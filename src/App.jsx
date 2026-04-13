@@ -66,7 +66,7 @@ export default function App() {
   const [newsEvents, setNewsEvents] = useState([]);
   const [sentimentScore, setSentimentScore] = useState(0);
   
-  const [binancePremium, setBinancePremium] = useState(0);
+  const [brtiPremium, setBrtiPremium] = useState(0); // V20.1 BRTI Aggregate Tracker
   const [fundingRate, setFundingRate] = useState(0); 
 
   const [targetMargin, setTargetMargin] = useState(71584.69);
@@ -99,7 +99,7 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V20 Absolute Apex online. I am now monitoring global futures for cascading liquidations. This is the final form." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V20.1 BRTI Aggregate online. I have switched to the global BRTI feed and added RSI/EMA tracking." }]);
   const [chatInput, setChatInput] = useState("");
   
   const currentWindowRef = useRef("");
@@ -253,9 +253,12 @@ export default function App() {
         } catch (err) {}
 
         try {
-          const resBinance = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
-          const dataBinance = await resBinance.json();
-          if (dataBinance?.price && currentCoinbaseRef) setBinancePremium(parseFloat(dataBinance.price) - currentCoinbaseRef);
+          // V20.1 BRTI Aggregate Tracking (Bypasses Binance CORS Blocks)
+          const resBRTI = await fetch('https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD');
+          const dataBRTI = await resBRTI.json();
+          if (dataBRTI?.USD && currentCoinbaseRef) {
+            setBrtiPremium(parseFloat(dataBRTI.USD) - currentCoinbaseRef);
+          }
         } catch (e) {}
 
         setIsLoading(false);
@@ -397,7 +400,9 @@ export default function App() {
 
     probabilityAbove += tapeOBDelta;
 
-    if (binancePremium > 10) { probabilityAbove += 8; } else if (binancePremium < -10) { probabilityAbove -= 8; }
+    // V20.1 Use BRTI Cross-Exchange Spread
+    if (brtiPremium > 10) { probabilityAbove += 8; reasoning.push("BRTI Index leads Coinbase. Arb up-pressure expected."); } 
+    else if (brtiPremium < -10) { probabilityAbove -= 8; reasoning.push("BRTI Index lags Coinbase. Arb down-pressure expected."); }
     
     if (bb) {
       if (currentPrice >= bb.upper) { probabilityAbove -= 10; reasoning.push(`Upper BB Pierced. Resistance strong.`); } 
@@ -546,9 +551,10 @@ export default function App() {
     return { 
       confidence: confidenceDisplay, prediction, predictionReason, reasoning, textColor, rawProbAbove: probabilityAbove,
       tradeAction, tradeReason, actionColor, actionBg, hasAction, actionButtonLabel, actionTarget, actionProb,
-      realGapBps, clockSeconds, isSystemLocked, atrBps, livePnL, liveEstValue, bb, projections, liqBuys, liqSells
+      realGapBps, clockSeconds, isSystemLocked, atrBps, livePnL, liveEstValue, bb, projections, liqBuys, liqSells,
+      rsi, ema9, ema21
     };
-  }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, binancePremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations]);
+  }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, brtiPremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations]);
 
   const executeManualAction = (actionLabel, targetState) => {
     setManualAction(actionLabel);
@@ -603,7 +609,7 @@ export default function App() {
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
             <span className="flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V20 Absolute Apex
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V20.1 BRTI Aggregate
             </span>
           </h1>
         </div>
@@ -640,21 +646,21 @@ export default function App() {
                <div className="text-[10px] md:text-xs text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Set Strike</div>
                <div className="flex items-center">
                  <Crosshair className="w-4 h-4 md:w-5 md:h-5 text-indigo-400 mr-2 opacity-80" />
-                 <input type="number" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-xl md:text-2xl w-24 md:w-28 focus:outline-none p-0" />
+                 <input type="number" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-xl md:text-2xl w-24 md:w-28 focus:outline-none py-1 leading-normal" />
                </div>
              </div>
              <div className="flex flex-col items-start pr-4 lg:pr-6 border-r border-[#E8E9E4]/10">
                <div className="text-[10px] md:text-xs text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Bet / Payout</div>
                <div className="flex items-center gap-1.5 text-white font-serif text-lg md:text-xl">
-                 $<input type="number" value={betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-12 md:w-16 text-center outline-none" />
+                 $<input type="number" value={betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-12 md:w-16 text-center outline-none py-1 leading-normal" />
                  <span className="text-[#E8E9E4]/40 mx-0.5 md:mx-1">/</span>
-                 $<input type="number" value={maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-14 md:w-20 text-center outline-none" />
+                 $<input type="number" value={maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-14 md:w-20 text-center outline-none py-1 leading-normal" />
                </div>
              </div>
              <div className="flex flex-col items-start pl-1 md:pl-2">
                <div className="text-[10px] md:text-xs text-emerald-400/80 uppercase tracking-widest font-medium mb-1.5">Live Market Offer</div>
                <div className="flex items-center gap-1 text-emerald-400 font-serif text-lg md:text-xl">
-                 $<input type="number" value={currentOffer} onChange={(e) => setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-16 md:w-24 text-center outline-none placeholder-emerald-900" />
+                 $<input type="number" value={currentOffer} onChange={(e) => setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-16 md:w-24 text-center outline-none placeholder-emerald-900 py-1 leading-normal" />
                </div>
              </div>
            </div>
@@ -718,9 +724,14 @@ export default function App() {
                        <span className={`font-bold ${analysis.realGapBps > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>GAP: {analysis.realGapBps > 0 ? '+' : ''}{analysis.realGapBps.toFixed(1)} bps</span>
                      </div>
                      <div className="flex justify-between items-center text-[9px] opacity-80 pt-1 border-t border-[#E8E9E4]/10">
+                       <span>BRTI GAP: {brtiPremium > 0 ? '+' : ''}${brtiPremium.toFixed(1)}</span>
                        <span>TAKER: <span className={takerFlow.imbalance > 1 ? 'text-emerald-400' : 'text-rose-400'}>{takerFlow.imbalance.toFixed(1)}x</span></span>
-                       <span>L2 IMB: {orderBook.imbalance.toFixed(1)}x</span>
                        <span>LIQ: <span className={(analysis.liqBuys > analysis.liqSells) ? 'text-emerald-400' : (analysis.liqSells > analysis.liqBuys ? 'text-rose-400' : 'text-zinc-400')}>{analysis.liqBuys > analysis.liqSells ? 'BULL' : (analysis.liqSells > analysis.liqBuys ? 'BEAR' : 'FLAT')}</span></span>
+                     </div>
+                     <div className="flex justify-between items-center text-[9px] opacity-80 pt-1 mt-1 border-t border-[#E8E9E4]/10">
+                       <span>RSI: <span className={analysis.rsi > 70 ? 'text-rose-400' : analysis.rsi < 30 ? 'text-emerald-400' : 'text-[#E8E9E4]'}>{analysis.rsi.toFixed(1)}</span></span>
+                       <span>EMA9: ${analysis.ema9?.toFixed(0) || '---'}</span>
+                       <span>EMA21: ${analysis.ema21?.toFixed(0) || '---'}</span>
                      </div>
                    </div>
 
