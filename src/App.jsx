@@ -50,31 +50,29 @@ const calculateEMA = (data, period) => {
   return ema;
 };
 
-const BULLISH_WORDS = ['surge', 'bull', 'etf', 'approve', 'buy', 'high', 'adoption', 'integration', 'soars', 'record', 'growth', 'positive'];
-const BEARISH_WORDS = ['ban', 'hack', 'sec', 'drop', 'bear', 'sell', 'low', 'crackdown', 'lawsuit', 'crash', 'negative', 'plunge'];
-
 export default function App() {
   const [currentPrice, setCurrentPrice] = useState(null);
   const [tickDirection, setTickDirection] = useState(null);
   
   const prevPriceRef = useRef(null);
   const currentPriceRef = useRef(null);
-  const tickHistoryRef = useRef([]); 
+  const tickHistoryRef = useRef([]); // V15 Tape Tracker
   const prevImbalanceRef = useRef(1); 
 
   const [history, setHistory] = useState([]); 
   const [orderBook, setOrderBook] = useState({ localBuy: 0, localSell: 0, imbalance: 1 });
+  const [takerFlow, setTakerFlow] = useState({ imbalance: 1, whaleSpotted: null }); // V15 Live Taker Tape
+  const [liquidations, setLiquidations] = useState([]); // V20 Live Liquidation Tracker
   const [newsEvents, setNewsEvents] = useState([]);
   const [sentimentScore, setSentimentScore] = useState(0);
   
   const [binancePremium, setBinancePremium] = useState(0);
   const [fundingRate, setFundingRate] = useState(0); 
 
-  // --- V13 User Inputs ---
   const [targetMargin, setTargetMargin] = useState(71584.69);
   const [betAmount, setBetAmount] = useState(50);
   const [maxPayout, setMaxPayout] = useState(100);
-  const [currentOffer, setCurrentOffer] = useState(""); // Live Market Cashout Offer
+  const [currentOffer, setCurrentOffer] = useState(""); 
 
   const [timeState, setTimeState] = useState({ currentEST: '', startWindowEST: '', nextWindowEST: '', minsRemaining: 0, secsRemaining: 0, currentHour: 0 });
   const [isLoading, setIsLoading] = useState(true);
@@ -82,15 +80,15 @@ export default function App() {
   const lockedPredictionRef = useRef("SIT OUT");
   const activeCallRef = useRef({ prediction: "SIT OUT", strike: 0 });
   
-  // Safe Initialization of Scorecard
+  // Safe Initialization of Scorecard (Updated 55-41)
   const [scorecard, setScorecard] = useState(() => {
-    const baseline = { wins: 32, losses: 30 };
+    const baseline = { wins: 55, losses: 41 };
     try {
       const savedScore = localStorage.getItem('btcOracleScorecard');
       if (savedScore) {
         const parsed = JSON.parse(savedScore);
         if (parsed && typeof parsed.wins === 'number' && typeof parsed.losses === 'number') {
-          if (parsed.wins + parsed.losses < 62) return baseline;
+          if (parsed.wins + parsed.losses < 96) return baseline;
           return parsed;
         }
       }
@@ -101,7 +99,7 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V13.1 Arbitrage Engine online. Enter the platform's Live Offer and I will tell you if they are ripping you off or overpaying." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V20 Absolute Apex online. I am now monitoring global futures for cascading liquidations. This is the final form." }]);
   const [chatInput, setChatInput] = useState("");
   
   const currentWindowRef = useRef("");
@@ -134,12 +132,12 @@ export default function App() {
         lastWindowRef.current = timeState.nextWindowEST;
         setManualAction(null); 
         tickHistoryRef.current = []; 
-        setCurrentOffer(""); // Reset offer on new window
+        setCurrentOffer(""); 
       }
     }
   }, [timeState.nextWindowEST, currentPrice]);
 
-  // Real-time Tick Data
+  // Real-time Tick Data & V15 Tape Reading & V20 Liquidation Feed
   useEffect(() => {
     const ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
     ws.onopen = () => ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] }));
@@ -149,21 +147,72 @@ export default function App() {
         const data = JSON.parse(event.data);
         if (data.type === 'ticker' && data.price) {
           const newPrice = parseFloat(data.price);
+          const size = parseFloat(data.last_size) || 0;
+          const side = data.side; // Maker side ('sell' means a Taker BUY occurred)
+
           if (prevPriceRef.current !== null) {
             if (newPrice > prevPriceRef.current) setTickDirection('up');
             else if (newPrice < prevPriceRef.current) setTickDirection('down');
           }
           prevPriceRef.current = newPrice; currentPriceRef.current = newPrice;
-          tickHistoryRef.current.push(newPrice);
-          if (tickHistoryRef.current.length > 20) tickHistoryRef.current.shift();
+          
+          const now = Date.now();
+          const isTakerBuy = side === 'sell';
+          
+          tickHistoryRef.current.push({ p: newPrice, s: size, t: isTakerBuy ? 'B' : 'S', time: now });
+          // Keep only last 30 seconds of rolling tape
+          tickHistoryRef.current = tickHistoryRef.current.filter(t => now - t.time < 30000);
+
           setCurrentPrice(newPrice);
         }
       } catch (err) {}
     };
-    return () => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'unsubscribe', product_ids: ['BTC-USD'], channels: ['ticker'] })); ws.close(); };
+
+    // V20 Binance Futures Liquidation WebSocket
+    const wsBinance = new WebSocket('wss://fstream.binance.com/ws/btcusdt@forceOrder');
+    wsBinance.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.e === 'forceOrder') {
+          const side = data.o.S; // BUY (short liquidated) or SELL (long liquidated)
+          const usdValue = parseFloat(data.o.q) * parseFloat(data.o.p);
+          if (usdValue > 10000) { // Only track >$10k liquidations
+            setLiquidations(prev => [...prev, { side, value: usdValue, time: Date.now() }].filter(l => Date.now() - l.time < 60000));
+          }
+        }
+      } catch (err) {}
+    };
+
+    return () => { 
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'unsubscribe', product_ids: ['BTC-USD'], channels: ['ticker'] })); 
+      ws.close(); 
+      wsBinance.close();
+    };
   }, []);
 
-  // Data Polling & Synthetic News Generation
+  // V15 Tape Aggregation Loop (Runs every 1 second)
+  useEffect(() => {
+    const tapeInterval = setInterval(() => {
+      let takerBuys = 0; let takerSells = 0; let whaleSpotted = null;
+      
+      tickHistoryRef.current.forEach(t => {
+        const usdValue = t.s * t.p;
+        if (t.t === 'B') {
+          takerBuys += usdValue;
+          if (t.s > 1.5) whaleSpotted = 'BUY';
+        } else {
+          takerSells += usdValue;
+          if (t.s > 1.5) whaleSpotted = 'SELL';
+        }
+      });
+
+      const tImbalance = takerSells === 0 ? (takerBuys > 0 ? 2 : 1) : takerBuys / takerSells;
+      setTakerFlow({ imbalance: tImbalance, whaleSpotted });
+    }, 1000);
+    return () => clearInterval(tapeInterval);
+  }, []);
+
+  // Data Polling
   useEffect(() => {
     const fetchMarketData = async () => {
       try {
@@ -212,14 +261,12 @@ export default function App() {
         setIsLoading(false);
         
         let syntheticNews = [];
-        if (currentImbalance > 1.5) syntheticNews.push({ title: `🐋 Whale Alert: Massive Bid wall placed near $${targetMargin.toFixed(0)}`, url: "#" });
-        if (currentImbalance < 0.6) syntheticNews.push({ title: `🐋 Whale Alert: Heavy Sell pressure defending $${targetMargin.toFixed(0)}`, url: "#" });
-        if (formattedHistory.length > 0) {
-          const rsi = calculateRSI(formattedHistory.map(x=>x.c), 14);
-          if (rsi > 70) syntheticNews.push({ title: "📉 Technicals: 1m RSI entering overbought exhaustion territory.", url: "#" });
-          if (rsi < 30) syntheticNews.push({ title: "📈 Technicals: 1m RSI oversold, potential bounce incoming.", url: "#" });
-        }
-        if (syntheticNews.length < 3) syntheticNews.push({ title: "⚡ Tara Engine: Analyzing market microstructure...", url: "#" });
+        if (currentImbalance > 1.5) syntheticNews.push({ title: `🐋 Maker Alert: Massive Limit BID wall placed near $${targetMargin.toFixed(0)}`, url: "#" });
+        if (currentImbalance < 0.6) syntheticNews.push({ title: `🐋 Maker Alert: Heavy Limit SELL pressure defending $${targetMargin.toFixed(0)}`, url: "#" });
+        if (takerFlow.imbalance > 2.0) syntheticNews.push({ title: `🚀 Taker Alert: Aggressive Market BUYING detected on the tape.`, url: "#" });
+        if (takerFlow.imbalance < 0.5) syntheticNews.push({ title: `🩸 Taker Alert: Aggressive Market SELLING detected on the tape.`, url: "#" });
+        
+        if (syntheticNews.length < 3) syntheticNews.push({ title: "⚡ Tara Engine: Analyzing Order Book vs Tape Divergence...", url: "#" });
         setNewsEvents(syntheticNews);
 
       } catch (err) { setIsLoading(false); }
@@ -228,7 +275,7 @@ export default function App() {
     fetchMarketData();
     const fastInterval = setInterval(fetchMarketData, 8000); 
     return () => clearInterval(fastInterval);
-  }, [targetMargin]);
+  }, [targetMargin, takerFlow.imbalance]);
 
   // Clock Sync
   useEffect(() => {
@@ -248,7 +295,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // --- TARA V13.1 ARBITRAGE ENGINE ---
+  // --- TARA V18 THE JEROME FILTER ENGINE ---
   const analysis = useMemo(() => {
     if (!currentPrice || history.length < 30 || !targetMargin) return null;
 
@@ -265,43 +312,107 @@ export default function App() {
     const realGapBps = ((currentPrice - targetMargin) / targetMargin) * 10000;
     const vwapGapBps = vwap ? ((currentPrice - vwap) / vwap) * 10000 : 0;
     const clockSeconds = (timeState.minsRemaining * 60) + timeState.secsRemaining;
+    
     const shortTermSlope = history.length >= 3 ? (history[0].c - history[2].c) : 0;
     const ticks = tickHistoryRef.current;
-    const tickSlope = ticks.length >= 10 ? (currentPrice - ticks[0]) : 0;
+    const tickSlope = ticks.length >= 10 ? (currentPrice - ticks[0].p) : 0;
     const imbalanceDelta = orderBook.imbalance - prevImbalanceRef.current;
 
     const timeDecayFactor = Math.max(0, 1 - (clockSeconds / 900));
-    let isObservationPhase = clockSeconds > 890; 
+    let isObservationPhase = clockSeconds > 897; 
 
     let probabilityAbove = 50; let reasoning = [];
-    if (isObservationPhase) reasoning.push(`Wait ${clockSeconds - 890}s for open volatility to settle.`);
+    if (isObservationPhase) reasoning.push(`Wait ${clockSeconds - 897}s for open volatility to settle.`);
 
-    probabilityAbove += realGapBps * (0.5 + (timeDecayFactor * 3.5)); 
+    // V18 ENDGAME MULTIPLIER: Starts squeezing at 4 minutes (240s) instead of 3
+    const endgameMultiplier = clockSeconds < 240 ? (1 + ((240 - clockSeconds) / 60)) : 1; 
+    // Increased raw gap weight
+    probabilityAbove += realGapBps * (1.5 + (timeDecayFactor * 3.5)) * endgameMultiplier; 
 
-    if (shortTermSlope > 0) {
-      if (volumeSurge > 1.5 || tickSlope > 1.5) { probabilityAbove += 10; reasoning.push("Confirmed volume-backed uptrend."); } else { probabilityAbove += 4; }
-    } else if (shortTermSlope < 0) {
-      if (volumeSurge > 1.5 || tickSlope < -1.5) { probabilityAbove -= 10; reasoning.push("Confirmed volume-backed downtrend."); } else { probabilityAbove -= 4; }
+    const priceRising = shortTermSlope > 0;
+    const priceFalling = shortTermSlope < 0;
+    const sellersStacking = orderBook.imbalance < 0.7;
+    const buyersStacking = orderBook.imbalance > 1.4;
+
+    const aggressiveTakerBuys = takerFlow.imbalance > 1.8;
+    const aggressiveTakerSells = takerFlow.imbalance < 0.55;
+
+    // --- V20 LIQUIDATION CASCADE TRACKER ---
+    let liqBuys = 0; let liqSells = 0;
+    liquidations.forEach(l => {
+      if (Date.now() - l.time < 60000) {
+        if (l.side === 'BUY') liqBuys += l.value; // Short getting liquidated forces a BUY
+        else liqSells += l.value; // Long getting liquidated forces a SELL
+      }
+    });
+
+    if (liqBuys > 100000) {
+      probabilityAbove += 15; reasoning.push(`🚨 SHORT SQUEEZE: $${(liqBuys/1000).toFixed(0)}k shorts liquidated. Price rocket imminent.`);
+    } else if (liqSells > 100000) {
+      probabilityAbove -= 15; reasoning.push(`🚨 LONG SQUEEZE: $${(liqSells/1000).toFixed(0)}k longs liquidated. Price crash imminent.`);
     }
 
-    if (binancePremium > 10) { probabilityAbove += 12; } else if (binancePremium < -10) { probabilityAbove -= 12; }
+    // --- THE JEROME FILTER (TAPE & ORDER BOOK DELTA) ---
+    let tapeOBDelta = 0;
+
+    if (tickSlope < -2.0) {
+      tapeOBDelta -= 35; reasoning.push(`🚨 FLASH CRASH: Instant momentum collapse detected.`);
+    } else if (tickSlope > 2.0) {
+      tapeOBDelta += 35; reasoning.push(`🚨 FLASH PUMP: Instant momentum surge detected.`);
+    } 
+    else if (sellersStacking && aggressiveTakerBuys) {
+      tapeOBDelta += 20; reasoning.push(`ABSORPTION: Whales are market-buying into heavy resistance.`);
+    } else if (buyersStacking && aggressiveTakerSells) {
+      tapeOBDelta -= 20; reasoning.push(`ABSORPTION: Whales are market-selling through heavy support.`);
+    } else if (priceRising && aggressiveTakerSells && sellersStacking) {
+      tapeOBDelta -= 20; reasoning.push(`FAKE PUMP: Price drift up, but heavy market selling into resistance.`);
+    } else if (priceFalling && aggressiveTakerBuys && buyersStacking) {
+      tapeOBDelta += 20; reasoning.push(`BEAR TRAP: Price drift down, but heavy market buying into support.`);
+    } else {
+      if (priceRising) {
+        if (volumeSurge > 1.5 || tickSlope > 1.0) { tapeOBDelta += 8; reasoning.push("Confirmed volume-backed uptrend."); } else { tapeOBDelta += 3; }
+      } else if (priceFalling) {
+        if (volumeSurge > 1.5 || tickSlope < -1.0) { tapeOBDelta -= 8; reasoning.push("Confirmed volume-backed downtrend."); } else { tapeOBDelta -= 3; }
+      }
+    }
+
+    if (takerFlow.whaleSpotted === 'BUY') { tapeOBDelta += 6; reasoning.push("🐋 Huge Taker BUY executed."); }
+    if (takerFlow.whaleSpotted === 'SELL') { tapeOBDelta -= 6; reasoning.push("🐋 Huge Taker SELL executed."); }
+
+    if (imbalanceDelta < -1.5) { tapeOBDelta -= 8; } 
+    else if (imbalanceDelta > 1.5) { tapeOBDelta += 8; }
+
+    if (orderBook.imbalance > 1.8) { tapeOBDelta += 8; } else if (orderBook.imbalance < 0.5) { tapeOBDelta -= 8; }
+
+    // V19 HARD CAP: Only apply Jerome Filter in the Endgame. Allow whales to buy the dip early.
+    if (clockSeconds < 240) {
+      if (realGapBps < -2.0 && tapeOBDelta > 5) {
+        tapeOBDelta = 5;
+        reasoning.push(`🛡️ JEROME FILTER: Time running out. Capping bullish hopium.`);
+      } else if (realGapBps > 2.0 && tapeOBDelta < -5) {
+        tapeOBDelta = -5;
+        reasoning.push(`🛡️ JEROME FILTER: Time running out. Capping bearish fear.`);
+      }
+    }
+
+    probabilityAbove += tapeOBDelta;
+
+    if (binancePremium > 10) { probabilityAbove += 8; } else if (binancePremium < -10) { probabilityAbove -= 8; }
+    
     if (bb) {
-      if (currentPrice >= bb.upper) { probabilityAbove -= 15; reasoning.push(`Upper BB Pierced. Resistance strong.`); } 
-      else if (currentPrice <= bb.lower) { probabilityAbove += 15; reasoning.push(`Lower BB Pierced. Support strong.`); }
+      if (currentPrice >= bb.upper) { probabilityAbove -= 10; reasoning.push(`Upper BB Pierced. Resistance strong.`); } 
+      else if (currentPrice <= bb.lower) { probabilityAbove += 10; reasoning.push(`Lower BB Pierced. Support strong.`); }
     }
-    if (rsi > 75) { probabilityAbove -= 10; } else if (rsi < 25) { probabilityAbove += 10; }
-    if (vwapGapBps > 3) probabilityAbove -= 8; else if (vwapGapBps < -3) probabilityAbove += 8;
-
-    if (imbalanceDelta < -1.5) { probabilityAbove -= 10; reasoning.push(`Order book support withdrawing.`); } 
-    else if (imbalanceDelta > 1.5) { probabilityAbove += 10; reasoning.push(`Order book resistance withdrawing.`); }
-
-    if (orderBook.imbalance > 1.8) { probabilityAbove += 15; } else if (orderBook.imbalance < 0.5) { probabilityAbove -= 15; }
+    
+    // Increased VWAP gravity
+    if (vwapGapBps > 2.0) { probabilityAbove -= 10; } else if (vwapGapBps < -2.0) { probabilityAbove += 10; }
 
     probabilityAbove = Math.max(0, Math.min(100, probabilityAbove)); 
 
+    // V18 DYNAMIC LOCKING
     let isSystemLocked = false;
-    if (clockSeconds < 180 && Math.abs(realGapBps) > (atrBps * 0.8)) {
-      isSystemLocked = true; reasoning.push(`LOCKED: Gap uncrossable in time.`);
+    if (clockSeconds < 180 && Math.abs(realGapBps) > (atrBps * 0.4)) {
+      isSystemLocked = true; reasoning.push(`LOCKED: Gap mathematically uncrossable.`);
     }
 
     let prediction = lockedPredictionRef.current;
@@ -311,14 +422,15 @@ export default function App() {
       prediction = "ANALYZING"; recommendedPrediction = "ANALYZING";
     } else {
       if (prediction === "YES") {
-        if (probabilityAbove <= 35) recommendedPrediction = "NO";
-        else if (probabilityAbove <= 45) recommendedPrediction = "SIT OUT";
+        // V19 DIAMOND HANDS: Refuse to reverse unless total collapse (< 20%)
+        if (probabilityAbove <= 20) recommendedPrediction = "NO";
+        else if (probabilityAbove <= 35) recommendedPrediction = "SIT OUT";
       } else if (prediction === "NO") {
-        if (probabilityAbove >= 65) recommendedPrediction = "YES";
-        else if (probabilityAbove >= 55) recommendedPrediction = "SIT OUT";
+        if (probabilityAbove >= 80) recommendedPrediction = "YES";
+        else if (probabilityAbove >= 65) recommendedPrediction = "SIT OUT";
       } else {
-        if (probabilityAbove >= 62) recommendedPrediction = "YES";
-        else if (probabilityAbove <= 38) recommendedPrediction = "NO";
+        if (probabilityAbove >= 68) recommendedPrediction = "YES";
+        else if (probabilityAbove <= 32) recommendedPrediction = "NO";
         else recommendedPrediction = "SIT OUT";
       }
       if (isSystemLocked) recommendedPrediction = realGapBps > 0 ? "YES" : "NO";
@@ -327,28 +439,27 @@ export default function App() {
     let predictionReason = "";
     if (prediction === "ANALYZING") predictionReason = "Calibrating early momentum indicators.";
     else if (prediction === "SIT OUT") {
-      if (recommendedPrediction === "YES") predictionReason = "Bull trajectory detected. Ready to enter.";
-      else if (recommendedPrediction === "NO") predictionReason = "Bear trajectory detected. Ready to enter.";
-      else predictionReason = "Spread deadlocked near VWAP. Waiting for breakout.";
+      if (recommendedPrediction === "YES") predictionReason = "Bull trajectory confirmed. Entering position.";
+      else if (recommendedPrediction === "NO") predictionReason = "Bear trajectory confirmed. Entering position.";
+      else predictionReason = "Probability is mixed. Awaiting minimum 68% conviction to trigger entry.";
     } else if (prediction === "YES") {
-      if (recommendedPrediction === "NO") predictionReason = "Trend invalidated. Reversal suggested.";
+      if (recommendedPrediction === "NO") predictionReason = "Structural collapse detected. Reversal mandatory.";
       else if (realGapBps > 0) predictionReason = "Firmly in profit. Holding position steady.";
-      else predictionReason = "Position negative, but macro indicators project recovery. Holding firm.";
+      else predictionReason = "Position negative, holding firm through noise.";
     } else if (prediction === "NO") {
-      if (recommendedPrediction === "YES") predictionReason = "Trend invalidated. Reversal suggested.";
+      if (recommendedPrediction === "YES") predictionReason = "Structural collapse detected. Reversal mandatory.";
       else if (realGapBps < 0) predictionReason = "Firmly in profit. Holding position steady.";
-      else predictionReason = "Position negative, but macro indicators project recovery. Holding firm.";
+      else predictionReason = "Position negative, holding firm through noise.";
     }
 
-    let tradeAction = "STAY PUT / SIT OUT"; let tradeReason = "Odds near 50/50. Wait for clear momentum.";
+    let tradeAction = "STAY PUT / SIT OUT"; let tradeReason = "Odds are unclear. Wait for minimum 68% conviction.";
     let actionColor = "text-zinc-400"; let actionBg = "bg-zinc-500/10 border-zinc-500/30";
     let hasAction = false, actionButtonLabel = "", actionTarget = "", actionProb = 0;
 
-    const dynamicStopLoss = atrBps * (0.25 + (timeDecayFactor * 0.50)); 
+    const dynamicStopLoss = atrBps * (0.35 + (timeDecayFactor * 0.40)); 
     let liveEstValue = prediction === "YES" ? maxPayout * (probabilityAbove / 100) : prediction === "NO" ? maxPayout * ((100 - probabilityAbove) / 100) : 0;
     const livePnL = liveEstValue - betAmount;
 
-    // --- V13.1 EXPECTED VALUE (EV) MARKET OFFER TRACKER ---
     const offerVal = parseFloat(currentOffer) || 0;
 
     if (prediction === "ANALYZING") {
@@ -356,25 +467,23 @@ export default function App() {
     } 
     else if (prediction === "SIT OUT") {
       if (recommendedPrediction === "YES") {
-        tradeAction = "ENTER POSITION (FIRM)"; tradeReason = "Momentum dictates YES finish. Good odds.";
+        tradeAction = "ENTER POSITION (FIRM)"; tradeReason = "Momentum dictates YES finish. Excellent conviction.";
         actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
         hasAction = true; actionButtonLabel = "CONFIRM ENTRY: 'YES'"; actionTarget = "YES"; actionProb = probabilityAbove;
       } else if (recommendedPrediction === "NO") {
-        tradeAction = "ENTER POSITION (FIRM)"; tradeReason = "Momentum dictates NO finish. Good odds.";
+        tradeAction = "ENTER POSITION (FIRM)"; tradeReason = "Momentum dictates NO finish. Excellent conviction.";
         actionColor = "text-rose-400"; actionBg = "bg-rose-500/10 border-rose-500/30";
         hasAction = true; actionButtonLabel = "CONFIRM ENTRY: 'NO'"; actionTarget = "NO"; actionProb = 100 - probabilityAbove;
       }
     }
     else if (prediction === "YES" || prediction === "NO") {
       const isYES = prediction === "YES";
-      const isBleeding = isYES ? (realGapBps < -dynamicStopLoss || realGapBps < -4.5) : (realGapBps > dynamicStopLoss || realGapBps > 4.5);
+      const isBleeding = isYES ? (realGapBps < -dynamicStopLoss || realGapBps < -5.0) : (realGapBps > dynamicStopLoss || realGapBps > 5.0);
       const isReversalRecommended = isYES ? recommendedPrediction === "NO" : recommendedPrediction === "YES";
 
-      // EV OVERRIDE LOGIC
       if (offerVal > 0) {
         const premium = offerVal - liveEstValue;
-        
-        if (premium > (maxPayout * 0.05)) { // Market is overpaying by > 5%
+        if (premium > (maxPayout * 0.05)) {
           tradeAction = "SELL TO MARKET (ARBITRAGE)"; 
           tradeReason = `Market is currently overpaying by $${premium.toFixed(2)} vs True Probability. Take the free money now.`;
           actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30 animate-pulse";
@@ -391,15 +500,11 @@ export default function App() {
           tradeReason = `Market offer is underpricing your true odds by $${Math.abs(premium).toFixed(2)}. Do not sell to them yet.`;
           actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/20";
         }
-        else if (isBleeding || isReversalRecommended) {
-           // Fall through to standard Stop Loss logic below
-        }
       }
 
-      // If EV override didn't trigger, proceed with standard Zen logic
       if (tradeAction === "STAY PUT / SIT OUT" || tradeAction === "HOLD FIRM") {
         if (isReversalRecommended) {
-          tradeAction = "REVERSE POSITION"; tradeReason = `Probability shifted. Safely swap to ${isYES ? 'NO' : 'YES'}.`;
+          tradeAction = "REVERSE POSITION"; tradeReason = `Probability collapsed. Safely swap to ${isYES ? 'NO' : 'YES'}.`;
           actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
           hasAction = true; actionButtonLabel = `REVERSE TO '${isYES ? 'NO' : 'YES'}'`; actionTarget = isYES ? "NO" : "YES"; actionProb = isYES ? 100 - probabilityAbove : probabilityAbove;
         }
@@ -424,7 +529,7 @@ export default function App() {
     if (prediction === "YES") { textColor = "text-emerald-400"; confidenceDisplay = probabilityAbove.toFixed(1); } 
     else if (prediction === "NO") { textColor = "text-rose-400"; confidenceDisplay = (100 - probabilityAbove).toFixed(1); } 
 
-    // --- HOURLY FORECAST (RESTORED) ---
+    // --- HOURLY FORECAST ---
     const price1hAgo = history[history.length - 1]?.c || currentPrice; 
     const hourlySlope = currentPrice - price1hAgo;
     let simulatedPrice = currentPrice;
@@ -441,9 +546,9 @@ export default function App() {
     return { 
       confidence: confidenceDisplay, prediction, predictionReason, reasoning, textColor, rawProbAbove: probabilityAbove,
       tradeAction, tradeReason, actionColor, actionBg, hasAction, actionButtonLabel, actionTarget, actionProb,
-      realGapBps, clockSeconds, isSystemLocked, atrBps, livePnL, liveEstValue, bb, projections
+      realGapBps, clockSeconds, isSystemLocked, atrBps, livePnL, liveEstValue, bb, projections, liqBuys, liqSells
     };
-  }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, binancePremium, forceRender, betAmount, maxPayout, currentOffer]);
+  }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, binancePremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations]);
 
   const executeManualAction = (actionLabel, targetState) => {
     setManualAction(actionLabel);
@@ -454,7 +559,7 @@ export default function App() {
     if (targetState) {
       lockedPredictionRef.current = targetState === "CASH" ? "SIT OUT" : targetState;
       setForceRender(prev => prev + 1);
-      setCurrentOffer(""); // Reset offer after action
+      setCurrentOffer(""); 
     }
   };
 
@@ -498,7 +603,7 @@ export default function App() {
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
             <span className="flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V13.1 EV Tracker
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V20 Absolute Apex
             </span>
           </h1>
         </div>
@@ -510,68 +615,70 @@ export default function App() {
 
       <div className="w-full max-w-6xl flex flex-col gap-4">
         
-        {/* Top Control Bar */}
-        <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-wrap lg:flex-nowrap items-center justify-between gap-3 relative overflow-hidden">
+        {/* Top Control Bar (UI DIALED BACK & BALANCED) */}
+        <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-wrap lg:flex-nowrap items-center justify-between gap-4 relative overflow-hidden">
            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
 
            {/* Live Spot */}
-           <div className="flex items-center gap-3 w-auto">
-             <div className="p-2 bg-[#111312] rounded-lg border border-[#E8E9E4]/5 shadow-inner">
-               <Zap className={`w-5 h-5 transition-colors duration-200 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-[#E8E9E4]/40'}`} />
+           <div className="flex items-center gap-3 w-auto pl-1 md:pl-2">
+             <div className="p-2 md:p-2.5 bg-[#111312] rounded-lg border border-[#E8E9E4]/5 shadow-inner">
+               <Zap className={`w-5 h-5 md:w-6 md:h-6 transition-colors duration-200 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-[#E8E9E4]/40'}`} />
              </div>
              <div>
-               <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-0.5">Live Spot</div>
+               <div className="text-[10px] md:text-xs text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-0.5 md:mb-1">Live Spot</div>
                <div className={`text-2xl md:text-3xl font-serif tracking-tight flex items-center gap-1 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-white'}`}>
                  ${currentPrice ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '---'}
                </div>
              </div>
            </div>
-           <div className="w-px h-10 bg-[#E8E9E4]/10 hidden lg:block"></div>
+           
+           <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
-           {/* Strike, Bet & Offer Setup */}
-           <div className="flex items-center gap-4 w-full lg:w-auto bg-[#111312] p-2.5 rounded-lg border border-[#E8E9E4]/5 shadow-inner flex-wrap md:flex-nowrap">
-             <div className="flex flex-col items-start pr-4 border-r border-[#E8E9E4]/10">
-               <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1">Set Strike</div>
+           {/* Strike, Bet & Offer Setup (DIALED BACK UI) */}
+           <div className="flex items-center gap-4 lg:gap-6 w-full lg:w-auto bg-[#111312] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/5 shadow-inner flex-wrap md:flex-nowrap">
+             <div className="flex flex-col items-start pr-4 lg:pr-6 border-r border-[#E8E9E4]/10">
+               <div className="text-[10px] md:text-xs text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Set Strike</div>
                <div className="flex items-center">
-                 <Crosshair className="w-3.5 h-3.5 text-indigo-400 mr-1.5 opacity-80" />
-                 <input type="number" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-lg w-28 focus:outline-none p-0" />
+                 <Crosshair className="w-4 h-4 md:w-5 md:h-5 text-indigo-400 mr-2 opacity-80" />
+                 <input type="number" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-xl md:text-2xl w-24 md:w-28 focus:outline-none p-0" />
                </div>
              </div>
-             <div className="flex flex-col items-start pr-4 border-r border-[#E8E9E4]/10">
-               <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1">Bet / Payout</div>
-               <div className="flex items-center gap-1 text-white font-serif text-sm">
-                 $<input type="number" value={betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-10 text-center outline-none" />
-                 <span className="text-[#E8E9E4]/40 mx-1">/</span>
-                 $<input type="number" value={maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-12 text-center outline-none" />
+             <div className="flex flex-col items-start pr-4 lg:pr-6 border-r border-[#E8E9E4]/10">
+               <div className="text-[10px] md:text-xs text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Bet / Payout</div>
+               <div className="flex items-center gap-1.5 text-white font-serif text-lg md:text-xl">
+                 $<input type="number" value={betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-12 md:w-16 text-center outline-none" />
+                 <span className="text-[#E8E9E4]/40 mx-0.5 md:mx-1">/</span>
+                 $<input type="number" value={maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-14 md:w-20 text-center outline-none" />
                </div>
              </div>
-             <div className="flex flex-col items-start">
-               <div className="text-[10px] text-emerald-400/80 uppercase tracking-widest font-medium mb-1">Live Market Offer</div>
-               <div className="flex items-center gap-1 text-emerald-400 font-serif text-sm">
-                 $<input type="number" value={currentOffer} onChange={(e) => setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-16 text-center outline-none placeholder-emerald-900" />
+             <div className="flex flex-col items-start pl-1 md:pl-2">
+               <div className="text-[10px] md:text-xs text-emerald-400/80 uppercase tracking-widest font-medium mb-1.5">Live Market Offer</div>
+               <div className="flex items-center gap-1 text-emerald-400 font-serif text-lg md:text-xl">
+                 $<input type="number" value={currentOffer} onChange={(e) => setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-16 md:w-24 text-center outline-none placeholder-emerald-900" />
                </div>
              </div>
            </div>
-           <div className="w-px h-10 bg-[#E8E9E4]/10 hidden lg:block"></div>
+           
+           <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
            {/* Scorecard */}
-           <div className="flex flex-col items-start bg-[#111312] p-2.5 rounded-lg border border-[#E8E9E4]/5 shadow-inner w-full lg:w-48">
-             <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1 flex justify-between w-full">
-               <span className="flex items-center gap-1"><Terminal className="w-3 h-3"/> Scorecard</span>
+           <div className="flex flex-col items-start bg-[#111312] p-2.5 md:p-3 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-full lg:w-56">
+             <div className="text-[10px] md:text-xs text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5 md:mb-2 flex justify-between w-full">
+               <span className="flex items-center gap-1.5"><Terminal className="w-3 md:w-3.5 h-3 md:h-3.5"/> Scorecard</span>
              </div>
-             <div className="flex items-center justify-between w-full px-1">
+             <div className="flex items-center justify-between w-full px-1 md:px-2">
                <div className="flex flex-col items-center">
-                 <div className="flex items-center gap-1 text-[9px] text-emerald-400 mb-0.5">
+                 <div className="flex items-center gap-1.5 text-[9px] md:text-[10px] text-emerald-400 mb-0.5 md:mb-1">
                    <button onClick={() => setScorecard(s => ({...s, wins: Math.max(0, (s?.wins||0)-1)}))}>-</button> WINS <button onClick={() => setScorecard(s => ({...s, wins: (s?.wins||0)+1}))}>+</button>
                  </div>
-                 <span className="text-xl font-serif text-emerald-400 font-bold">{scorecard?.wins || 0}</span>
+                 <span className="text-2xl md:text-3xl font-serif text-emerald-400 font-bold">{scorecard?.wins || 0}</span>
                </div>
-               <div className="h-6 w-px bg-[#E8E9E4]/10"></div>
+               <div className="h-8 md:h-10 w-px bg-[#E8E9E4]/10"></div>
                <div className="flex flex-col items-center">
-                 <div className="flex items-center gap-1 text-[9px] text-rose-400 mb-0.5">
+                 <div className="flex items-center gap-1.5 text-[9px] md:text-[10px] text-rose-400 mb-0.5 md:mb-1">
                    <button onClick={() => setScorecard(s => ({...s, losses: Math.max(0, (s?.losses||0)-1)}))}>-</button> LOSS <button onClick={() => setScorecard(s => ({...s, losses: (s?.losses||0)+1}))}>+</button>
                  </div>
-                 <span className="text-xl font-serif text-rose-400 font-bold">{scorecard?.losses || 0}</span>
+                 <span className="text-2xl md:text-3xl font-serif text-rose-400 font-bold">{scorecard?.losses || 0}</span>
                </div>
              </div>
            </div>
@@ -606,13 +713,14 @@ export default function App() {
                  <div className="flex flex-col items-center w-full mt-6">
                    
                    <div className="bg-[#111312] border border-[#E8E9E4]/10 p-3 rounded-lg font-mono text-[11px] text-[#E8E9E4]/60 mb-4 w-full max-w-[400px] mx-auto shadow-inner text-left">
-                     <div className="flex justify-between items-center mb-1">
-                       <span>BTC: ${currentPrice?.toFixed(2)}</span>
+                     <div className="flex justify-between items-center mb-1.5">
+                       <span className="text-[#E8E9E4]">BTC: ${currentPrice?.toFixed(2)}</span>
                        <span className={`font-bold ${analysis.realGapBps > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>GAP: {analysis.realGapBps > 0 ? '+' : ''}{analysis.realGapBps.toFixed(1)} bps</span>
                      </div>
-                     <div className="flex justify-between items-center">
-                       <span>BINANCE: {binancePremium > 0 ? '+' : ''}${binancePremium.toFixed(1)}</span>
-                       <span>L2 IMBALANCE: {orderBook.imbalance.toFixed(2)}x</span>
+                     <div className="flex justify-between items-center text-[9px] opacity-80 pt-1 border-t border-[#E8E9E4]/10">
+                       <span>TAKER: <span className={takerFlow.imbalance > 1 ? 'text-emerald-400' : 'text-rose-400'}>{takerFlow.imbalance.toFixed(1)}x</span></span>
+                       <span>L2 IMB: {orderBook.imbalance.toFixed(1)}x</span>
+                       <span>LIQ: <span className={(analysis.liqBuys > analysis.liqSells) ? 'text-emerald-400' : (analysis.liqSells > analysis.liqBuys ? 'text-rose-400' : 'text-zinc-400')}>{analysis.liqBuys > analysis.liqSells ? 'BULL' : (analysis.liqSells > analysis.liqBuys ? 'BEAR' : 'FLAT')}</span></span>
                      </div>
                    </div>
 
@@ -678,7 +786,7 @@ export default function App() {
                )}
             </div>
 
-            {/* Hourly Forecast Restored */}
+            {/* Hourly Forecast */}
             {analysis && (
               <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md">
                 <h2 className="text-[10px] font-medium text-[#E8E9E4]/60 uppercase tracking-widest mb-3 flex items-center gap-1.5">
