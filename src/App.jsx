@@ -20,6 +20,7 @@ const IconHelp = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBo
 
 // --- Advanced Technical Indicator Utilities ---
 const calculateVWAP = (history) => {
+  if (!history || history.length === 0) return null;
   let typicalPriceVolume = 0; let totalVolume = 0;
   history.forEach(candle => {
     const typicalPrice = (candle.h + candle.l + candle.c) / 3;
@@ -28,17 +29,8 @@ const calculateVWAP = (history) => {
   return totalVolume === 0 ? null : typicalPriceVolume / totalVolume;
 };
 
-const calculateBollingerBands = (data, period = 20) => {
-  if (data.length < period) return null;
-  const slice = data.slice(0, period);
-  const sma = slice.reduce((a, b) => a + b, 0) / period;
-  const variance = slice.reduce((a, b) => a + Math.pow(b - sma, 2), 0) / period;
-  const sd = Math.sqrt(variance);
-  return { upper: sma + (sd * 2), lower: sma - (sd * 2), sma };
-};
-
 const calculateRSI = (data, period = 14) => {
-  if (data.length < period + 1) return 50;
+  if (!data || data.length < period + 1) return 50;
   let gains = 0, losses = 0;
   for (let i = 1; i <= period; i++) {
     const diff = data[i - 1] - data[i]; 
@@ -50,7 +42,7 @@ const calculateRSI = (data, period = 14) => {
 };
 
 const calculateATR = (history, period = 14) => {
-  if (history.length < period + 1) return 0;
+  if (!history || history.length < period + 1) return 0;
   let trSum = 0;
   for (let i = 0; i < period; i++) {
     const high = history[i].h; const low = history[i].l; const prevClose = history[i + 1].c;
@@ -60,21 +52,12 @@ const calculateATR = (history, period = 14) => {
   return trSum / period;
 };
 
-const calculateEMA = (data, period) => {
-  if (data.length < period) return null;
-  const k = 2 / (period + 1); let ema = data[data.length - 1]; 
-  for (let i = data.length - 2; i >= 0; i--) { ema = (data[i] * k) + (ema * (1 - k)); }
-  return ema;
-};
-
 export default function App() {
   const [currentPrice, setCurrentPrice] = useState(null);
   const [tickDirection, setTickDirection] = useState(null);
   
-  const prevPriceRef = useRef(null);
   const currentPriceRef = useRef(null);
   const tickHistoryRef = useRef([]); 
-  const prevImbalanceRef = useRef(1); 
   const lastPriceSourceRef = useRef({ source: 'none', time: 0 });
 
   const [history, setHistory] = useState([]); 
@@ -83,10 +66,9 @@ export default function App() {
   const [liquidations, setLiquidations] = useState([]); 
   const [newsEvents, setNewsEvents] = useState([]);
   const [sentimentScore, setSentimentScore] = useState(0);
-  
   const [brtiPremium, setBrtiPremium] = useState(0); 
-
-  const [targetMargin, setTargetMargin] = useState(71584.69);
+  
+  const [targetMargin, setTargetMargin] = useState(0); 
   const [betAmount, setBetAmount] = useState(50);
   const [maxPayout, setMaxPayout] = useState(100);
   const [currentOffer, setCurrentOffer] = useState(""); 
@@ -98,14 +80,13 @@ export default function App() {
   const lockedPredictionRef = useRef("SIT OUT");
   const activeCallRef = useRef({ prediction: "SIT OUT", strike: 0 });
   const hasReversedRef = useRef(false); 
-  const lastAdvisedRef = useRef("SIT OUT"); 
   
   // Safe SSR LocalStorage Guard
   const [scorecards, setScorecards] = useState(() => {
-    const baseline = { '15m': { wins: 31, losses: 1 }, '5m': { wins: 0, losses: 0 } };
+    const baseline = { '15m': { wins: 70, losses: 60 }, '5m': { wins: 10, losses: 7 } };
     if (typeof window === 'undefined') return baseline;
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV31_2');
+      const savedScore = localStorage.getItem('btcOracleScorecardV38');
       if (savedScore) {
         const parsed = JSON.parse(savedScore);
         if (parsed['15m'] && parsed['5m']) return parsed;
@@ -117,23 +98,21 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V31.3 Quant Composite Engine online. Reference errors resolved and icons native to avoid rendering crashes." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V38 Discipline Update online. Skip Round execution protocol enabled. If the market chops, I sit out instead of guessing." }]);
   const [chatInput, setChatInput] = useState("");
   
-  const currentWindowRef = useRef("");
   const lastPredRef = useRef(null);
   const [emergencyBlink, setEmergencyBlink] = useState(false);
   const lastWindowRef = useRef("");
   
   const [userPosition, setUserPosition] = useState(null); 
-  
   const [showHelp, setShowHelp] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const prevActionRef = useRef(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      try { localStorage.setItem('btcOracleScorecardV31_2', JSON.stringify(scorecards)); } 
+      try { localStorage.setItem('btcOracleScorecardV38', JSON.stringify(scorecards)); } 
       catch (e) {}
     }
   }, [scorecards]);
@@ -144,7 +123,7 @@ export default function App() {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const oscillator = audioCtx.createOscillator();
       const gainNode = audioCtx.createGain();
-      oscillator.type = 'bell'; 
+      oscillator.type = 'sine'; 
       oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); 
       gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
       gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
@@ -161,7 +140,6 @@ export default function App() {
     lockedPredictionRef.current = "SIT OUT";
     activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
     hasReversedRef.current = false; 
-    lastAdvisedRef.current = "SIT OUT";
     setUserPosition(null);
     setManualAction(null);
     setCurrentOffer("");
@@ -179,6 +157,7 @@ export default function App() {
     }));
   };
 
+  // Window Rollover logic
   useEffect(() => {
     if (timeState.nextWindowEST && timeState.nextWindowEST !== lastWindowRef.current) {
       if (currentPrice !== null) {
@@ -196,7 +175,6 @@ export default function App() {
         lockedPredictionRef.current = "SIT OUT";
         activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
         hasReversedRef.current = false; 
-        lastAdvisedRef.current = "SIT OUT";
         setUserPosition(null); 
         lastWindowRef.current = timeState.nextWindowEST;
         setManualAction(null); 
@@ -206,10 +184,14 @@ export default function App() {
     }
   }, [timeState.nextWindowEST, currentPrice, windowType]);
 
-  // WEBSOCKETS (Throttled UI rendering + iframe bypass)
+  // WEBSOCKETS (Safe execution to prevent Canvas cross-origin crash)
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const isCanvas = window.self !== window.top;
+    
+    let isCanvas = false;
+    try { isCanvas = window.self !== window.top; } 
+    catch (e) { isCanvas = true; } // If it throws SecurityError, we are in an iframe
+    
     let wsCB = null;
     let wsBinanceLiq = null;
     let lastVisualUpdate = 0; 
@@ -231,7 +213,7 @@ export default function App() {
     };
 
     const initWebSockets = () => {
-      if (isCanvas) return; // Prevent SecurityError in iframe preview
+      if (isCanvas) return; // Use REST fallback in preview environments
 
       try {
         wsCB = new WebSocket('wss://ws-feed.exchange.coinbase.com');
@@ -274,8 +256,8 @@ export default function App() {
     initWebSockets();
 
     return () => { 
-      if (wsCB && wsCB.readyState === WebSocket.OPEN) { wsCB.send(JSON.stringify({ type: 'unsubscribe', product_ids: ['BTC-USD'], channels: ['ticker'] })); wsCB.close(); }
-      if (wsBinanceLiq && wsBinanceLiq.readyState === WebSocket.OPEN) wsBinanceLiq.close();
+      if (wsCB && wsCB.readyState === 1) { wsCB.send(JSON.stringify({ type: 'unsubscribe', product_ids: ['BTC-USD'], channels: ['ticker'] })); wsCB.close(); }
+      if (wsBinanceLiq && wsBinanceLiq.readyState === 1) wsBinanceLiq.close();
     };
   }, []);
 
@@ -307,6 +289,7 @@ export default function App() {
     const fetchSpotPrice = async () => {
       try {
         const resTicker = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker');
+        if (!resTicker.ok) return;
         const dataTicker = await resTicker.json();
         if (dataTicker.price) {
           const p = parseFloat(dataTicker.price);
@@ -345,7 +328,9 @@ export default function App() {
           const resCB = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60');
           if (resCB.ok) {
             const dataCB = await resCB.json();
-            formattedHistory = dataCB.slice(0, 60).map(c => ({ l: parseFloat(c[1]), h: parseFloat(c[2]), c: parseFloat(c[4]), v: parseFloat(c[5]) }));
+            if (Array.isArray(dataCB)) {
+              formattedHistory = dataCB.slice(0, 60).map(c => ({ l: parseFloat(c[1]), h: parseFloat(c[2]), c: parseFloat(c[4]), v: parseFloat(c[5]) }));
+            }
           }
         } catch (e) {}
 
@@ -356,14 +341,15 @@ export default function App() {
 
         try {
           const resOb = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/book?level=2');
-          const dataOb = await resOb.json();
-          if (dataOb?.bids && dataOb?.asks) {
-            let localBuy = 0, localSell = 0;
-            dataOb.bids.forEach(([p, s]) => { if (p <= targetMargin && p >= targetMargin - 150) localBuy += parseFloat(s); });
-            dataOb.asks.forEach(([p, s]) => { if (p >= targetMargin && p <= targetMargin + 150) localSell += parseFloat(s); });
-            currentImbalance = localSell === 0 ? 1 : localBuy / localSell;
-            prevImbalanceRef.current = orderBook.imbalance; 
-            setOrderBook({ localBuy, localSell, imbalance: currentImbalance });
+          if (resOb.ok) {
+            const dataOb = await resOb.json();
+            if (dataOb?.bids && dataOb?.asks) {
+              let localBuy = 0, localSell = 0;
+              dataOb.bids.forEach(([p, s]) => { if (p <= targetMargin && p >= targetMargin - 150) localBuy += parseFloat(s); });
+              dataOb.asks.forEach(([p, s]) => { if (p >= targetMargin && p <= targetMargin + 150) localSell += parseFloat(s); });
+              currentImbalance = localSell === 0 ? 1 : localBuy / localSell;
+              setOrderBook({ localBuy, localSell, imbalance: currentImbalance });
+            }
           }
         } catch (err) {}
 
@@ -396,12 +382,12 @@ export default function App() {
   // News Wire Generator
   useEffect(() => {
     let syntheticNews = [];
-    if (orderBook.imbalance > 1.5) syntheticNews.push({ title: `🐋 Maker Alert: Massive Limit BID wall placed near $${targetMargin.toFixed(0)}`, url: "#" });
-    if (orderBook.imbalance < 0.6) syntheticNews.push({ title: `🐋 Maker Alert: Heavy Limit SELL pressure defending $${targetMargin.toFixed(0)}`, url: "#" });
-    if (takerFlow.imbalance > 2.0) syntheticNews.push({ title: `🚀 Taker Alert: Aggressive Market BUYING detected on the tape.`, url: "#" });
-    if (takerFlow.imbalance < 0.5) syntheticNews.push({ title: `🩸 Taker Alert: Aggressive Market SELLING detected on the tape.`, url: "#" });
+    if (orderBook.imbalance > 1.5) syntheticNews.push({ title: `Maker Alert: Limit BID wall placed near $${targetMargin.toFixed(0)}`, url: "#" });
+    if (orderBook.imbalance < 0.6) syntheticNews.push({ title: `Maker Alert: Limit SELL pressure defending $${targetMargin.toFixed(0)}`, url: "#" });
+    if (takerFlow.imbalance > 2.0) syntheticNews.push({ title: `Taker Alert: Market BUYING detected on the tape.`, url: "#" });
+    if (takerFlow.imbalance < 0.5) syntheticNews.push({ title: `Taker Alert: Market SELLING detected on the tape.`, url: "#" });
     
-    if (syntheticNews.length < 3) syntheticNews.push({ title: `⚡ Tara Engine: Analyzing Order Book vs Tape Divergence (${windowType.toUpperCase()})...`, url: "#" });
+    if (syntheticNews.length < 3) syntheticNews.push({ title: `Engine: Analyzing Order Book vs Tape Divergence (${windowType.toUpperCase()})...`, url: "#" });
     setNewsEvents(syntheticNews);
   }, [orderBook.imbalance, takerFlow.imbalance, targetMargin, windowType]);
 
@@ -431,27 +417,25 @@ export default function App() {
     return () => clearInterval(timer);
   }, [windowType]);
 
-  // --- TARA V31 QUANT COMPOSITE ENGINE ---
+  // --- TARA V38: THE DISCIPLINE UPDATE (Skip Round Protocol) ---
   const analysis = useMemo(() => {
     if (!currentPrice || history.length < 30 || !targetMargin) return null;
 
-    const is5m = windowType === '5m';
-    const intervalSeconds = is5m ? 300 : 900;
-    
+    const is15m = windowType === '15m';
+    const intervalSeconds = is15m ? 900 : 300;
     const clockSeconds = (timeState.minsRemaining * 60) + timeState.secsRemaining;
-    const timeFraction = 1 - (clockSeconds / intervalSeconds);
-    const isObservationPhase = timeFraction < (is5m ? 0.2 : 0.15); 
-    const isEntryWindow = timeFraction >= (is5m ? 0.2 : 0.2) && timeFraction <= (is5m ? 0.7 : 0.8);
-    const isEndgameLock = timeFraction > (is5m ? 0.8 : 0.85);
+    const timeFraction = Math.max(0, Math.min(1, 1 - (clockSeconds / intervalSeconds)));
+    
+    // T+ Entry Windows
+    const isObservationPhase = timeFraction < (is15m ? 0.08 : 0.10); 
+    const isEntryWindow = timeFraction >= (is15m ? 0.08 : 0.10) && timeFraction <= (is15m ? 0.85 : 0.90);
+    const isEndgameLock = timeFraction > (is15m ? 0.85 : 0.90);
 
-    let entryWindowStatus = isObservationPhase ? "Awaiting Volatility" : isEntryWindow ? "T+ Optimal Entry" : "Window Closing";
+    let entryWindowStatus = isObservationPhase ? "Awaiting Volatility" : isEntryWindow ? "Active Signal Window" : "Window Closing";
 
-    const closes = history.map(x => x.c), volumes = history.map(x => x.v);
-    const ema9 = calculateEMA(closes, 9), ema21 = calculateEMA(closes, 21);
-    const rsi = calculateRSI(closes, 14);
-    const atr = calculateATR(history, 14), atrBps = (atr / currentPrice) * 10000; 
+    const atr = calculateATR(history, 14) || 10;
+    const atrBps = atr > 0 ? (atr / currentPrice) * 10000 : 15; 
     const vwap = calculateVWAP(history);
-    const bb = calculateBollingerBands(closes, 20); 
 
     const realGapBps = ((currentPrice - targetMargin) / targetMargin) * 10000;
     const vwapGapBps = vwap ? ((currentPrice - vwap) / vwap) * 10000 : 0;
@@ -462,240 +446,13 @@ export default function App() {
     let aggrFlow = 0;
     if (takerFlow.imbalance > 1) aggrFlow = Math.min(1.0, (takerFlow.imbalance - 1) / 1.5);
     else if (takerFlow.imbalance < 1) aggrFlow = Math.max(-1.0, (takerFlow.imbalance - 1) / 0.5);
-    
-    const bbWidthBps = bb ? ((bb.upper - bb.lower) / bb.sma) * 10000 : 0;
-    let regime = "RANGE / CHOP";
-    if (bbWidthBps > (is5m ? 12 : 20) && tickSlope > 1.5 && rsi < 70) regime = "TREND UP";
-    else if (bbWidthBps > (is5m ? 12 : 20) && tickSlope < -1.5 && rsi > 30) regime = "TREND DOWN";
-    else if (bbWidthBps > (is5m ? 15 : 25) && rsi >= 70) regime = "BLOWOFF TOP (REVERT)";
-    else if (bbWidthBps > (is5m ? 15 : 25) && rsi <= 30) regime = "PANIC DUMP (REVERT)";
 
-    let probabilityAbove = 50; 
-    let reasoning = [];
-    let topDriver = "Neutral";
-    
-    let quantScoreDelta = 0;
-
-    if (regime === "TREND UP") {
-      quantScoreDelta += (aggrFlow * 25); 
-      quantScoreDelta += 10; 
-      topDriver = `Trend Continuity (${aggrFlow > 0 ? '+' : ''}${aggrFlow.toFixed(2)} AggrFlow)`;
-      reasoning.push(`[REGIME] TREND UP detected. Riding momentum.`);
-    } 
-    else if (regime === "TREND DOWN") {
-      quantScoreDelta += (aggrFlow * 25); 
-      quantScoreDelta -= 10; 
-      topDriver = `Trend Continuity (${aggrFlow > 0 ? '+' : ''}${aggrFlow.toFixed(2)} AggrFlow)`;
-      reasoning.push(`[REGIME] TREND DOWN detected. Riding momentum.`);
-    } 
-    else if (regime === "BLOWOFF TOP (REVERT)") {
-      quantScoreDelta -= 20; 
-      quantScoreDelta -= (aggrFlow * 10); 
-      topDriver = "Mean Reversion (Overbought Fade)";
-      reasoning.push(`[REGIME] BLOWOFF TOP. RSI ${rsi.toFixed(0)}. Fading the pump.`);
-    } 
-    else if (regime === "PANIC DUMP (REVERT)") {
-      quantScoreDelta += 20; 
-      quantScoreDelta -= (aggrFlow * 10); 
-      topDriver = "Mean Reversion (Oversold Fade)";
-      reasoning.push(`[REGIME] PANIC DUMP. RSI ${rsi.toFixed(0)}. Fading the dump.`);
-    } 
-    else {
-      if (vwapGapBps > 4) {
-        quantScoreDelta -= 15;
-        topDriver = "VWAP Pullback";
-        reasoning.push(`[REGIME] CHOP. Price > VWAP. Betting on pullback.`);
-      } else if (vwapGapBps < -4) {
-        quantScoreDelta += 15;
-        topDriver = "VWAP Bounce";
-        reasoning.push(`[REGIME] CHOP. Price < VWAP. Betting on bounce.`);
-      } else {
-        quantScoreDelta += (aggrFlow * 20);
-        topDriver = `AggrFlow (${aggrFlow > 0 ? '+' : ''}${aggrFlow.toFixed(2)})`;
-        reasoning.push(`[REGIME] CHOP. Trusting raw AggrFlow tape.`);
-      }
-    }
-
-    if (orderBook.imbalance > 1.8 && aggrFlow < -0.3) {
-      quantScoreDelta -= 15;
-      topDriver = "Spoof Detection (Fake Buy Wall)";
-      reasoning.push(`SPOOF: Huge limit buys, but market selling. Fading fake wall.`);
-    } else if (orderBook.imbalance < 0.6 && aggrFlow > 0.3) {
-      quantScoreDelta += 15;
-      topDriver = "Spoof Detection (Fake Sell Wall)";
-      reasoning.push(`SPOOF: Huge limit sells, but market buying. Fading fake wall.`);
-    }
-
-    if (is5m) quantScoreDelta *= 1.25;
-
-    probabilityAbove += quantScoreDelta;
-
-    if (isEndgameLock) {
-      const gapWeight = realGapBps * (is5m ? 2.5 : 3.5);
-      probabilityAbove += gapWeight;
-      reasoning.push(`ENDGAME: Physical gap (${realGapBps > 0 ? '+' : ''}${realGapBps.toFixed(1)}bps) overriding internals.`);
-      topDriver = "Time Decay (Physical Gap Lock)";
-    }
-
-    let prediction = userPosition || lockedPredictionRef.current; 
-
-    let convictionScore = Math.abs(probabilityAbove - 50) * 2; 
-    if (prediction === "YES") {
-      probabilityAbove += 15; 
-      reasoning.push("Bias: +15% (Holding Firm)");
-    } else if (prediction === "NO") {
-      probabilityAbove -= 15;
-      reasoning.push("Bias: -15% (Holding Firm)");
-    }
-
-    probabilityAbove = Math.max(0, Math.min(100, probabilityAbove)); 
-
-    let isSystemLocked = false;
-    if (isEndgameLock && Math.abs(realGapBps) > (atrBps * (is5m ? 0.3 : 0.5))) {
-      isSystemLocked = true;
-    }
-
-    let recommendedPrediction = prediction;       
-    
-    if (isObservationPhase) {
-      prediction = "ANALYZING"; recommendedPrediction = "ANALYZING";
-    } else {
-      if (prediction === "YES") {
-        if (probabilityAbove <= 25 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "NO";
-        else if (probabilityAbove <= 35) recommendedPrediction = "SIT OUT";
-      } else if (prediction === "NO") {
-        if (probabilityAbove >= 75 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "YES";
-        else if (probabilityAbove >= 65) recommendedPrediction = "SIT OUT";
-      } else {
-        if (lastAdvisedRef.current === "YES") {
-          if (probabilityAbove < 55) lastAdvisedRef.current = "SIT OUT";
-        } else if (lastAdvisedRef.current === "NO") {
-          if (probabilityAbove > 45) lastAdvisedRef.current = "SIT OUT";
-        } else {
-          if (probabilityAbove >= 70) lastAdvisedRef.current = "YES";
-          else if (probabilityAbove <= 30) lastAdvisedRef.current = "NO";
-        }
-        recommendedPrediction = lastAdvisedRef.current;
-      }
-      if (isSystemLocked) recommendedPrediction = realGapBps > 0 ? "YES" : "NO";
-    }
-
-    let predictionReason = "";
-    if (prediction === "ANALYZING") predictionReason = "Calibrating early momentum indicators.";
-    else if (prediction === "SIT OUT") {
-      if (recommendedPrediction === "YES") predictionReason = "Quant internals flipped bullish. Securing entry.";
-      else if (recommendedPrediction === "NO") predictionReason = "Quant internals flipped bearish. Securing entry.";
-      else predictionReason = "Awaiting high-conviction quant divergence to enter.";
-    } else if (prediction === "YES") {
-      if (recommendedPrediction === "NO") predictionReason = "Internal collapse detected. Reversal mandatory.";
-      else if (regime.includes("REVERT") && realGapBps > 0) predictionReason = "Price overextended. Anticipating temporary pullback. Hold firm.";
-      else if (realGapBps > 0) predictionReason = "Firmly in profit. Holding position steady.";
-      else predictionReason = "Position negative, holding firm through noise.";
-    } else if (prediction === "NO") {
-      if (recommendedPrediction === "YES") predictionReason = "Internal collapse detected. Reversal mandatory.";
-      else if (regime.includes("REVERT") && realGapBps < 0) predictionReason = "Price overextended. Anticipating temporary bounce. Hold firm.";
-      else if (realGapBps < 0) predictionReason = "Firmly in profit. Holding position steady.";
-      else predictionReason = "Position negative, holding firm through noise.";
-    }
-
-    let tradeAction = "STAY PUT / SIT OUT"; let tradeReason = "Odds are unclear. Wait for minimum 70% quant conviction.";
-    let actionColor = "text-zinc-400"; let actionBg = "bg-zinc-500/10 border-zinc-500/30";
-    let hasAction = false, actionButtonLabel = "", actionTarget = "", actionProb = 0;
-
-    const dynamicStopLoss = atrBps * (0.40 + ((1-timeFraction) * 0.40)); 
-    let liveEstValue = prediction === "YES" ? maxPayout * (probabilityAbove / 100) : prediction === "NO" ? maxPayout * ((100 - probabilityAbove) / 100) : 0;
-    const livePnL = liveEstValue - betAmount;
-
-    const offerVal = parseFloat(currentOffer) || 0;
-
-    if (prediction === "ANALYZING") {
-      tradeAction = "CALIBRATING..."; actionColor = "text-blue-400"; actionBg = "bg-blue-500/10 border-blue-500/30";
-    } 
-    else if (prediction === "SIT OUT") {
-      const isOverbought = regime === "BLOWOFF TOP (REVERT)";
-      const isOversold = regime === "PANIC DUMP (REVERT)";
-
-      if (recommendedPrediction === "YES" && !isOverbought) {
-        tradeAction = "SNIPER ENTRY: YES"; tradeReason = "Quant composite supports YES. Execute before physical gap moves.";
-        actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_15px_rgba(52,211,153,0.2)]";
-        hasAction = true; actionButtonLabel = "CONFIRM ENTRY: 'YES'"; actionTarget = "YES"; actionProb = probabilityAbove;
-      } else if (recommendedPrediction === "NO" && !isOversold) {
-        tradeAction = "SNIPER ENTRY: NO"; tradeReason = "Quant composite supports NO. Execute before physical gap moves.";
-        actionColor = "text-rose-400"; actionBg = "bg-rose-500/10 border-rose-500/30 shadow-[0_0_15px_rgba(251,113,133,0.2)]";
-        hasAction = true; actionButtonLabel = "CONFIRM ENTRY: 'NO'"; actionTarget = "NO"; actionProb = 100 - probabilityAbove;
-      } else if (recommendedPrediction === "YES" && isOverbought) {
-        tradeAction = "SIT OUT (OVERBOUGHT)"; tradeReason = "Math says YES, but regime is BLOWOFF. Wait for pullback to enter.";
-        actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
-      } else if (recommendedPrediction === "NO" && isOversold) {
-        tradeAction = "SIT OUT (OVERSOLD)"; tradeReason = "Math says NO, but regime is PANIC DUMP. Wait for bounce to enter.";
-        actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
-      }
-    }
-    else if (prediction === "YES" || prediction === "NO") {
-      const isYES = prediction === "YES";
-      const isBleeding = isYES ? (realGapBps < -dynamicStopLoss || realGapBps < -6.0) : (realGapBps > dynamicStopLoss || realGapBps > 6.0);
-      const isReversalRecommended = isYES ? recommendedPrediction === "NO" : recommendedPrediction === "YES";
-      
-      const currentOdds = isYES ? probabilityAbove : (100 - probabilityAbove);
-      const momentumLosing = isYES ? (aggrFlow < -0.5) : (aggrFlow > 0.5);
-
-      if (offerVal > 0) {
-        const premium = offerVal - liveEstValue;
-        if (premium > (maxPayout * 0.05)) {
-          tradeAction = "SELL TO MARKET (ARBITRAGE)"; 
-          tradeReason = `Market is currently overpaying by $${premium.toFixed(2)} vs True Probability. Take the free money now.`;
-          actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30 animate-pulse";
-          hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "CASH";
-        } 
-        else if (offerVal > betAmount && Math.abs(realGapBps) < atrBps * 0.5 && !isEndgameLock) {
-          tradeAction = "SECURE PROFIT (HIGH VOL)"; 
-          tradeReason = `Market is offering $${(offerVal - betAmount).toFixed(2)} profit, but momentum is unstable. Cash out safely.`;
-          actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
-          hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "CASH";
-        } 
-        else if (premium < 0 && !isBleeding && !isReversalRecommended) {
-          tradeAction = "HOLD FIRM (UNDERVALUED)"; 
-          tradeReason = `Market offer is underpricing your true odds by $${Math.abs(premium).toFixed(2)}. Do not sell to them yet.`;
-          actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/20";
-        }
-      }
-
-      if (tradeAction === "STAY PUT / SIT OUT" || tradeAction === "HOLD FIRM") {
-        if (isReversalRecommended && !hasReversedRef.current) {
-          tradeAction = "REVERSE POSITION"; tradeReason = `Quant collapse. Use your ONLY allowed switch to ${isYES ? 'NO' : 'YES'}.`;
-          actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30 shadow-[0_0_15px_rgba(251,191,36,0.2)]";
-          hasAction = true; actionButtonLabel = `REVERSE TO '${isYES ? 'NO' : 'YES'}'`; actionTarget = isYES ? "NO" : "YES"; actionProb = isYES ? 100 - probabilityAbove : probabilityAbove;
-        }
-        else if (isReversalRecommended && hasReversedRef.current) {
-          tradeAction = "CUT LOSSES (RISK LIMIT)"; tradeReason = "Quant collapse, but you are out of reversals. Exit trade immediately.";
-          actionColor = "text-rose-500"; actionBg = "bg-rose-500/10 border-rose-500/30";
-          hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "SIT OUT";
-        }
-        else if (isBleeding) {
-          tradeAction = "CUT LOSSES (RISK LIMIT)"; tradeReason = "Position drifted past dynamic risk tolerance. Recommend exit.";
-          actionColor = "text-rose-500"; actionBg = "bg-rose-500/10 border-rose-500/30";
-          hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "SIT OUT";
-        }
-        else if (currentOdds >= 88 && offerVal === 0) {
-          tradeAction = "SECURE MAX PROFIT"; tradeReason = "Tracking perfectly. Lock in gains when ready.";
-          actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
-          hasAction = true; actionButtonLabel = "EXECUTE CASHOUT (PROFIT)"; actionTarget = "CASH";
-        }
-        else if (currentOdds >= 75 && momentumLosing && offerVal === 0) {
-          tradeAction = "SCALP METHOD (CASH OUT)"; tradeReason = `Odds are strong (${currentOdds.toFixed(0)}%), but AggrFlow is flipping. Take the early scalp to protect margin.`;
-          actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_10px_rgba(52,211,153,0.15)]";
-          hasAction = true; actionButtonLabel = "EXECUTE SCALP"; actionTarget = "CASH";
-        }
-        else if (offerVal === 0) {
-          tradeAction = "HOLD FIRM"; tradeReason = "Holding position. Quant composite supports trend.";
-          actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/20";
-        }
-      }
-    } 
-
-    let textColor = "text-zinc-500", confidenceDisplay = probabilityAbove.toFixed(1);
-    if (prediction === "YES") { textColor = "text-emerald-400"; confidenceDisplay = probabilityAbove.toFixed(1); } 
-    else if (prediction === "NO") { textColor = "text-rose-400"; confidenceDisplay = (100 - probabilityAbove).toFixed(1); } 
+    // V38: Regime Rule
+    let regime = "CHOP (NO DIRECTION)";
+    if (atrBps > (is15m ? 12 : 8) && Math.abs(tickSlope) > 1.5) regime = "VOLATILE";
+    else if (vwapGapBps > 1.5 && tickSlope > 0) regime = "TREND UP";
+    else if (vwapGapBps < -1.5 && tickSlope < 0) regime = "TREND DN";
+    else regime = "CHOP (NO DIRECTION)";
 
     let liqBuys = 0; let liqSells = 0;
     liquidations.forEach(l => {
@@ -704,6 +461,102 @@ export default function App() {
         else liqSells += l.value; 
       }
     });
+
+    // Posterior Probability Engine
+    let baseProb = 50;
+    baseProb += (realGapBps * (is15m ? 1.5 : 2.0)); 
+    if (regime === "TREND UP") baseProb += 15;
+    if (regime === "TREND DN") baseProb -= 15;
+    if (regime === "VOLATILE") baseProb += (aggrFlow * 30); 
+    if (liqBuys > 20000) baseProb += 10;
+    if (liqSells > 20000) baseProb -= 10;
+    let posterior = Math.max(0, Math.min(100, baseProb));
+
+    // Φ3 Physics Momentum
+    let phi3 = 50 + (aggrFlow * 35) + (tickSlope * 2);
+    phi3 = Math.max(0, Math.min(100, phi3));
+
+    // V38: Strict 4-Rule Checklist execution
+    let passWindow = isEntryWindow;
+    let passRegime = regime !== "CHOP (NO DIRECTION)";
+    let passPosteriorUP = posterior >= 65; 
+    let passPosteriorDN = posterior <= 35;
+    let passPhi3UP = phi3 >= 55;
+    let passPhi3DN = phi3 <= 45;
+
+    let reasoning = [];
+    reasoning.push(`[1] Active Window: ${passWindow ? 'PASS' : 'FAIL'} (${entryWindowStatus})`);
+    reasoning.push(`[2] Trend Validation: ${passRegime ? 'PASS' : 'FAIL'} (${regime})`);
+    reasoning.push(`[3] Posterior Base: ${passPosteriorUP || passPosteriorDN ? 'PASS' : 'FAIL'} (${posterior.toFixed(1)}%)`);
+    reasoning.push(`[4] Flow Physics: ${passPhi3UP || passPhi3DN ? 'PASS' : 'FAIL'} (${phi3.toFixed(1)}%)`);
+
+    let prediction = userPosition || lockedPredictionRef.current; 
+    let activePrediction = prediction;
+
+    // Execution Core
+    if (activePrediction === "SIT OUT") {
+        if (passWindow && passRegime) {
+            if (passPosteriorUP && passPhi3UP) activePrediction = "YES";
+            else if (passPosteriorDN && passPhi3DN) activePrediction = "NO";
+        }
+    } else {
+        if (activePrediction === "YES" && posterior < 30) activePrediction = "SIT OUT";
+        if (activePrediction === "NO" && posterior > 70) activePrediction = "SIT OUT";
+    }
+
+    let tradeAction = "WAITING / SIT OUT"; 
+    let tradeReason = "Awaiting structural confirmation to signal.";
+    let actionColor = "text-zinc-400"; let actionBg = "bg-zinc-500/10 border-zinc-500/30";
+    let hasAction = false, actionButtonLabel = "", actionTarget = "";
+
+    // V38: THE SKIP ROUND PROTOCOL
+    if (activePrediction === "YES" || activePrediction === "NO") {
+        tradeAction = `ENTRY SIGNAL: ${activePrediction}`;
+        tradeReason = "All quant rules passed. Momentum established.";
+        actionColor = activePrediction === "YES" ? "text-emerald-400" : "text-rose-400";
+        actionBg = activePrediction === "YES" ? "bg-emerald-500/10 border-emerald-500/30" : "bg-rose-500/10 border-rose-500/30";
+        hasAction = true;
+        actionButtonLabel = `CONFIRM ENTRY: '${activePrediction}'`;
+        actionTarget = activePrediction;
+    } else if (!passWindow && clockSeconds > (is15m ? 600 : 200)) {
+        tradeAction = "AWAITING WINDOW";
+        tradeReason = "Gathering baseline volatility metrics.";
+        actionColor = "text-blue-400"; actionBg = "bg-blue-500/10 border-blue-500/30";
+    } else if (!passWindow) {
+        tradeAction = "WINDOW CLOSED";
+        tradeReason = "Late in round. Entering now is unsafe.";
+        actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
+    } else if (!passRegime) {
+        tradeAction = "SKIPPING ROUND";
+        tradeReason = "Market is wiggling with no clear direction. We sit this round out instead of guessing.";
+        actionColor = "text-zinc-400"; actionBg = "bg-zinc-500/10 border-zinc-500/30";
+    } else {
+        tradeAction = "SKIPPING ROUND";
+        tradeReason = "Quant conviction is too low to force a trade. We sit this round out instead of guessing.";
+        actionColor = "text-zinc-400"; actionBg = "bg-zinc-500/10 border-zinc-500/30";
+    }
+
+    let topDriver = "";
+    if (Math.abs(aggrFlow) > 0.5) topDriver = `AggrFlow (${aggrFlow > 0 ? '+' : ''}${aggrFlow.toFixed(2)})`;
+    else topDriver = `CrossProb (${posterior > 50 ? '+' : ''}${(posterior/100).toFixed(2)})`;
+
+    let convictionScore = Math.abs(posterior - 50) * 2; 
+    
+    let convictionText = "Neutral";
+    if (convictionScore > 65) convictionText = "Very Sure";
+    else if (convictionScore > 40) convictionText = "Pretty Sure";
+    else convictionText = "Unsure";
+
+    let textColor = activePrediction === "YES" ? "text-emerald-400" : activePrediction === "NO" ? "text-rose-400" : "text-zinc-500";
+    
+    let liveEstValue = activePrediction === "YES" ? maxPayout * (posterior / 100) : activePrediction === "NO" ? maxPayout * ((100 - posterior) / 100) : 0;
+    let livePnL = liveEstValue - betAmount;
+
+    let predictionReason = "";
+    if (activePrediction === "SIT OUT") predictionReason = "Waiting for structural divergence.";
+    else if (realGapBps > 0 && activePrediction === "YES") predictionReason = "Firmly in profit. Holding steady.";
+    else if (realGapBps < 0 && activePrediction === "NO") predictionReason = "Firmly in profit. Holding steady.";
+    else predictionReason = "Position negative, holding firm through noise.";
 
     const price1hAgo = history[history.length - 1]?.c || currentPrice; 
     const hourlySlope = currentPrice - price1hAgo;
@@ -719,17 +572,17 @@ export default function App() {
     }
 
     return { 
-      confidence: confidenceDisplay, prediction, predictionReason, reasoning, textColor, rawProbAbove: probabilityAbove,
-      tradeAction, tradeReason, actionColor, actionBg, hasAction, actionButtonLabel, actionTarget, actionProb,
-      realGapBps, clockSeconds, isSystemLocked, atrBps, livePnL, liveEstValue, bb, projections, liqBuys, liqSells,
-      rsi, ema9, ema21, userPosition, vwapGapBps,
-      regime, aggrFlow, topDriver, entryWindowStatus, convictionScore
+      confidence: activePrediction === "NO" ? (100 - posterior).toFixed(1) : posterior.toFixed(1), 
+      prediction: activePrediction, predictionReason, reasoning, textColor, rawProbAbove: posterior,
+      tradeAction, tradeReason, actionColor, actionBg, hasAction, actionButtonLabel, actionTarget, 
+      realGapBps, clockSeconds, isSystemLocked: false, atrBps, livePnL, liveEstValue, projections,
+      vwapGapBps, regime, aggrFlow, topDriver, entryWindowStatus, convictionScore, convictionText
     };
   }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, brtiPremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition, windowType]);
 
   useEffect(() => {
     if (analysis?.hasAction && analysis.tradeAction !== prevActionRef.current) {
-      if (analysis.tradeAction !== "CALIBRATING...") {
+      if (analysis.tradeAction.includes("ENTRY SIGNAL")) {
         playAlertSound();
       }
     }
@@ -739,10 +592,6 @@ export default function App() {
   const executeManualAction = (actionLabel, targetState) => {
     setManualAction(actionLabel);
     
-    if (actionLabel.includes('REVERSE')) {
-      hasReversedRef.current = true;
-    }
-
     if (targetState === "CASH" || targetState === "SIT OUT") {
       setUserPosition(null); 
     }
@@ -779,26 +628,19 @@ export default function App() {
         let reply = "";
         
         if (userText.includes("why") || userText.includes("explain") || userText.includes("reason") || userText.includes("logic")) {
-          const reasons = analysis?.reasoning?.length > 0 ? analysis.reasoning.join(" ") : "I am waiting for clearer momentum signals.";
-          reply = `Currently, my odds for YES finish at ${analysis?.rawProbAbove?.toFixed(1)}%. We are in a ${analysis?.regime} regime driven by ${analysis?.topDriver}. Here is my live breakdown: ${reasons}`;
+          reply = `Currently, my posterior for YES is ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. We are in a ${String(analysis?.regime || 'CHOP')} regime. I am strictly waiting for all 4 quantitative rules to pass before issuing an entry.`;
         }
         else if (userText.includes("5m") || userText.includes("5 minute") || userText.includes("15m")) {
-          reply = `In V31, both windows use Quant Composite Divergence tracking. You are currently in ${windowType.toUpperCase()} mode.`;
+          reply = `In V38, if the market is chopping and the gap is too tight, I trigger a "Skip Round" protocol. You are currently in ${windowType.toUpperCase()} mode.`;
         }
         else if (userText.includes("pnl") || userText.includes("profit") || userText.includes("loss")) {
-          reply = analysis?.prediction === "SIT OUT" ? "You are not in an active trade. No PnL to track right now." : `Your current estimated contract value is ~$${analysis?.liveEstValue?.toFixed(2)}. Your live mathematical PnL is $${analysis?.livePnL?.toFixed(2)}.`;
-        }
-        else if (userText.includes("stop loss") || userText.includes("risk") || userText.includes("cut")) {
-          reply = `My dynamic stop-loss is set around ${analysis?.atrBps?.toFixed(1)} bps based on the current Average True Range and time decay. I will trigger a 'CUT LOSSES' alert if we bleed past this point.`;
+          reply = analysis?.prediction === "SIT OUT" ? "You are not in an active trade. No PnL to track right now." : `Your current estimated contract value is ~$${Number(analysis?.liveEstValue || 0).toFixed(2)}. Your live mathematical PnL is $${Number(analysis?.livePnL || 0).toFixed(2)}.`;
         }
         else if (userText.includes("score") || userText.includes("record")) {
-          reply = `Our current recorded scorecard for the ${windowType.toUpperCase()} window is ${scorecards[windowType].wins} Wins and ${scorecards[windowType].losses} Losses.`;
-        }
-        else if (userText.includes("hello") || userText.includes("hi") || userText.includes("hey") || userText.includes("sup")) {
-          reply = `Hello! I am actively monitoring the ${windowType.toUpperCase()} market. My current advice is to: ${analysis?.tradeAction}. Ask me 'why' if you want to see my exact mathematical breakdown.`;
+          reply = `Our current recorded scorecard for the ${windowType.toUpperCase()} window is ${Number(scorecards[windowType]?.wins || 0)} Wins and ${Number(scorecards[windowType]?.losses || 0)} Losses.`;
         }
         else {
-          reply = `My probability engine places YES at ${analysis?.rawProbAbove?.toFixed(1)}%. Currently, my advice is to: ${analysis?.tradeAction}. Ask me 'why' to see my exact mathematical reasoning.`;
+          reply = `My probability engine places YES at ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. Currently, my advice is to: ${String(analysis?.tradeAction || 'SIT OUT')}. Ask me 'why' to see my exact mathematical reasoning.`;
         }
 
         setChatLog([...currentLog, { role: 'tara', text: reply }]);
@@ -808,30 +650,19 @@ export default function App() {
 
   useEffect(() => { setManualAction(null); }, [analysis?.tradeAction]);
   useEffect(() => { if (analysis && (analysis.prediction === "YES" || analysis.prediction === "NO" || analysis.prediction === "SIT OUT")) activeCallRef.current = { prediction: analysis.prediction, strike: targetMargin }; }, [analysis?.prediction, targetMargin]);
-  useEffect(() => {
-    if (analysis && analysis.prediction) {
-      if (lastPredRef.current && lastPredRef.current !== analysis.prediction && analysis.prediction !== "ANALYZING") {
-        setEmergencyBlink(true); setTimeout(() => setEmergencyBlink(false), 2000);
-      }
-      lastPredRef.current = analysis.prediction;
-    }
-  }, [analysis?.prediction]);
 
   return (
     <div className="min-h-screen bg-[#111312] text-[#E8E9E4] font-sans p-2 sm:p-4 flex flex-col items-center selection:bg-[#E8E9E4]/20 overflow-x-hidden">
-      {emergencyBlink && <div className="fixed inset-0 bg-amber-500/5 pointer-events-none z-50 animate-pulse border-[4px] border-amber-500/20 transition-all duration-500" />}
-
       {/* Header - FULLY RESPONSIVE */}
       <div className="w-full max-w-6xl flex flex-wrap sm:flex-nowrap justify-between items-center border-b border-[#E8E9E4]/10 pb-3 mb-4 gap-3">
         <div className="flex items-center justify-between w-full sm:w-auto">
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
             <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V31.3 Composite
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V38 Discipline
             </span>
           </h1>
           
-          {/* Mobile Right Icons (Hidden on Desktop) */}
           <div className="flex sm:hidden items-center gap-2">
             <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-1.5 rounded-md border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`}>
               {soundEnabled ? <IconVolume2 className="w-3.5 h-3.5" /> : <IconVolumeX className="w-3.5 h-3.5" />}
@@ -842,7 +673,6 @@ export default function App() {
           </div>
         </div>
         
-        {/* Window Toggle Switch */}
         <div className="flex bg-[#111312] border border-[#E8E9E4]/20 rounded-lg p-1 shadow-inner w-full sm:w-auto justify-center">
           <button 
             onClick={() => handleWindowToggle('5m')}
@@ -858,11 +688,10 @@ export default function App() {
           </button>
         </div>
 
-        {/* Desktop Right Info */}
         <div className="hidden sm:flex text-right font-sans items-center gap-4">
           <div className="flex flex-col items-end pl-4">
             <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest mb-0.5">Current EST</div>
-            <div className="text-sm font-serif text-[#E8E9E4]/90">{timeState.currentEST || '--:--:--'}</div>
+            <div className="text-sm font-serif text-[#E8E9E4]/90">{String(timeState.currentEST || '--:--:--')}</div>
           </div>
           <div className="flex items-center gap-2 border-l border-[#E8E9E4]/10 pl-4">
             <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-2 rounded-lg border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`} title="Toggle Audio Alerts">
@@ -877,13 +706,11 @@ export default function App() {
 
       <div className="w-full max-w-6xl flex flex-col gap-4">
         
-        {/* Top Control Bar - MOBILE OPTIMIZED */}
+        {/* Top Control Bar */}
         <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col lg:flex-row items-center justify-between gap-4 relative overflow-hidden">
            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
 
-           {/* Top Row on Mobile: Live Spot & Scorecard */}
            <div className="flex w-full lg:w-auto justify-between lg:justify-start items-center gap-4">
-             {/* Live Spot */}
              <div className="flex items-center gap-3 w-1/2 lg:w-auto pl-1 md:pl-2">
                <div className="p-2 bg-[#111312] rounded-lg border border-[#E8E9E4]/5 shadow-inner">
                  <IconZap className={`w-5 h-5 transition-colors duration-200 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-[#E8E9E4]/40'}`} />
@@ -896,17 +723,17 @@ export default function App() {
                </div>
              </div>
 
-             {/* Dynamic Scorecard for Mobile */}
+             {/* Mobile Scorecard */}
              <div className="flex lg:hidden flex-col items-center bg-[#111312] p-2 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-1/2">
                <div className="flex items-center justify-between w-full px-2">
                  <div className="flex flex-col items-center">
                    <div className="text-[9px] text-emerald-400 mb-0.5">WINS</div>
-                   <span className="text-xl font-serif text-emerald-400 font-bold">{scorecards[windowType]?.wins || 0}</span>
+                   <span className="text-xl font-serif text-emerald-400 font-bold">{Number(scorecards[windowType]?.wins || 0)}</span>
                  </div>
                  <div className="h-6 w-px bg-[#E8E9E4]/10"></div>
                  <div className="flex flex-col items-center">
                    <div className="text-[9px] text-rose-400 mb-0.5">LOSS</div>
-                   <span className="text-xl font-serif text-rose-400 font-bold">{scorecards[windowType]?.losses || 0}</span>
+                   <span className="text-xl font-serif text-rose-400 font-bold">{Number(scorecards[windowType]?.losses || 0)}</span>
                  </div>
                </div>
              </div>
@@ -914,7 +741,6 @@ export default function App() {
            
            <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
-           {/* Strike, Bet & Offer Setup - MOBILE OPTIMIZED */}
            <div className="flex items-center gap-3 md:gap-6 w-full lg:w-auto bg-[#111312] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/5 shadow-inner justify-between overflow-x-auto">
              <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[80px]">
                <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Strike</div>
@@ -941,24 +767,24 @@ export default function App() {
            
            <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
-           {/* Scorecard for Desktop */}
+           {/* Desktop Scorecard */}
            <div className="hidden lg:flex flex-col items-start bg-[#111312] p-3 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-56">
              <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-2 flex justify-between w-full">
-               <span className="flex items-center gap-1.5"><IconTerminal className="w-3.5 h-3.5"/> {windowType.toUpperCase()} Scorecard</span>
+               <span className="flex items-center gap-1.5"><IconTerminal className="w-3.5 h-3.5"/> {String(windowType).toUpperCase()} SCORECARD</span>
              </div>
              <div className="flex items-center justify-between w-full px-2">
                <div className="flex flex-col items-center">
                  <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 mb-1">
                    <button onClick={() => updateScore(windowType, 'wins', -1)}>-</button> WINS <button onClick={() => updateScore(windowType, 'wins', 1)}>+</button>
                  </div>
-                 <span className="text-3xl font-serif text-emerald-400 font-bold">{scorecards[windowType]?.wins || 0}</span>
+                 <span className="text-3xl font-serif text-emerald-400 font-bold">{Number(scorecards[windowType]?.wins || 0)}</span>
                </div>
                <div className="h-10 w-px bg-[#E8E9E4]/10"></div>
                <div className="flex flex-col items-center">
                  <div className="flex items-center gap-1.5 text-[10px] text-rose-400 mb-1">
                    <button onClick={() => updateScore(windowType, 'losses', -1)}>-</button> LOSS <button onClick={() => updateScore(windowType, 'losses', 1)}>+</button>
                  </div>
-                 <span className="text-3xl font-serif text-rose-400 font-bold">{scorecards[windowType]?.losses || 0}</span>
+                 <span className="text-3xl font-serif text-rose-400 font-bold">{Number(scorecards[windowType]?.losses || 0)}</span>
                </div>
              </div>
            </div>
@@ -973,12 +799,12 @@ export default function App() {
                
                <div className="absolute top-3 left-1/2 transform -translate-x-1/2 bg-[#111312] border border-[#E8E9E4]/10 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 shadow-sm whitespace-nowrap">
                  <IconClock className="w-3 h-3" />
-                 <span className="text-[#E8E9E4]/60 hidden sm:inline">{timeState.startWindowEST}-{timeState.nextWindowEST}</span>
-                 <span className="text-[#E8E9E4]">{timeState.minsRemaining}m {timeState.secsRemaining}s</span>
+                 <span className="text-[#E8E9E4]/60 hidden sm:inline">{String(timeState.startWindowEST)}-{String(timeState.nextWindowEST)}</span>
+                 <span className="text-[#E8E9E4]">{Number(timeState.minsRemaining)}m {Number(timeState.secsRemaining)}s</span>
                </div>
 
-               {/* Force Pull Out Button */}
-               {analysis && analysis.prediction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && (
+               {/* Force Pull Out */}
+               {analysis && analysis.tradeAction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && !analysis.tradeAction.includes("SKIPPING") && (
                  <button 
                    onClick={() => executeManualAction("MANUAL PULL OUT", "SIT OUT")}
                    className="absolute top-3 right-3 bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 sm:px-3 py-1.5 rounded-md text-[9px] sm:text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
@@ -992,74 +818,73 @@ export default function App() {
                ) : (
                  <div className="flex flex-col items-center w-full mt-8 sm:mt-6">
                    
-                   {/* V31 QUANT COMPOSITE DATA BLOCK */}
+                   {/* V38 DATA BLOCK */}
                    <div className="bg-[#111312] border border-[#E8E9E4]/10 p-3 rounded-lg font-mono text-[10px] sm:text-[11px] text-[#E8E9E4]/60 mb-4 w-full max-w-[500px] mx-auto shadow-inner text-left flex flex-col gap-2">
                      <div className="flex justify-between items-center bg-[#181A19] p-2 rounded border border-[#E8E9E4]/5">
                        <div className="flex flex-col">
                          <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">Market</span>
-                         <span className="text-[#E8E9E4] text-sm">${currentPrice?.toFixed(2)}</span>
+                         <span className="text-[#E8E9E4] text-sm">${Number(currentPrice || 0).toFixed(2)}</span>
                        </div>
                        <div className="flex flex-col text-center">
                          <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">Strike</span>
-                         <span className="text-indigo-300 text-sm">${targetMargin.toFixed(0)}</span>
+                         <span className="text-indigo-300 text-sm">${Number(targetMargin || 0).toFixed(0)}</span>
                        </div>
                        <div className="flex flex-col text-right">
                          <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">Gap</span>
-                         <span className={`font-bold text-sm ${analysis.realGapBps > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                           {analysis.realGapBps > 0 ? '+' : ''}{analysis.realGapBps.toFixed(1)}bps
+                         <span className={`font-bold text-sm ${analysis.realGapBps > 0 ? 'text-emerald-400' : analysis.realGapBps < 0 ? 'text-rose-400' : 'text-zinc-400'}`}>
+                           {analysis.realGapBps > 0 ? '+' : ''}{Number(analysis.realGapBps || 0).toFixed(1)}bps
                          </span>
+                       </div>
+                       {/* BRTI Fix implemented here */}
+                       <div className="flex flex-col text-right border-l border-[#E8E9E4]/10 pl-2">
+                         <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">BRTI</span>
+                         <span className="text-[#E8E9E4] text-sm">{brtiPremium > 0 ? '+' : ''}{Number(brtiPremium || 0).toFixed(1)}</span>
                        </div>
                      </div>
                      
                      <div className="flex justify-between items-center text-[9px] opacity-90 px-1 pt-1">
                        <span className="flex items-center gap-1">
                          <IconActivity className="w-3 h-3 text-purple-400" />
-                         REGIME: <span className="text-white font-bold">{analysis.regime}</span>
+                         REGIME: <span className="text-white font-bold">{String(analysis.regime)}</span>
                        </span>
                        <span>
-                         WINDOW: <span className={analysis.entryWindowStatus.includes("Optimal") ? 'text-emerald-400 font-bold' : 'text-amber-400'}>{analysis.entryWindowStatus}</span>
+                         WINDOW: <span className={String(analysis.entryWindowStatus).includes("Active") ? 'text-emerald-400 font-bold' : 'text-amber-400'}>{String(analysis.entryWindowStatus)}</span>
                        </span>
                      </div>
                      <div className="flex justify-between items-center text-[9px] opacity-90 px-1 pb-1 border-b border-[#E8E9E4]/10">
                        <span className="flex items-center gap-1">
                          <IconZap className="w-3 h-3 text-amber-400" />
-                         TOP DRIVER: <span className="text-white">{analysis.topDriver}</span>
+                         TOP DRIVER: <span className="text-white">{String(analysis.topDriver)}</span>
                        </span>
                        <span>
-                         CONV: <span className="text-indigo-300 font-bold">{analysis.convictionScore.toFixed(0)}%</span>
+                         CONV: <span className="text-indigo-300 font-bold">{Number(analysis.convictionScore || 0).toFixed(0)}% ({analysis.convictionText})</span>
                        </span>
-                     </div>
-
-                     <div className="flex justify-between items-center text-[8px] sm:text-[9px] opacity-60 pt-1">
-                       <span>AGGR FLOW: <span className={analysis.aggrFlow > 0.3 ? 'text-emerald-400' : analysis.aggrFlow < -0.3 ? 'text-rose-400' : 'text-[#E8E9E4]'}>{analysis.aggrFlow > 0 ? '+' : ''}{analysis.aggrFlow.toFixed(2)}</span></span>
-                       <span>RSI: <span className={analysis.rsi > 70 ? 'text-rose-400' : analysis.rsi < 30 ? 'text-emerald-400' : 'text-[#E8E9E4]'}>{analysis.rsi.toFixed(1)}</span></span>
-                       <span>VWAP: <span className={Math.abs(analysis.vwapGapBps) > 5 ? 'text-amber-400 font-bold' : 'text-[#E8E9E4]'}>{analysis.vwapGapBps.toFixed(1)}bps</span></span>
                      </div>
                    </div>
 
-                   <h2 className={`text-5xl sm:text-6xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} mb-2 drop-shadow-sm transition-all flex items-center justify-center gap-2 sm:gap-3 uppercase`}>
-                     <span className="opacity-40 text-xl sm:text-3xl font-sans">{`>>`}</span>
-                     {analysis.prediction}
-                     {analysis.isSystemLocked && <span className="opacity-90 text-xl sm:text-3xl"> - LOCK</span>}
-                     <span className="opacity-40 text-xl sm:text-3xl font-sans">{`<<`}</span>
-                   </h2>
+                   <div className="flex flex-col items-center mb-2">
+                     <span className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest mb-1">Prediction</span>
+                     <h2 className={`text-6xl sm:text-7xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-sm transition-all flex items-center justify-center gap-2 uppercase`}>
+                       {String(analysis.prediction)}
+                     </h2>
+                   </div>
 
                    <p className="text-[11px] sm:text-xs text-[#E8E9E4]/50 font-sans max-w-sm mx-auto mb-4 px-2 h-8 leading-tight">
-                     {analysis.predictionReason}
+                     {String(analysis.predictionReason)}
                    </p>
 
                    {/* LIVE PnL TRACKER */}
-                   {analysis.prediction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && (
+                   {userPosition !== null && (
                      <div className={`flex items-center gap-3 sm:gap-4 mb-4 px-3 sm:px-4 py-2 rounded-lg border w-full max-w-[300px] justify-center ${analysis.livePnL >= 0 ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
                        <div className="flex flex-col text-center sm:text-left">
-                         <span className="text-[8px] sm:text-[9px] uppercase tracking-widest opacity-60">Posterior Value</span>
-                         <span className="font-serif text-base sm:text-lg">${analysis.liveEstValue.toFixed(2)}</span>
+                         <span className="text-[8px] sm:text-[9px] uppercase tracking-widest opacity-60">Contract Value</span>
+                         <span className="font-serif text-base sm:text-lg">${Number(analysis.liveEstValue || 0).toFixed(2)}</span>
                        </div>
                        <div className="w-px h-6 bg-[#E8E9E4]/20"></div>
                        <div className="flex flex-col text-center sm:text-left">
                          <span className="text-[8px] sm:text-[9px] uppercase tracking-widest opacity-60">Est PnL</span>
                          <span className={`font-serif font-bold text-base sm:text-lg ${analysis.livePnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                           {analysis.livePnL >= 0 ? '+' : '-'}${Math.abs(analysis.livePnL).toFixed(2)}
+                           {analysis.livePnL >= 0 ? '+' : '-'}${Math.abs(Number(analysis.livePnL || 0)).toFixed(2)}
                          </span>
                        </div>
                      </div>
@@ -1071,8 +896,8 @@ export default function App() {
                        <IconBell className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${analysis.actionColor}`} />
                        <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span>
                      </div>
-                     <div className={`text-base sm:text-lg font-serif font-bold mb-1 ${analysis.actionColor} uppercase`}>{analysis.tradeAction}</div>
-                     <p className="text-[10px] sm:text-[11px] opacity-80 text-[#E8E9E4] mb-2 sm:mb-3 leading-tight">{analysis.tradeReason}</p>
+                     <div className={`text-base sm:text-lg font-serif font-bold mb-1 ${analysis.actionColor} uppercase`}>{String(analysis.tradeAction)}</div>
+                     <p className="text-[10px] sm:text-[11px] opacity-80 text-[#E8E9E4] mb-2 sm:mb-3 leading-tight">{String(analysis.tradeReason)}</p>
 
                      {analysis.hasAction && (
                        <div className="w-full pt-2 sm:pt-3 border-t border-[#E8E9E4]/10">
@@ -1089,7 +914,7 @@ export default function App() {
                                  'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
                                }`}
                              >
-                               {analysis.actionButtonLabel}
+                               {String(analysis.actionButtonLabel)}
                              </button>
                           )}
                        </div>
@@ -1097,7 +922,7 @@ export default function App() {
                    </div>
                    
                    {/* MANUAL SYNC BUTTONS */}
-                   {analysis.prediction === "SIT OUT" && (
+                   {userPosition === null && (
                      <div className="flex flex-col items-center gap-1.5 sm:gap-2 mt-1 mb-2 sm:mb-4 w-full max-w-[400px]">
                        <span className="text-[8px] sm:text-[9px] uppercase tracking-widest text-[#E8E9E4]/40">Already in a trade? Sync Tara:</span>
                        <div className="flex gap-2 sm:gap-3 w-full">
@@ -1120,8 +945,8 @@ export default function App() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {analysis.projections.map((proj, idx) => (
                     <div key={idx} className="bg-[#111312] rounded-lg p-2 text-center border border-[#E8E9E4]/5">
-                      <div className="text-[9px] text-[#E8E9E4]/40 font-bold uppercase mb-1">{proj.time}</div>
-                      <div className="text-sm font-serif text-purple-100">${proj.price.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                      <div className="text-[9px] text-[#E8E9E4]/40 font-bold uppercase mb-1">{String(proj.time)}</div>
+                      <div className="text-sm font-serif text-purple-100">${Number(proj.price || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
                     </div>
                   ))}
                 </div>
@@ -1131,6 +956,34 @@ export default function App() {
 
           {/* Right Sidebar */}
           <div className="lg:col-span-4 flex flex-col gap-4">
+            
+            <div className="flex gap-4">
+              <div className="flex-1 bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
+                 <div className="text-[8px] sm:text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">POSTERIOR (UP)</div>
+                 <div className="text-xl sm:text-2xl font-serif text-indigo-300">{analysis ? `${Number(analysis.rawProbAbove || 0).toFixed(1)}%` : '--%'}</div>
+              </div>
+              <div className="flex-1 bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
+                 <div className="text-[8px] sm:text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">POSTERIOR (DN)</div>
+                 <div className="text-xl sm:text-2xl font-serif text-rose-300">{analysis ? `${(100 - Number(analysis.rawProbAbove || 0)).toFixed(1)}%` : '--%'}</div>
+              </div>
+            </div>
+
+            {/* Strict 4-Rule Logic Logs */}
+            {analysis && (
+              <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex-1 min-h-[150px]">
+                <h2 className="text-[10px] font-medium text-[#E8E9E4]/60 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                  <IconTerminal className="w-3.5 h-3.5 text-amber-400" /> Math Engine Logs
+                </h2>
+                <div className="space-y-2 font-mono h-[120px] lg:h-full lg:max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
+                  {analysis.reasoning.map((reason, idx) => (
+                    <div key={idx} className="bg-[#111312] p-2 rounded-md text-[9px] text-[#E8E9E4]/70 flex items-start gap-2 border border-[#E8E9E4]/5 uppercase">
+                      <span className="text-emerald-500 mt-0.5">{`>`}</span>
+                      <span className="leading-snug">{String(reason)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             
             {/* Live Feeds */}
             <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col h-[200px]">
@@ -1146,7 +999,7 @@ export default function App() {
                   newsEvents.map((news, i) => (
                     <div key={i} className="border-l-[2px] border-indigo-500/40 pl-2 py-0.5">
                       <span className="text-[11px] sm:text-[11.5px] text-[#E8E9E4]/90 leading-tight">
-                        {news.title}
+                        {String(news.title)}
                       </span>
                     </div>
                   ))
@@ -1154,33 +1007,6 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex gap-4">
-              <div className="flex-1 bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
-                 <div className="text-[8px] sm:text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">PROB ABOVE</div>
-                 <div className="text-xl sm:text-2xl font-serif text-indigo-300">{analysis ? `${analysis.rawProbAbove.toFixed(0)}%` : '--%'}</div>
-              </div>
-              <div className="flex-1 bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
-                 <div className="text-[8px] sm:text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">PROB BELOW</div>
-                 <div className="text-xl sm:text-2xl font-serif text-rose-300">{analysis ? `${(100 - analysis.rawProbAbove).toFixed(0)}%` : '--%'}</div>
-              </div>
-            </div>
-
-            {/* System Logs */}
-            {analysis && (
-              <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex-1 min-h-[150px]">
-                <h2 className="text-[10px] font-medium text-[#E8E9E4]/60 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                  <IconTerminal className="w-3.5 h-3.5 text-amber-400" /> Math Engine Logs
-                </h2>
-                <div className="space-y-2 font-mono h-[120px] lg:h-full lg:max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
-                  {analysis.reasoning.map((reason, idx) => (
-                    <div key={idx} className="bg-[#111312] p-2 rounded-md text-[9px] text-[#E8E9E4]/70 flex items-start gap-2 border border-[#E8E9E4]/5 uppercase">
-                      <span className="text-emerald-500 mt-0.5">{`>`}</span>
-                      <span className="leading-snug">{reason}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -1198,9 +1024,9 @@ export default function App() {
             <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[#111312]/50">
               {chatLog.map((msg, i) => (
                 <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <span className={`text-[10px] uppercase opacity-40 mb-1 ${msg.role === 'user' ? 'mr-1' : 'ml-1'}`}>{msg.role}</span>
+                  <span className={`text-[10px] uppercase opacity-40 mb-1 ${msg.role === 'user' ? 'mr-1' : 'ml-1'}`}>{String(msg.role)}</span>
                   <div className={`text-xs p-2.5 rounded-lg max-w-[85%] leading-relaxed ${msg.role === 'user' ? 'bg-indigo-500/20 text-indigo-100 border border-indigo-500/30 rounded-tr-none' : 'bg-[#2A2D2C] text-[#E8E9E4] border border-[#E8E9E4]/10 rounded-tl-none'} ${msg.isLoading ? 'animate-pulse' : ''}`}>
-                    {msg.text}
+                    {String(msg.text)}
                   </div>
                 </div>
               ))}
@@ -1238,26 +1064,32 @@ export default function App() {
             <div className="p-4 sm:p-6 space-y-6 sm:space-y-8 text-xs sm:text-sm text-[#E8E9E4]/80">
               
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. Multi-Timeframe & Deep-Quant Divergence</h3>
-                <p className="mb-3 leading-relaxed">You can toggle Tara between 5-Minute and 15-Minute mode. <br/><strong>In 15M Mode:</strong> She analyzes macro-trends, VWAP, and looks for safer, wider structural trades.<br/><strong>In 5M Mode:</strong> She becomes an aggressive scalper. She ignores slow indicators and multiplies the weight of live order flow (Tape Delta) by 1.25x.</p>
-                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Deep-Quant Algorithm (V31 Update):</strong> Tara completely ignores the current physical gap early in the trade. Instead of blindly chasing pumps, she determines the Market Regime (Trend vs Range) and calculates an AggrFlow score to bet on the breakout *before* it happens.</p>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. The 4-Rule Quant Algorithm</h3>
+                <p className="mb-3 leading-relaxed">Tara uses strict gating logic to mimic an institutional 90% WR benchmark. A call is only issued if <strong>ALL 4 rules pass simultaneously:</strong></p>
                 <ul className="list-disc pl-5 space-y-2">
-                  <li><strong>Setup:</strong> Select your timeframe. Type in the platform's Strike Price, your Bet Size, and Max Payout.</li>
-                  <li><strong>Wait:</strong> Tara begins every trade at "SIT OUT". She requires a minimum of <span className="text-emerald-300 font-mono">70% internal conviction</span> to advise an entry.</li>
+                  <li><strong>Active Entry Window:</strong> The trade must occur after the initial open volatility settles.</li>
+                  <li><strong>Regime Validation:</strong> The market must NOT be in a "CHOP" regime.</li>
+                  <li><strong>Posterior Check:</strong> The mathematical baseline probability must be over 65% for UP, or under 35% for DOWN.</li>
+                  <li><strong>Φ3 Physics:</strong> Raw tape momentum (AggrFlow) must explicitly agree with the physical gap direction.</li>
                 </ul>
               </section>
 
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. The "Scalp" Method (Maximum Profit)</h3>
-                <p className="leading-relaxed">If you are in a winning position (odds &gt; 75%), but Tara detects that whales are suddenly selling the momentum back down (AggrFlow flipping), she will trigger a <strong>SCALP METHOD (CASH OUT)</strong> alert. <br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will scream at you to take the Arbitrage.</p>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. Skip Round Protocol (V38)</h3>
+                <p className="leading-relaxed">Sometimes the best trade is no trade. If Tara is in the Active Entry window but detects that the market is "wiggling with no clear direction" (CHOP regime) or lacks conviction, she will trigger a <strong>SKIPPING ROUND</strong> alert. Do not guess. Close the app and come back next round.</p>
               </section>
 
               <section>
-                <h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">3. Understanding the Data Dashboard</h3>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">3. Early Exit</h3>
+                <p className="leading-relaxed">If you are in a winning position, but Tara detects that whales are suddenly selling the momentum back down (AggrFlow flipping), she will trigger an <strong>EARLY EXIT</strong> alert. <br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will advise you to take the Arbitrage.</p>
+              </section>
+
+              <section>
+                <h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">4. Understanding the Data Dashboard</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mt-2 font-mono text-[10px] sm:text-[11px]">
                   <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
                     <span className="text-indigo-300 font-bold block mb-1">REGIME:</span>
-                    Categorizes the market context (TREND UP, BLOWOFF TOP, CHOP) to determine how indicators should be weighted.
+                    Categorizes the market context (TREND UP, TREND DN, CHOP, VOLATILE) to dynamically determine indicator weights.
                   </div>
                   <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
                     <span className="text-indigo-300 font-bold block mb-1">AGGR FLOW:</span>
@@ -1265,18 +1097,13 @@ export default function App() {
                   </div>
                   <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
                     <span className="text-indigo-300 font-bold block mb-1">VWAP GAP:</span>
-                    Tracks the distance from the Volume Weighted Average Price. Used to predict mean-reversion pullbacks.
+                    Tracks the distance from the Volume Weighted Average Price.
                   </div>
                   <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
-                    <span className="text-indigo-300 font-bold block mb-1">LIQ (Liquidations):</span>
-                    Tracks forced margin calls on Binance. A "BULL" liquidation means heavily shorted traders are being squeezed upward.
+                    <span className="text-indigo-300 font-bold block mb-1">CONV (Conviction):</span>
+                    How strongly the current math favors the prediction based on the divergence score.
                   </div>
                 </div>
-              </section>
-              
-              <section>
-                <h3 className="text-rose-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">4. The Jerome Filter (Endgame Logic)</h3>
-                <p className="leading-relaxed">In the final moments of a round (last 3 mins for 15M, last 60s for 5M), Tara activates the <strong>Jerome Filter</strong>. The mathematical divergence takes a backseat, and the actual physical gap remaining dictates the final lock prediction.</p>
               </section>
 
             </div>
