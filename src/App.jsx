@@ -1,5 +1,22 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Clock, Crosshair, BarChart2, Zap, ArrowUpRight, ArrowDownRight, Globe, TrendingUp, BellRing, Terminal, CheckCircle, MessageSquare, X, DollarSign, AlertTriangle, HelpCircle, Volume2, VolumeX, Info, Layers, Activity } from 'lucide-react';
+
+// --- 100% DEPENDENCY-FREE INLINE ICONS ---
+const IconClock = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
+const IconCrosshair = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>;
+const IconZap = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
+const IconTerminal = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>;
+const IconAlertTriangle = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+const IconActivity = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
+const IconBell = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
+const IconCheck = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
+const IconTrendingUp = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>;
+const IconGlobe = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>;
+const IconMessage = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
+const IconX = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+const IconInfo = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
+const IconVolume2 = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>;
+const IconVolumeX = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>;
+const IconHelp = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 
 // --- Advanced Technical Indicator Utilities ---
 const calculateVWAP = (history) => {
@@ -83,10 +100,12 @@ export default function App() {
   const hasReversedRef = useRef(false); 
   const lastAdvisedRef = useRef("SIT OUT"); 
   
+  // Safe SSR LocalStorage Guard
   const [scorecards, setScorecards] = useState(() => {
     const baseline = { '15m': { wins: 31, losses: 1 }, '5m': { wins: 0, losses: 0 } };
+    if (typeof window === 'undefined') return baseline;
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV31');
+      const savedScore = localStorage.getItem('btcOracleScorecardV31_2');
       if (savedScore) {
         const parsed = JSON.parse(savedScore);
         if (parsed['15m'] && parsed['5m']) return parsed;
@@ -98,7 +117,7 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V31 Quant Composite Engine online. I no longer rely on the physical price gap. My predictions are now driven strictly by Market Regime and AggrFlow to front-run reversals." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V31.3 Quant Composite Engine online. Reference errors resolved and icons native to avoid rendering crashes." }]);
   const [chatInput, setChatInput] = useState("");
   
   const currentWindowRef = useRef("");
@@ -113,12 +132,14 @@ export default function App() {
   const prevActionRef = useRef(null);
 
   useEffect(() => {
-    try { localStorage.setItem('btcOracleScorecardV31', JSON.stringify(scorecards)); } 
-    catch (e) { console.warn("Storage restricted."); }
+    if (typeof window !== 'undefined') {
+      try { localStorage.setItem('btcOracleScorecardV31_2', JSON.stringify(scorecards)); } 
+      catch (e) {}
+    }
   }, [scorecards]);
 
   const playAlertSound = () => {
-    if (!soundEnabled) return;
+    if (!soundEnabled || typeof window === 'undefined') return;
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const oscillator = audioCtx.createOscillator();
@@ -185,8 +206,10 @@ export default function App() {
     }
   }, [timeState.nextWindowEST, currentPrice, windowType]);
 
-  // WEBSOCKETS (Throttled UI rendering)
+  // WEBSOCKETS (Throttled UI rendering + iframe bypass)
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const isCanvas = window.self !== window.top;
     let wsCB = null;
     let wsBinanceLiq = null;
     let lastVisualUpdate = 0; 
@@ -208,6 +231,8 @@ export default function App() {
     };
 
     const initWebSockets = () => {
+      if (isCanvas) return; // Prevent SecurityError in iframe preview
+
       try {
         wsCB = new WebSocket('wss://ws-feed.exchange.coinbase.com');
         wsCB.onopen = () => wsCB.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] }));
@@ -361,6 +386,13 @@ export default function App() {
     return () => clearInterval(heavyInterval);
   }, [targetMargin]); 
 
+  // Auto-Snap Target Margin on Boot
+  useEffect(() => {
+    if (targetMargin === 0 && currentPrice) {
+      setTargetMargin(currentPrice);
+    }
+  }, [currentPrice, targetMargin]);
+
   // News Wire Generator
   useEffect(() => {
     let syntheticNews = [];
@@ -399,17 +431,16 @@ export default function App() {
     return () => clearInterval(timer);
   }, [windowType]);
 
-  // --- TARA V31 QUANT COMPOSITE ENGINE (Benchmark Match) ---
+  // --- TARA V31 QUANT COMPOSITE ENGINE ---
   const analysis = useMemo(() => {
     if (!currentPrice || history.length < 30 || !targetMargin) return null;
 
     const is5m = windowType === '5m';
     const intervalSeconds = is5m ? 300 : 900;
     
-    // V31: T+ Entry Windows
     const clockSeconds = (timeState.minsRemaining * 60) + timeState.secsRemaining;
     const timeFraction = 1 - (clockSeconds / intervalSeconds);
-    const isObservationPhase = timeFraction < (is5m ? 0.2 : 0.15); // Wait for open volatility
+    const isObservationPhase = timeFraction < (is5m ? 0.2 : 0.15); 
     const isEntryWindow = timeFraction >= (is5m ? 0.2 : 0.2) && timeFraction <= (is5m ? 0.7 : 0.8);
     const isEndgameLock = timeFraction > (is5m ? 0.8 : 0.85);
 
@@ -428,12 +459,10 @@ export default function App() {
     const ticks = tickHistoryRef.current;
     const tickSlope = ticks.length >= 10 ? (currentPrice - ticks[0].p) : 0;
     
-    // V31.1: AggrFlow (Normalized -1.0 to 1.0)
     let aggrFlow = 0;
     if (takerFlow.imbalance > 1) aggrFlow = Math.min(1.0, (takerFlow.imbalance - 1) / 1.5);
     else if (takerFlow.imbalance < 1) aggrFlow = Math.max(-1.0, (takerFlow.imbalance - 1) / 0.5);
     
-    // V31.2: Regime Detection
     const bbWidthBps = bb ? ((bb.upper - bb.lower) / bb.sma) * 10000 : 0;
     let regime = "RANGE / CHOP";
     if (bbWidthBps > (is5m ? 12 : 20) && tickSlope > 1.5 && rsi < 70) regime = "TREND UP";
@@ -444,38 +473,34 @@ export default function App() {
     let probabilityAbove = 50; 
     let reasoning = [];
     let topDriver = "Neutral";
-
-    // V31 CORE: Decouple physical gap from probability during the entry window.
-    // We only care about internal quant drivers until the very end.
     
     let quantScoreDelta = 0;
 
     if (regime === "TREND UP") {
-      quantScoreDelta += (aggrFlow * 25); // Follow flow
-      quantScoreDelta += 10; // Trend premium
+      quantScoreDelta += (aggrFlow * 25); 
+      quantScoreDelta += 10; 
       topDriver = `Trend Continuity (${aggrFlow > 0 ? '+' : ''}${aggrFlow.toFixed(2)} AggrFlow)`;
       reasoning.push(`[REGIME] TREND UP detected. Riding momentum.`);
     } 
     else if (regime === "TREND DOWN") {
-      quantScoreDelta += (aggrFlow * 25); // Follow flow
-      quantScoreDelta -= 10; // Trend discount
+      quantScoreDelta += (aggrFlow * 25); 
+      quantScoreDelta -= 10; 
       topDriver = `Trend Continuity (${aggrFlow > 0 ? '+' : ''}${aggrFlow.toFixed(2)} AggrFlow)`;
       reasoning.push(`[REGIME] TREND DOWN detected. Riding momentum.`);
     } 
     else if (regime === "BLOWOFF TOP (REVERT)") {
-      quantScoreDelta -= 20; // Hard fade
-      quantScoreDelta -= (aggrFlow * 10); // Fade late buyers
+      quantScoreDelta -= 20; 
+      quantScoreDelta -= (aggrFlow * 10); 
       topDriver = "Mean Reversion (Overbought Fade)";
       reasoning.push(`[REGIME] BLOWOFF TOP. RSI ${rsi.toFixed(0)}. Fading the pump.`);
     } 
     else if (regime === "PANIC DUMP (REVERT)") {
-      quantScoreDelta += 20; // Hard fade
-      quantScoreDelta -= (aggrFlow * 10); // Fade late sellers
+      quantScoreDelta += 20; 
+      quantScoreDelta -= (aggrFlow * 10); 
       topDriver = "Mean Reversion (Oversold Fade)";
       reasoning.push(`[REGIME] PANIC DUMP. RSI ${rsi.toFixed(0)}. Fading the dump.`);
     } 
     else {
-      // RANGE / CHOP
       if (vwapGapBps > 4) {
         quantScoreDelta -= 15;
         topDriver = "VWAP Pullback";
@@ -491,40 +516,36 @@ export default function App() {
       }
     }
 
-    // Orderbook Spoof Detection (Overrules standard flow)
     if (orderBook.imbalance > 1.8 && aggrFlow < -0.3) {
       quantScoreDelta -= 15;
       topDriver = "Spoof Detection (Fake Buy Wall)";
-      reasoning.push(`⚠️ SPOOF: Huge limit buys, but market selling. Fading fake wall.`);
+      reasoning.push(`SPOOF: Huge limit buys, but market selling. Fading fake wall.`);
     } else if (orderBook.imbalance < 0.6 && aggrFlow > 0.3) {
       quantScoreDelta += 15;
       topDriver = "Spoof Detection (Fake Sell Wall)";
-      reasoning.push(`⚠️ SPOOF: Huge limit sells, but market buying. Fading fake wall.`);
+      reasoning.push(`SPOOF: Huge limit sells, but market buying. Fading fake wall.`);
     }
 
-    // Scale up 5m sensitivity
     if (is5m) quantScoreDelta *= 1.25;
 
     probabilityAbove += quantScoreDelta;
 
-    // ONLY introduce the physical gap as time runs out (The convergence)
     if (isEndgameLock) {
       const gapWeight = realGapBps * (is5m ? 2.5 : 3.5);
       probabilityAbove += gapWeight;
-      reasoning.push(`🛡️ ENDGAME: Physical gap (${realGapBps > 0 ? '+' : ''}${realGapBps.toFixed(1)}bps) overriding internals.`);
+      reasoning.push(`ENDGAME: Physical gap (${realGapBps > 0 ? '+' : ''}${realGapBps.toFixed(1)}bps) overriding internals.`);
       topDriver = "Time Decay (Physical Gap Lock)";
     }
 
     let prediction = userPosition || lockedPredictionRef.current; 
 
-    // CONVICTION BIAS: Hold position to prevent flickering
-    let convictionScore = Math.abs(probabilityAbove - 50) * 2; // 0% to 100% conviction
+    let convictionScore = Math.abs(probabilityAbove - 50) * 2; 
     if (prediction === "YES") {
       probabilityAbove += 15; 
-      reasoning.push("🛡️ Bias: +15% (Holding Firm)");
+      reasoning.push("Bias: +15% (Holding Firm)");
     } else if (prediction === "NO") {
       probabilityAbove -= 15;
-      reasoning.push("🛡️ Bias: -15% (Holding Firm)");
+      reasoning.push("Bias: -15% (Holding Firm)");
     }
 
     probabilityAbove = Math.max(0, Math.min(100, probabilityAbove)); 
@@ -551,7 +572,6 @@ export default function App() {
         } else if (lastAdvisedRef.current === "NO") {
           if (probabilityAbove > 45) lastAdvisedRef.current = "SIT OUT";
         } else {
-          // V31: Require strong internal quant score to enter
           if (probabilityAbove >= 70) lastAdvisedRef.current = "YES";
           else if (probabilityAbove <= 30) lastAdvisedRef.current = "NO";
         }
@@ -677,6 +697,14 @@ export default function App() {
     if (prediction === "YES") { textColor = "text-emerald-400"; confidenceDisplay = probabilityAbove.toFixed(1); } 
     else if (prediction === "NO") { textColor = "text-rose-400"; confidenceDisplay = (100 - probabilityAbove).toFixed(1); } 
 
+    let liqBuys = 0; let liqSells = 0;
+    liquidations.forEach(l => {
+      if (Date.now() - l.time < 60000) {
+        if (l.side === 'BUY') liqBuys += l.value; 
+        else liqSells += l.value; 
+      }
+    });
+
     const price1hAgo = history[history.length - 1]?.c || currentPrice; 
     const hourlySlope = currentPrice - price1hAgo;
     let simulatedPrice = currentPrice;
@@ -695,7 +723,7 @@ export default function App() {
       tradeAction, tradeReason, actionColor, actionBg, hasAction, actionButtonLabel, actionTarget, actionProb,
       realGapBps, clockSeconds, isSystemLocked, atrBps, livePnL, liveEstValue, bb, projections, liqBuys, liqSells,
       rsi, ema9, ema21, userPosition, vwapGapBps,
-      regime, aggrFlow, topDriver, entryWindowStatus, convictionScore // V31 NEW EXPORTS
+      regime, aggrFlow, topDriver, entryWindowStatus, convictionScore
     };
   }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, brtiPremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition, windowType]);
 
@@ -799,17 +827,17 @@ export default function App() {
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
             <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V31 Composite
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V31.3 Composite
             </span>
           </h1>
           
           {/* Mobile Right Icons (Hidden on Desktop) */}
           <div className="flex sm:hidden items-center gap-2">
             <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-1.5 rounded-md border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`}>
-              {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+              {soundEnabled ? <IconVolume2 className="w-3.5 h-3.5" /> : <IconVolumeX className="w-3.5 h-3.5" />}
             </button>
             <button onClick={() => setShowHelp(true)} className="p-1.5 rounded-md bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors">
-              <HelpCircle className="w-3.5 h-3.5" />
+              <IconHelp className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -838,10 +866,10 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2 border-l border-[#E8E9E4]/10 pl-4">
             <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-2 rounded-lg border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`} title="Toggle Audio Alerts">
-              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              {soundEnabled ? <IconVolume2 className="w-4 h-4" /> : <IconVolumeX className="w-4 h-4" />}
             </button>
             <button onClick={() => setShowHelp(true)} className="p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors" title="Operations Manual">
-              <HelpCircle className="w-4 h-4" />
+              <IconHelp className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -858,7 +886,7 @@ export default function App() {
              {/* Live Spot */}
              <div className="flex items-center gap-3 w-1/2 lg:w-auto pl-1 md:pl-2">
                <div className="p-2 bg-[#111312] rounded-lg border border-[#E8E9E4]/5 shadow-inner">
-                 <Zap className={`w-5 h-5 transition-colors duration-200 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-[#E8E9E4]/40'}`} />
+                 <IconZap className={`w-5 h-5 transition-colors duration-200 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-[#E8E9E4]/40'}`} />
                </div>
                <div>
                  <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-0.5">Live Spot</div>
@@ -873,12 +901,12 @@ export default function App() {
                <div className="flex items-center justify-between w-full px-2">
                  <div className="flex flex-col items-center">
                    <div className="text-[9px] text-emerald-400 mb-0.5">WINS</div>
-                   <span className="text-xl font-serif text-emerald-400 font-bold">{scorecards[windowType].wins}</span>
+                   <span className="text-xl font-serif text-emerald-400 font-bold">{scorecards[windowType]?.wins || 0}</span>
                  </div>
                  <div className="h-6 w-px bg-[#E8E9E4]/10"></div>
                  <div className="flex flex-col items-center">
                    <div className="text-[9px] text-rose-400 mb-0.5">LOSS</div>
-                   <span className="text-xl font-serif text-rose-400 font-bold">{scorecards[windowType].losses}</span>
+                   <span className="text-xl font-serif text-rose-400 font-bold">{scorecards[windowType]?.losses || 0}</span>
                  </div>
                </div>
              </div>
@@ -891,7 +919,7 @@ export default function App() {
              <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[80px]">
                <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Strike</div>
                <div className="flex items-center">
-                 <Crosshair className="w-3 h-3 md:w-4 md:h-4 text-indigo-400 mr-1 md:mr-2 opacity-80 hidden sm:block" />
+                 <IconCrosshair className="w-3 h-3 md:w-4 md:h-4 text-indigo-400 mr-1 md:mr-2 opacity-80 hidden sm:block" />
                  <input type="number" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-lg md:text-xl w-[75px] md:w-24 focus:outline-none py-1 leading-normal" />
                </div>
              </div>
@@ -916,21 +944,21 @@ export default function App() {
            {/* Scorecard for Desktop */}
            <div className="hidden lg:flex flex-col items-start bg-[#111312] p-3 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-56">
              <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-2 flex justify-between w-full">
-               <span className="flex items-center gap-1.5"><Terminal className="w-3.5 h-3.5"/> {windowType.toUpperCase()} Scorecard</span>
+               <span className="flex items-center gap-1.5"><IconTerminal className="w-3.5 h-3.5"/> {windowType.toUpperCase()} Scorecard</span>
              </div>
              <div className="flex items-center justify-between w-full px-2">
                <div className="flex flex-col items-center">
                  <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 mb-1">
                    <button onClick={() => updateScore(windowType, 'wins', -1)}>-</button> WINS <button onClick={() => updateScore(windowType, 'wins', 1)}>+</button>
                  </div>
-                 <span className="text-3xl font-serif text-emerald-400 font-bold">{scorecards[windowType].wins}</span>
+                 <span className="text-3xl font-serif text-emerald-400 font-bold">{scorecards[windowType]?.wins || 0}</span>
                </div>
                <div className="h-10 w-px bg-[#E8E9E4]/10"></div>
                <div className="flex flex-col items-center">
                  <div className="flex items-center gap-1.5 text-[10px] text-rose-400 mb-1">
                    <button onClick={() => updateScore(windowType, 'losses', -1)}>-</button> LOSS <button onClick={() => updateScore(windowType, 'losses', 1)}>+</button>
                  </div>
-                 <span className="text-3xl font-serif text-rose-400 font-bold">{scorecards[windowType].losses}</span>
+                 <span className="text-3xl font-serif text-rose-400 font-bold">{scorecards[windowType]?.losses || 0}</span>
                </div>
              </div>
            </div>
@@ -944,7 +972,7 @@ export default function App() {
             <div className="bg-[#181A19] p-4 md:p-6 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col justify-center items-center text-center relative overflow-hidden min-h-[380px] md:min-h-[420px]">
                
                <div className="absolute top-3 left-1/2 transform -translate-x-1/2 bg-[#111312] border border-[#E8E9E4]/10 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 shadow-sm whitespace-nowrap">
-                 <Clock className="w-3 h-3" />
+                 <IconClock className="w-3 h-3" />
                  <span className="text-[#E8E9E4]/60 hidden sm:inline">{timeState.startWindowEST}-{timeState.nextWindowEST}</span>
                  <span className="text-[#E8E9E4]">{timeState.minsRemaining}m {timeState.secsRemaining}s</span>
                </div>
@@ -955,7 +983,7 @@ export default function App() {
                    onClick={() => executeManualAction("MANUAL PULL OUT", "SIT OUT")}
                    className="absolute top-3 right-3 bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 sm:px-3 py-1.5 rounded-md text-[9px] sm:text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
                  >
-                   <AlertTriangle className="w-3 h-3" /> <span className="hidden sm:inline">Force Pull Out</span>
+                   <IconAlertTriangle className="w-3 h-3" /> <span className="hidden sm:inline">Force Pull Out</span>
                  </button>
                )}
 
@@ -985,7 +1013,7 @@ export default function App() {
                      
                      <div className="flex justify-between items-center text-[9px] opacity-90 px-1 pt-1">
                        <span className="flex items-center gap-1">
-                         <Activity className="w-3 h-3 text-purple-400" />
+                         <IconActivity className="w-3 h-3 text-purple-400" />
                          REGIME: <span className="text-white font-bold">{analysis.regime}</span>
                        </span>
                        <span>
@@ -994,7 +1022,7 @@ export default function App() {
                      </div>
                      <div className="flex justify-between items-center text-[9px] opacity-90 px-1 pb-1 border-b border-[#E8E9E4]/10">
                        <span className="flex items-center gap-1">
-                         <Zap className="w-3 h-3 text-amber-400" />
+                         <IconZap className="w-3 h-3 text-amber-400" />
                          TOP DRIVER: <span className="text-white">{analysis.topDriver}</span>
                        </span>
                        <span>
@@ -1040,7 +1068,7 @@ export default function App() {
                    {/* INTERACTIVE TRADE ADVISOR */}
                    <div className={`mb-4 w-full max-w-[400px] p-3 sm:p-4 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm`}>
                      <div className="flex items-center gap-1.5 mb-1.5">
-                       <BellRing className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${analysis.actionColor}`} />
+                       <IconBell className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${analysis.actionColor}`} />
                        <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span>
                      </div>
                      <div className={`text-base sm:text-lg font-serif font-bold mb-1 ${analysis.actionColor} uppercase`}>{analysis.tradeAction}</div>
@@ -1050,7 +1078,7 @@ export default function App() {
                        <div className="w-full pt-2 sm:pt-3 border-t border-[#E8E9E4]/10">
                           {manualAction === analysis.tradeAction ? (
                              <div className="w-full bg-emerald-500/20 text-emerald-400 py-2 rounded-lg text-[10px] sm:text-[11px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5">
-                               <CheckCircle className="w-3.5 h-3.5" /> Action Logged
+                               <IconCheck className="w-3.5 h-3.5" /> Action Logged
                              </div>
                           ) : (
                              <button 
@@ -1087,7 +1115,7 @@ export default function App() {
             {analysis && (
               <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md">
                 <h2 className="text-[10px] font-medium text-[#E8E9E4]/60 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5 text-purple-400" /> Hourly Forecast Projections
+                  <IconTrendingUp className="w-3.5 h-3.5 text-purple-400" /> Hourly Forecast Projections
                 </h2>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {analysis.projections.map((proj, idx) => (
@@ -1108,7 +1136,7 @@ export default function App() {
             <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col h-[200px]">
               <div className="flex justify-between items-center mb-3 border-b border-[#E8E9E4]/10 pb-2">
                 <h2 className="text-[10px] font-medium text-[#E8E9E4]/60 uppercase tracking-widest flex items-center gap-1.5">
-                  <Globe className="w-3.5 h-3.5 text-blue-400" /> Tara Live Wire
+                  <IconGlobe className="w-3.5 h-3.5 text-blue-400" /> Tara Live Wire
                 </h2>
               </div>
               <div className="space-y-3 overflow-y-auto custom-scrollbar pr-1">
@@ -1129,11 +1157,11 @@ export default function App() {
             <div className="flex gap-4">
               <div className="flex-1 bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
                  <div className="text-[8px] sm:text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">PROB ABOVE</div>
-                 <div className="text-xl sm:text-2xl font-serif text-indigo-300">{analysis ? `${analysis.rawProbAbove.toFixed(1)}%` : '--%'}</div>
+                 <div className="text-xl sm:text-2xl font-serif text-indigo-300">{analysis ? `${analysis.rawProbAbove.toFixed(0)}%` : '--%'}</div>
               </div>
               <div className="flex-1 bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
                  <div className="text-[8px] sm:text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">PROB BELOW</div>
-                 <div className="text-xl sm:text-2xl font-serif text-rose-300">{analysis ? `${(100 - analysis.rawProbAbove).toFixed(1)}%` : '--%'}</div>
+                 <div className="text-xl sm:text-2xl font-serif text-rose-300">{analysis ? `${(100 - analysis.rawProbAbove).toFixed(0)}%` : '--%'}</div>
               </div>
             </div>
 
@@ -1141,7 +1169,7 @@ export default function App() {
             {analysis && (
               <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex-1 min-h-[150px]">
                 <h2 className="text-[10px] font-medium text-[#E8E9E4]/60 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                  <Terminal className="w-3.5 h-3.5 text-amber-400" /> Math Engine Logs
+                  <IconTerminal className="w-3.5 h-3.5 text-amber-400" /> Math Engine Logs
                 </h2>
                 <div className="space-y-2 font-mono h-[120px] lg:h-full lg:max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
                   {analysis.reasoning.map((reason, idx) => (
@@ -1163,9 +1191,9 @@ export default function App() {
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[60vh] sm:h-96">
             <div className="bg-[#111312] p-3 flex justify-between items-center border-b border-[#E8E9E4]/10">
               <span className="text-xs font-bold uppercase tracking-widest flex items-center gap-2">
-                <MessageSquare className="w-3.5 h-3.5 text-indigo-400" /> Chat w/ Tara
+                <IconMessage className="w-3.5 h-3.5 text-indigo-400" /> Chat w/ Tara
               </span>
-              <button onClick={() => setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><X className="w-4 h-4" /></button>
+              <button onClick={() => setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IconX className="w-4 h-4" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[#111312]/50">
               {chatLog.map((msg, i) => (
@@ -1191,7 +1219,7 @@ export default function App() {
         )}
         {!isChatOpen && (
           <button onClick={() => setIsChatOpen(true)} className="bg-indigo-500 hover:bg-indigo-400 text-white p-3 rounded-full shadow-lg border border-indigo-400/50 flex items-center gap-2 transition-transform hover:scale-105">
-            <MessageSquare className="w-5 h-5" />
+            <IconMessage className="w-5 h-5" />
           </button>
         )}
       </div>
@@ -1202,9 +1230,9 @@ export default function App() {
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl">
             <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10">
               <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                <Info className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" /> Tara Operations Manual
+                <IconInfo className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" /> Tara Operations Manual
               </h2>
-              <button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><X className="w-5 h-5" /></button>
+              <button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IconX className="w-5 h-5" /></button>
             </div>
             
             <div className="p-4 sm:p-6 space-y-6 sm:space-y-8 text-xs sm:text-sm text-[#E8E9E4]/80">
