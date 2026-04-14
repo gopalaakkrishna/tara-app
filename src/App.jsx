@@ -635,17 +635,17 @@ export default function App() {
       setChatLog(currentLog);
       setChatInput("");
       
-      const apiKey = ""; // API Key provided silently by Canvas Environment
-      setChatLog([...currentLog, { role: 'tara', text: "Processing market dynamics..." }]);
+      const apiKey = ""; // API Key provided silently by Canvas Environment. FOR NETLIFY: Paste your free Gemini key inside these quotes!
+      setChatLog([...currentLog, { role: 'tara', text: "Processing market dynamics...", isLoading: true }]);
 
       try {
-        const systemPrompt = `You are Tara V23, an institutional quantitative AI trading bot. You specialize in 15-minute BTC options windows.
+        const systemPrompt = `You are Tara V24, an institutional quantitative AI trading bot. You specialize in 15-minute BTC options windows.
         Context:
-        BTC Price: $${currentPrice}
-        Strike: $${targetMargin}
-        Your Prediction: ${analysis?.prediction}
-        Your Confidence: ${analysis?.confidence}%
-        Your Advisor Action: ${analysis?.tradeAction}
+        BTC Price: $${currentPrice || 'Unknown'}
+        Strike: $${targetMargin || 'Unknown'}
+        Your Prediction: ${analysis?.prediction || 'Unknown'}
+        Your Confidence: ${analysis?.confidence || 0}%
+        Your Advisor Action: ${analysis?.tradeAction || 'Unknown'}
         Keep responses composed, institutional, and under 3 sentences. Answer questions about the market data or your logic. Do not make up technical data.`;
 
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
@@ -658,7 +658,13 @@ export default function App() {
         });
         
         const data = await response.json();
-        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "I'm recalibrating my neural link. Please try again.";
+        
+        if (data.error) {
+          setChatLog([...currentLog, { role: 'tara', text: `System Alert: API Key Missing. Since you are hosted on Netlify, you must manually insert a free Gemini API Key into the code (search for 'apiKey' in App.jsx).` }]);
+          return;
+        }
+        
+        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "I'm recalibrating my logic module. Please try again.";
         setChatLog([...currentLog, { role: 'tara', text: reply }]);
 
       } catch (err) {
@@ -978,7 +984,7 @@ export default function App() {
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-96">
             <div className="bg-[#111312] p-3 flex justify-between items-center border-b border-[#E8E9E4]/10">
               <span className="text-xs font-bold uppercase tracking-widest flex items-center gap-2">
-                <MessageSquare className="w-3.5 h-3.5 text-indigo-400" /> Neural Link
+                <MessageSquare className="w-3.5 h-3.5 text-indigo-400" /> Chat w/ Tara
               </span>
               <button onClick={() => setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><X className="w-4 h-4" /></button>
             </div>
