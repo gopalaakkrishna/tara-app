@@ -86,7 +86,7 @@ export default function App() {
   const [scorecards, setScorecards] = useState(() => {
     const baseline = { '15m': { wins: 70, losses: 60 }, '5m': { wins: 0, losses: 0 } };
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV29');
+      const savedScore = localStorage.getItem('btcOracleScorecardV30');
       if (savedScore) {
         const parsed = JSON.parse(savedScore);
         if (parsed['15m'] && parsed['5m']) return parsed;
@@ -98,7 +98,7 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V29 Mean-Reversion Engine online. I now actively fade pumps and dumps that are mathematically overextended. UI is optimized for mobile." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V30 Deep-Quant Engine online. I have completely decoupled my logic from the current price gap to eliminate 'price chasing'. I now rely on divergence, spoof detection, and raw order flow to predict the move before it happens." }]);
   const [chatInput, setChatInput] = useState("");
   
   const currentWindowRef = useRef("");
@@ -113,7 +113,7 @@ export default function App() {
   const prevActionRef = useRef(null);
 
   useEffect(() => {
-    try { localStorage.setItem('btcOracleScorecardV29', JSON.stringify(scorecards)); } 
+    try { localStorage.setItem('btcOracleScorecardV30', JSON.stringify(scorecards)); } 
     catch (e) { console.warn("Storage restricted."); }
   }, [scorecards]);
 
@@ -185,7 +185,7 @@ export default function App() {
     }
   }, [timeState.nextWindowEST, currentPrice, windowType]);
 
-  // V29: SYNCHRONIZED, NON-GLITCHING WEBSOCKETS (Throttled UI rendering)
+  // WEBSOCKETS (Throttled UI rendering)
   useEffect(() => {
     let wsCB = null;
     let wsBinanceLiq = null;
@@ -196,7 +196,7 @@ export default function App() {
       const now = Date.now();
       lastPriceSourceRef.current = { source, time: now };
 
-      // UI Throttle: 300ms to stop glitching numbers, but logic keeps instant value
+      // UI Throttle: 300ms to stop glitching numbers
       if (now - lastVisualUpdate > 300) {
         setCurrentPrice(prev => {
           if (prev !== null && newPrice !== prev) {
@@ -220,7 +220,6 @@ export default function App() {
               const size = parseFloat(data.last_size) || 0;
               const isTakerBuy = data.side === 'sell'; 
               
-              // Exclusively rely on Coinbase WS for visual price to prevent exchange mismatch
               updateVisualPrice(newPrice, 'coinbase');
               
               const now = Date.now();
@@ -401,7 +400,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [windowType]);
 
-  // --- TARA V29 MEAN-REVERSION ENGINE ---
+  // --- TARA V30 DEEP-QUANT ENGINE (Anti-Chasing Algorithm) ---
   const analysis = useMemo(() => {
     if (!currentPrice || history.length < 30 || !targetMargin) return null;
 
@@ -423,153 +422,145 @@ export default function App() {
     const vwapGapBps = vwap ? ((currentPrice - vwap) / vwap) * 10000 : 0;
     const clockSeconds = (timeState.minsRemaining * 60) + timeState.secsRemaining;
     
-    const shortTermSlope = history.length >= 3 ? (history[0].c - history[2].c) : 0;
     const ticks = tickHistoryRef.current;
     const tickSlope = ticks.length >= 10 ? (currentPrice - ticks[0].p) : 0;
-    const imbalanceDelta = orderBook.imbalance - prevImbalanceRef.current;
 
-    const timeDecayFactor = Math.max(0, 1 - (clockSeconds / intervalSeconds));
+    // Time decay represents how much of the window has passed (0.0 at start, 1.0 at end)
+    const timeFraction = 1 - (clockSeconds / intervalSeconds);
     let isObservationPhase = clockSeconds > (intervalSeconds - 3); 
 
-    let probabilityAbove = 50; let reasoning = [];
+    let probabilityAbove = 50; 
+    let reasoning = [];
     if (isObservationPhase) reasoning.push(`Wait ${clockSeconds - (intervalSeconds - 3)}s for window open.`);
 
-    // V29: Reduced baseline gap multiplier. Stop blindly chasing pumps.
-    const gapWeight = is5m ? 1.0 : 1.5;
-    const endgameMultiplier = clockSeconds < endgameLockTime ? (1 + ((endgameLockTime - clockSeconds) / (is5m ? 30 : 90))) : 1; 
-    probabilityAbove += realGapBps * (gapWeight + (timeDecayFactor * 2.0)) * endgameMultiplier; 
+    // --- V30: THE CORE ALGORITHMIC SHIFT ---
+    // We no longer start with the gap determining the probability. The gap ONLY matters 
+    // exponentially as time runs out. At the start of a 5m window, a $10 gap means nothing.
+    
+    // Calculate exponential time influence. At t=0 (start), gapWeight is ~0. At t=end, it's massive.
+    const gapInfluence = Math.pow(timeFraction, is5m ? 2 : 3); 
+    const baseGapWeight = realGapBps * (is5m ? 0.8 : 1.2);
+    const timeWeightedGap = baseGapWeight * gapInfluence;
+    
+    probabilityAbove += timeWeightedGap;
+    
+    if (timeFraction < 0.5) {
+      reasoning.push(`[EARLY PHASE] Ignoring current physical price gap. Looking for true structural divergence.`);
+    }
 
-    const priceRising = shortTermSlope > 0;
-    const priceFalling = shortTermSlope < 0;
-    const sellersStacking = orderBook.imbalance < 0.7;
-    const buyersStacking = orderBook.imbalance > 1.4;
+    // --- 1. SPOOF DETECTION & DIVERGENCE (Leading Indicators) ---
+    let divergenceScore = 0;
+    
+    // If Maker (Orderbook) is heavily buying, but Taker (Tape) is heavily selling = FAKE BUY WALL
+    if (orderBook.imbalance > 1.8 && takerFlow.imbalance < 0.7) {
+        divergenceScore -= 15;
+        reasoning.push(`⚠️ SPOOF: Fake BUY wall detected. Whales are market selling into retail limits.`);
+    } 
+    // If Maker is heavily selling, but Taker is heavily buying = FAKE SELL WALL
+    else if (orderBook.imbalance < 0.55 && takerFlow.imbalance > 1.4) {
+        divergenceScore += 15;
+        reasoning.push(`⚠️ SPOOF: Fake SELL wall detected. Whales are market buying into retail limits.`);
+    } 
+    // True momentum (both agree)
+    else {
+        if (takerFlow.imbalance > 1.5) divergenceScore += 8;
+        if (takerFlow.imbalance < 0.6) divergenceScore -= 8;
+    }
 
-    const aggressiveTakerBuys = takerFlow.imbalance > 1.8;
-    const aggressiveTakerSells = takerFlow.imbalance < 0.55;
+    probabilityAbove += divergenceScore;
 
+    // --- 2. VWAP & MEAN REVERSION (Anti-Chasing Logic) ---
+    // If price is far above VWAP, it naturally wants to pull back. We bet AGAINST the current pump.
+    if (vwapGapBps > 5.0 && rsi > 60) {
+        probabilityAbove -= (is5m ? 12 : 8);
+        reasoning.push(`📉 REVERSION: Price is ${vwapGapBps.toFixed(1)}bps over VWAP. Fading the pump.`);
+    } else if (vwapGapBps < -5.0 && rsi < 40) {
+        probabilityAbove += (is5m ? 12 : 8);
+        reasoning.push(`📈 REVERSION: Price is ${Math.abs(vwapGapBps).toFixed(1)}bps under VWAP. Fading the dump.`);
+    } else if (vwapGapBps > 0) {
+        // Normal trend adherence if not overextended
+        probabilityAbove += 3;
+    } else if (vwapGapBps < 0) {
+        probabilityAbove -= 3;
+    }
+
+    // --- 3. LIQUIDATION SQUEEZES ---
     let liqBuys = 0; let liqSells = 0;
     liquidations.forEach(l => {
       if (Date.now() - l.time < 60000) {
-        if (l.side === 'BUY') liqBuys += l.value; 
-        else liqSells += l.value; 
+        if (l.side === 'BUY') liqBuys += l.value; else liqSells += l.value; 
       }
     });
 
-    if (liqBuys > 100000) {
-      probabilityAbove += 15; reasoning.push(`🚨 SHORT SQUEEZE: Shorts liquidated. Upward pressure.`);
-    } else if (liqSells > 100000) {
-      probabilityAbove -= 15; reasoning.push(`🚨 LONG SQUEEZE: Longs liquidated. Downward pressure.`);
+    if (liqBuys > 50000) {
+      probabilityAbove += 10; reasoning.push(`🔥 SQUEEZE: Shorts liquidated. Forced up-pressure.`);
+    } else if (liqSells > 50000) {
+      probabilityAbove -= 10; reasoning.push(`🔥 SQUEEZE: Longs liquidated. Forced down-pressure.`);
     }
 
-    let tapeOBDelta = 0;
-
-    // V29: Mean Reversion Penalty (Fades the extremes)
-    const distanceToEma = ema9 ? ((currentPrice - ema9) / ema9) * 10000 : 0;
-    if (distanceToEma > 8 && rsi > 65) {
-        tapeOBDelta -= is5m ? 15 : 10;
-        reasoning.push(`📉 OVERBOUGHT: Price overextended UP by ${distanceToEma.toFixed(1)}bps. Reversion expected.`);
-    } else if (distanceToEma < -8 && rsi < 35) {
-        tapeOBDelta += is5m ? 15 : 10;
-        reasoning.push(`📈 OVERSOLD: Price overextended DOWN by ${Math.abs(distanceToEma).toFixed(1)}bps. Reversion expected.`);
-    }
-
-    if (tickSlope < -2.0) {
-      tapeOBDelta -= 10; reasoning.push(`Flash momentum drop detected.`);
+    // --- 4. EXTREME NOISE DAMPENING ---
+    if (tickSlope < -3.0 && takerFlow.imbalance > 0.8) {
+      // Price dropped fast, but taker flow didn't justify it (low volume drop)
+      reasoning.push(`Ghost drop ignored (low volume).`);
+    } else if (tickSlope > 3.0 && takerFlow.imbalance < 1.2) {
+      reasoning.push(`Ghost pump ignored (low volume).`);
+    } else if (tickSlope < -2.0) {
+      probabilityAbove -= 5;
     } else if (tickSlope > 2.0) {
-      tapeOBDelta += 10; reasoning.push(`Flash momentum surge detected.`);
-    } 
-    else if (sellersStacking && aggressiveTakerBuys) {
-      tapeOBDelta += 10; reasoning.push(`Absorption: Whales buying into resistance.`);
-    } else if (buyersStacking && aggressiveTakerSells) {
-      tapeOBDelta -= 10; reasoning.push(`Absorption: Whales selling into support.`);
-    } else if (priceRising && aggressiveTakerSells && sellersStacking) {
-      tapeOBDelta -= 10; reasoning.push(`Fake Pump: Drift up, but heavy selling.`);
-    } else if (priceFalling && aggressiveTakerBuys && buyersStacking) {
-      tapeOBDelta += 10; reasoning.push(`Bear Trap: Drift down, but heavy buying.`);
-    } else {
-      if (priceRising) {
-        if (volumeSurge > 1.5 || tickSlope > 1.0) { tapeOBDelta += 6; reasoning.push("Confirmed volume uptrend."); } else { tapeOBDelta += 2; }
-      } else if (priceFalling) {
-        if (volumeSurge > 1.5 || tickSlope < -1.0) { tapeOBDelta -= 6; reasoning.push("Confirmed volume downtrend."); } else { tapeOBDelta -= 2; }
-      }
+      probabilityAbove += 5;
     }
 
-    if (takerFlow.whaleSpotted === 'BUY') { tapeOBDelta += 6; }
-    if (takerFlow.whaleSpotted === 'SELL') { tapeOBDelta -= 6; }
-
-    if (imbalanceDelta < -1.5) { tapeOBDelta -= 5; } 
-    else if (imbalanceDelta > 1.5) { tapeOBDelta += 5; }
-
-    // Timeframe specific scaling
-    const bbWeight = is5m ? 5 : 10; 
-    const vwapWeight = is5m ? 5 : 10;
-    const orderBookWeight = is5m ? 12 : 8; 
-
-    if (orderBook.imbalance > 1.8) { tapeOBDelta += orderBookWeight; } else if (orderBook.imbalance < 0.5) { tapeOBDelta -= orderBookWeight; }
-
-    if (is5m) {
-      tapeOBDelta *= 1.5; 
-      reasoning.push(`[5M] Tape Multiplier Active (Order flow weighted).`);
-    }
-
+    // --- 5. ENDGAME FILTER (Jerome Lock) ---
     if (clockSeconds < endgameLockTime) {
-      if (realGapBps < -2.0 && tapeOBDelta > 5) {
-        tapeOBDelta = 5;
-        reasoning.push(`🛡️ JEROME FILTER: Capping bullish hopium.`);
-      } else if (realGapBps > 2.0 && tapeOBDelta < -5) {
-        tapeOBDelta = -5;
-        reasoning.push(`🛡️ JEROME FILTER: Capping bearish fear.`);
+      if (realGapBps < -3.0) {
+        probabilityAbove -= 30; // Mathematically bury it
+        reasoning.push(`🛡️ ENDGAME: Insufficient time to cross gap UP.`);
+      } else if (realGapBps > 3.0) {
+        probabilityAbove += 30; 
+        reasoning.push(`🛡️ ENDGAME: Insufficient time to cross gap DOWN.`);
       }
     }
-
-    probabilityAbove += tapeOBDelta;
-
-    if (brtiPremium > 10) { probabilityAbove += 8; reasoning.push("Arb up-pressure expected."); } 
-    else if (brtiPremium < -10) { probabilityAbove -= 8; reasoning.push("Arb down-pressure expected."); }
-    
-    if (bb) {
-      if (currentPrice >= bb.upper) { probabilityAbove -= bbWeight; } 
-      else if (currentPrice <= bb.lower) { probabilityAbove += bbWeight; }
-    }
-    
-    if (vwapGapBps > 2.0) { probabilityAbove -= vwapWeight; } else if (vwapGapBps < -2.0) { probabilityAbove += vwapWeight; }
 
     let prediction = userPosition || lockedPredictionRef.current; 
 
+    // CONVICTION BIAS: Once entered, add stubbornness buffer
     if (prediction === "YES") {
-      probabilityAbove += 16; 
-      reasoning.push("🛡️ Conviction Bias: +16% (Holding Firm)");
+      probabilityAbove += 12; 
+      reasoning.push("🛡️ Bias: +12% (Holding Firm)");
     } else if (prediction === "NO") {
-      probabilityAbove -= 16;
-      reasoning.push("🛡️ Conviction Bias: -16% (Holding Firm)");
+      probabilityAbove -= 12;
+      reasoning.push("🛡️ Bias: -12% (Holding Firm)");
     }
 
     probabilityAbove = Math.max(0, Math.min(100, probabilityAbove)); 
 
     let isSystemLocked = false;
-    if (clockSeconds < endgameLockTime && Math.abs(realGapBps) > (atrBps * (is5m ? 0.2 : 0.4))) {
-      isSystemLocked = true; reasoning.push(`LOCKED: Gap mathematically uncrossable.`);
+    if (clockSeconds < endgameLockTime && Math.abs(realGapBps) > (atrBps * (is5m ? 0.3 : 0.5))) {
+      isSystemLocked = true; reasoning.push(`LOCKED: Gap uncrossable.`);
     }
 
     let recommendedPrediction = prediction;       
     
+    // V30 Strict Entry Thresholds
     if (isObservationPhase) {
       prediction = "ANALYZING"; recommendedPrediction = "ANALYZING";
     } else {
       if (prediction === "YES") {
-        if (probabilityAbove <= 20 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "NO";
-        else if (probabilityAbove <= 30) recommendedPrediction = "SIT OUT";
+        if (probabilityAbove <= 25 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "NO";
+        else if (probabilityAbove <= 35) recommendedPrediction = "SIT OUT";
       } else if (prediction === "NO") {
-        if (probabilityAbove >= 80 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "YES";
-        else if (probabilityAbove >= 70) recommendedPrediction = "SIT OUT";
+        if (probabilityAbove >= 75 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "YES";
+        else if (probabilityAbove >= 65) recommendedPrediction = "SIT OUT";
       } else {
+        // Require higher conviction to enter, reducing fakeouts
         if (lastAdvisedRef.current === "YES") {
           if (probabilityAbove < 55) lastAdvisedRef.current = "SIT OUT";
         } else if (lastAdvisedRef.current === "NO") {
           if (probabilityAbove > 45) lastAdvisedRef.current = "SIT OUT";
         } else {
-          if (probabilityAbove >= 66 || (probabilityAbove >= 60 && tapeOBDelta >= 10)) lastAdvisedRef.current = "YES";
-          else if (probabilityAbove <= 34 || (probabilityAbove <= 40 && tapeOBDelta <= -10)) lastAdvisedRef.current = "NO";
+          // Must break 68% conviction based purely on internals to advise a fresh entry
+          if (probabilityAbove >= 68) lastAdvisedRef.current = "YES";
+          else if (probabilityAbove <= 32) lastAdvisedRef.current = "NO";
         }
         recommendedPrediction = lastAdvisedRef.current;
       }
@@ -579,26 +570,27 @@ export default function App() {
     let predictionReason = "";
     if (prediction === "ANALYZING") predictionReason = "Calibrating early momentum indicators.";
     else if (prediction === "SIT OUT") {
-      if (recommendedPrediction === "YES") predictionReason = "Momentum surging. Securing early entry.";
-      else if (recommendedPrediction === "NO") predictionReason = "Momentum crashing. Securing early entry.";
-      else predictionReason = "Awaiting 58-66% conviction for sniper entry.";
+      if (recommendedPrediction === "YES") predictionReason = "Structural break detected. Securing entry.";
+      else if (recommendedPrediction === "NO") predictionReason = "Structural break detected. Securing entry.";
+      else predictionReason = "Awaiting high-conviction structural divergence to enter.";
     } else if (prediction === "YES") {
-      if (recommendedPrediction === "NO") predictionReason = "Structural collapse detected. Reversal mandatory.";
-      else if (distanceToEma > 8 && rsi > 65) predictionReason = "Price is elevated but overbought. Expect a temporary pullback. Do not panic.";
+      if (recommendedPrediction === "NO") predictionReason = "Internal collapse detected. Reversal mandatory.";
+      else if (vwapGapBps > 5.0 && rsi > 60) predictionReason = "Price overextended. Anticipating temporary pullback. Hold firm.";
       else if (realGapBps > 0) predictionReason = "Firmly in profit. Holding position steady.";
       else predictionReason = "Position negative, holding firm through noise.";
     } else if (prediction === "NO") {
-      if (recommendedPrediction === "YES") predictionReason = "Structural collapse detected. Reversal mandatory.";
-      else if (distanceToEma < -8 && rsi < 35) predictionReason = "Price is low but oversold. Expect a temporary bounce. Do not panic.";
+      if (recommendedPrediction === "YES") predictionReason = "Internal collapse detected. Reversal mandatory.";
+      else if (vwapGapBps < -5.0 && rsi < 40) predictionReason = "Price overextended. Anticipating temporary bounce. Hold firm.";
       else if (realGapBps < 0) predictionReason = "Firmly in profit. Holding position steady.";
       else predictionReason = "Position negative, holding firm through noise.";
     }
 
-    let tradeAction = "STAY PUT / SIT OUT"; let tradeReason = "Odds are unclear. Wait for minimum 66% conviction.";
+    let tradeAction = "STAY PUT / SIT OUT"; let tradeReason = "Odds are unclear. Wait for minimum 68% internal conviction.";
     let actionColor = "text-zinc-400"; let actionBg = "bg-zinc-500/10 border-zinc-500/30";
     let hasAction = false, actionButtonLabel = "", actionTarget = "", actionProb = 0;
 
-    const dynamicStopLoss = atrBps * (0.35 + (timeDecayFactor * 0.40)); 
+    // Use time decay on ATR to calculate dynamic stop loss
+    const dynamicStopLoss = atrBps * (0.40 + ((1-timeFraction) * 0.40)); 
     let liveEstValue = prediction === "YES" ? maxPayout * (probabilityAbove / 100) : prediction === "NO" ? maxPayout * ((100 - probabilityAbove) / 100) : 0;
     const livePnL = liveEstValue - betAmount;
 
@@ -608,17 +600,16 @@ export default function App() {
       tradeAction = "CALIBRATING..."; actionColor = "text-blue-400"; actionBg = "bg-blue-500/10 border-blue-500/30";
     } 
     else if (prediction === "SIT OUT") {
-      // V29: Prevent entries into overextended rubber-bands
-      const isOverbought = distanceToEma > 10 && rsi > 65;
-      const isOversold = distanceToEma < -10 && rsi < 35;
+      const isOverbought = vwapGapBps > 8 && rsi > 65;
+      const isOversold = vwapGapBps < -8 && rsi < 35;
 
       if (recommendedPrediction === "YES" && !isOverbought) {
-        tradeAction = "EARLY SNIPER ENTRY"; tradeReason = "Momentum supports early YES. Catching better odds.";
-        actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
+        tradeAction = "SNIPER ENTRY: YES"; tradeReason = "Divergence supports YES. Catching better odds before physical gap moves.";
+        actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_15px_rgba(52,211,153,0.2)]";
         hasAction = true; actionButtonLabel = "CONFIRM ENTRY: 'YES'"; actionTarget = "YES"; actionProb = probabilityAbove;
       } else if (recommendedPrediction === "NO" && !isOversold) {
-        tradeAction = "EARLY SNIPER ENTRY"; tradeReason = "Momentum supports early NO. Catching better odds.";
-        actionColor = "text-rose-400"; actionBg = "bg-rose-500/10 border-rose-500/30";
+        tradeAction = "SNIPER ENTRY: NO"; tradeReason = "Divergence supports NO. Catching better odds before physical gap moves.";
+        actionColor = "text-rose-400"; actionBg = "bg-rose-500/10 border-rose-500/30 shadow-[0_0_15px_rgba(251,113,133,0.2)]";
         hasAction = true; actionButtonLabel = "CONFIRM ENTRY: 'NO'"; actionTarget = "NO"; actionProb = 100 - probabilityAbove;
       } else if (recommendedPrediction === "YES" && isOverbought) {
         tradeAction = "SIT OUT (OVERBOUGHT)"; tradeReason = "Math says YES, but RSI is too hot. Wait for pullback to enter.";
@@ -630,12 +621,12 @@ export default function App() {
     }
     else if (prediction === "YES" || prediction === "NO") {
       const isYES = prediction === "YES";
-      const isBleeding = isYES ? (realGapBps < -dynamicStopLoss || realGapBps < -5.0) : (realGapBps > dynamicStopLoss || realGapBps > 5.0);
+      const isBleeding = isYES ? (realGapBps < -dynamicStopLoss || realGapBps < -6.0) : (realGapBps > dynamicStopLoss || realGapBps > 6.0);
       const isReversalRecommended = isYES ? recommendedPrediction === "NO" : recommendedPrediction === "YES";
       
       const currentOdds = isYES ? probabilityAbove : (100 - probabilityAbove);
       
-      const momentumLosing = isYES ? (tapeOBDelta < -8 || tickSlope < -2.0) : (tapeOBDelta > 8 || tickSlope > 2.0);
+      const momentumLosing = isYES ? (divergenceScore < -5 || tickSlope < -2.0) : (divergenceScore > 5 || tickSlope > 2.0);
 
       if (offerVal > 0) {
         const premium = offerVal - liveEstValue;
@@ -645,7 +636,7 @@ export default function App() {
           actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30 animate-pulse";
           hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "CASH";
         } 
-        else if (offerVal > betAmount && Math.abs(realGapBps) < atrBps * 0.6 && clockSeconds > (intervalSeconds/3)) {
+        else if (offerVal > betAmount && Math.abs(realGapBps) < atrBps * 0.5 && clockSeconds > (intervalSeconds/3)) {
           tradeAction = "SECURE PROFIT (HIGH VOL)"; 
           tradeReason = `Market is offering $${(offerVal - betAmount).toFixed(2)} profit, but momentum is unstable. Cash out safely.`;
           actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
@@ -660,8 +651,8 @@ export default function App() {
 
       if (tradeAction === "STAY PUT / SIT OUT" || tradeAction === "HOLD FIRM") {
         if (isReversalRecommended && !hasReversedRef.current) {
-          tradeAction = "REVERSE POSITION"; tradeReason = `Absolute collapse. Use your ONLY allowed switch to ${isYES ? 'NO' : 'YES'}.`;
-          actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
+          tradeAction = "REVERSE POSITION"; tradeReason = `Structural collapse. Use your ONLY allowed switch to ${isYES ? 'NO' : 'YES'}.`;
+          actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30 shadow-[0_0_15px_rgba(251,191,36,0.2)]";
           hasAction = true; actionButtonLabel = `REVERSE TO '${isYES ? 'NO' : 'YES'}'`; actionTarget = isYES ? "NO" : "YES"; actionProb = isYES ? 100 - probabilityAbove : probabilityAbove;
         }
         else if (isReversalRecommended && hasReversedRef.current) {
@@ -670,18 +661,18 @@ export default function App() {
           hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "SIT OUT";
         }
         else if (isBleeding) {
-          tradeAction = "CUT LOSSES (RISK LIMIT)"; tradeReason = "Position drifted past risk tolerance. Recommend exit.";
+          tradeAction = "CUT LOSSES (RISK LIMIT)"; tradeReason = "Position drifted past dynamic risk tolerance. Recommend exit.";
           actionColor = "text-rose-500"; actionBg = "bg-rose-500/10 border-rose-500/30";
           hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "SIT OUT";
         }
-        else if (currentOdds >= 85 && offerVal === 0) {
+        else if (currentOdds >= 88 && offerVal === 0) {
           tradeAction = "SECURE MAX PROFIT"; tradeReason = "Tracking perfectly. Lock in gains when ready.";
           actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
           hasAction = true; actionButtonLabel = "EXECUTE CASHOUT (PROFIT)"; actionTarget = "CASH";
         }
-        else if (currentOdds >= 70 && momentumLosing && offerVal === 0) {
+        else if (currentOdds >= 72 && momentumLosing && offerVal === 0) {
           tradeAction = "SCALP METHOD (CASH OUT)"; tradeReason = `Odds are strong (${currentOdds.toFixed(0)}%), but micro-momentum is fading. Take the early scalp to protect margin.`;
-          actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
+          actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_10px_rgba(52,211,153,0.15)]";
           hasAction = true; actionButtonLabel = "EXECUTE SCALP"; actionTarget = "CASH";
         }
         else if (offerVal === 0) {
@@ -712,7 +703,7 @@ export default function App() {
       confidence: confidenceDisplay, prediction, predictionReason, reasoning, textColor, rawProbAbove: probabilityAbove,
       tradeAction, tradeReason, actionColor, actionBg, hasAction, actionButtonLabel, actionTarget, actionProb,
       realGapBps, clockSeconds, isSystemLocked, atrBps, livePnL, liveEstValue, bb, projections, liqBuys, liqSells,
-      rsi, ema9, ema21, userPosition
+      rsi, ema9, ema21, userPosition, divergenceScore, vwapGapBps
     };
   }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, brtiPremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition, windowType]);
 
@@ -769,10 +760,10 @@ export default function App() {
         
         if (userText.includes("why") || userText.includes("explain") || userText.includes("reason") || userText.includes("logic")) {
           const reasons = analysis?.reasoning?.length > 0 ? analysis.reasoning.join(" ") : "I am waiting for clearer momentum signals.";
-          reply = `Currently, my odds for YES finish at ${analysis?.rawProbAbove?.toFixed(1)}%. The real gap is ${analysis?.realGapBps?.toFixed(1)} bps. Here is my exact live breakdown: ${reasons}`;
+          reply = `Currently, my odds for YES finish at ${analysis?.rawProbAbove?.toFixed(1)}%. I have a Divergence Score of ${analysis?.divergenceScore} and a VWAP Gap of ${analysis?.vwapGapBps?.toFixed(1)}. Here is my exact live breakdown: ${reasons}`;
         }
         else if (userText.includes("5m") || userText.includes("5 minute") || userText.includes("15m")) {
-          reply = `In 5-minute mode, I rely 1.5x more on immediate Order Flow (Tape Delta) and ignore lagging indicators like EMA/RSI. In 15-minute mode, I look for macro trends. You are currently in ${windowType.toUpperCase()} mode.`;
+          reply = `In V30, both windows use Deep-Quant Divergence tracking. 5M ignores long-term EMAs entirely and focuses purely on Orderbook spoofing and VWAP pullbacks. You are currently in ${windowType.toUpperCase()} mode.`;
         }
         else if (userText.includes("pnl") || userText.includes("profit") || userText.includes("loss")) {
           reply = analysis?.prediction === "SIT OUT" ? "You are not in an active trade. No PnL to track right now." : `Your current estimated contract value is ~$${analysis?.liveEstValue?.toFixed(2)}. Your live mathematical PnL is $${analysis?.livePnL?.toFixed(2)}.`;
@@ -816,7 +807,7 @@ export default function App() {
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
             <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V29
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V30 Quant
             </span>
           </h1>
           
@@ -866,7 +857,7 @@ export default function App() {
 
       <div className="w-full max-w-6xl flex flex-col gap-4">
         
-        {/* Top Control Bar - MOBILE OPTIMIZED (Wrap properly) */}
+        {/* Top Control Bar - MOBILE OPTIMIZED */}
         <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col lg:flex-row items-center justify-between gap-4 relative overflow-hidden">
            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
 
@@ -987,13 +978,13 @@ export default function App() {
                        <span className={`font-bold ${analysis.realGapBps > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>GAP: {analysis.realGapBps > 0 ? '+' : ''}{analysis.realGapBps.toFixed(1)} bps</span>
                      </div>
                      <div className="flex justify-between items-center text-[9px] opacity-80 pt-1 border-t border-[#E8E9E4]/10 overflow-x-hidden">
-                       <span className="hidden sm:inline">BRTI GAP: {brtiPremium > 0 ? '+' : ''}${brtiPremium.toFixed(1)}</span>
+                       <span className="hidden sm:inline">DIVERGENCE: <span className={analysis.divergenceScore > 0 ? 'text-emerald-400' : analysis.divergenceScore < 0 ? 'text-rose-400' : 'text-zinc-400'}>{analysis.divergenceScore > 0 ? '+' : ''}{analysis.divergenceScore}</span></span>
                        <span>TAKER: <span className={takerFlow.imbalance > 1 ? 'text-emerald-400' : 'text-rose-400'}>{takerFlow.imbalance.toFixed(1)}x</span></span>
                        <span>LIQ: <span className={(analysis.liqBuys > analysis.liqSells) ? 'text-emerald-400' : (analysis.liqSells > analysis.liqBuys ? 'text-rose-400' : 'text-zinc-400')}>{analysis.liqBuys > analysis.liqSells ? 'BULL' : (analysis.liqSells > analysis.liqBuys ? 'BEAR' : 'FLAT')}</span></span>
                      </div>
                      <div className="flex justify-between items-center text-[9px] opacity-80 pt-1 mt-1 border-t border-[#E8E9E4]/10">
                        <span>RSI: <span className={analysis.rsi > 70 ? 'text-rose-400' : analysis.rsi < 30 ? 'text-emerald-400' : 'text-[#E8E9E4]'}>{analysis.rsi.toFixed(1)}</span></span>
-                       <span>EMA9: ${analysis.ema9?.toFixed(0) || '---'}</span>
+                       <span>VWAP GAP: <span className={Math.abs(analysis.vwapGapBps) > 5 ? 'text-amber-400 font-bold' : 'text-[#E8E9E4]'}>{analysis.vwapGapBps.toFixed(1)}</span></span>
                        <span>EMA21: ${analysis.ema21?.toFixed(0) || '---'}</span>
                      </div>
                    </div>
@@ -1199,40 +1190,45 @@ export default function App() {
             <div className="p-4 sm:p-6 space-y-6 sm:space-y-8 text-xs sm:text-sm text-[#E8E9E4]/80">
               
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. Multi-Timeframe & Mean Reversion</h3>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. Multi-Timeframe & Deep-Quant Divergence</h3>
                 <p className="mb-3 leading-relaxed">You can toggle Tara between 5-Minute and 15-Minute mode. <br/><strong>In 15M Mode:</strong> She analyzes macro-trends, VWAP, and looks for safer, wider structural trades.<br/><strong>In 5M Mode:</strong> She becomes an aggressive scalper. She ignores slow indicators and multiplies the weight of live order flow (Tape Delta) by 1.5x.</p>
-                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Mean Reversion (V29 Update):</strong> Tara no longer chases fake pumps. If the price rockets but RSI is overbought (&gt;65), she will penalize the odds by 15% and advise you to "Wait for Pullback".</p>
+                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Deep-Quant Algorithm (V30 Update):</strong> Tara completely ignores the current physical gap early in the trade. Instead of blindly chasing pumps, she looks for Orderbook Spoofing and true internal structural divergence to bet on the breakout *before* it happens.</p>
                 <ul className="list-disc pl-5 space-y-2">
                   <li><strong>Setup:</strong> Select your timeframe. Type in the platform's Strike Price, your Bet Size, and Max Payout.</li>
-                  <li><strong>Wait:</strong> Tara begins every trade at "SIT OUT". She requires a minimum of <span className="text-emerald-300 font-mono">64% conviction</span> to advise an entry.</li>
+                  <li><strong>Wait:</strong> Tara begins every trade at "SIT OUT". She requires a minimum of <span className="text-emerald-300 font-mono">68% internal conviction</span> to advise an entry.</li>
                 </ul>
               </section>
 
               <section>
                 <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. The "Scalp" Method (Maximum Profit)</h3>
-                <p className="leading-relaxed">If you are in a winning position (odds &gt; 70%), but Tara detects that whales are suddenly selling the momentum back down, she will trigger a <strong>SCALP METHOD (CASH OUT)</strong> alert. <br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will scream at you to take the Arbitrage.</p>
+                <p className="leading-relaxed">If you are in a winning position (odds &gt; 72%), but Tara detects that whales are suddenly selling the momentum back down, she will trigger a <strong>SCALP METHOD (CASH OUT)</strong> alert. <br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will scream at you to take the Arbitrage.</p>
               </section>
 
               <section>
                 <h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">3. Understanding the Data Dashboard</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mt-2 font-mono text-[10px] sm:text-[11px]">
                   <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
-                    <span className="text-indigo-300 font-bold block mb-1">BRTI GAP:</span>
-                    The difference between Coinbase and the Global Market Index. If positive (+), arbitrage bots will soon force the price UP.
+                    <span className="text-indigo-300 font-bold block mb-1">DIVERGENCE SCORE:</span>
+                    Calculates if the tape flow matches the order book, penalizing fake whale spoofing walls.
                   </div>
                   <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
                     <span className="text-indigo-300 font-bold block mb-1">TAKER DELTA:</span>
                     Live Market Orders. &gt;1.0 means aggressive buying. &lt;1.0 means aggressive selling. This catches fake-outs.
                   </div>
                   <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
-                    <span className="text-indigo-300 font-bold block mb-1">L2 IMBALANCE:</span>
-                    The Order Book. Shows if whales are placing massive limit "walls" to defend or suppress the price.
+                    <span className="text-indigo-300 font-bold block mb-1">VWAP GAP:</span>
+                    Tracks the distance from the Volume Weighted Average Price. Used to predict mean-reversion pullbacks.
                   </div>
                   <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
                     <span className="text-indigo-300 font-bold block mb-1">LIQ (Liquidations):</span>
                     Tracks forced margin calls on Binance. A "BULL" liquidation means heavily shorted traders are being squeezed upward.
                   </div>
                 </div>
+              </section>
+              
+              <section>
+                <h3 className="text-rose-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">4. The Jerome Filter (Endgame Logic)</h3>
+                <p className="leading-relaxed">In the final moments of a round (last 3 mins for 15M, last 60s for 5M), Tara activates the <strong>Jerome Filter</strong>. The mathematical divergence is ignored, and the actual physical gap remaining dictates the final lock prediction.</p>
               </section>
 
             </div>
