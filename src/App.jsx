@@ -187,7 +187,6 @@ export default function App() {
 
   // V29: SYNCHRONIZED, NON-GLITCHING WEBSOCKETS (Throttled UI rendering)
   useEffect(() => {
-    let wsBinanceTrade = null;
     let wsCB = null;
     let wsBinanceLiq = null;
     let lastVisualUpdate = 0; 
@@ -211,16 +210,6 @@ export default function App() {
 
     const initWebSockets = () => {
       try {
-        wsBinanceTrade = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@trade');
-        wsBinanceTrade.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.p) updateVisualPrice(parseFloat(data.p), 'binance');
-          } catch (e) {}
-        };
-      } catch(e) {}
-
-      try {
         wsCB = new WebSocket('wss://ws-feed.exchange.coinbase.com');
         wsCB.onopen = () => wsCB.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] }));
         wsCB.onmessage = (event) => {
@@ -231,11 +220,10 @@ export default function App() {
               const size = parseFloat(data.last_size) || 0;
               const isTakerBuy = data.side === 'sell'; 
               
-              const now = Date.now();
-              if (lastPriceSourceRef.current.source !== 'binance' || now - lastPriceSourceRef.current.time > 2000) {
-                updateVisualPrice(newPrice, 'coinbase');
-              }
+              // Exclusively rely on Coinbase WS for visual price to prevent exchange mismatch
+              updateVisualPrice(newPrice, 'coinbase');
               
+              const now = Date.now();
               tickHistoryRef.current.push({ p: newPrice, s: size, t: isTakerBuy ? 'B' : 'S', time: now });
               tickHistoryRef.current = tickHistoryRef.current.filter(t => now - t.time < 30000);
             }
@@ -263,7 +251,6 @@ export default function App() {
     initWebSockets();
 
     return () => { 
-      if (wsBinanceTrade && wsBinanceTrade.readyState === WebSocket.OPEN) wsBinanceTrade.close();
       if (wsCB && wsCB.readyState === WebSocket.OPEN) { wsCB.send(JSON.stringify({ type: 'unsubscribe', product_ids: ['BTC-USD'], channels: ['ticker'] })); wsCB.close(); }
       if (wsBinanceLiq && wsBinanceLiq.readyState === WebSocket.OPEN) wsBinanceLiq.close();
     };
@@ -302,7 +289,7 @@ export default function App() {
           const p = parseFloat(dataTicker.price);
           const now = Date.now();
           
-          if (!['binance', 'coinbase'].includes(lastPriceSourceRef.current.source) || now - lastPriceSourceRef.current.time > 2000) {
+          if (lastPriceSourceRef.current.source !== 'coinbase' || now - lastPriceSourceRef.current.time > 2000) {
              currentPriceRef.current = p;
              lastPriceSourceRef.current = { source: 'rest', time: now };
              
