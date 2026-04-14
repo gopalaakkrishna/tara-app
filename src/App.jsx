@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Clock, Crosshair, BarChart2, Zap, ArrowUpRight, ArrowDownRight, Globe, TrendingUp, BellRing, Terminal, CheckCircle, MessageSquare, X, DollarSign, AlertTriangle, Users } from 'lucide-react';
+import { Clock, Crosshair, BarChart2, Zap, ArrowUpRight, ArrowDownRight, Globe, TrendingUp, BellRing, Terminal, CheckCircle, MessageSquare, X, DollarSign, AlertTriangle, Users, HelpCircle, Volume2, VolumeX, Info } from 'lucide-react';
 
 // --- Advanced Technical Indicator Utilities ---
 const calculateVWAP = (history) => {
@@ -100,7 +100,7 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V23 Neural Scalp Engine online. I am connected to the Gemini AI API. Ask me anything about my calculations." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V24 Terminal online. I have integrated Audio Alerts and an Operations Manual to maximize your trade execution speed." }]);
   const [chatInput, setChatInput] = useState("");
   
   const currentWindowRef = useRef("");
@@ -110,23 +110,33 @@ export default function App() {
   
   const [userPosition, setUserPosition] = useState(null); 
   
-  // V23 Simulated Active Users Tracker
-  const [activeUsers, setActiveUsers] = useState(64);
-
-  useEffect(() => {
-    const userInterval = setInterval(() => {
-      setActiveUsers(prev => {
-        const jump = Math.floor(Math.random() * 5) - 2; 
-        return Math.max(30, Math.min(150, prev + jump));
-      });
-    }, 4500);
-    return () => clearInterval(userInterval);
-  }, []);
+  // V24 New UI States
+  const [showHelp, setShowHelp] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const prevActionRef = useRef(null);
 
   useEffect(() => {
     try { localStorage.setItem('btcOracleScorecard', JSON.stringify(scorecard)); } 
     catch (e) { console.warn("Storage restricted."); }
   }, [scorecard]);
+
+  // --- V24 Audio Alert System ---
+  const playAlertSound = () => {
+    if (!soundEnabled) return;
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      oscillator.type = 'bell'; 
+      oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5 Note
+      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.5);
+    } catch(e) {}
+  };
 
   // Window Rollover logic
   useEffect(() => {
@@ -578,6 +588,16 @@ export default function App() {
     };
   }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, brtiPremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition]);
 
+  // V24 Audio Effect Hook
+  useEffect(() => {
+    if (analysis?.hasAction && analysis.tradeAction !== prevActionRef.current) {
+      if (analysis.tradeAction !== "CALIBRATING...") {
+        playAlertSound();
+      }
+    }
+    prevActionRef.current = analysis?.tradeAction;
+  }, [analysis?.tradeAction, soundEnabled]);
+
   const executeManualAction = (actionLabel, targetState) => {
     setManualAction(actionLabel);
     
@@ -668,20 +688,22 @@ export default function App() {
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
             <span className="flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V23 Scalp & Neural Engine
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V24.1 Terminal
             </span>
           </h1>
         </div>
         <div className="text-right font-sans flex items-center gap-4">
-          <div className="flex flex-col items-end">
-            <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest mb-0.5 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Active Traders
-            </div>
-            <div className="text-sm font-serif text-emerald-100/90 flex items-center gap-1"><Users className="w-3 h-3 opacity-50"/> {activeUsers}</div>
-          </div>
-          <div className="flex flex-col items-end border-l border-[#E8E9E4]/10 pl-4">
+          <div className="flex flex-col items-end pl-4">
             <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest mb-0.5">Current EST</div>
             <div className="text-sm font-serif text-[#E8E9E4]/90">{timeState.currentEST || '--:--:--'}</div>
+          </div>
+          <div className="flex items-center gap-2 border-l border-[#E8E9E4]/10 pl-4">
+            <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-2 rounded-lg border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`} title="Toggle Audio Alerts">
+              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+            <button onClick={() => setShowHelp(true)} className="p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors" title="Operations Manual">
+              <HelpCircle className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>
@@ -988,6 +1010,67 @@ export default function App() {
           </button>
         )}
       </div>
+
+      {/* V24 HELP / MANUAL MODAL */}
+      {showHelp && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl">
+            <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10">
+              <h2 className="text-lg font-serif text-white flex items-center gap-2">
+                <Info className="w-5 h-5 text-indigo-400" /> Tara Operations Manual
+              </h2>
+              <button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            
+            <div className="p-6 space-y-8 text-sm text-[#E8E9E4]/80">
+              
+              <section>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">1. The Basics (How to Win)</h3>
+                <p className="mb-3 leading-relaxed">Tara is an institutional quant-bot designed to beat the 15-minute options market by tracking microscopic momentum. <strong>Do not enter a trade until Tara's Advisor tells you to.</strong></p>
+                <ul className="list-disc pl-5 space-y-2">
+                  <li><strong>Setup:</strong> Type in the platform's Strike Price, your Bet Size, and the Max Payout.</li>
+                  <li><strong>Wait:</strong> Tara begins every trade at "SIT OUT". She requires a minimum of <span className="text-emerald-300 font-mono">64% conviction</span> to advise an entry.</li>
+                  <li><strong>The Audio Sniper:</strong> Turn on the Speaker icon (top right). You will hear a "Ding" the second Tara finds an entry point. </li>
+                  <li><strong>Manual Sync:</strong> If you enter early based on your own gut, click "I Entered YES/NO" so Tara locks onto your position and manages your exit.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">2. The "Scalp" Method (Maximum Profit)</h3>
+                <p className="leading-relaxed">A 15-minute window is a long time in crypto. If you are in a winning position (odds &gt; 70%), but Tara detects that whales are suddenly selling the momentum back down, she will trigger a <strong>SCALP METHOD (CASH OUT)</strong> alert. <br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will scream at you to take the Arbitrage.</p>
+              </section>
+
+              <section>
+                <h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-xs">3. Understanding the Data Dashboard</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 font-mono text-[11px]">
+                  <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
+                    <span className="text-indigo-300 font-bold block mb-1">BRTI GAP:</span>
+                    The difference between Coinbase and the Global Market Index. If positive (+), arbitrage bots will soon force the price UP.
+                  </div>
+                  <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
+                    <span className="text-indigo-300 font-bold block mb-1">TAKER DELTA:</span>
+                    Live Market Orders. &gt;1.0 means aggressive buying. &lt;1.0 means aggressive selling. This catches fake-outs.
+                  </div>
+                  <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
+                    <span className="text-indigo-300 font-bold block mb-1">L2 IMBALANCE:</span>
+                    The Order Book. Shows if whales are placing massive limit "walls" to defend or suppress the price.
+                  </div>
+                  <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
+                    <span className="text-indigo-300 font-bold block mb-1">LIQ (Liquidations):</span>
+                    Tracks forced margin calls on Binance. A "BULL" liquidation means heavily shorted traders are being squeezed upward.
+                  </div>
+                </div>
+              </section>
+              
+              <section>
+                <h3 className="text-rose-400 font-bold uppercase tracking-widest mb-2 text-xs">4. The Jerome Filter (Endgame Logic)</h3>
+                <p className="leading-relaxed">In the final 3-4 minutes of a round, Tara activates the <strong>Jerome Filter</strong>. She will stop listening to order book hopium and strictly calculate whether the physical gap is crossable in the time remaining. If the math says it's physically impossible, she locks the prediction.</p>
+              </section>
+
+            </div>
+          </div>
+        </div>
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
