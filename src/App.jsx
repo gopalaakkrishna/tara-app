@@ -79,16 +79,17 @@ export default function App() {
 
   const lockedPredictionRef = useRef("SIT OUT");
   const activeCallRef = useRef({ prediction: "SIT OUT", strike: 0 });
+  const hasReversedRef = useRef(false); // V21: Max 1 Reversal Limit
   
-  // Safe Initialization of Scorecard (Updated 55-41)
+  // Safe Initialization of Scorecard (Updated 65-56)
   const [scorecard, setScorecard] = useState(() => {
-    const baseline = { wins: 55, losses: 41 };
+    const baseline = { wins: 65, losses: 56 };
     try {
       const savedScore = localStorage.getItem('btcOracleScorecard');
       if (savedScore) {
         const parsed = JSON.parse(savedScore);
         if (parsed && typeof parsed.wins === 'number' && typeof parsed.losses === 'number') {
-          if (parsed.wins + parsed.losses < 96) return baseline;
+          if (parsed.wins + parsed.losses < 121) return baseline;
           return parsed;
         }
       }
@@ -99,13 +100,15 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V20.1 BRTI Aggregate online. I have switched to the global BRTI feed and added RSI/EMA tracking." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V22 Early Sniper online. I will now trigger entries at 58-64% when tape momentum surges to catch better odds. You can also manually sync your early entries." }]);
   const [chatInput, setChatInput] = useState("");
   
   const currentWindowRef = useRef("");
   const lastPredRef = useRef(null);
   const [emergencyBlink, setEmergencyBlink] = useState(false);
   const lastWindowRef = useRef("");
+  
+  const [userPosition, setUserPosition] = useState(null); // V22: Track manual early entries
 
   useEffect(() => {
     try { localStorage.setItem('btcOracleScorecard', JSON.stringify(scorecard)); } 
@@ -129,6 +132,8 @@ export default function App() {
         setTargetMargin(currentPrice);
         lockedPredictionRef.current = "SIT OUT";
         activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
+        hasReversedRef.current = false; // Reset 1-switch limit
+        setUserPosition(null); // V22 Reset manual position
         lastWindowRef.current = timeState.nextWindowEST;
         setManualAction(null); 
         tickHistoryRef.current = []; 
@@ -298,7 +303,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // --- TARA V18 THE JEROME FILTER ENGINE ---
+  // --- TARA V21 SINGLE-STRIKE CALM ENGINE ---
   const analysis = useMemo(() => {
     if (!currentPrice || history.length < 30 || !targetMargin) return null;
 
@@ -327,9 +332,8 @@ export default function App() {
     let probabilityAbove = 50; let reasoning = [];
     if (isObservationPhase) reasoning.push(`Wait ${clockSeconds - 897}s for open volatility to settle.`);
 
-    // V18 ENDGAME MULTIPLIER: Starts squeezing at 4 minutes (240s) instead of 3
-    const endgameMultiplier = clockSeconds < 240 ? (1 + ((240 - clockSeconds) / 60)) : 1; 
-    // Increased raw gap weight
+    // V21: Only start the aggressive physical gap multiplier at 3 minutes remaining to let math breathe
+    const endgameMultiplier = clockSeconds < 180 ? (1 + ((180 - clockSeconds) / 60)) : 1; 
     probabilityAbove += realGapBps * (1.5 + (timeDecayFactor * 3.5)) * endgameMultiplier; 
 
     const priceRising = shortTermSlope > 0;
@@ -344,8 +348,8 @@ export default function App() {
     let liqBuys = 0; let liqSells = 0;
     liquidations.forEach(l => {
       if (Date.now() - l.time < 60000) {
-        if (l.side === 'BUY') liqBuys += l.value; // Short getting liquidated forces a BUY
-        else liqSells += l.value; // Long getting liquidated forces a SELL
+        if (l.side === 'BUY') liqBuys += l.value; 
+        else liqSells += l.value; 
       }
     });
 
@@ -355,13 +359,14 @@ export default function App() {
       probabilityAbove -= 15; reasoning.push(`🚨 LONG SQUEEZE: $${(liqSells/1000).toFixed(0)}k longs liquidated. Price crash imminent.`);
     }
 
-    // --- THE JEROME FILTER (TAPE & ORDER BOOK DELTA) ---
+    // --- V21 CALMER TAPE & ORDER BOOK DELTA ---
     let tapeOBDelta = 0;
 
+    // V21: Reduced flash crash multiplier slightly to avoid panic whipsaw
     if (tickSlope < -2.0) {
-      tapeOBDelta -= 35; reasoning.push(`🚨 FLASH CRASH: Instant momentum collapse detected.`);
+      tapeOBDelta -= 25; reasoning.push(`🚨 FLASH CRASH: Sudden momentum drop detected.`);
     } else if (tickSlope > 2.0) {
-      tapeOBDelta += 35; reasoning.push(`🚨 FLASH PUMP: Instant momentum surge detected.`);
+      tapeOBDelta += 25; reasoning.push(`🚨 FLASH PUMP: Sudden momentum surge detected.`);
     } 
     else if (sellersStacking && aggressiveTakerBuys) {
       tapeOBDelta += 20; reasoning.push(`ABSORPTION: Whales are market-buying into heavy resistance.`);
@@ -387,8 +392,8 @@ export default function App() {
 
     if (orderBook.imbalance > 1.8) { tapeOBDelta += 8; } else if (orderBook.imbalance < 0.5) { tapeOBDelta -= 8; }
 
-    // V19 HARD CAP: Only apply Jerome Filter in the Endgame. Allow whales to buy the dip early.
-    if (clockSeconds < 240) {
+    // V21 HARD CAP: Jerome Filter only applies strictly in last 3 mins (180s) to avoid mid-round false-alarms
+    if (clockSeconds < 180) {
       if (realGapBps < -2.0 && tapeOBDelta > 5) {
         tapeOBDelta = 5;
         reasoning.push(`🛡️ JEROME FILTER: Time running out. Capping bullish hopium.`);
@@ -400,7 +405,6 @@ export default function App() {
 
     probabilityAbove += tapeOBDelta;
 
-    // V20.1 Use BRTI Cross-Exchange Spread
     if (brtiPremium > 10) { probabilityAbove += 8; reasoning.push("BRTI Index leads Coinbase. Arb up-pressure expected."); } 
     else if (brtiPremium < -10) { probabilityAbove -= 8; reasoning.push("BRTI Index lags Coinbase. Arb down-pressure expected."); }
     
@@ -409,33 +413,31 @@ export default function App() {
       else if (currentPrice <= bb.lower) { probabilityAbove += 10; reasoning.push(`Lower BB Pierced. Support strong.`); }
     }
     
-    // Increased VWAP gravity
     if (vwapGapBps > 2.0) { probabilityAbove -= 10; } else if (vwapGapBps < -2.0) { probabilityAbove += 10; }
 
     probabilityAbove = Math.max(0, Math.min(100, probabilityAbove)); 
 
-    // V18 DYNAMIC LOCKING
     let isSystemLocked = false;
     if (clockSeconds < 180 && Math.abs(realGapBps) > (atrBps * 0.4)) {
       isSystemLocked = true; reasoning.push(`LOCKED: Gap mathematically uncrossable.`);
     }
 
-    let prediction = lockedPredictionRef.current;
+    let prediction = userPosition || lockedPredictionRef.current; // V22: Respect user's manual entry
     let recommendedPrediction = prediction;       
     
     if (isObservationPhase) {
       prediction = "ANALYZING"; recommendedPrediction = "ANALYZING";
     } else {
       if (prediction === "YES") {
-        // V19 DIAMOND HANDS: Refuse to reverse unless total collapse (< 20%)
-        if (probabilityAbove <= 20) recommendedPrediction = "NO";
+        if (probabilityAbove <= 25 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "NO";
         else if (probabilityAbove <= 35) recommendedPrediction = "SIT OUT";
       } else if (prediction === "NO") {
-        if (probabilityAbove >= 80) recommendedPrediction = "YES";
+        if (probabilityAbove >= 75 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "YES";
         else if (probabilityAbove >= 65) recommendedPrediction = "SIT OUT";
       } else {
-        if (probabilityAbove >= 68) recommendedPrediction = "YES";
-        else if (probabilityAbove <= 32) recommendedPrediction = "NO";
+        // V22 EARLY SNIPER: Trigger at 58% if tape momentum is massive (>10 delta), else standard 64%
+        if (probabilityAbove >= 64 || (probabilityAbove >= 58 && tapeOBDelta >= 10)) recommendedPrediction = "YES";
+        else if (probabilityAbove <= 36 || (probabilityAbove <= 42 && tapeOBDelta <= -10)) recommendedPrediction = "NO";
         else recommendedPrediction = "SIT OUT";
       }
       if (isSystemLocked) recommendedPrediction = realGapBps > 0 ? "YES" : "NO";
@@ -444,9 +446,9 @@ export default function App() {
     let predictionReason = "";
     if (prediction === "ANALYZING") predictionReason = "Calibrating early momentum indicators.";
     else if (prediction === "SIT OUT") {
-      if (recommendedPrediction === "YES") predictionReason = "Bull trajectory confirmed. Entering position.";
-      else if (recommendedPrediction === "NO") predictionReason = "Bear trajectory confirmed. Entering position.";
-      else predictionReason = "Probability is mixed. Awaiting minimum 68% conviction to trigger entry.";
+      if (recommendedPrediction === "YES") predictionReason = "Momentum surging. Securing early entry.";
+      else if (recommendedPrediction === "NO") predictionReason = "Momentum crashing. Securing early entry.";
+      else predictionReason = "Awaiting 58-64% conviction for sniper entry.";
     } else if (prediction === "YES") {
       if (recommendedPrediction === "NO") predictionReason = "Structural collapse detected. Reversal mandatory.";
       else if (realGapBps > 0) predictionReason = "Firmly in profit. Holding position steady.";
@@ -457,7 +459,7 @@ export default function App() {
       else predictionReason = "Position negative, holding firm through noise.";
     }
 
-    let tradeAction = "STAY PUT / SIT OUT"; let tradeReason = "Odds are unclear. Wait for minimum 68% conviction.";
+    let tradeAction = "STAY PUT / SIT OUT"; let tradeReason = "Odds are unclear. Wait for minimum 70% conviction.";
     let actionColor = "text-zinc-400"; let actionBg = "bg-zinc-500/10 border-zinc-500/30";
     let hasAction = false, actionButtonLabel = "", actionTarget = "", actionProb = 0;
 
@@ -472,11 +474,11 @@ export default function App() {
     } 
     else if (prediction === "SIT OUT") {
       if (recommendedPrediction === "YES") {
-        tradeAction = "ENTER POSITION (FIRM)"; tradeReason = "Momentum dictates YES finish. Excellent conviction.";
+        tradeAction = "EARLY SNIPER ENTRY"; tradeReason = "Momentum supports early YES. Catching better odds.";
         actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
         hasAction = true; actionButtonLabel = "CONFIRM ENTRY: 'YES'"; actionTarget = "YES"; actionProb = probabilityAbove;
       } else if (recommendedPrediction === "NO") {
-        tradeAction = "ENTER POSITION (FIRM)"; tradeReason = "Momentum dictates NO finish. Excellent conviction.";
+        tradeAction = "EARLY SNIPER ENTRY"; tradeReason = "Momentum supports early NO. Catching better odds.";
         actionColor = "text-rose-400"; actionBg = "bg-rose-500/10 border-rose-500/30";
         hasAction = true; actionButtonLabel = "CONFIRM ENTRY: 'NO'"; actionTarget = "NO"; actionProb = 100 - probabilityAbove;
       }
@@ -508,10 +510,15 @@ export default function App() {
       }
 
       if (tradeAction === "STAY PUT / SIT OUT" || tradeAction === "HOLD FIRM") {
-        if (isReversalRecommended) {
-          tradeAction = "REVERSE POSITION"; tradeReason = `Probability collapsed. Safely swap to ${isYES ? 'NO' : 'YES'}.`;
+        if (isReversalRecommended && !hasReversedRef.current) {
+          tradeAction = "REVERSE POSITION"; tradeReason = `Absolute collapse. Use your ONLY allowed switch to ${isYES ? 'NO' : 'YES'}.`;
           actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
           hasAction = true; actionButtonLabel = `REVERSE TO '${isYES ? 'NO' : 'YES'}'`; actionTarget = isYES ? "NO" : "YES"; actionProb = isYES ? 100 - probabilityAbove : probabilityAbove;
+        }
+        else if (isReversalRecommended && hasReversedRef.current) {
+          tradeAction = "CUT LOSSES (RISK LIMIT)"; tradeReason = "Structural collapse, but you are out of reversals. Exit trade immediately.";
+          actionColor = "text-rose-500"; actionBg = "bg-rose-500/10 border-rose-500/30";
+          hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "SIT OUT";
         }
         else if (isBleeding) {
           tradeAction = "CUT LOSSES (RISK LIMIT)"; tradeReason = "Position drifted past risk tolerance. Recommend exit.";
@@ -552,12 +559,22 @@ export default function App() {
       confidence: confidenceDisplay, prediction, predictionReason, reasoning, textColor, rawProbAbove: probabilityAbove,
       tradeAction, tradeReason, actionColor, actionBg, hasAction, actionButtonLabel, actionTarget, actionProb,
       realGapBps, clockSeconds, isSystemLocked, atrBps, livePnL, liveEstValue, bb, projections, liqBuys, liqSells,
-      rsi, ema9, ema21
+      rsi, ema9, ema21, userPosition
     };
-  }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, brtiPremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations]);
+  }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, brtiPremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition]);
 
   const executeManualAction = (actionLabel, targetState) => {
     setManualAction(actionLabel);
+    
+    // V21 Log that a reversal was used
+    if (actionLabel.includes('REVERSE')) {
+      hasReversedRef.current = true;
+    }
+
+    if (targetState === "CASH" || targetState === "SIT OUT") {
+      setUserPosition(null); // Clear manual position on cashout
+    }
+
     if (analysis.prediction === "YES" || analysis.prediction === "NO") {
       const isWin = (analysis.prediction === "YES" && currentPrice > targetMargin) || (analysis.prediction === "NO" && currentPrice < targetMargin);
       setScorecard(s => ({ ...s, wins: (s?.wins||0) + (isWin?1:0), losses: (s?.losses||0) + (isWin?0:1) }));
@@ -567,6 +584,13 @@ export default function App() {
       setForceRender(prev => prev + 1);
       setCurrentOffer(""); 
     }
+  };
+
+  const handleManualSync = (dir) => {
+    lockedPredictionRef.current = dir;
+    activeCallRef.current = { prediction: dir, strike: targetMargin };
+    setUserPosition(dir);
+    setForceRender(prev => prev + 1);
   };
 
   const handleChatSubmit = (e) => {
@@ -609,7 +633,7 @@ export default function App() {
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
             <span className="flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V20.1 BRTI Aggregate
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V22 Early Sniper
             </span>
           </h1>
         </div>
@@ -793,6 +817,18 @@ export default function App() {
                        </div>
                      )}
                    </div>
+                   
+                   {/* V22 MANUAL SYNC BUTTONS */}
+                   {analysis.prediction === "SIT OUT" && (
+                     <div className="flex flex-col items-center gap-2 mt-1 mb-4 w-full max-w-[400px]">
+                       <span className="text-[9px] uppercase tracking-widest text-[#E8E9E4]/40">Already in a trade? Sync Tara:</span>
+                       <div className="flex gap-3 w-full">
+                         <button onClick={() => handleManualSync("YES")} className="flex-1 py-1.5 border border-emerald-500/30 text-emerald-400 rounded-md text-[10px] uppercase font-bold tracking-widest hover:bg-emerald-500/10 transition-colors">I Entered YES</button>
+                         <button onClick={() => handleManualSync("NO")} className="flex-1 py-1.5 border border-rose-500/30 text-rose-400 rounded-md text-[10px] uppercase font-bold tracking-widest hover:bg-rose-500/10 transition-colors">I Entered NO</button>
+                       </div>
+                     </div>
+                   )}
+
                  </div>
                )}
             </div>
