@@ -635,7 +635,7 @@ export default function App() {
       setChatLog(currentLog);
       setChatInput("");
       
-      const apiKey = ""; // API Key provided silently by Canvas Environment. FOR NETLIFY: Paste your free Gemini key inside these quotes!
+      const apiKey = "AIzaSyChYBwixKUJT9js46eYw1cSxDVbj1Fr3mQ"; 
       setChatLog([...currentLog, { role: 'tara', text: "Processing market dynamics...", isLoading: true }]);
 
       try {
@@ -660,7 +660,7 @@ export default function App() {
         const data = await response.json();
         
         if (data.error) {
-          setChatLog([...currentLog, { role: 'tara', text: `System Alert: API Key Missing. Since you are hosted on Netlify, you must manually insert a free Gemini API Key into the code (search for 'apiKey' in App.jsx).` }]);
+          setChatLog([...currentLog, { role: 'tara', text: `System Alert: API Key Error. Double check that your key is valid and has not hit rate limits.` }]);
           return;
         }
         
