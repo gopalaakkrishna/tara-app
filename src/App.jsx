@@ -58,6 +58,7 @@ export default function App() {
   const currentPriceRef = useRef(null);
   const tickHistoryRef = useRef([]); 
   const prevImbalanceRef = useRef(1); 
+  const lastPriceSourceRef = useRef({ source: 'none', time: 0 }); // V28: Prevents feed conflicts
 
   const [history, setHistory] = useState([]); 
   const [orderBook, setOrderBook] = useState({ localBuy: 0, localSell: 0, imbalance: 1 });
@@ -85,7 +86,7 @@ export default function App() {
   const [scorecards, setScorecards] = useState(() => {
     const baseline = { '15m': { wins: 70, losses: 60 }, '5m': { wins: 0, losses: 0 } };
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV27');
+      const savedScore = localStorage.getItem('btcOracleScorecardV28');
       if (savedScore) {
         const parsed = JSON.parse(savedScore);
         if (parsed['15m'] && parsed['5m']) return parsed;
@@ -97,7 +98,7 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V27.2 Ultra-Fast Spot Tracker online. Live price is now bound directly to the global raw trade stream for split-second updates." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V28 Unified Oracle online. Price feeds are now synchronized to stop glitching. Math algorithms are dynamically scaling based on your active timeframe." }]);
   const [chatInput, setChatInput] = useState("");
   
   const currentWindowRef = useRef("");
@@ -112,7 +113,7 @@ export default function App() {
   const prevActionRef = useRef(null);
 
   useEffect(() => {
-    try { localStorage.setItem('btcOracleScorecardV27', JSON.stringify(scorecards)); } 
+    try { localStorage.setItem('btcOracleScorecardV28', JSON.stringify(scorecards)); } 
     catch (e) { console.warn("Storage restricted."); }
   }, [scorecards]);
 
@@ -184,31 +185,41 @@ export default function App() {
     }
   }, [timeState.nextWindowEST, currentPrice, windowType]);
 
-  // V27.2: ULTRA-FAST SPLIT-SECOND WEBSOCKETS
+  // V28: SYNCHRONIZED, NON-GLITCHING WEBSOCKETS
   useEffect(() => {
     let wsBinanceTrade = null;
     let wsCB = null;
     let wsBinanceLiq = null;
+    let lastVisualUpdate = 0; // Throttle visual updates to 100ms
     
-    // 1. Binance Raw Trade Stream (Provides true split-second visual price updates)
+    const updateVisualPrice = (newPrice, source) => {
+      currentPriceRef.current = newPrice;
+      const now = Date.now();
+      lastPriceSourceRef.current = { source, time: now };
+
+      if (now - lastVisualUpdate > 100) {
+        setCurrentPrice(prev => {
+          if (prev !== null && newPrice !== prev) {
+            setTickDirection(newPrice > prev ? 'up' : 'down');
+          }
+          return newPrice;
+        });
+        lastVisualUpdate = now;
+      }
+    };
+
+    // 1. Binance Raw Trade Stream (Alpha Feed)
     try {
       wsBinanceTrade = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@trade');
       wsBinanceTrade.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.p) {
-            const newPrice = parseFloat(data.p);
-            if (currentPriceRef.current !== null && newPrice !== currentPriceRef.current) {
-              setTickDirection(newPrice > currentPriceRef.current ? 'up' : 'down');
-            }
-            currentPriceRef.current = newPrice;
-            setCurrentPrice(newPrice);
-          }
+          if (data.p) updateVisualPrice(parseFloat(data.p), 'binance');
         } catch (e) {}
       };
     } catch(e) {}
 
-    // 2. Coinbase Ticker (For accurate institutional Taker Flow/Tape logic)
+    // 2. Coinbase Ticker (Fallback + Tape Analyzer)
     try {
       wsCB = new WebSocket('wss://ws-feed.exchange.coinbase.com');
       wsCB.onopen = () => wsCB.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] }));
@@ -218,19 +229,16 @@ export default function App() {
           if (data.type === 'ticker' && data.price) {
             const newPrice = parseFloat(data.price);
             const size = parseFloat(data.last_size) || 0;
-            const isTakerBuy = data.side === 'sell'; // 'sell' on maker side = Taker BUY
+            const isTakerBuy = data.side === 'sell'; 
             
-            // If Binance WS failed, fallback to updating visual price from Coinbase
-            if (!wsBinanceTrade || wsBinanceTrade.readyState !== WebSocket.OPEN) {
-              if (currentPriceRef.current !== null && newPrice !== currentPriceRef.current) {
-                setTickDirection(newPrice > currentPriceRef.current ? 'up' : 'down');
-              }
-              currentPriceRef.current = newPrice;
-              setCurrentPrice(newPrice);
+            // Only update visuals if Binance hasn't sent data in the last 2 seconds (Anti-Glitch)
+            const now = Date.now();
+            if (lastPriceSourceRef.current.source !== 'binance' || now - lastPriceSourceRef.current.time > 2000) {
+              updateVisualPrice(newPrice, 'coinbase');
             }
             
-            tickHistoryRef.current.push({ p: newPrice, s: size, t: isTakerBuy ? 'B' : 'S', time: Date.now() });
-            tickHistoryRef.current = tickHistoryRef.current.filter(t => Date.now() - t.time < 30000);
+            tickHistoryRef.current.push({ p: newPrice, s: size, t: isTakerBuy ? 'B' : 'S', time: now });
+            tickHistoryRef.current = tickHistoryRef.current.filter(t => now - t.time < 30000);
           }
         } catch (err) {}
       };
@@ -282,21 +290,31 @@ export default function App() {
     return () => clearInterval(tapeInterval);
   }, []);
 
-  // V27.2: SPLIT-SECOND REST FALLBACK (Runs every 800ms to guarantee fast UI if WS is blocked)
+  // V28: Sub-Second REST Fallback (Respects Hierarchy to prevent glitching)
   useEffect(() => {
+    let lastUiUpdate = 0;
     const fetchSpotPrice = async () => {
       try {
         const resTicker = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker');
         const dataTicker = await resTicker.json();
         if (dataTicker.price) {
           const p = parseFloat(dataTicker.price);
-          if (currentPriceRef.current !== null && p !== currentPriceRef.current) {
-            setTickDirection(p > currentPriceRef.current ? 'up' : 'down');
-          }
-          currentPriceRef.current = p;
-          setCurrentPrice(p);
+          const now = Date.now();
           
-          // Inject into tape to keep math flowing
+          // Only update UI if both WebSockets have failed/stalled (Anti-Glitch)
+          if (!['binance', 'coinbase'].includes(lastPriceSourceRef.current.source) || now - lastPriceSourceRef.current.time > 2000) {
+             currentPriceRef.current = p;
+             lastPriceSourceRef.current = { source: 'rest', time: now };
+             
+             if (now - lastUiUpdate > 100) {
+               setCurrentPrice(prev => {
+                 if (prev !== null && p !== prev) setTickDirection(p > prev ? 'up' : 'down');
+                 return p;
+               });
+               lastUiUpdate = now;
+             }
+          }
+          
           tickHistoryRef.current.push({ p, s: parseFloat(dataTicker.size || 0.1), t: 'B', time: Date.now() });
           tickHistoryRef.current = tickHistoryRef.current.filter(t => Date.now() - t.time < 30000);
         }
@@ -304,11 +322,11 @@ export default function App() {
     };
 
     fetchSpotPrice();
-    const spotInterval = setInterval(fetchSpotPrice, 800); // 0.8 seconds!
+    const spotInterval = setInterval(fetchSpotPrice, 800); 
     return () => clearInterval(spotInterval);
   }, []);
 
-  // V27.2: HEAVY DATA POLLING (Runs every 4s to protect API rate limits)
+  // V28: Heavy Data Polling (Safe 4s Loop)
   useEffect(() => {
     const fetchHeavyData = async () => {
       try {
@@ -321,9 +339,7 @@ export default function App() {
           }
         } catch (e) {}
 
-        if (formattedHistory.length > 0) {
-          setHistory(formattedHistory);
-        }
+        if (formattedHistory.length > 0) setHistory(formattedHistory);
 
         let currentCoinbaseRef = currentPriceRef.current;
         let currentImbalance = 1;
@@ -398,6 +414,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [windowType]);
 
+  // --- TARA V28 DYNAMIC MULTI-TIMEFRAME ENGINE ---
   const analysis = useMemo(() => {
     if (!currentPrice || history.length < 30 || !targetMargin) return null;
 
@@ -484,7 +501,12 @@ export default function App() {
     if (imbalanceDelta < -1.5) { tapeOBDelta -= 5; } 
     else if (imbalanceDelta > 1.5) { tapeOBDelta += 5; }
 
-    if (orderBook.imbalance > 1.8) { tapeOBDelta += 8; } else if (orderBook.imbalance < 0.5) { tapeOBDelta -= 8; }
+    // V28: Timeframe specific scaling
+    const bbWeight = is5m ? 5 : 10; // Less weight for macro indicators in 5m
+    const vwapWeight = is5m ? 5 : 10;
+    const orderBookWeight = is5m ? 12 : 8; // More weight for order book in 5m
+
+    if (orderBook.imbalance > 1.8) { tapeOBDelta += orderBookWeight; } else if (orderBook.imbalance < 0.5) { tapeOBDelta -= orderBookWeight; }
 
     if (is5m) {
       tapeOBDelta *= 1.5; 
@@ -507,20 +529,21 @@ export default function App() {
     else if (brtiPremium < -10) { probabilityAbove -= 8; reasoning.push("Arb down-pressure expected."); }
     
     if (bb) {
-      if (currentPrice >= bb.upper) { probabilityAbove -= 10; } 
-      else if (currentPrice <= bb.lower) { probabilityAbove += 10; }
+      if (currentPrice >= bb.upper) { probabilityAbove -= bbWeight; } 
+      else if (currentPrice <= bb.lower) { probabilityAbove += bbWeight; }
     }
     
-    if (vwapGapBps > 2.0) { probabilityAbove -= 10; } else if (vwapGapBps < -2.0) { probabilityAbove += 10; }
+    if (vwapGapBps > 2.0) { probabilityAbove -= vwapWeight; } else if (vwapGapBps < -2.0) { probabilityAbove += vwapWeight; }
 
     let prediction = userPosition || lockedPredictionRef.current; 
 
+    // IRONCLAD CONVICTION BIAS: Become mathematically stubborn to hold winning odds
     if (prediction === "YES") {
-      probabilityAbove += 18; 
-      reasoning.push("🛡️ Conviction Bias: +18% (Holding Firm)");
+      probabilityAbove += 16; 
+      reasoning.push("🛡️ Conviction Bias: +16% (Holding Firm)");
     } else if (prediction === "NO") {
-      probabilityAbove -= 18;
-      reasoning.push("🛡️ Conviction Bias: -18% (Holding Firm)");
+      probabilityAbove -= 16;
+      reasoning.push("🛡️ Conviction Bias: -16% (Holding Firm)");
     }
 
     probabilityAbove = Math.max(0, Math.min(100, probabilityAbove)); 
@@ -783,12 +806,12 @@ export default function App() {
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
             <span className="flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V27.2 Apex Engine
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V28 Unified Oracle
             </span>
           </h1>
         </div>
         
-        {/* V27: Window Toggle Switch */}
+        {/* Window Toggle Switch */}
         <div className="flex bg-[#111312] border border-[#E8E9E4]/20 rounded-lg p-1 mr-auto ml-8 shadow-inner">
           <button 
             onClick={() => handleWindowToggle('5m')}
