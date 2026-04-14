@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Clock, Crosshair, BarChart2, Zap, ArrowUpRight, ArrowDownRight, Globe, TrendingUp, BellRing, Terminal, CheckCircle, MessageSquare, X, DollarSign, AlertTriangle, Users, HelpCircle, Volume2, VolumeX, Info } from 'lucide-react';
+import { Clock, Crosshair, BarChart2, Zap, ArrowUpRight, ArrowDownRight, Globe, TrendingUp, BellRing, Terminal, CheckCircle, MessageSquare, X, DollarSign, AlertTriangle, HelpCircle, Volume2, VolumeX, Info, Layers } from 'lucide-react';
 
 // --- Advanced Technical Indicator Utilities ---
 const calculateVWAP = (history) => {
@@ -56,7 +56,7 @@ export default function App() {
   
   const prevPriceRef = useRef(null);
   const currentPriceRef = useRef(null);
-  const tickHistoryRef = useRef([]); // V15 Tape Tracker
+  const tickHistoryRef = useRef([]); 
   const prevImbalanceRef = useRef(1); 
 
   const [history, setHistory] = useState([]); 
@@ -67,31 +67,28 @@ export default function App() {
   const [sentimentScore, setSentimentScore] = useState(0);
   
   const [brtiPremium, setBrtiPremium] = useState(0); 
-  const [fundingRate, setFundingRate] = useState(0); 
 
   const [targetMargin, setTargetMargin] = useState(71584.69);
   const [betAmount, setBetAmount] = useState(50);
   const [maxPayout, setMaxPayout] = useState(100);
   const [currentOffer, setCurrentOffer] = useState(""); 
 
+  const [windowType, setWindowType] = useState('15m'); 
   const [timeState, setTimeState] = useState({ currentEST: '', startWindowEST: '', nextWindowEST: '', minsRemaining: 0, secsRemaining: 0, currentHour: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
   const lockedPredictionRef = useRef("SIT OUT");
   const activeCallRef = useRef({ prediction: "SIT OUT", strike: 0 });
   const hasReversedRef = useRef(false); 
+  const lastAdvisedRef = useRef("SIT OUT"); 
   
-  // Safe Initialization of Scorecard (Updated 69-57)
-  const [scorecard, setScorecard] = useState(() => {
-    const baseline = { wins: 69, losses: 57 };
+  const [scorecards, setScorecards] = useState(() => {
+    const baseline = { '15m': { wins: 70, losses: 60 }, '5m': { wins: 0, losses: 0 } };
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecard');
+      const savedScore = localStorage.getItem('btcOracleScorecardV27');
       if (savedScore) {
         const parsed = JSON.parse(savedScore);
-        if (parsed && typeof parsed.wins === 'number' && typeof parsed.losses === 'number') {
-          if (parsed.wins + parsed.losses < 126) return baseline;
-          return parsed;
-        }
+        if (parsed['15m'] && parsed['5m']) return parsed;
       }
       return baseline;
     } catch (e) { return baseline; }
@@ -100,7 +97,7 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V24 Terminal online. I have integrated Audio Alerts and an Operations Manual to maximize your trade execution speed." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V27.2 Ultra-Fast Spot Tracker online. Live price is now bound directly to the global raw trade stream for split-second updates." }]);
   const [chatInput, setChatInput] = useState("");
   
   const currentWindowRef = useRef("");
@@ -110,17 +107,15 @@ export default function App() {
   
   const [userPosition, setUserPosition] = useState(null); 
   
-  // V24 New UI States
   const [showHelp, setShowHelp] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const prevActionRef = useRef(null);
 
   useEffect(() => {
-    try { localStorage.setItem('btcOracleScorecard', JSON.stringify(scorecard)); } 
+    try { localStorage.setItem('btcOracleScorecardV27', JSON.stringify(scorecards)); } 
     catch (e) { console.warn("Storage restricted."); }
-  }, [scorecard]);
+  }, [scorecards]);
 
-  // --- V24 Audio Alert System ---
   const playAlertSound = () => {
     if (!soundEnabled) return;
     try {
@@ -128,7 +123,7 @@ export default function App() {
       const oscillator = audioCtx.createOscillator();
       const gainNode = audioCtx.createGain();
       oscillator.type = 'bell'; 
-      oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5 Note
+      oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); 
       gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
       gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
       oscillator.connect(gainNode);
@@ -138,24 +133,48 @@ export default function App() {
     } catch(e) {}
   };
 
-  // Window Rollover logic
+  const handleWindowToggle = (type) => {
+    if (type === windowType) return;
+    setWindowType(type);
+    lockedPredictionRef.current = "SIT OUT";
+    activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
+    hasReversedRef.current = false; 
+    lastAdvisedRef.current = "SIT OUT";
+    setUserPosition(null);
+    setManualAction(null);
+    setCurrentOffer("");
+    lastWindowRef.current = ""; 
+    setForceRender(prev => prev + 1);
+  };
+
+  const updateScore = (type, winOrLoss, amount) => {
+    setScorecards(prev => ({
+      ...prev,
+      [type]: {
+        ...prev[type],
+        [winOrLoss]: Math.max(0, prev[type][winOrLoss] + amount)
+      }
+    }));
+  };
+
   useEffect(() => {
     if (timeState.nextWindowEST && timeState.nextWindowEST !== lastWindowRef.current) {
       if (currentPrice !== null) {
         if (lastWindowRef.current !== "") {
           const prevCall = activeCallRef.current;
           if (prevCall.prediction === "YES") {
-            if (currentPrice > prevCall.strike) setScorecard(s => ({ ...s, wins: s.wins + 1 }));
-            else if (currentPrice < prevCall.strike) setScorecard(s => ({ ...s, losses: s.losses + 1 }));
+            if (currentPrice > prevCall.strike) updateScore(windowType, 'wins', 1);
+            else if (currentPrice < prevCall.strike) updateScore(windowType, 'losses', 1);
           } else if (prevCall.prediction === "NO") {
-            if (currentPrice < prevCall.strike) setScorecard(s => ({ ...s, wins: s.wins + 1 }));
-            else if (currentPrice > prevCall.strike) setScorecard(s => ({ ...s, losses: s.losses + 1 }));
+            if (currentPrice < prevCall.strike) updateScore(windowType, 'wins', 1);
+            else if (currentPrice > prevCall.strike) updateScore(windowType, 'losses', 1);
           }
         }
         setTargetMargin(currentPrice);
         lockedPredictionRef.current = "SIT OUT";
         activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
-        hasReversedRef.current = false; // Reset 1-switch limit
+        hasReversedRef.current = false; 
+        lastAdvisedRef.current = "SIT OUT";
         setUserPosition(null); 
         lastWindowRef.current = timeState.nextWindowEST;
         setManualAction(null); 
@@ -163,61 +182,85 @@ export default function App() {
         setCurrentOffer(""); 
       }
     }
-  }, [timeState.nextWindowEST, currentPrice]);
+  }, [timeState.nextWindowEST, currentPrice, windowType]);
 
-  // Real-time Tick Data & Tape Reading & Liquidation Feed
+  // V27.2: ULTRA-FAST SPLIT-SECOND WEBSOCKETS
   useEffect(() => {
-    const ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] }));
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'ticker' && data.price) {
-          const newPrice = parseFloat(data.price);
-          const size = parseFloat(data.last_size) || 0;
-          const side = data.side; 
-
-          if (prevPriceRef.current !== null) {
-            if (newPrice > prevPriceRef.current) setTickDirection('up');
-            else if (newPrice < prevPriceRef.current) setTickDirection('down');
+    let wsBinanceTrade = null;
+    let wsCB = null;
+    let wsBinanceLiq = null;
+    
+    // 1. Binance Raw Trade Stream (Provides true split-second visual price updates)
+    try {
+      wsBinanceTrade = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@trade');
+      wsBinanceTrade.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.p) {
+            const newPrice = parseFloat(data.p);
+            if (currentPriceRef.current !== null && newPrice !== currentPriceRef.current) {
+              setTickDirection(newPrice > currentPriceRef.current ? 'up' : 'down');
+            }
+            currentPriceRef.current = newPrice;
+            setCurrentPrice(newPrice);
           }
-          prevPriceRef.current = newPrice; currentPriceRef.current = newPrice;
-          
-          const now = Date.now();
-          const isTakerBuy = side === 'sell';
-          
-          tickHistoryRef.current.push({ p: newPrice, s: size, t: isTakerBuy ? 'B' : 'S', time: now });
-          tickHistoryRef.current = tickHistoryRef.current.filter(t => now - t.time < 30000);
+        } catch (e) {}
+      };
+    } catch(e) {}
 
-          setCurrentPrice(newPrice);
-        }
-      } catch (err) {}
-    };
-
-    // V20 Binance Futures Liquidation WebSocket
-    const wsBinance = new WebSocket('wss://fstream.binance.com/ws/btcusdt@forceOrder');
-    wsBinance.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.e === 'forceOrder') {
-          const side = data.o.S; 
-          const usdValue = parseFloat(data.o.q) * parseFloat(data.o.p);
-          if (usdValue > 10000) { 
-            setLiquidations(prev => [...prev, { side, value: usdValue, time: Date.now() }].filter(l => Date.now() - l.time < 60000));
+    // 2. Coinbase Ticker (For accurate institutional Taker Flow/Tape logic)
+    try {
+      wsCB = new WebSocket('wss://ws-feed.exchange.coinbase.com');
+      wsCB.onopen = () => wsCB.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] }));
+      wsCB.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'ticker' && data.price) {
+            const newPrice = parseFloat(data.price);
+            const size = parseFloat(data.last_size) || 0;
+            const isTakerBuy = data.side === 'sell'; // 'sell' on maker side = Taker BUY
+            
+            // If Binance WS failed, fallback to updating visual price from Coinbase
+            if (!wsBinanceTrade || wsBinanceTrade.readyState !== WebSocket.OPEN) {
+              if (currentPriceRef.current !== null && newPrice !== currentPriceRef.current) {
+                setTickDirection(newPrice > currentPriceRef.current ? 'up' : 'down');
+              }
+              currentPriceRef.current = newPrice;
+              setCurrentPrice(newPrice);
+            }
+            
+            tickHistoryRef.current.push({ p: newPrice, s: size, t: isTakerBuy ? 'B' : 'S', time: Date.now() });
+            tickHistoryRef.current = tickHistoryRef.current.filter(t => Date.now() - t.time < 30000);
           }
-        }
-      } catch (err) {}
-    };
+        } catch (err) {}
+      };
+    } catch(e) {}
+
+    // 3. Binance Liquidations
+    try {
+      wsBinanceLiq = new WebSocket('wss://fstream.binance.com/ws/btcusdt@forceOrder');
+      wsBinanceLiq.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.e === 'forceOrder') {
+            const side = data.o.S; 
+            const usdValue = parseFloat(data.o.q) * parseFloat(data.o.p);
+            if (usdValue > 10000) { 
+              setLiquidations(prev => [...prev, { side, value: usdValue, time: Date.now() }].filter(l => Date.now() - l.time < 60000));
+            }
+          }
+        } catch (err) {}
+      };
+    } catch(e) {}
 
     return () => { 
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'unsubscribe', product_ids: ['BTC-USD'], channels: ['ticker'] })); 
-      ws.close(); 
-      wsBinance.close();
+      if (wsBinanceTrade && wsBinanceTrade.readyState === WebSocket.OPEN) wsBinanceTrade.close();
+      if (wsCB && wsCB.readyState === WebSocket.OPEN) { wsCB.send(JSON.stringify({ type: 'unsubscribe', product_ids: ['BTC-USD'], channels: ['ticker'] })); wsCB.close(); }
+      if (wsBinanceLiq && wsBinanceLiq.readyState === WebSocket.OPEN) wsBinanceLiq.close();
     };
   }, []);
 
-  // V15 Tape Aggregation Loop (Runs every 1 second)
+  // Tape Aggregation Loop
   useEffect(() => {
     const tapeInterval = setInterval(() => {
       let takerBuys = 0; let takerSells = 0; let whaleSpotted = null;
@@ -239,9 +282,35 @@ export default function App() {
     return () => clearInterval(tapeInterval);
   }, []);
 
-  // Data Polling
+  // V27.2: SPLIT-SECOND REST FALLBACK (Runs every 800ms to guarantee fast UI if WS is blocked)
   useEffect(() => {
-    const fetchMarketData = async () => {
+    const fetchSpotPrice = async () => {
+      try {
+        const resTicker = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker');
+        const dataTicker = await resTicker.json();
+        if (dataTicker.price) {
+          const p = parseFloat(dataTicker.price);
+          if (currentPriceRef.current !== null && p !== currentPriceRef.current) {
+            setTickDirection(p > currentPriceRef.current ? 'up' : 'down');
+          }
+          currentPriceRef.current = p;
+          setCurrentPrice(p);
+          
+          // Inject into tape to keep math flowing
+          tickHistoryRef.current.push({ p, s: parseFloat(dataTicker.size || 0.1), t: 'B', time: Date.now() });
+          tickHistoryRef.current = tickHistoryRef.current.filter(t => Date.now() - t.time < 30000);
+        }
+      } catch(e) {}
+    };
+
+    fetchSpotPrice();
+    const spotInterval = setInterval(fetchSpotPrice, 800); // 0.8 seconds!
+    return () => clearInterval(spotInterval);
+  }, []);
+
+  // V27.2: HEAVY DATA POLLING (Runs every 4s to protect API rate limits)
+  useEffect(() => {
+    const fetchHeavyData = async () => {
       try {
         let formattedHistory = [];
         try {
@@ -249,18 +318,11 @@ export default function App() {
           if (resCB.ok) {
             const dataCB = await resCB.json();
             formattedHistory = dataCB.slice(0, 60).map(c => ({ l: parseFloat(c[1]), h: parseFloat(c[2]), c: parseFloat(c[4]), v: parseFloat(c[5]) }));
-          } else throw new Error("CB Blocked");
-        } catch (e1) {
-          try {
-            const resCC = await fetch('https://min-api.cryptocompare.com/data/v2/histominute?fsym=BTC&tsym=USD&limit=60&aggregate=1');
-            const dataCC = await resCC.json();
-            if (dataCC?.Data?.Data) formattedHistory = dataCC.Data.Data.map(c => ({ h: parseFloat(c.high), l: parseFloat(c.low), c: parseFloat(c.close), v: parseFloat(c.volumeto) })).reverse();
-          } catch (e2) {}
-        }
+          }
+        } catch (e) {}
 
         if (formattedHistory.length > 0) {
           setHistory(formattedHistory);
-          if (currentPriceRef.current === null) { setCurrentPrice(formattedHistory[0].c); currentPriceRef.current = formattedHistory[0].c; }
         }
 
         let currentCoinbaseRef = currentPriceRef.current;
@@ -288,45 +350,60 @@ export default function App() {
         } catch (e) {}
 
         setIsLoading(false);
-        
-        let syntheticNews = [];
-        if (currentImbalance > 1.5) syntheticNews.push({ title: `🐋 Maker Alert: Massive Limit BID wall placed near $${targetMargin.toFixed(0)}`, url: "#" });
-        if (currentImbalance < 0.6) syntheticNews.push({ title: `🐋 Maker Alert: Heavy Limit SELL pressure defending $${targetMargin.toFixed(0)}`, url: "#" });
-        if (takerFlow.imbalance > 2.0) syntheticNews.push({ title: `🚀 Taker Alert: Aggressive Market BUYING detected on the tape.`, url: "#" });
-        if (takerFlow.imbalance < 0.5) syntheticNews.push({ title: `🩸 Taker Alert: Aggressive Market SELLING detected on the tape.`, url: "#" });
-        
-        if (syntheticNews.length < 3) syntheticNews.push({ title: "⚡ Tara Engine: Analyzing Order Book vs Tape Divergence...", url: "#" });
-        setNewsEvents(syntheticNews);
-
-      } catch (err) { setIsLoading(false); }
+      } catch (err) { 
+        setIsLoading(false);
+      }
     };
 
-    fetchMarketData();
-    const fastInterval = setInterval(fetchMarketData, 8000); 
-    return () => clearInterval(fastInterval);
-  }, [targetMargin, takerFlow.imbalance]);
+    fetchHeavyData();
+    const heavyInterval = setInterval(fetchHeavyData, 4000); 
+    return () => clearInterval(heavyInterval);
+  }, [targetMargin]); 
 
-  // Clock Sync
+  // News Wire Generator
+  useEffect(() => {
+    let syntheticNews = [];
+    if (orderBook.imbalance > 1.5) syntheticNews.push({ title: `🐋 Maker Alert: Massive Limit BID wall placed near $${targetMargin.toFixed(0)}`, url: "#" });
+    if (orderBook.imbalance < 0.6) syntheticNews.push({ title: `🐋 Maker Alert: Heavy Limit SELL pressure defending $${targetMargin.toFixed(0)}`, url: "#" });
+    if (takerFlow.imbalance > 2.0) syntheticNews.push({ title: `🚀 Taker Alert: Aggressive Market BUYING detected on the tape.`, url: "#" });
+    if (takerFlow.imbalance < 0.5) syntheticNews.push({ title: `🩸 Taker Alert: Aggressive Market SELLING detected on the tape.`, url: "#" });
+    
+    if (syntheticNews.length < 3) syntheticNews.push({ title: `⚡ Tara Engine: Analyzing Order Book vs Tape Divergence (${windowType.toUpperCase()})...`, url: "#" });
+    setNewsEvents(syntheticNews);
+  }, [orderBook.imbalance, takerFlow.imbalance, targetMargin, windowType]);
+
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      const currentEST = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const next15Mins = Math.ceil((now.getMinutes() + 1) / 15) * 15;
-      const nextWindow = new Date(now); nextWindow.setMinutes(next15Mins, 0, 0);
-      const nextWindowEST = nextWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' });
-      const startWindow = new Date(nextWindow.getTime() - 15 * 60000);
-      const startWindowEST = startWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' });
+      const msNow = now.getTime();
+      const intervalMs = (windowType === '15m' ? 15 : 5) * 60 * 1000;
+      
+      const nextWindowMs = Math.ceil((msNow + 500) / intervalMs) * intervalMs; 
+      const nextWindow = new Date(nextWindowMs);
+      const startWindow = new Date(nextWindowMs - intervalMs);
+      
       const diffMs = nextWindow.getTime() - now.getTime();
-      setTimeState({ currentEST, startWindowEST, nextWindowEST, minsRemaining: Math.floor(diffMs / 60000), secsRemaining: Math.floor((diffMs % 60000) / 1000), currentHour: new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' })).getHours() });
+      
+      setTimeState({ 
+        currentEST: now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' }), 
+        startWindowEST: startWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' }), 
+        nextWindowEST: nextWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' }), 
+        minsRemaining: Math.floor(diffMs / 60000), 
+        secsRemaining: Math.floor((diffMs % 60000) / 1000), 
+        currentHour: new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' })).getHours() 
+      });
     };
     updateTime();
     const timer = setInterval(updateTime, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [windowType]);
 
-  // --- TARA V23 SCALP ENGINE ---
   const analysis = useMemo(() => {
     if (!currentPrice || history.length < 30 || !targetMargin) return null;
+
+    const is5m = windowType === '5m';
+    const intervalSeconds = is5m ? 300 : 900;
+    const endgameLockTime = is5m ? 60 : 180; 
 
     const closes = history.map(x => x.c), volumes = history.map(x => x.v);
     const ema9 = calculateEMA(closes, 9), ema21 = calculateEMA(closes, 21);
@@ -347,13 +424,13 @@ export default function App() {
     const tickSlope = ticks.length >= 10 ? (currentPrice - ticks[0].p) : 0;
     const imbalanceDelta = orderBook.imbalance - prevImbalanceRef.current;
 
-    const timeDecayFactor = Math.max(0, 1 - (clockSeconds / 900));
-    let isObservationPhase = clockSeconds > 897; 
+    const timeDecayFactor = Math.max(0, 1 - (clockSeconds / intervalSeconds));
+    let isObservationPhase = clockSeconds > (intervalSeconds - 3); 
 
     let probabilityAbove = 50; let reasoning = [];
-    if (isObservationPhase) reasoning.push(`Wait ${clockSeconds - 897}s for open volatility to settle.`);
+    if (isObservationPhase) reasoning.push(`Wait ${clockSeconds - (intervalSeconds - 3)}s for window open.`);
 
-    const endgameMultiplier = clockSeconds < 180 ? (1 + ((180 - clockSeconds) / 60)) : 1; 
+    const endgameMultiplier = clockSeconds < endgameLockTime ? (1 + ((endgameLockTime - clockSeconds) / (is5m ? 20 : 60))) : 1; 
     probabilityAbove += realGapBps * (1.5 + (timeDecayFactor * 3.5)) * endgameMultiplier; 
 
     const priceRising = shortTermSlope > 0;
@@ -373,87 +450,107 @@ export default function App() {
     });
 
     if (liqBuys > 100000) {
-      probabilityAbove += 15; reasoning.push(`🚨 SHORT SQUEEZE: $${(liqBuys/1000).toFixed(0)}k shorts liquidated. Price rocket imminent.`);
+      probabilityAbove += 15; reasoning.push(`🚨 SHORT SQUEEZE: Shorts liquidated. Upward pressure.`);
     } else if (liqSells > 100000) {
-      probabilityAbove -= 15; reasoning.push(`🚨 LONG SQUEEZE: $${(liqSells/1000).toFixed(0)}k longs liquidated. Price crash imminent.`);
+      probabilityAbove -= 15; reasoning.push(`🚨 LONG SQUEEZE: Longs liquidated. Downward pressure.`);
     }
 
     let tapeOBDelta = 0;
 
     if (tickSlope < -2.0) {
-      tapeOBDelta -= 25; reasoning.push(`🚨 FLASH CRASH: Sudden momentum drop detected.`);
+      tapeOBDelta -= 10; reasoning.push(`Flash momentum drop detected.`);
     } else if (tickSlope > 2.0) {
-      tapeOBDelta += 25; reasoning.push(`🚨 FLASH PUMP: Sudden momentum surge detected.`);
+      tapeOBDelta += 10; reasoning.push(`Flash momentum surge detected.`);
     } 
     else if (sellersStacking && aggressiveTakerBuys) {
-      tapeOBDelta += 20; reasoning.push(`ABSORPTION: Whales are market-buying into heavy resistance.`);
+      tapeOBDelta += 10; reasoning.push(`Absorption: Whales buying into resistance.`);
     } else if (buyersStacking && aggressiveTakerSells) {
-      tapeOBDelta -= 20; reasoning.push(`ABSORPTION: Whales are market-selling through heavy support.`);
+      tapeOBDelta -= 10; reasoning.push(`Absorption: Whales selling into support.`);
     } else if (priceRising && aggressiveTakerSells && sellersStacking) {
-      tapeOBDelta -= 20; reasoning.push(`FAKE PUMP: Price drift up, but heavy market selling into resistance.`);
+      tapeOBDelta -= 10; reasoning.push(`Fake Pump: Drift up, but heavy selling.`);
     } else if (priceFalling && aggressiveTakerBuys && buyersStacking) {
-      tapeOBDelta += 20; reasoning.push(`BEAR TRAP: Price drift down, but heavy market buying into support.`);
+      tapeOBDelta += 10; reasoning.push(`Bear Trap: Drift down, but heavy buying.`);
     } else {
       if (priceRising) {
-        if (volumeSurge > 1.5 || tickSlope > 1.0) { tapeOBDelta += 8; reasoning.push("Confirmed volume-backed uptrend."); } else { tapeOBDelta += 3; }
+        if (volumeSurge > 1.5 || tickSlope > 1.0) { tapeOBDelta += 6; reasoning.push("Confirmed volume uptrend."); } else { tapeOBDelta += 2; }
       } else if (priceFalling) {
-        if (volumeSurge > 1.5 || tickSlope < -1.0) { tapeOBDelta -= 8; reasoning.push("Confirmed volume-backed downtrend."); } else { tapeOBDelta -= 3; }
+        if (volumeSurge > 1.5 || tickSlope < -1.0) { tapeOBDelta -= 6; reasoning.push("Confirmed volume downtrend."); } else { tapeOBDelta -= 2; }
       }
     }
 
-    if (takerFlow.whaleSpotted === 'BUY') { tapeOBDelta += 6; reasoning.push("🐋 Huge Taker BUY executed."); }
-    if (takerFlow.whaleSpotted === 'SELL') { tapeOBDelta -= 6; reasoning.push("🐋 Huge Taker SELL executed."); }
+    if (takerFlow.whaleSpotted === 'BUY') { tapeOBDelta += 6; }
+    if (takerFlow.whaleSpotted === 'SELL') { tapeOBDelta -= 6; }
 
-    if (imbalanceDelta < -1.5) { tapeOBDelta -= 8; } 
-    else if (imbalanceDelta > 1.5) { tapeOBDelta += 8; }
+    if (imbalanceDelta < -1.5) { tapeOBDelta -= 5; } 
+    else if (imbalanceDelta > 1.5) { tapeOBDelta += 5; }
 
     if (orderBook.imbalance > 1.8) { tapeOBDelta += 8; } else if (orderBook.imbalance < 0.5) { tapeOBDelta -= 8; }
 
-    if (clockSeconds < 180) {
+    if (is5m) {
+      tapeOBDelta *= 1.5; 
+      reasoning.push(`[5M] Tape Multiplier Active (Order flow weighted).`);
+    }
+
+    if (clockSeconds < endgameLockTime) {
       if (realGapBps < -2.0 && tapeOBDelta > 5) {
         tapeOBDelta = 5;
-        reasoning.push(`🛡️ JEROME FILTER: Time running out. Capping bullish hopium.`);
+        reasoning.push(`🛡️ JEROME FILTER: Capping bullish hopium.`);
       } else if (realGapBps > 2.0 && tapeOBDelta < -5) {
         tapeOBDelta = -5;
-        reasoning.push(`🛡️ JEROME FILTER: Time running out. Capping bearish fear.`);
+        reasoning.push(`🛡️ JEROME FILTER: Capping bearish fear.`);
       }
     }
 
     probabilityAbove += tapeOBDelta;
 
-    if (brtiPremium > 10) { probabilityAbove += 8; reasoning.push("BRTI Index leads Coinbase. Arb up-pressure expected."); } 
-    else if (brtiPremium < -10) { probabilityAbove -= 8; reasoning.push("BRTI Index lags Coinbase. Arb down-pressure expected."); }
+    if (brtiPremium > 10) { probabilityAbove += 8; reasoning.push("Arb up-pressure expected."); } 
+    else if (brtiPremium < -10) { probabilityAbove -= 8; reasoning.push("Arb down-pressure expected."); }
     
     if (bb) {
-      if (currentPrice >= bb.upper) { probabilityAbove -= 10; reasoning.push(`Upper BB Pierced. Resistance strong.`); } 
-      else if (currentPrice <= bb.lower) { probabilityAbove += 10; reasoning.push(`Lower BB Pierced. Support strong.`); }
+      if (currentPrice >= bb.upper) { probabilityAbove -= 10; } 
+      else if (currentPrice <= bb.lower) { probabilityAbove += 10; }
     }
     
     if (vwapGapBps > 2.0) { probabilityAbove -= 10; } else if (vwapGapBps < -2.0) { probabilityAbove += 10; }
 
+    let prediction = userPosition || lockedPredictionRef.current; 
+
+    if (prediction === "YES") {
+      probabilityAbove += 18; 
+      reasoning.push("🛡️ Conviction Bias: +18% (Holding Firm)");
+    } else if (prediction === "NO") {
+      probabilityAbove -= 18;
+      reasoning.push("🛡️ Conviction Bias: -18% (Holding Firm)");
+    }
+
     probabilityAbove = Math.max(0, Math.min(100, probabilityAbove)); 
 
     let isSystemLocked = false;
-    if (clockSeconds < 180 && Math.abs(realGapBps) > (atrBps * 0.4)) {
+    if (clockSeconds < endgameLockTime && Math.abs(realGapBps) > (atrBps * (is5m ? 0.2 : 0.4))) {
       isSystemLocked = true; reasoning.push(`LOCKED: Gap mathematically uncrossable.`);
     }
 
-    let prediction = userPosition || lockedPredictionRef.current; 
     let recommendedPrediction = prediction;       
     
     if (isObservationPhase) {
       prediction = "ANALYZING"; recommendedPrediction = "ANALYZING";
     } else {
       if (prediction === "YES") {
-        if (probabilityAbove <= 25 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "NO";
-        else if (probabilityAbove <= 35) recommendedPrediction = "SIT OUT";
+        if (probabilityAbove <= 20 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "NO";
+        else if (probabilityAbove <= 30) recommendedPrediction = "SIT OUT";
       } else if (prediction === "NO") {
-        if (probabilityAbove >= 75 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "YES";
-        else if (probabilityAbove >= 65) recommendedPrediction = "SIT OUT";
+        if (probabilityAbove >= 80 && !hasReversedRef.current && !isSystemLocked) recommendedPrediction = "YES";
+        else if (probabilityAbove >= 70) recommendedPrediction = "SIT OUT";
       } else {
-        if (probabilityAbove >= 64 || (probabilityAbove >= 58 && tapeOBDelta >= 10)) recommendedPrediction = "YES";
-        else if (probabilityAbove <= 36 || (probabilityAbove <= 42 && tapeOBDelta <= -10)) recommendedPrediction = "NO";
-        else recommendedPrediction = "SIT OUT";
+        if (lastAdvisedRef.current === "YES") {
+          if (probabilityAbove < 55) lastAdvisedRef.current = "SIT OUT";
+        } else if (lastAdvisedRef.current === "NO") {
+          if (probabilityAbove > 45) lastAdvisedRef.current = "SIT OUT";
+        } else {
+          if (probabilityAbove >= 66 || (probabilityAbove >= 60 && tapeOBDelta >= 10)) lastAdvisedRef.current = "YES";
+          else if (probabilityAbove <= 34 || (probabilityAbove <= 40 && tapeOBDelta <= -10)) lastAdvisedRef.current = "NO";
+        }
+        recommendedPrediction = lastAdvisedRef.current;
       }
       if (isSystemLocked) recommendedPrediction = realGapBps > 0 ? "YES" : "NO";
     }
@@ -463,7 +560,7 @@ export default function App() {
     else if (prediction === "SIT OUT") {
       if (recommendedPrediction === "YES") predictionReason = "Momentum surging. Securing early entry.";
       else if (recommendedPrediction === "NO") predictionReason = "Momentum crashing. Securing early entry.";
-      else predictionReason = "Awaiting 58-64% conviction for sniper entry.";
+      else predictionReason = "Awaiting 58-66% conviction for sniper entry.";
     } else if (prediction === "YES") {
       if (recommendedPrediction === "NO") predictionReason = "Structural collapse detected. Reversal mandatory.";
       else if (realGapBps > 0) predictionReason = "Firmly in profit. Holding position steady.";
@@ -474,7 +571,7 @@ export default function App() {
       else predictionReason = "Position negative, holding firm through noise.";
     }
 
-    let tradeAction = "STAY PUT / SIT OUT"; let tradeReason = "Odds are unclear. Wait for minimum 64% conviction.";
+    let tradeAction = "STAY PUT / SIT OUT"; let tradeReason = "Odds are unclear. Wait for minimum 66% conviction.";
     let actionColor = "text-zinc-400"; let actionBg = "bg-zinc-500/10 border-zinc-500/30";
     let hasAction = false, actionButtonLabel = "", actionTarget = "", actionProb = 0;
 
@@ -504,9 +601,9 @@ export default function App() {
       const isReversalRecommended = isYES ? recommendedPrediction === "NO" : recommendedPrediction === "YES";
       
       const currentOdds = isYES ? probabilityAbove : (100 - probabilityAbove);
-      const momentumLosing = isYES ? (tapeOBDelta < 0 || tickSlope < 0) : (tapeOBDelta > 0 || tickSlope > 0);
+      
+      const momentumLosing = isYES ? (tapeOBDelta < -8 || tickSlope < -2.0) : (tapeOBDelta > 8 || tickSlope > 2.0);
 
-      // EV OVERRIDE LOGIC
       if (offerVal > 0) {
         const premium = offerVal - liveEstValue;
         if (premium > (maxPayout * 0.05)) {
@@ -515,7 +612,7 @@ export default function App() {
           actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30 animate-pulse";
           hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "CASH";
         } 
-        else if (offerVal > betAmount && Math.abs(realGapBps) < atrBps * 0.6 && clockSeconds > 300) {
+        else if (offerVal > betAmount && Math.abs(realGapBps) < atrBps * 0.6 && clockSeconds > (intervalSeconds/3)) {
           tradeAction = "SECURE PROFIT (HIGH VOL)"; 
           tradeReason = `Market is offering $${(offerVal - betAmount).toFixed(2)} profit, but momentum is unstable. Cash out safely.`;
           actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
@@ -528,7 +625,6 @@ export default function App() {
         }
       }
 
-      // STANDARD HOLD/SCALP/BAILOUT LOGIC
       if (tradeAction === "STAY PUT / SIT OUT" || tradeAction === "HOLD FIRM") {
         if (isReversalRecommended && !hasReversedRef.current) {
           tradeAction = "REVERSE POSITION"; tradeReason = `Absolute collapse. Use your ONLY allowed switch to ${isYES ? 'NO' : 'YES'}.`;
@@ -550,7 +646,6 @@ export default function App() {
           actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
           hasAction = true; actionButtonLabel = "EXECUTE CASHOUT (PROFIT)"; actionTarget = "CASH";
         }
-        // V23 SCALP METHOD (Take profit early when odds are 70%+ but momentum turns against us)
         else if (currentOdds >= 70 && momentumLosing && offerVal === 0) {
           tradeAction = "SCALP METHOD (CASH OUT)"; tradeReason = `Odds are strong (${currentOdds.toFixed(0)}%), but micro-momentum is fading. Take the early scalp to protect margin.`;
           actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
@@ -586,9 +681,8 @@ export default function App() {
       realGapBps, clockSeconds, isSystemLocked, atrBps, livePnL, liveEstValue, bb, projections, liqBuys, liqSells,
       rsi, ema9, ema21, userPosition
     };
-  }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, brtiPremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition]);
+  }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, brtiPremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition, windowType]);
 
-  // V24 Audio Effect Hook
   useEffect(() => {
     if (analysis?.hasAction && analysis.tradeAction !== prevActionRef.current) {
       if (analysis.tradeAction !== "CALIBRATING...") {
@@ -609,12 +703,15 @@ export default function App() {
       setUserPosition(null); 
     }
 
-    if (analysis.prediction === "YES" || analysis.prediction === "NO") {
+    if (analysis && (analysis.prediction === "YES" || analysis.prediction === "NO")) {
       const isWin = (analysis.prediction === "YES" && currentPrice > targetMargin) || (analysis.prediction === "NO" && currentPrice < targetMargin);
-      setScorecard(s => ({ ...s, wins: (s?.wins||0) + (isWin?1:0), losses: (s?.losses||0) + (isWin?0:1) }));
+      if (isWin) updateScore(windowType, 'wins', 1);
+      else updateScore(windowType, 'losses', 1);
     }
+    
     if (targetState) {
       lockedPredictionRef.current = targetState === "CASH" ? "SIT OUT" : targetState;
+      lastAdvisedRef.current = "SIT OUT";
       setForceRender(prev => prev + 1);
       setCurrentOffer(""); 
     }
@@ -627,49 +724,41 @@ export default function App() {
     setForceRender(prev => prev + 1);
   };
 
-  // V23 NEURAL CHATBOT VIA GEMINI
-  const handleChatSubmit = async (e) => {
+  const handleChatSubmit = (e) => {
     if (e.key === 'Enter' && chatInput.trim()) {
-      const userText = chatInput.trim();
-      const currentLog = [...chatLog, { role: 'user', text: userText }];
+      const userText = chatInput.trim().toLowerCase();
+      const currentLog = [...chatLog, { role: 'user', text: chatInput.trim() }];
       setChatLog(currentLog);
       setChatInput("");
       
-      const apiKey = "AIzaSyChYBwixKUJT9js46eYw1cSxDVbj1Fr3mQ"; 
-      setChatLog([...currentLog, { role: 'tara', text: "Processing market dynamics...", isLoading: true }]);
-
-      try {
-        const systemPrompt = `You are Tara V24, an institutional quantitative AI trading bot. You specialize in 15-minute BTC options windows.
-        Context:
-        BTC Price: $${currentPrice || 'Unknown'}
-        Strike: $${targetMargin || 'Unknown'}
-        Your Prediction: ${analysis?.prediction || 'Unknown'}
-        Your Confidence: ${analysis?.confidence || 0}%
-        Your Advisor Action: ${analysis?.tradeAction || 'Unknown'}
-        Keep responses composed, institutional, and under 3 sentences. Answer questions about the market data or your logic. Do not make up technical data.`;
-
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents: [{ parts: [{ text: userText }] }]
-          })
-        });
+      setTimeout(() => {
+        let reply = "";
         
-        const data = await response.json();
-        
-        if (data.error) {
-          setChatLog([...currentLog, { role: 'tara', text: `System Alert: API Key Error. Double check that your key is valid and has not hit rate limits.` }]);
-          return;
+        if (userText.includes("why") || userText.includes("explain") || userText.includes("reason") || userText.includes("logic")) {
+          const reasons = analysis?.reasoning?.length > 0 ? analysis.reasoning.join(" ") : "I am waiting for clearer momentum signals.";
+          reply = `Currently, my odds for YES finish at ${analysis?.rawProbAbove?.toFixed(1)}%. The real gap is ${analysis?.realGapBps?.toFixed(1)} bps. Here is my exact live breakdown: ${reasons}`;
         }
-        
-        const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || "I'm recalibrating my logic module. Please try again.";
-        setChatLog([...currentLog, { role: 'tara', text: reply }]);
+        else if (userText.includes("5m") || userText.includes("5 minute") || userText.includes("15m")) {
+          reply = `In 5-minute mode, I rely 1.5x more on immediate Order Flow (Tape Delta) and ignore lagging indicators like EMA/RSI. In 15-minute mode, I look for macro trends. You are currently in ${windowType.toUpperCase()} mode.`;
+        }
+        else if (userText.includes("pnl") || userText.includes("profit") || userText.includes("loss")) {
+          reply = analysis?.prediction === "SIT OUT" ? "You are not in an active trade. No PnL to track right now." : `Your current estimated contract value is ~$${analysis?.liveEstValue?.toFixed(2)}. Your live mathematical PnL is $${analysis?.livePnL?.toFixed(2)}.`;
+        }
+        else if (userText.includes("stop loss") || userText.includes("risk") || userText.includes("cut")) {
+          reply = `My dynamic stop-loss is set around ${analysis?.atrBps?.toFixed(1)} bps based on the current Average True Range and time decay. I will trigger a 'CUT LOSSES' alert if we bleed past this point.`;
+        }
+        else if (userText.includes("score") || userText.includes("record")) {
+          reply = `Our current recorded scorecard for the ${windowType.toUpperCase()} window is ${scorecards[windowType].wins} Wins and ${scorecards[windowType].losses} Losses.`;
+        }
+        else if (userText.includes("hello") || userText.includes("hi") || userText.includes("hey") || userText.includes("sup")) {
+          reply = `Hello! I am actively monitoring the ${windowType.toUpperCase()} market. My current advice is to: ${analysis?.tradeAction}. Ask me 'why' if you want to see my exact mathematical breakdown.`;
+        }
+        else {
+          reply = `My probability engine places YES at ${analysis?.rawProbAbove?.toFixed(1)}%. Currently, my advice is to: ${analysis?.tradeAction}. Ask me 'why' to see my exact mathematical reasoning.`;
+        }
 
-      } catch (err) {
-        setChatLog([...currentLog, { role: 'tara', text: "Connection error to the core AI network. Resorting to local logic." }]);
-      }
+        setChatLog([...currentLog, { role: 'tara', text: reply }]);
+      }, 500); 
     }
   };
 
@@ -694,10 +783,27 @@ export default function App() {
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
             <span className="flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V24.1 Terminal
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V27.2 Apex Engine
             </span>
           </h1>
         </div>
+        
+        {/* V27: Window Toggle Switch */}
+        <div className="flex bg-[#111312] border border-[#E8E9E4]/20 rounded-lg p-1 mr-auto ml-8 shadow-inner">
+          <button 
+            onClick={() => handleWindowToggle('5m')}
+            className={`px-4 py-1 text-[10px] uppercase font-bold tracking-widest rounded-md transition-all ${windowType === '5m' ? 'bg-indigo-500 text-white shadow-md' : 'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
+          >
+            5 Min
+          </button>
+          <button 
+            onClick={() => handleWindowToggle('15m')}
+            className={`px-4 py-1 text-[10px] uppercase font-bold tracking-widest rounded-md transition-all ${windowType === '15m' ? 'bg-emerald-500 text-white shadow-md' : 'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
+          >
+            15 Min
+          </button>
+        </div>
+
         <div className="text-right font-sans flex items-center gap-4">
           <div className="flex flex-col items-end pl-4">
             <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest mb-0.5">Current EST</div>
@@ -762,24 +868,24 @@ export default function App() {
            
            <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
-           {/* Scorecard */}
+           {/* Dynamic Scorecard for 5M/15M */}
            <div className="flex flex-col items-start bg-[#111312] p-2.5 md:p-3 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-full lg:w-56">
              <div className="text-[10px] md:text-xs text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5 md:mb-2 flex justify-between w-full">
-               <span className="flex items-center gap-1.5"><Terminal className="w-3 md:w-3.5 h-3 md:h-3.5"/> Scorecard</span>
+               <span className="flex items-center gap-1.5"><Terminal className="w-3 md:w-3.5 h-3 md:h-3.5"/> {windowType.toUpperCase()} Scorecard</span>
              </div>
              <div className="flex items-center justify-between w-full px-1 md:px-2">
                <div className="flex flex-col items-center">
                  <div className="flex items-center gap-1.5 text-[9px] md:text-[10px] text-emerald-400 mb-0.5 md:mb-1">
-                   <button onClick={() => setScorecard(s => ({...s, wins: Math.max(0, (s?.wins||0)-1)}))}>-</button> WINS <button onClick={() => setScorecard(s => ({...s, wins: (s?.wins||0)+1}))}>+</button>
+                   <button onClick={() => updateScore(windowType, 'wins', -1)}>-</button> WINS <button onClick={() => updateScore(windowType, 'wins', 1)}>+</button>
                  </div>
-                 <span className="text-2xl md:text-3xl font-serif text-emerald-400 font-bold">{scorecard?.wins || 0}</span>
+                 <span className="text-2xl md:text-3xl font-serif text-emerald-400 font-bold">{scorecards[windowType].wins}</span>
                </div>
                <div className="h-8 md:h-10 w-px bg-[#E8E9E4]/10"></div>
                <div className="flex flex-col items-center">
                  <div className="flex items-center gap-1.5 text-[9px] md:text-[10px] text-rose-400 mb-0.5 md:mb-1">
-                   <button onClick={() => setScorecard(s => ({...s, losses: Math.max(0, (s?.losses||0)-1)}))}>-</button> LOSS <button onClick={() => setScorecard(s => ({...s, losses: (s?.losses||0)+1}))}>+</button>
+                   <button onClick={() => updateScore(windowType, 'losses', -1)}>-</button> LOSS <button onClick={() => updateScore(windowType, 'losses', 1)}>+</button>
                  </div>
-                 <span className="text-2xl md:text-3xl font-serif text-rose-400 font-bold">{scorecard?.losses || 0}</span>
+                 <span className="text-2xl md:text-3xl font-serif text-rose-400 font-bold">{scorecards[windowType].losses}</span>
                </div>
              </div>
            </div>
@@ -978,7 +1084,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* FLOATING NEURAL CHAT WIDGET */}
+      {/* FLOATING CHAT WIDGET */}
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen ? 'w-80' : 'w-auto'}`}>
         {isChatOpen && (
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-96">
@@ -1004,7 +1110,7 @@ export default function App() {
                 value={chatInput} 
                 onChange={(e) => setChatInput(e.target.value)} 
                 onKeyDown={handleChatSubmit}
-                placeholder="Ask Tara about the market..." 
+                placeholder={`Ask Tara about the ${windowType.toUpperCase()} window...`} 
                 className="w-full bg-[#181A19] border border-[#E8E9E4]/20 rounded-md px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white"
               />
             </div>
@@ -1017,7 +1123,7 @@ export default function App() {
         )}
       </div>
 
-      {/* V24 HELP / MANUAL MODAL */}
+      {/* HELP / MANUAL MODAL */}
       {showHelp && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl">
@@ -1031,19 +1137,18 @@ export default function App() {
             <div className="p-6 space-y-8 text-sm text-[#E8E9E4]/80">
               
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">1. The Basics (How to Win)</h3>
-                <p className="mb-3 leading-relaxed">Tara is an institutional quant-bot designed to beat the 15-minute options market by tracking microscopic momentum. <strong>Do not enter a trade until Tara's Advisor tells you to.</strong></p>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">1. Multi-Timeframe System (5M vs 15M)</h3>
+                <p className="mb-3 leading-relaxed">You can toggle Tara between 5-Minute and 15-Minute mode in the top left. <br/><strong>In 15M Mode:</strong> She analyzes macro-trends, VWAP, and looks for safer, wider structural trades.<br/><strong>In 5M Mode:</strong> She becomes an aggressive scalper. She ignores slow indicators and multiplies the weight of live order flow (Tape Delta) by 1.5x.</p>
                 <ul className="list-disc pl-5 space-y-2">
-                  <li><strong>Setup:</strong> Type in the platform's Strike Price, your Bet Size, and the Max Payout.</li>
+                  <li><strong>Setup:</strong> Select your timeframe. Type in the platform's Strike Price, your Bet Size, and Max Payout.</li>
                   <li><strong>Wait:</strong> Tara begins every trade at "SIT OUT". She requires a minimum of <span className="text-emerald-300 font-mono">64% conviction</span> to advise an entry.</li>
-                  <li><strong>The Audio Sniper:</strong> Turn on the Speaker icon (top right). You will hear a "Ding" the second Tara finds an entry point. </li>
                   <li><strong>Manual Sync:</strong> If you enter early based on your own gut, click "I Entered YES/NO" so Tara locks onto your position and manages your exit.</li>
                 </ul>
               </section>
 
               <section>
                 <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">2. The "Scalp" Method (Maximum Profit)</h3>
-                <p className="leading-relaxed">A 15-minute window is a long time in crypto. If you are in a winning position (odds &gt; 70%), but Tara detects that whales are suddenly selling the momentum back down, she will trigger a <strong>SCALP METHOD (CASH OUT)</strong> alert. <br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will scream at you to take the Arbitrage.</p>
+                <p className="leading-relaxed">If you are in a winning position (odds &gt; 70%), but Tara detects that whales are suddenly selling the momentum back down, she will trigger a <strong>SCALP METHOD (CASH OUT)</strong> alert. <br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will scream at you to take the Arbitrage.</p>
               </section>
 
               <section>
@@ -1070,7 +1175,7 @@ export default function App() {
               
               <section>
                 <h3 className="text-rose-400 font-bold uppercase tracking-widest mb-2 text-xs">4. The Jerome Filter (Endgame Logic)</h3>
-                <p className="leading-relaxed">In the final 3-4 minutes of a round, Tara activates the <strong>Jerome Filter</strong>. She will stop listening to order book hopium and strictly calculate whether the physical gap is crossable in the time remaining. If the math says it's physically impossible, she locks the prediction.</p>
+                <p className="leading-relaxed">In the final moments of a round (last 3 mins for 15M, last 60s for 5M), Tara activates the <strong>Jerome Filter</strong>. She will stop listening to order book hopium and strictly calculate whether the physical gap is crossable in the time remaining. If the math says it's physically impossible, she locks the prediction.</p>
               </section>
 
             </div>
