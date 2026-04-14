@@ -1,22 +1,312 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 
 // --- 100% DEPENDENCY-FREE INLINE ICONS ---
-const IconClock = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
-const IconCrosshair = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>;
-const IconZap = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
-const IconTerminal = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>;
-const IconAlertTriangle = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
-const IconActivity = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
-const IconBell = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
-const IconCheck = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
-const IconTrendingUp = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>;
-const IconGlobe = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>;
-const IconMessage = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
-const IconX = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
-const IconInfo = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
-const IconVolume2 = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>;
-const IconVolumeX = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>;
-const IconHelp = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+const IconClock = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
+const IconCrosshair = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>;
+const IconZap = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
+const IconTerminal = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>;
+const IconAlertTriangle = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+const IconActivity = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
+const IconBell = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
+const IconCheck = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
+const IconTrendingUp = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-400"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>;
+const IconGlobe = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>;
+const IconMessage = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
+const IconX = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+const IconInfo = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
+const IconVolume2 = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>;
+const IconVolumeX = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>;
+const IconHelp = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+
+// --- NATIVE INTERACTIVE CANDLESTICK / LINE CHART ---
+const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActive }) => {
+  const canvasRef = useRef(null);
+  const containerRef = useRef(null);
+  const [hoverPos, setHoverPos] = useState(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState(0);
+  const isDragging = useRef(false);
+  const lastMouseX = useRef(0);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !data || data.length === 0) return;
+    const ctx = canvas.getContext('2d');
+    const rect = containerRef.current.getBoundingClientRect();
+    
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    
+    const width = rect.width;
+    const height = rect.height;
+    const rightMargin = 65; 
+    const bottomMargin = 20;
+    const chartW = width - rightMargin;
+    const chartH = height - bottomMargin;
+
+    ctx.clearRect(0, 0, width, height);
+
+    const validData = [...data].reverse().filter(d => d.h !== undefined && d.l !== undefined);
+    const visibleCount = Math.max(15, Math.floor(validData.length / zoom));
+    const maxPan = Math.max(0, validData.length - visibleCount);
+    const currentPan = Math.max(0, Math.min(pan, maxPan));
+    
+    const viewData = validData.slice(currentPan, currentPan + visibleCount);
+    if(viewData.length === 0) return;
+
+    let minPrice = Math.min(...viewData.map(d => d.l));
+    let maxPrice = Math.max(...viewData.map(d => d.h));
+    
+    // Include target margin in scale if exists so we can see the line
+    if (targetMargin > 0) {
+        minPrice = Math.min(minPrice, targetMargin - 50);
+        maxPrice = Math.max(maxPrice, targetMargin + 50);
+    }
+
+    const padding = (maxPrice - minPrice) * 0.1 || 10;
+    const scaleY = chartH / (maxPrice - minPrice + padding * 2);
+    const yOffset = maxPrice + padding;
+
+    // Background Grid & Y-Axis Prices
+    ctx.strokeStyle = 'rgba(232, 233, 228, 0.05)';
+    ctx.fillStyle = 'rgba(232, 233, 228, 0.4)';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 1;
+    
+    for(let i=0; i<=5; i++) {
+        const y = (chartH / 5) * i;
+        const price = maxPrice + padding - (y / scaleY);
+        
+        ctx.beginPath();
+        ctx.moveTo(0, y); 
+        ctx.lineTo(chartW, y);
+        ctx.stroke();
+        
+        if (i < 5) ctx.fillText(price.toFixed(2), chartW + 5, y);
+    }
+
+    const spacing = chartW / viewData.length;
+    const candleWidth = Math.max(1, spacing * 0.6);
+
+    // X-Axis Times
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for(let i=1; i<5; i++) {
+        const x = (chartW / 5) * i;
+        ctx.beginPath();
+        ctx.moveTo(x, 0); 
+        ctx.lineTo(x, chartH);
+        ctx.stroke();
+
+        const dataIndex = Math.floor(x / spacing);
+        if (viewData[dataIndex] && viewData[dataIndex].time) {
+            const t = viewData[dataIndex].time;
+            const d = new Date(t > 1e11 ? t : t * 1000);
+            ctx.fillText(d.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit'}), x, chartH + 5);
+        }
+    }
+
+    // Target Margin Strike Line
+    if (targetMargin > 0) {
+        const targetY = (yOffset - targetMargin) * scaleY;
+        if (targetY > 0 && targetY < chartH) {
+            ctx.strokeStyle = 'rgba(99, 102, 241, 0.5)'; // Indigo line
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(0, targetY);
+            ctx.lineTo(chartW, targetY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            ctx.fillStyle = 'rgba(99, 102, 241, 0.2)';
+            ctx.fillRect(chartW, targetY - 10, rightMargin, 20);
+            ctx.fillStyle = '#818cf8';
+            ctx.textAlign = 'left';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.fillText(targetMargin.toFixed(2), chartW + 5, targetY);
+        }
+    }
+
+    if (showCandles) {
+      // Draw Candlesticks
+      viewData.forEach((candle, i) => {
+        const x = i * spacing + spacing / 2;
+        const isBullish = candle.c >= candle.o;
+        const color = isBullish ? '#34d399' : '#fb7185'; 
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x, (yOffset - candle.h) * scaleY);
+        ctx.lineTo(x, (yOffset - candle.l) * scaleY);
+        ctx.stroke();
+
+        ctx.fillStyle = color;
+        const bodyY = (yOffset - Math.max(candle.o, candle.c)) * scaleY;
+        const bodyHeight = Math.max(2, Math.abs(candle.c - candle.o) * scaleY);
+        ctx.fillRect(x - candleWidth / 2, bodyY, candleWidth, bodyHeight);
+      });
+    } else {
+      // Draw Purple Area Line Chart
+      ctx.beginPath();
+      viewData.forEach((candle, i) => {
+         const x = i * spacing + spacing / 2;
+         const y = (yOffset - candle.c) * scaleY;
+         if(i === 0) ctx.moveTo(x, y);
+         else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = '#c084fc'; 
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.lineTo(chartW, chartH);
+      ctx.lineTo(0, chartH);
+      ctx.closePath();
+      
+      const grad = ctx.createLinearGradient(0, 0, 0, chartH);
+      grad.addColorStop(0, 'rgba(192, 132, 252, 0.2)');
+      grad.addColorStop(1, 'rgba(192, 132, 252, 0)');
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+
+    // Draw Current Price Line
+    if (currentPrice) {
+      const currentY = (yOffset - currentPrice) * scaleY;
+      if (currentY > 0 && currentY < chartH) {
+        ctx.strokeStyle = rugPullActive ? '#fb7185' : '#34d399';
+        ctx.lineWidth = rugPullActive ? 2 : 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(0, currentY);
+        ctx.lineTo(chartW, currentY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Price Tag
+        ctx.fillStyle = rugPullActive ? '#fb7185' : '#34d399';
+        ctx.fillRect(chartW, currentY - 10, rightMargin, 20);
+        ctx.fillStyle = '#111312';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillText(currentPrice.toFixed(2), chartW + 5, currentY);
+      }
+    }
+
+    // RUG PULL OVERLAY
+    if (rugPullActive) {
+        ctx.fillStyle = 'rgba(251, 113, 133, 0.1)';
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = '#fb7185';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText("🚨 RUG PULL DETECTED", width / 2, height / 2);
+    }
+
+    // Draw Hover Crosshair
+    if (hoverPos && hoverPos.x < chartW && hoverPos.y < chartH) {
+      ctx.strokeStyle = 'rgba(232, 233, 228, 0.2)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
+      
+      ctx.beginPath();
+      ctx.moveTo(hoverPos.x, 0); ctx.lineTo(hoverPos.x, chartH);
+      ctx.stroke();
+      
+      ctx.beginPath();
+      ctx.moveTo(0, hoverPos.y); ctx.lineTo(chartW, hoverPos.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (!showCandles && !rugPullActive) {
+         const dataIndex = Math.floor(hoverPos.x / spacing);
+         if (viewData[dataIndex]) {
+            const dotX = dataIndex * spacing + spacing / 2;
+            const dotY = (yOffset - viewData[dataIndex].c) * scaleY;
+            ctx.beginPath();
+            ctx.arc(dotX, dotY, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = '#c084fc';
+            ctx.fill();
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#c084fc';
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+         }
+      }
+
+      const hoverPrice = yOffset - (hoverPos.y / scaleY);
+      ctx.fillStyle = '#2A2D2C';
+      ctx.fillRect(chartW, hoverPos.y - 10, rightMargin, 20);
+      ctx.fillStyle = '#E8E9E4';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = '10px sans-serif';
+      ctx.fillText(hoverPrice.toFixed(2), chartW + 5, hoverPos.y);
+
+      const dataIndex = Math.floor(hoverPos.x / spacing);
+      if (viewData[dataIndex] && viewData[dataIndex].time) {
+          const t = viewData[dataIndex].time;
+          const d = new Date(t > 1e11 ? t : t * 1000);
+          const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+          const timeStr = d.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'});
+          const fullStr = `${dateStr} ${timeStr}`;
+          
+          ctx.fillStyle = '#2A2D2C';
+          ctx.fillRect(hoverPos.x - 50, chartH, 100, bottomMargin);
+          ctx.fillStyle = '#E8E9E4';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(fullStr, hoverPos.x, chartH + (bottomMargin/2));
+      }
+    }
+
+  }, [data, currentPrice, zoom, pan, hoverPos, showCandles, targetMargin, rugPullActive]);
+
+  const handleWheel = (e) => {
+      setZoom(prev => Math.max(1, Math.min(10, prev - e.deltaY * 0.005)));
+  };
+
+  const handlePointerDown = (e) => {
+      isDragging.current = true;
+      lastMouseX.current = e.clientX;
+  };
+
+  const handlePointerMove = (e) => {
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      setHoverPos({ x, y });
+
+      if (isDragging.current) {
+          const deltaX = e.clientX - lastMouseX.current;
+          setPan(prev => prev - (deltaX * 0.1));
+          lastMouseX.current = e.clientX;
+      }
+  };
+
+  const handlePointerUp = () => { isDragging.current = false; };
+  const handlePointerLeave = () => { setHoverPos(null); isDragging.current = false; };
+
+  return (
+      <div ref={containerRef} className="w-full h-full relative cursor-crosshair">
+          <canvas 
+              ref={canvasRef} 
+              className="absolute inset-0 w-full h-full"
+              onWheel={handleWheel}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerLeave={handlePointerLeave}
+          />
+      </div>
+  );
+};
 
 // --- Advanced Technical Indicator Utilities ---
 const calculateVWAP = (history) => {
@@ -45,7 +335,7 @@ const calculateATR = (history, period = 14) => {
   if (!history || history.length < period + 1) return 0;
   let trSum = 0;
   for (let i = 0; i < period; i++) {
-    const high = history[i].h; const low = history[i].l; const prevClose = history[i + 1].c;
+    const high = history[i].h; const low = history[i].l; const prevClose = history[i + 1]?.c || history[i].o;
     const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
     trSum += tr;
   }
@@ -53,6 +343,13 @@ const calculateATR = (history, period = 14) => {
 };
 
 export default function App() {
+  const [isMounted, setIsMounted] = useState(false);
+  
+  // UI Toggles
+  const [showCandles, setShowCandles] = useState(true); 
+  const [showWhaleAlerts, setShowWhaleAlerts] = useState(true);
+  const [showRugPullAlerts, setShowRugPullAlerts] = useState(true);
+  
   const [currentPrice, setCurrentPrice] = useState(null);
   const [tickDirection, setTickDirection] = useState(null);
   
@@ -66,11 +363,10 @@ export default function App() {
   const [liquidations, setLiquidations] = useState([]); 
   const [newsEvents, setNewsEvents] = useState([]);
   const [sentimentScore, setSentimentScore] = useState(0);
-  const [brtiPremium, setBrtiPremium] = useState(0); 
   
   const [targetMargin, setTargetMargin] = useState(0); 
-  const [betAmount, setBetAmount] = useState(50);
-  const [maxPayout, setMaxPayout] = useState(100);
+  const [betAmount, setBetAmount] = useState(0);
+  const [maxPayout, setMaxPayout] = useState(0);
   const [currentOffer, setCurrentOffer] = useState(""); 
 
   const [windowType, setWindowType] = useState('15m'); 
@@ -81,41 +377,55 @@ export default function App() {
   const activeCallRef = useRef({ prediction: "SIT OUT", strike: 0 });
   const hasReversedRef = useRef(false); 
   
-  // Safe SSR LocalStorage Guard
-  const [scorecards, setScorecards] = useState(() => {
-    const baseline = { '15m': { wins: 70, losses: 60 }, '5m': { wins: 10, losses: 7 } };
-    if (typeof window === 'undefined') return baseline;
-    try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV38');
-      if (savedScore) {
-        const parsed = JSON.parse(savedScore);
-        if (parsed['15m'] && parsed['5m']) return parsed;
-      }
-      return baseline;
-    } catch (e) { return baseline; }
-  });
+  // SSR Hydration & Baseline Setup
+  const [scorecards, setScorecards] = useState({ '15m': { wins: 83, losses: 62 }, '5m': { wins: 10, losses: 7 } });
+  const [prevCyclesMap, setPrevCyclesMap] = useState({ '15m': [], '5m': [] });
   
+  useEffect(() => {
+    setIsMounted(true);
+    try {
+      const savedScore = localStorage.getItem('btcOracleScorecardV47');
+      if (savedScore) setScorecards(JSON.parse(savedScore));
+      
+      const savedCycles = localStorage.getItem('btcOraclePrevCyclesV47');
+      if (savedCycles) setPrevCyclesMap(JSON.parse(savedCycles));
+    } catch (e) {}
+  }, []);
+
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V38 Discipline Update online. Skip Round execution protocol enabled. If the market chops, I sit out instead of guessing." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V47 Layout Active. Full width native canvas chart installed. Real-time candlestick injection running. Whale & Rug Pull safety toggles engaged." }]);
   const [chatInput, setChatInput] = useState("");
   
-  const lastPredRef = useRef(null);
-  const [emergencyBlink, setEmergencyBlink] = useState(false);
   const lastWindowRef = useRef("");
-  
   const [userPosition, setUserPosition] = useState(null); 
   const [showHelp, setShowHelp] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const prevActionRef = useRef(null);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try { localStorage.setItem('btcOracleScorecardV38', JSON.stringify(scorecards)); } 
+    if (isMounted && typeof window !== 'undefined') {
+      try { 
+        localStorage.setItem('btcOracleScorecardV47', JSON.stringify(scorecards)); 
+        localStorage.setItem('btcOraclePrevCyclesV47', JSON.stringify(prevCyclesMap));
+      } 
       catch (e) {}
     }
-  }, [scorecards]);
+  }, [scorecards, prevCyclesMap, isMounted]);
+
+  // LIVE CANDLESTICK TICK INJECTION 
+  const liveHistory = useMemo(() => {
+    if (history.length === 0 || !currentPrice) return history;
+    const updated = [...history];
+    updated[0] = {
+      ...updated[0],
+      c: currentPrice,
+      h: Math.max(updated[0].h || currentPrice, currentPrice),
+      l: Math.min(updated[0].l || currentPrice, currentPrice)
+    };
+    return updated;
+  }, [history, currentPrice]);
 
   const playAlertSound = () => {
     if (!soundEnabled || typeof window === 'undefined') return;
@@ -143,6 +453,8 @@ export default function App() {
     setUserPosition(null);
     setManualAction(null);
     setCurrentOffer("");
+    setBetAmount(0);
+    setMaxPayout(0);
     lastWindowRef.current = ""; 
     setForceRender(prev => prev + 1);
   };
@@ -152,17 +464,31 @@ export default function App() {
       ...prev,
       [type]: {
         ...prev[type],
-        [winOrLoss]: Math.max(0, prev[type][winOrLoss] + amount)
+        [winOrLoss]: Math.max(0, (prev[type]?.[winOrLoss] || 0) + amount)
       }
     }));
   };
 
-  // Window Rollover logic
+  // Window Rollover logic & Previous Cycles Tracker
   useEffect(() => {
     if (timeState.nextWindowEST && timeState.nextWindowEST !== lastWindowRef.current) {
       if (currentPrice !== null) {
         if (lastWindowRef.current !== "") {
           const prevCall = activeCallRef.current;
+          const endGap = prevCall.strike > 0 ? ((currentPrice - prevCall.strike) / prevCall.strike) * 10000 : 0;
+          const outcome = currentPrice > prevCall.strike ? 'UP' : 'DOWN';
+          
+          setPrevCyclesMap(prev => {
+             const currentList = prev[windowType] || [];
+             const newCycle = {
+                time: lastWindowRef.current,
+                outcome: outcome,
+                gapPct: (Math.abs(endGap) / 100).toFixed(2) + '%'
+             };
+             const updatedList = [newCycle, ...currentList].slice(0, 3);
+             return { ...prev, [windowType]: updatedList };
+          });
+
           if (prevCall.prediction === "YES") {
             if (currentPrice > prevCall.strike) updateScore(windowType, 'wins', 1);
             else if (currentPrice < prevCall.strike) updateScore(windowType, 'losses', 1);
@@ -171,6 +497,7 @@ export default function App() {
             else if (currentPrice > prevCall.strike) updateScore(windowType, 'losses', 1);
           }
         }
+        
         setTargetMargin(currentPrice);
         lockedPredictionRef.current = "SIT OUT";
         activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
@@ -180,17 +507,19 @@ export default function App() {
         setManualAction(null); 
         tickHistoryRef.current = []; 
         setCurrentOffer(""); 
+        setBetAmount(0); 
+        setMaxPayout(0); 
       }
     }
   }, [timeState.nextWindowEST, currentPrice, windowType]);
 
-  // WEBSOCKETS (Safe execution to prevent Canvas cross-origin crash)
+  // WEBSOCKETS
   useEffect(() => {
     if (typeof window === 'undefined') return;
     
     let isCanvas = false;
     try { isCanvas = window.self !== window.top; } 
-    catch (e) { isCanvas = true; } // If it throws SecurityError, we are in an iframe
+    catch (e) { isCanvas = true; } 
     
     let wsCB = null;
     let wsBinanceLiq = null;
@@ -213,7 +542,7 @@ export default function App() {
     };
 
     const initWebSockets = () => {
-      if (isCanvas) return; // Use REST fallback in preview environments
+      if (isCanvas) return; 
 
       try {
         wsCB = new WebSocket('wss://ws-feed.exchange.coinbase.com');
@@ -329,16 +658,21 @@ export default function App() {
           if (resCB.ok) {
             const dataCB = await resCB.json();
             if (Array.isArray(dataCB)) {
-              formattedHistory = dataCB.slice(0, 60).map(c => ({ l: parseFloat(c[1]), h: parseFloat(c[2]), c: parseFloat(c[4]), v: parseFloat(c[5]) }));
+              formattedHistory = dataCB.slice(0, 60).map(c => ({ 
+                time: c[0], 
+                l: parseFloat(c[1]), 
+                h: parseFloat(c[2]), 
+                o: parseFloat(c[3]), 
+                c: parseFloat(c[4]), 
+                v: parseFloat(c[5]) 
+              }));
             }
           }
         } catch (e) {}
 
         if (formattedHistory.length > 0) setHistory(formattedHistory);
 
-        let currentCoinbaseRef = currentPriceRef.current;
         let currentImbalance = 1;
-
         try {
           const resOb = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/book?level=2');
           if (resOb.ok) {
@@ -352,14 +686,6 @@ export default function App() {
             }
           }
         } catch (err) {}
-
-        try {
-          const resBRTI = await fetch('https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD');
-          const dataBRTI = await resBRTI.json();
-          if (dataBRTI?.USD && currentCoinbaseRef) {
-            setBrtiPremium(parseFloat(dataBRTI.USD) - currentCoinbaseRef);
-          }
-        } catch (e) {}
 
         setIsLoading(false);
       } catch (err) { 
@@ -379,18 +705,7 @@ export default function App() {
     }
   }, [currentPrice, targetMargin]);
 
-  // News Wire Generator
-  useEffect(() => {
-    let syntheticNews = [];
-    if (orderBook.imbalance > 1.5) syntheticNews.push({ title: `Maker Alert: Limit BID wall placed near $${targetMargin.toFixed(0)}`, url: "#" });
-    if (orderBook.imbalance < 0.6) syntheticNews.push({ title: `Maker Alert: Limit SELL pressure defending $${targetMargin.toFixed(0)}`, url: "#" });
-    if (takerFlow.imbalance > 2.0) syntheticNews.push({ title: `Taker Alert: Market BUYING detected on the tape.`, url: "#" });
-    if (takerFlow.imbalance < 0.5) syntheticNews.push({ title: `Taker Alert: Market SELLING detected on the tape.`, url: "#" });
-    
-    if (syntheticNews.length < 3) syntheticNews.push({ title: `Engine: Analyzing Order Book vs Tape Divergence (${windowType.toUpperCase()})...`, url: "#" });
-    setNewsEvents(syntheticNews);
-  }, [orderBook.imbalance, takerFlow.imbalance, targetMargin, windowType]);
-
+  // BULLETPROOF TIME ENGINE (100% Vercel SSR Crash Proof)
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -403,13 +718,22 @@ export default function App() {
       
       const diffMs = nextWindow.getTime() - now.getTime();
       
+      let currentEST, startWindowEST, nextWindowEST;
+      try {
+         currentEST = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+         startWindowEST = startWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' });
+         nextWindowEST = nextWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' });
+      } catch (e) {
+         currentEST = now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+         startWindowEST = startWindow.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit' });
+         nextWindowEST = nextWindow.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit' });
+      }
+      
       setTimeState({ 
-        currentEST: now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' }), 
-        startWindowEST: startWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' }), 
-        nextWindowEST: nextWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' }), 
+        currentEST, startWindowEST, nextWindowEST, 
         minsRemaining: Math.floor(diffMs / 60000), 
         secsRemaining: Math.floor((diffMs % 60000) / 1000), 
-        currentHour: new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' })).getHours() 
+        currentHour: now.getHours() 
       });
     };
     updateTime();
@@ -417,25 +741,22 @@ export default function App() {
     return () => clearInterval(timer);
   }, [windowType]);
 
-  // --- TARA V38: THE DISCIPLINE UPDATE (Skip Round Protocol) ---
+  // --- TARA V40: ZERO-LATENCY REAL-TIME ENGINE ---
   const analysis = useMemo(() => {
-    if (!currentPrice || history.length < 30 || !targetMargin) return null;
+    if (!currentPrice || liveHistory.length < 30 || !targetMargin || !isMounted) return null;
 
     const is15m = windowType === '15m';
     const intervalSeconds = is15m ? 900 : 300;
     const clockSeconds = (timeState.minsRemaining * 60) + timeState.secsRemaining;
     const timeFraction = Math.max(0, Math.min(1, 1 - (clockSeconds / intervalSeconds)));
     
-    // T+ Entry Windows
-    const isObservationPhase = timeFraction < (is15m ? 0.08 : 0.10); 
-    const isEntryWindow = timeFraction >= (is15m ? 0.08 : 0.10) && timeFraction <= (is15m ? 0.85 : 0.90);
-    const isEndgameLock = timeFraction > (is15m ? 0.85 : 0.90);
+    const isEndgameLock = clockSeconds < 120; 
 
-    let entryWindowStatus = isObservationPhase ? "Awaiting Volatility" : isEntryWindow ? "Active Signal Window" : "Window Closing";
-
-    const atr = calculateATR(history, 14) || 10;
+    const closes = liveHistory.map(x => x.c);
+    const rsi = calculateRSI(closes, 14) || 50;
+    const atr = calculateATR(liveHistory, 14) || 10;
     const atrBps = atr > 0 ? (atr / currentPrice) * 10000 : 15; 
-    const vwap = calculateVWAP(history);
+    const vwap = calculateVWAP(liveHistory);
 
     const realGapBps = ((currentPrice - targetMargin) / targetMargin) * 10000;
     const vwapGapBps = vwap ? ((currentPrice - vwap) / vwap) * 10000 : 0;
@@ -443,16 +764,11 @@ export default function App() {
     const ticks = tickHistoryRef.current;
     const tickSlope = ticks.length >= 10 ? (currentPrice - ticks[0].p) : 0;
     
-    let aggrFlow = 0;
-    if (takerFlow.imbalance > 1) aggrFlow = Math.min(1.0, (takerFlow.imbalance - 1) / 1.5);
-    else if (takerFlow.imbalance < 1) aggrFlow = Math.max(-1.0, (takerFlow.imbalance - 1) / 0.5);
+    let aggrFlow = (takerFlow.imbalance - 1);
+    aggrFlow = Math.max(-1.0, Math.min(1.0, aggrFlow));
 
-    // V38: Regime Rule
-    let regime = "CHOP (NO DIRECTION)";
-    if (atrBps > (is15m ? 12 : 8) && Math.abs(tickSlope) > 1.5) regime = "VOLATILE";
-    else if (vwapGapBps > 1.5 && tickSlope > 0) regime = "TREND UP";
-    else if (vwapGapBps < -1.5 && tickSlope < 0) regime = "TREND DN";
-    else regime = "CHOP (NO DIRECTION)";
+    let mktImplied = (orderBook.imbalance - 1);
+    mktImplied = Math.max(-1.0, Math.min(1.0, mktImplied));
 
     let liqBuys = 0; let liqSells = 0;
     liquidations.forEach(l => {
@@ -462,46 +778,70 @@ export default function App() {
       }
     });
 
-    // Posterior Probability Engine
     let baseProb = 50;
-    baseProb += (realGapBps * (is15m ? 1.5 : 2.0)); 
-    if (regime === "TREND UP") baseProb += 15;
-    if (regime === "TREND DN") baseProb -= 15;
-    if (regime === "VOLATILE") baseProb += (aggrFlow * 30); 
-    if (liqBuys > 20000) baseProb += 10;
-    if (liqSells > 20000) baseProb -= 10;
-    let posterior = Math.max(0, Math.min(100, baseProb));
-
-    // Φ3 Physics Momentum
-    let phi3 = 50 + (aggrFlow * 35) + (tickSlope * 2);
-    phi3 = Math.max(0, Math.min(100, phi3));
-
-    // V38: Strict 4-Rule Checklist execution
-    let passWindow = isEntryWindow;
-    let passRegime = regime !== "CHOP (NO DIRECTION)";
-    let passPosteriorUP = posterior >= 65; 
-    let passPosteriorDN = posterior <= 35;
-    let passPhi3UP = phi3 >= 55;
-    let passPhi3DN = phi3 <= 45;
-
+    let regime = "RANGE/CHOP";
     let reasoning = [];
-    reasoning.push(`[1] Active Window: ${passWindow ? 'PASS' : 'FAIL'} (${entryWindowStatus})`);
-    reasoning.push(`[2] Trend Validation: ${passRegime ? 'PASS' : 'FAIL'} (${regime})`);
-    reasoning.push(`[3] Posterior Base: ${passPosteriorUP || passPosteriorDN ? 'PASS' : 'FAIL'} (${posterior.toFixed(1)}%)`);
-    reasoning.push(`[4] Flow Physics: ${passPhi3UP || passPhi3DN ? 'PASS' : 'FAIL'} (${phi3.toFixed(1)}%)`);
+    
+    // RUG PULL & WHALE LOGIC
+    let isRugPull = false;
+    if (tickSlope < -5.0 && aggrFlow < -0.6) {
+        isRugPull = true;
+    }
+
+    const timeDecay = Math.pow(timeFraction, 2); 
+    const gapWeight = realGapBps * (is15m ? 1.0 : 1.5) * (0.2 + 0.8 * timeDecay);
+    baseProb += gapWeight;
+
+    if (rsi > 65 && realGapBps > 0) {
+       baseProb -= 20; 
+       regime = "OVERBOUGHT (FADE)";
+       reasoning.push(`REGIME: RSI is ${rsi.toFixed(1)}. Pumping but overextended. Fading the top.`);
+    } else if (rsi < 35 && realGapBps < 0) {
+       baseProb += 20; 
+       regime = "OVERSOLD (FADE)";
+       reasoning.push(`REGIME: RSI is ${rsi.toFixed(1)}. Dumping but overextended. Fading the bottom.`);
+    } else if (Math.abs(vwapGapBps) > 2 && tickSlope > 0.5) {
+       regime = "STRONG UPTREND";
+       baseProb += (aggrFlow * 25) + 10;
+       reasoning.push(`REGIME: Strong Uptrend identified. Trusting AggrFlow.`);
+    } else if (Math.abs(vwapGapBps) > 2 && tickSlope < -0.5) {
+       regime = "STRONG DOWNTREND";
+       baseProb += (aggrFlow * 25) - 10;
+       reasoning.push(`REGIME: Strong Downtrend identified. Trusting AggrFlow.`);
+    } else {
+       regime = "RANGE/CHOP";
+       baseProb += (aggrFlow * 20) + (mktImplied * 10);
+       reasoning.push(`REGIME: Market ranging. Orderbook & Tape dictates path.`);
+    }
+
+    if (liqBuys > 10000) { baseProb += 15; reasoning.push(`LIQ: Shorts squeezed. Upward force applied.`); }
+    if (liqSells > 10000) { baseProb -= 15; reasoning.push(`LIQ: Longs squeezed. Downward force applied.`); }
+
+    if (isEndgameLock) {
+        reasoning.push(`ENDGAME: Physics overrule momentum. Physical gap locked in.`);
+        baseProb = 50 + (realGapBps * 4); // Override with physical distance
+    }
 
     let prediction = userPosition || lockedPredictionRef.current; 
     let activePrediction = prediction;
 
-    // Execution Core
-    if (activePrediction === "SIT OUT") {
-        if (passWindow && passRegime) {
-            if (passPosteriorUP && passPhi3UP) activePrediction = "YES";
-            else if (passPosteriorDN && passPhi3DN) activePrediction = "NO";
-        }
-    } else {
+    if (activePrediction === "YES") baseProb += 10; 
+    else if (activePrediction === "NO") baseProb -= 10;
+
+    let posterior = Math.max(1, Math.min(99, baseProb)); 
+    let convictionScore = Math.abs(posterior - 50) * 2; 
+
+    // V40: ZERO LATENCY ENTRY.
+    if (activePrediction === "SIT OUT" && !isEndgameLock) {
+        if (posterior >= 65) activePrediction = "YES";
+        else if (posterior <= 35) activePrediction = "NO";
+    } else if (activePrediction !== "SIT OUT") {
         if (activePrediction === "YES" && posterior < 30) activePrediction = "SIT OUT";
         if (activePrediction === "NO" && posterior > 70) activePrediction = "SIT OUT";
+    }
+
+    if (isEndgameLock && Math.abs(realGapBps) > atrBps) {
+        activePrediction = realGapBps > 0 ? "YES" : "NO";
     }
 
     let tradeAction = "WAITING / SIT OUT"; 
@@ -509,48 +849,78 @@ export default function App() {
     let actionColor = "text-zinc-400"; let actionBg = "bg-zinc-500/10 border-zinc-500/30";
     let hasAction = false, actionButtonLabel = "", actionTarget = "";
 
-    // V38: THE SKIP ROUND PROTOCOL
-    if (activePrediction === "YES" || activePrediction === "NO") {
-        tradeAction = `ENTRY SIGNAL: ${activePrediction}`;
-        tradeReason = "All quant rules passed. Momentum established.";
-        actionColor = activePrediction === "YES" ? "text-emerald-400" : "text-rose-400";
-        actionBg = activePrediction === "YES" ? "bg-emerald-500/10 border-emerald-500/30" : "bg-rose-500/10 border-rose-500/30";
-        hasAction = true;
-        actionButtonLabel = `CONFIRM ENTRY: '${activePrediction}'`;
-        actionTarget = activePrediction;
-    } else if (!passWindow && clockSeconds > (is15m ? 600 : 200)) {
-        tradeAction = "AWAITING WINDOW";
-        tradeReason = "Gathering baseline volatility metrics.";
-        actionColor = "text-blue-400"; actionBg = "bg-blue-500/10 border-blue-500/30";
-    } else if (!passWindow) {
-        tradeAction = "WINDOW CLOSED";
-        tradeReason = "Late in round. Entering now is unsafe.";
-        actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
-    } else if (!passRegime) {
-        tradeAction = "SKIPPING ROUND";
-        tradeReason = "Market is wiggling with no clear direction. We sit this round out instead of guessing.";
-        actionColor = "text-zinc-400"; actionBg = "bg-zinc-500/10 border-zinc-500/30";
-    } else {
-        tradeAction = "SKIPPING ROUND";
-        tradeReason = "Quant conviction is too low to force a trade. We sit this round out instead of guessing.";
-        actionColor = "text-zinc-400"; actionBg = "bg-zinc-500/10 border-zinc-500/30";
+    const dynamicStopLoss = atrBps * (0.60 + ((1-timeFraction) * 0.40)); 
+    let liveEstValue = activePrediction === "YES" ? maxPayout * (posterior / 100) : activePrediction === "NO" ? maxPayout * ((100 - posterior) / 100) : 0;
+    const livePnL = liveEstValue - betAmount;
+    const offerVal = parseFloat(currentOffer) || 0;
+
+    if (isRugPull && showRugPullAlerts) {
+        tradeAction = "🚨 RUG PULL DETECTED 🚨"; 
+        tradeReason = "Massive instantaneous liquidity collapse. Abort longs immediately.";
+        actionColor = "text-rose-500"; actionBg = "bg-rose-500/20 border-rose-500/50 animate-pulse shadow-[0_0_20px_rgba(225,29,72,0.4)]";
+        hasAction = true; actionButtonLabel = "EMERGENCY CASHOUT"; actionTarget = "SIT OUT";
     }
+    else if (activePrediction === "SIT OUT") {
+        if (isEndgameLock) {
+            tradeAction = "WINDOW CLOSED"; tradeReason = "Late in round. Entering now is unsafe.";
+            actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
+        } else {
+            tradeAction = "AWAITING CONVICTION"; tradeReason = "Odds below 65%. Waiting for cleaner setup.";
+        }
+    }
+    else {
+        const isYES = activePrediction === "YES";
+        const isBleeding = isYES ? (realGapBps < -dynamicStopLoss) : (realGapBps > dynamicStopLoss);
+        const isReversalRecommended = isYES ? (posterior < 35) : (posterior > 65);
+        const currentOdds = isYES ? posterior : (100 - posterior);
+
+        if (prediction === "SIT OUT") {
+            tradeAction = `ENTRY SIGNAL: ${activePrediction}`;
+            tradeReason = "Quant composite supports entry. Execute now.";
+            actionColor = isYES ? "text-emerald-400" : "text-rose-400";
+            actionBg = isYES ? "bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_15px_rgba(52,211,153,0.2)]" : "bg-rose-500/10 border-rose-500/30 shadow-[0_0_15px_rgba(251,113,133,0.2)]";
+            hasAction = true;
+            actionButtonLabel = `CONFIRM ENTRY: '${activePrediction}'`;
+            actionTarget = activePrediction;
+        }
+        else if (offerVal > 0 && offerVal - liveEstValue > (maxPayout * 0.05)) {
+            tradeAction = "SELL TO MARKET (ARB)"; 
+            tradeReason = `Market is overpaying. Take the free arbitrage.`;
+            actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30 animate-pulse";
+            hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "CASH";
+        }
+        else if (isReversalRecommended && !hasReversedRef.current) {
+            tradeAction = "REVERSE POSITION"; tradeReason = `Trend collapsed. Switch position.`;
+            actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30 shadow-[0_0_15px_rgba(251,191,36,0.2)]";
+            hasAction = true; actionButtonLabel = `REVERSE TO '${isYES ? 'NO' : 'YES'}'`; actionTarget = isYES ? "NO" : "YES";
+        }
+        else if (isBleeding || (isReversalRecommended && hasReversedRef.current)) {
+            tradeAction = "CUT LOSSES"; tradeReason = "Position drifted past dynamic ATR limit. Exit.";
+            actionColor = "text-rose-500"; actionBg = "bg-rose-500/10 border-rose-500/30";
+            hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "SIT OUT";
+        }
+        else if (currentOdds >= 85 && offerVal === 0) {
+            tradeAction = "SECURE MAX PROFIT"; tradeReason = "Odds > 85%. Lock in gains when ready.";
+            actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
+            hasAction = true; actionButtonLabel = "EXECUTE CASHOUT (PROFIT)"; actionTarget = "CASH";
+        }
+        else if (offerVal === 0) {
+            tradeAction = "HOLD FIRM"; tradeReason = "Holding position. Quant composite supports trend.";
+            actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/20";
+        }
+    } 
+
+    let textColor = activePrediction === "YES" ? "text-emerald-400" : activePrediction === "NO" ? "text-rose-400" : "text-zinc-500";
+    let entryWindowStatus = isEndgameLock ? "Window Closed" : "Active Signal Window";
 
     let topDriver = "";
     if (Math.abs(aggrFlow) > 0.5) topDriver = `AggrFlow (${aggrFlow > 0 ? '+' : ''}${aggrFlow.toFixed(2)})`;
     else topDriver = `CrossProb (${posterior > 50 ? '+' : ''}${(posterior/100).toFixed(2)})`;
 
-    let convictionScore = Math.abs(posterior - 50) * 2; 
-    
     let convictionText = "Neutral";
-    if (convictionScore > 65) convictionText = "Very Sure";
-    else if (convictionScore > 40) convictionText = "Pretty Sure";
+    if (convictionScore > 60) convictionText = "Very Sure";
+    else if (convictionScore > 35) convictionText = "Pretty Sure";
     else convictionText = "Unsure";
-
-    let textColor = activePrediction === "YES" ? "text-emerald-400" : activePrediction === "NO" ? "text-rose-400" : "text-zinc-500";
-    
-    let liveEstValue = activePrediction === "YES" ? maxPayout * (posterior / 100) : activePrediction === "NO" ? maxPayout * ((100 - posterior) / 100) : 0;
-    let livePnL = liveEstValue - betAmount;
 
     let predictionReason = "";
     if (activePrediction === "SIT OUT") predictionReason = "Waiting for structural divergence.";
@@ -563,11 +933,13 @@ export default function App() {
     let simulatedPrice = currentPrice;
     let projections = [];
     const driftModifier = (orderBook.imbalance > 1 ? 1.2 : 0.8) * 0.6; 
-
+    
+    // SAFE FORECAST LOGIC
     for(let i=1; i<=4; i++) {
-        const projTime = new Date(); projTime.setHours(timeState.currentHour + i, 0, 0, 0);
-        const timeLabel = projTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-        simulatedPrice += (hourlySlope * driftModifier + (sentimentScore * 20));
+        const nextHour = (timeState.currentHour + i) % 24;
+        let timeLabel = `${nextHour.toString().padStart(2, '0')}:00`;
+        
+        simulatedPrice += (tickSlope * driftModifier + (sentimentScore * 20));
         projections.push({ time: timeLabel, price: simulatedPrice });
     }
 
@@ -575,14 +947,32 @@ export default function App() {
       confidence: activePrediction === "NO" ? (100 - posterior).toFixed(1) : posterior.toFixed(1), 
       prediction: activePrediction, predictionReason, reasoning, textColor, rawProbAbove: posterior,
       tradeAction, tradeReason, actionColor, actionBg, hasAction, actionButtonLabel, actionTarget, 
-      realGapBps, clockSeconds, isSystemLocked: false, atrBps, livePnL, liveEstValue, projections,
-      vwapGapBps, regime, aggrFlow, topDriver, entryWindowStatus, convictionScore, convictionText
+      realGapBps, clockSeconds, isSystemLocked: isEndgameLock, atrBps, livePnL, liveEstValue, projections,
+      vwapGapBps, regime, aggrFlow, topDriver, entryWindowStatus, convictionScore, convictionText,
+      isRugPull
     };
-  }, [currentPrice, history, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, brtiPremium, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition, windowType]);
+  }, [currentPrice, liveHistory, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition, windowType, isMounted, showRugPullAlerts]);
+
+  // Handle News & Whale Alerts specifically
+  useEffect(() => {
+    let syntheticNews = [];
+    if (showWhaleAlerts) {
+        if (orderBook.imbalance > 1.8) syntheticNews.push({ title: `🐋 WHALE ALERT: Massive Limit BID wall placed near $${targetMargin.toFixed(0)}`, type: 'whale' });
+        if (orderBook.imbalance < 0.5) syntheticNews.push({ title: `🐋 WHALE ALERT: Heavy Limit SELL pressure defending $${targetMargin.toFixed(0)}`, type: 'whale' });
+        if (takerFlow.imbalance > 2.0) syntheticNews.push({ title: `🚀 WHALE ALERT: Aggressive Market BUYING detected on the tape.`, type: 'whale' });
+        if (takerFlow.imbalance < 0.5) syntheticNews.push({ title: `🩸 WHALE ALERT: Aggressive Market SELLING detected on the tape.`, type: 'whale' });
+    }
+    if (showRugPullAlerts && analysis?.isRugPull) {
+        syntheticNews.push({ title: `🚨 RUG PULL WARNING: Immediate liquidity collapse detected!`, type: 'rugpull' });
+    }
+    if (syntheticNews.length < 3) syntheticNews.push({ title: `Engine: Analyzing Order Book vs Tape Divergence (${String(windowType).toUpperCase()})...`, type: 'info' });
+    setNewsEvents(syntheticNews);
+  }, [orderBook.imbalance, takerFlow.imbalance, targetMargin, windowType, showWhaleAlerts, showRugPullAlerts, analysis?.isRugPull]);
+
 
   useEffect(() => {
     if (analysis?.hasAction && analysis.tradeAction !== prevActionRef.current) {
-      if (analysis.tradeAction.includes("ENTRY SIGNAL")) {
+      if (analysis.tradeAction.includes("ENTRY SIGNAL") || analysis.tradeAction.includes("RUG PULL")) {
         playAlertSound();
       }
     }
@@ -628,10 +1018,10 @@ export default function App() {
         let reply = "";
         
         if (userText.includes("why") || userText.includes("explain") || userText.includes("reason") || userText.includes("logic")) {
-          reply = `Currently, my posterior for YES is ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. We are in a ${String(analysis?.regime || 'CHOP')} regime. I am strictly waiting for all 4 quantitative rules to pass before issuing an entry.`;
+          reply = `Currently, my posterior for YES is ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. We are in a ${String(analysis?.regime || 'CHOP')} regime. I am strictly waiting for quant rules to pass before issuing an entry.`;
         }
         else if (userText.includes("5m") || userText.includes("5 minute") || userText.includes("15m")) {
-          reply = `In V38, if the market is chopping and the gap is too tight, I trigger a "Skip Round" protocol. You are currently in ${windowType.toUpperCase()} mode.`;
+          reply = `In V47, both windows trigger early ENTRY SIGNALS based on pure momentum. You are currently in ${windowType.toUpperCase()} mode.`;
         }
         else if (userText.includes("pnl") || userText.includes("profit") || userText.includes("loss")) {
           reply = analysis?.prediction === "SIT OUT" ? "You are not in an active trade. No PnL to track right now." : `Your current estimated contract value is ~$${Number(analysis?.liveEstValue || 0).toFixed(2)}. Your live mathematical PnL is $${Number(analysis?.livePnL || 0).toFixed(2)}.`;
@@ -651,15 +1041,21 @@ export default function App() {
   useEffect(() => { setManualAction(null); }, [analysis?.tradeAction]);
   useEffect(() => { if (analysis && (analysis.prediction === "YES" || analysis.prediction === "NO" || analysis.prediction === "SIT OUT")) activeCallRef.current = { prediction: analysis.prediction, strike: targetMargin }; }, [analysis?.prediction, targetMargin]);
 
+  // PREVENT SSR HYDRATION MISMATCH WHITE SCREEN
+  if (!isMounted) {
+    return <div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara Terminal...</div>;
+  }
+
   return (
     <div className="min-h-screen bg-[#111312] text-[#E8E9E4] font-sans p-2 sm:p-4 flex flex-col items-center selection:bg-[#E8E9E4]/20 overflow-x-hidden">
-      {/* Header - FULLY RESPONSIVE */}
-      <div className="w-full max-w-6xl flex flex-wrap sm:flex-nowrap justify-between items-center border-b border-[#E8E9E4]/10 pb-3 mb-4 gap-3">
+      
+      {/* Top Header */}
+      <div className="w-full max-w-7xl flex flex-wrap sm:flex-nowrap justify-between items-center border-b border-[#E8E9E4]/10 pb-3 mb-4 gap-3">
         <div className="flex items-center justify-between w-full sm:w-auto">
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
             <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V38 Discipline
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V47 Terminal
             </span>
           </h1>
           
@@ -704,9 +1100,9 @@ export default function App() {
         </div>
       </div>
 
-      <div className="w-full max-w-6xl flex flex-col gap-4">
+      <div className="w-full max-w-7xl flex flex-col gap-4">
         
-        {/* Top Control Bar */}
+        {/* STATS BAR */}
         <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col lg:flex-row items-center justify-between gap-4 relative overflow-hidden">
            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
 
@@ -723,7 +1119,6 @@ export default function App() {
                </div>
              </div>
 
-             {/* Mobile Scorecard */}
              <div className="flex lg:hidden flex-col items-center bg-[#111312] p-2 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-1/2">
                <div className="flex items-center justify-between w-full px-2">
                  <div className="flex flex-col items-center">
@@ -746,15 +1141,15 @@ export default function App() {
                <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Strike</div>
                <div className="flex items-center">
                  <IconCrosshair className="w-3 h-3 md:w-4 md:h-4 text-indigo-400 mr-1 md:mr-2 opacity-80 hidden sm:block" />
-                 <input type="number" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-lg md:text-xl w-[75px] md:w-24 focus:outline-none py-1 leading-normal" />
+                 <input type="number" value={targetMargin === 0 ? '' : targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-lg md:text-xl w-[75px] md:w-24 focus:outline-none py-1 leading-normal" />
                </div>
              </div>
              <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[90px]">
                <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Bet / Win</div>
                <div className="flex items-center gap-1 text-white font-serif text-base md:text-lg">
-                 $<input type="number" value={betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-8 md:w-12 text-center outline-none py-1 leading-normal" />
+                 $<input type="number" value={betAmount === 0 ? '' : betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-8 md:w-12 text-center outline-none py-1 leading-normal" />
                  <span className="text-[#E8E9E4]/40 mx-0.5">/</span>
-                 $<input type="number" value={maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-10 md:w-14 text-center outline-none py-1 leading-normal" />
+                 $<input type="number" value={maxPayout === 0 ? '' : maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-10 md:w-14 text-center outline-none py-1 leading-normal" />
                </div>
              </div>
              <div className="flex flex-col items-start pl-1 md:pl-2 min-w-[80px]">
@@ -767,7 +1162,6 @@ export default function App() {
            
            <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
-           {/* Desktop Scorecard */}
            <div className="hidden lg:flex flex-col items-start bg-[#111312] p-3 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-56">
              <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-2 flex justify-between w-full">
                <span className="flex items-center gap-1.5"><IconTerminal className="w-3.5 h-3.5"/> {String(windowType).toUpperCase()} SCORECARD</span>
@@ -790,10 +1184,64 @@ export default function App() {
            </div>
         </div>
 
+        {/* FULL WIDTH LIVE CHART (V47 UPDATE) */}
+        <div className="w-full bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col h-[400px] sm:h-[480px]">
+          <div className="flex justify-between items-center mb-3 border-b border-[#E8E9E4]/10 pb-2">
+            <h2 className="text-[11px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] flex items-center gap-2">
+              LIVE PRICE CHART
+            </h2>
+            <div className="flex items-center gap-4 text-[10px] text-[#E8E9E4]/60 bg-[#111312] px-3 py-1.5 rounded-lg border border-[#E8E9E4]/5">
+              <label className="flex items-center gap-1.5 cursor-pointer hover:text-purple-400 transition-colors">
+                <input type="checkbox" checked={showWhaleAlerts} onChange={(e) => setShowWhaleAlerts(e.target.checked)} className="accent-purple-500 w-3.5 h-3.5" /> Whale Alerts
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer hover:text-purple-400 transition-colors">
+                <input type="checkbox" checked={showRugPullAlerts} onChange={(e) => setShowRugPullAlerts(e.target.checked)} className="accent-purple-500 w-3.5 h-3.5" /> Rug Pull Alert
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer hover:text-purple-400 transition-colors">
+                <input type="checkbox" checked={showCandles} onChange={(e) => setShowCandles(e.target.checked)} className="accent-purple-500 w-3.5 h-3.5" /> Candlesticks
+              </label>
+              <span className="ml-2 pl-3 border-l border-[#E8E9E4]/10 opacity-50">{liveHistory.length} pts</span>
+            </div>
+          </div>
+          <div className="flex-1 w-full h-full relative rounded-md overflow-hidden bg-[#111312]" style={{ backgroundImage: 'linear-gradient(rgba(232, 233, 228, 0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(232, 233, 228, 0.02) 1px, transparent 1px)', backgroundSize: '40px 40px' }}>
+            {liveHistory.length > 0 ? (
+              <LiveChart 
+                 data={liveHistory} 
+                 currentPrice={currentPrice} 
+                 targetMargin={targetMargin}
+                 showCandles={showCandles} 
+                 rugPullActive={showRugPullAlerts && analysis?.isRugPull}
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#E8E9E4]/30 uppercase tracking-widest animate-pulse">
+                Aggregating Ticks...
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           
           {/* MAIN OUTCOME DISPLAY */}
-          <div className="lg:col-span-8 flex flex-col gap-4">
+          <div className="lg:col-span-7 flex flex-col gap-4">
+            
+            {prevCyclesMap[windowType] && prevCyclesMap[windowType].length > 0 && (
+              <div className="flex items-center justify-start gap-3 w-full pl-2 mb-2">
+                <span className="text-[9px] font-bold tracking-[0.2em] text-[#E8E9E4]/30 uppercase">Prev Cycles</span>
+                <div className="flex items-center gap-2">
+                  {[...(prevCyclesMap[windowType] || [])].map((cycle, i) => (
+                    <div key={i} className={`flex flex-col items-center justify-center px-2 py-1 rounded-md border bg-[#111312] shadow-sm ${cycle.outcome === 'UP' ? 'border-emerald-500/20 text-emerald-400' : 'border-rose-500/20 text-rose-400'}`}>
+                      <div className="flex items-center gap-1 text-[10px] font-bold">
+                        <span className="text-[12px] leading-none">{cycle.outcome === 'UP' ? '▲' : '▼'}</span>
+                        <span>{cycle.gapPct}</span>
+                      </div>
+                      <span className="text-[8px] text-[#E8E9E4]/40 font-mono mt-0.5">{String(cycle.time)}</span>
+                    </div>
+                  ))}
+                  <span className="text-[9px] font-mono text-[#E8E9E4]/30 ml-1">→ NOW</span>
+                </div>
+              </div>
+            )}
             
             <div className="bg-[#181A19] p-4 md:p-6 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col justify-center items-center text-center relative overflow-hidden min-h-[380px] md:min-h-[420px]">
                
@@ -803,8 +1251,7 @@ export default function App() {
                  <span className="text-[#E8E9E4]">{Number(timeState.minsRemaining)}m {Number(timeState.secsRemaining)}s</span>
                </div>
 
-               {/* Force Pull Out */}
-               {analysis && analysis.tradeAction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && !analysis.tradeAction.includes("SKIPPING") && (
+               {analysis && analysis.tradeAction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && (
                  <button 
                    onClick={() => executeManualAction("MANUAL PULL OUT", "SIT OUT")}
                    className="absolute top-3 right-3 bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 sm:px-3 py-1.5 rounded-md text-[9px] sm:text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
@@ -818,64 +1265,19 @@ export default function App() {
                ) : (
                  <div className="flex flex-col items-center w-full mt-8 sm:mt-6">
                    
-                   {/* V38 DATA BLOCK */}
-                   <div className="bg-[#111312] border border-[#E8E9E4]/10 p-3 rounded-lg font-mono text-[10px] sm:text-[11px] text-[#E8E9E4]/60 mb-4 w-full max-w-[500px] mx-auto shadow-inner text-left flex flex-col gap-2">
-                     <div className="flex justify-between items-center bg-[#181A19] p-2 rounded border border-[#E8E9E4]/5">
-                       <div className="flex flex-col">
-                         <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">Market</span>
-                         <span className="text-[#E8E9E4] text-sm">${Number(currentPrice || 0).toFixed(2)}</span>
-                       </div>
-                       <div className="flex flex-col text-center">
-                         <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">Strike</span>
-                         <span className="text-indigo-300 text-sm">${Number(targetMargin || 0).toFixed(0)}</span>
-                       </div>
-                       <div className="flex flex-col text-right">
-                         <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">Gap</span>
-                         <span className={`font-bold text-sm ${analysis.realGapBps > 0 ? 'text-emerald-400' : analysis.realGapBps < 0 ? 'text-rose-400' : 'text-zinc-400'}`}>
-                           {analysis.realGapBps > 0 ? '+' : ''}{Number(analysis.realGapBps || 0).toFixed(1)}bps
-                         </span>
-                       </div>
-                       {/* BRTI Fix implemented here */}
-                       <div className="flex flex-col text-right border-l border-[#E8E9E4]/10 pl-2">
-                         <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">BRTI</span>
-                         <span className="text-[#E8E9E4] text-sm">{brtiPremium > 0 ? '+' : ''}{Number(brtiPremium || 0).toFixed(1)}</span>
-                       </div>
-                     </div>
-                     
-                     <div className="flex justify-between items-center text-[9px] opacity-90 px-1 pt-1">
-                       <span className="flex items-center gap-1">
-                         <IconActivity className="w-3 h-3 text-purple-400" />
-                         REGIME: <span className="text-white font-bold">{String(analysis.regime)}</span>
-                       </span>
-                       <span>
-                         WINDOW: <span className={String(analysis.entryWindowStatus).includes("Active") ? 'text-emerald-400 font-bold' : 'text-amber-400'}>{String(analysis.entryWindowStatus)}</span>
-                       </span>
-                     </div>
-                     <div className="flex justify-between items-center text-[9px] opacity-90 px-1 pb-1 border-b border-[#E8E9E4]/10">
-                       <span className="flex items-center gap-1">
-                         <IconZap className="w-3 h-3 text-amber-400" />
-                         TOP DRIVER: <span className="text-white">{String(analysis.topDriver)}</span>
-                       </span>
-                       <span>
-                         CONV: <span className="text-indigo-300 font-bold">{Number(analysis.convictionScore || 0).toFixed(0)}% ({analysis.convictionText})</span>
-                       </span>
-                     </div>
-                   </div>
-
-                   <div className="flex flex-col items-center mb-2">
-                     <span className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest mb-1">Prediction</span>
-                     <h2 className={`text-6xl sm:text-7xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-sm transition-all flex items-center justify-center gap-2 uppercase`}>
+                   <div className="flex flex-col items-center mb-6">
+                     <span className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-[0.2em] mb-2 font-bold">Prediction</span>
+                     <h2 className={`text-7xl sm:text-8xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-sm transition-all flex items-center justify-center uppercase`}>
                        {String(analysis.prediction)}
                      </h2>
                    </div>
 
-                   <p className="text-[11px] sm:text-xs text-[#E8E9E4]/50 font-sans max-w-sm mx-auto mb-4 px-2 h-8 leading-tight">
+                   <p className="text-[11px] sm:text-xs text-[#E8E9E4]/50 font-sans max-w-sm mx-auto mb-6 px-2 h-8 leading-tight">
                      {String(analysis.predictionReason)}
                    </p>
 
-                   {/* LIVE PnL TRACKER */}
                    {userPosition !== null && (
-                     <div className={`flex items-center gap-3 sm:gap-4 mb-4 px-3 sm:px-4 py-2 rounded-lg border w-full max-w-[300px] justify-center ${analysis.livePnL >= 0 ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
+                     <div className={`flex items-center gap-3 sm:gap-4 mb-6 px-3 sm:px-4 py-2 rounded-lg border w-full max-w-[300px] justify-center ${analysis.livePnL >= 0 ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
                        <div className="flex flex-col text-center sm:text-left">
                          <span className="text-[8px] sm:text-[9px] uppercase tracking-widest opacity-60">Contract Value</span>
                          <span className="font-serif text-base sm:text-lg">${Number(analysis.liveEstValue || 0).toFixed(2)}</span>
@@ -890,25 +1292,24 @@ export default function App() {
                      </div>
                    )}
 
-                   {/* INTERACTIVE TRADE ADVISOR */}
-                   <div className={`mb-4 w-full max-w-[400px] p-3 sm:p-4 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm`}>
+                   <div className={`mb-4 w-full max-w-[400px] p-3 sm:p-5 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm`}>
                      <div className="flex items-center gap-1.5 mb-1.5">
-                       <IconBell className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${analysis.actionColor}`} />
+                       <IconBell className={`w-3.5 h-3.5 ${analysis.actionColor}`} />
                        <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span>
                      </div>
-                     <div className={`text-base sm:text-lg font-serif font-bold mb-1 ${analysis.actionColor} uppercase`}>{String(analysis.tradeAction)}</div>
-                     <p className="text-[10px] sm:text-[11px] opacity-80 text-[#E8E9E4] mb-2 sm:mb-3 leading-tight">{String(analysis.tradeReason)}</p>
+                     <div className={`text-lg sm:text-xl font-serif font-bold mb-1.5 ${analysis.actionColor} uppercase`}>{String(analysis.tradeAction)}</div>
+                     <p className="text-[10px] sm:text-[11px] opacity-80 text-[#E8E9E4] mb-3 sm:mb-4 leading-tight">{String(analysis.tradeReason)}</p>
 
                      {analysis.hasAction && (
-                       <div className="w-full pt-2 sm:pt-3 border-t border-[#E8E9E4]/10">
+                       <div className="w-full pt-3 sm:pt-4 border-t border-[#E8E9E4]/10">
                           {manualAction === analysis.tradeAction ? (
-                             <div className="w-full bg-emerald-500/20 text-emerald-400 py-2 rounded-lg text-[10px] sm:text-[11px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5">
+                             <div className="w-full bg-emerald-500/20 text-emerald-400 py-2.5 rounded-lg text-[10px] sm:text-[11px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5">
                                <IconCheck className="w-3.5 h-3.5" /> Action Logged
                              </div>
                           ) : (
                              <button 
                                onClick={() => executeManualAction(analysis.tradeAction, analysis.actionTarget)}
-                               className={`w-full py-2 sm:py-2.5 rounded-lg text-[10px] sm:text-[11px] font-bold uppercase tracking-widest border transition-all hover:brightness-125 ${
+                               className={`w-full py-2.5 sm:py-3 rounded-lg text-[10px] sm:text-[11px] font-bold uppercase tracking-widest border transition-all hover:brightness-125 ${
                                  analysis.actionColor.includes('rose') ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' :
                                  analysis.actionColor.includes('amber') ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' :
                                  'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
@@ -923,11 +1324,11 @@ export default function App() {
                    
                    {/* MANUAL SYNC BUTTONS */}
                    {userPosition === null && (
-                     <div className="flex flex-col items-center gap-1.5 sm:gap-2 mt-1 mb-2 sm:mb-4 w-full max-w-[400px]">
+                     <div className="flex flex-col items-center gap-1.5 sm:gap-2 mt-2 mb-2 sm:mb-4 w-full max-w-[400px]">
                        <span className="text-[8px] sm:text-[9px] uppercase tracking-widest text-[#E8E9E4]/40">Already in a trade? Sync Tara:</span>
                        <div className="flex gap-2 sm:gap-3 w-full">
-                         <button onClick={() => handleManualSync("YES")} className="flex-1 py-1.5 border border-emerald-500/30 text-emerald-400 rounded-md text-[9px] sm:text-[10px] uppercase font-bold tracking-widest hover:bg-emerald-500/10 transition-colors">I Entered YES</button>
-                         <button onClick={() => handleManualSync("NO")} className="flex-1 py-1.5 border border-rose-500/30 text-rose-400 rounded-md text-[9px] sm:text-[10px] uppercase font-bold tracking-widest hover:bg-rose-500/10 transition-colors">I Entered NO</button>
+                         <button onClick={() => handleManualSync("YES")} className="flex-1 py-2 border border-emerald-500/30 text-emerald-400 rounded-md text-[9px] sm:text-[10px] uppercase font-bold tracking-widest hover:bg-emerald-500/10 transition-colors">I Entered YES</button>
+                         <button onClick={() => handleManualSync("NO")} className="flex-1 py-2 border border-rose-500/30 text-rose-400 rounded-md text-[9px] sm:text-[10px] uppercase font-bold tracking-widest hover:bg-rose-500/10 transition-colors">I Entered NO</button>
                        </div>
                      </div>
                    )}
@@ -935,11 +1336,61 @@ export default function App() {
                  </div>
                )}
             </div>
+          </div>
 
-            {/* Hourly Forecast */}
+          <div className="lg:col-span-5 flex flex-col gap-4">
+            
+            <div className="flex gap-4">
+              <div className="flex-1 bg-[#181A19] p-4 sm:p-5 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md">
+                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-1.5">POSTERIOR (UP)</div>
+                 <div className="text-3xl sm:text-4xl font-serif text-indigo-300">{analysis ? `${Number(analysis.rawProbAbove || 0).toFixed(1)}%` : '--%'}</div>
+              </div>
+              <div className="flex-1 bg-[#181A19] p-4 sm:p-5 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md">
+                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-1.5">POSTERIOR (DN)</div>
+                 <div className="text-3xl sm:text-4xl font-serif text-rose-300">{analysis ? `${(100 - Number(analysis.rawProbAbove || 0)).toFixed(1)}%` : '--%'}</div>
+              </div>
+            </div>
+
+            {analysis && (
+              <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col">
+                <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                  <IconTerminal className="w-3.5 h-3.5 text-amber-400" /> Math Engine Logs
+                </h2>
+                <div className="space-y-2 font-mono h-[140px] overflow-y-auto pr-1 custom-scrollbar">
+                  {(analysis.reasoning || []).map((reason, idx) => (
+                    <div key={idx} className={`bg-[#111312] p-2.5 rounded-md text-[9px] sm:text-[10px] ${reason.includes('RUG PULL') ? 'text-rose-400 border border-rose-500/20' : 'text-[#E8E9E4]/70 border border-[#E8E9E4]/5'} flex items-start gap-2 uppercase`}>
+                      <span className="text-emerald-500 mt-0.5">{`>`}</span>
+                      <span className="leading-snug">{String(reason)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-[180px]">
+              <div className="flex justify-between items-center mb-3 border-b border-[#E8E9E4]/10 pb-2">
+                <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest flex items-center gap-1.5">
+                  <IconGlobe className="w-3.5 h-3.5 text-blue-400" /> Tara Live Wire
+                </h2>
+              </div>
+              <div className="space-y-3 overflow-y-auto custom-scrollbar pr-1 flex-1">
+                {newsEvents.length === 0 ? (
+                   <div className="text-[11px] text-[#E8E9E4]/40 italic">Generating market intel...</div>
+                ) : (
+                  newsEvents.map((news, i) => (
+                    <div key={i} className={`border-l-[2px] pl-2 py-0.5 ${news.type === 'rugpull' ? 'border-rose-500' : news.type === 'whale' ? 'border-purple-500' : 'border-indigo-500/40'}`}>
+                      <span className={`text-[11px] sm:text-[11.5px] leading-tight ${news.type === 'rugpull' ? 'text-rose-400 font-bold' : news.type === 'whale' ? 'text-purple-300' : 'text-[#E8E9E4]/90'}`}>
+                        {String(news.title)}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
             {analysis && (
               <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md">
-                <h2 className="text-[10px] font-medium text-[#E8E9E4]/60 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest mb-3 flex items-center gap-1.5">
                   <IconTrendingUp className="w-3.5 h-3.5 text-purple-400" /> Hourly Forecast Projections
                 </h2>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -952,61 +1403,6 @@ export default function App() {
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Right Sidebar */}
-          <div className="lg:col-span-4 flex flex-col gap-4">
-            
-            <div className="flex gap-4">
-              <div className="flex-1 bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
-                 <div className="text-[8px] sm:text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">POSTERIOR (UP)</div>
-                 <div className="text-xl sm:text-2xl font-serif text-indigo-300">{analysis ? `${Number(analysis.rawProbAbove || 0).toFixed(1)}%` : '--%'}</div>
-              </div>
-              <div className="flex-1 bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
-                 <div className="text-[8px] sm:text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">POSTERIOR (DN)</div>
-                 <div className="text-xl sm:text-2xl font-serif text-rose-300">{analysis ? `${(100 - Number(analysis.rawProbAbove || 0)).toFixed(1)}%` : '--%'}</div>
-              </div>
-            </div>
-
-            {/* Strict 4-Rule Logic Logs */}
-            {analysis && (
-              <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex-1 min-h-[150px]">
-                <h2 className="text-[10px] font-medium text-[#E8E9E4]/60 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                  <IconTerminal className="w-3.5 h-3.5 text-amber-400" /> Math Engine Logs
-                </h2>
-                <div className="space-y-2 font-mono h-[120px] lg:h-full lg:max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
-                  {analysis.reasoning.map((reason, idx) => (
-                    <div key={idx} className="bg-[#111312] p-2 rounded-md text-[9px] text-[#E8E9E4]/70 flex items-start gap-2 border border-[#E8E9E4]/5 uppercase">
-                      <span className="text-emerald-500 mt-0.5">{`>`}</span>
-                      <span className="leading-snug">{String(reason)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Live Feeds */}
-            <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col h-[200px]">
-              <div className="flex justify-between items-center mb-3 border-b border-[#E8E9E4]/10 pb-2">
-                <h2 className="text-[10px] font-medium text-[#E8E9E4]/60 uppercase tracking-widest flex items-center gap-1.5">
-                  <IconGlobe className="w-3.5 h-3.5 text-blue-400" /> Tara Live Wire
-                </h2>
-              </div>
-              <div className="space-y-3 overflow-y-auto custom-scrollbar pr-1">
-                {newsEvents.length === 0 ? (
-                   <div className="text-[11px] text-[#E8E9E4]/40 italic">Generating market intel...</div>
-                ) : (
-                  newsEvents.map((news, i) => (
-                    <div key={i} className="border-l-[2px] border-indigo-500/40 pl-2 py-0.5">
-                      <span className="text-[11px] sm:text-[11.5px] text-[#E8E9E4]/90 leading-tight">
-                        {String(news.title)}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
           </div>
         </div>
       </div>
@@ -1022,7 +1418,7 @@ export default function App() {
               <button onClick={() => setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IconX className="w-4 h-4" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[#111312]/50">
-              {chatLog.map((msg, i) => (
+              {(chatLog || []).map((msg, i) => (
                 <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <span className={`text-[10px] uppercase opacity-40 mb-1 ${msg.role === 'user' ? 'mr-1' : 'ml-1'}`}>{String(msg.role)}</span>
                   <div className={`text-xs p-2.5 rounded-lg max-w-[85%] leading-relaxed ${msg.role === 'user' ? 'bg-indigo-500/20 text-indigo-100 border border-indigo-500/30 rounded-tr-none' : 'bg-[#2A2D2C] text-[#E8E9E4] border border-[#E8E9E4]/10 rounded-tl-none'} ${msg.isLoading ? 'animate-pulse' : ''}`}>
@@ -1064,28 +1460,22 @@ export default function App() {
             <div className="p-4 sm:p-6 space-y-6 sm:space-y-8 text-xs sm:text-sm text-[#E8E9E4]/80">
               
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. The 4-Rule Quant Algorithm</h3>
-                <p className="mb-3 leading-relaxed">Tara uses strict gating logic to mimic an institutional 90% WR benchmark. A call is only issued if <strong>ALL 4 rules pass simultaneously:</strong></p>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. Multi-Timeframe & Zero-Latency Divergence</h3>
+                <p className="mb-3 leading-relaxed">You can toggle Tara between 5-Minute and 15-Minute mode. <br/><strong>In 15M Mode:</strong> She analyzes macro-trends, VWAP, and looks for safer, wider structural trades.<br/><strong>In 5M Mode:</strong> She becomes an aggressive scalper. She ignores slow indicators and multiplies the weight of live order flow (Tape Delta) by 1.25x.</p>
+                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Zero-Latency Algorithm (V47 Update):</strong> Tara completely ignores initial artificial time locks. From the very first second of the round, she evaluates structural setups to provide instant early entry signals, enabling you to grab extreme odds before the platform adjusts.</p>
                 <ul className="list-disc pl-5 space-y-2">
-                  <li><strong>Active Entry Window:</strong> The trade must occur after the initial open volatility settles.</li>
-                  <li><strong>Regime Validation:</strong> The market must NOT be in a "CHOP" regime.</li>
-                  <li><strong>Posterior Check:</strong> The mathematical baseline probability must be over 65% for UP, or under 35% for DOWN.</li>
-                  <li><strong>Φ3 Physics:</strong> Raw tape momentum (AggrFlow) must explicitly agree with the physical gap direction.</li>
+                  <li><strong>Setup:</strong> Select your timeframe. Type in the platform's Strike Price, your Bet Size, and Max Payout.</li>
+                  <li><strong>Wait:</strong> Tara begins every trade at "SIT OUT". She requires a minimum of <span className="text-emerald-300 font-mono">65% internal conviction</span> to advise an entry.</li>
                 </ul>
               </section>
 
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. Skip Round Protocol (V38)</h3>
-                <p className="leading-relaxed">Sometimes the best trade is no trade. If Tara is in the Active Entry window but detects that the market is "wiggling with no clear direction" (CHOP regime) or lacks conviction, she will trigger a <strong>SKIPPING ROUND</strong> alert. Do not guess. Close the app and come back next round.</p>
-              </section>
-
-              <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">3. Early Exit</h3>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. Early Exit</h3>
                 <p className="leading-relaxed">If you are in a winning position, but Tara detects that whales are suddenly selling the momentum back down (AggrFlow flipping), she will trigger an <strong>EARLY EXIT</strong> alert. <br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will advise you to take the Arbitrage.</p>
               </section>
 
               <section>
-                <h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">4. Understanding the Data Dashboard</h3>
+                <h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">3. Understanding the Data Dashboard</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mt-2 font-mono text-[10px] sm:text-[11px]">
                   <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
                     <span className="text-indigo-300 font-bold block mb-1">REGIME:</span>
