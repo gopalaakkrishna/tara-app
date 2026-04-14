@@ -18,7 +18,7 @@ const IconVolume2 = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" hei
 const IconVolumeX = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>;
 const IconHelp = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 
-// --- NATIVE INTERACTIVE CANDLESTICK / LINE CHART ---
+// --- NATIVE INTERACTIVE CANDLESTICK / LINE CHART WITH VOLUME ---
 const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActive }) => {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -27,6 +27,26 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
   const [pan, setPan] = useState(0);
   const isDragging = useRef(false);
   const lastMouseX = useRef(0);
+  const maxPanRef = useRef(0);
+  const spacingRef = useRef(10); 
+
+  // Scroll Isolation Fix & Native Trackpad Pan
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleNativeWheel = (e) => {
+      e.preventDefault(); 
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+         setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev - e.deltaX / spacingRef.current)));
+      } else {
+         setZoom(prev => Math.max(1, Math.min(20, prev - e.deltaY * 0.005)));
+      }
+    };
+
+    canvas.addEventListener('wheel', handleNativeWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleNativeWheel);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -45,29 +65,38 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     const bottomMargin = 20;
     const chartW = width - rightMargin;
     const chartH = height - bottomMargin;
+    const volH = chartH * 0.2; // Bottom 20% for volume
+    const priceH = chartH - volH; 
 
     ctx.clearRect(0, 0, width, height);
 
     const validData = [...data].reverse().filter(d => d.h !== undefined && d.l !== undefined);
     const visibleCount = Math.max(15, Math.floor(validData.length / zoom));
+    
     const maxPan = Math.max(0, validData.length - visibleCount);
+    maxPanRef.current = maxPan;
+    
     const currentPan = Math.max(0, Math.min(pan, maxPan));
     
-    const viewData = validData.slice(currentPan, currentPan + visibleCount);
+    const startIndex = Math.max(0, validData.length - visibleCount - Math.floor(currentPan));
+    const endIndex = Math.max(0, validData.length - Math.floor(currentPan));
+    const viewData = validData.slice(startIndex, endIndex);
+
     if(viewData.length === 0) return;
 
     let minPrice = Math.min(...viewData.map(d => d.l));
     let maxPrice = Math.max(...viewData.map(d => d.h));
+    let maxVol = Math.max(...viewData.map(d => d.v || 0.1));
     
-    // Include target margin in scale if exists so we can see the line
     if (targetMargin > 0) {
         minPrice = Math.min(minPrice, targetMargin - 50);
         maxPrice = Math.max(maxPrice, targetMargin + 50);
     }
 
     const padding = (maxPrice - minPrice) * 0.1 || 10;
-    const scaleY = chartH / (maxPrice - minPrice + padding * 2);
+    const scaleY = priceH / (maxPrice - minPrice + padding * 2);
     const yOffset = maxPrice + padding;
+    const volScale = volH / (maxVol * 1.1);
 
     // Background Grid & Y-Axis Prices
     ctx.strokeStyle = 'rgba(232, 233, 228, 0.05)';
@@ -78,7 +107,7 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     ctx.lineWidth = 1;
     
     for(let i=0; i<=5; i++) {
-        const y = (chartH / 5) * i;
+        const y = (priceH / 5) * i;
         const price = maxPrice + padding - (y / scaleY);
         
         ctx.beginPath();
@@ -90,6 +119,7 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     }
 
     const spacing = chartW / viewData.length;
+    spacingRef.current = spacing;
     const candleWidth = Math.max(1, spacing * 0.6);
 
     // X-Axis Times
@@ -113,8 +143,8 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     // Target Margin Strike Line
     if (targetMargin > 0) {
         const targetY = (yOffset - targetMargin) * scaleY;
-        if (targetY > 0 && targetY < chartH) {
-            ctx.strokeStyle = 'rgba(99, 102, 241, 0.5)'; // Indigo line
+        if (targetY > 0 && targetY < priceH) {
+            ctx.strokeStyle = 'rgba(99, 102, 241, 0.5)'; 
             ctx.lineWidth = 1.5;
             ctx.setLineDash([5, 5]);
             ctx.beginPath();
@@ -131,6 +161,15 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
             ctx.fillText(targetMargin.toFixed(2), chartW + 5, targetY);
         }
     }
+
+    // Draw Volume Bars
+    viewData.forEach((candle, i) => {
+        const x = i * spacing + spacing / 2;
+        const isBullish = candle.c >= candle.o;
+        ctx.fillStyle = isBullish ? 'rgba(52, 211, 153, 0.2)' : 'rgba(251, 113, 133, 0.2)';
+        const barH = (candle.v || 0) * volScale;
+        ctx.fillRect(x - candleWidth / 2, chartH - barH, candleWidth, barH);
+    });
 
     if (showCandles) {
       // Draw Candlesticks
@@ -164,11 +203,11 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      ctx.lineTo(chartW, chartH);
-      ctx.lineTo(0, chartH);
+      ctx.lineTo(chartW, priceH);
+      ctx.lineTo(0, priceH);
       ctx.closePath();
       
-      const grad = ctx.createLinearGradient(0, 0, 0, chartH);
+      const grad = ctx.createLinearGradient(0, 0, 0, priceH);
       grad.addColorStop(0, 'rgba(192, 132, 252, 0.2)');
       grad.addColorStop(1, 'rgba(192, 132, 252, 0)');
       ctx.fillStyle = grad;
@@ -178,7 +217,7 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     // Draw Current Price Line
     if (currentPrice) {
       const currentY = (yOffset - currentPrice) * scaleY;
-      if (currentY > 0 && currentY < chartH) {
+      if (currentY > 0 && currentY < priceH) {
         ctx.strokeStyle = rugPullActive ? '#fb7185' : '#34d399';
         ctx.lineWidth = rugPullActive ? 2 : 1;
         ctx.setLineDash([4, 4]);
@@ -188,7 +227,6 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Price Tag
         ctx.fillStyle = rugPullActive ? '#fb7185' : '#34d399';
         ctx.fillRect(chartW, currentY - 10, rightMargin, 20);
         ctx.fillStyle = '#111312';
@@ -219,12 +257,14 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
       ctx.moveTo(hoverPos.x, 0); ctx.lineTo(hoverPos.x, chartH);
       ctx.stroke();
       
-      ctx.beginPath();
-      ctx.moveTo(0, hoverPos.y); ctx.lineTo(chartW, hoverPos.y);
-      ctx.stroke();
+      if (hoverPos.y < priceH) {
+          ctx.beginPath();
+          ctx.moveTo(0, hoverPos.y); ctx.lineTo(chartW, hoverPos.y);
+          ctx.stroke();
+      }
       ctx.setLineDash([]);
 
-      if (!showCandles && !rugPullActive) {
+      if (!showCandles && !rugPullActive && hoverPos.y < priceH) {
          const dataIndex = Math.floor(hoverPos.x / spacing);
          if (viewData[dataIndex]) {
             const dotX = dataIndex * spacing + spacing / 2;
@@ -240,14 +280,16 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
          }
       }
 
-      const hoverPrice = yOffset - (hoverPos.y / scaleY);
-      ctx.fillStyle = '#2A2D2C';
-      ctx.fillRect(chartW, hoverPos.y - 10, rightMargin, 20);
-      ctx.fillStyle = '#E8E9E4';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.font = '10px sans-serif';
-      ctx.fillText(hoverPrice.toFixed(2), chartW + 5, hoverPos.y);
+      if (hoverPos.y < priceH) {
+          const hoverPrice = yOffset - (hoverPos.y / scaleY);
+          ctx.fillStyle = '#2A2D2C';
+          ctx.fillRect(chartW, hoverPos.y - 10, rightMargin, 20);
+          ctx.fillStyle = '#E8E9E4';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.font = '10px sans-serif';
+          ctx.fillText(hoverPrice.toFixed(2), chartW + 5, hoverPos.y);
+      }
 
       const dataIndex = Math.floor(hoverPos.x / spacing);
       if (viewData[dataIndex] && viewData[dataIndex].time) {
@@ -268,10 +310,6 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
 
   }, [data, currentPrice, zoom, pan, hoverPos, showCandles, targetMargin, rugPullActive]);
 
-  const handleWheel = (e) => {
-      setZoom(prev => Math.max(1, Math.min(10, prev - e.deltaY * 0.005)));
-  };
-
   const handlePointerDown = (e) => {
       isDragging.current = true;
       lastMouseX.current = e.clientX;
@@ -285,7 +323,7 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
 
       if (isDragging.current) {
           const deltaX = e.clientX - lastMouseX.current;
-          setPan(prev => prev - (deltaX * 0.1));
+          setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev + deltaX / spacingRef.current)));
           lastMouseX.current = e.clientX;
       }
   };
@@ -294,11 +332,10 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
   const handlePointerLeave = () => { setHoverPos(null); isDragging.current = false; };
 
   return (
-      <div ref={containerRef} className="w-full h-full relative cursor-crosshair">
+      <div ref={containerRef} className="w-full h-full relative cursor-crosshair" style={{ touchAction: 'none' }}>
           <canvas 
               ref={canvasRef} 
               className="absolute inset-0 w-full h-full"
-              onWheel={handleWheel}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
@@ -384,10 +421,10 @@ export default function App() {
   useEffect(() => {
     setIsMounted(true);
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV47');
+      const savedScore = localStorage.getItem('btcOracleScorecardV50');
       if (savedScore) setScorecards(JSON.parse(savedScore));
       
-      const savedCycles = localStorage.getItem('btcOraclePrevCyclesV47');
+      const savedCycles = localStorage.getItem('btcOraclePrevCyclesV50');
       if (savedCycles) setPrevCyclesMap(JSON.parse(savedCycles));
     } catch (e) {}
   }, []);
@@ -395,7 +432,7 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V47 Layout Active. Full width native canvas chart installed. Real-time candlestick injection running. Whale & Rug Pull safety toggles engaged." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V50 Ultimate Edition online. Layout transformed. Live Volume Bars added. Risk/Chance percentages injected into Advisor." }]);
   const [chatInput, setChatInput] = useState("");
   
   const lastWindowRef = useRef("");
@@ -407,8 +444,8 @@ export default function App() {
   useEffect(() => {
     if (isMounted && typeof window !== 'undefined') {
       try { 
-        localStorage.setItem('btcOracleScorecardV47', JSON.stringify(scorecards)); 
-        localStorage.setItem('btcOraclePrevCyclesV47', JSON.stringify(prevCyclesMap));
+        localStorage.setItem('btcOracleScorecardV50', JSON.stringify(scorecards)); 
+        localStorage.setItem('btcOraclePrevCyclesV50', JSON.stringify(prevCyclesMap));
       } 
       catch (e) {}
     }
@@ -705,7 +742,22 @@ export default function App() {
     }
   }, [currentPrice, targetMargin]);
 
-  // BULLETPROOF TIME ENGINE (100% Vercel SSR Crash Proof)
+  // News Wire Generator
+  useEffect(() => {
+    let syntheticNews = [];
+    if (orderBook.imbalance > 1.5) syntheticNews.push({ title: `Maker Alert: Limit BID wall placed near $${targetMargin.toFixed(0)}`, url: "#", type: 'info' });
+    if (orderBook.imbalance < 0.6) syntheticNews.push({ title: `Maker Alert: Limit SELL pressure defending $${targetMargin.toFixed(0)}`, url: "#", type: 'info' });
+    
+    if (showWhaleAlerts) {
+        if (takerFlow.imbalance > 2.0) syntheticNews.push({ title: `🐋 WHALE: Aggressive Market BUYING detected on the tape.`, url: "#", type: 'whale' });
+        if (takerFlow.imbalance < 0.5) syntheticNews.push({ title: `🐋 WHALE: Aggressive Market SELLING detected on the tape.`, url: "#", type: 'whale' });
+    }
+    
+    if (syntheticNews.length < 3) syntheticNews.push({ title: `Engine: Analyzing Order Book vs Tape Divergence (${String(windowType).toUpperCase()})...`, url: "#", type: 'info' });
+    setNewsEvents(syntheticNews);
+  }, [orderBook.imbalance, takerFlow.imbalance, targetMargin, windowType, showWhaleAlerts]);
+
+  // BULLETPROOF TIME ENGINE 
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -741,7 +793,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [windowType]);
 
-  // --- TARA V40: ZERO-LATENCY REAL-TIME ENGINE ---
+  // --- TARA V50: ZERO-LATENCY REAL-TIME ENGINE ---
   const analysis = useMemo(() => {
     if (!currentPrice || liveHistory.length < 30 || !targetMargin || !isMounted) return null;
 
@@ -782,7 +834,7 @@ export default function App() {
     let regime = "RANGE/CHOP";
     let reasoning = [];
     
-    // RUG PULL & WHALE LOGIC
+    // RUG PULL LOGIC
     let isRugPull = false;
     if (tickSlope < -5.0 && aggrFlow < -0.6) {
         isRugPull = true;
@@ -853,12 +905,18 @@ export default function App() {
     let liveEstValue = activePrediction === "YES" ? maxPayout * (posterior / 100) : activePrediction === "NO" ? maxPayout * ((100 - posterior) / 100) : 0;
     const livePnL = liveEstValue - betAmount;
     const offerVal = parseFloat(currentOffer) || 0;
+    
+    // V50 RISK/CHANCE METRICS
+    const riskPct = activePrediction === "YES" ? (100 - posterior) : posterior;
+    const chancePct = activePrediction === "YES" ? posterior : (100 - posterior);
+    const metricsStr = `[Chance: ${chancePct.toFixed(0)}% | Risk: ${riskPct.toFixed(0)}%]`;
 
     if (isRugPull && showRugPullAlerts) {
         tradeAction = "🚨 RUG PULL DETECTED 🚨"; 
-        tradeReason = "Massive instantaneous liquidity collapse. Abort longs immediately.";
+        tradeReason = `Massive liquidity collapse. Abort longs immediately. ${metricsStr}`;
         actionColor = "text-rose-500"; actionBg = "bg-rose-500/20 border-rose-500/50 animate-pulse shadow-[0_0_20px_rgba(225,29,72,0.4)]";
         hasAction = true; actionButtonLabel = "EMERGENCY CASHOUT"; actionTarget = "SIT OUT";
+        reasoning.push(`🚨 RUG PULL: AggrFlow & TickSlope indicate severe localized crash.`);
     }
     else if (activePrediction === "SIT OUT") {
         if (isEndgameLock) {
@@ -876,7 +934,7 @@ export default function App() {
 
         if (prediction === "SIT OUT") {
             tradeAction = `ENTRY SIGNAL: ${activePrediction}`;
-            tradeReason = "Quant composite supports entry. Execute now.";
+            tradeReason = `Quant composite supports entry. Execute now. ${metricsStr}`;
             actionColor = isYES ? "text-emerald-400" : "text-rose-400";
             actionBg = isYES ? "bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_15px_rgba(52,211,153,0.2)]" : "bg-rose-500/10 border-rose-500/30 shadow-[0_0_15px_rgba(251,113,133,0.2)]";
             hasAction = true;
@@ -885,27 +943,27 @@ export default function App() {
         }
         else if (offerVal > 0 && offerVal - liveEstValue > (maxPayout * 0.05)) {
             tradeAction = "SELL TO MARKET (ARB)"; 
-            tradeReason = `Market is overpaying. Take the free arbitrage.`;
+            tradeReason = `Market is overpaying. Take the free arbitrage. ${metricsStr}`;
             actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30 animate-pulse";
             hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "CASH";
         }
         else if (isReversalRecommended && !hasReversedRef.current) {
-            tradeAction = "REVERSE POSITION"; tradeReason = `Trend collapsed. Switch position.`;
+            tradeAction = "REVERSE POSITION"; tradeReason = `Trend collapsed. Switch position. ${metricsStr}`;
             actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30 shadow-[0_0_15px_rgba(251,191,36,0.2)]";
             hasAction = true; actionButtonLabel = `REVERSE TO '${isYES ? 'NO' : 'YES'}'`; actionTarget = isYES ? "NO" : "YES";
         }
         else if (isBleeding || (isReversalRecommended && hasReversedRef.current)) {
-            tradeAction = "CUT LOSSES"; tradeReason = "Position drifted past dynamic ATR limit. Exit.";
+            tradeAction = "CUT LOSSES"; tradeReason = `Position drifted past dynamic ATR limit. Exit. ${metricsStr}`;
             actionColor = "text-rose-500"; actionBg = "bg-rose-500/10 border-rose-500/30";
             hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "SIT OUT";
         }
         else if (currentOdds >= 85 && offerVal === 0) {
-            tradeAction = "SECURE MAX PROFIT"; tradeReason = "Odds > 85%. Lock in gains when ready.";
+            tradeAction = "SECURE MAX PROFIT"; tradeReason = `Odds > 85%. Lock in gains when ready. ${metricsStr}`;
             actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
             hasAction = true; actionButtonLabel = "EXECUTE CASHOUT (PROFIT)"; actionTarget = "CASH";
         }
         else if (offerVal === 0) {
-            tradeAction = "HOLD FIRM"; tradeReason = "Holding position. Quant composite supports trend.";
+            tradeAction = "HOLD FIRM"; tradeReason = `Holding position. Quant composite supports trend. ${metricsStr}`;
             actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/20";
         }
     } 
@@ -928,51 +986,19 @@ export default function App() {
     else if (realGapBps < 0 && activePrediction === "NO") predictionReason = "Firmly in profit. Holding steady.";
     else predictionReason = "Position negative, holding firm through noise.";
 
-    const price1hAgo = history[history.length - 1]?.c || currentPrice; 
-    const hourlySlope = currentPrice - price1hAgo;
-    let simulatedPrice = currentPrice;
-    let projections = [];
-    const driftModifier = (orderBook.imbalance > 1 ? 1.2 : 0.8) * 0.6; 
-    
-    // SAFE FORECAST LOGIC
-    for(let i=1; i<=4; i++) {
-        const nextHour = (timeState.currentHour + i) % 24;
-        let timeLabel = `${nextHour.toString().padStart(2, '0')}:00`;
-        
-        simulatedPrice += (tickSlope * driftModifier + (sentimentScore * 20));
-        projections.push({ time: timeLabel, price: simulatedPrice });
-    }
-
     return { 
       confidence: activePrediction === "NO" ? (100 - posterior).toFixed(1) : posterior.toFixed(1), 
       prediction: activePrediction, predictionReason, reasoning, textColor, rawProbAbove: posterior,
       tradeAction, tradeReason, actionColor, actionBg, hasAction, actionButtonLabel, actionTarget, 
-      realGapBps, clockSeconds, isSystemLocked: isEndgameLock, atrBps, livePnL, liveEstValue, projections,
+      realGapBps, clockSeconds, isSystemLocked: isEndgameLock, atrBps, livePnL, liveEstValue,
       vwapGapBps, regime, aggrFlow, topDriver, entryWindowStatus, convictionScore, convictionText,
       isRugPull
     };
   }, [currentPrice, liveHistory, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition, windowType, isMounted, showRugPullAlerts]);
 
-  // Handle News & Whale Alerts specifically
-  useEffect(() => {
-    let syntheticNews = [];
-    if (showWhaleAlerts) {
-        if (orderBook.imbalance > 1.8) syntheticNews.push({ title: `🐋 WHALE ALERT: Massive Limit BID wall placed near $${targetMargin.toFixed(0)}`, type: 'whale' });
-        if (orderBook.imbalance < 0.5) syntheticNews.push({ title: `🐋 WHALE ALERT: Heavy Limit SELL pressure defending $${targetMargin.toFixed(0)}`, type: 'whale' });
-        if (takerFlow.imbalance > 2.0) syntheticNews.push({ title: `🚀 WHALE ALERT: Aggressive Market BUYING detected on the tape.`, type: 'whale' });
-        if (takerFlow.imbalance < 0.5) syntheticNews.push({ title: `🩸 WHALE ALERT: Aggressive Market SELLING detected on the tape.`, type: 'whale' });
-    }
-    if (showRugPullAlerts && analysis?.isRugPull) {
-        syntheticNews.push({ title: `🚨 RUG PULL WARNING: Immediate liquidity collapse detected!`, type: 'rugpull' });
-    }
-    if (syntheticNews.length < 3) syntheticNews.push({ title: `Engine: Analyzing Order Book vs Tape Divergence (${String(windowType).toUpperCase()})...`, type: 'info' });
-    setNewsEvents(syntheticNews);
-  }, [orderBook.imbalance, takerFlow.imbalance, targetMargin, windowType, showWhaleAlerts, showRugPullAlerts, analysis?.isRugPull]);
-
-
   useEffect(() => {
     if (analysis?.hasAction && analysis.tradeAction !== prevActionRef.current) {
-      if (analysis.tradeAction.includes("ENTRY SIGNAL") || analysis.tradeAction.includes("RUG PULL")) {
+      if (analysis.tradeAction.includes("ENTRY SIGNAL")) {
         playAlertSound();
       }
     }
@@ -1007,41 +1033,6 @@ export default function App() {
     setForceRender(prev => prev + 1);
   };
 
-  const handleChatSubmit = (e) => {
-    if (e.key === 'Enter' && chatInput.trim()) {
-      const userText = chatInput.trim().toLowerCase();
-      const currentLog = [...chatLog, { role: 'user', text: chatInput.trim() }];
-      setChatLog(currentLog);
-      setChatInput("");
-      
-      setTimeout(() => {
-        let reply = "";
-        
-        if (userText.includes("why") || userText.includes("explain") || userText.includes("reason") || userText.includes("logic")) {
-          reply = `Currently, my posterior for YES is ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. We are in a ${String(analysis?.regime || 'CHOP')} regime. I am strictly waiting for quant rules to pass before issuing an entry.`;
-        }
-        else if (userText.includes("5m") || userText.includes("5 minute") || userText.includes("15m")) {
-          reply = `In V47, both windows trigger early ENTRY SIGNALS based on pure momentum. You are currently in ${windowType.toUpperCase()} mode.`;
-        }
-        else if (userText.includes("pnl") || userText.includes("profit") || userText.includes("loss")) {
-          reply = analysis?.prediction === "SIT OUT" ? "You are not in an active trade. No PnL to track right now." : `Your current estimated contract value is ~$${Number(analysis?.liveEstValue || 0).toFixed(2)}. Your live mathematical PnL is $${Number(analysis?.livePnL || 0).toFixed(2)}.`;
-        }
-        else if (userText.includes("score") || userText.includes("record")) {
-          reply = `Our current recorded scorecard for the ${windowType.toUpperCase()} window is ${Number(scorecards[windowType]?.wins || 0)} Wins and ${Number(scorecards[windowType]?.losses || 0)} Losses.`;
-        }
-        else {
-          reply = `My probability engine places YES at ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. Currently, my advice is to: ${String(analysis?.tradeAction || 'SIT OUT')}. Ask me 'why' to see my exact mathematical reasoning.`;
-        }
-
-        setChatLog([...currentLog, { role: 'tara', text: reply }]);
-      }, 500); 
-    }
-  };
-
-  useEffect(() => { setManualAction(null); }, [analysis?.tradeAction]);
-  useEffect(() => { if (analysis && (analysis.prediction === "YES" || analysis.prediction === "NO" || analysis.prediction === "SIT OUT")) activeCallRef.current = { prediction: analysis.prediction, strike: targetMargin }; }, [analysis?.prediction, targetMargin]);
-
-  // PREVENT SSR HYDRATION MISMATCH WHITE SCREEN
   if (!isMounted) {
     return <div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara Terminal...</div>;
   }
@@ -1049,13 +1040,13 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#111312] text-[#E8E9E4] font-sans p-2 sm:p-4 flex flex-col items-center selection:bg-[#E8E9E4]/20 overflow-x-hidden">
       
-      {/* Top Header */}
-      <div className="w-full max-w-7xl flex flex-wrap sm:flex-nowrap justify-between items-center border-b border-[#E8E9E4]/10 pb-3 mb-4 gap-3">
+      {/* Top Header - V50 CONSOLIDATED LAYOUT */}
+      <div className="w-full max-w-[1400px] flex flex-wrap justify-between items-center border-b border-[#E8E9E4]/10 pb-3 mb-4 gap-3">
         <div className="flex items-center justify-between w-full sm:w-auto">
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
             <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V47 Terminal
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V50 Terminal
             </span>
           </h1>
           
@@ -1100,9 +1091,9 @@ export default function App() {
         </div>
       </div>
 
-      <div className="w-full max-w-7xl flex flex-col gap-4">
+      <div className="w-full max-w-[1400px] flex flex-col gap-4">
         
-        {/* STATS BAR */}
+        {/* V50 STATS BAR (Consolidated) */}
         <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col lg:flex-row items-center justify-between gap-4 relative overflow-hidden">
            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
 
@@ -1136,37 +1127,37 @@ export default function App() {
            
            <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
-           <div className="flex items-center gap-3 md:gap-6 w-full lg:w-auto bg-[#111312] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/5 shadow-inner justify-between overflow-x-auto">
-             <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[80px]">
+           <div className="flex items-center gap-3 md:gap-6 w-full lg:w-auto bg-[#111312] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/5 shadow-inner justify-between overflow-x-auto flex-1">
+             <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[120px]">
                <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Strike</div>
-               <div className="flex items-center">
+               <div className="flex items-center w-full">
                  <IconCrosshair className="w-3 h-3 md:w-4 md:h-4 text-indigo-400 mr-1 md:mr-2 opacity-80 hidden sm:block" />
-                 <input type="number" value={targetMargin === 0 ? '' : targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-lg md:text-xl w-[75px] md:w-24 focus:outline-none py-1 leading-normal" />
+                 <input type="number" value={targetMargin === 0 ? '' : targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-lg md:text-xl w-full focus:outline-none py-1 leading-normal" />
                </div>
              </div>
-             <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[90px]">
+             <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[120px]">
                <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Bet / Win</div>
-               <div className="flex items-center gap-1 text-white font-serif text-base md:text-lg">
-                 $<input type="number" value={betAmount === 0 ? '' : betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-8 md:w-12 text-center outline-none py-1 leading-normal" />
+               <div className="flex items-center gap-1 text-white font-serif text-base md:text-lg w-full">
+                 $<input type="number" value={betAmount === 0 ? '' : betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-full text-center outline-none py-1 leading-normal" />
                  <span className="text-[#E8E9E4]/40 mx-0.5">/</span>
-                 $<input type="number" value={maxPayout === 0 ? '' : maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-10 md:w-14 text-center outline-none py-1 leading-normal" />
+                 $<input type="number" value={maxPayout === 0 ? '' : maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-full text-center outline-none py-1 leading-normal" />
                </div>
              </div>
-             <div className="flex flex-col items-start pl-1 md:pl-2 min-w-[80px]">
+             <div className="flex flex-col items-start pl-1 md:pl-2 min-w-[100px]">
                <div className="text-[9px] md:text-[10px] text-emerald-400/80 uppercase tracking-widest font-medium mb-1.5">Live Offer</div>
                <div className="flex items-center gap-1 text-emerald-400 font-serif text-base md:text-lg">
-                 $<input type="number" value={currentOffer} onChange={(e) => setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-12 md:w-16 text-center outline-none placeholder-emerald-900 py-1 leading-normal" />
+                 $<input type="number" value={currentOffer} onChange={(e) => setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-full text-center outline-none placeholder-emerald-900 py-1 leading-normal" />
                </div>
              </div>
            </div>
            
            <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
-           <div className="hidden lg:flex flex-col items-start bg-[#111312] p-3 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-56">
+           <div className="hidden lg:flex flex-col items-start w-48">
              <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-2 flex justify-between w-full">
                <span className="flex items-center gap-1.5"><IconTerminal className="w-3.5 h-3.5"/> {String(windowType).toUpperCase()} SCORECARD</span>
              </div>
-             <div className="flex items-center justify-between w-full px-2">
+             <div className="flex items-center justify-between w-full">
                <div className="flex flex-col items-center">
                  <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 mb-1">
                    <button onClick={() => updateScore(windowType, 'wins', -1)}>-</button> WINS <button onClick={() => updateScore(windowType, 'wins', 1)}>+</button>
@@ -1184,11 +1175,11 @@ export default function App() {
            </div>
         </div>
 
-        {/* FULL WIDTH LIVE CHART (V47 UPDATE) */}
-        <div className="w-full bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col h-[400px] sm:h-[480px]">
+        {/* FULL WIDTH LIVE CHART (V50 UPDATE - Massive Centerpiece) */}
+        <div className="w-full bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col h-[500px] sm:h-[600px] relative z-10">
           <div className="flex justify-between items-center mb-3 border-b border-[#E8E9E4]/10 pb-2">
             <h2 className="text-[11px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] flex items-center gap-2">
-              LIVE PRICE CHART
+              <IconActivity className="w-4 h-4 text-indigo-400" /> LIVE PRICE CHART
             </h2>
             <div className="flex items-center gap-4 text-[10px] text-[#E8E9E4]/60 bg-[#111312] px-3 py-1.5 rounded-lg border border-[#E8E9E4]/5">
               <label className="flex items-center gap-1.5 cursor-pointer hover:text-purple-400 transition-colors">
@@ -1220,79 +1211,45 @@ export default function App() {
           </div>
         </div>
 
+        {/* BOTTOM ROW (V50 Grid Layout) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           
-          {/* MAIN OUTCOME DISPLAY */}
-          <div className="lg:col-span-7 flex flex-col gap-4">
+          {/* Left Column: Prediction Block */}
+          <div className="lg:col-span-5 flex flex-col gap-4">
             
-            {prevCyclesMap[windowType] && prevCyclesMap[windowType].length > 0 && (
-              <div className="flex items-center justify-start gap-3 w-full pl-2 mb-2">
-                <span className="text-[9px] font-bold tracking-[0.2em] text-[#E8E9E4]/30 uppercase">Prev Cycles</span>
-                <div className="flex items-center gap-2">
-                  {[...(prevCyclesMap[windowType] || [])].map((cycle, i) => (
-                    <div key={i} className={`flex flex-col items-center justify-center px-2 py-1 rounded-md border bg-[#111312] shadow-sm ${cycle.outcome === 'UP' ? 'border-emerald-500/20 text-emerald-400' : 'border-rose-500/20 text-rose-400'}`}>
-                      <div className="flex items-center gap-1 text-[10px] font-bold">
-                        <span className="text-[12px] leading-none">{cycle.outcome === 'UP' ? '▲' : '▼'}</span>
-                        <span>{cycle.gapPct}</span>
-                      </div>
-                      <span className="text-[8px] text-[#E8E9E4]/40 font-mono mt-0.5">{String(cycle.time)}</span>
-                    </div>
-                  ))}
-                  <span className="text-[9px] font-mono text-[#E8E9E4]/30 ml-1">→ NOW</span>
-                </div>
-              </div>
-            )}
-            
-            <div className="bg-[#181A19] p-4 md:p-6 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col justify-center items-center text-center relative overflow-hidden min-h-[380px] md:min-h-[420px]">
+            <div className="bg-[#181A19] p-4 md:p-6 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative overflow-hidden min-h-[350px]">
+               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-transparent opacity-30"></div>
                
-               <div className="absolute top-3 left-1/2 transform -translate-x-1/2 bg-[#111312] border border-[#E8E9E4]/10 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 shadow-sm whitespace-nowrap">
-                 <IconClock className="w-3 h-3" />
-                 <span className="text-[#E8E9E4]/60 hidden sm:inline">{String(timeState.startWindowEST)}-{String(timeState.nextWindowEST)}</span>
-                 <span className="text-[#E8E9E4]">{Number(timeState.minsRemaining)}m {Number(timeState.secsRemaining)}s</span>
+               <div className="flex justify-between items-start mb-6">
+                 <div className="bg-[#111312] border border-[#E8E9E4]/10 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 shadow-sm whitespace-nowrap">
+                   <IconClock className="w-3 h-3" />
+                   <span className="text-[#E8E9E4]/60 hidden sm:inline">{String(timeState.startWindowEST)}-{String(timeState.nextWindowEST)}</span>
+                   <span className="text-[#E8E9E4]">{Number(timeState.minsRemaining)}m {Number(timeState.secsRemaining)}s</span>
+                 </div>
+                 
+                 {analysis && analysis.tradeAction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && (
+                   <button 
+                     onClick={() => executeManualAction("MANUAL PULL OUT", "SIT OUT")}
+                     className="bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+                   >
+                     <IconAlertTriangle className="w-3 h-3" /> <span>Force Pull Out</span>
+                   </button>
+                 )}
                </div>
 
-               {analysis && analysis.tradeAction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && (
-                 <button 
-                   onClick={() => executeManualAction("MANUAL PULL OUT", "SIT OUT")}
-                   className="absolute top-3 right-3 bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 sm:px-3 py-1.5 rounded-md text-[9px] sm:text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
-                 >
-                   <IconAlertTriangle className="w-3 h-3" /> <span className="hidden sm:inline">Force Pull Out</span>
-                 </button>
-               )}
-
                {isLoading || !analysis ? (
-                 <div className="text-xl font-serif text-[#E8E9E4]/30 animate-pulse mt-8">Connecting to Datastream...</div>
+                 <div className="text-xl font-serif text-[#E8E9E4]/30 animate-pulse mt-8 text-center w-full">Connecting to Datastream...</div>
                ) : (
-                 <div className="flex flex-col items-center w-full mt-8 sm:mt-6">
+                 <div className="flex flex-col items-center w-full flex-1 justify-center">
                    
                    <div className="flex flex-col items-center mb-6">
                      <span className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-[0.2em] mb-2 font-bold">Prediction</span>
-                     <h2 className={`text-7xl sm:text-8xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-sm transition-all flex items-center justify-center uppercase`}>
+                     <h2 className={`text-[120px] font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg transition-all flex items-center justify-center uppercase`}>
                        {String(analysis.prediction)}
                      </h2>
                    </div>
 
-                   <p className="text-[11px] sm:text-xs text-[#E8E9E4]/50 font-sans max-w-sm mx-auto mb-6 px-2 h-8 leading-tight">
-                     {String(analysis.predictionReason)}
-                   </p>
-
-                   {userPosition !== null && (
-                     <div className={`flex items-center gap-3 sm:gap-4 mb-6 px-3 sm:px-4 py-2 rounded-lg border w-full max-w-[300px] justify-center ${analysis.livePnL >= 0 ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
-                       <div className="flex flex-col text-center sm:text-left">
-                         <span className="text-[8px] sm:text-[9px] uppercase tracking-widest opacity-60">Contract Value</span>
-                         <span className="font-serif text-base sm:text-lg">${Number(analysis.liveEstValue || 0).toFixed(2)}</span>
-                       </div>
-                       <div className="w-px h-6 bg-[#E8E9E4]/20"></div>
-                       <div className="flex flex-col text-center sm:text-left">
-                         <span className="text-[8px] sm:text-[9px] uppercase tracking-widest opacity-60">Est PnL</span>
-                         <span className={`font-serif font-bold text-base sm:text-lg ${analysis.livePnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                           {analysis.livePnL >= 0 ? '+' : '-'}${Math.abs(Number(analysis.livePnL || 0)).toFixed(2)}
-                         </span>
-                       </div>
-                     </div>
-                   )}
-
-                   <div className={`mb-4 w-full max-w-[400px] p-3 sm:p-5 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm`}>
+                   <div className={`mt-auto w-full p-4 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm`}>
                      <div className="flex items-center gap-1.5 mb-1.5">
                        <IconBell className={`w-3.5 h-3.5 ${analysis.actionColor}`} />
                        <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span>
@@ -1321,53 +1278,98 @@ export default function App() {
                        </div>
                      )}
                    </div>
-                   
-                   {/* MANUAL SYNC BUTTONS */}
-                   {userPosition === null && (
-                     <div className="flex flex-col items-center gap-1.5 sm:gap-2 mt-2 mb-2 sm:mb-4 w-full max-w-[400px]">
-                       <span className="text-[8px] sm:text-[9px] uppercase tracking-widest text-[#E8E9E4]/40">Already in a trade? Sync Tara:</span>
-                       <div className="flex gap-2 sm:gap-3 w-full">
-                         <button onClick={() => handleManualSync("YES")} className="flex-1 py-2 border border-emerald-500/30 text-emerald-400 rounded-md text-[9px] sm:text-[10px] uppercase font-bold tracking-widest hover:bg-emerald-500/10 transition-colors">I Entered YES</button>
-                         <button onClick={() => handleManualSync("NO")} className="flex-1 py-2 border border-rose-500/30 text-rose-400 rounded-md text-[9px] sm:text-[10px] uppercase font-bold tracking-widest hover:bg-rose-500/10 transition-colors">I Entered NO</button>
-                       </div>
-                     </div>
-                   )}
-
                  </div>
                )}
             </div>
-          </div>
 
-          <div className="lg:col-span-5 flex flex-col gap-4">
-            
-            <div className="flex gap-4">
-              <div className="flex-1 bg-[#181A19] p-4 sm:p-5 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md">
-                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-1.5">POSTERIOR (UP)</div>
-                 <div className="text-3xl sm:text-4xl font-serif text-indigo-300">{analysis ? `${Number(analysis.rawProbAbove || 0).toFixed(1)}%` : '--%'}</div>
-              </div>
-              <div className="flex-1 bg-[#181A19] p-4 sm:p-5 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md">
-                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-1.5">POSTERIOR (DN)</div>
-                 <div className="text-3xl sm:text-4xl font-serif text-rose-300">{analysis ? `${(100 - Number(analysis.rawProbAbove || 0)).toFixed(1)}%` : '--%'}</div>
-              </div>
-            </div>
-
-            {analysis && (
-              <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col">
-                <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                  <IconTerminal className="w-3.5 h-3.5 text-amber-400" /> Math Engine Logs
-                </h2>
-                <div className="space-y-2 font-mono h-[140px] overflow-y-auto pr-1 custom-scrollbar">
-                  {(analysis.reasoning || []).map((reason, idx) => (
-                    <div key={idx} className={`bg-[#111312] p-2.5 rounded-md text-[9px] sm:text-[10px] ${reason.includes('RUG PULL') ? 'text-rose-400 border border-rose-500/20' : 'text-[#E8E9E4]/70 border border-[#E8E9E4]/5'} flex items-start gap-2 uppercase`}>
-                      <span className="text-emerald-500 mt-0.5">{`>`}</span>
-                      <span className="leading-snug">{String(reason)}</span>
+            {/* PREVIOUS CYCLES TRACKER */}
+            {prevCyclesMap[windowType] && prevCyclesMap[windowType].length > 0 && (
+              <div className="flex items-center justify-start gap-3 w-full pl-2">
+                <span className="text-[9px] font-bold tracking-[0.2em] text-[#E8E9E4]/30 uppercase">Prev Cycles</span>
+                <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-1">
+                  {[...(prevCyclesMap[windowType] || [])].map((cycle, i) => (
+                    <div key={i} className={`flex flex-col items-center justify-center px-3 py-1.5 rounded-md border bg-[#111312] shadow-sm min-w-[70px] ${cycle.outcome === 'UP' ? 'border-emerald-500/20 text-emerald-400' : 'border-rose-500/20 text-rose-400'}`}>
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold">
+                        <span className="text-[14px] leading-none">{cycle.outcome === 'UP' ? '▲' : '▼'}</span>
+                        <span>{cycle.gapPct}</span>
+                      </div>
+                      <span className="text-[8px] text-[#E8E9E4]/40 font-mono mt-1">{String(cycle.time)}</span>
                     </div>
                   ))}
+                  <span className="text-[9px] font-mono text-[#E8E9E4]/30 ml-2 whitespace-nowrap">→ NOW</span>
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Right Column: Posteriors & Data */}
+          <div className="lg:col-span-7 flex flex-col gap-4">
             
-            <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-[180px]">
+            <div className="flex gap-4">
+              <div className="flex-1 bg-[#181A19] p-4 sm:p-6 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md flex flex-col justify-center">
+                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-2">POSTERIOR (UP)</div>
+                 <div className="text-4xl sm:text-5xl font-serif text-indigo-300">{analysis ? `${Number(analysis.rawProbAbove || 0).toFixed(1)}%` : '--%'}</div>
+              </div>
+              <div className="flex-1 bg-[#181A19] p-4 sm:p-6 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md flex flex-col justify-center">
+                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-2">POSTERIOR (DN)</div>
+                 <div className="text-4xl sm:text-5xl font-serif text-rose-300">{analysis ? `${(100 - Number(analysis.rawProbAbove || 0)).toFixed(1)}%` : '--%'}</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+               {/* Internal Data Block */}
+               {analysis && (
+                 <div className="bg-[#181A19] border border-[#E8E9E4]/10 p-4 rounded-xl font-mono text-[10px] sm:text-[11px] text-[#E8E9E4]/60 shadow-md flex flex-col justify-between">
+                   <div className="flex justify-between items-center bg-[#111312] p-2 rounded border border-[#E8E9E4]/5 mb-3">
+                     <div className="flex flex-col">
+                       <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">Market</span>
+                       <span className="text-[#E8E9E4] text-sm">${Number(currentPrice || 0).toFixed(2)}</span>
+                     </div>
+                     <div className="flex flex-col text-right">
+                       <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">Gap</span>
+                       <span className={`font-bold text-sm ${analysis.realGapBps > 0 ? 'text-emerald-400' : analysis.realGapBps < 0 ? 'text-rose-400' : 'text-zinc-400'}`}>
+                         {analysis.realGapBps > 0 ? '+' : ''}{Number(analysis.realGapBps || 0).toFixed(1)}bps
+                       </span>
+                     </div>
+                   </div>
+                   
+                   <div className="flex flex-col gap-2">
+                       <div className="flex justify-between items-center text-[9px] opacity-90 px-1 border-b border-[#E8E9E4]/5 pb-1">
+                         <span className="flex items-center gap-1"><IconActivity className="w-3 h-3 text-purple-400" /> REGIME:</span>
+                         <span className="text-white font-bold text-right">{String(analysis.regime)}</span>
+                       </div>
+                       <div className="flex justify-between items-center text-[9px] opacity-90 px-1 border-b border-[#E8E9E4]/5 pb-1">
+                         <span className="flex items-center gap-1"><IconZap className="w-3 h-3 text-amber-400" /> TOP DRIVER:</span>
+                         <span className="text-white text-right">{String(analysis.topDriver)}</span>
+                       </div>
+                       <div className="flex justify-between items-center text-[9px] opacity-90 px-1 pb-1">
+                         <span className="flex items-center gap-1"><IconCrosshair className="w-3 h-3 text-indigo-400" /> CONV:</span>
+                         <span className="text-indigo-300 font-bold text-right">{Number(analysis.convictionScore || 0).toFixed(0)}% ({String(analysis.convictionText)})</span>
+                       </div>
+                   </div>
+                 </div>
+               )}
+
+               {/* Strict Logic Logs */}
+               {analysis && (
+                 <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col h-full">
+                   <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest mb-3 flex items-center gap-1.5 border-b border-[#E8E9E4]/10 pb-2">
+                     <IconTerminal className="w-3.5 h-3.5 text-amber-400" /> Engine Logs
+                   </h2>
+                   <div className="space-y-2 font-mono flex-1 overflow-y-auto pr-1 custom-scrollbar">
+                     {(analysis.reasoning || []).map((reason, idx) => (
+                       <div key={idx} className={`bg-[#111312] p-2.5 rounded-md text-[9px] sm:text-[10px] ${reason.includes('RUG PULL') ? 'text-rose-400 border border-rose-500/20' : 'text-[#E8E9E4]/70 border border-[#E8E9E4]/5'} flex items-start gap-2 uppercase`}>
+                         <span className="text-emerald-500 mt-0.5">{`>`}</span>
+                         <span className="leading-snug">{String(reason)}</span>
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+               )}
+            </div>
+
+            {/* Live Feeds */}
+            <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-[140px]">
               <div className="flex justify-between items-center mb-3 border-b border-[#E8E9E4]/10 pb-2">
                 <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest flex items-center gap-1.5">
                   <IconGlobe className="w-3.5 h-3.5 text-blue-400" /> Tara Live Wire
@@ -1388,21 +1390,6 @@ export default function App() {
               </div>
             </div>
 
-            {analysis && (
-              <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md">
-                <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                  <IconTrendingUp className="w-3.5 h-3.5 text-purple-400" /> Hourly Forecast Projections
-                </h2>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {analysis.projections.map((proj, idx) => (
-                    <div key={idx} className="bg-[#111312] rounded-lg p-2 text-center border border-[#E8E9E4]/5">
-                      <div className="text-[9px] text-[#E8E9E4]/40 font-bold uppercase mb-1">{String(proj.time)}</div>
-                      <div className="text-sm font-serif text-purple-100">${Number(proj.price || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -1462,7 +1449,7 @@ export default function App() {
               <section>
                 <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. Multi-Timeframe & Zero-Latency Divergence</h3>
                 <p className="mb-3 leading-relaxed">You can toggle Tara between 5-Minute and 15-Minute mode. <br/><strong>In 15M Mode:</strong> She analyzes macro-trends, VWAP, and looks for safer, wider structural trades.<br/><strong>In 5M Mode:</strong> She becomes an aggressive scalper. She ignores slow indicators and multiplies the weight of live order flow (Tape Delta) by 1.25x.</p>
-                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Zero-Latency Algorithm (V47 Update):</strong> Tara completely ignores initial artificial time locks. From the very first second of the round, she evaluates structural setups to provide instant early entry signals, enabling you to grab extreme odds before the platform adjusts.</p>
+                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Zero-Latency Algorithm (V50 Update):</strong> Tara completely ignores initial artificial time locks. From the very first second of the round, she evaluates structural setups to provide instant early entry signals, enabling you to grab extreme odds before the platform adjusts.</p>
                 <ul className="list-disc pl-5 space-y-2">
                   <li><strong>Setup:</strong> Select your timeframe. Type in the platform's Strike Price, your Bet Size, and Max Payout.</li>
                   <li><strong>Wait:</strong> Tara begins every trade at "SIT OUT". She requires a minimum of <span className="text-emerald-300 font-mono">65% internal conviction</span> to advise an entry.</li>
@@ -1470,8 +1457,8 @@ export default function App() {
               </section>
 
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. Early Exit</h3>
-                <p className="leading-relaxed">If you are in a winning position, but Tara detects that whales are suddenly selling the momentum back down (AggrFlow flipping), she will trigger an <strong>EARLY EXIT</strong> alert. <br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will advise you to take the Arbitrage.</p>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. Early Exit & Risk Management</h3>
+                <p className="leading-relaxed">If you are in a winning position, but Tara detects that whales are suddenly selling the momentum back down (AggrFlow flipping), she will trigger an <strong>EARLY EXIT</strong> alert. The Advisor panel will show you exact Chance vs. Risk percentages to help you make composed decisions without emotion.<br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will advise you to take the Arbitrage.</p>
               </section>
 
               <section>
