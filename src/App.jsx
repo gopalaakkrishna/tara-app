@@ -58,7 +58,7 @@ export default function App() {
   const currentPriceRef = useRef(null);
   const tickHistoryRef = useRef([]); 
   const prevImbalanceRef = useRef(1); 
-  const lastPriceSourceRef = useRef({ source: 'none', time: 0 }); // V28: Prevents feed conflicts
+  const lastPriceSourceRef = useRef({ source: 'none', time: 0 });
 
   const [history, setHistory] = useState([]); 
   const [orderBook, setOrderBook] = useState({ localBuy: 0, localSell: 0, imbalance: 1 });
@@ -86,7 +86,7 @@ export default function App() {
   const [scorecards, setScorecards] = useState(() => {
     const baseline = { '15m': { wins: 70, losses: 60 }, '5m': { wins: 0, losses: 0 } };
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV28');
+      const savedScore = localStorage.getItem('btcOracleScorecardV29');
       if (savedScore) {
         const parsed = JSON.parse(savedScore);
         if (parsed['15m'] && parsed['5m']) return parsed;
@@ -98,7 +98,7 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V28 Unified Oracle online. Price feeds are now synchronized to stop glitching. Math algorithms are dynamically scaling based on your active timeframe." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V29 Mean-Reversion Engine online. I now actively fade pumps and dumps that are mathematically overextended. UI is optimized for mobile." }]);
   const [chatInput, setChatInput] = useState("");
   
   const currentWindowRef = useRef("");
@@ -113,7 +113,7 @@ export default function App() {
   const prevActionRef = useRef(null);
 
   useEffect(() => {
-    try { localStorage.setItem('btcOracleScorecardV28', JSON.stringify(scorecards)); } 
+    try { localStorage.setItem('btcOracleScorecardV29', JSON.stringify(scorecards)); } 
     catch (e) { console.warn("Storage restricted."); }
   }, [scorecards]);
 
@@ -185,19 +185,20 @@ export default function App() {
     }
   }, [timeState.nextWindowEST, currentPrice, windowType]);
 
-  // V28: SYNCHRONIZED, NON-GLITCHING WEBSOCKETS
+  // V29: SYNCHRONIZED, NON-GLITCHING WEBSOCKETS (Throttled UI rendering)
   useEffect(() => {
     let wsBinanceTrade = null;
     let wsCB = null;
     let wsBinanceLiq = null;
-    let lastVisualUpdate = 0; // Throttle visual updates to 100ms
+    let lastVisualUpdate = 0; 
     
     const updateVisualPrice = (newPrice, source) => {
       currentPriceRef.current = newPrice;
       const now = Date.now();
       lastPriceSourceRef.current = { source, time: now };
 
-      if (now - lastVisualUpdate > 100) {
+      // UI Throttle: 300ms to stop glitching numbers, but logic keeps instant value
+      if (now - lastVisualUpdate > 300) {
         setCurrentPrice(prev => {
           if (prev !== null && newPrice !== prev) {
             setTickDirection(newPrice > prev ? 'up' : 'down');
@@ -208,58 +209,58 @@ export default function App() {
       }
     };
 
-    // 1. Binance Raw Trade Stream (Alpha Feed)
-    try {
-      wsBinanceTrade = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@trade');
-      wsBinanceTrade.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.p) updateVisualPrice(parseFloat(data.p), 'binance');
-        } catch (e) {}
-      };
-    } catch(e) {}
+    const initWebSockets = () => {
+      try {
+        wsBinanceTrade = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@trade');
+        wsBinanceTrade.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.p) updateVisualPrice(parseFloat(data.p), 'binance');
+          } catch (e) {}
+        };
+      } catch(e) {}
 
-    // 2. Coinbase Ticker (Fallback + Tape Analyzer)
-    try {
-      wsCB = new WebSocket('wss://ws-feed.exchange.coinbase.com');
-      wsCB.onopen = () => wsCB.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] }));
-      wsCB.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'ticker' && data.price) {
-            const newPrice = parseFloat(data.price);
-            const size = parseFloat(data.last_size) || 0;
-            const isTakerBuy = data.side === 'sell'; 
-            
-            // Only update visuals if Binance hasn't sent data in the last 2 seconds (Anti-Glitch)
-            const now = Date.now();
-            if (lastPriceSourceRef.current.source !== 'binance' || now - lastPriceSourceRef.current.time > 2000) {
-              updateVisualPrice(newPrice, 'coinbase');
+      try {
+        wsCB = new WebSocket('wss://ws-feed.exchange.coinbase.com');
+        wsCB.onopen = () => wsCB.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] }));
+        wsCB.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'ticker' && data.price) {
+              const newPrice = parseFloat(data.price);
+              const size = parseFloat(data.last_size) || 0;
+              const isTakerBuy = data.side === 'sell'; 
+              
+              const now = Date.now();
+              if (lastPriceSourceRef.current.source !== 'binance' || now - lastPriceSourceRef.current.time > 2000) {
+                updateVisualPrice(newPrice, 'coinbase');
+              }
+              
+              tickHistoryRef.current.push({ p: newPrice, s: size, t: isTakerBuy ? 'B' : 'S', time: now });
+              tickHistoryRef.current = tickHistoryRef.current.filter(t => now - t.time < 30000);
             }
-            
-            tickHistoryRef.current.push({ p: newPrice, s: size, t: isTakerBuy ? 'B' : 'S', time: now });
-            tickHistoryRef.current = tickHistoryRef.current.filter(t => now - t.time < 30000);
-          }
-        } catch (err) {}
-      };
-    } catch(e) {}
+          } catch (err) {}
+        };
+      } catch(e) {}
 
-    // 3. Binance Liquidations
-    try {
-      wsBinanceLiq = new WebSocket('wss://fstream.binance.com/ws/btcusdt@forceOrder');
-      wsBinanceLiq.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.e === 'forceOrder') {
-            const side = data.o.S; 
-            const usdValue = parseFloat(data.o.q) * parseFloat(data.o.p);
-            if (usdValue > 10000) { 
-              setLiquidations(prev => [...prev, { side, value: usdValue, time: Date.now() }].filter(l => Date.now() - l.time < 60000));
+      try {
+        wsBinanceLiq = new WebSocket('wss://fstream.binance.com/ws/btcusdt@forceOrder');
+        wsBinanceLiq.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.e === 'forceOrder') {
+              const side = data.o.S; 
+              const usdValue = parseFloat(data.o.q) * parseFloat(data.o.p);
+              if (usdValue > 10000) { 
+                setLiquidations(prev => [...prev, { side, value: usdValue, time: Date.now() }].filter(l => Date.now() - l.time < 60000));
+              }
             }
-          }
-        } catch (err) {}
-      };
-    } catch(e) {}
+          } catch (err) {}
+        };
+      } catch(e) {}
+    }
+
+    initWebSockets();
 
     return () => { 
       if (wsBinanceTrade && wsBinanceTrade.readyState === WebSocket.OPEN) wsBinanceTrade.close();
@@ -290,7 +291,7 @@ export default function App() {
     return () => clearInterval(tapeInterval);
   }, []);
 
-  // V28: Sub-Second REST Fallback (Respects Hierarchy to prevent glitching)
+  // Sub-Second REST Fallback
   useEffect(() => {
     let lastUiUpdate = 0;
     const fetchSpotPrice = async () => {
@@ -301,12 +302,11 @@ export default function App() {
           const p = parseFloat(dataTicker.price);
           const now = Date.now();
           
-          // Only update UI if both WebSockets have failed/stalled (Anti-Glitch)
           if (!['binance', 'coinbase'].includes(lastPriceSourceRef.current.source) || now - lastPriceSourceRef.current.time > 2000) {
              currentPriceRef.current = p;
              lastPriceSourceRef.current = { source: 'rest', time: now };
              
-             if (now - lastUiUpdate > 100) {
+             if (now - lastUiUpdate > 300) {
                setCurrentPrice(prev => {
                  if (prev !== null && p !== prev) setTickDirection(p > prev ? 'up' : 'down');
                  return p;
@@ -322,11 +322,11 @@ export default function App() {
     };
 
     fetchSpotPrice();
-    const spotInterval = setInterval(fetchSpotPrice, 800); 
+    const spotInterval = setInterval(fetchSpotPrice, 1500); 
     return () => clearInterval(spotInterval);
   }, []);
 
-  // V28: Heavy Data Polling (Safe 4s Loop)
+  // Heavy Data Polling
   useEffect(() => {
     const fetchHeavyData = async () => {
       try {
@@ -372,7 +372,7 @@ export default function App() {
     };
 
     fetchHeavyData();
-    const heavyInterval = setInterval(fetchHeavyData, 4000); 
+    const heavyInterval = setInterval(fetchHeavyData, 5000); 
     return () => clearInterval(heavyInterval);
   }, [targetMargin]); 
 
@@ -414,7 +414,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [windowType]);
 
-  // --- TARA V28 DYNAMIC MULTI-TIMEFRAME ENGINE ---
+  // --- TARA V29 MEAN-REVERSION ENGINE ---
   const analysis = useMemo(() => {
     if (!currentPrice || history.length < 30 || !targetMargin) return null;
 
@@ -447,8 +447,10 @@ export default function App() {
     let probabilityAbove = 50; let reasoning = [];
     if (isObservationPhase) reasoning.push(`Wait ${clockSeconds - (intervalSeconds - 3)}s for window open.`);
 
-    const endgameMultiplier = clockSeconds < endgameLockTime ? (1 + ((endgameLockTime - clockSeconds) / (is5m ? 20 : 60))) : 1; 
-    probabilityAbove += realGapBps * (1.5 + (timeDecayFactor * 3.5)) * endgameMultiplier; 
+    // V29: Reduced baseline gap multiplier. Stop blindly chasing pumps.
+    const gapWeight = is5m ? 1.0 : 1.5;
+    const endgameMultiplier = clockSeconds < endgameLockTime ? (1 + ((endgameLockTime - clockSeconds) / (is5m ? 30 : 90))) : 1; 
+    probabilityAbove += realGapBps * (gapWeight + (timeDecayFactor * 2.0)) * endgameMultiplier; 
 
     const priceRising = shortTermSlope > 0;
     const priceFalling = shortTermSlope < 0;
@@ -473,6 +475,16 @@ export default function App() {
     }
 
     let tapeOBDelta = 0;
+
+    // V29: Mean Reversion Penalty (Fades the extremes)
+    const distanceToEma = ema9 ? ((currentPrice - ema9) / ema9) * 10000 : 0;
+    if (distanceToEma > 8 && rsi > 65) {
+        tapeOBDelta -= is5m ? 15 : 10;
+        reasoning.push(`📉 OVERBOUGHT: Price overextended UP by ${distanceToEma.toFixed(1)}bps. Reversion expected.`);
+    } else if (distanceToEma < -8 && rsi < 35) {
+        tapeOBDelta += is5m ? 15 : 10;
+        reasoning.push(`📈 OVERSOLD: Price overextended DOWN by ${Math.abs(distanceToEma).toFixed(1)}bps. Reversion expected.`);
+    }
 
     if (tickSlope < -2.0) {
       tapeOBDelta -= 10; reasoning.push(`Flash momentum drop detected.`);
@@ -501,10 +513,10 @@ export default function App() {
     if (imbalanceDelta < -1.5) { tapeOBDelta -= 5; } 
     else if (imbalanceDelta > 1.5) { tapeOBDelta += 5; }
 
-    // V28: Timeframe specific scaling
-    const bbWeight = is5m ? 5 : 10; // Less weight for macro indicators in 5m
+    // Timeframe specific scaling
+    const bbWeight = is5m ? 5 : 10; 
     const vwapWeight = is5m ? 5 : 10;
-    const orderBookWeight = is5m ? 12 : 8; // More weight for order book in 5m
+    const orderBookWeight = is5m ? 12 : 8; 
 
     if (orderBook.imbalance > 1.8) { tapeOBDelta += orderBookWeight; } else if (orderBook.imbalance < 0.5) { tapeOBDelta -= orderBookWeight; }
 
@@ -537,7 +549,6 @@ export default function App() {
 
     let prediction = userPosition || lockedPredictionRef.current; 
 
-    // IRONCLAD CONVICTION BIAS: Become mathematically stubborn to hold winning odds
     if (prediction === "YES") {
       probabilityAbove += 16; 
       reasoning.push("🛡️ Conviction Bias: +16% (Holding Firm)");
@@ -586,10 +597,12 @@ export default function App() {
       else predictionReason = "Awaiting 58-66% conviction for sniper entry.";
     } else if (prediction === "YES") {
       if (recommendedPrediction === "NO") predictionReason = "Structural collapse detected. Reversal mandatory.";
+      else if (distanceToEma > 8 && rsi > 65) predictionReason = "Price is elevated but overbought. Expect a temporary pullback. Do not panic.";
       else if (realGapBps > 0) predictionReason = "Firmly in profit. Holding position steady.";
       else predictionReason = "Position negative, holding firm through noise.";
     } else if (prediction === "NO") {
       if (recommendedPrediction === "YES") predictionReason = "Structural collapse detected. Reversal mandatory.";
+      else if (distanceToEma < -8 && rsi < 35) predictionReason = "Price is low but oversold. Expect a temporary bounce. Do not panic.";
       else if (realGapBps < 0) predictionReason = "Firmly in profit. Holding position steady.";
       else predictionReason = "Position negative, holding firm through noise.";
     }
@@ -608,14 +621,24 @@ export default function App() {
       tradeAction = "CALIBRATING..."; actionColor = "text-blue-400"; actionBg = "bg-blue-500/10 border-blue-500/30";
     } 
     else if (prediction === "SIT OUT") {
-      if (recommendedPrediction === "YES") {
+      // V29: Prevent entries into overextended rubber-bands
+      const isOverbought = distanceToEma > 10 && rsi > 65;
+      const isOversold = distanceToEma < -10 && rsi < 35;
+
+      if (recommendedPrediction === "YES" && !isOverbought) {
         tradeAction = "EARLY SNIPER ENTRY"; tradeReason = "Momentum supports early YES. Catching better odds.";
         actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
         hasAction = true; actionButtonLabel = "CONFIRM ENTRY: 'YES'"; actionTarget = "YES"; actionProb = probabilityAbove;
-      } else if (recommendedPrediction === "NO") {
+      } else if (recommendedPrediction === "NO" && !isOversold) {
         tradeAction = "EARLY SNIPER ENTRY"; tradeReason = "Momentum supports early NO. Catching better odds.";
         actionColor = "text-rose-400"; actionBg = "bg-rose-500/10 border-rose-500/30";
         hasAction = true; actionButtonLabel = "CONFIRM ENTRY: 'NO'"; actionTarget = "NO"; actionProb = 100 - probabilityAbove;
+      } else if (recommendedPrediction === "YES" && isOverbought) {
+        tradeAction = "SIT OUT (OVERBOUGHT)"; tradeReason = "Math says YES, but RSI is too hot. Wait for pullback to enter.";
+        actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
+      } else if (recommendedPrediction === "NO" && isOversold) {
+        tradeAction = "SIT OUT (OVERSOLD)"; tradeReason = "Math says NO, but RSI is too cold. Wait for bounce to enter.";
+        actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
       }
     }
     else if (prediction === "YES" || prediction === "NO") {
@@ -797,37 +820,48 @@ export default function App() {
   }, [analysis?.prediction]);
 
   return (
-    <div className="min-h-screen bg-[#111312] text-[#E8E9E4] font-sans p-2 md:p-4 flex flex-col items-center selection:bg-[#E8E9E4]/20 overflow-x-hidden">
+    <div className="min-h-screen bg-[#111312] text-[#E8E9E4] font-sans p-2 sm:p-4 flex flex-col items-center selection:bg-[#E8E9E4]/20 overflow-x-hidden">
       {emergencyBlink && <div className="fixed inset-0 bg-amber-500/5 pointer-events-none z-50 animate-pulse border-[4px] border-amber-500/20 transition-all duration-500" />}
 
-      {/* Header */}
-      <div className="w-full max-w-6xl flex justify-between items-end border-b border-[#E8E9E4]/10 pb-3 mb-4">
-        <div>
+      {/* Header - FULLY RESPONSIVE */}
+      <div className="w-full max-w-6xl flex flex-wrap sm:flex-nowrap justify-between items-center border-b border-[#E8E9E4]/10 pb-3 mb-4 gap-3">
+        <div className="flex items-center justify-between w-full sm:w-auto">
           <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
             Tara
-            <span className="flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V28 Unified Oracle
+            <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V29
             </span>
           </h1>
+          
+          {/* Mobile Right Icons (Hidden on Desktop) */}
+          <div className="flex sm:hidden items-center gap-2">
+            <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-1.5 rounded-md border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`}>
+              {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            </button>
+            <button onClick={() => setShowHelp(true)} className="p-1.5 rounded-md bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors">
+              <HelpCircle className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
         
         {/* Window Toggle Switch */}
-        <div className="flex bg-[#111312] border border-[#E8E9E4]/20 rounded-lg p-1 mr-auto ml-8 shadow-inner">
+        <div className="flex bg-[#111312] border border-[#E8E9E4]/20 rounded-lg p-1 shadow-inner w-full sm:w-auto justify-center">
           <button 
             onClick={() => handleWindowToggle('5m')}
-            className={`px-4 py-1 text-[10px] uppercase font-bold tracking-widest rounded-md transition-all ${windowType === '5m' ? 'bg-indigo-500 text-white shadow-md' : 'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
+            className={`flex-1 sm:flex-none px-6 py-1.5 text-[10px] uppercase font-bold tracking-widest rounded-md transition-all ${windowType === '5m' ? 'bg-indigo-500 text-white shadow-md' : 'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
           >
             5 Min
           </button>
           <button 
             onClick={() => handleWindowToggle('15m')}
-            className={`px-4 py-1 text-[10px] uppercase font-bold tracking-widest rounded-md transition-all ${windowType === '15m' ? 'bg-emerald-500 text-white shadow-md' : 'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
+            className={`flex-1 sm:flex-none px-6 py-1.5 text-[10px] uppercase font-bold tracking-widest rounded-md transition-all ${windowType === '15m' ? 'bg-emerald-500 text-white shadow-md' : 'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
           >
             15 Min
           </button>
         </div>
 
-        <div className="text-right font-sans flex items-center gap-4">
+        {/* Desktop Right Info */}
+        <div className="hidden sm:flex text-right font-sans items-center gap-4">
           <div className="flex flex-col items-end pl-4">
             <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest mb-0.5">Current EST</div>
             <div className="text-sm font-serif text-[#E8E9E4]/90">{timeState.currentEST || '--:--:--'}</div>
@@ -845,70 +879,88 @@ export default function App() {
 
       <div className="w-full max-w-6xl flex flex-col gap-4">
         
-        {/* Top Control Bar */}
-        <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-wrap lg:flex-nowrap items-center justify-between gap-4 relative overflow-hidden">
+        {/* Top Control Bar - MOBILE OPTIMIZED (Wrap properly) */}
+        <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col lg:flex-row items-center justify-between gap-4 relative overflow-hidden">
            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
 
-           {/* Live Spot */}
-           <div className="flex items-center gap-3 w-auto pl-1 md:pl-2">
-             <div className="p-2 md:p-2.5 bg-[#111312] rounded-lg border border-[#E8E9E4]/5 shadow-inner">
-               <Zap className={`w-5 h-5 md:w-6 md:h-6 transition-colors duration-200 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-[#E8E9E4]/40'}`} />
+           {/* Top Row on Mobile: Live Spot & Scorecard */}
+           <div className="flex w-full lg:w-auto justify-between lg:justify-start items-center gap-4">
+             {/* Live Spot */}
+             <div className="flex items-center gap-3 w-1/2 lg:w-auto pl-1 md:pl-2">
+               <div className="p-2 bg-[#111312] rounded-lg border border-[#E8E9E4]/5 shadow-inner">
+                 <Zap className={`w-5 h-5 transition-colors duration-200 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-[#E8E9E4]/40'}`} />
+               </div>
+               <div>
+                 <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-0.5">Live Spot</div>
+                 <div className={`text-xl sm:text-2xl md:text-3xl font-serif tracking-tight flex items-center gap-1 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-white'}`}>
+                   ${currentPrice ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '---'}
+                 </div>
+               </div>
              </div>
-             <div>
-               <div className="text-[10px] md:text-xs text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-0.5 md:mb-1">Live Spot</div>
-               <div className={`text-2xl md:text-3xl font-serif tracking-tight flex items-center gap-1 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-white'}`}>
-                 ${currentPrice ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '---'}
+
+             {/* Dynamic Scorecard for Mobile */}
+             <div className="flex lg:hidden flex-col items-center bg-[#111312] p-2 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-1/2">
+               <div className="flex items-center justify-between w-full px-2">
+                 <div className="flex flex-col items-center">
+                   <div className="text-[9px] text-emerald-400 mb-0.5">WINS</div>
+                   <span className="text-xl font-serif text-emerald-400 font-bold">{scorecards[windowType].wins}</span>
+                 </div>
+                 <div className="h-6 w-px bg-[#E8E9E4]/10"></div>
+                 <div className="flex flex-col items-center">
+                   <div className="text-[9px] text-rose-400 mb-0.5">LOSS</div>
+                   <span className="text-xl font-serif text-rose-400 font-bold">{scorecards[windowType].losses}</span>
+                 </div>
                </div>
              </div>
            </div>
            
            <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
-           {/* Strike, Bet & Offer Setup */}
-           <div className="flex items-center gap-4 lg:gap-6 w-full lg:w-auto bg-[#111312] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/5 shadow-inner flex-wrap md:flex-nowrap">
-             <div className="flex flex-col items-start pr-4 lg:pr-6 border-r border-[#E8E9E4]/10">
-               <div className="text-[10px] md:text-xs text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Set Strike</div>
+           {/* Strike, Bet & Offer Setup - MOBILE OPTIMIZED */}
+           <div className="flex items-center gap-3 md:gap-6 w-full lg:w-auto bg-[#111312] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/5 shadow-inner justify-between overflow-x-auto">
+             <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[80px]">
+               <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Strike</div>
                <div className="flex items-center">
-                 <Crosshair className="w-4 h-4 md:w-5 md:h-5 text-indigo-400 mr-2 opacity-80" />
-                 <input type="number" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-xl md:text-2xl w-24 md:w-28 focus:outline-none py-1 leading-normal" />
+                 <Crosshair className="w-3 h-3 md:w-4 md:h-4 text-indigo-400 mr-1 md:mr-2 opacity-80 hidden sm:block" />
+                 <input type="number" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-lg md:text-xl w-[75px] md:w-24 focus:outline-none py-1 leading-normal" />
                </div>
              </div>
-             <div className="flex flex-col items-start pr-4 lg:pr-6 border-r border-[#E8E9E4]/10">
-               <div className="text-[10px] md:text-xs text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Bet / Payout</div>
-               <div className="flex items-center gap-1.5 text-white font-serif text-lg md:text-xl">
-                 $<input type="number" value={betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-12 md:w-16 text-center outline-none py-1 leading-normal" />
-                 <span className="text-[#E8E9E4]/40 mx-0.5 md:mx-1">/</span>
-                 $<input type="number" value={maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-14 md:w-20 text-center outline-none py-1 leading-normal" />
+             <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[90px]">
+               <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Bet / Win</div>
+               <div className="flex items-center gap-1 text-white font-serif text-base md:text-lg">
+                 $<input type="number" value={betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-8 md:w-12 text-center outline-none py-1 leading-normal" />
+                 <span className="text-[#E8E9E4]/40 mx-0.5">/</span>
+                 $<input type="number" value={maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-10 md:w-14 text-center outline-none py-1 leading-normal" />
                </div>
              </div>
-             <div className="flex flex-col items-start pl-1 md:pl-2">
-               <div className="text-[10px] md:text-xs text-emerald-400/80 uppercase tracking-widest font-medium mb-1.5">Live Market Offer</div>
-               <div className="flex items-center gap-1 text-emerald-400 font-serif text-lg md:text-xl">
-                 $<input type="number" value={currentOffer} onChange={(e) => setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-16 md:w-24 text-center outline-none placeholder-emerald-900 py-1 leading-normal" />
+             <div className="flex flex-col items-start pl-1 md:pl-2 min-w-[80px]">
+               <div className="text-[9px] md:text-[10px] text-emerald-400/80 uppercase tracking-widest font-medium mb-1.5">Live Offer</div>
+               <div className="flex items-center gap-1 text-emerald-400 font-serif text-base md:text-lg">
+                 $<input type="number" value={currentOffer} onChange={(e) => setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-12 md:w-16 text-center outline-none placeholder-emerald-900 py-1 leading-normal" />
                </div>
              </div>
            </div>
            
            <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
-           {/* Dynamic Scorecard for 5M/15M */}
-           <div className="flex flex-col items-start bg-[#111312] p-2.5 md:p-3 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-full lg:w-56">
-             <div className="text-[10px] md:text-xs text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5 md:mb-2 flex justify-between w-full">
-               <span className="flex items-center gap-1.5"><Terminal className="w-3 md:w-3.5 h-3 md:h-3.5"/> {windowType.toUpperCase()} Scorecard</span>
+           {/* Scorecard for Desktop */}
+           <div className="hidden lg:flex flex-col items-start bg-[#111312] p-3 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-56">
+             <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-2 flex justify-between w-full">
+               <span className="flex items-center gap-1.5"><Terminal className="w-3.5 h-3.5"/> {windowType.toUpperCase()} Scorecard</span>
              </div>
-             <div className="flex items-center justify-between w-full px-1 md:px-2">
+             <div className="flex items-center justify-between w-full px-2">
                <div className="flex flex-col items-center">
-                 <div className="flex items-center gap-1.5 text-[9px] md:text-[10px] text-emerald-400 mb-0.5 md:mb-1">
+                 <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 mb-1">
                    <button onClick={() => updateScore(windowType, 'wins', -1)}>-</button> WINS <button onClick={() => updateScore(windowType, 'wins', 1)}>+</button>
                  </div>
-                 <span className="text-2xl md:text-3xl font-serif text-emerald-400 font-bold">{scorecards[windowType].wins}</span>
+                 <span className="text-3xl font-serif text-emerald-400 font-bold">{scorecards[windowType].wins}</span>
                </div>
-               <div className="h-8 md:h-10 w-px bg-[#E8E9E4]/10"></div>
+               <div className="h-10 w-px bg-[#E8E9E4]/10"></div>
                <div className="flex flex-col items-center">
-                 <div className="flex items-center gap-1.5 text-[9px] md:text-[10px] text-rose-400 mb-0.5 md:mb-1">
+                 <div className="flex items-center gap-1.5 text-[10px] text-rose-400 mb-1">
                    <button onClick={() => updateScore(windowType, 'losses', -1)}>-</button> LOSS <button onClick={() => updateScore(windowType, 'losses', 1)}>+</button>
                  </div>
-                 <span className="text-2xl md:text-3xl font-serif text-rose-400 font-bold">{scorecards[windowType].losses}</span>
+                 <span className="text-3xl font-serif text-rose-400 font-bold">{scorecards[windowType].losses}</span>
                </div>
              </div>
            </div>
@@ -919,36 +971,36 @@ export default function App() {
           {/* MAIN OUTCOME DISPLAY */}
           <div className="lg:col-span-8 flex flex-col gap-4">
             
-            <div className="bg-[#181A19] p-4 md:p-6 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col justify-center items-center text-center relative overflow-hidden min-h-[420px]">
+            <div className="bg-[#181A19] p-4 md:p-6 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col justify-center items-center text-center relative overflow-hidden min-h-[380px] md:min-h-[420px]">
                
                <div className="absolute top-3 left-1/2 transform -translate-x-1/2 bg-[#111312] border border-[#E8E9E4]/10 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 shadow-sm whitespace-nowrap">
                  <Clock className="w-3 h-3" />
-                 <span className="text-[#E8E9E4]/60">{timeState.startWindowEST}-{timeState.nextWindowEST}</span>
-                 <span className="text-[#E8E9E4] ml-1">{timeState.minsRemaining}m {timeState.secsRemaining}s</span>
+                 <span className="text-[#E8E9E4]/60 hidden sm:inline">{timeState.startWindowEST}-{timeState.nextWindowEST}</span>
+                 <span className="text-[#E8E9E4]">{timeState.minsRemaining}m {timeState.secsRemaining}s</span>
                </div>
 
                {/* Force Pull Out Button */}
                {analysis && analysis.prediction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && (
                  <button 
                    onClick={() => executeManualAction("MANUAL PULL OUT", "SIT OUT")}
-                   className="absolute top-3 right-3 bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+                   className="absolute top-3 right-3 bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 sm:px-3 py-1.5 rounded-md text-[9px] sm:text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
                  >
-                   <AlertTriangle className="w-3 h-3" /> Force Pull Out
+                   <AlertTriangle className="w-3 h-3" /> <span className="hidden sm:inline">Force Pull Out</span>
                  </button>
                )}
 
                {isLoading || !analysis ? (
                  <div className="text-xl font-serif text-[#E8E9E4]/30 animate-pulse mt-8">Connecting to Datastream...</div>
                ) : (
-                 <div className="flex flex-col items-center w-full mt-6">
+                 <div className="flex flex-col items-center w-full mt-8 sm:mt-6">
                    
-                   <div className="bg-[#111312] border border-[#E8E9E4]/10 p-3 rounded-lg font-mono text-[11px] text-[#E8E9E4]/60 mb-4 w-full max-w-[400px] mx-auto shadow-inner text-left">
+                   <div className="bg-[#111312] border border-[#E8E9E4]/10 p-3 rounded-lg font-mono text-[10px] sm:text-[11px] text-[#E8E9E4]/60 mb-4 w-full max-w-[400px] mx-auto shadow-inner text-left">
                      <div className="flex justify-between items-center mb-1.5">
                        <span className="text-[#E8E9E4]">BTC: ${currentPrice?.toFixed(2)}</span>
                        <span className={`font-bold ${analysis.realGapBps > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>GAP: {analysis.realGapBps > 0 ? '+' : ''}{analysis.realGapBps.toFixed(1)} bps</span>
                      </div>
-                     <div className="flex justify-between items-center text-[9px] opacity-80 pt-1 border-t border-[#E8E9E4]/10">
-                       <span>BRTI GAP: {brtiPremium > 0 ? '+' : ''}${brtiPremium.toFixed(1)}</span>
+                     <div className="flex justify-between items-center text-[9px] opacity-80 pt-1 border-t border-[#E8E9E4]/10 overflow-x-hidden">
+                       <span className="hidden sm:inline">BRTI GAP: {brtiPremium > 0 ? '+' : ''}${brtiPremium.toFixed(1)}</span>
                        <span>TAKER: <span className={takerFlow.imbalance > 1 ? 'text-emerald-400' : 'text-rose-400'}>{takerFlow.imbalance.toFixed(1)}x</span></span>
                        <span>LIQ: <span className={(analysis.liqBuys > analysis.liqSells) ? 'text-emerald-400' : (analysis.liqSells > analysis.liqBuys ? 'text-rose-400' : 'text-zinc-400')}>{analysis.liqBuys > analysis.liqSells ? 'BULL' : (analysis.liqSells > analysis.liqBuys ? 'BEAR' : 'FLAT')}</span></span>
                      </div>
@@ -959,28 +1011,28 @@ export default function App() {
                      </div>
                    </div>
 
-                   <h2 className={`text-4xl md:text-6xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} mb-2 drop-shadow-sm transition-all flex items-center justify-center gap-3 uppercase`}>
-                     <span className="opacity-40 text-xl md:text-3xl font-sans">{`>>`}</span>
+                   <h2 className={`text-5xl sm:text-6xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} mb-2 drop-shadow-sm transition-all flex items-center justify-center gap-2 sm:gap-3 uppercase`}>
+                     <span className="opacity-40 text-xl sm:text-3xl font-sans">{`>>`}</span>
                      {analysis.prediction}
-                     {analysis.isSystemLocked && <span className="opacity-90 text-xl md:text-3xl"> - LOCK</span>}
-                     <span className="opacity-40 text-xl md:text-3xl font-sans">{`<<`}</span>
+                     {analysis.isSystemLocked && <span className="opacity-90 text-xl sm:text-3xl"> - LOCK</span>}
+                     <span className="opacity-40 text-xl sm:text-3xl font-sans">{`<<`}</span>
                    </h2>
 
-                   <p className="text-xs text-[#E8E9E4]/50 font-sans max-w-sm mx-auto mb-4 px-2 h-8">
+                   <p className="text-[11px] sm:text-xs text-[#E8E9E4]/50 font-sans max-w-sm mx-auto mb-4 px-2 h-8 leading-tight">
                      {analysis.predictionReason}
                    </p>
 
                    {/* LIVE PnL TRACKER */}
                    {analysis.prediction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && (
-                     <div className={`flex items-center gap-4 mb-4 px-4 py-2 rounded-lg border ${analysis.livePnL >= 0 ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
-                       <div className="flex flex-col">
-                         <span className="text-[9px] uppercase tracking-widest opacity-60">Tara's True Value</span>
-                         <span className="font-serif text-lg">${analysis.liveEstValue.toFixed(2)}</span>
+                     <div className={`flex items-center gap-3 sm:gap-4 mb-4 px-3 sm:px-4 py-2 rounded-lg border w-full max-w-[300px] justify-center ${analysis.livePnL >= 0 ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
+                       <div className="flex flex-col text-center sm:text-left">
+                         <span className="text-[8px] sm:text-[9px] uppercase tracking-widest opacity-60">Tara Value</span>
+                         <span className="font-serif text-base sm:text-lg">${analysis.liveEstValue.toFixed(2)}</span>
                        </div>
                        <div className="w-px h-6 bg-[#E8E9E4]/20"></div>
-                       <div className="flex flex-col">
-                         <span className="text-[9px] uppercase tracking-widest opacity-60">Est PnL</span>
-                         <span className={`font-serif font-bold text-lg ${analysis.livePnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                       <div className="flex flex-col text-center sm:text-left">
+                         <span className="text-[8px] sm:text-[9px] uppercase tracking-widest opacity-60">Est PnL</span>
+                         <span className={`font-serif font-bold text-base sm:text-lg ${analysis.livePnL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                            {analysis.livePnL >= 0 ? '+' : '-'}${Math.abs(analysis.livePnL).toFixed(2)}
                          </span>
                        </div>
@@ -988,24 +1040,24 @@ export default function App() {
                    )}
 
                    {/* INTERACTIVE TRADE ADVISOR */}
-                   <div className={`mb-4 w-full max-w-[400px] p-4 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm`}>
+                   <div className={`mb-4 w-full max-w-[400px] p-3 sm:p-4 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm`}>
                      <div className="flex items-center gap-1.5 mb-1.5">
-                       <BellRing className={`w-3.5 h-3.5 ${analysis.actionColor}`} />
-                       <span className="text-[10px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span>
+                       <BellRing className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${analysis.actionColor}`} />
+                       <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span>
                      </div>
-                     <div className={`text-lg font-serif font-bold mb-1 ${analysis.actionColor} uppercase`}>{analysis.tradeAction}</div>
-                     <p className="text-[11px] opacity-80 text-[#E8E9E4] mb-3">{analysis.tradeReason}</p>
+                     <div className={`text-base sm:text-lg font-serif font-bold mb-1 ${analysis.actionColor} uppercase`}>{analysis.tradeAction}</div>
+                     <p className="text-[10px] sm:text-[11px] opacity-80 text-[#E8E9E4] mb-2 sm:mb-3 leading-tight">{analysis.tradeReason}</p>
 
                      {analysis.hasAction && (
-                       <div className="w-full pt-3 border-t border-[#E8E9E4]/10">
+                       <div className="w-full pt-2 sm:pt-3 border-t border-[#E8E9E4]/10">
                           {manualAction === analysis.tradeAction ? (
-                             <div className="w-full bg-emerald-500/20 text-emerald-400 py-2 rounded-lg text-[11px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5">
+                             <div className="w-full bg-emerald-500/20 text-emerald-400 py-2 rounded-lg text-[10px] sm:text-[11px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5">
                                <CheckCircle className="w-3.5 h-3.5" /> Action Logged
                              </div>
                           ) : (
                              <button 
                                onClick={() => executeManualAction(analysis.tradeAction, analysis.actionTarget)}
-                               className={`w-full py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-widest border transition-all hover:brightness-125 ${
+                               className={`w-full py-2 sm:py-2.5 rounded-lg text-[10px] sm:text-[11px] font-bold uppercase tracking-widest border transition-all hover:brightness-125 ${
                                  analysis.actionColor.includes('rose') ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' :
                                  analysis.actionColor.includes('amber') ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' :
                                  'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
@@ -1020,11 +1072,11 @@ export default function App() {
                    
                    {/* MANUAL SYNC BUTTONS */}
                    {analysis.prediction === "SIT OUT" && (
-                     <div className="flex flex-col items-center gap-2 mt-1 mb-4 w-full max-w-[400px]">
-                       <span className="text-[9px] uppercase tracking-widest text-[#E8E9E4]/40">Already in a trade? Sync Tara:</span>
-                       <div className="flex gap-3 w-full">
-                         <button onClick={() => handleManualSync("YES")} className="flex-1 py-1.5 border border-emerald-500/30 text-emerald-400 rounded-md text-[10px] uppercase font-bold tracking-widest hover:bg-emerald-500/10 transition-colors">I Entered YES</button>
-                         <button onClick={() => handleManualSync("NO")} className="flex-1 py-1.5 border border-rose-500/30 text-rose-400 rounded-md text-[10px] uppercase font-bold tracking-widest hover:bg-rose-500/10 transition-colors">I Entered NO</button>
+                     <div className="flex flex-col items-center gap-1.5 sm:gap-2 mt-1 mb-2 sm:mb-4 w-full max-w-[400px]">
+                       <span className="text-[8px] sm:text-[9px] uppercase tracking-widest text-[#E8E9E4]/40">Already in a trade? Sync Tara:</span>
+                       <div className="flex gap-2 sm:gap-3 w-full">
+                         <button onClick={() => handleManualSync("YES")} className="flex-1 py-1.5 border border-emerald-500/30 text-emerald-400 rounded-md text-[9px] sm:text-[10px] uppercase font-bold tracking-widest hover:bg-emerald-500/10 transition-colors">I Entered YES</button>
+                         <button onClick={() => handleManualSync("NO")} className="flex-1 py-1.5 border border-rose-500/30 text-rose-400 rounded-md text-[9px] sm:text-[10px] uppercase font-bold tracking-widest hover:bg-rose-500/10 transition-colors">I Entered NO</button>
                        </div>
                      </div>
                    )}
@@ -1067,7 +1119,7 @@ export default function App() {
                 ) : (
                   newsEvents.map((news, i) => (
                     <div key={i} className="border-l-[2px] border-indigo-500/40 pl-2 py-0.5">
-                      <span className="text-[11.5px] text-[#E8E9E4]/90 leading-tight">
+                      <span className="text-[11px] sm:text-[11.5px] text-[#E8E9E4]/90 leading-tight">
                         {news.title}
                       </span>
                     </div>
@@ -1077,23 +1129,23 @@ export default function App() {
             </div>
 
             <div className="flex gap-4">
-              <div className="flex-1 bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
-                 <div className="text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">PROB ABOVE</div>
-                 <div className="text-2xl font-serif text-indigo-300">{analysis ? `${analysis.rawProbAbove.toFixed(0)}%` : '--%'}</div>
+              <div className="flex-1 bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
+                 <div className="text-[8px] sm:text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">PROB ABOVE</div>
+                 <div className="text-xl sm:text-2xl font-serif text-indigo-300">{analysis ? `${analysis.rawProbAbove.toFixed(0)}%` : '--%'}</div>
               </div>
-              <div className="flex-1 bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
-                 <div className="text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">PROB BELOW</div>
-                 <div className="text-2xl font-serif text-rose-300">{analysis ? `${(100 - analysis.rawProbAbove).toFixed(0)}%` : '--%'}</div>
+              <div className="flex-1 bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 text-center">
+                 <div className="text-[8px] sm:text-[9px] text-[#E8E9E4]/50 font-bold uppercase mb-1">PROB BELOW</div>
+                 <div className="text-xl sm:text-2xl font-serif text-rose-300">{analysis ? `${(100 - analysis.rawProbAbove).toFixed(0)}%` : '--%'}</div>
               </div>
             </div>
 
             {/* System Logs */}
             {analysis && (
-              <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex-1">
+              <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex-1 min-h-[150px]">
                 <h2 className="text-[10px] font-medium text-[#E8E9E4]/60 uppercase tracking-widest mb-3 flex items-center gap-1.5">
                   <Terminal className="w-3.5 h-3.5 text-amber-400" /> Math Engine Logs
                 </h2>
-                <div className="space-y-2 font-mono h-[120px] overflow-y-auto pr-1 custom-scrollbar">
+                <div className="space-y-2 font-mono h-[120px] lg:h-full lg:max-h-[250px] overflow-y-auto pr-1 custom-scrollbar">
                   {analysis.reasoning.map((reason, idx) => (
                     <div key={idx} className="bg-[#111312] p-2 rounded-md text-[9px] text-[#E8E9E4]/70 flex items-start gap-2 border border-[#E8E9E4]/5 uppercase">
                       <span className="text-emerald-500 mt-0.5">{`>`}</span>
@@ -1108,9 +1160,9 @@ export default function App() {
       </div>
 
       {/* FLOATING CHAT WIDGET */}
-      <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen ? 'w-80' : 'w-auto'}`}>
+      <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen ? 'w-[90vw] sm:w-80' : 'w-auto'}`}>
         {isChatOpen && (
-          <div className="bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-96">
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[60vh] sm:h-96">
             <div className="bg-[#111312] p-3 flex justify-between items-center border-b border-[#E8E9E4]/10">
               <span className="text-xs font-bold uppercase tracking-widest flex items-center gap-2">
                 <MessageSquare className="w-3.5 h-3.5 text-indigo-400" /> Chat w/ Tara
@@ -1151,32 +1203,32 @@ export default function App() {
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl">
             <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10">
-              <h2 className="text-lg font-serif text-white flex items-center gap-2">
-                <Info className="w-5 h-5 text-indigo-400" /> Tara Operations Manual
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
+                <Info className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" /> Tara Operations Manual
               </h2>
               <button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             
-            <div className="p-6 space-y-8 text-sm text-[#E8E9E4]/80">
+            <div className="p-4 sm:p-6 space-y-6 sm:space-y-8 text-xs sm:text-sm text-[#E8E9E4]/80">
               
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">1. Multi-Timeframe System (5M vs 15M)</h3>
-                <p className="mb-3 leading-relaxed">You can toggle Tara between 5-Minute and 15-Minute mode in the top left. <br/><strong>In 15M Mode:</strong> She analyzes macro-trends, VWAP, and looks for safer, wider structural trades.<br/><strong>In 5M Mode:</strong> She becomes an aggressive scalper. She ignores slow indicators and multiplies the weight of live order flow (Tape Delta) by 1.5x.</p>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. Multi-Timeframe & Mean Reversion</h3>
+                <p className="mb-3 leading-relaxed">You can toggle Tara between 5-Minute and 15-Minute mode. <br/><strong>In 15M Mode:</strong> She analyzes macro-trends, VWAP, and looks for safer, wider structural trades.<br/><strong>In 5M Mode:</strong> She becomes an aggressive scalper. She ignores slow indicators and multiplies the weight of live order flow (Tape Delta) by 1.5x.</p>
+                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Mean Reversion (V29 Update):</strong> Tara no longer chases fake pumps. If the price rockets but RSI is overbought (&gt;65), she will penalize the odds by 15% and advise you to "Wait for Pullback".</p>
                 <ul className="list-disc pl-5 space-y-2">
                   <li><strong>Setup:</strong> Select your timeframe. Type in the platform's Strike Price, your Bet Size, and Max Payout.</li>
                   <li><strong>Wait:</strong> Tara begins every trade at "SIT OUT". She requires a minimum of <span className="text-emerald-300 font-mono">64% conviction</span> to advise an entry.</li>
-                  <li><strong>Manual Sync:</strong> If you enter early based on your own gut, click "I Entered YES/NO" so Tara locks onto your position and manages your exit.</li>
                 </ul>
               </section>
 
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">2. The "Scalp" Method (Maximum Profit)</h3>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. The "Scalp" Method (Maximum Profit)</h3>
                 <p className="leading-relaxed">If you are in a winning position (odds &gt; 70%), but Tara detects that whales are suddenly selling the momentum back down, she will trigger a <strong>SCALP METHOD (CASH OUT)</strong> alert. <br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will scream at you to take the Arbitrage.</p>
               </section>
 
               <section>
-                <h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-xs">3. Understanding the Data Dashboard</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2 font-mono text-[11px]">
+                <h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">3. Understanding the Data Dashboard</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mt-2 font-mono text-[10px] sm:text-[11px]">
                   <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
                     <span className="text-indigo-300 font-bold block mb-1">BRTI GAP:</span>
                     The difference between Coinbase and the Global Market Index. If positive (+), arbitrage bots will soon force the price UP.
@@ -1194,11 +1246,6 @@ export default function App() {
                     Tracks forced margin calls on Binance. A "BULL" liquidation means heavily shorted traders are being squeezed upward.
                   </div>
                 </div>
-              </section>
-              
-              <section>
-                <h3 className="text-rose-400 font-bold uppercase tracking-widest mb-2 text-xs">4. The Jerome Filter (Endgame Logic)</h3>
-                <p className="leading-relaxed">In the final moments of a round (last 3 mins for 15M, last 60s for 5M), Tara activates the <strong>Jerome Filter</strong>. She will stop listening to order book hopium and strictly calculate whether the physical gap is crossable in the time remaining. If the math says it's physically impossible, she locks the prediction.</p>
               </section>
 
             </div>
