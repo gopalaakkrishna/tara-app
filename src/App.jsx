@@ -1,23 +1,22 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 
 // --- 100% DEPENDENCY-FREE INLINE ICONS ---
-const IconClock = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
-const IconCrosshair = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>;
-const IconZap = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
-const IconTerminal = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>;
-const IconAlertTriangle = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
-const IconActivity = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
-const IconBell = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
-const IconCheck = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
-const IconTrendingUp = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>;
-const IconGlobe = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>;
-const IconMessage = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
-const IconX = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
-const IconInfo = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
-const IconVolume2 = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>;
-const IconVolumeX = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>;
-const IconHelp = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
-const IconLink = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>;
+const IconClock = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
+const IconCrosshair = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>;
+const IconZap = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
+const IconTerminal = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>;
+const IconAlertTriangle = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+const IconActivity = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
+const IconBell = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
+const IconCheck = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
+const IconTrendingUp = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-400"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>;
+const IconGlobe = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>;
+const IconMessage = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
+const IconX = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+const IconInfo = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
+const IconVolume2 = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>;
+const IconVolumeX = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>;
+const IconHelp = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 
 // --- NATIVE INTERACTIVE CANDLESTICK / LINE CHART WITH VOLUME ---
 const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActive }) => {
@@ -26,13 +25,16 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
   const [hoverPos, setHoverPos] = useState(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState(0);
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 }); 
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 }); // Fixes resizing cutoff
   
   const isDragging = useRef(false);
   const lastMouseX = useRef(0);
+  const lastTouchX = useRef(null);
+  const initialPinchDist = useRef(null);
   const maxPanRef = useRef(0);
   const spacingRef = useRef(10); 
 
+  // Watch for Container Resizes (Fixes chart cutoff)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -45,6 +47,7 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     return () => resizeObserver.disconnect();
   }, []);
 
+  // Scroll Isolation Fix & Native Trackpad Pan
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -73,7 +76,7 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     const width = dimensions.width;
     const height = dimensions.height;
     const rightMargin = 65; 
-    const bottomMargin = 28; 
+    const bottomMargin = 20;
     const chartW = width - rightMargin;
     const chartH = height - bottomMargin;
     const volH = chartH * 0.2; 
@@ -137,7 +140,7 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
         if (viewData[dataIndex] && viewData[dataIndex].time) {
             const t = viewData[dataIndex].time;
             const d = new Date(t > 1e11 ? t : t * 1000);
-            ctx.fillText(d.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit'}), x, chartH + 10);
+            ctx.fillText(d.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit'}), x, chartH + 5);
         }
     }
 
@@ -248,8 +251,8 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     }
   }, [data, currentPrice, zoom, pan, hoverPos, showCandles, targetMargin, rugPullActive, dimensions]);
 
-  const handlePointerDown = (e) => { isDragging.current = true; lastMouseX.current = e.clientX; };
-  const handlePointerMove = (e) => {
+  const handleMouseDown = (e) => { isDragging.current = true; lastMouseX.current = e.clientX; };
+  const handleMouseMove = (e) => {
       const rect = containerRef.current.getBoundingClientRect();
       setHoverPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
       if (isDragging.current) {
@@ -257,12 +260,62 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
           lastMouseX.current = e.clientX;
       }
   };
-  const handlePointerUp = () => { isDragging.current = false; };
-  const handlePointerLeave = () => { setHoverPos(null); isDragging.current = false; };
+  const handleMouseUp = () => { isDragging.current = false; };
+  const handleMouseLeave = () => { setHoverPos(null); isDragging.current = false; };
+
+  const handleTouchStart = (e) => {
+      if (e.touches.length === 1) {
+          isDragging.current = true;
+          lastTouchX.current = e.touches[0].clientX;
+          const rect = containerRef.current.getBoundingClientRect();
+          setHoverPos({ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top });
+      } else if (e.touches.length === 2) {
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          initialPinchDist.current = Math.sqrt(dx*dx + dy*dy);
+          setHoverPos(null);
+      }
+  };
+
+  const handleTouchMove = (e) => {
+      if (e.touches.length === 1 && isDragging.current) {
+          const deltaX = e.touches[0].clientX - lastTouchX.current;
+          setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev + deltaX / spacingRef.current)));
+          lastTouchX.current = e.touches[0].clientX;
+          
+          const rect = containerRef.current.getBoundingClientRect();
+          setHoverPos({ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top });
+      } else if (e.touches.length === 2 && initialPinchDist.current) {
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          const delta = dist - initialPinchDist.current;
+          
+          setZoom(prev => Math.max(1, Math.min(20, prev + delta * 0.05)));
+          initialPinchDist.current = dist;
+      }
+  };
+
+  const handleTouchEnd = () => {
+      isDragging.current = false;
+      initialPinchDist.current = null;
+      setHoverPos(null);
+  };
 
   return (
       <div ref={containerRef} className="w-full h-full relative cursor-crosshair" style={{ touchAction: 'none' }}>
-          <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerLeave} />
+          <canvas 
+              ref={canvasRef} 
+              className="absolute inset-0 w-full h-full" 
+              onMouseDown={handleMouseDown} 
+              onMouseMove={handleMouseMove} 
+              onMouseUp={handleMouseUp} 
+              onMouseLeave={handleMouseLeave}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onTouchCancel={handleTouchEnd}
+          />
       </div>
   );
 };
@@ -332,15 +385,14 @@ export default function App() {
   const lockedPredictionRef = useRef("SIT OUT");
   const activeCallRef = useRef({ prediction: "SIT OUT", strike: 0 });
   const hasReversedRef = useRef(false); 
-  const taraAdviceRef = useRef("SIT OUT");
   
   // SSR Hydration & Baseline Setup
-  const [scorecards, setScorecards] = useState({ '15m': { wins: 87, losses: 66 }, '5m': { wins: 10, losses: 7 } });
+  const [scorecards, setScorecards] = useState({ '15m': { wins: 83, losses: 62 }, '5m': { wins: 10, losses: 7 } });
   
   useEffect(() => {
     setIsMounted(true);
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV58');
+      const savedScore = localStorage.getItem('btcOracleScorecardV55');
       if (savedScore) setScorecards(JSON.parse(savedScore));
     } catch (e) {}
   }, []);
@@ -348,7 +400,7 @@ export default function App() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V58 Engine online. Active trade management enabled. Sticky signals prevent glitching. Analysis buffer active." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V55 Terminal online. Prediction text scaled down. Canvas resize cutoff resolved." }]);
   const [chatInput, setChatInput] = useState("");
   
   const lastWindowRef = useRef("");
@@ -359,11 +411,12 @@ export default function App() {
 
   useEffect(() => {
     if (isMounted && typeof window !== 'undefined') {
-      try { localStorage.setItem('btcOracleScorecardV58', JSON.stringify(scorecards)); } 
+      try { localStorage.setItem('btcOracleScorecardV55', JSON.stringify(scorecards)); } 
       catch (e) {}
     }
   }, [scorecards, isMounted]);
 
+  // LIVE CANDLESTICK TICK INJECTION 
   const liveHistory = useMemo(() => {
     if (history.length === 0 || !currentPrice) return history;
     const updated = [...history];
@@ -399,7 +452,6 @@ export default function App() {
     lockedPredictionRef.current = "SIT OUT";
     activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
     hasReversedRef.current = false; 
-    taraAdviceRef.current = "SIT OUT";
     setUserPosition(null);
     setManualAction(null);
     setCurrentOffer("");
@@ -438,7 +490,6 @@ export default function App() {
         lockedPredictionRef.current = "SIT OUT";
         activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
         hasReversedRef.current = false; 
-        taraAdviceRef.current = "SIT OUT";
         setUserPosition(null); 
         lastWindowRef.current = timeState.nextWindowEST;
         setManualAction(null); 
@@ -565,7 +616,7 @@ export default function App() {
     return () => clearInterval(spotInterval);
   }, []);
 
-  // API Data Polling
+  // Heavy Data Polling
   useEffect(() => {
     const fetchHeavyData = async () => {
       try {
@@ -633,7 +684,7 @@ export default function App() {
     setNewsEvents(syntheticNews);
   }, [orderBook.imbalance, takerFlow.imbalance, targetMargin, windowType, showWhaleAlerts]);
 
-  // BULLETPROOF TIME ENGINE 
+  // BULLETPROOF TIME ENGINE (100% Vercel SSR Crash Proof)
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -669,7 +720,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [windowType]);
 
-  // --- TARA V58: HYSTERESIS & ACTIVE MANAGEMENT ENGINE ---
+  // --- TARA V40: ZERO-LATENCY REAL-TIME ENGINE ---
   const analysis = useMemo(() => {
     if (!currentPrice || liveHistory.length < 30 || !targetMargin || !isMounted) return null;
 
@@ -679,7 +730,6 @@ export default function App() {
     const timeFraction = Math.max(0, Math.min(1, 1 - (clockSeconds / intervalSeconds)));
     
     const isEndgameLock = clockSeconds < 120; 
-    const isCalibrating = (intervalSeconds - clockSeconds) < 25; 
 
     const closes = liveHistory.map(x => x.c);
     const rsi = calculateRSI(closes, 14) || 50;
@@ -738,31 +788,30 @@ export default function App() {
     if (liqBuys > 10000) { baseProb += 15; reasoning.push(`LIQ: Shorts squeezed. Upward force applied.`); }
     if (liqSells > 10000) { baseProb -= 15; reasoning.push(`LIQ: Longs squeezed. Downward force applied.`); }
 
-    if (isEndgameLock && userPosition === null) {
+    if (isEndgameLock) {
         reasoning.push(`ENDGAME: Physics overrule momentum. Physical gap locked in.`);
-        baseProb = 50 + (realGapBps * 4); 
+        baseProb = 50 + (realGapBps * 4); // Override with physical distance
     }
+
+    let prediction = userPosition || lockedPredictionRef.current; 
+    let activePrediction = prediction;
+
+    if (activePrediction === "YES") baseProb += 10; 
+    else if (activePrediction === "NO") baseProb -= 10;
 
     let posterior = Math.max(1, Math.min(99, baseProb)); 
     let convictionScore = Math.abs(posterior - 50) * 2; 
 
-    // THE GLITCH FIX: HYSTERESIS ENTRY LOGIC
-    if (taraAdviceRef.current === "SIT OUT") {
-        if (posterior >= 68) taraAdviceRef.current = "YES";
-        else if (posterior <= 32) taraAdviceRef.current = "NO";
-    } else if (taraAdviceRef.current === "YES") {
-        if (posterior < 48) taraAdviceRef.current = "SIT OUT"; 
-    } else if (taraAdviceRef.current === "NO") {
-        if (posterior > 52) taraAdviceRef.current = "SIT OUT";
+    if (activePrediction === "SIT OUT" && !isEndgameLock) {
+        if (posterior >= 65) activePrediction = "YES";
+        else if (posterior <= 35) activePrediction = "NO";
+    } else if (activePrediction !== "SIT OUT") {
+        if (activePrediction === "YES" && posterior < 30) activePrediction = "SIT OUT";
+        if (activePrediction === "NO" && posterior > 70) activePrediction = "SIT OUT";
     }
 
-    let activePrediction = userPosition !== null ? userPosition : taraAdviceRef.current;
-
-    // Overrides for Entry Mode Only
-    if (userPosition === null) {
-        if (isCalibrating || isEndgameLock) {
-            activePrediction = "SIT OUT";
-        }
+    if (isEndgameLock && Math.abs(realGapBps) > atrBps) {
+        activePrediction = realGapBps > 0 ? "YES" : "NO";
     }
 
     let tradeAction = "WAITING / SIT OUT"; 
@@ -770,91 +819,75 @@ export default function App() {
     let actionColor = "text-zinc-400"; let actionBg = "bg-zinc-500/10 border-zinc-500/30";
     let hasAction = false, actionButtonLabel = "", actionTarget = "";
 
-    const isYES = activePrediction === "YES";
-    const currentOdds = activePrediction === "SIT OUT" ? 50 : (isYES ? posterior : (100 - posterior));
-    const riskPct = 100 - currentOdds;
-    const metricsStr = `[Chance: ${currentOdds.toFixed(0)}% | Risk: ${riskPct.toFixed(0)}%]`;
-
     const dynamicStopLoss = atrBps * (0.60 + ((1-timeFraction) * 0.40)); 
-    let liveEstValue = isYES ? maxPayout * (posterior / 100) : (activePrediction === "NO" ? maxPayout * ((100 - posterior) / 100) : 0);
-    
+    let liveEstValue = activePrediction === "YES" ? maxPayout * (posterior / 100) : activePrediction === "NO" ? maxPayout * ((100 - posterior) / 100) : 0;
+    const livePnL = liveEstValue - betAmount;
     const offerVal = parseFloat(currentOffer) || 0;
-    const livePnL = offerVal > 0 ? (offerVal - betAmount) : (liveEstValue - betAmount);
+    
+    const riskPct = activePrediction === "YES" ? (100 - posterior) : posterior;
+    const chancePct = activePrediction === "YES" ? posterior : (100 - posterior);
+    const metricsStr = `[Chance: ${chancePct.toFixed(0)}% | Risk: ${riskPct.toFixed(0)}%]`;
 
-    if (userPosition === null) {
-        if (isRugPull && showRugPullAlerts) {
-            tradeAction = "🚨 RUG PULL DETECTED 🚨"; 
-            tradeReason = `Massive liquidity collapse. Abort longs immediately.`;
-            actionColor = "text-rose-500"; actionBg = "bg-rose-500/20 border-rose-500/50 animate-pulse shadow-[0_0_20px_rgba(225,29,72,0.4)]";
-            reasoning.push(`🚨 RUG PULL: AggrFlow & TickSlope indicate severe localized crash.`);
-        }
-        else if (isCalibrating) {
-            tradeAction = "CALIBRATING TAPE"; tradeReason = "Analyzing initial tick flow. Please wait...";
-        }
-        else if (isEndgameLock) {
+    if (isRugPull && showRugPullAlerts) {
+        tradeAction = "🚨 RUG PULL DETECTED 🚨"; 
+        tradeReason = `Massive liquidity collapse. Abort longs immediately. ${metricsStr}`;
+        actionColor = "text-rose-500"; actionBg = "bg-rose-500/20 border-rose-500/50 animate-pulse shadow-[0_0_20px_rgba(225,29,72,0.4)]";
+        hasAction = true; actionButtonLabel = "EMERGENCY CASHOUT"; actionTarget = "SIT OUT";
+        reasoning.push(`🚨 RUG PULL: AggrFlow & TickSlope indicate severe localized crash.`);
+    }
+    else if (activePrediction === "SIT OUT") {
+        if (isEndgameLock) {
             tradeAction = "WINDOW CLOSED"; tradeReason = "Late in round. Entering now is unsafe.";
             actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
+        } else {
+            tradeAction = "AWAITING CONVICTION"; tradeReason = "Odds below 65%. Waiting for cleaner setup.";
         }
-        else if (activePrediction !== "SIT OUT") {
+    }
+    else {
+        const isYES = activePrediction === "YES";
+        const isBleeding = isYES ? (realGapBps < -dynamicStopLoss) : (realGapBps > dynamicStopLoss);
+        const isReversalRecommended = isYES ? (posterior < 35) : (posterior > 65);
+        const currentOdds = isYES ? posterior : (100 - posterior);
+
+        if (prediction === "SIT OUT") {
             tradeAction = `ENTRY SIGNAL: ${activePrediction}`;
             tradeReason = `Quant composite supports entry. Execute now. ${metricsStr}`;
             actionColor = isYES ? "text-emerald-400" : "text-rose-400";
             actionBg = isYES ? "bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_15px_rgba(52,211,153,0.2)]" : "bg-rose-500/10 border-rose-500/30 shadow-[0_0_15px_rgba(251,113,133,0.2)]";
-            hasAction = true; actionButtonLabel = `CONFIRM ENTRY: '${activePrediction}'`; actionTarget = activePrediction;
-        } else {
-            tradeAction = "AWAITING CONVICTION"; tradeReason = "Odds below 68%. Waiting for cleaner setup.";
+            hasAction = true;
+            actionButtonLabel = `CONFIRM ENTRY: '${activePrediction}'`;
+            actionTarget = activePrediction;
         }
-    } 
-    else {
-        const isBleeding = currentOdds < 45;
-        const isHardReversal = currentOdds < 30;
-
-        if (isRugPull && showRugPullAlerts && isYES) {
-            tradeAction = "🚨 RUG PULL DETECTED 🚨"; 
-            tradeReason = `Massive liquidity collapse. Abort longs immediately. ${metricsStr}`;
-            actionColor = "text-rose-500"; actionBg = "bg-rose-500/20 border-rose-500/50 animate-pulse shadow-[0_0_20px_rgba(225,29,72,0.4)]";
-            hasAction = true; actionButtonLabel = "EMERGENCY CASHOUT"; actionTarget = "SIT OUT";
-        }
-        else if (offerVal > 0 && livePnL > (betAmount * 0.15) && currentOdds < 65) {
-            tradeAction = "SECURE PROFIT"; 
-            tradeReason = `Momentum fading while in profit. Lock in gains now. ${metricsStr}`;
+        else if (offerVal > 0 && offerVal - liveEstValue > (maxPayout * 0.05)) {
+            tradeAction = "SELL TO MARKET (ARB)"; 
+            tradeReason = `Market is overpaying. Take the free arbitrage. ${metricsStr}`;
             actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30 animate-pulse";
             hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "CASH";
         }
-        else if (offerVal > 0 && livePnL > 0 && currentOdds < 55) {
-            tradeAction = "PROTECT POSITION"; 
-            tradeReason = `Edge is collapsing. Protect your breakeven. ${metricsStr}`;
-            actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
-            hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "CASH";
-        }
-        else if (isHardReversal && !hasReversedRef.current) {
+        else if (isReversalRecommended && !hasReversedRef.current) {
             tradeAction = "REVERSE POSITION"; tradeReason = `Trend collapsed. Switch position. ${metricsStr}`;
             actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30 shadow-[0_0_15px_rgba(251,191,36,0.2)]";
             hasAction = true; actionButtonLabel = `REVERSE TO '${isYES ? 'NO' : 'YES'}'`; actionTarget = isYES ? "NO" : "YES";
         }
-        else if (isBleeding) {
-            tradeAction = "CUT LOSSES"; tradeReason = `Position bleeding. Edge lost. Consider exit. ${metricsStr}`;
+        else if (isBleeding || (isReversalRecommended && hasReversedRef.current)) {
+            tradeAction = "CUT LOSSES"; tradeReason = `Position drifted past dynamic ATR limit. Exit. ${metricsStr}`;
             actionColor = "text-rose-500"; actionBg = "bg-rose-500/10 border-rose-500/30";
             hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "SIT OUT";
         }
-        else if (currentOdds >= 85) {
-            tradeAction = "MAX PROFIT REACHED"; tradeReason = `Odds > 85%. Stand by to lock in gains. ${metricsStr}`;
+        else if (currentOdds >= 85 && offerVal === 0) {
+            tradeAction = "SECURE MAX PROFIT"; tradeReason = `Odds > 85%. Lock in gains when ready. ${metricsStr}`;
             actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
-            hasAction = offerVal > 0; actionButtonLabel = "EXECUTE CASHOUT (PROFIT)"; actionTarget = "CASH";
+            hasAction = true; actionButtonLabel = "EXECUTE CASHOUT (PROFIT)"; actionTarget = "CASH";
         }
-        else {
-            tradeAction = "HOLD FIRM"; tradeReason = `Holding position. Quant supports trend. ${metricsStr}`;
+        else if (offerVal === 0) {
+            tradeAction = "HOLD FIRM"; tradeReason = `Holding position. Quant composite supports trend. ${metricsStr}`;
             actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/20";
         }
-    }
+    } 
 
     let textColor = activePrediction === "YES" ? "text-emerald-400" : activePrediction === "NO" ? "text-rose-400" : "text-zinc-500";
-    if (activePrediction === "SIT OUT" && isCalibrating) {
-        activePrediction = "ANALYZING";
-        textColor = "text-amber-400 animate-pulse";
-    }
-
     let entryWindowStatus = isEndgameLock ? "Window Closed" : "Active Signal Window";
+
     let topDriver = "";
     if (Math.abs(aggrFlow) > 0.5) topDriver = `AggrFlow (${aggrFlow > 0 ? '+' : ''}${aggrFlow.toFixed(2)})`;
     else topDriver = `CrossProb (${posterior > 50 ? '+' : ''}${(posterior/100).toFixed(2)})`;
@@ -865,18 +898,22 @@ export default function App() {
     else convictionText = "Unsure";
 
     let predictionReason = "";
-    if (activePrediction === "SIT OUT" || activePrediction === "ANALYZING") predictionReason = "Waiting for structural divergence.";
+    if (activePrediction === "SIT OUT") predictionReason = "Waiting for structural divergence.";
     else if (realGapBps > 0 && activePrediction === "YES") predictionReason = "Firmly in profit. Holding steady.";
     else if (realGapBps < 0 && activePrediction === "NO") predictionReason = "Firmly in profit. Holding steady.";
     else predictionReason = "Position negative, holding firm through noise.";
 
+    const price1hAgo = history[history.length - 1]?.c || currentPrice; 
+    const hourlySlope = currentPrice - price1hAgo;
     let simulatedPrice = currentPrice;
     let projections = [];
     const driftModifier = (orderBook.imbalance > 1 ? 1.2 : 0.8) * 0.6; 
     
+    // SAFE FORECAST LOGIC
     for(let i=1; i<=4; i++) {
         const nextHour = (timeState.currentHour + i) % 24;
         let timeLabel = `${nextHour.toString().padStart(2, '0')}:00`;
+        
         simulatedPrice += (tickSlope * driftModifier + (sentimentScore * 20));
         projections.push({ time: timeLabel, price: simulatedPrice });
     }
@@ -893,7 +930,7 @@ export default function App() {
 
   useEffect(() => {
     if (analysis?.hasAction && analysis.tradeAction !== prevActionRef.current) {
-      if (analysis.tradeAction.includes("ENTRY SIGNAL") || analysis.tradeAction.includes("RUG PULL")) {
+      if (analysis.tradeAction.includes("ENTRY SIGNAL")) {
         playAlertSound();
       }
     }
@@ -938,7 +975,7 @@ export default function App() {
           reply = `Currently, my posterior for YES is ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. We are in a ${String(analysis?.regime || 'CHOP')} regime. I am strictly waiting for quant rules to pass before issuing an entry.`;
         }
         else if (userText.includes("5m") || userText.includes("5 minute") || userText.includes("15m")) {
-          reply = `In V58, both windows trigger early ENTRY SIGNALS based on pure momentum. You are currently in ${windowType.toUpperCase()} mode.`;
+          reply = `In V55, both windows trigger early ENTRY SIGNALS based on pure momentum. You are currently in ${windowType.toUpperCase()} mode.`;
         }
         else if (userText.includes("pnl") || userText.includes("profit") || userText.includes("loss")) {
           reply = analysis?.prediction === "SIT OUT" ? "You are not in an active trade. No PnL to track right now." : `Your current estimated contract value is ~$${Number(analysis?.liveEstValue || 0).toFixed(2)}. Your live mathematical PnL is $${Number(analysis?.livePnL || 0).toFixed(2)}.`;
@@ -964,7 +1001,6 @@ export default function App() {
   return (
     <div className="min-h-screen lg:h-screen bg-[#111312] text-[#E8E9E4] font-sans p-2 sm:p-3 flex flex-col selection:bg-[#E8E9E4]/20 overflow-y-auto">
       
-      {/* Top Header */}
       <div className="w-full max-w-[1600px] mx-auto flex flex-col h-full gap-3 min-h-0">
         
         {/* TOP HEADER: Shrink 0 */}
@@ -973,7 +1009,7 @@ export default function App() {
             <h1 className="text-lg md:text-xl font-serif tracking-tight text-white flex items-center gap-2">
               Tara
               <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V58 Active Mgt
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V55 Terminal
               </span>
             </h1>
             <div className="flex sm:hidden items-center gap-2">
@@ -1094,7 +1130,7 @@ export default function App() {
         </div>
 
         {/* MIDDLE ROW: Prediction, Posteriors/Forecast, Logs/Wire. Shrink 0 on Desktop */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 shrink-0 lg:h-[320px]">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 shrink-0 lg:h-[250px]">
           
           {/* Left Column: Prediction Block */}
           <div className="lg:col-span-4 bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative overflow-hidden h-full">
@@ -1121,9 +1157,9 @@ export default function App() {
                <div className="text-lg font-serif text-[#E8E9E4]/30 animate-pulse mt-4 text-center w-full">Connecting...</div>
              ) : (
                <div className="flex flex-col items-center w-full flex-1 justify-center">
-                 <div className="flex flex-col items-center mb-4 mt-2">
-                   <span className="text-[9px] text-[#E8E9E4]/40 uppercase tracking-[0.2em] mb-1 font-bold">Prediction</span>
-                   <h2 className={`text-[64px] sm:text-[72px] font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg transition-all flex items-center justify-center uppercase`}>
+                 <div className="flex flex-col items-center mb-2">
+                   <span className="text-[9px] text-[#E8E9E4]/40 uppercase tracking-[0.2em] font-bold">Prediction</span>
+                   <h2 className={`text-[48px] sm:text-[56px] xl:text-[64px] font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg transition-all flex items-center justify-center uppercase`}>
                      {String(analysis.prediction)}
                    </h2>
                  </div>
@@ -1134,7 +1170,7 @@ export default function App() {
                      <span className="text-[9px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span>
                    </div>
                    <div className={`text-sm sm:text-base font-serif font-bold mb-1 ${analysis.actionColor} uppercase`}>{String(analysis.tradeAction)}</div>
-                   <p className="text-[9px] sm:text-[10px] opacity-80 text-[#E8E9E4] mb-2 leading-tight px-1">{String(analysis.tradeReason)}</p>
+                   <p className="text-[9px] sm:text-[10px] opacity-80 text-[#E8E9E4] mb-1.5 leading-tight px-1">{String(analysis.tradeReason)}</p>
 
                    {analysis.hasAction && (
                      <div className="w-full pt-2 border-t border-[#E8E9E4]/10">
@@ -1247,7 +1283,7 @@ export default function App() {
         </div>
 
         {/* FULL WIDTH LIVE CHART (Flex-1 perfectly fills remaining screen on desktop) */}
-        <div className="w-full bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col flex-1 min-h-[300px] mt-2 relative z-10">
+        <div className="w-full bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col flex-1 min-h-[200px] mt-2 relative z-10">
           <div className="flex justify-between items-center mb-2 border-b border-[#E8E9E4]/10 pb-2">
             <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] flex items-center gap-2">
               <IconActivity className="w-4 h-4 text-indigo-400" /> LIVE PRICE CHART
@@ -1338,18 +1374,18 @@ export default function App() {
               
               <section>
                 <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. Layout & Scroll Engine</h3>
-                <p className="mb-3 leading-relaxed">Tara V58 is designed to fit entirely on a single screen. The Canvas chart natively supports panning (click and drag) and zooming (scroll wheel/trackpad swiping) without interrupting the page layout.</p>
+                <p className="mb-3 leading-relaxed">Tara V55 is designed to fit entirely on a single screen. The Canvas chart natively supports panning (click and drag) and zooming (scroll wheel/trackpad swiping) without interrupting the page layout.</p>
               </section>
               
               <section>
                 <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. Multi-Timeframe & Zero-Latency Divergence</h3>
                 <p className="mb-3 leading-relaxed">You can toggle Tara between 5-Minute and 15-Minute mode. <br/><strong>In 15M Mode:</strong> She analyzes macro-trends, VWAP, and looks for safer, wider structural trades.<br/><strong>In 5M Mode:</strong> She becomes an aggressive scalper. She ignores slow indicators and multiplies the weight of live order flow (Tape Delta) by 1.25x.</p>
-                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Active Signal Hysteresis:</strong> Tara's brain is now sticky. If she identifies a 68% conviction entry, she locks onto it and won't drop the signal unless momentum completely collapses below 48%. This eliminates UI flickering.</p>
+                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Zero-Latency Algorithm:</strong> Tara completely ignores initial artificial time locks. From the very first second of the round, she evaluates structural setups to provide instant early entry signals, enabling you to grab extreme odds before the platform adjusts.</p>
               </section>
 
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">3. Active Trade Management</h3>
-                <p className="leading-relaxed">Once you click <strong>"I Entered YES/NO"</strong>, the terminal shifts into Active Management Mode. The "Window Closed" warnings disappear. Tara will now guide you down to the final second. <br/><br/>If you input your "Live Market Offer", Tara will explicitly tell you to <strong>SECURE PROFIT</strong> if your edge begins to fade, or <strong>CUT LOSSES</strong> if momentum breaks.</p>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">3. Early Exit & Risk Management</h3>
+                <p className="leading-relaxed">If you are in a winning position, but Tara detects that whales are suddenly selling the momentum back down (AggrFlow flipping), she will trigger an <strong>EARLY EXIT</strong> alert. The Advisor panel will show you exact Chance vs. Risk percentages to help you make composed decisions without emotion.<br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will advise you to take the Arbitrage.</p>
               </section>
 
               <section>
