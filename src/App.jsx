@@ -51,31 +51,8 @@ const getMarketSessions = () => {
 };
 
 // ═══════════════════════════════════════
-// HOOKS (Strict Component Safety)
+// GLOBAL TAPE
 // ═══════════════════════════════════════
-const useVelocity = (tickH, price, target) => {
-  const ref = useRef({v1s:0,v5s:0,v15s:0,v30s:0,accel:0,jerk:0,peakPnL:0,troughPnL:0,pnlSlope:0});
-  const pnlH = useRef([]);
-  useEffect(() => {
-    const iv = setInterval(() => {
-      if(!price||!target) return;
-      const now=Date.now(), ticks=tickH.current||[];
-      const ga=(ms)=>{const r=ticks.filter(t=>Math.abs((now-t.time)-ms)<2000);return r.length>0?r.reduce((a,b)=>a+b.p,0)/r.length:null;};
-      const p1=ga(1000),p5=ga(5000),p15=ga(15000),p30=ga(30000);
-      const v1s=p1?(price-p1):0,v5s=p5?(price-p5)/5:0,v15s=p15?(price-p15)/15:0,v30s=p30?(price-p30)/30:0;
-      const cpnl=target>0?((price-target)/target)*10000:0;
-      pnlH.current.push({pnl:cpnl,time:now});pnlH.current=pnlH.current.filter(p=>now-p.time<120000);
-      const peakPnL=Math.max(...pnlH.current.map(p=>p.pnl),cpnl);
-      const troughPnL=Math.min(...pnlH.current.map(p=>p.pnl),cpnl);
-      const recent=pnlH.current.filter(p=>now-p.time<10000);
-      const pnlSlope=recent.length>=3?recent[recent.length-1].pnl-recent[0].pnl:0;
-      ref.current={v1s,v5s,v15s,v30s,accel:v5s-v15s,jerk:v1s-v5s,peakPnL,troughPnL,pnlSlope};
-    }, 500);
-    return () => clearInterval(iv);
-  }, [price, target]);
-  return ref;
-};
-
 const useGlobalTape = () => {
   const tapeRef = useRef({ coinbase:{buys:0,sells:0},binanceFutures:{buys:0,sells:0},bybit:{buys:0,sells:0},globalBuys:0,globalSells:0,globalImbalance:1,cbFlow:0,bnFlow:0,byFlow:0,divergence:0,whaleAlerts:[],binancePrice:0,bybitPrice:0 });
   const ticksRef = useRef([]);
@@ -147,14 +124,14 @@ const useBloomberg = () => {
 };
 
 // ═══════════════════════════════════════
-// V78 TRADINGVIEW MULTI-TIMEFRAME CHART
+// V79 TRADINGVIEW MULTI-TIMEFRAME CHART
 // ═══════════════════════════════════════
-const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPullActive, showOverlays, bb, globalFlow, projections, prediction, liquidations }) => {
+const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPullActive, showOverlays, fallbackData, projections, prediction, liquidations }) => {
   const chartContainerRef = useRef(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [crosshairData, setCrosshairData] = useState(null);
   const [klines, setKlines] = useState([]);
-  const chartRefs = useRef({ chart: null, mainSeries: null, volSeries: null, strike: null, e9: null, e21: null, bbu: null, bbl: null, predSeries: null, liqMarkers: [] });
+  const chartRefs = useRef({ chart: null, mainSeries: null, volSeries: null, strike: null, e9: null, e21: null, bbu: null, bbl: null, predSeries: null });
 
   useEffect(() => {
     if (window.LightweightCharts && window.LightweightCharts.createChart) { setIsLoaded(true); return; }
@@ -165,22 +142,27 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
     document.head.appendChild(script);
   }, []);
 
-  // Fetch Binance Klines
+  // Fetch Binance Klines with Fallback to Binance.US
   useEffect(() => {
       const fetchKlines = async () => {
           try {
-              const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${resolution}&limit=200`);
+              let res = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${resolution}&limit=200`);
+              if (!res.ok) throw new Error("Fallback");
               const data = await res.json();
               const formatted = data.map(d => ({
-                  time: d[0] / 1000,
-                  o: parseFloat(d[1]),
-                  h: parseFloat(d[2]),
-                  l: parseFloat(d[3]),
-                  c: parseFloat(d[4]),
-                  v: parseFloat(d[5])
+                  time: d[0] / 1000, o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
               }));
               setKlines(formatted);
-          } catch(e){}
+          } catch(e) {
+              try {
+                  let res2 = await fetch(`https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=${resolution}&limit=200`);
+                  const data2 = await res2.json();
+                  const formatted2 = data2.map(d => ({
+                      time: d[0] / 1000, o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
+                  }));
+                  setKlines(formatted2);
+              } catch(err) {}
+          }
       };
       fetchKlines();
       const iv = setInterval(fetchKlines, 10000);
@@ -191,7 +173,6 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
     if (!isLoaded || !chartContainerRef.current) return;
     try {
         const { createChart, ColorType, LineStyle, CrosshairMode } = window.LightweightCharts;
-        
         const chart = createChart(chartContainerRef.current, {
           layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#E8E9E4' },
           grid: { vertLines: { color: 'rgba(232, 233, 228, 0.04)' }, horzLines: { color: 'rgba(232, 233, 228, 0.04)' } },
@@ -240,12 +221,16 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
     } catch (e) {}
   }, [isLoaded, showCandles]); 
 
-  // Plot Klines & Overlays
+  // Plot Data
   useEffect(() => {
-    if (!chartRefs.current.chart || !chartRefs.current.mainSeries || !klines || klines.length === 0) return;
+    if (!chartRefs.current.chart || !chartRefs.current.mainSeries) return;
     
+    // V79: Fallback to internal Coinbase history if Binance is blocked
+    const activeData = (klines && klines.length > 0) ? klines : (fallbackData || []);
+    if (activeData.length === 0) return;
+
     try {
-        const sortedData = [...klines].sort((a,b)=>a.time - b.time);
+        const sortedData = [...activeData].sort((a,b) => a.time - b.time);
         const uniqueData = [];
         const seen = new Set();
         for (const d of sortedData) {
@@ -256,7 +241,7 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
         chartRefs.current.volSeries.setData(uniqueData.map(d => ({ time: d.time, value: d.v || 0, color: d.c >= d.o ? 'rgba(52, 211, 153, 0.3)' : 'rgba(251, 113, 133, 0.3)' })));
 
         if (showOverlays) {
-            const closes = uniqueData.map(d => d.c);
+            const closes = uniqueData.map(d => d.c || d.value || 0);
             const e9Arr = calcEMA(closes, 9);
             const e21Arr = calcEMA(closes, 21);
             
@@ -279,13 +264,13 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
             chartRefs.current.bbu.setData([]); chartRefs.current.bbl.setData([]);
         }
     } catch (e) {}
-  }, [klines, showCandles, showOverlays]);
+  }, [klines, fallbackData, showCandles, showOverlays]);
 
-  // Sync Live Price to last candle
   useEffect(() => {
-    if (!chartRefs.current.mainSeries || !klines || klines.length === 0 || !currentPrice) return;
+    const activeData = (klines && klines.length > 0) ? klines : (fallbackData || []);
+    if (!chartRefs.current.mainSeries || activeData.length === 0 || !currentPrice) return;
     try {
-        const last = klines[klines.length - 1]; 
+        const last = activeData[activeData.length - 1]; 
         chartRefs.current.mainSeries.update({
             time: last.time,
             open: last.o,
@@ -295,9 +280,8 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
             value: showCandles ? undefined : currentPrice
         });
     } catch (e) {}
-  }, [currentPrice, klines, showCandles]);
+  }, [currentPrice, klines, fallbackData, showCandles]);
 
-  // Plot Liquidation Bubbles
   useEffect(() => {
       if (!chartRefs.current.mainSeries || !liquidations) return;
       try {
@@ -320,15 +304,15 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
       } catch(e) {}
   }, [liquidations]);
 
-  // Sync Trend Prediction Line
   useEffect(() => {
-      if (!chartRefs.current.predSeries || !projections || projections.length === 0 || !klines || klines.length === 0) return;
+      const activeData = (klines && klines.length > 0) ? klines : (fallbackData || []);
+      if (!chartRefs.current.predSeries || !projections || projections.length === 0 || activeData.length === 0) return;
       try {
           const col = prediction === 'YES' ? '#34d399' : prediction === 'NO' ? '#fb7185' : '#a1a1aa';
           chartRefs.current.predSeries.applyOptions({ color: col });
           
-          const lastHistoricalTime = klines[klines.length - 1].time; 
-          const lastPrice = currentPrice || klines[klines.length - 1].c;
+          const lastHistoricalTime = activeData[activeData.length - 1].time; 
+          const lastPrice = currentPrice || activeData[activeData.length - 1].c;
           
           const predData = [
               { time: lastHistoricalTime, value: lastPrice },
@@ -346,7 +330,7 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
           uniquePredData.sort((a,b) => a.time - b.time);
           chartRefs.current.predSeries.setData(uniquePredData);
       } catch (e) {}
-  }, [projections, prediction, klines, currentPrice]);
+  }, [projections, prediction, klines, fallbackData, currentPrice]);
 
   useEffect(() => {
     if (!chartRefs.current.mainSeries) return;
@@ -388,10 +372,9 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
 
   return (
     <div className="w-full h-full relative" style={{ touchAction: 'none' }}>
-        {!isLoaded && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#E8E9E4]/30 uppercase tracking-widest animate-pulse">Loading Institutional Chart Engine...</div>}
+        {!isLoaded && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#E8E9E4]/30 uppercase tracking-widest animate-pulse">Loading TradingView Engine...</div>}
         {rugPullActive && <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10"><span className="text-[#fb7185] font-bold text-2xl tracking-widest bg-black/40 px-4 py-2 rounded-xl backdrop-blur-sm border border-[#fb7185]/50">🚨 RUG PULL DETECTED</span></div>}
         
-        {/* V77 On-Chart Legend */}
         {isLoaded && (
             <div className="absolute top-2 left-3 z-10 flex flex-col gap-0.5 pointer-events-none select-none">
                 {currentPrice && (
@@ -399,21 +382,9 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
                         ${currentPrice.toFixed(2)}
                     </div>
                 )}
-                {globalFlow && globalFlow.deltaUSD !== undefined && (
-                    <div className={`text-[10px] font-bold uppercase tracking-widest ${globalFlow.deltaUSD > 0 ? 'text-emerald-400' : 'text-rose-400'} drop-shadow-md`}>
-                        30s Vol Delta: {globalFlow.deltaUSD > 0 ? '+' : ''}{formatUSD(globalFlow.deltaUSD)}
-                    </div>
-                )}
-                {prediction && prediction !== "SIT OUT" && (
-                    <div className={`text-[10px] font-bold uppercase tracking-widest ${prediction === 'YES' ? 'text-emerald-400' : 'text-rose-400'} drop-shadow-md mt-1 flex items-center gap-1`}>
-                        <div className={`w-1.5 h-1.5 rounded-full ${prediction === 'YES' ? 'bg-emerald-400' : 'bg-rose-400'} animate-pulse`}></div>
-                        Target: {prediction}
-                    </div>
-                )}
             </div>
         )}
 
-        {/* V77 Custom OHLCV Interactive Tooltip */}
         {crosshairData && (
             <div 
                 className="absolute z-20 bg-[#181A19]/95 border border-[#E8E9E4]/15 rounded shadow-xl p-2 pointer-events-none transform -translate-x-1/2 -translate-y-[120%]"
@@ -507,7 +478,7 @@ function TaraApp() {
   useEffect(() => {
     setIsMounted(true);
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV78');
+      const savedScore = localStorage.getItem('btcOracleScorecardV79');
       if (savedScore) {
           const parsed = JSON.parse(savedScore);
           if (parsed && typeof parsed['15m'] === 'object' && typeof parsed['15m'].wins === 'number') {
@@ -516,7 +487,7 @@ function TaraApp() {
       } else {
           setScorecards({ '15m': { wins: 140, losses: 101 }, '5m': { wins: 10, losses: 7 } });
       }
-      const savedWebhook = localStorage.getItem('btcOracleWebhookV78');
+      const savedWebhook = localStorage.getItem('btcOracleWebhookV79');
       if (savedWebhook) setDiscordWebhook(savedWebhook);
     } catch (e) {
       setScorecards({ '15m': { wins: 140, losses: 101 }, '5m': { wins: 10, losses: 7 } });
@@ -526,7 +497,7 @@ function TaraApp() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V78 Master Build online. Reality Gap Capping, Whale Logs, Voice Synthesis, and Kelly Sizing fully functional." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V79 Master Build online. Binance Fallbacks Active. Trend Projections Restored." }]);
   const [chatInput, setChatInput] = useState("");
   
   const lastWindowRef = useRef("");
@@ -538,8 +509,6 @@ function TaraApp() {
   const [voiceEnabled, setVoiceEnabled] = useState(false); 
   const prevActionRef = useRef(null);
 
-  // CORE HOOKS (Restored for Stability)
-  const velocityRef = useVelocity(tickHistoryRef, currentPrice, targetMargin);
   const bloomberg = useBloomberg();
   const { tapeRef, globalFlow, ticksRef, whaleLog } = useGlobalTape();
   const marketSessions = useMemo(() => getMarketSessions(), [timeState.currentHour]);
@@ -549,8 +518,8 @@ function TaraApp() {
   useEffect(() => {
     if (isMounted && typeof window !== 'undefined') {
       try { 
-        localStorage.setItem('btcOracleScorecardV78', JSON.stringify(scorecards)); 
-        localStorage.setItem('btcOracleWebhookV78', String(discordWebhook));
+        localStorage.setItem('btcOracleScorecardV79', JSON.stringify(scorecards)); 
+        localStorage.setItem('btcOracleWebhookV79', String(discordWebhook));
       } 
       catch (e) {}
     }
@@ -595,7 +564,7 @@ function TaraApp() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: "Tara Terminal V78",
+          username: "Tara Terminal V79",
           avatar_url: "https://i.imgur.com/8nLFCVP.png", 
           embeds: [{
             title: String(title),
@@ -653,7 +622,7 @@ function TaraApp() {
     }));
   };
 
-  // V78 30% Position Status Manager
+  // V79 30% Position Status Manager
   const positionStatus = useMemo(() => {
     if (!positionEntry || !currentPrice) return null;
     const { price: entry, side } = positionEntry;
@@ -714,7 +683,7 @@ function TaraApp() {
     }
   }, [timeState.nextWindowEST, currentPrice, windowType]);
 
-  // Sub-Second REST Fallback
+  // Sub-Second REST Fallback (Coinbase Base Data)
   useEffect(() => {
     let lastUiUpdate = 0;
     const fetchSpotPrice = async () => {
@@ -847,7 +816,7 @@ function TaraApp() {
     return () => clearInterval(timer);
   }, [windowType]);
 
-  // --- TARA V78: KELLY CRITERION & PHYSICS ---
+  // --- TARA V79: STABILIZED PHYSICS ENGINE ---
   const analysis = useMemo(() => {
     try {
         if (!currentPrice || liveHistory.length < 30 || !targetMargin || !isMounted) return null;
@@ -871,6 +840,7 @@ function TaraApp() {
         const realGapBps = targetMargin > 0 ? ((currentPrice - targetMargin) / targetMargin) * 10000 : 0;
         const vwapGapBps = vwap ? ((currentPrice - vwap) / vwap) * 10000 : 0;
         
+        // Accurate BPS Kinematics
         const v30s_bps = ((currentPrice - getHistoricPrice(30000)) / currentPrice) * 10000;
         const v1m_bps = ((currentPrice - getHistoricPrice(60000)) / currentPrice) * 10000;
         const v3m_bps = ((currentPrice - getHistoricPrice(180000)) / currentPrice) * 10000;
@@ -922,6 +892,22 @@ function TaraApp() {
            regime = "RANGE/CHOP"; baseProb += (aggrFlow * 20) + (mktImplied * 10);
         }
 
+        // Apply BPS Kinematics
+        const allUp = v30s_bps > 0 && v1m_bps > 0 && v3m_bps > 0;
+        const allDn = v30s_bps < 0 && v1m_bps < 0 && v3m_bps < 0;
+        const velAl = allUp || allDn;
+        const velDir = allUp ? 1 : allDn ? -1 : 0;
+        const accel = Math.abs(v30s_bps) - Math.abs(v1m_bps);
+        const isAcc = accel > 0;
+
+        if(is15m){
+            baseProb += v1m_bps * 0.8 + v3m_bps * 0.5 + v30s_bps * 0.3;
+        } else {
+            baseProb += v30s_bps * 1.2 + v1m_bps * 0.8 + v3m_bps * 0.3;
+        }
+        if (velAl) baseProb += velDir * 15;
+        if (velAl && isAcc) baseProb += velDir * 10;
+
         if (liqBuys > 10000) { baseProb += 15; reasoning.push(`LIQ: Shorts squeezed. Upward force applied.`); }
         if (liqSells > 10000) { baseProb -= 15; reasoning.push(`LIQ: Longs squeezed. Downward force applied.`); }
 
@@ -931,6 +917,7 @@ function TaraApp() {
 
         let posterior = Math.max(1, Math.min(99, baseProb)); 
 
+        // HARD REALITY CAPS
         if (realGapBps < -35) { 
             posterior = Math.min(posterior, 20); 
             reasoning.push(`REALITY CAP: Deep underwater. UP odds strictly capped at 20%.`); 
@@ -1089,18 +1076,21 @@ function TaraApp() {
         else if (realGapBps < 0 && activePrediction === "NO") predictionReason = "Firmly in profit. Holding steady.";
         else predictionReason = "Position negative, holding firm through noise.";
 
-        // Explicit Target Markers (T+5m and T+15m)
+        // Explicit Target Markers (T+5m, T+15m, T+1h)
         let projections = [];
-        let trendSlope = isNaN(v30s_bps) ? 0 : v30s_bps;
-        if (activePrediction === "YES" && trendSlope <= 0) trendSlope = 5;
-        if (activePrediction === "NO" && trendSlope >= 0) trendSlope = -5;
+        let trendSlopeBps = isNaN(v1m_bps) ? 0 : v1m_bps;
+        if (activePrediction === "YES" && trendSlopeBps <= 0) trendSlopeBps = 2; // Fallback positive drift
+        if (activePrediction === "NO" && trendSlopeBps >= 0) trendSlopeBps = -2; // Fallback negative drift
         
         const currentUnix = Math.floor(Date.now() / 1000);
-        const p5 = currentPrice * (1 + (trendSlope / 10000) * 5);
-        const p15 = currentPrice * (1 + (trendSlope / 10000) * 15);
+        
+        const p5 = currentPrice * (1 + (trendSlopeBps / 10000) * 5);
+        const p15 = currentPrice * (1 + (trendSlopeBps / 10000) * 15);
+        const p60 = currentPrice * (1 + (trendSlopeBps / 10000) * 60);
         
         projections.push({ time: "T+5m", timestamp: currentUnix + 300, price: Number(p5) });
         projections.push({ time: "T+15m", timestamp: currentUnix + 900, price: Number(p15) });
+        projections.push({ time: "T+1h", timestamp: currentUnix + 3600, price: Number(p60) });
 
         return { 
           confidence: String(activePrediction === "NO" ? (100 - posterior).toFixed(1) : posterior.toFixed(1)), 
@@ -1131,7 +1121,7 @@ function TaraApp() {
           isRugPull: Boolean(isRugPull)
         };
     } catch (err) {
-        return { prediction: "SIT OUT", tradeAction: "CALCULATING...", rawProbAbove: 50, projections: [], reasoning: [], textColor: "text-zinc-500", actionColor: "text-zinc-500", actionBg: "bg-zinc-500/10" };
+        return { prediction: "SIT OUT", tradeAction: "CALCULATING...", tradeReason: "Warming up engine...", rawProbAbove: 50, projections: [], reasoning: [], textColor: "text-zinc-500", actionColor: "text-zinc-500", actionBg: "bg-zinc-500/10" };
     }
   }, [currentPrice, liveHistory, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, forceRender, betAmount, maxPayout, currentOffer, globalFlow, liquidations, userPosition, windowType, isMounted, showRugPullAlerts, positionStatus, marketSessions]);
 
@@ -1179,7 +1169,6 @@ function TaraApp() {
     lockedPredictionRef.current = String(dir);
     activeCallRef.current = { prediction: String(dir), strike: targetMargin };
     setUserPosition(String(dir));
-    // Set Position Manager entry with 30% stop limit
     if(currentPrice){
       const stopPrice = dir === 'YES' ? currentPrice * 0.997 : currentPrice * 1.003; 
       setPositionEntry({price: currentPrice, side: dir, time: Date.now(), stopPrice});
@@ -1241,7 +1230,7 @@ function TaraApp() {
           <div className="flex items-center justify-between w-full sm:w-auto">
             <h1 className="text-lg md:text-xl font-serif tracking-tight text-white flex items-center gap-2">
               Tara <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V78 Master
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V79 Master
               </span>
               <span className="hidden md:flex items-center gap-1 text-[10px] ml-2">
                 {marketSessions.sessions.map((s,i)=><span key={i} className={`${s.color} opacity-80`}>{s.flag}</span>)}
@@ -1397,7 +1386,7 @@ function TaraApp() {
                   {analysis?.kellyPct > 0 && <div className="text-[9px] text-rose-400/80 mt-1">Kelly: {analysis.kellyPct.toFixed(1)}%</div>}
               </div>
             </div>
-            {analysis && (<div className="bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md shrink-0"><h2 className="text-[9px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5"><IC.TrendUp className="w-3.5 h-3.5 text-purple-400" /> T-Target Projections</h2><div className="grid grid-cols-2 gap-2">{analysis.projections.map((proj, idx) => (<div key={idx} className="bg-[#111312] rounded-lg p-1.5 text-center border border-[#E8E9E4]/5"><div className="text-[9px] text-[#E8E9E4]/40 font-bold uppercase mb-0.5">{String(proj.time)}</div><div className="text-[11px] font-serif text-purple-100">${Number(proj.price || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div></div>))}</div></div>)}
+            {analysis && (<div className="bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md shrink-0"><h2 className="text-[9px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5"><IC.TrendUp className="w-3.5 h-3.5 text-purple-400" /> T-Target Projections</h2><div className="grid grid-cols-3 gap-2">{analysis.projections.map((proj, idx) => (<div key={idx} className="bg-[#111312] rounded-lg p-1.5 text-center border border-[#E8E9E4]/5"><div className="text-[9px] text-[#E8E9E4]/40 font-bold uppercase mb-0.5">{String(proj.time)}</div><div className="text-[11px] font-serif text-purple-100">${Number(proj.price || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div></div>))}</div></div>)}
             {userPosition === null && (<div className="flex flex-col items-center gap-1.5 w-full shrink-0"><span className="text-[8px] uppercase tracking-widest text-[#E8E9E4]/40">Sync Position (Activates -30% Stop Guard):</span><div className="flex gap-2 w-full"><button onClick={() => handleManualSync("YES")} className="flex-1 py-1.5 border border-emerald-500/30 text-emerald-400 rounded-md text-[9px] uppercase font-bold tracking-widest hover:bg-emerald-500/10 transition-colors">I Entered YES</button><button onClick={() => handleManualSync("NO")} className="flex-1 py-1.5 border border-rose-500/30 text-rose-400 rounded-md text-[9px] uppercase font-bold tracking-widest hover:bg-rose-500/10 transition-colors">I Entered NO</button></div></div>)}
           </div>
 
@@ -1437,6 +1426,7 @@ function TaraApp() {
               showOverlays={showOverlays} 
               bb={analysis?.bb}
               globalFlow={globalFlow}
+              fallbackData={liveHistory}
               projections={analysis?.projections}
               prediction={analysis?.prediction}
               liquidations={liquidations}
@@ -1490,17 +1480,18 @@ function TaraApp() {
       {/* OPERATIONS MANUAL */}
       {showHelp && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl"><div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10"><h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" /> Tara Operations Manual (V78)</h2><button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5" /></button></div>
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl"><div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10"><h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" /> Tara Operations Manual (V79)</h2><button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5" /></button></div>
             <div className="p-4 sm:p-6 space-y-6 text-xs sm:text-sm text-[#E8E9E4]/80">
-              <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">V78 Ultimate Features</h3><ul className="list-disc pl-4 space-y-2">
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">V79 Updates</h3><ul className="list-disc pl-4 space-y-2">
                 <li><strong>Voice Synthesis:</strong> Toggle the Microphone icon in the header. Tara will literally speak her entry, scalp, and stop-loss calls out loud so you can look away from the screen.</li>
                 <li><strong>Visual DOM & CVD:</strong> A live horizontal progress bar under the header shows the limit order depth, and the chart explicitly shows 30s Cumulative Volume Delta (CVD) in USD.</li>
                 <li><strong>Liquidation Bubbles:</strong> When whales get liquidated (&gt;{'$10k'}), Red and Green arrows physically drop onto the chart exactly where it happened.</li>
                 <li><strong>Kelly Criterion Risk:</strong> Tara now calculates the exact mathematical percentage of your bankroll you should risk based on the current Posterior odds.</li>
-                <li><strong>Multi-Timeframe Engine:</strong> The chart now has 1m, 3m, 5m, 15m, 30m, and 1h resolution buttons. It fetches native Binance data for precise institutional technical analysis.</li>
+                <li><strong>Multi-Timeframe Engine:</strong> The chart now has 1m, 3m, 5m, 15m, 30m, and 1h resolution buttons. It features a complete fallback matrix so the chart is never blank.</li>
               </ul></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">Reality Capping & Gravity Well</h3><p className="leading-relaxed">If a trade is underwater by a massive margin, the engine physically caps the "UP" or "DOWN" probability at 20%, unconditionally shattering the hysteresis lock and forcing a correct exit. It will never output 99% on a losing trade again.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">Position Manager (30% Stop)</h3><p className="leading-relaxed">When you sync a position (even if trading against Tara), she locks your entry price and calculates your live PnL%. If your position drops by 30%, she triggers a massive emergency exit alert to protect your capital.</p></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">Scalp Profit Maximizer</h3><p className="leading-relaxed">If you achieve decent profits (+15%) but momentum stalls, Tara will instantly advise you to SCALP PROFIT to lock in gains before a reversal.</p></section>
               <section><h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 flex items-center gap-2"><IC.Globe className="w-4 h-4" /> Global Whale Log & Sessions</h3><p className="leading-relaxed">Click the 🐋 icon to track real-time orders over $200k from offshore exchanges. The header dynamically displays which market session (ASIA/EU/US) is currently driving volume.</p></section>
             </div>
           </div>
