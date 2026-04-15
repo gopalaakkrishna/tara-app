@@ -25,16 +25,30 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
   const [hoverPos, setHoverPos] = useState(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState(0);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 }); // Fixes resizing cutoff
+  
   const isDragging = useRef(false);
   const lastMouseX = useRef(0);
   const maxPanRef = useRef(0);
   const spacingRef = useRef(10); 
 
+  // Watch for Container Resizes (Fixes chart cutoff)
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const resizeObserver = new ResizeObserver(entries => {
+      for (let entry of entries) {
+        setDimensions({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, []);
+
   // Scroll Isolation Fix & Native Trackpad Pan
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const handleNativeWheel = (e) => {
       e.preventDefault(); 
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
@@ -43,29 +57,27 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
          setZoom(prev => Math.max(1, Math.min(20, prev - e.deltaY * 0.005)));
       }
     };
-
     canvas.addEventListener('wheel', handleNativeWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', handleNativeWheel);
   }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !data || data.length === 0) return;
+    if (!canvas || !data || data.length === 0 || dimensions.width === 0) return;
     const ctx = canvas.getContext('2d');
-    const rect = containerRef.current.getBoundingClientRect();
     
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    canvas.width = dimensions.width * dpr;
+    canvas.height = dimensions.height * dpr;
     ctx.scale(dpr, dpr);
     
-    const width = rect.width;
-    const height = rect.height;
+    const width = dimensions.width;
+    const height = dimensions.height;
     const rightMargin = 65; 
     const bottomMargin = 20;
     const chartW = width - rightMargin;
     const chartH = height - bottomMargin;
-    const volH = chartH * 0.2; // Bottom 20% for volume
+    const volH = chartH * 0.2; 
     const priceH = chartH - volH; 
 
     ctx.clearRect(0, 0, width, height);
@@ -98,7 +110,6 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     const yOffset = maxPrice + padding;
     const volScale = volH / (maxVol * 1.1);
 
-    // Background Grid & Y-Axis Prices
     ctx.strokeStyle = 'rgba(232, 233, 228, 0.05)';
     ctx.fillStyle = 'rgba(232, 233, 228, 0.4)';
     ctx.font = '10px sans-serif';
@@ -109,12 +120,7 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     for(let i=0; i<=5; i++) {
         const y = (priceH / 5) * i;
         const price = maxPrice + padding - (y / scaleY);
-        
-        ctx.beginPath();
-        ctx.moveTo(0, y); 
-        ctx.lineTo(chartW, y);
-        ctx.stroke();
-        
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(chartW, y); ctx.stroke();
         if (i < 5) ctx.fillText(price.toFixed(2), chartW + 5, y);
     }
 
@@ -122,15 +128,11 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     spacingRef.current = spacing;
     const candleWidth = Math.max(1, spacing * 0.6);
 
-    // X-Axis Times
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     for(let i=1; i<5; i++) {
         const x = (chartW / 5) * i;
-        ctx.beginPath();
-        ctx.moveTo(x, 0); 
-        ctx.lineTo(x, chartH);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, chartH); ctx.stroke();
 
         const dataIndex = Math.floor(x / spacing);
         if (viewData[dataIndex] && viewData[dataIndex].time) {
@@ -140,17 +142,13 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
         }
     }
 
-    // Target Margin Strike Line
     if (targetMargin > 0) {
         const targetY = (yOffset - targetMargin) * scaleY;
         if (targetY > 0 && targetY < priceH) {
             ctx.strokeStyle = 'rgba(99, 102, 241, 0.5)'; 
             ctx.lineWidth = 1.5;
             ctx.setLineDash([5, 5]);
-            ctx.beginPath();
-            ctx.moveTo(0, targetY);
-            ctx.lineTo(chartW, targetY);
-            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, targetY); ctx.lineTo(chartW, targetY); ctx.stroke();
             ctx.setLineDash([]);
             
             ctx.fillStyle = 'rgba(99, 102, 241, 0.2)';
@@ -162,7 +160,6 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
         }
     }
 
-    // Draw Volume Bars
     viewData.forEach((candle, i) => {
         const x = i * spacing + spacing / 2;
         const isBullish = candle.c >= candle.o;
@@ -172,96 +169,54 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     });
 
     if (showCandles) {
-      // Draw Candlesticks
       viewData.forEach((candle, i) => {
         const x = i * spacing + spacing / 2;
         const isBullish = candle.c >= candle.o;
         const color = isBullish ? '#34d399' : '#fb7185'; 
-
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(x, (yOffset - candle.h) * scaleY);
-        ctx.lineTo(x, (yOffset - candle.l) * scaleY);
-        ctx.stroke();
-
+        ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+        ctx.moveTo(x, (yOffset - candle.h) * scaleY); ctx.lineTo(x, (yOffset - candle.l) * scaleY); ctx.stroke();
         ctx.fillStyle = color;
         const bodyY = (yOffset - Math.max(candle.o, candle.c)) * scaleY;
         const bodyHeight = Math.max(2, Math.abs(candle.c - candle.o) * scaleY);
         ctx.fillRect(x - candleWidth / 2, bodyY, candleWidth, bodyHeight);
       });
     } else {
-      // Draw Purple Area Line Chart
       ctx.beginPath();
       viewData.forEach((candle, i) => {
          const x = i * spacing + spacing / 2;
          const y = (yOffset - candle.c) * scaleY;
-         if(i === 0) ctx.moveTo(x, y);
-         else ctx.lineTo(x, y);
+         if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       });
-      ctx.strokeStyle = '#c084fc'; 
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      ctx.lineTo(chartW, priceH);
-      ctx.lineTo(0, priceH);
-      ctx.closePath();
-      
+      ctx.strokeStyle = '#c084fc'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.lineTo(chartW, priceH); ctx.lineTo(0, priceH); ctx.closePath();
       const grad = ctx.createLinearGradient(0, 0, 0, priceH);
-      grad.addColorStop(0, 'rgba(192, 132, 252, 0.2)');
-      grad.addColorStop(1, 'rgba(192, 132, 252, 0)');
-      ctx.fillStyle = grad;
-      ctx.fill();
+      grad.addColorStop(0, 'rgba(192, 132, 252, 0.2)'); grad.addColorStop(1, 'rgba(192, 132, 252, 0)');
+      ctx.fillStyle = grad; ctx.fill();
     }
 
-    // Draw Current Price Line
     if (currentPrice) {
       const currentY = (yOffset - currentPrice) * scaleY;
       if (currentY > 0 && currentY < priceH) {
         ctx.strokeStyle = rugPullActive ? '#fb7185' : '#34d399';
         ctx.lineWidth = rugPullActive ? 2 : 1;
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        ctx.moveTo(0, currentY);
-        ctx.lineTo(chartW, currentY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
+        ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(0, currentY); ctx.lineTo(chartW, currentY); ctx.stroke(); ctx.setLineDash([]);
         ctx.fillStyle = rugPullActive ? '#fb7185' : '#34d399';
         ctx.fillRect(chartW, currentY - 10, rightMargin, 20);
-        ctx.fillStyle = '#111312';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.font = 'bold 11px sans-serif';
+        ctx.fillStyle = '#111312'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = 'bold 11px sans-serif';
         ctx.fillText(currentPrice.toFixed(2), chartW + 5, currentY);
       }
     }
 
-    // RUG PULL OVERLAY
     if (rugPullActive) {
-        ctx.fillStyle = 'rgba(251, 113, 133, 0.1)';
-        ctx.fillRect(0, 0, width, height);
-        ctx.fillStyle = '#fb7185';
-        ctx.font = 'bold 24px sans-serif';
-        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(251, 113, 133, 0.1)'; ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = '#fb7185'; ctx.font = 'bold 24px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText("🚨 RUG PULL DETECTED", width / 2, height / 2);
     }
 
-    // Draw Hover Crosshair
     if (hoverPos && hoverPos.x < chartW && hoverPos.y < chartH) {
-      ctx.strokeStyle = 'rgba(232, 233, 228, 0.2)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([2, 2]);
-      
-      ctx.beginPath();
-      ctx.moveTo(hoverPos.x, 0); ctx.lineTo(hoverPos.x, chartH);
-      ctx.stroke();
-      
-      if (hoverPos.y < priceH) {
-          ctx.beginPath();
-          ctx.moveTo(0, hoverPos.y); ctx.lineTo(chartW, hoverPos.y);
-          ctx.stroke();
-      }
+      ctx.strokeStyle = 'rgba(232, 233, 228, 0.2)'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
+      ctx.beginPath(); ctx.moveTo(hoverPos.x, 0); ctx.lineTo(hoverPos.x, chartH); ctx.stroke();
+      if (hoverPos.y < priceH) { ctx.beginPath(); ctx.moveTo(0, hoverPos.y); ctx.lineTo(chartW, hoverPos.y); ctx.stroke(); }
       ctx.setLineDash([]);
 
       if (!showCandles && !rugPullActive && hoverPos.y < priceH) {
@@ -269,25 +224,15 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
          if (viewData[dataIndex]) {
             const dotX = dataIndex * spacing + spacing / 2;
             const dotY = (yOffset - viewData[dataIndex].c) * scaleY;
-            ctx.beginPath();
-            ctx.arc(dotX, dotY, 4, 0, 2 * Math.PI);
-            ctx.fillStyle = '#c084fc';
-            ctx.fill();
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = '#c084fc';
-            ctx.stroke();
-            ctx.shadowBlur = 0;
+            ctx.beginPath(); ctx.arc(dotX, dotY, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = '#c084fc'; ctx.fill(); ctx.shadowBlur = 10; ctx.shadowColor = '#c084fc'; ctx.stroke(); ctx.shadowBlur = 0;
          }
       }
 
       if (hoverPos.y < priceH) {
           const hoverPrice = yOffset - (hoverPos.y / scaleY);
-          ctx.fillStyle = '#2A2D2C';
-          ctx.fillRect(chartW, hoverPos.y - 10, rightMargin, 20);
-          ctx.fillStyle = '#E8E9E4';
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'middle';
-          ctx.font = '10px sans-serif';
+          ctx.fillStyle = '#2A2D2C'; ctx.fillRect(chartW, hoverPos.y - 10, rightMargin, 20);
+          ctx.fillStyle = '#E8E9E4'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = '10px sans-serif';
           ctx.fillText(hoverPrice.toFixed(2), chartW + 5, hoverPos.y);
       }
 
@@ -297,50 +242,28 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
           const d = new Date(t > 1e11 ? t : t * 1000);
           const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
           const timeStr = d.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'});
-          const fullStr = `${dateStr} ${timeStr}`;
-          
-          ctx.fillStyle = '#2A2D2C';
-          ctx.fillRect(hoverPos.x - 50, chartH, 100, bottomMargin);
-          ctx.fillStyle = '#E8E9E4';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(fullStr, hoverPos.x, chartH + (bottomMargin/2));
+          ctx.fillStyle = '#2A2D2C'; ctx.fillRect(hoverPos.x - 50, chartH, 100, bottomMargin);
+          ctx.fillStyle = '#E8E9E4'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(`${dateStr} ${timeStr}`, hoverPos.x, chartH + (bottomMargin/2));
       }
     }
+  }, [data, currentPrice, zoom, pan, hoverPos, showCandles, targetMargin, rugPullActive, dimensions]);
 
-  }, [data, currentPrice, zoom, pan, hoverPos, showCandles, targetMargin, rugPullActive]);
-
-  const handlePointerDown = (e) => {
-      isDragging.current = true;
-      lastMouseX.current = e.clientX;
-  };
-
+  const handlePointerDown = (e) => { isDragging.current = true; lastMouseX.current = e.clientX; };
   const handlePointerMove = (e) => {
       const rect = containerRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      setHoverPos({ x, y });
-
+      setHoverPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
       if (isDragging.current) {
-          const deltaX = e.clientX - lastMouseX.current;
-          setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev + deltaX / spacingRef.current)));
+          setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev + (e.clientX - lastMouseX.current) / spacingRef.current)));
           lastMouseX.current = e.clientX;
       }
   };
-
   const handlePointerUp = () => { isDragging.current = false; };
   const handlePointerLeave = () => { setHoverPos(null); isDragging.current = false; };
 
   return (
       <div ref={containerRef} className="w-full h-full relative cursor-crosshair" style={{ touchAction: 'none' }}>
-          <canvas 
-              ref={canvasRef} 
-              className="absolute inset-0 w-full h-full"
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerLeave={handlePointerLeave}
-          />
+          <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerLeave} />
       </div>
   );
 };
@@ -381,15 +304,12 @@ const calculateATR = (history, period = 14) => {
 
 export default function App() {
   const [isMounted, setIsMounted] = useState(false);
-  
-  // UI Toggles
   const [showCandles, setShowCandles] = useState(true); 
   const [showWhaleAlerts, setShowWhaleAlerts] = useState(true);
   const [showRugPullAlerts, setShowRugPullAlerts] = useState(true);
   
   const [currentPrice, setCurrentPrice] = useState(null);
   const [tickDirection, setTickDirection] = useState(null);
-  
   const currentPriceRef = useRef(null);
   const tickHistoryRef = useRef([]); 
   const lastPriceSourceRef = useRef({ source: 'none', time: 0 });
@@ -416,23 +336,19 @@ export default function App() {
   
   // SSR Hydration & Baseline Setup
   const [scorecards, setScorecards] = useState({ '15m': { wins: 83, losses: 62 }, '5m': { wins: 10, losses: 7 } });
-  const [prevCyclesMap, setPrevCyclesMap] = useState({ '15m': [], '5m': [] });
   
   useEffect(() => {
     setIsMounted(true);
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV50');
+      const savedScore = localStorage.getItem('btcOracleScorecardV55');
       if (savedScore) setScorecards(JSON.parse(savedScore));
-      
-      const savedCycles = localStorage.getItem('btcOraclePrevCyclesV50');
-      if (savedCycles) setPrevCyclesMap(JSON.parse(savedCycles));
     } catch (e) {}
   }, []);
 
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V50 Ultimate Edition online. Layout transformed. Live Volume Bars added. Risk/Chance percentages injected into Advisor." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V55 Terminal online. Prediction text scaled down. Canvas resize cutoff resolved." }]);
   const [chatInput, setChatInput] = useState("");
   
   const lastWindowRef = useRef("");
@@ -443,13 +359,10 @@ export default function App() {
 
   useEffect(() => {
     if (isMounted && typeof window !== 'undefined') {
-      try { 
-        localStorage.setItem('btcOracleScorecardV50', JSON.stringify(scorecards)); 
-        localStorage.setItem('btcOraclePrevCyclesV50', JSON.stringify(prevCyclesMap));
-      } 
+      try { localStorage.setItem('btcOracleScorecardV55', JSON.stringify(scorecards)); } 
       catch (e) {}
     }
-  }, [scorecards, prevCyclesMap, isMounted]);
+  }, [scorecards, isMounted]);
 
   // LIVE CANDLESTICK TICK INJECTION 
   const liveHistory = useMemo(() => {
@@ -506,26 +419,12 @@ export default function App() {
     }));
   };
 
-  // Window Rollover logic & Previous Cycles Tracker
+  // Window Rollover logic
   useEffect(() => {
     if (timeState.nextWindowEST && timeState.nextWindowEST !== lastWindowRef.current) {
       if (currentPrice !== null) {
         if (lastWindowRef.current !== "") {
           const prevCall = activeCallRef.current;
-          const endGap = prevCall.strike > 0 ? ((currentPrice - prevCall.strike) / prevCall.strike) * 10000 : 0;
-          const outcome = currentPrice > prevCall.strike ? 'UP' : 'DOWN';
-          
-          setPrevCyclesMap(prev => {
-             const currentList = prev[windowType] || [];
-             const newCycle = {
-                time: lastWindowRef.current,
-                outcome: outcome,
-                gapPct: (Math.abs(endGap) / 100).toFixed(2) + '%'
-             };
-             const updatedList = [newCycle, ...currentList].slice(0, 3);
-             return { ...prev, [windowType]: updatedList };
-          });
-
           if (prevCall.prediction === "YES") {
             if (currentPrice > prevCall.strike) updateScore(windowType, 'wins', 1);
             else if (currentPrice < prevCall.strike) updateScore(windowType, 'losses', 1);
@@ -569,9 +468,7 @@ export default function App() {
 
       if (now - lastVisualUpdate > 300) {
         setCurrentPrice(prev => {
-          if (prev !== null && newPrice !== prev) {
-            setTickDirection(newPrice > prev ? 'up' : 'down');
-          }
+          if (prev !== null && newPrice !== prev) setTickDirection(newPrice > prev ? 'up' : 'down');
           return newPrice;
         });
         lastVisualUpdate = now;
@@ -591,9 +488,7 @@ export default function App() {
               const newPrice = parseFloat(data.price);
               const size = parseFloat(data.last_size) || 0;
               const isTakerBuy = data.side === 'sell'; 
-              
               updateVisualPrice(newPrice, 'coinbase');
-              
               const now = Date.now();
               tickHistoryRef.current.push({ p: newPrice, s: size, t: isTakerBuy ? 'B' : 'S', time: now });
               tickHistoryRef.current = tickHistoryRef.current.filter(t => now - t.time < 30000);
@@ -620,7 +515,6 @@ export default function App() {
     }
 
     initWebSockets();
-
     return () => { 
       if (wsCB && wsCB.readyState === 1) { wsCB.send(JSON.stringify({ type: 'unsubscribe', product_ids: ['BTC-USD'], channels: ['ticker'] })); wsCB.close(); }
       if (wsBinanceLiq && wsBinanceLiq.readyState === 1) wsBinanceLiq.close();
@@ -631,18 +525,11 @@ export default function App() {
   useEffect(() => {
     const tapeInterval = setInterval(() => {
       let takerBuys = 0; let takerSells = 0; let whaleSpotted = null;
-      
       tickHistoryRef.current.forEach(t => {
         const usdValue = t.s * t.p;
-        if (t.t === 'B') {
-          takerBuys += usdValue;
-          if (t.s > 1.5) whaleSpotted = 'BUY';
-        } else {
-          takerSells += usdValue;
-          if (t.s > 1.5) whaleSpotted = 'SELL';
-        }
+        if (t.t === 'B') { takerBuys += usdValue; if (t.s > 1.5) whaleSpotted = 'BUY'; } 
+        else { takerSells += usdValue; if (t.s > 1.5) whaleSpotted = 'SELL'; }
       });
-
       const tImbalance = takerSells === 0 ? (takerBuys > 0 ? 2 : 1) : takerBuys / takerSells;
       setTakerFlow({ imbalance: tImbalance, whaleSpotted });
     }, 1000);
@@ -660,26 +547,18 @@ export default function App() {
         if (dataTicker.price) {
           const p = parseFloat(dataTicker.price);
           const now = Date.now();
-          
           if (lastPriceSourceRef.current.source !== 'coinbase' || now - lastPriceSourceRef.current.time > 2000) {
-             currentPriceRef.current = p;
-             lastPriceSourceRef.current = { source: 'rest', time: now };
-             
+             currentPriceRef.current = p; lastPriceSourceRef.current = { source: 'rest', time: now };
              if (now - lastUiUpdate > 300) {
-               setCurrentPrice(prev => {
-                 if (prev !== null && p !== prev) setTickDirection(p > prev ? 'up' : 'down');
-                 return p;
-               });
+               setCurrentPrice(prev => { if (prev !== null && p !== prev) setTickDirection(p > prev ? 'up' : 'down'); return p; });
                lastUiUpdate = now;
              }
           }
-          
           tickHistoryRef.current.push({ p, s: parseFloat(dataTicker.size || 0.1), t: 'B', time: Date.now() });
           tickHistoryRef.current = tickHistoryRef.current.filter(t => Date.now() - t.time < 30000);
         }
       } catch(e) {}
     };
-
     fetchSpotPrice();
     const spotInterval = setInterval(fetchSpotPrice, 1500); 
     return () => clearInterval(spotInterval);
@@ -690,18 +569,14 @@ export default function App() {
     const fetchHeavyData = async () => {
       try {
         let formattedHistory = [];
+        const gran = windowType === '15m' ? 900 : 300;
         try {
-          const resCB = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60');
+          const resCB = await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`);
           if (resCB.ok) {
             const dataCB = await resCB.json();
             if (Array.isArray(dataCB)) {
               formattedHistory = dataCB.slice(0, 60).map(c => ({ 
-                time: c[0], 
-                l: parseFloat(c[1]), 
-                h: parseFloat(c[2]), 
-                o: parseFloat(c[3]), 
-                c: parseFloat(c[4]), 
-                v: parseFloat(c[5]) 
+                time: c[0], l: parseFloat(c[1]), h: parseFloat(c[2]), o: parseFloat(c[3]), c: parseFloat(c[4]), v: parseFloat(c[5]) 
               }));
             }
           }
@@ -733,7 +608,7 @@ export default function App() {
     fetchHeavyData();
     const heavyInterval = setInterval(fetchHeavyData, 5000); 
     return () => clearInterval(heavyInterval);
-  }, [targetMargin]); 
+  }, [targetMargin, windowType]); 
 
   // Auto-Snap Target Margin on Boot
   useEffect(() => {
@@ -745,19 +620,19 @@ export default function App() {
   // News Wire Generator
   useEffect(() => {
     let syntheticNews = [];
-    if (orderBook.imbalance > 1.5) syntheticNews.push({ title: `Maker Alert: Limit BID wall placed near $${targetMargin.toFixed(0)}`, url: "#", type: 'info' });
-    if (orderBook.imbalance < 0.6) syntheticNews.push({ title: `Maker Alert: Limit SELL pressure defending $${targetMargin.toFixed(0)}`, url: "#", type: 'info' });
+    if (orderBook.imbalance > 1.5) syntheticNews.push({ title: `Maker Alert: Limit BID wall placed near $${targetMargin.toFixed(0)}`, type: 'info' });
+    if (orderBook.imbalance < 0.6) syntheticNews.push({ title: `Maker Alert: Limit SELL pressure defending $${targetMargin.toFixed(0)}`, type: 'info' });
     
     if (showWhaleAlerts) {
-        if (takerFlow.imbalance > 2.0) syntheticNews.push({ title: `🐋 WHALE: Aggressive Market BUYING detected on the tape.`, url: "#", type: 'whale' });
-        if (takerFlow.imbalance < 0.5) syntheticNews.push({ title: `🐋 WHALE: Aggressive Market SELLING detected on the tape.`, url: "#", type: 'whale' });
+        if (takerFlow.imbalance > 2.0) syntheticNews.push({ title: `🐋 WHALE: Aggressive Market BUYING detected on the tape.`, type: 'whale' });
+        if (takerFlow.imbalance < 0.5) syntheticNews.push({ title: `🐋 WHALE: Aggressive Market SELLING detected on the tape.`, type: 'whale' });
     }
     
-    if (syntheticNews.length < 3) syntheticNews.push({ title: `Engine: Analyzing Order Book vs Tape Divergence (${String(windowType).toUpperCase()})...`, url: "#", type: 'info' });
+    if (syntheticNews.length < 3) syntheticNews.push({ title: `Engine: Analyzing Order Book vs Tape Divergence (${String(windowType).toUpperCase()})...`, type: 'info' });
     setNewsEvents(syntheticNews);
   }, [orderBook.imbalance, takerFlow.imbalance, targetMargin, windowType, showWhaleAlerts]);
 
-  // BULLETPROOF TIME ENGINE 
+  // BULLETPROOF TIME ENGINE (100% Vercel SSR Crash Proof)
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -793,7 +668,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [windowType]);
 
-  // --- TARA V50: ZERO-LATENCY REAL-TIME ENGINE ---
+  // --- TARA V40: ZERO-LATENCY REAL-TIME ENGINE ---
   const analysis = useMemo(() => {
     if (!currentPrice || liveHistory.length < 30 || !targetMargin || !isMounted) return null;
 
@@ -834,35 +709,27 @@ export default function App() {
     let regime = "RANGE/CHOP";
     let reasoning = [];
     
-    // RUG PULL LOGIC
     let isRugPull = false;
-    if (tickSlope < -5.0 && aggrFlow < -0.6) {
-        isRugPull = true;
-    }
+    if (tickSlope < -5.0 && aggrFlow < -0.6) isRugPull = true;
 
     const timeDecay = Math.pow(timeFraction, 2); 
     const gapWeight = realGapBps * (is15m ? 1.0 : 1.5) * (0.2 + 0.8 * timeDecay);
     baseProb += gapWeight;
 
     if (rsi > 65 && realGapBps > 0) {
-       baseProb -= 20; 
-       regime = "OVERBOUGHT (FADE)";
+       baseProb -= 20; regime = "OVERBOUGHT (FADE)";
        reasoning.push(`REGIME: RSI is ${rsi.toFixed(1)}. Pumping but overextended. Fading the top.`);
     } else if (rsi < 35 && realGapBps < 0) {
-       baseProb += 20; 
-       regime = "OVERSOLD (FADE)";
+       baseProb += 20; regime = "OVERSOLD (FADE)";
        reasoning.push(`REGIME: RSI is ${rsi.toFixed(1)}. Dumping but overextended. Fading the bottom.`);
     } else if (Math.abs(vwapGapBps) > 2 && tickSlope > 0.5) {
-       regime = "STRONG UPTREND";
-       baseProb += (aggrFlow * 25) + 10;
+       regime = "STRONG UPTREND"; baseProb += (aggrFlow * 25) + 10;
        reasoning.push(`REGIME: Strong Uptrend identified. Trusting AggrFlow.`);
     } else if (Math.abs(vwapGapBps) > 2 && tickSlope < -0.5) {
-       regime = "STRONG DOWNTREND";
-       baseProb += (aggrFlow * 25) - 10;
+       regime = "STRONG DOWNTREND"; baseProb += (aggrFlow * 25) - 10;
        reasoning.push(`REGIME: Strong Downtrend identified. Trusting AggrFlow.`);
     } else {
-       regime = "RANGE/CHOP";
-       baseProb += (aggrFlow * 20) + (mktImplied * 10);
+       regime = "RANGE/CHOP"; baseProb += (aggrFlow * 20) + (mktImplied * 10);
        reasoning.push(`REGIME: Market ranging. Orderbook & Tape dictates path.`);
     }
 
@@ -883,7 +750,6 @@ export default function App() {
     let posterior = Math.max(1, Math.min(99, baseProb)); 
     let convictionScore = Math.abs(posterior - 50) * 2; 
 
-    // V40: ZERO LATENCY ENTRY.
     if (activePrediction === "SIT OUT" && !isEndgameLock) {
         if (posterior >= 65) activePrediction = "YES";
         else if (posterior <= 35) activePrediction = "NO";
@@ -906,7 +772,6 @@ export default function App() {
     const livePnL = liveEstValue - betAmount;
     const offerVal = parseFloat(currentOffer) || 0;
     
-    // V50 RISK/CHANCE METRICS
     const riskPct = activePrediction === "YES" ? (100 - posterior) : posterior;
     const chancePct = activePrediction === "YES" ? posterior : (100 - posterior);
     const metricsStr = `[Chance: ${chancePct.toFixed(0)}% | Risk: ${riskPct.toFixed(0)}%]`;
@@ -986,11 +851,26 @@ export default function App() {
     else if (realGapBps < 0 && activePrediction === "NO") predictionReason = "Firmly in profit. Holding steady.";
     else predictionReason = "Position negative, holding firm through noise.";
 
+    const price1hAgo = history[history.length - 1]?.c || currentPrice; 
+    const hourlySlope = currentPrice - price1hAgo;
+    let simulatedPrice = currentPrice;
+    let projections = [];
+    const driftModifier = (orderBook.imbalance > 1 ? 1.2 : 0.8) * 0.6; 
+    
+    // SAFE FORECAST LOGIC
+    for(let i=1; i<=4; i++) {
+        const nextHour = (timeState.currentHour + i) % 24;
+        let timeLabel = `${nextHour.toString().padStart(2, '0')}:00`;
+        
+        simulatedPrice += (tickSlope * driftModifier + (sentimentScore * 20));
+        projections.push({ time: timeLabel, price: simulatedPrice });
+    }
+
     return { 
       confidence: activePrediction === "NO" ? (100 - posterior).toFixed(1) : posterior.toFixed(1), 
       prediction: activePrediction, predictionReason, reasoning, textColor, rawProbAbove: posterior,
       tradeAction, tradeReason, actionColor, actionBg, hasAction, actionButtonLabel, actionTarget, 
-      realGapBps, clockSeconds, isSystemLocked: isEndgameLock, atrBps, livePnL, liveEstValue,
+      realGapBps, clockSeconds, isSystemLocked: isEndgameLock, atrBps, livePnL, liveEstValue, projections,
       vwapGapBps, regime, aggrFlow, topDriver, entryWindowStatus, convictionScore, convictionText,
       isRugPull
     };
@@ -1007,10 +887,7 @@ export default function App() {
 
   const executeManualAction = (actionLabel, targetState) => {
     setManualAction(actionLabel);
-    
-    if (targetState === "CASH" || targetState === "SIT OUT") {
-      setUserPosition(null); 
-    }
+    if (targetState === "CASH" || targetState === "SIT OUT") setUserPosition(null); 
 
     if (analysis && (analysis.prediction === "YES" || analysis.prediction === "NO")) {
       const isWin = (analysis.prediction === "YES" && currentPrice > targetMargin) || (analysis.prediction === "NO" && currentPrice < targetMargin);
@@ -1033,69 +910,94 @@ export default function App() {
     setForceRender(prev => prev + 1);
   };
 
+  const handleChatSubmit = (e) => {
+    if (e.key === 'Enter' && chatInput.trim()) {
+      const userText = chatInput.trim().toLowerCase();
+      const currentLog = [...chatLog, { role: 'user', text: chatInput.trim() }];
+      setChatLog(currentLog);
+      setChatInput("");
+      
+      setTimeout(() => {
+        let reply = "";
+        if (userText.includes("why") || userText.includes("explain") || userText.includes("reason") || userText.includes("logic")) {
+          reply = `Currently, my posterior for YES is ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. We are in a ${String(analysis?.regime || 'CHOP')} regime. I am strictly waiting for quant rules to pass before issuing an entry.`;
+        }
+        else if (userText.includes("5m") || userText.includes("5 minute") || userText.includes("15m")) {
+          reply = `In V55, both windows trigger early ENTRY SIGNALS based on pure momentum. You are currently in ${windowType.toUpperCase()} mode.`;
+        }
+        else if (userText.includes("pnl") || userText.includes("profit") || userText.includes("loss")) {
+          reply = analysis?.prediction === "SIT OUT" ? "You are not in an active trade. No PnL to track right now." : `Your current estimated contract value is ~$${Number(analysis?.liveEstValue || 0).toFixed(2)}. Your live mathematical PnL is $${Number(analysis?.livePnL || 0).toFixed(2)}.`;
+        }
+        else if (userText.includes("score") || userText.includes("record")) {
+          reply = `Our current recorded scorecard for the ${windowType.toUpperCase()} window is ${Number(scorecards[windowType]?.wins || 0)} Wins and ${Number(scorecards[windowType]?.losses || 0)} Losses.`;
+        }
+        else {
+          reply = `My probability engine places YES at ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. Currently, my advice is to: ${String(analysis?.tradeAction || 'SIT OUT')}. Ask me 'why' to see my exact mathematical reasoning.`;
+        }
+        setChatLog([...currentLog, { role: 'tara', text: reply }]);
+      }, 500); 
+    }
+  };
+
+  useEffect(() => { setManualAction(null); }, [analysis?.tradeAction]);
+  useEffect(() => { if (analysis && (analysis.prediction === "YES" || analysis.prediction === "NO" || analysis.prediction === "SIT OUT")) activeCallRef.current = { prediction: analysis.prediction, strike: targetMargin }; }, [analysis?.prediction, targetMargin]);
+
   if (!isMounted) {
     return <div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara Terminal...</div>;
   }
 
   return (
-    <div className="min-h-screen bg-[#111312] text-[#E8E9E4] font-sans p-2 sm:p-4 flex flex-col items-center selection:bg-[#E8E9E4]/20 overflow-x-hidden">
+    <div className="min-h-screen lg:h-screen bg-[#111312] text-[#E8E9E4] font-sans p-2 sm:p-3 flex flex-col selection:bg-[#E8E9E4]/20 overflow-y-auto">
       
-      {/* Top Header - V50 CONSOLIDATED LAYOUT */}
-      <div className="w-full max-w-[1400px] flex flex-wrap justify-between items-center border-b border-[#E8E9E4]/10 pb-3 mb-4 gap-3">
-        <div className="flex items-center justify-between w-full sm:w-auto">
-          <h1 className="text-xl md:text-2xl font-serif tracking-tight text-white flex items-center gap-2">
-            Tara
-            <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V50 Terminal
-            </span>
-          </h1>
+      <div className="w-full max-w-[1600px] mx-auto flex flex-col h-full gap-3 min-h-0">
+        
+        {/* TOP HEADER: Shrink 0 */}
+        <div className="flex justify-between items-center border-b border-[#E8E9E4]/10 pb-2 shrink-0">
+          <div className="flex items-center justify-between w-full sm:w-auto">
+            <h1 className="text-lg md:text-xl font-serif tracking-tight text-white flex items-center gap-2">
+              Tara
+              <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V55 Terminal
+              </span>
+            </h1>
+            <div className="flex sm:hidden items-center gap-2">
+              <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-1.5 rounded-md border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`}>
+                {soundEnabled ? <IconVolume2 className="w-3.5 h-3.5" /> : <IconVolumeX className="w-3.5 h-3.5" />}
+              </button>
+              <button onClick={() => setShowHelp(true)} className="p-1.5 rounded-md bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors">
+                <IconHelp className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
           
-          <div className="flex sm:hidden items-center gap-2">
-            <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-1.5 rounded-md border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`}>
-              {soundEnabled ? <IconVolume2 className="w-3.5 h-3.5" /> : <IconVolumeX className="w-3.5 h-3.5" />}
+          <div className="flex bg-[#111312] border border-[#E8E9E4]/20 rounded-lg p-1 shadow-inner w-full sm:w-auto justify-center">
+            <button onClick={() => handleWindowToggle('5m')} className={`flex-1 sm:flex-none px-6 py-1 text-[10px] uppercase font-bold tracking-widest rounded-md transition-all ${windowType === '5m' ? 'bg-indigo-500 text-white shadow-md' : 'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>
+              5 Min
             </button>
-            <button onClick={() => setShowHelp(true)} className="p-1.5 rounded-md bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors">
-              <IconHelp className="w-3.5 h-3.5" />
+            <button onClick={() => handleWindowToggle('15m')} className={`flex-1 sm:flex-none px-6 py-1 text-[10px] uppercase font-bold tracking-widest rounded-md transition-all ${windowType === '15m' ? 'bg-emerald-500 text-white shadow-md' : 'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>
+              15 Min
             </button>
           </div>
-        </div>
-        
-        <div className="flex bg-[#111312] border border-[#E8E9E4]/20 rounded-lg p-1 shadow-inner w-full sm:w-auto justify-center">
-          <button 
-            onClick={() => handleWindowToggle('5m')}
-            className={`flex-1 sm:flex-none px-6 py-1.5 text-[10px] uppercase font-bold tracking-widest rounded-md transition-all ${windowType === '5m' ? 'bg-indigo-500 text-white shadow-md' : 'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
-          >
-            5 Min
-          </button>
-          <button 
-            onClick={() => handleWindowToggle('15m')}
-            className={`flex-1 sm:flex-none px-6 py-1.5 text-[10px] uppercase font-bold tracking-widest rounded-md transition-all ${windowType === '15m' ? 'bg-emerald-500 text-white shadow-md' : 'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
-          >
-            15 Min
-          </button>
+
+          <div className="hidden sm:flex text-right font-sans items-center gap-4">
+            <div className="flex flex-col items-end pl-4">
+              <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest mb-0.5">Current EST</div>
+              <div className="text-sm font-serif text-[#E8E9E4]/90">{String(timeState.currentEST || '--:--:--')}</div>
+            </div>
+            <div className="flex items-center gap-2 border-l border-[#E8E9E4]/10 pl-4">
+              <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-2 rounded-lg border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`} title="Toggle Audio Alerts">
+                {soundEnabled ? <IconVolume2 className="w-4 h-4" /> : <IconVolumeX className="w-4 h-4" />}
+              </button>
+              <button onClick={() => setShowHelp(true)} className="p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors" title="Operations Manual">
+                <IconHelp className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div className="hidden sm:flex text-right font-sans items-center gap-4">
-          <div className="flex flex-col items-end pl-4">
-            <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest mb-0.5">Current EST</div>
-            <div className="text-sm font-serif text-[#E8E9E4]/90">{String(timeState.currentEST || '--:--:--')}</div>
-          </div>
-          <div className="flex items-center gap-2 border-l border-[#E8E9E4]/10 pl-4">
-            <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-2 rounded-lg border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`} title="Toggle Audio Alerts">
-              {soundEnabled ? <IconVolume2 className="w-4 h-4" /> : <IconVolumeX className="w-4 h-4" />}
-            </button>
-            <button onClick={() => setShowHelp(true)} className="p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors" title="Operations Manual">
-              <IconHelp className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="w-full max-w-[1400px] flex flex-col gap-4">
-        
-        {/* V50 STATS BAR (Consolidated) */}
-        <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col lg:flex-row items-center justify-between gap-4 relative overflow-hidden">
-           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
+        {/* STATS BAR: Shrink 0 */}
+        <div className="bg-[#181A19] p-2 sm:px-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-wrap lg:flex-nowrap items-center justify-between gap-3 shrink-0 relative overflow-hidden">
+           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
 
            <div className="flex w-full lg:w-auto justify-between lg:justify-start items-center gap-4">
              <div className="flex items-center gap-3 w-1/2 lg:w-auto pl-1 md:pl-2">
@@ -1104,94 +1006,247 @@ export default function App() {
                </div>
                <div>
                  <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-0.5">Live Spot</div>
-                 <div className={`text-xl sm:text-2xl md:text-3xl font-serif tracking-tight flex items-center gap-1 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-white'}`}>
+                 <div className={`text-lg sm:text-2xl font-serif tracking-tight flex items-center gap-1 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-white'}`}>
                    ${currentPrice ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '---'}
                  </div>
                </div>
              </div>
-
-             <div className="flex lg:hidden flex-col items-center bg-[#111312] p-2 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-1/2">
+             {/* Mobile Scorecard */}
+             <div className="flex lg:hidden flex-col items-center bg-[#111312] p-1.5 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-1/2">
                <div className="flex items-center justify-between w-full px-2">
                  <div className="flex flex-col items-center">
                    <div className="text-[9px] text-emerald-400 mb-0.5">WINS</div>
-                   <span className="text-xl font-serif text-emerald-400 font-bold">{Number(scorecards[windowType]?.wins || 0)}</span>
+                   <span className="text-lg font-serif text-emerald-400 font-bold">{Number(scorecards[windowType]?.wins || 0)}</span>
                  </div>
                  <div className="h-6 w-px bg-[#E8E9E4]/10"></div>
                  <div className="flex flex-col items-center">
                    <div className="text-[9px] text-rose-400 mb-0.5">LOSS</div>
-                   <span className="text-xl font-serif text-rose-400 font-bold">{Number(scorecards[windowType]?.losses || 0)}</span>
+                   <span className="text-lg font-serif text-rose-400 font-bold">{Number(scorecards[windowType]?.losses || 0)}</span>
                  </div>
                </div>
              </div>
            </div>
            
-           <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
+           <div className="w-px h-8 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
-           <div className="flex items-center gap-3 md:gap-6 w-full lg:w-auto bg-[#111312] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/5 shadow-inner justify-between overflow-x-auto flex-1">
+           <div className="flex items-center gap-3 md:gap-6 w-full lg:w-auto bg-[#111312] p-2 rounded-xl border border-[#E8E9E4]/5 shadow-inner justify-between overflow-x-auto flex-1">
              <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[120px]">
-               <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Strike</div>
+               <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1">Strike</div>
                <div className="flex items-center w-full">
                  <IconCrosshair className="w-3 h-3 md:w-4 md:h-4 text-indigo-400 mr-1 md:mr-2 opacity-80 hidden sm:block" />
-                 <input type="number" value={targetMargin === 0 ? '' : targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-lg md:text-xl w-full focus:outline-none py-1 leading-normal" />
+                 <input type="number" value={targetMargin === 0 ? '' : targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-base md:text-lg w-full focus:outline-none py-1 leading-normal" />
                </div>
              </div>
              <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[120px]">
-               <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1.5">Bet / Win</div>
-               <div className="flex items-center gap-1 text-white font-serif text-base md:text-lg w-full">
+               <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1">Bet / Win</div>
+               <div className="flex items-center gap-1 text-white font-serif text-base w-full">
                  $<input type="number" value={betAmount === 0 ? '' : betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-full text-center outline-none py-1 leading-normal" />
                  <span className="text-[#E8E9E4]/40 mx-0.5">/</span>
                  $<input type="number" value={maxPayout === 0 ? '' : maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-full text-center outline-none py-1 leading-normal" />
                </div>
              </div>
              <div className="flex flex-col items-start pl-1 md:pl-2 min-w-[100px]">
-               <div className="text-[9px] md:text-[10px] text-emerald-400/80 uppercase tracking-widest font-medium mb-1.5">Live Offer</div>
+               <div className="text-[9px] md:text-[10px] text-emerald-400/80 uppercase tracking-widest font-medium mb-1">Live Offer</div>
                <div className="flex items-center gap-1 text-emerald-400 font-serif text-base md:text-lg">
                  $<input type="number" value={currentOffer} onChange={(e) => setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-full text-center outline-none placeholder-emerald-900 py-1 leading-normal" />
                </div>
              </div>
            </div>
            
-           <div className="w-px h-10 md:h-12 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
+           <div className="w-px h-8 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
 
            <div className="hidden lg:flex flex-col items-start w-48">
-             <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-2 flex justify-between w-full">
+             <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1 flex justify-between w-full">
                <span className="flex items-center gap-1.5"><IconTerminal className="w-3.5 h-3.5"/> {String(windowType).toUpperCase()} SCORECARD</span>
              </div>
-             <div className="flex items-center justify-between w-full">
+             <div className="flex items-center justify-between w-full px-2">
                <div className="flex flex-col items-center">
-                 <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 mb-1">
+                 <div className="flex items-center gap-1 text-[9px] text-emerald-400 mb-0.5">
                    <button onClick={() => updateScore(windowType, 'wins', -1)}>-</button> WINS <button onClick={() => updateScore(windowType, 'wins', 1)}>+</button>
                  </div>
-                 <span className="text-3xl font-serif text-emerald-400 font-bold">{Number(scorecards[windowType]?.wins || 0)}</span>
+                 <span className="text-2xl font-serif text-emerald-400 font-bold">{Number(scorecards[windowType]?.wins || 0)}</span>
                </div>
-               <div className="h-10 w-px bg-[#E8E9E4]/10"></div>
+               <div className="h-8 w-px bg-[#E8E9E4]/10"></div>
                <div className="flex flex-col items-center">
-                 <div className="flex items-center gap-1.5 text-[10px] text-rose-400 mb-1">
+                 <div className="flex items-center gap-1 text-[9px] text-rose-400 mb-0.5">
                    <button onClick={() => updateScore(windowType, 'losses', -1)}>-</button> LOSS <button onClick={() => updateScore(windowType, 'losses', 1)}>+</button>
                  </div>
-                 <span className="text-3xl font-serif text-rose-400 font-bold">{Number(scorecards[windowType]?.losses || 0)}</span>
+                 <span className="text-2xl font-serif text-rose-400 font-bold">{Number(scorecards[windowType]?.losses || 0)}</span>
                </div>
              </div>
            </div>
         </div>
 
-        {/* FULL WIDTH LIVE CHART (V50 UPDATE - Massive Centerpiece) */}
-        <div className="w-full bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col h-[500px] sm:h-[600px] relative z-10">
-          <div className="flex justify-between items-center mb-3 border-b border-[#E8E9E4]/10 pb-2">
-            <h2 className="text-[11px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] flex items-center gap-2">
+        {/* MIDDLE ROW: Prediction, Posteriors/Forecast, Logs/Wire. Shrink 0 on Desktop */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 shrink-0 lg:h-[250px]">
+          
+          {/* Left Column: Prediction Block */}
+          <div className="lg:col-span-4 bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative overflow-hidden h-full">
+             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-transparent opacity-30"></div>
+             
+             <div className="flex justify-between items-start mb-2">
+               <div className="bg-[#111312] border border-[#E8E9E4]/10 px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 shadow-sm whitespace-nowrap">
+                 <IconClock className="w-3 h-3" />
+                 <span className="text-[#E8E9E4]/60 hidden sm:inline">{String(timeState.startWindowEST)}-{String(timeState.nextWindowEST)}</span>
+                 <span className="text-[#E8E9E4]">{Number(timeState.minsRemaining)}m {Number(timeState.secsRemaining)}s</span>
+               </div>
+               
+               {analysis && analysis.tradeAction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && (
+                 <button 
+                   onClick={() => executeManualAction("MANUAL PULL OUT", "SIT OUT")}
+                   className="bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-colors"
+                 >
+                   <IconAlertTriangle className="w-3 h-3" /> <span>Force Exit</span>
+                 </button>
+               )}
+             </div>
+
+             {isLoading || !analysis ? (
+               <div className="text-lg font-serif text-[#E8E9E4]/30 animate-pulse mt-4 text-center w-full">Connecting...</div>
+             ) : (
+               <div className="flex flex-col items-center w-full flex-1 justify-center">
+                 <div className="flex flex-col items-center mb-2">
+                   <span className="text-[9px] text-[#E8E9E4]/40 uppercase tracking-[0.2em] font-bold">Prediction</span>
+                   <h2 className={`text-[48px] sm:text-[56px] xl:text-[64px] font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg transition-all flex items-center justify-center uppercase`}>
+                     {String(analysis.prediction)}
+                   </h2>
+                 </div>
+
+                 <div className={`w-full p-2.5 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm mt-auto`}>
+                   <div className="flex items-center gap-1.5 mb-1">
+                     <IconBell className={`w-3.5 h-3.5 ${analysis.actionColor}`} />
+                     <span className="text-[9px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span>
+                   </div>
+                   <div className={`text-sm sm:text-base font-serif font-bold mb-1 ${analysis.actionColor} uppercase`}>{String(analysis.tradeAction)}</div>
+                   <p className="text-[9px] sm:text-[10px] opacity-80 text-[#E8E9E4] mb-1.5 leading-tight px-1">{String(analysis.tradeReason)}</p>
+
+                   {analysis.hasAction && (
+                     <div className="w-full pt-2 border-t border-[#E8E9E4]/10">
+                        {manualAction === analysis.tradeAction ? (
+                           <div className="w-full bg-emerald-500/20 text-emerald-400 py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5">
+                             <IconCheck className="w-3.5 h-3.5" /> Logged
+                           </div>
+                        ) : (
+                           <button 
+                             onClick={() => executeManualAction(analysis.tradeAction, analysis.actionTarget)}
+                             className={`w-full py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest border transition-all hover:brightness-125 ${
+                               analysis.actionColor.includes('rose') ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' :
+                               analysis.actionColor.includes('amber') ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' :
+                               'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                             }`}
+                           >
+                             {String(analysis.actionButtonLabel)}
+                           </button>
+                        )}
+                     </div>
+                   )}
+                 </div>
+               </div>
+             )}
+          </div>
+
+          {/* Middle Column: Posteriors, Forecast, Sync */}
+          <div className="lg:col-span-4 flex flex-col gap-3 h-full">
+            <div className="flex gap-3 flex-1 min-h-0">
+              <div className="flex-1 bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md flex flex-col justify-center">
+                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-1">POSTERIOR (UP)</div>
+                 <div className="text-3xl sm:text-4xl xl:text-5xl font-serif text-indigo-300">{analysis ? `${Number(analysis.rawProbAbove || 0).toFixed(1)}%` : '--%'}</div>
+              </div>
+              <div className="flex-1 bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md flex flex-col justify-center">
+                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-1">POSTERIOR (DN)</div>
+                 <div className="text-3xl sm:text-4xl xl:text-5xl font-serif text-rose-300">{analysis ? `${(100 - Number(analysis.rawProbAbove || 0)).toFixed(1)}%` : '--%'}</div>
+              </div>
+            </div>
+
+            {/* Restored Hourly Forecast Projections */}
+            {analysis && (
+              <div className="bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md shrink-0">
+                <h2 className="text-[9px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5">
+                  <IconTrendingUp className="w-3.5 h-3.5 text-purple-400" /> Forecast
+                </h2>
+                <div className="grid grid-cols-4 gap-2">
+                  {analysis.projections.map((proj, idx) => (
+                    <div key={idx} className="bg-[#111312] rounded-lg p-1.5 text-center border border-[#E8E9E4]/5">
+                      <div className="text-[9px] text-[#E8E9E4]/40 font-bold uppercase mb-0.5">{String(proj.time)}</div>
+                      <div className="text-[11px] font-serif text-purple-100">${Number(proj.price || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* MANUAL SYNC BUTTONS */}
+            {userPosition === null && (
+              <div className="flex flex-col items-center gap-1.5 w-full shrink-0">
+                <span className="text-[8px] uppercase tracking-widest text-[#E8E9E4]/40">Already in a trade? Sync Tara:</span>
+                <div className="flex gap-2 w-full">
+                  <button onClick={() => handleManualSync("YES")} className="flex-1 py-1.5 border border-emerald-500/30 text-emerald-400 rounded-md text-[9px] uppercase font-bold tracking-widest hover:bg-emerald-500/10 transition-colors">I Entered YES</button>
+                  <button onClick={() => handleManualSync("NO")} className="flex-1 py-1.5 border border-rose-500/30 text-rose-400 rounded-md text-[9px] uppercase font-bold tracking-widest hover:bg-rose-500/10 transition-colors">I Entered NO</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right Column: Engine Logs & Live Wire */}
+          <div className="lg:col-span-4 flex flex-col gap-3 h-full">
+             {/* Engine Logs */}
+             {analysis && (
+               <div className="bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-0">
+                 <h2 className="text-[9px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest mb-2 flex items-center gap-1.5 border-b border-[#E8E9E4]/10 pb-1">
+                   <IconTerminal className="w-3.5 h-3.5 text-amber-400" /> Engine Logs
+                 </h2>
+                 <div className="space-y-1.5 font-mono flex-1 overflow-y-auto pr-1 custom-scrollbar">
+                   {(analysis.reasoning || []).map((reason, idx) => (
+                     <div key={idx} className={`bg-[#111312] p-2 rounded-md text-[8.5px] sm:text-[9px] ${reason.includes('RUG PULL') ? 'text-rose-400 border border-rose-500/20' : 'text-[#E8E9E4]/70 border border-[#E8E9E4]/5'} flex items-start gap-1.5 uppercase`}>
+                       <span className="text-emerald-500 mt-0.5">{`>`}</span>
+                       <span className="leading-snug">{String(reason)}</span>
+                     </div>
+                   ))}
+                 </div>
+               </div>
+             )}
+
+             {/* Live Wire */}
+             <div className="bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-0">
+               <div className="flex justify-between items-center mb-2 border-b border-[#E8E9E4]/10 pb-1">
+                 <h2 className="text-[9px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest flex items-center gap-1.5">
+                   <IconGlobe className="w-3.5 h-3.5 text-blue-400" /> Live Wire
+                 </h2>
+               </div>
+               <div className="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1">
+                 {newsEvents.length === 0 ? (
+                    <div className="text-[10px] text-[#E8E9E4]/40 italic">Generating market intel...</div>
+                 ) : (
+                   newsEvents.map((news, i) => (
+                     <div key={i} className={`border-l-[2px] pl-2 py-0.5 ${news.type === 'rugpull' ? 'border-rose-500' : news.type === 'whale' ? 'border-purple-500' : 'border-indigo-500/40'}`}>
+                       <span className={`text-[9px] sm:text-[10px] leading-tight ${news.type === 'rugpull' ? 'text-rose-400 font-bold' : news.type === 'whale' ? 'text-purple-300' : 'text-[#E8E9E4]/90'}`}>
+                         {String(news.title)}
+                       </span>
+                     </div>
+                   ))
+                 )}
+               </div>
+             </div>
+          </div>
+        </div>
+
+        {/* FULL WIDTH LIVE CHART (Flex-1 perfectly fills remaining screen on desktop) */}
+        <div className="w-full bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col flex-1 min-h-[200px] mt-2 relative z-10">
+          <div className="flex justify-between items-center mb-2 border-b border-[#E8E9E4]/10 pb-2">
+            <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] flex items-center gap-2">
               <IconActivity className="w-4 h-4 text-indigo-400" /> LIVE PRICE CHART
             </h2>
-            <div className="flex items-center gap-4 text-[10px] text-[#E8E9E4]/60 bg-[#111312] px-3 py-1.5 rounded-lg border border-[#E8E9E4]/5">
-              <label className="flex items-center gap-1.5 cursor-pointer hover:text-purple-400 transition-colors">
-                <input type="checkbox" checked={showWhaleAlerts} onChange={(e) => setShowWhaleAlerts(e.target.checked)} className="accent-purple-500 w-3.5 h-3.5" /> Whale Alerts
+            <div className="flex items-center gap-3 text-[9px] text-[#E8E9E4]/60 bg-[#111312] px-3 py-1 rounded-lg border border-[#E8E9E4]/5">
+              <label className="flex items-center gap-1 cursor-pointer hover:text-purple-400 transition-colors">
+                <input type="checkbox" checked={showWhaleAlerts} onChange={(e) => setShowWhaleAlerts(e.target.checked)} className="accent-purple-500 w-3 h-3" /> Whale Alerts
               </label>
-              <label className="flex items-center gap-1.5 cursor-pointer hover:text-purple-400 transition-colors">
-                <input type="checkbox" checked={showRugPullAlerts} onChange={(e) => setShowRugPullAlerts(e.target.checked)} className="accent-purple-500 w-3.5 h-3.5" /> Rug Pull Alert
+              <label className="flex items-center gap-1 cursor-pointer hover:text-purple-400 transition-colors">
+                <input type="checkbox" checked={showRugPullAlerts} onChange={(e) => setShowRugPullAlerts(e.target.checked)} className="accent-purple-500 w-3 h-3" /> Rug Pull Alerts
               </label>
-              <label className="flex items-center gap-1.5 cursor-pointer hover:text-purple-400 transition-colors">
-                <input type="checkbox" checked={showCandles} onChange={(e) => setShowCandles(e.target.checked)} className="accent-purple-500 w-3.5 h-3.5" /> Candlesticks
+              <label className="flex items-center gap-1 cursor-pointer hover:text-purple-400 transition-colors">
+                <input type="checkbox" checked={showCandles} onChange={(e) => setShowCandles(e.target.checked)} className="accent-purple-500 w-3 h-3" /> Candlesticks
               </label>
-              <span className="ml-2 pl-3 border-l border-[#E8E9E4]/10 opacity-50">{liveHistory.length} pts</span>
+              <span className="ml-1 pl-2 border-l border-[#E8E9E4]/10 opacity-50">{liveHistory.length} pts</span>
             </div>
           </div>
           <div className="flex-1 w-full h-full relative rounded-md overflow-hidden bg-[#111312]" style={{ backgroundImage: 'linear-gradient(rgba(232, 233, 228, 0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(232, 233, 228, 0.02) 1px, transparent 1px)', backgroundSize: '40px 40px' }}>
@@ -1211,187 +1266,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* BOTTOM ROW (V50 Grid Layout) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-          
-          {/* Left Column: Prediction Block */}
-          <div className="lg:col-span-5 flex flex-col gap-4">
-            
-            <div className="bg-[#181A19] p-4 md:p-6 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative overflow-hidden min-h-[350px]">
-               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-transparent opacity-30"></div>
-               
-               <div className="flex justify-between items-start mb-6">
-                 <div className="bg-[#111312] border border-[#E8E9E4]/10 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 shadow-sm whitespace-nowrap">
-                   <IconClock className="w-3 h-3" />
-                   <span className="text-[#E8E9E4]/60 hidden sm:inline">{String(timeState.startWindowEST)}-{String(timeState.nextWindowEST)}</span>
-                   <span className="text-[#E8E9E4]">{Number(timeState.minsRemaining)}m {Number(timeState.secsRemaining)}s</span>
-                 </div>
-                 
-                 {analysis && analysis.tradeAction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && (
-                   <button 
-                     onClick={() => executeManualAction("MANUAL PULL OUT", "SIT OUT")}
-                     className="bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
-                   >
-                     <IconAlertTriangle className="w-3 h-3" /> <span>Force Pull Out</span>
-                   </button>
-                 )}
-               </div>
-
-               {isLoading || !analysis ? (
-                 <div className="text-xl font-serif text-[#E8E9E4]/30 animate-pulse mt-8 text-center w-full">Connecting to Datastream...</div>
-               ) : (
-                 <div className="flex flex-col items-center w-full flex-1 justify-center">
-                   
-                   <div className="flex flex-col items-center mb-6">
-                     <span className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-[0.2em] mb-2 font-bold">Prediction</span>
-                     <h2 className={`text-[120px] font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg transition-all flex items-center justify-center uppercase`}>
-                       {String(analysis.prediction)}
-                     </h2>
-                   </div>
-
-                   <div className={`mt-auto w-full p-4 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm`}>
-                     <div className="flex items-center gap-1.5 mb-1.5">
-                       <IconBell className={`w-3.5 h-3.5 ${analysis.actionColor}`} />
-                       <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span>
-                     </div>
-                     <div className={`text-lg sm:text-xl font-serif font-bold mb-1.5 ${analysis.actionColor} uppercase`}>{String(analysis.tradeAction)}</div>
-                     <p className="text-[10px] sm:text-[11px] opacity-80 text-[#E8E9E4] mb-3 sm:mb-4 leading-tight">{String(analysis.tradeReason)}</p>
-
-                     {analysis.hasAction && (
-                       <div className="w-full pt-3 sm:pt-4 border-t border-[#E8E9E4]/10">
-                          {manualAction === analysis.tradeAction ? (
-                             <div className="w-full bg-emerald-500/20 text-emerald-400 py-2.5 rounded-lg text-[10px] sm:text-[11px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5">
-                               <IconCheck className="w-3.5 h-3.5" /> Action Logged
-                             </div>
-                          ) : (
-                             <button 
-                               onClick={() => executeManualAction(analysis.tradeAction, analysis.actionTarget)}
-                               className={`w-full py-2.5 sm:py-3 rounded-lg text-[10px] sm:text-[11px] font-bold uppercase tracking-widest border transition-all hover:brightness-125 ${
-                                 analysis.actionColor.includes('rose') ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' :
-                                 analysis.actionColor.includes('amber') ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' :
-                                 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                               }`}
-                             >
-                               {String(analysis.actionButtonLabel)}
-                             </button>
-                          )}
-                       </div>
-                     )}
-                   </div>
-                 </div>
-               )}
-            </div>
-
-            {/* PREVIOUS CYCLES TRACKER */}
-            {prevCyclesMap[windowType] && prevCyclesMap[windowType].length > 0 && (
-              <div className="flex items-center justify-start gap-3 w-full pl-2">
-                <span className="text-[9px] font-bold tracking-[0.2em] text-[#E8E9E4]/30 uppercase">Prev Cycles</span>
-                <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-1">
-                  {[...(prevCyclesMap[windowType] || [])].map((cycle, i) => (
-                    <div key={i} className={`flex flex-col items-center justify-center px-3 py-1.5 rounded-md border bg-[#111312] shadow-sm min-w-[70px] ${cycle.outcome === 'UP' ? 'border-emerald-500/20 text-emerald-400' : 'border-rose-500/20 text-rose-400'}`}>
-                      <div className="flex items-center gap-1.5 text-[11px] font-bold">
-                        <span className="text-[14px] leading-none">{cycle.outcome === 'UP' ? '▲' : '▼'}</span>
-                        <span>{cycle.gapPct}</span>
-                      </div>
-                      <span className="text-[8px] text-[#E8E9E4]/40 font-mono mt-1">{String(cycle.time)}</span>
-                    </div>
-                  ))}
-                  <span className="text-[9px] font-mono text-[#E8E9E4]/30 ml-2 whitespace-nowrap">→ NOW</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Right Column: Posteriors & Data */}
-          <div className="lg:col-span-7 flex flex-col gap-4">
-            
-            <div className="flex gap-4">
-              <div className="flex-1 bg-[#181A19] p-4 sm:p-6 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md flex flex-col justify-center">
-                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-2">POSTERIOR (UP)</div>
-                 <div className="text-4xl sm:text-5xl font-serif text-indigo-300">{analysis ? `${Number(analysis.rawProbAbove || 0).toFixed(1)}%` : '--%'}</div>
-              </div>
-              <div className="flex-1 bg-[#181A19] p-4 sm:p-6 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md flex flex-col justify-center">
-                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-2">POSTERIOR (DN)</div>
-                 <div className="text-4xl sm:text-5xl font-serif text-rose-300">{analysis ? `${(100 - Number(analysis.rawProbAbove || 0)).toFixed(1)}%` : '--%'}</div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-               {/* Internal Data Block */}
-               {analysis && (
-                 <div className="bg-[#181A19] border border-[#E8E9E4]/10 p-4 rounded-xl font-mono text-[10px] sm:text-[11px] text-[#E8E9E4]/60 shadow-md flex flex-col justify-between">
-                   <div className="flex justify-between items-center bg-[#111312] p-2 rounded border border-[#E8E9E4]/5 mb-3">
-                     <div className="flex flex-col">
-                       <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">Market</span>
-                       <span className="text-[#E8E9E4] text-sm">${Number(currentPrice || 0).toFixed(2)}</span>
-                     </div>
-                     <div className="flex flex-col text-right">
-                       <span className="text-[8px] text-[#E8E9E4]/40 uppercase tracking-widest">Gap</span>
-                       <span className={`font-bold text-sm ${analysis.realGapBps > 0 ? 'text-emerald-400' : analysis.realGapBps < 0 ? 'text-rose-400' : 'text-zinc-400'}`}>
-                         {analysis.realGapBps > 0 ? '+' : ''}{Number(analysis.realGapBps || 0).toFixed(1)}bps
-                       </span>
-                     </div>
-                   </div>
-                   
-                   <div className="flex flex-col gap-2">
-                       <div className="flex justify-between items-center text-[9px] opacity-90 px-1 border-b border-[#E8E9E4]/5 pb-1">
-                         <span className="flex items-center gap-1"><IconActivity className="w-3 h-3 text-purple-400" /> REGIME:</span>
-                         <span className="text-white font-bold text-right">{String(analysis.regime)}</span>
-                       </div>
-                       <div className="flex justify-between items-center text-[9px] opacity-90 px-1 border-b border-[#E8E9E4]/5 pb-1">
-                         <span className="flex items-center gap-1"><IconZap className="w-3 h-3 text-amber-400" /> TOP DRIVER:</span>
-                         <span className="text-white text-right">{String(analysis.topDriver)}</span>
-                       </div>
-                       <div className="flex justify-between items-center text-[9px] opacity-90 px-1 pb-1">
-                         <span className="flex items-center gap-1"><IconCrosshair className="w-3 h-3 text-indigo-400" /> CONV:</span>
-                         <span className="text-indigo-300 font-bold text-right">{Number(analysis.convictionScore || 0).toFixed(0)}% ({String(analysis.convictionText)})</span>
-                       </div>
-                   </div>
-                 </div>
-               )}
-
-               {/* Strict Logic Logs */}
-               {analysis && (
-                 <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col h-full">
-                   <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest mb-3 flex items-center gap-1.5 border-b border-[#E8E9E4]/10 pb-2">
-                     <IconTerminal className="w-3.5 h-3.5 text-amber-400" /> Engine Logs
-                   </h2>
-                   <div className="space-y-2 font-mono flex-1 overflow-y-auto pr-1 custom-scrollbar">
-                     {(analysis.reasoning || []).map((reason, idx) => (
-                       <div key={idx} className={`bg-[#111312] p-2.5 rounded-md text-[9px] sm:text-[10px] ${reason.includes('RUG PULL') ? 'text-rose-400 border border-rose-500/20' : 'text-[#E8E9E4]/70 border border-[#E8E9E4]/5'} flex items-start gap-2 uppercase`}>
-                         <span className="text-emerald-500 mt-0.5">{`>`}</span>
-                         <span className="leading-snug">{String(reason)}</span>
-                       </div>
-                     ))}
-                   </div>
-                 </div>
-               )}
-            </div>
-
-            {/* Live Feeds */}
-            <div className="bg-[#181A19] p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-[140px]">
-              <div className="flex justify-between items-center mb-3 border-b border-[#E8E9E4]/10 pb-2">
-                <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest flex items-center gap-1.5">
-                  <IconGlobe className="w-3.5 h-3.5 text-blue-400" /> Tara Live Wire
-                </h2>
-              </div>
-              <div className="space-y-3 overflow-y-auto custom-scrollbar pr-1 flex-1">
-                {newsEvents.length === 0 ? (
-                   <div className="text-[11px] text-[#E8E9E4]/40 italic">Generating market intel...</div>
-                ) : (
-                  newsEvents.map((news, i) => (
-                    <div key={i} className={`border-l-[2px] pl-2 py-0.5 ${news.type === 'rugpull' ? 'border-rose-500' : news.type === 'whale' ? 'border-purple-500' : 'border-indigo-500/40'}`}>
-                      <span className={`text-[11px] sm:text-[11.5px] leading-tight ${news.type === 'rugpull' ? 'text-rose-400 font-bold' : news.type === 'whale' ? 'text-purple-300' : 'text-[#E8E9E4]/90'}`}>
-                        {String(news.title)}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-          </div>
-        </div>
       </div>
 
       {/* FLOATING CHAT WIDGET */}
@@ -1447,22 +1321,23 @@ export default function App() {
             <div className="p-4 sm:p-6 space-y-6 sm:space-y-8 text-xs sm:text-sm text-[#E8E9E4]/80">
               
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. Multi-Timeframe & Zero-Latency Divergence</h3>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. Layout & Scroll Engine</h3>
+                <p className="mb-3 leading-relaxed">Tara V55 is designed to fit entirely on a single screen. The Canvas chart natively supports panning (click and drag) and zooming (scroll wheel/trackpad swiping) without interrupting the page layout.</p>
+              </section>
+              
+              <section>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. Multi-Timeframe & Zero-Latency Divergence</h3>
                 <p className="mb-3 leading-relaxed">You can toggle Tara between 5-Minute and 15-Minute mode. <br/><strong>In 15M Mode:</strong> She analyzes macro-trends, VWAP, and looks for safer, wider structural trades.<br/><strong>In 5M Mode:</strong> She becomes an aggressive scalper. She ignores slow indicators and multiplies the weight of live order flow (Tape Delta) by 1.25x.</p>
-                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Zero-Latency Algorithm (V50 Update):</strong> Tara completely ignores initial artificial time locks. From the very first second of the round, she evaluates structural setups to provide instant early entry signals, enabling you to grab extreme odds before the platform adjusts.</p>
-                <ul className="list-disc pl-5 space-y-2">
-                  <li><strong>Setup:</strong> Select your timeframe. Type in the platform's Strike Price, your Bet Size, and Max Payout.</li>
-                  <li><strong>Wait:</strong> Tara begins every trade at "SIT OUT". She requires a minimum of <span className="text-emerald-300 font-mono">65% internal conviction</span> to advise an entry.</li>
-                </ul>
+                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Zero-Latency Algorithm:</strong> Tara completely ignores initial artificial time locks. From the very first second of the round, she evaluates structural setups to provide instant early entry signals, enabling you to grab extreme odds before the platform adjusts.</p>
               </section>
 
               <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. Early Exit & Risk Management</h3>
+                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">3. Early Exit & Risk Management</h3>
                 <p className="leading-relaxed">If you are in a winning position, but Tara detects that whales are suddenly selling the momentum back down (AggrFlow flipping), she will trigger an <strong>EARLY EXIT</strong> alert. The Advisor panel will show you exact Chance vs. Risk percentages to help you make composed decisions without emotion.<br/><br/>If you type the platform's current "Live Market Offer" into the box, Tara will instantly calculate your true Edge. If they offer you $70 for a contract mathematically worth $50, she will advise you to take the Arbitrage.</p>
               </section>
 
               <section>
-                <h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">3. Understanding the Data Dashboard</h3>
+                <h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">4. Understanding the Data Dashboard</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mt-2 font-mono text-[10px] sm:text-[11px]">
                   <div className="bg-[#111312] p-3 rounded border border-[#E8E9E4]/10">
                     <span className="text-indigo-300 font-bold block mb-1">REGIME:</span>
