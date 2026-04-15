@@ -29,6 +29,8 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
   
   const isDragging = useRef(false);
   const lastMouseX = useRef(0);
+  const lastTouchX = useRef(null);
+  const initialPinchDist = useRef(null);
   const maxPanRef = useRef(0);
   const spacingRef = useRef(10); 
 
@@ -249,8 +251,8 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     }
   }, [data, currentPrice, zoom, pan, hoverPos, showCandles, targetMargin, rugPullActive, dimensions]);
 
-  const handlePointerDown = (e) => { isDragging.current = true; lastMouseX.current = e.clientX; };
-  const handlePointerMove = (e) => {
+  const handleMouseDown = (e) => { isDragging.current = true; lastMouseX.current = e.clientX; };
+  const handleMouseMove = (e) => {
       const rect = containerRef.current.getBoundingClientRect();
       setHoverPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
       if (isDragging.current) {
@@ -258,12 +260,62 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
           lastMouseX.current = e.clientX;
       }
   };
-  const handlePointerUp = () => { isDragging.current = false; };
-  const handlePointerLeave = () => { setHoverPos(null); isDragging.current = false; };
+  const handleMouseUp = () => { isDragging.current = false; };
+  const handleMouseLeave = () => { setHoverPos(null); isDragging.current = false; };
+
+  const handleTouchStart = (e) => {
+      if (e.touches.length === 1) {
+          isDragging.current = true;
+          lastTouchX.current = e.touches[0].clientX;
+          const rect = containerRef.current.getBoundingClientRect();
+          setHoverPos({ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top });
+      } else if (e.touches.length === 2) {
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          initialPinchDist.current = Math.sqrt(dx*dx + dy*dy);
+          setHoverPos(null);
+      }
+  };
+
+  const handleTouchMove = (e) => {
+      if (e.touches.length === 1 && isDragging.current) {
+          const deltaX = e.touches[0].clientX - lastTouchX.current;
+          setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev + deltaX / spacingRef.current)));
+          lastTouchX.current = e.touches[0].clientX;
+          
+          const rect = containerRef.current.getBoundingClientRect();
+          setHoverPos({ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top });
+      } else if (e.touches.length === 2 && initialPinchDist.current) {
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          const delta = dist - initialPinchDist.current;
+          
+          setZoom(prev => Math.max(1, Math.min(20, prev + delta * 0.05)));
+          initialPinchDist.current = dist;
+      }
+  };
+
+  const handleTouchEnd = () => {
+      isDragging.current = false;
+      initialPinchDist.current = null;
+      setHoverPos(null);
+  };
 
   return (
       <div ref={containerRef} className="w-full h-full relative cursor-crosshair" style={{ touchAction: 'none' }}>
-          <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerLeave} />
+          <canvas 
+              ref={canvasRef} 
+              className="absolute inset-0 w-full h-full" 
+              onMouseDown={handleMouseDown} 
+              onMouseMove={handleMouseMove} 
+              onMouseUp={handleMouseUp} 
+              onMouseLeave={handleMouseLeave}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onTouchCancel={handleTouchEnd}
+          />
       </div>
   );
 };
