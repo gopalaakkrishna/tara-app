@@ -1,173 +1,33 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 
 // --- 100% DEPENDENCY-FREE INLINE ICONS ---
-const IconClock = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
-const IconCrosshair = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>;
-const IconZap = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
-const IconTerminal = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>;
-const IconAlertTriangle = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
-const IconActivity = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
-const IconBell = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
-const IconCheck = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
-const IconTrendingUp = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-400"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>;
-const IconGlobe = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>;
-const IconMessage = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
-const IconX = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
-const IconInfo = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
-const IconVolume2 = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>;
-const IconVolumeX = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>;
-const IconHelp = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
-const IconTarget = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>;
+const IconClock = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
+const IconCrosshair = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>;
+const IconZap = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
+const IconTerminal = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>;
+const IconAlertTriangle = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+const IconActivity = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
+const IconBell = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>;
+const IconCheck = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
+const IconTrendingUp = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>;
+const IconGlobe = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>;
+const IconMessage = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
+const IconX = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+const IconInfo = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
+const IconVolume2 = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>;
+const IconVolumeX = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>;
+const IconLink = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>;
+const IconHelp = ({className}) => <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className || "w-4 h-4"}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
 
-// ═══════════════════════════════════════════════════
-// V60 TECHNICAL INDICATORS — COMPLETE SUITE
-// ═══════════════════════════════════════════════════
-
-const calcEMA = (data, period) => {
-  if (!data || data.length < period) return [];
-  const k = 2 / (period + 1);
-  const result = new Array(data.length).fill(null);
-  result[data.length - 1] = data[data.length - 1];
-  for (let i = data.length - 2; i >= 0; i--) {
-    result[i] = data[i] * k + result[i + 1] * (1 - k);
-  }
-  return result;
-};
-
-const calculateVWAP = (history) => {
-  if (!history || history.length === 0) return null;
-  let tpv = 0, tv = 0;
-  history.forEach(c => { const tp = (c.h + c.l + c.c) / 3; tpv += tp * c.v; tv += c.v; });
-  return tv === 0 ? null : tpv / tv;
-};
-
-const calculateRSI = (data, period = 14) => {
-  if (!data || data.length < period + 1) return 50;
-  let avgGain = 0, avgLoss = 0;
-  for (let i = 1; i <= period; i++) {
-    const diff = data[i - 1] - data[i];
-    if (diff > 0) avgGain += diff; else avgLoss -= diff;
-  }
-  avgGain /= period; avgLoss /= period;
-  for (let i = period + 1; i < Math.min(data.length, period + 30); i++) {
-    const diff = data[i - 1] - data[i];
-    avgGain = (avgGain * (period - 1) + Math.max(diff, 0)) / period;
-    avgLoss = (avgLoss * (period - 1) + Math.max(-diff, 0)) / period;
-  }
-  if (avgLoss === 0) return 100;
-  return 100 - (100 / (1 + (avgGain / avgLoss)));
-};
-
-const calculateATR = (history, period = 14) => {
-  if (!history || history.length < period + 1) return 0;
-  let trSum = 0;
-  for (let i = 0; i < period; i++) {
-    const h = history[i].h, l = history[i].l, pc = history[i + 1]?.c || history[i].o;
-    trSum += Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
-  }
-  return trSum / period;
-};
-
-const calculateMACD = (closes) => {
-  if (!closes || closes.length < 26) return { line: 0, signal: 0, hist: 0 };
-  const ema12 = calcEMA(closes, 12);
-  const ema26 = calcEMA(closes, 26);
-  if (ema12.length === 0 || ema26.length === 0) return { line: 0, signal: 0, hist: 0 };
-  const macdLine = ema12.map((v, i) => (v !== null && ema26[i] !== null) ? v - ema26[i] : 0);
-  const signalLine = calcEMA(macdLine, 9);
-  const line = macdLine[0] || 0;
-  const signal = signalLine[0] || 0;
-  return { line, signal, hist: line - signal };
-};
-
-const calculateBB = (closes, period = 20) => {
-  if (!closes || closes.length < period) return { upper: 0, mid: 0, lower: 0, pctB: 0.5, width: 0 };
-  const slice = closes.slice(0, period);
-  const mean = slice.reduce((a, b) => a + b, 0) / period;
-  const std = Math.sqrt(slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period);
-  const upper = mean + 2 * std, lower = mean - 2 * std;
-  const pctB = (upper - lower) > 0 ? (closes[0] - lower) / (upper - lower) : 0.5;
-  const width = mean > 0 ? ((upper - lower) / mean) * 10000 : 0;
-  return { upper, mid: mean, lower, pctB, width };
-};
-
-// ═══════════════════════════════════════════════════
-// V60 VELOCITY ENGINE — Tracks speed & acceleration
-// of price movement relative to strike. This is the
-// core innovation: instead of asking "where is price?"
-// we ask "where is price GOING and how FAST?"
-// ═══════════════════════════════════════════════════
-const useVelocityEngine = (tickHistory, currentPrice, targetMargin, windowType) => {
-  const velocityRef = useRef({ v1s: 0, v5s: 0, v15s: 0, v30s: 0, accel: 0, jerk: 0, peakPnL: 0, troughPnL: 0, pnlSlope: 0 });
-  const pnlHistory = useRef([]); // track PnL over time for cashout logic
-  
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!currentPrice || !targetMargin) return;
-      const now = Date.now();
-      const ticks = tickHistory.current || [];
-      
-      // Velocity at multiple timeframes
-      const getAvgPrice = (ms) => {
-        const relevant = ticks.filter(t => now - t.time >= ms - 500 && now - t.time <= ms + 500);
-        if (relevant.length === 0) {
-          const fallback = ticks.filter(t => now - t.time <= ms + 2000 && now - t.time >= ms - 2000);
-          return fallback.length > 0 ? fallback[Math.floor(fallback.length / 2)].p : null;
-        }
-        return relevant.reduce((a, b) => a + b.p, 0) / relevant.length;
-      };
-      
-      const p1s = getAvgPrice(1000);
-      const p5s = getAvgPrice(5000);
-      const p15s = getAvgPrice(15000);
-      const p30s = getAvgPrice(30000);
-      
-      const v1s = p1s ? (currentPrice - p1s) : 0;
-      const v5s = p5s ? (currentPrice - p5s) / 5 : 0;
-      const v15s = p15s ? (currentPrice - p15s) / 15 : 0;
-      const v30s = p30s ? (currentPrice - p30s) / 30 : 0;
-      
-      // Acceleration: is velocity increasing or decreasing?
-      const accel = v5s - v15s; // positive = accelerating in current direction
-      const jerk = v1s - v5s; // rate of change of acceleration (snap moves)
-      
-      // PnL tracking for cashout timing
-      const currentPnLBps = ((currentPrice - targetMargin) / targetMargin) * 10000;
-      pnlHistory.current.push({ pnl: currentPnLBps, time: now });
-      pnlHistory.current = pnlHistory.current.filter(p => now - p.time < 120000);
-      
-      // Track peak and trough PnL this window
-      const peakPnL = Math.max(...pnlHistory.current.map(p => p.pnl), currentPnLBps);
-      const troughPnL = Math.min(...pnlHistory.current.map(p => p.pnl), currentPnLBps);
-      
-      // PnL slope: is our profit growing or shrinking? (last 10s)
-      const recentPnL = pnlHistory.current.filter(p => now - p.time < 10000);
-      let pnlSlope = 0;
-      if (recentPnL.length >= 3) {
-        const first = recentPnL[0].pnl;
-        const last = recentPnL[recentPnL.length - 1].pnl;
-        pnlSlope = last - first;
-      }
-      
-      velocityRef.current = { v1s, v5s, v15s, v30s, accel, jerk, peakPnL, troughPnL, pnlSlope };
-    }, 500);
-    
-    return () => clearInterval(interval);
-  }, [currentPrice, targetMargin, windowType]);
-  
-  return velocityRef;
-};
-
-// ═══════════════════════════════════════════════════
-// NATIVE INTERACTIVE CANDLESTICK / LINE CHART
-// ═══════════════════════════════════════════════════
+// --- NATIVE INTERACTIVE CANDLESTICK / LINE CHART WITH VOLUME ---
 const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActive }) => {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const [hoverPos, setHoverPos] = useState(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState(0);
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 }); 
+  
   const isDragging = useRef(false);
   const lastMouseX = useRef(0);
   const lastTouchX = useRef(null);
@@ -178,11 +38,19 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const ro = new ResizeObserver(entries => {
-      for (let entry of entries) setDimensions({ width: entry.contentRect.width, height: entry.contentRect.height });
+    const resizeObserver = new ResizeObserver(entries => {
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+            setDimensions(prev => {
+                if (prev.width === width && prev.height === height) return prev;
+                return { width, height };
+            });
+        }
+      }
     });
-    ro.observe(container);
-    return () => ro.disconnect();
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
   }, []);
 
   useEffect(() => {
@@ -190,8 +58,11 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
     if (!canvas) return;
     const handleNativeWheel = (e) => {
       e.preventDefault(); 
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev - e.deltaX / spacingRef.current)));
-      else setZoom(prev => Math.max(1, Math.min(20, prev - e.deltaY * 0.005)));
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+         setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev - e.deltaX / spacingRef.current)));
+      } else {
+         setZoom(prev => Math.max(1, Math.min(20, prev - e.deltaY * 0.005)));
+      }
     };
     canvas.addEventListener('wheel', handleNativeWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', handleNativeWheel);
@@ -199,94 +70,145 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !data || data.length === 0 || dimensions.width === 0) return;
+    if (!canvas || !data || data.length === 0 || dimensions.width <= 0 || dimensions.height <= 0) return;
     const ctx = canvas.getContext('2d');
+    
     const dpr = window.devicePixelRatio || 1;
     canvas.width = dimensions.width * dpr;
     canvas.height = dimensions.height * dpr;
     ctx.scale(dpr, dpr);
-    const width = dimensions.width, height = dimensions.height;
-    const rightMargin = 65, bottomMargin = 20;
-    const chartW = width - rightMargin, chartH = height - bottomMargin;
-    const volH = chartH * 0.2, priceH = chartH - volH;
+    
+    const width = dimensions.width;
+    const height = dimensions.height;
+    const rightMargin = 65; 
+    const bottomMargin = 28; 
+    const chartW = width - rightMargin;
+    const chartH = height - bottomMargin;
+    
+    if (chartW <= 0 || chartH <= 0) return;
+
+    const volH = chartH * 0.2; 
+    const priceH = chartH - volH; 
+
     ctx.clearRect(0, 0, width, height);
 
     const validData = [...data].reverse().filter(d => d.h !== undefined && d.l !== undefined);
     const visibleCount = Math.max(15, Math.floor(validData.length / zoom));
+    
     const maxPan = Math.max(0, validData.length - visibleCount);
     maxPanRef.current = maxPan;
+    
     const currentPan = Math.max(0, Math.min(pan, maxPan));
+    
     const startIndex = Math.max(0, validData.length - visibleCount - Math.floor(currentPan));
     const endIndex = Math.max(0, validData.length - Math.floor(currentPan));
     const viewData = validData.slice(startIndex, endIndex);
+
     if(viewData.length === 0) return;
 
     let minPrice = Math.min(...viewData.map(d => d.l));
     let maxPrice = Math.max(...viewData.map(d => d.h));
     let maxVol = Math.max(...viewData.map(d => d.v || 0.1));
-    if (targetMargin > 0) { minPrice = Math.min(minPrice, targetMargin - 50); maxPrice = Math.max(maxPrice, targetMargin + 50); }
+    
+    if (targetMargin > 0) {
+        minPrice = Math.min(minPrice, targetMargin - 50);
+        maxPrice = Math.max(maxPrice, targetMargin + 50);
+    }
+
     const padding = (maxPrice - minPrice) * 0.1 || 10;
     const scaleY = priceH / (maxPrice - minPrice + padding * 2);
     const yOffset = maxPrice + padding;
     const volScale = volH / (maxVol * 1.1);
 
-    ctx.strokeStyle = 'rgba(232, 233, 228, 0.05)'; ctx.fillStyle = 'rgba(232, 233, 228, 0.4)';
-    ctx.font = '10px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(232, 233, 228, 0.05)';
+    ctx.fillStyle = 'rgba(232, 233, 228, 0.4)';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 1;
+    
     for(let i=0; i<=5; i++) {
-        const y = (priceH / 5) * i; const price = maxPrice + padding - (y / scaleY);
+        const y = (priceH / 5) * i;
+        const price = maxPrice + padding - (y / scaleY);
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(chartW, y); ctx.stroke();
         if (i < 5) ctx.fillText(price.toFixed(2), chartW + 5, y);
     }
-    const spacing = chartW / viewData.length; spacingRef.current = spacing;
+
+    const spacing = chartW / viewData.length;
+    spacingRef.current = spacing;
     const candleWidth = Math.max(1, spacing * 0.6);
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
     for(let i=1; i<5; i++) {
         const x = (chartW / 5) * i;
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, chartH); ctx.stroke();
+
         const dataIndex = Math.floor(x / spacing);
-        if (viewData[dataIndex]?.time) {
-            const t = viewData[dataIndex].time; const d = new Date(t > 1e11 ? t : t * 1000);
-            ctx.fillText(d.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit'}), x, chartH + 5);
+        if (viewData[dataIndex] && viewData[dataIndex].time) {
+            const t = viewData[dataIndex].time;
+            const d = new Date(t > 1e11 ? t : t * 1000);
+            ctx.fillText(d.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit'}), x, chartH + 10);
         }
     }
+
     if (targetMargin > 0) {
         const targetY = (yOffset - targetMargin) * scaleY;
         if (targetY > 0 && targetY < priceH) {
-            ctx.strokeStyle = 'rgba(99, 102, 241, 0.5)'; ctx.lineWidth = 1.5;
-            ctx.setLineDash([5, 5]); ctx.beginPath(); ctx.moveTo(0, targetY); ctx.lineTo(chartW, targetY); ctx.stroke(); ctx.setLineDash([]);
-            ctx.fillStyle = 'rgba(99, 102, 241, 0.2)'; ctx.fillRect(chartW, targetY - 10, rightMargin, 20);
-            ctx.fillStyle = '#818cf8'; ctx.textAlign = 'left'; ctx.font = 'bold 10px sans-serif';
+            ctx.strokeStyle = 'rgba(99, 102, 241, 0.5)'; 
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath(); ctx.moveTo(0, targetY); ctx.lineTo(chartW, targetY); ctx.stroke();
+            ctx.setLineDash([]);
+            
+            ctx.fillStyle = 'rgba(99, 102, 241, 0.2)';
+            ctx.fillRect(chartW, targetY - 10, rightMargin, 20);
+            ctx.fillStyle = '#818cf8';
+            ctx.textAlign = 'left';
+            ctx.font = 'bold 10px sans-serif';
             ctx.fillText(targetMargin.toFixed(2), chartW + 5, targetY);
         }
     }
+
     viewData.forEach((candle, i) => {
-        const x = i * spacing + spacing / 2; const isBullish = candle.c >= candle.o;
+        const x = i * spacing + spacing / 2;
+        const isBullish = candle.c >= candle.o;
         ctx.fillStyle = isBullish ? 'rgba(52, 211, 153, 0.2)' : 'rgba(251, 113, 133, 0.2)';
-        ctx.fillRect(x - candleWidth / 2, chartH - (candle.v || 0) * volScale, candleWidth, (candle.v || 0) * volScale);
+        const barH = (candle.v || 0) * volScale;
+        ctx.fillRect(x - candleWidth / 2, chartH - barH, candleWidth, barH);
     });
+
     if (showCandles) {
       viewData.forEach((candle, i) => {
-        const x = i * spacing + spacing / 2; const isBullish = candle.c >= candle.o;
+        const x = i * spacing + spacing / 2;
+        const isBullish = candle.c >= candle.o;
         const color = isBullish ? '#34d399' : '#fb7185'; 
         ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
         ctx.moveTo(x, (yOffset - candle.h) * scaleY); ctx.lineTo(x, (yOffset - candle.l) * scaleY); ctx.stroke();
         ctx.fillStyle = color;
         const bodyY = (yOffset - Math.max(candle.o, candle.c)) * scaleY;
-        ctx.fillRect(x - candleWidth / 2, bodyY, candleWidth, Math.max(2, Math.abs(candle.c - candle.o) * scaleY));
+        const bodyHeight = Math.max(2, Math.abs(candle.c - candle.o) * scaleY);
+        ctx.fillRect(x - candleWidth / 2, bodyY, candleWidth, bodyHeight);
       });
     } else {
       ctx.beginPath();
-      viewData.forEach((candle, i) => { const x = i * spacing + spacing / 2; const y = (yOffset - candle.c) * scaleY; if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+      viewData.forEach((candle, i) => {
+         const x = i * spacing + spacing / 2;
+         const y = (yOffset - candle.c) * scaleY;
+         if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
       ctx.strokeStyle = '#c084fc'; ctx.lineWidth = 2; ctx.stroke();
       ctx.lineTo(chartW, priceH); ctx.lineTo(0, priceH); ctx.closePath();
       const grad = ctx.createLinearGradient(0, 0, 0, priceH);
       grad.addColorStop(0, 'rgba(192, 132, 252, 0.2)'); grad.addColorStop(1, 'rgba(192, 132, 252, 0)');
       ctx.fillStyle = grad; ctx.fill();
     }
+
     if (currentPrice) {
       const currentY = (yOffset - currentPrice) * scaleY;
       if (currentY > 0 && currentY < priceH) {
-        ctx.strokeStyle = rugPullActive ? '#fb7185' : '#34d399'; ctx.lineWidth = rugPullActive ? 2 : 1;
+        ctx.strokeStyle = rugPullActive ? '#fb7185' : '#34d399';
+        ctx.lineWidth = rugPullActive ? 2 : 1;
         ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(0, currentY); ctx.lineTo(chartW, currentY); ctx.stroke(); ctx.setLineDash([]);
         ctx.fillStyle = rugPullActive ? '#fb7185' : '#34d399';
         ctx.fillRect(chartW, currentY - 10, rightMargin, 20);
@@ -294,33 +216,40 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
         ctx.fillText(currentPrice.toFixed(2), chartW + 5, currentY);
       }
     }
+
     if (rugPullActive) {
         ctx.fillStyle = 'rgba(251, 113, 133, 0.1)'; ctx.fillRect(0, 0, width, height);
         ctx.fillStyle = '#fb7185'; ctx.font = 'bold 24px sans-serif'; ctx.textAlign = 'center';
         ctx.fillText("🚨 RUG PULL DETECTED", width / 2, height / 2);
     }
+
     if (hoverPos && hoverPos.x < chartW && hoverPos.y < chartH) {
       ctx.strokeStyle = 'rgba(232, 233, 228, 0.2)'; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
       ctx.beginPath(); ctx.moveTo(hoverPos.x, 0); ctx.lineTo(hoverPos.x, chartH); ctx.stroke();
       if (hoverPos.y < priceH) { ctx.beginPath(); ctx.moveTo(0, hoverPos.y); ctx.lineTo(chartW, hoverPos.y); ctx.stroke(); }
       ctx.setLineDash([]);
+
       if (!showCandles && !rugPullActive && hoverPos.y < priceH) {
-         const di = Math.floor(hoverPos.x / spacing);
-         if (viewData[di]) {
-            const dotX = di * spacing + spacing / 2; const dotY = (yOffset - viewData[di].c) * scaleY;
+         const dataIndex = Math.floor(hoverPos.x / spacing);
+         if (viewData[dataIndex]) {
+            const dotX = dataIndex * spacing + spacing / 2;
+            const dotY = (yOffset - viewData[dataIndex].c) * scaleY;
             ctx.beginPath(); ctx.arc(dotX, dotY, 4, 0, 2 * Math.PI);
             ctx.fillStyle = '#c084fc'; ctx.fill(); ctx.shadowBlur = 10; ctx.shadowColor = '#c084fc'; ctx.stroke(); ctx.shadowBlur = 0;
          }
       }
+
       if (hoverPos.y < priceH) {
-          const hp = yOffset - (hoverPos.y / scaleY);
+          const hoverPrice = yOffset - (hoverPos.y / scaleY);
           ctx.fillStyle = '#2A2D2C'; ctx.fillRect(chartW, hoverPos.y - 10, rightMargin, 20);
           ctx.fillStyle = '#E8E9E4'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = '10px sans-serif';
-          ctx.fillText(hp.toFixed(2), chartW + 5, hoverPos.y);
+          ctx.fillText(hoverPrice.toFixed(2), chartW + 5, hoverPos.y);
       }
-      const di = Math.floor(hoverPos.x / spacing);
-      if (viewData[di]?.time) {
-          const t = viewData[di].time; const d = new Date(t > 1e11 ? t : t * 1000);
+
+      const dataIndex = Math.floor(hoverPos.x / spacing);
+      if (viewData[dataIndex] && viewData[dataIndex].time) {
+          const t = viewData[dataIndex].time;
+          const d = new Date(t > 1e11 ? t : t * 1000);
           const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
           const timeStr = d.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'});
           ctx.fillStyle = '#2A2D2C'; ctx.fillRect(hoverPos.x - 50, chartH, 100, bottomMargin);
@@ -334,164 +263,387 @@ const LiveChart = ({ data, currentPrice, targetMargin, showCandles, rugPullActiv
   const handleMouseMove = (e) => {
       const rect = containerRef.current.getBoundingClientRect();
       setHoverPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-      if (isDragging.current) { setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev + (e.clientX - lastMouseX.current) / spacingRef.current))); lastMouseX.current = e.clientX; }
+      if (isDragging.current) {
+          setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev + (e.clientX - lastMouseX.current) / spacingRef.current)));
+          lastMouseX.current = e.clientX;
+      }
   };
   const handleMouseUp = () => { isDragging.current = false; };
   const handleMouseLeave = () => { setHoverPos(null); isDragging.current = false; };
+
   const handleTouchStart = (e) => {
-      if (e.touches.length === 1) { isDragging.current = true; lastTouchX.current = e.touches[0].clientX; const rect = containerRef.current.getBoundingClientRect(); setHoverPos({ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }); }
-      else if (e.touches.length === 2) { const dx = e.touches[0].clientX - e.touches[1].clientX; const dy = e.touches[0].clientY - e.touches[1].clientY; initialPinchDist.current = Math.sqrt(dx*dx + dy*dy); setHoverPos(null); }
-  };
-  const handleTouchMove = (e) => {
-      if (e.touches.length === 1 && isDragging.current) {
-          const dx = e.touches[0].clientX - lastTouchX.current;
-          setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev + dx / spacingRef.current)));
+      if (e.touches.length === 1) {
+          isDragging.current = true;
           lastTouchX.current = e.touches[0].clientX;
           const rect = containerRef.current.getBoundingClientRect();
           setHoverPos({ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top });
+      } else if (e.touches.length === 2) {
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
+          initialPinchDist.current = Math.sqrt(dx*dx + dy*dy);
+          setHoverPos(null);
+      }
+  };
+
+  const handleTouchMove = (e) => {
+      if (e.touches.length === 1 && isDragging.current) {
+          const deltaX = e.touches[0].clientX - lastTouchX.current;
+          setPan(prev => Math.max(0, Math.min(maxPanRef.current, prev + deltaX / spacingRef.current)));
+          lastTouchX.current = e.touches[0].clientX;
+          
+          const rect = containerRef.current.getBoundingClientRect();
+          setHoverPos({ x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top });
       } else if (e.touches.length === 2 && initialPinchDist.current) {
-          const dx = e.touches[0].clientX - e.touches[1].clientX; const dy = e.touches[0].clientY - e.touches[1].clientY;
+          const dx = e.touches[0].clientX - e.touches[1].clientX;
+          const dy = e.touches[0].clientY - e.touches[1].clientY;
           const dist = Math.sqrt(dx*dx + dy*dy);
-          setZoom(prev => Math.max(1, Math.min(20, prev + (dist - initialPinchDist.current) * 0.05)));
+          const delta = dist - initialPinchDist.current;
+          
+          setZoom(prev => Math.max(1, Math.min(20, prev + delta * 0.05)));
           initialPinchDist.current = dist;
       }
   };
-  const handleTouchEnd = () => { isDragging.current = false; initialPinchDist.current = null; setHoverPos(null); };
+
+  const handleTouchEnd = () => {
+      isDragging.current = false;
+      initialPinchDist.current = null;
+      setHoverPos(null);
+  };
 
   return (
       <div ref={containerRef} className="w-full h-full relative cursor-crosshair" style={{ touchAction: 'none' }}>
-          <canvas ref={canvasRef} className="absolute inset-0 w-full h-full"
-              onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseLeave}
-              onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd} onTouchCancel={handleTouchEnd}
+          <canvas 
+              ref={canvasRef} 
+              className="absolute inset-0 w-full h-full"
+              onMouseDown={handleMouseDown} 
+              onMouseMove={handleMouseMove} 
+              onMouseUp={handleMouseUp} 
+              onMouseLeave={handleMouseLeave}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onTouchCancel={handleTouchEnd}
           />
       </div>
   );
 };
 
+// --- Advanced Technical Indicator Utilities ---
+const calculateVWAP = (history) => {
+  if (!history || history.length === 0) return null;
+  let typicalPriceVolume = 0; let totalVolume = 0;
+  history.forEach(candle => {
+    const typicalPrice = (candle.h + candle.l + candle.c) / 3;
+    typicalPriceVolume += typicalPrice * candle.v; totalVolume += candle.v;
+  });
+  return totalVolume === 0 ? null : typicalPriceVolume / totalVolume;
+};
 
-// ═══════════════════════════════════════════════════
-// MAIN APPLICATION
-// ═══════════════════════════════════════════════════
-export default function App() {
+const calculateRSI = (data, period = 14) => {
+  if (!data || data.length < period + 1) return 50;
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = data[i - 1] - data[i]; 
+    if (diff > 0) gains += diff; else losses -= diff;
+  }
+  const avgGain = gains / period; const avgLoss = losses / period;
+  if (avgLoss === 0) return 100;
+  return 100 - (100 / (1 + (avgGain / avgLoss)));
+};
+
+const calculateATR = (history, period = 14) => {
+  if (!history || history.length < period + 1) return 0;
+  let trSum = 0;
+  for (let i = 0; i < period; i++) {
+    const high = history[i].h; const low = history[i].l; const prevClose = history[i + 1]?.c || history[i].o;
+    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+    trSum += tr;
+  }
+  return trSum / period;
+};
+
+const calculateMACD = (closes) => {
+    if(!closes || closes.length < 26) return { macd: 0, signal: 0, hist: 0 };
+    const ema = (data, period) => {
+        const k = 2 / (period + 1);
+        let val = data[0];
+        for(let i=1; i<data.length; i++) val = (data[i] * k) + (val * (1 - k));
+        return val;
+    };
+    const macdLine = [];
+    for(let i=26; i<=closes.length; i++) {
+        const slice = closes.slice(0, i);
+        macdLine.push(ema(slice, 12) - ema(slice, 26));
+    }
+    const currentMacd = macdLine[macdLine.length-1] || 0;
+    const signalLine = ema(macdLine, 9) || 0;
+    return { macd: currentMacd, signal: signalLine, hist: currentMacd - signalLine };
+};
+
+// --- ERROR BOUNDARY ---
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error("Tara Terminal Crash:", error, errorInfo);
+    this.setState({ errorInfo });
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#111312] text-rose-500 p-8 font-mono flex flex-col items-start justify-start overflow-auto">
+          <h1 className="text-2xl font-bold mb-4">Tara Engine Crash Detected</h1>
+          <p className="mb-4 text-white">An internal rendering error occurred. Please screenshot this and send it to the developer:</p>
+          <pre className="bg-black p-4 rounded-md w-full border border-rose-500/30 text-xs mb-4 whitespace-pre-wrap">
+            {this.state.error && this.state.error.toString()}
+          </pre>
+          <pre className="bg-black p-4 rounded-md w-full border border-rose-500/30 text-[10px] text-zinc-500 whitespace-pre-wrap">
+            {this.state.errorInfo && this.state.errorInfo.componentStack}
+          </pre>
+          <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="mt-4 px-4 py-2 bg-rose-500 text-white rounded font-bold">Clear Memory & Reload</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function TaraApp() {
   const [isMounted, setIsMounted] = useState(false);
   const [showCandles, setShowCandles] = useState(true); 
   const [showWhaleAlerts, setShowWhaleAlerts] = useState(true);
   const [showRugPullAlerts, setShowRugPullAlerts] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [discordWebhook, setDiscordWebhook] = useState("");
+  
   const [currentPrice, setCurrentPrice] = useState(null);
   const [tickDirection, setTickDirection] = useState(null);
   const currentPriceRef = useRef(null);
   const tickHistoryRef = useRef([]); 
   const lastPriceSourceRef = useRef({ source: 'none', time: 0 });
+
   const [history, setHistory] = useState([]); 
   const [orderBook, setOrderBook] = useState({ localBuy: 0, localSell: 0, imbalance: 1 });
   const [takerFlow, setTakerFlow] = useState({ imbalance: 1, whaleSpotted: null }); 
   const [liquidations, setLiquidations] = useState([]); 
   const [newsEvents, setNewsEvents] = useState([]);
-  const [sentimentScore, setSentimentScore] = useState(0);
+  
+  // Phase 2 + Kinematics state
+  const [marketOI, setMarketOI] = useState({ funding: 0, interest: 0 });
+  const [kinematics, setKinematics] = useState({ v1:0, v5:0, v15:0, v30:0, a5:0, j5:0 });
+
   const [targetMargin, setTargetMargin] = useState(0); 
   const [betAmount, setBetAmount] = useState(0);
   const [maxPayout, setMaxPayout] = useState(0);
   const [currentOffer, setCurrentOffer] = useState(""); 
+
   const [windowType, setWindowType] = useState('15m'); 
   const [timeState, setTimeState] = useState({ currentEST: '', startWindowEST: '', nextWindowEST: '', minsRemaining: 0, secsRemaining: 0, currentHour: 0 });
   const [isLoading, setIsLoading] = useState(true);
+
   const lockedPredictionRef = useRef("SIT OUT");
   const activeCallRef = useRef({ prediction: "SIT OUT", strike: 0 });
   const hasReversedRef = useRef(false); 
-  const lastAdvisedRef = useRef("SIT OUT");
+  const taraAdviceRef = useRef("SIT OUT");
+  const activeAdviceRef = useRef("HOLD FIRM");
+  const peakOfferRef = useRef(0);
+  
+  // SSR Hydration & Baseline Setup (Busted Cache to V67 to prevent white screens)
   const [scorecards, setScorecards] = useState({ '15m': { wins: 91, losses: 71 }, '5m': { wins: 10, losses: 7 } });
   
   useEffect(() => {
     setIsMounted(true);
-    try { const s = localStorage.getItem('btcOracleScorecardV60'); if (s) setScorecards(JSON.parse(s)); } catch (e) {}
+    try {
+      const savedScore = localStorage.getItem('btcOracleScorecardV67');
+      if (savedScore) {
+          const parsed = JSON.parse(savedScore);
+          if (parsed && typeof parsed['15m'] === 'object' && typeof parsed['15m'].wins === 'number') {
+              setScorecards(parsed);
+          }
+      } else {
+          setScorecards({ '15m': { wins: 91, losses: 71 }, '5m': { wins: 10, losses: 7 } });
+      }
+      const savedWebhook = localStorage.getItem('btcOracleWebhookV67');
+      if (savedWebhook) setDiscordWebhook(savedWebhook);
+    } catch (e) {
+      setScorecards({ '15m': { wins: 91, losses: 71 }, '5m': { wins: 10, losses: 7 } });
+    }
   }, []);
 
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V60 online. Velocity engine active. Momentum-based predictions with early cashout detection. PnL slope tracking enabled." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V67 Velocity Engine online. Connected to Global Futures (Phase 1-3). PnL-Aware Predictive Cashouts active. Strict 5m/15m differentiation engaged." }]);
   const [chatInput, setChatInput] = useState("");
+  
   const lastWindowRef = useRef("");
   const [userPosition, setUserPosition] = useState(null); 
   const [showHelp, setShowHelp] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const prevActionRef = useRef(null);
 
-  // V60 Velocity Engine
-  const velocityRef = useVelocityEngine(tickHistoryRef, currentPrice, targetMargin, windowType);
-
   useEffect(() => {
     if (isMounted && typeof window !== 'undefined') {
-      try { localStorage.setItem('btcOracleScorecardV60', JSON.stringify(scorecards)); } catch (e) {}
+      try { 
+        localStorage.setItem('btcOracleScorecardV67', JSON.stringify(scorecards)); 
+        localStorage.setItem('btcOracleWebhookV67', String(discordWebhook));
+      } 
+      catch (e) {}
     }
-  }, [scorecards, isMounted]);
+  }, [scorecards, discordWebhook, isMounted]);
 
-  const liveHistory = useMemo(() => {
-    if (history.length === 0 || !currentPrice) return history;
-    const updated = [...history];
-    updated[0] = { ...updated[0], c: currentPrice, h: Math.max(updated[0].h || currentPrice, currentPrice), l: Math.min(updated[0].l || currentPrice, currentPrice) };
-    return updated;
-  }, [history, currentPrice]);
+  // Tracking Peak Profit for PnL Predictive Cashout
+  useEffect(() => {
+      if (userPosition === null) {
+          peakOfferRef.current = 0;
+          activeAdviceRef.current = "HOLD FIRM";
+      } else {
+          const offer = parseFloat(currentOffer) || 0;
+          if (offer > peakOfferRef.current) peakOfferRef.current = offer;
+      }
+  }, [currentOffer, userPosition]);
+
+  // --- DISCORD BROADCAST ENGINE ---
+  const broadcastToDiscord = async (title, color, fields) => {
+    if (!discordWebhook || !discordWebhook.startsWith("http")) return;
+    try {
+      await fetch(discordWebhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: "Tara Terminal V67",
+          avatar_url: "https://i.imgur.com/8nLFCVP.png", 
+          embeds: [{
+            title: String(title),
+            color: Number(color), 
+            fields: fields.map(f => ({ name: String(f.name), value: String(f.value), inline: Boolean(f.inline) })),
+            timestamp: new Date().toISOString()
+          }]
+        })
+      });
+    } catch (e) {}
+  };
 
   const playAlertSound = () => {
     if (!soundEnabled || typeof window === 'undefined') return;
     try {
-      const ac = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ac.createOscillator(); const gain = ac.createGain();
-      osc.type = 'sine'; osc.frequency.setValueAtTime(587.33, ac.currentTime); 
-      gain.gain.setValueAtTime(0.1, ac.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.5);
-      osc.connect(gain); gain.connect(ac.destination); osc.start(); osc.stop(ac.currentTime + 0.5);
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      oscillator.type = 'sine'; 
+      oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); 
+      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.5);
     } catch(e) {}
   };
 
   const handleWindowToggle = (type) => {
     if (type === windowType) return;
-    setWindowType(type); lockedPredictionRef.current = "SIT OUT";
+    setWindowType(String(type));
+    lockedPredictionRef.current = "SIT OUT";
     activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
-    hasReversedRef.current = false; lastAdvisedRef.current = "SIT OUT";
-    setUserPosition(null); setManualAction(null); setCurrentOffer(""); setBetAmount(0); setMaxPayout(0);
-    lastWindowRef.current = ""; setForceRender(prev => prev + 1);
+    hasReversedRef.current = false; 
+    taraAdviceRef.current = "SIT OUT";
+    activeAdviceRef.current = "HOLD FIRM";
+    setUserPosition(null);
+    setManualAction(null);
+    setCurrentOffer("");
+    setBetAmount(0);
+    setMaxPayout(0);
+    lastWindowRef.current = ""; 
+    setForceRender(prev => prev + 1);
   };
 
   const updateScore = (type, winOrLoss, amount) => {
-    setScorecards(prev => ({ ...prev, [type]: { ...prev[type], [winOrLoss]: Math.max(0, (prev[type]?.[winOrLoss] || 0) + amount) } }));
+    setScorecards(prev => ({
+      ...prev,
+      [type]: {
+        ...prev[type],
+        [winOrLoss]: Math.max(0, (Number(prev[type]?.[winOrLoss]) || 0) + amount)
+      }
+    }));
   };
 
-  // Window Rollover
+  // Window Rollover logic
   useEffect(() => {
     if (timeState.nextWindowEST && timeState.nextWindowEST !== lastWindowRef.current) {
       if (currentPrice !== null) {
         if (lastWindowRef.current !== "") {
           const prevCall = activeCallRef.current;
-          if (prevCall.prediction === "YES") { if (currentPrice > prevCall.strike) updateScore(windowType, 'wins', 1); else if (currentPrice < prevCall.strike) updateScore(windowType, 'losses', 1); }
-          else if (prevCall.prediction === "NO") { if (currentPrice < prevCall.strike) updateScore(windowType, 'wins', 1); else if (currentPrice > prevCall.strike) updateScore(windowType, 'losses', 1); }
+          let won = false;
+          if (prevCall.prediction === "YES") {
+            if (currentPrice > prevCall.strike) { updateScore(windowType, 'wins', 1); won = true; }
+            else if (currentPrice < prevCall.strike) updateScore(windowType, 'losses', 1);
+          } else if (prevCall.prediction === "NO") {
+            if (currentPrice < prevCall.strike) { updateScore(windowType, 'wins', 1); won = true; }
+            else if (currentPrice > prevCall.strike) updateScore(windowType, 'losses', 1);
+          }
+
+          if (prevCall.prediction !== "SIT OUT") {
+             broadcastToDiscord(`Round Closed: ${windowType.toUpperCase()}`, won ? 3404125 : 16478549, [
+                { name: "Result", value: won ? "WIN" : "LOSS", inline: true },
+                { name: "Prediction", value: String(prevCall.prediction), inline: true },
+                { name: "Closing Price", value: `$${currentPrice.toFixed(2)}`, inline: true }
+             ]);
+          }
         }
-        setTargetMargin(currentPrice); lockedPredictionRef.current = "SIT OUT";
+        
+        setTargetMargin(currentPrice);
+        lockedPredictionRef.current = "SIT OUT";
         activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
-        hasReversedRef.current = false; lastAdvisedRef.current = "SIT OUT";
-        setUserPosition(null); lastWindowRef.current = timeState.nextWindowEST;
-        setManualAction(null); tickHistoryRef.current = []; setCurrentOffer(""); setBetAmount(0); setMaxPayout(0);
+        hasReversedRef.current = false; 
+        taraAdviceRef.current = "SIT OUT";
+        activeAdviceRef.current = "HOLD FIRM";
+        setUserPosition(null); 
+        lastWindowRef.current = timeState.nextWindowEST;
+        setManualAction(null); 
+        tickHistoryRef.current = []; 
+        setCurrentOffer(""); 
+        setBetAmount(0); 
+        setMaxPayout(0); 
       }
     }
   }, [timeState.nextWindowEST, currentPrice, windowType]);
 
-  // WebSockets
+  // PHASE 1 & 3: GLOBAL WEBSOCKETS (Binance + Bybit + Coinbase)
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    let isCanvas = false; try { isCanvas = window.self !== window.top; } catch (e) { isCanvas = true; }
-    let wsCB = null, wsBinanceLiq = null, lastVisualUpdate = 0;
+    let isCanvas = false;
+    try { isCanvas = window.self !== window.top; } catch (e) { isCanvas = true; } 
+    
+    let wsCB = null;
+    let wsBinanceFut = null;
+    let wsBybit = null;
+    let wsBinanceLiq = null;
+    let lastVisualUpdate = 0; 
     
     const updateVisualPrice = (newPrice, source) => {
-      currentPriceRef.current = newPrice; const now = Date.now();
+      currentPriceRef.current = newPrice;
+      const now = Date.now();
       lastPriceSourceRef.current = { source, time: now };
+
       if (now - lastVisualUpdate > 300) {
-        setCurrentPrice(prev => { if (prev !== null && newPrice !== prev) setTickDirection(newPrice > prev ? 'up' : 'down'); return newPrice; });
+        setCurrentPrice(prev => {
+          if (prev !== null && newPrice !== prev) setTickDirection(newPrice > prev ? 'up' : 'down');
+          return newPrice;
+        });
         lastVisualUpdate = now;
       }
     };
 
-    const initWS = () => {
-      if (isCanvas) return;
+    const initWebSockets = () => {
+      if (isCanvas) return; 
+
+      // 1. Coinbase (Baseline Price)
       try {
         wsCB = new WebSocket('wss://ws-feed.exchange.coinbase.com');
         wsCB.onopen = () => wsCB.send(JSON.stringify({ type: 'subscribe', product_ids: ['BTC-USD'], channels: ['ticker'] }));
@@ -499,551 +651,579 @@ export default function App() {
           try {
             const data = JSON.parse(event.data);
             if (data.type === 'ticker' && data.price) {
-              const p = parseFloat(data.price); const size = parseFloat(data.last_size) || 0;
-              updateVisualPrice(p, 'coinbase');
-              const now = Date.now();
-              tickHistoryRef.current.push({ p, s: size, t: data.side === 'sell' ? 'B' : 'S', time: now });
-              tickHistoryRef.current = tickHistoryRef.current.filter(t => now - t.time < 60000);
+              const newPrice = parseFloat(data.price);
+              updateVisualPrice(newPrice, 'coinbase');
+              tickHistoryRef.current.push({ p: newPrice, s: parseFloat(data.last_size || 0), t: data.side === 'sell' ? 'B' : 'S', time: Date.now(), ex: 'CB' });
             }
           } catch (err) {}
         };
       } catch(e) {}
+
+      // 2. Binance Futures (Whale Tape)
+      try {
+        wsBinanceFut = new WebSocket('wss://fstream.binance.com/ws/btcusdt@aggTrade');
+        wsBinanceFut.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.e === 'aggTrade') {
+              const price = parseFloat(data.p);
+              tickHistoryRef.current.push({ p: price, s: parseFloat(data.q), t: !data.m ? 'B' : 'S', time: Date.now(), ex: 'BIN' });
+            }
+          } catch(err) {}
+        };
+      } catch(e) {}
+
+      // 3. Bybit Futures (Secondary Tape)
+      try {
+        wsBybit = new WebSocket('wss://stream.bybit.com/v5/public/linear');
+        wsBybit.onopen = () => wsBybit.send(JSON.stringify({ op: 'subscribe', args: ['publicTrade.BTCUSDT'] }));
+        wsBybit.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.topic === 'publicTrade.BTCUSDT' && data.data) {
+              data.data.forEach(trade => {
+                tickHistoryRef.current.push({ p: parseFloat(trade.p), s: parseFloat(trade.v), t: trade.S === 'Buy' ? 'B' : 'S', time: Date.now(), ex: 'BYB' });
+              });
+            }
+          } catch(err) {}
+        };
+      } catch(e) {}
+
+      // Phase 3: Liquidations
       try {
         wsBinanceLiq = new WebSocket('wss://fstream.binance.com/ws/btcusdt@forceOrder');
         wsBinanceLiq.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
             if (data.e === 'forceOrder') {
+              const side = data.o.S; 
               const usdValue = parseFloat(data.o.q) * parseFloat(data.o.p);
-              if (usdValue > 10000) setLiquidations(prev => [...prev, { side: data.o.S, value: usdValue, time: Date.now() }].filter(l => Date.now() - l.time < 60000));
+              if (usdValue > 10000) { 
+                setLiquidations(prev => [...prev, { side, value: usdValue, time: Date.now() }].filter(l => Date.now() - l.time < 60000));
+              }
             }
           } catch (err) {}
         };
       } catch(e) {}
-    };
-    initWS();
+    }
+
+    initWebSockets();
     return () => { 
-      if (wsCB?.readyState === 1) { wsCB.send(JSON.stringify({ type: 'unsubscribe', product_ids: ['BTC-USD'], channels: ['ticker'] })); wsCB.close(); }
-      if (wsBinanceLiq?.readyState === 1) wsBinanceLiq.close();
+      if (wsCB && wsCB.readyState === 1) wsCB.close();
+      if (wsBinanceFut && wsBinanceFut.readyState === 1) wsBinanceFut.close();
+      if (wsBybit && wsBybit.readyState === 1) wsBybit.close();
+      if (wsBinanceLiq && wsBinanceLiq.readyState === 1) wsBinanceLiq.close();
     };
   }, []);
 
-  // Tape Aggregation
+  // --- KINEMATICS & VELOCITY ENGINE (V65) ---
+  const v5HistoryRef = useRef([]);
+  const a5HistoryRef = useRef([]);
+
   useEffect(() => {
-    const interval = setInterval(() => {
+    const tapeInterval = setInterval(() => {
       const now = Date.now();
-      let takerBuys = 0, takerSells = 0, whaleSpotted = null;
-      tickHistoryRef.current.forEach(t => {
-        if (now - t.time > 30000) return;
-        const usd = t.s * t.p;
-        if (t.t === 'B') { takerBuys += usd; if (t.s > 1.5) whaleSpotted = 'BUY'; } 
-        else { takerSells += usd; if (t.s > 1.5) whaleSpotted = 'SELL'; }
+      // Clean Memory
+      tickHistoryRef.current = tickHistoryRef.current.filter(t => now - t.time < 45000);
+      
+      const ticks = tickHistoryRef.current;
+      if (!ticks.length || !currentPriceRef.current) return;
+      
+      const currentP = currentPriceRef.current;
+      
+      // Calculate Tape Flow (Offshore whales use >5.0 BTC size)
+      let takerBuys = 0; let takerSells = 0; let whaleSpotted = null;
+      ticks.filter(t => now - t.time < 10000).forEach(t => {
+        const usdValue = t.s * t.p;
+        if (t.t === 'B') { takerBuys += usdValue; if (t.s > 5.0) whaleSpotted = `BUY (${t.ex})`; } 
+        else { takerSells += usdValue; if (t.s > 5.0) whaleSpotted = `SELL (${t.ex})`; }
       });
-      setTakerFlow({ imbalance: takerSells === 0 ? (takerBuys > 0 ? 2 : 1) : takerBuys / takerSells, whaleSpotted });
+      const tImbalance = takerSells === 0 ? (takerBuys > 0 ? 2 : 1) : takerBuys / takerSells;
+      setTakerFlow({ imbalance: tImbalance, whaleSpotted });
+
+      // Calculate Kinematics (Velocity - points away from now)
+      const getP = (msAgo) => {
+        const target = now - msAgo;
+        let closest = ticks[0];
+        for(let i=ticks.length-1; i>=0; i--) {
+          if (ticks[i].time <= target) { closest = ticks[i]; break; }
+        }
+        return closest ? closest.p : currentP;
+      };
+
+      const v1 = currentP - getP(1000);
+      const v5 = currentP - getP(5000);
+      const v15 = currentP - getP(15000);
+      const v30 = currentP - getP(30000);
+
+      // Track Acceleration (Change in v5)
+      v5HistoryRef.current.push(v5);
+      if (v5HistoryRef.current.length > 5) v5HistoryRef.current.shift();
+      const prevV5 = v5HistoryRef.current[0] || v5;
+      const a5 = (v5 - prevV5) / 5; 
+
+      // Track Jerk (Change in a5)
+      a5HistoryRef.current.push(a5);
+      if (a5HistoryRef.current.length > 5) a5HistoryRef.current.shift();
+      const prevA5 = a5HistoryRef.current[0] || a5;
+      const j5 = (a5 - prevA5) / 5; 
+
+      setKinematics({ v1, v5, v15, v30, a5, j5 });
+
     }, 1000);
-    return () => clearInterval(interval);
+    return () => clearInterval(tapeInterval);
   }, []);
 
-  // REST Fallback
+  // REST Fallbacks & Phase 2 Institutional Data Polling
   useEffect(() => {
     let lastUiUpdate = 0;
-    const fetchSpot = async () => {
+    const fetchSpotPrice = async () => {
       try {
-        const res = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker');
-        if (!res.ok) return; const d = await res.json();
-        if (d.price) {
-          const p = parseFloat(d.price); const now = Date.now();
+        const resTicker = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker');
+        if (!resTicker.ok) return;
+        const dataTicker = await resTicker.json();
+        if (dataTicker.price) {
+          const p = parseFloat(dataTicker.price);
+          const now = Date.now();
           if (lastPriceSourceRef.current.source !== 'coinbase' || now - lastPriceSourceRef.current.time > 2000) {
              currentPriceRef.current = p; lastPriceSourceRef.current = { source: 'rest', time: now };
-             if (now - lastUiUpdate > 300) { setCurrentPrice(prev => { if (prev !== null && p !== prev) setTickDirection(p > prev ? 'up' : 'down'); return p; }); lastUiUpdate = now; }
+             if (now - lastUiUpdate > 300) {
+               setCurrentPrice(prev => { if (prev !== null && p !== prev) setTickDirection(p > prev ? 'up' : 'down'); return p; });
+               lastUiUpdate = now;
+             }
           }
-          tickHistoryRef.current.push({ p, s: parseFloat(d.size || 0.1), t: 'B', time: Date.now() });
-          tickHistoryRef.current = tickHistoryRef.current.filter(t => Date.now() - t.time < 60000);
+          tickHistoryRef.current.push({ p, s: parseFloat(dataTicker.size || 0.1), t: 'B', time: Date.now(), ex: 'CB' });
         }
       } catch(e) {}
     };
-    fetchSpot(); const interval = setInterval(fetchSpot, 1500);
-    return () => clearInterval(interval);
+    fetchSpotPrice();
+    const spotInterval = setInterval(fetchSpotPrice, 1500); 
+    return () => clearInterval(spotInterval);
   }, []);
 
-  // Heavy Polling
   useEffect(() => {
-    const fetchHeavy = async () => {
+    const fetchHeavyData = async () => {
       try {
         const gran = windowType === '15m' ? 900 : 300;
-        try {
-          const res = await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`);
-          if (res.ok) { const d = await res.json(); if (Array.isArray(d)) { const f = d.slice(0, 60).map(c => ({ time: c[0], l: parseFloat(c[1]), h: parseFloat(c[2]), o: parseFloat(c[3]), c: parseFloat(c[4]), v: parseFloat(c[5]) })); if (f.length > 0) setHistory(f); }}
-        } catch (e) {}
-        try {
-          const res = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/book?level=2');
-          if (res.ok) { const d = await res.json(); if (d?.bids && d?.asks) {
+        const resCB = await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`);
+        if (resCB.ok) {
+          const dataCB = await resCB.json();
+          if (Array.isArray(dataCB)) {
+            setHistory(dataCB.slice(0, 60).map(c => ({ time: c[0], l: parseFloat(c[1]), h: parseFloat(c[2]), o: parseFloat(c[3]), c: parseFloat(c[4]), v: parseFloat(c[5]) })));
+          }
+        }
+        
+        const resOb = await fetch('https://api.exchange.coinbase.com/products/BTC-USD/book?level=2');
+        if (resOb.ok) {
+          const dataOb = await resOb.json();
+          if (dataOb?.bids && dataOb?.asks) {
             let localBuy = 0, localSell = 0;
-            d.bids.forEach(([p, s]) => { if (p <= targetMargin && p >= targetMargin - 150) localBuy += parseFloat(s); });
-            d.asks.forEach(([p, s]) => { if (p >= targetMargin && p <= targetMargin + 150) localSell += parseFloat(s); });
+            dataOb.bids.forEach(([p, s]) => { if (p <= targetMargin && p >= targetMargin - 150) localBuy += parseFloat(s); });
+            dataOb.asks.forEach(([p, s]) => { if (p >= targetMargin && p <= targetMargin + 150) localSell += parseFloat(s); });
             setOrderBook({ localBuy, localSell, imbalance: localSell === 0 ? 1 : localBuy / localSell });
-          }}
-        } catch (e) {}
+          }
+        }
+
+        // Phase 2: Mock fetching global OI and Funding (Handles CORS gracefully in browser)
+        try {
+            const fRes = await fetch('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT');
+            if (fRes.ok) {
+                const fData = await fRes.json();
+                setMarketOI({ funding: parseFloat(fData.lastFundingRate) * 100, interest: 0 });
+            }
+        } catch(e) { } 
+
         setIsLoading(false);
-      } catch (e) { setIsLoading(false); }
+      } catch (err) { setIsLoading(false); }
     };
-    fetchHeavy(); const interval = setInterval(fetchHeavy, 5000);
-    return () => clearInterval(interval);
-  }, [targetMargin, windowType]);
+
+    fetchHeavyData();
+    const heavyInterval = setInterval(fetchHeavyData, 5000); 
+    return () => clearInterval(heavyInterval);
+  }, [targetMargin, windowType]); 
 
   useEffect(() => { if (targetMargin === 0 && currentPrice) setTargetMargin(currentPrice); }, [currentPrice, targetMargin]);
 
-  // News Wire
-  useEffect(() => {
-    let news = [];
-    if (orderBook.imbalance > 1.5) news.push({ title: `Maker Alert: Limit BID wall placed near $${targetMargin.toFixed(0)}`, type: 'info' });
-    if (orderBook.imbalance < 0.6) news.push({ title: `Maker Alert: Limit SELL pressure defending $${targetMargin.toFixed(0)}`, type: 'info' });
-    if (showWhaleAlerts) {
-        if (takerFlow.imbalance > 2.0) news.push({ title: `🐋 WHALE: Aggressive Market BUYING detected on the tape.`, type: 'whale' });
-        if (takerFlow.imbalance < 0.5) news.push({ title: `🐋 WHALE: Aggressive Market SELLING detected on the tape.`, type: 'whale' });
-    }
-    if (news.length < 3) news.push({ title: `Engine: Analyzing Order Book vs Tape Divergence (${String(windowType).toUpperCase()})...`, type: 'info' });
-    setNewsEvents(news);
-  }, [orderBook.imbalance, takerFlow.imbalance, targetMargin, windowType, showWhaleAlerts]);
-
-  // Time Engine
-  useEffect(() => {
-    const update = () => {
-      const now = new Date(); const msNow = now.getTime();
-      const intervalMs = (windowType === '15m' ? 15 : 5) * 60 * 1000;
-      const nextWindowMs = Math.ceil((msNow + 500) / intervalMs) * intervalMs;
-      const nextWindow = new Date(nextWindowMs); const startWindow = new Date(nextWindowMs - intervalMs);
-      const diffMs = nextWindow.getTime() - now.getTime();
-      let currentEST, startWindowEST, nextWindowEST;
-      try {
-         currentEST = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-         startWindowEST = startWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' });
-         nextWindowEST = nextWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' });
-      } catch (e) {
-         currentEST = now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-         startWindowEST = startWindow.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit' });
-         nextWindowEST = nextWindow.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit' });
-      }
-      setTimeState({ currentEST, startWindowEST, nextWindowEST, minsRemaining: Math.floor(diffMs / 60000), secsRemaining: Math.floor((diffMs % 60000) / 1000), currentHour: now.getHours() });
+  const liveHistory = useMemo(() => {
+    if (history.length === 0 || !currentPrice) return history;
+    const updated = [...history];
+    updated[0] = {
+      ...updated[0],
+      c: currentPrice,
+      h: Math.max(updated[0].h || currentPrice, currentPrice),
+      l: Math.min(updated[0].l || currentPrice, currentPrice)
     };
-    update(); const timer = setInterval(update, 1000);
+    return updated;
+  }, [history, currentPrice]);
+
+  useEffect(() => {
+    let syntheticNews = [];
+    if (orderBook.imbalance > 1.5) syntheticNews.push({ title: `Maker Alert: Limit BID wall placed near $${targetMargin.toFixed(0)}`, type: 'info' });
+    if (orderBook.imbalance < 0.6) syntheticNews.push({ title: `Maker Alert: Limit SELL pressure defending $${targetMargin.toFixed(0)}`, type: 'info' });
+    if (showWhaleAlerts && takerFlow.whaleSpotted) {
+        syntheticNews.push({ title: `🐋 WHALE: Massive Market ${takerFlow.whaleSpotted.includes('BUY') ? 'BUYING' : 'SELLING'} detected on ${takerFlow.whaleSpotted.includes('BIN') ? 'BINANCE' : takerFlow.whaleSpotted.includes('BYB') ? 'BYBIT' : 'COINBASE'} Futures.`, type: 'whale' });
+    }
+    if (marketOI.funding > 0.01) syntheticNews.push({ title: `Phase 2: High Positive Funding (${marketOI.funding.toFixed(4)}%). Long squeeze highly probable.`, type: 'info' });
+    if (syntheticNews.length < 3) syntheticNews.push({ title: `Kinematics Engine: Monitoring ${String(windowType).toUpperCase()} velocity vectors and Jerk variables...`, type: 'info' });
+    setNewsEvents(syntheticNews);
+  }, [orderBook.imbalance, takerFlow.imbalance, targetMargin, windowType, showWhaleAlerts, takerFlow.whaleSpotted, marketOI]);
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      const intervalMs = (windowType === '15m' ? 15 : 5) * 60 * 1000;
+      const nextWindowMs = Math.ceil((now.getTime() + 500) / intervalMs) * intervalMs; 
+      const diffMs = nextWindowMs - now.getTime();
+      let curEST, startEST, nextEST;
+      try {
+         curEST = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+         startEST = new Date(nextWindowMs - intervalMs).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' });
+         nextEST = new Date(nextWindowMs).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' });
+      } catch (e) {
+         curEST = now.toLocaleTimeString(); startEST = new Date(nextWindowMs - intervalMs).toLocaleTimeString(); nextEST = new Date(nextWindowMs).toLocaleTimeString();
+      }
+      setTimeState({ currentEST: String(curEST), startWindowEST: String(startEST), nextWindowEST: String(nextEST), minsRemaining: Math.floor(diffMs / 60000), secsRemaining: Math.floor((diffMs % 60000) / 1000), currentHour: now.getHours() });
+    };
+    updateTime();
+    const timer = setInterval(updateTime, 1000);
     return () => clearInterval(timer);
   }, [windowType]);
 
-  // ═══════════════════════════════════════════════════════════
-  // V60 PREDICTION ENGINE — COMPLETELY REWRITTEN
-  // 
-  // Core philosophy changes from V55:
-  // 1. VELOCITY over position — "where is price GOING" not "where IS it"
-  // 2. Multi-timeframe momentum confirmation (1s, 5s, 15s, 30s)
-  // 3. Acceleration tracking — detect momentum decay BEFORE reversal
-  // 4. PnL-aware cashout — track your peak profit, exit on decay
-  // 5. Distinct 5m vs 15m weighting (not just threshold changes)
-  // 6. Candle structure analysis (wicks, body ratio)
-  // 7. Volume-price divergence detection
-  // ═══════════════════════════════════════════════════════════
+  // --- TARA V67: VELOCITY PREDICTION ENGINE (Claude's Specs) ---
   const analysis = useMemo(() => {
-    if (!currentPrice || liveHistory.length < 20 || !targetMargin || !isMounted) return null;
+    if (!currentPrice || liveHistory.length < 30 || !targetMargin || !isMounted) return null;
 
     const is15m = windowType === '15m';
     const intervalSeconds = is15m ? 900 : 300;
     const clockSeconds = (timeState.minsRemaining * 60) + timeState.secsRemaining;
     const timeFraction = Math.max(0, Math.min(1, 1 - (clockSeconds / intervalSeconds)));
-    const isEndgameLock = clockSeconds < (is15m ? 90 : 45);
+    
+    // Strict 5m vs 15m Endgame Physics
+    const isEndgameLock = is15m ? (clockSeconds < 90) : (clockSeconds < 45); 
+    const isCalibrating = (intervalSeconds - clockSeconds) < 30; // 30-Second strict calibration lock
 
-    // --- INDICATORS ---
-    const closes = liveHistory.map(x => x.c);
-    const rsi = calculateRSI(closes, 14);
+    const closes = [...liveHistory].reverse().map(x => x.c);
+    const rsi = calculateRSI([...closes].reverse(), 14) || 50;
     const atr = calculateATR(liveHistory, 14) || 10;
-    const atrBps = atr > 0 ? (atr / currentPrice) * 10000 : 15;
-    const vwap = calculateVWAP(liveHistory);
-    const macd = calculateMACD(closes);
-    const bb = calculateBB(closes, 20);
+    const atrBps = atr > 0 ? (atr / currentPrice) * 10000 : 15; 
+    const macdData = calculateMACD(closes);
 
     const realGapBps = ((currentPrice - targetMargin) / targetMargin) * 10000;
-    const vwapGapBps = vwap ? ((currentPrice - vwap) / vwap) * 10000 : 0;
+    let aggrFlow = Math.max(-1.0, Math.min(1.0, takerFlow.imbalance - 1));
 
-    // --- VELOCITY DATA ---
-    const vel = velocityRef.current;
-    const { v1s, v5s, v15s, v30s, accel, jerk, peakPnL, troughPnL, pnlSlope } = vel;
-
-    // --- TAPE FLOW ---
-    let aggrFlow = Math.max(-1.0, Math.min(1.0, (takerFlow.imbalance - 1)));
-    let mktImplied = Math.max(-1.0, Math.min(1.0, (orderBook.imbalance - 1)));
-
-    // --- LIQUIDATIONS ---
-    let liqBuys = 0, liqSells = 0;
-    liquidations.forEach(l => { if (Date.now() - l.time < 60000) { if (l.side === 'BUY') liqBuys += l.value; else liqSells += l.value; }});
-
-    // --- CANDLE STRUCTURE (last 5 candles) ---
-    let bullishCandles = 0, bearishCandles = 0, avgWickRatio = 0;
-    const recentCandles = liveHistory.slice(0, Math.min(5, liveHistory.length));
-    recentCandles.forEach(c => {
-      if (c.c > c.o) bullishCandles++; else bearishCandles++;
-      const body = Math.abs(c.c - c.o);
-      const range = c.h - c.l;
-      if (range > 0) avgWickRatio += (range - body) / range;
-    });
-    avgWickRatio /= recentCandles.length || 1;
-    const candleBias = (bullishCandles - bearishCandles) / (recentCandles.length || 1); // -1 to +1
-
-    // --- VOLUME-PRICE DIVERGENCE ---
-    let volPriceDivergence = false;
-    if (liveHistory.length >= 10) {
-      const recentVol = liveHistory.slice(0, 5).reduce((a, b) => a + b.v, 0);
-      const priorVol = liveHistory.slice(5, 10).reduce((a, b) => a + b.v, 0);
-      const priceUp = closes[0] > closes[4];
-      const volDown = recentVol < priorVol * 0.7;
-      volPriceDivergence = priceUp && volDown; // price up on decreasing volume = weak
-    }
-
-    // ═══════════════════════════════════════════
-    // REGIME DETECTION (V60: Velocity-based)
-    // ═══════════════════════════════════════════
+    let baseProb = 50;
     let regime = "RANGE/CHOP";
     let reasoning = [];
+    
+    let isRugPull = false;
+    if (kinematics.v5 < -20 && aggrFlow < -0.6) isRugPull = true;
 
-    // Rug pull: multi-confirmation
-    const rugConfirm = [v1s < -2, v5s < -0.8, aggrFlow < -0.5, macd.hist < -3, bb.pctB < 0.05].filter(Boolean).length;
-    const isRugPull = rugConfirm >= 3;
-
-    // Momentum alignment: are all velocity timeframes agreeing?
-    const allVelUp = v1s > 0 && v5s > 0 && v15s > 0;
-    const allVelDown = v1s < 0 && v5s < 0 && v15s < 0;
-    const velAligned = allVelUp || allVelDown;
-    const velDirection = allVelUp ? 1 : allVelDown ? -1 : 0;
-
-    // Is momentum accelerating or decelerating?
-    const isAccelerating = (velDirection > 0 && accel > 0) || (velDirection < 0 && accel < 0);
-    const isDecelerating = (velDirection > 0 && accel < 0) || (velDirection < 0 && accel > 0);
-
-    if (isRugPull) {
-      regime = "CRASH/RUG"; reasoning.push(`REGIME: CRASH (${rugConfirm}/5 confirms). All velocities negative.`);
-    } else if (rsi > 72 && bb.pctB > 0.95 && isDecelerating) {
-      regime = "OVERBOUGHT REVERSAL"; reasoning.push(`REGIME: RSI ${rsi.toFixed(0)}, BB%B ${(bb.pctB*100).toFixed(0)}%, momentum decelerating. Fade.`);
-    } else if (rsi < 28 && bb.pctB < 0.05 && isDecelerating) {
-      regime = "OVERSOLD REVERSAL"; reasoning.push(`REGIME: RSI ${rsi.toFixed(0)}, BB%B ${(bb.pctB*100).toFixed(0)}%, momentum decelerating. Fade.`);
-    } else if (velAligned && isAccelerating && macd.hist * velDirection > 0) {
-      regime = velDirection > 0 ? "STRONG MOMENTUM UP" : "STRONG MOMENTUM DOWN";
-      reasoning.push(`REGIME: ${regime}. All velocities aligned + accelerating + MACD confirms.`);
-    } else if (velAligned && !isAccelerating) {
-      regime = velDirection > 0 ? "FADING UP MOVE" : "FADING DOWN MOVE";
-      reasoning.push(`REGIME: ${regime}. Velocity aligned but decelerating. Momentum exhausting.`);
-    } else if (bb.width < atrBps * 0.7) {
-      regime = "SQUEEZE"; reasoning.push(`REGIME: Bollinger Squeeze. Width ${bb.width.toFixed(0)}bps vs ATR ${atrBps.toFixed(0)}bps. Breakout imminent.`);
+    // CORE DIFFERENTIATION (5m vs 15m)
+    if (!is15m) {
+        // 5 MINUTE MODE: Pure Kinematics & Scalping
+        baseProb += (kinematics.v1 * 5.0); 
+        baseProb += (kinematics.v5 * 2.0);
+        baseProb += (kinematics.a5 * 10.0); // Heavy acceleration weight
+        baseProb += (macdData.hist * 2.0); // 2x MACD
+        baseProb += (aggrFlow * 30); // 1.5x Tape Flow
+        
+        if (kinematics.v5 > 0 && kinematics.a5 > 0) { regime = "ACCELERATING UP (5m)"; reasoning.push(`REGIME: 5s Velocity & Accel aligned UP.`); }
+        else if (kinematics.v5 < 0 && kinematics.a5 < 0) { regime = "ACCELERATING DOWN (5m)"; reasoning.push(`REGIME: 5s Velocity & Accel aligned DOWN.`); }
+        else { reasoning.push(`REGIME: Waiting for 5m acceleration alignment.`); }
     } else {
-      regime = "RANGE/CHOP"; reasoning.push(`REGIME: Choppy. Velocities disagree. No clear direction.`);
+        // 15 MINUTE MODE: Structural Tracking
+        baseProb += (kinematics.v15 * 1.5);
+        baseProb += (kinematics.v30 * 1.0);
+        baseProb += (aggrFlow * 20);
+
+        if (rsi > 70) { baseProb -= 15; reasoning.push(`RSI: Overbought. Fading.`); }
+        if (rsi < 30) { baseProb += 15; reasoning.push(`RSI: Oversold. Fading.`); }
+        
+        if (marketOI.funding > 0.01) { baseProb -= 5; reasoning.push(`FUNDING: High positive. Bias to short squeeze.`); }
+        else if (marketOI.funding < -0.01) { baseProb += 5; reasoning.push(`FUNDING: Negative. Bias to long squeeze.`); }
+
+        if (kinematics.v15 > 0 && kinematics.v30 > 0) regime = "MACRO TREND UP (15m)";
+        else if (kinematics.v15 < 0 && kinematics.v30 < 0) regime = "MACRO TREND DOWN (15m)";
     }
 
-    // ═══════════════════════════════════════════
-    // PROBABILITY ENGINE (V60: Velocity-weighted)
-    // ═══════════════════════════════════════════
-    let prob = 50;
+    // Gravitational Pull (Endgame)
+    const timeMultiplier = Math.pow(timeFraction, 2); 
+    const gapGravitation = realGapBps * (is15m ? 1.0 : 1.5) * (0.2 + 0.8 * timeMultiplier);
+    baseProb += gapGravitation;
 
-    // 1. Physical gap (time-decayed, but less dominant now)
-    const timeDecay = Math.pow(timeFraction, is15m ? 1.8 : 1.3);
-    prob += realGapBps * (is15m ? 0.6 : 0.8) * (0.15 + 0.85 * timeDecay);
-
-    // 2. VELOCITY COMPOSITE — the big change
-    // Weight recent velocity more, but require multi-timeframe confirmation
-    if (is15m) {
-      // 15m: Trust slower velocities more, need confirmation
-      prob += v30s * 8;   // base drift
-      prob += v15s * 5;   // medium momentum
-      prob += v5s * 3;    // recent push
-      if (velAligned) prob += velDirection * 12; // alignment bonus
-      if (isAccelerating) prob += velDirection * 8; // acceleration bonus
-    } else {
-      // 5m: Trust fast velocities, react quickly
-      prob += v5s * 12;   // recent push is king
-      prob += v1s * 8;    // snap velocity matters
-      prob += v15s * 3;   // background drift
-      if (velAligned) prob += velDirection * 15; // stronger alignment bonus
-      if (isAccelerating) prob += velDirection * 10;
+    if (isEndgameLock && userPosition === null) {
+        reasoning.push(`ENDGAME: Physics overrule momentum. Window locked.`);
+        baseProb = 50 + (realGapBps * 4);
     }
 
-    // 3. Jerk detection — sudden momentum shifts
-    if (Math.abs(jerk) > 1.0) {
-      prob += jerk * (is15m ? 3 : 5);
-      reasoning.push(`JERK: Sudden momentum ${jerk > 0 ? 'spike UP' : 'spike DOWN'} (${jerk.toFixed(2)}). React.`);
+    let posterior = Math.max(1, Math.min(99, baseProb)); 
+
+    // --- STRICT VELOCITY ALIGNMENT GATE ---
+    if (userPosition === null && !isCalibrating && !isEndgameLock) {
+        if (posterior > 65 && kinematics.v5 < 0) { posterior = 60; reasoning.push(`GATE: Denied YES. 5s Velocity is dropping.`); }
+        if (posterior < 35 && kinematics.v5 > 0) { posterior = 40; reasoning.push(`GATE: Denied NO. 5s Velocity is climbing.`); }
     }
 
-    // 4. RSI extremes (mean reversion)
-    if (rsi > 70) prob -= (rsi - 70) * (is15m ? 1.5 : 1.0);
-    else if (rsi < 30) prob += (30 - rsi) * (is15m ? 1.5 : 1.0);
+    let convictionScore = Math.abs(posterior - 50) * 2; 
 
-    // 5. MACD confirmation
-    prob += macd.hist * (is15m ? 0.4 : 0.8);
-
-    // 6. Tape flow
-    prob += aggrFlow * (is15m ? 12 : 18);
-    prob += mktImplied * (is15m ? 6 : 4);
-
-    // 7. Candle structure
-    prob += candleBias * (is15m ? 5 : 8);
-
-    // 8. Volume-price divergence (bearish signal)
-    if (volPriceDivergence && realGapBps > 0) {
-      prob -= 8; reasoning.push(`VOL-DIV: Price up on declining volume. Weak rally.`);
+    // HYSTERESIS ENTRY LOGIC (Diamond Hands 70/40)
+    if (taraAdviceRef.current === "SIT OUT") {
+        if (posterior >= 70) taraAdviceRef.current = "YES";
+        else if (posterior <= 30) taraAdviceRef.current = "NO";
+    } else if (taraAdviceRef.current === "YES") {
+        if (posterior < 40) taraAdviceRef.current = "SIT OUT"; 
+    } else if (taraAdviceRef.current === "NO") {
+        if (posterior > 60) taraAdviceRef.current = "SIT OUT";
     }
 
-    // 9. Bollinger position
-    if (bb.pctB > 0.92) prob -= (bb.pctB - 0.92) * 100;
-    else if (bb.pctB < 0.08) prob += (0.08 - bb.pctB) * 100;
+    let activePrediction = userPosition !== null ? userPosition : taraAdviceRef.current;
 
-    // 10. Liquidation cascades
-    if (liqBuys > 10000) { prob += 10; reasoning.push(`LIQ: $${(liqBuys/1000).toFixed(0)}K shorts squeezed.`); }
-    if (liqSells > 10000) { prob -= 10; reasoning.push(`LIQ: $${(liqSells/1000).toFixed(0)}K longs liquidated.`); }
-
-    // 11. Endgame: physical distance dominates entirely
-    if (isEndgameLock) {
-        reasoning.push(`ENDGAME: ${clockSeconds}s left. Physical gap locked.`);
-        prob = 50 + (realGapBps * (is15m ? 5 : 8));
+    if (userPosition === null) {
+        if (isCalibrating) activePrediction = "SIT OUT";
+        else if (isEndgameLock && taraAdviceRef.current === "SIT OUT") activePrediction = "SIT OUT";
     }
 
-    // --- PREDICTION LOGIC ---
-    let prediction = userPosition || lockedPredictionRef.current;
-    let activePrediction = prediction;
-    if (activePrediction === "YES") prob += 6;
-    else if (activePrediction === "NO") prob -= 6;
-
-    let posterior = Math.max(1, Math.min(99, prob));
-    let convictionScore = Math.abs(posterior - 50) * 2;
-
-    // Entry thresholds: require strong conviction
-    const entryThreshold = is15m ? 62 : 60;
-    if (activePrediction === "SIT OUT" && !isEndgameLock) {
-        if (posterior >= entryThreshold && velAligned && velDirection > 0) activePrediction = "YES";
-        else if (posterior <= (100 - entryThreshold) && velAligned && velDirection < 0) activePrediction = "NO";
-        else if (posterior >= 68) activePrediction = "YES"; // strong prob even without vel alignment
-        else if (posterior <= 32) activePrediction = "NO";
-    } else if (activePrediction !== "SIT OUT") {
-        if (activePrediction === "YES" && posterior < 33) activePrediction = "SIT OUT";
-        if (activePrediction === "NO" && posterior > 67) activePrediction = "SIT OUT";
-    }
-    if (isEndgameLock && Math.abs(realGapBps) > atrBps * 0.4) {
-        activePrediction = realGapBps > 0 ? "YES" : "NO";
-    }
-
-    // Add indicator readout to reasoning
-    reasoning.push(`VEL: 1s=${v1s.toFixed(2)} 5s=${v5s.toFixed(2)} 15s=${v15s.toFixed(2)} 30s=${v30s.toFixed(2)} | Accel=${accel.toFixed(2)}`);
-    reasoning.push(`IND: RSI ${rsi.toFixed(0)} | MACD H: ${macd.hist > 0 ? '+' : ''}${macd.hist.toFixed(2)} | BB%B ${(bb.pctB*100).toFixed(0)}% | Tape ${aggrFlow > 0 ? '+' : ''}${aggrFlow.toFixed(2)}`);
-
-    // ═══════════════════════════════════════════
-    // V60 TRADE ADVISOR — PnL-AWARE CASHOUT
-    // ═══════════════════════════════════════════
-    let tradeAction = "WAITING / SIT OUT";
-    let tradeReason = "Awaiting velocity alignment to signal.";
-    let actionColor = "text-zinc-400", actionBg = "bg-zinc-500/10 border-zinc-500/30";
+    let tradeAction = "WAITING / SIT OUT"; 
+    let tradeReason = "Awaiting structural confirmation to signal.";
+    let actionColor = "text-zinc-400"; let actionBg = "bg-zinc-500/10 border-zinc-500/30";
     let hasAction = false, actionButtonLabel = "", actionTarget = "";
 
-    const dynamicStopLoss = atrBps * (0.50 + ((1-timeFraction) * 0.50));
-    let liveEstValue = activePrediction === "YES" ? maxPayout * (posterior / 100) : activePrediction === "NO" ? maxPayout * ((100 - posterior) / 100) : 0;
-    const livePnL = liveEstValue - betAmount;
+    const isYES = activePrediction === "YES";
+    const currentOdds = activePrediction === "SIT OUT" ? 50 : (isYES ? posterior : (100 - posterior));
+    const riskPct = 100 - currentOdds;
+    const metricsStr = `[Chance: ${currentOdds.toFixed(0)}% | Risk: ${riskPct.toFixed(0)}%]`;
+    
+    let liveEstValue = isYES ? maxPayout * (posterior / 100) : (activePrediction === "NO" ? maxPayout * ((100 - posterior) / 100) : 0);
     const offerVal = parseFloat(currentOffer) || 0;
+    const livePnL = offerVal > 0 ? (offerVal - betAmount) : (liveEstValue - betAmount);
 
-    const riskPct = activePrediction === "YES" ? (100 - posterior) : posterior;
-    const chancePct = activePrediction === "YES" ? posterior : (100 - posterior);
-    const metricsStr = `[${chancePct.toFixed(0)}% chance | ${riskPct.toFixed(0)}% risk]`;
-
-    // PnL decay detection for cashout timing
-    const pnlDrawdown = peakPnL - realGapBps; // how far have we fallen from peak profit
-    const isPnLDecaying = pnlSlope < -0.3 && pnlDrawdown > 2; // profit actively shrinking
-
-    if (isRugPull && showRugPullAlerts) {
-        tradeAction = "🚨 RUG PULL DETECTED 🚨";
-        tradeReason = `${rugConfirm}/5 crash signals. Exit ALL positions. ${metricsStr}`;
-        actionColor = "text-rose-500"; actionBg = "bg-rose-500/20 border-rose-500/50 animate-pulse shadow-[0_0_20px_rgba(225,29,72,0.4)]";
-        hasAction = true; actionButtonLabel = "EMERGENCY CASHOUT"; actionTarget = "SIT OUT";
-        reasoning.push(`🚨 RUG PULL: Multi-confirmation crash detected.`);
-    }
-    else if (activePrediction === "SIT OUT") {
-        if (isEndgameLock) { tradeAction = "WINDOW CLOSED"; tradeReason = "Too late to enter. Wait for next round."; actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30"; }
-        else if (regime === "SQUEEZE") { tradeAction = "SQUEEZE — STANDBY"; tradeReason = "Volatility compression. Breakout imminent. Waiting for direction."; actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30"; }
-        else { tradeAction = "AWAITING CONVICTION"; tradeReason = `Need velocity alignment + ${entryThreshold}% prob. Currently ${posterior.toFixed(0)}%.`; }
-    }
-    else {
-        const isYES = activePrediction === "YES";
-        const currentDir = isYES ? 1 : -1;
-        const isBleeding = isYES ? (realGapBps < -dynamicStopLoss) : (realGapBps > dynamicStopLoss);
-        const isReversalRecommended = isYES ? (posterior < 33) : (posterior > 67);
-        const currentOdds = isYES ? posterior : (100 - posterior);
-
-        // V60 EARLY CASHOUT: detect when your profit is decaying
-        const isInProfit = betAmount > 0 && livePnL > 0;
-        const profitDropPercent = peakPnL > 0 ? (pnlDrawdown / peakPnL) * 100 : 0;
-        const momentumAgainstPosition = (isYES && v5s < -0.3 && accel < 0) || (!isYES && v5s > 0.3 && accel > 0);
-
-        if (prediction === "SIT OUT") {
-            tradeAction = `ENTRY: ${activePrediction}`;
-            tradeReason = `Velocity aligned. ${regime}. ${metricsStr}`;
+    if (userPosition === null) {
+        if (isRugPull && showRugPullAlerts) {
+            tradeAction = "🚨 RUG PULL DETECTED 🚨"; tradeReason = `Massive liquidity collapse. Abort longs immediately.`;
+            actionColor = "text-rose-500"; actionBg = "bg-rose-500/20 border-rose-500/50 animate-pulse shadow-[0_0_20px_rgba(225,29,72,0.4)]";
+        }
+        else if (isCalibrating) {
+            tradeAction = "CALIBRATING TAPE"; tradeReason = "Mapping 30s initial volatility block...";
+            actionColor = "text-amber-400";
+        }
+        else if (isEndgameLock && activePrediction === "SIT OUT") {
+            tradeAction = "WINDOW CLOSED"; tradeReason = "Late in round. Entering now is unsafe.";
+            actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30";
+        }
+        else if (activePrediction !== "SIT OUT") {
+            tradeAction = `ENTRY SIGNAL: ${activePrediction}`;
+            tradeReason = `Quant composite supports entry. Execute now. ${metricsStr}`;
             actionColor = isYES ? "text-emerald-400" : "text-rose-400";
             actionBg = isYES ? "bg-emerald-500/10 border-emerald-500/30 shadow-[0_0_15px_rgba(52,211,153,0.2)]" : "bg-rose-500/10 border-rose-500/30 shadow-[0_0_15px_rgba(251,113,133,0.2)]";
             hasAction = true; actionButtonLabel = `CONFIRM ENTRY: '${activePrediction}'`; actionTarget = activePrediction;
+        } else {
+            tradeAction = "AWAITING CONVICTION"; tradeReason = "Odds below 70% or Velocity unaligned. Sit out.";
         }
-        // NEW: Early profit protection
-        else if (isInProfit && isPnLDecaying && momentumAgainstPosition) {
-            tradeAction = "⚡ TAKE PROFIT NOW";
-            tradeReason = `Profit decaying. Peak was +${peakPnL.toFixed(0)}bps, now +${realGapBps.toFixed(0)}bps. Momentum reversing. ${metricsStr}`;
-            actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/15 border-emerald-500/40 animate-pulse shadow-[0_0_15px_rgba(52,211,153,0.3)]";
-            hasAction = true; actionButtonLabel = "CASHOUT PROFIT"; actionTarget = "CASH";
-            reasoning.push(`CASHOUT: PnL dropped ${profitDropPercent.toFixed(0)}% from peak. Momentum flipping against you.`);
+    } 
+    else {
+        // --- PNL-AWARE PREDICTIVE CASHOUTS ---
+        const peak = peakOfferRef.current;
+        const tapeAgainst = (isYES && kinematics.v5 < 0) || (!isYES && kinematics.v5 > 0);
+        const accelAgainst = (isYES && kinematics.a5 < -0.2) || (!isYES && kinematics.a5 > 0.2);
+        
+        const drawdownFromPeak = peak > 0 ? ((peak - offerVal) / peak) : 0;
+        const isTrailingStopHit = peak > (betAmount * 1.1) && drawdownFromPeak > 0.15; // 15% drop from peak profit
+
+        let currentAdvice = activeAdviceRef.current;
+
+        if (isRugPull && showRugPullAlerts && isYES) {
+            currentAdvice = "🚨 RUG PULL DETECTED 🚨";
+        } else if (isTrailingStopHit) {
+            currentAdvice = "TRAILING STOP HIT";
+        } else if (offerVal > 0 && livePnL > 0 && tapeAgainst && accelAgainst) {
+            currentAdvice = "⚡ TAKE PROFIT NOW";
+        } else if (livePnL < -Math.max(5, atrBps * 0.5) && tapeAgainst && accelAgainst) {
+            currentAdvice = "⚡ CUT LOSSES NOW";
+        } else if (currentOdds >= 85 && offerVal === 0) {
+            currentAdvice = "MAX PROFIT REACHED";
         }
-        // Arb detection
-        else if (offerVal > 0 && offerVal - liveEstValue > (maxPayout * 0.04)) {
-            tradeAction = "SELL TO MARKET (ARB)";
-            tradeReason = `Market overpaying by $${(offerVal - liveEstValue).toFixed(2)}. Free money. ${metricsStr}`;
+
+        // Latch Logic (Stop flickering)
+        if (currentAdvice === "⚡ TAKE PROFIT NOW" && currentOdds > 82 && !accelAgainst) {
+            currentAdvice = "HOLD FIRM"; 
+        } else if (currentAdvice === "⚡ CUT LOSSES NOW" && currentOdds > 55 && !accelAgainst) {
+            currentAdvice = "HOLD FIRM"; 
+        } else if (!["⚡ TAKE PROFIT NOW", "⚡ CUT LOSSES NOW", "TRAILING STOP HIT", "🚨 RUG PULL DETECTED 🚨", "REVERSE POSITION", "MAX PROFIT REACHED"].includes(currentAdvice)) {
+            currentAdvice = "HOLD FIRM";
+        }
+
+        activeAdviceRef.current = String(currentAdvice);
+        tradeAction = String(currentAdvice);
+
+        if (tradeAction === "🚨 RUG PULL DETECTED 🚨") {
+            tradeReason = `Massive liquidity collapse. Abort longs immediately. ${metricsStr}`;
+            actionColor = "text-rose-500"; actionBg = "bg-rose-500/20 border-rose-500/50 animate-pulse shadow-[0_0_20px_rgba(225,29,72,0.4)]";
+            hasAction = true; actionButtonLabel = "EMERGENCY CASHOUT"; actionTarget = "SIT OUT";
+        } else if (tradeAction === "TRAILING STOP HIT") {
+            tradeReason = `Price retreated 15% from local peak. Lock in remaining profit. ${metricsStr}`;
             actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30 animate-pulse";
             hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "CASH";
-        }
-        // NEW: Early loss cut — don't wait for ATR limit
-        else if (isBleeding && momentumAgainstPosition) {
-            tradeAction = "🔻 CUT LOSSES NOW";
-            tradeReason = `Past stop + momentum against you. Vel: ${v5s.toFixed(2)}/s. Don't wait. ${metricsStr}`;
-            actionColor = "text-rose-500"; actionBg = "bg-rose-500/15 border-rose-500/40 shadow-[0_0_15px_rgba(251,113,133,0.3)]";
-            hasAction = true; actionButtonLabel = "CASHOUT (STOP LOSS)"; actionTarget = "SIT OUT";
-            reasoning.push(`STOP: Bleeding ${Math.abs(realGapBps).toFixed(0)}bps + velocity against position.`);
-        }
-        else if (isReversalRecommended && !hasReversedRef.current) {
-            tradeAction = "REVERSE POSITION";
-            tradeReason = `Regime flipped. Switch sides. ${metricsStr}`;
-            actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30 shadow-[0_0_15px_rgba(251,191,36,0.2)]";
-            hasAction = true; actionButtonLabel = `REVERSE TO '${isYES ? 'NO' : 'YES'}'`; actionTarget = isYES ? "NO" : "YES";
-        }
-        else if (isBleeding || (isReversalRecommended && hasReversedRef.current)) {
-            tradeAction = "CUT LOSSES";
-            tradeReason = `Position drifting. ATR stop at ${dynamicStopLoss.toFixed(0)}bps. ${metricsStr}`;
+        } else if (tradeAction === "⚡ TAKE PROFIT NOW") {
+            tradeReason = `Profit peaked at $${peak}. Momentum is flipping hard against you. Exit. ${metricsStr}`;
+            actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30 animate-pulse";
+            hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "CASH";
+        } else if (tradeAction === "⚡ CUT LOSSES NOW") {
+            tradeReason = `Position bleeding past stop & acceleration is adverse. Exit immediately. ${metricsStr}`;
             actionColor = "text-rose-500"; actionBg = "bg-rose-500/10 border-rose-500/30";
             hasAction = true; actionButtonLabel = "EXECUTE CASHOUT"; actionTarget = "SIT OUT";
-        }
-        else if (currentOdds >= 82 && offerVal === 0) {
-            tradeAction = "LOCK IN PROFIT";
-            tradeReason = `Odds ${currentOdds.toFixed(0)}%. Secure gains. ${metricsStr}`;
+        } else if (tradeAction === "REVERSE POSITION") {
+            tradeReason = `Trend collapsed. Switch position. ${metricsStr}`;
+            actionColor = "text-amber-400"; actionBg = "bg-amber-500/10 border-amber-500/30 shadow-[0_0_15px_rgba(251,191,36,0.2)]";
+            hasAction = true; actionButtonLabel = `REVERSE TO '${isYES ? 'NO' : 'YES'}'`; actionTarget = isYES ? "NO" : "YES";
+        } else if (tradeAction === "MAX PROFIT REACHED") {
+            tradeReason = `Odds > 85%. Stand by to lock in gains. ${metricsStr}`;
             actionColor = "text-emerald-300"; actionBg = "bg-emerald-500/10 border-emerald-500/30";
-            hasAction = true; actionButtonLabel = "CASHOUT (PROFIT)"; actionTarget = "CASH";
-        }
-        else if (offerVal === 0) {
-            // Show position health
-            const healthEmoji = currentOdds > 65 ? "💪" : currentOdds > 55 ? "👌" : "⚠️";
-            tradeAction = `${healthEmoji} HOLD — ${currentOdds.toFixed(0)}%`;
-            tradeReason = `Vel ${v5s > 0 ? '↑' : '↓'}${Math.abs(v5s).toFixed(1)}/s. ${regime}. ${metricsStr}`;
-            actionColor = currentOdds > 60 ? "text-emerald-400" : "text-amber-400";
-            actionBg = currentOdds > 60 ? "bg-emerald-500/10 border-emerald-500/20" : "bg-amber-500/10 border-amber-500/20";
+            hasAction = true; actionButtonLabel = "EXECUTE CASHOUT (PROFIT)"; actionTarget = "CASH";
+        } else {
+            tradeReason = `Holding position. Velocity supports trend. ${metricsStr}`;
+            actionColor = "text-emerald-400"; actionBg = "bg-emerald-500/10 border-emerald-500/20";
         }
     }
 
     let textColor = activePrediction === "YES" ? "text-emerald-400" : activePrediction === "NO" ? "text-rose-400" : "text-zinc-500";
-
-    let convictionText = convictionScore > 60 ? "Very Sure" : convictionScore > 35 ? "Pretty Sure" : "Unsure";
-    let topDriver = Math.abs(v5s) > 0.5 ? `Velocity (${v5s > 0 ? '+' : ''}${v5s.toFixed(2)}/s)` : Math.abs(aggrFlow) > 0.5 ? `AggrFlow (${aggrFlow > 0 ? '+' : ''}${aggrFlow.toFixed(2)})` : `Composite (${posterior.toFixed(0)}%)`;
-
-    let predictionReason = "";
-    if (activePrediction === "SIT OUT") predictionReason = "Waiting for multi-timeframe velocity alignment.";
-    else if (velAligned && isAccelerating) predictionReason = "All velocities aligned + accelerating. Strong.";
-    else if (velAligned) predictionReason = "Velocities aligned but decelerating. Watch for exit.";
-    else predictionReason = "Holding through chop. Monitoring velocity.";
-
-    // Forecast
-    let simulatedPrice = currentPrice;
-    let projections = [];
-    for(let i=1; i<=4; i++) {
-        const nextHour = (timeState.currentHour + i) % 24;
-        const decay = Math.pow(0.82, i);
-        simulatedPrice += (v15s * 3 + (mktImplied * 0.5) + (macd.hist * 0.1)) * decay * (is15m ? 1.5 : 0.8);
-        projections.push({ time: `${nextHour.toString().padStart(2, '0')}:00`, price: simulatedPrice });
+    if (activePrediction === "SIT OUT" && isCalibrating && userPosition === null) {
+        activePrediction = "ANALYZING";
+        textColor = "text-amber-400 animate-pulse";
     }
 
-    return {
-      confidence: activePrediction === "NO" ? (100 - posterior).toFixed(1) : posterior.toFixed(1),
-      prediction: activePrediction, predictionReason, reasoning, textColor, rawProbAbove: posterior,
-      tradeAction, tradeReason, actionColor, actionBg, hasAction, actionButtonLabel, actionTarget,
-      realGapBps, clockSeconds, isSystemLocked: isEndgameLock, atrBps, livePnL, liveEstValue, projections,
-      vwapGapBps, regime, aggrFlow, topDriver, entryWindowStatus: isEndgameLock ? "Window Closed" : "Active Signal Window",
-      convictionScore, convictionText, isRugPull,
-      // V60 extras for display
-      vel, rsi, macd, bb, chancePct, riskPct, pnlSlope, peakPnL
+    let predictionReason = "";
+    if (activePrediction === "SIT OUT" || activePrediction === "ANALYZING") predictionReason = "Waiting for structural divergence.";
+    else if (realGapBps > 0 && activePrediction === "YES") predictionReason = "Firmly in profit. Holding steady.";
+    else if (realGapBps < 0 && activePrediction === "NO") predictionReason = "Firmly in profit. Holding steady.";
+    else predictionReason = "Position negative, holding firm through noise.";
+
+    let simulatedPrice = currentPrice;
+    let projections = [];
+    const safeSlope = isNaN(kinematics.v1) ? 0 : kinematics.v1; 
+    
+    for(let i=1; i<=4; i++) {
+        const nextHour = (timeState.currentHour + i) % 24;
+        let timeLabel = `${nextHour.toString().padStart(2, '0')}:00`;
+        simulatedPrice += (safeSlope * 0.5);
+        projections.push({ time: String(timeLabel), price: Number(simulatedPrice) });
+    }
+
+    return { 
+      confidence: String(activePrediction === "NO" ? (100 - posterior).toFixed(1) : posterior.toFixed(1)), 
+      prediction: String(activePrediction), 
+      predictionReason: String(predictionReason), 
+      reasoning: reasoning.map(r => String(r)), 
+      textColor: String(textColor), 
+      rawProbAbove: Number(posterior),
+      tradeAction: String(tradeAction), 
+      tradeReason: String(tradeReason), 
+      actionColor: String(actionColor), 
+      actionBg: String(actionBg), 
+      hasAction: Boolean(hasAction), 
+      actionButtonLabel: String(actionButtonLabel), 
+      actionTarget: String(actionTarget), 
+      realGapBps: Number(realGapBps), 
+      clockSeconds: Number(clockSeconds), 
+      isSystemLocked: Boolean(isEndgameLock), 
+      atrBps: Number(atrBps), 
+      livePnL: Number(livePnL), 
+      liveEstValue: Number(liveEstValue), 
+      projections: projections,
+      regime: String(regime), 
+      aggrFlow: Number(aggrFlow), 
+      convictionScore: Number(convictionScore),
+      isRugPull: Boolean(isRugPull)
     };
-  }, [currentPrice, liveHistory, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition, windowType, isMounted, showRugPullAlerts, velocityRef]);
+  }, [currentPrice, liveHistory, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, forceRender, betAmount, maxPayout, currentOffer, takerFlow, liquidations, userPosition, windowType, isMounted, showRugPullAlerts, kinematics, marketOI]);
 
   useEffect(() => {
     if (analysis?.hasAction && analysis.tradeAction !== prevActionRef.current) {
-      if (analysis.tradeAction.includes("ENTRY") || analysis.tradeAction.includes("TAKE PROFIT") || analysis.tradeAction.includes("CUT LOSSES NOW")) playAlertSound();
+      if (analysis.tradeAction.includes("ENTRY SIGNAL") || analysis.tradeAction.includes("TAKE PROFIT") || analysis.tradeAction.includes("CUT LOSSES")) {
+        playAlertSound();
+      }
     }
     prevActionRef.current = analysis?.tradeAction;
   }, [analysis?.tradeAction, soundEnabled]);
 
   const executeManualAction = (actionLabel, targetState) => {
-    setManualAction(actionLabel);
-    if (targetState === "CASH" || targetState === "SIT OUT") setUserPosition(null);
+    setManualAction(String(actionLabel));
+    if (analysis) {
+      broadcastToDiscord(`Action Executed: ${actionLabel}`, 3066993, [
+         { name: "Spot Price", value: `$${currentPrice?.toFixed(2) || '---'}`, inline: true },
+         { name: "Target Margin", value: `$${targetMargin?.toFixed(2) || '---'}`, inline: true },
+         { name: "Live PnL", value: `$${analysis.livePnL.toFixed(2)}`, inline: false }
+      ]);
+    }
+    if (targetState === "CASH" || targetState === "SIT OUT") setUserPosition(null); 
     if (analysis && (analysis.prediction === "YES" || analysis.prediction === "NO")) {
       const isWin = (analysis.prediction === "YES" && currentPrice > targetMargin) || (analysis.prediction === "NO" && currentPrice < targetMargin);
-      if (isWin) updateScore(windowType, 'wins', 1); else updateScore(windowType, 'losses', 1);
+      if (isWin) updateScore(windowType, 'wins', 1);
+      else updateScore(windowType, 'losses', 1);
     }
     if (targetState) {
-      lockedPredictionRef.current = targetState === "CASH" ? "SIT OUT" : targetState;
-      lastAdvisedRef.current = "SIT OUT";
-      if (targetState !== "CASH" && targetState !== "SIT OUT") hasReversedRef.current = true;
-      setForceRender(prev => prev + 1); setCurrentOffer("");
+      lockedPredictionRef.current = targetState === "CASH" ? "SIT OUT" : String(targetState);
+      setForceRender(prev => prev + 1);
+      setCurrentOffer(""); 
     }
   };
 
   const handleManualSync = (dir) => {
-    lockedPredictionRef.current = dir; activeCallRef.current = { prediction: dir, strike: targetMargin };
-    setUserPosition(dir); setForceRender(prev => prev + 1);
+    lockedPredictionRef.current = String(dir);
+    activeCallRef.current = { prediction: String(dir), strike: targetMargin };
+    setUserPosition(String(dir));
+    setForceRender(prev => prev + 1);
+    broadcastToDiscord(`Manual Sync: ${dir}`, 10181046, [
+       { name: "Spot Price", value: `$${currentPrice?.toFixed(2) || '---'}`, inline: true },
+       { name: "Target Margin", value: `$${targetMargin?.toFixed(2) || '---'}`, inline: true }
+    ]);
   };
 
   const handleChatSubmit = (e) => {
     if (e.key === 'Enter' && chatInput.trim()) {
-      const userText = chatInput.trim().toLowerCase();
-      const currentLog = [...chatLog, { role: 'user', text: chatInput.trim() }];
-      setChatLog(currentLog); setChatInput("");
+      const userText = chatInput.trim();
+      const currentLog = [...chatLog, { role: 'user', text: userText }];
+      setChatLog(currentLog);
+      setChatInput("");
       setTimeout(() => {
         let reply = "";
-        const a = analysis;
-        const v = velocityRef.current;
-        if (userText.includes("why") || userText.includes("explain") || userText.includes("reason") || userText.includes("logic")) {
-          reply = a ? `Posterior: ${Number(a.rawProbAbove||0).toFixed(1)}% YES. Regime: ${a.regime}. Velocity 5s: ${v.v5s.toFixed(2)}/s, 15s: ${v.v15s.toFixed(2)}/s. Accel: ${v.accel.toFixed(2)}. RSI: ${a.rsi?.toFixed(0)||50}. MACD H: ${a.macd?.hist?.toFixed(2)||0}. AggrFlow: ${a.aggrFlow?.toFixed(2)||0}. PnL slope: ${v.pnlSlope.toFixed(2)}.` : "Calculating...";
-        }
-        else if (userText.includes("velocity") || userText.includes("speed") || userText.includes("momentum")) {
-          reply = `Velocity: 1s=${v.v1s.toFixed(2)} | 5s=${v.v5s.toFixed(2)} | 15s=${v.v15s.toFixed(2)} | 30s=${v.v30s.toFixed(2)}. Acceleration: ${v.accel.toFixed(2)}. Jerk: ${v.jerk.toFixed(2)}. Peak PnL: ${v.peakPnL.toFixed(1)}bps. PnL slope: ${v.pnlSlope.toFixed(2)}.`;
-        }
-        else if (userText.includes("pnl") || userText.includes("profit") || userText.includes("loss") || userText.includes("cashout")) {
-          reply = a?.prediction === "SIT OUT" ? "No active trade." : `Est value: ~$${Number(a?.liveEstValue||0).toFixed(2)}. Live PnL: $${Number(a?.livePnL||0).toFixed(2)}. Peak PnL: ${v.peakPnL.toFixed(1)}bps. PnL slope: ${v.pnlSlope > 0 ? '↑ growing' : '↓ shrinking'} (${v.pnlSlope.toFixed(2)}). ${a?.chancePct?.toFixed(0)}% chance, ${a?.riskPct?.toFixed(0)}% risk.`;
-        }
-        else if (userText.includes("score") || userText.includes("record")) {
-          reply = `${windowType.toUpperCase()} scorecard: ${Number(scorecards[windowType]?.wins||0)} Wins / ${Number(scorecards[windowType]?.losses||0)} Losses.`;
-        }
-        else {
-          reply = `YES posterior: ${Number(a?.rawProbAbove||0).toFixed(1)}%. Regime: ${a?.regime||'CHOP'}. Velocity: ${v.v5s > 0 ? '↑' : '↓'}${Math.abs(v.v5s).toFixed(2)}/s. Advice: ${a?.tradeAction||'SIT OUT'}. Ask 'why' for reasoning or 'velocity' for speed data.`;
+        if (userText.toLowerCase().includes("/broadcast")) {
+            broadcastToDiscord(`Manual Status Broadcast`, 3447003, [
+                { name: "Prediction", value: analysis?.prediction || 'SIT OUT', inline: true },
+                { name: "Spot Price", value: `$${currentPrice?.toFixed(2)}`, inline: true },
+                { name: "Regime", value: analysis?.regime || 'Unknown', inline: true }
+            ]);
+            reply = `Status successfully broadcasted to Discord.`;
+        } else if (userText.toLowerCase().includes("why") || userText.toLowerCase().includes("explain")) {
+          reply = `Currently, my posterior for YES is ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. We are in a ${String(analysis?.regime || 'CHOP')} regime.`;
+        } else {
+          reply = `My probability engine places YES at ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. Currently, my advice is to: ${String(analysis?.tradeAction || 'SIT OUT')}.`;
         }
         setChatLog([...currentLog, { role: 'tara', text: reply }]);
-      }, 400);
+      }, 500); 
     }
   };
 
-  useEffect(() => { setManualAction(null); }, [analysis?.tradeAction]);
-  useEffect(() => { if (analysis && (analysis.prediction === "YES" || analysis.prediction === "NO" || analysis.prediction === "SIT OUT")) activeCallRef.current = { prediction: analysis.prediction, strike: targetMargin }; }, [analysis?.prediction, targetMargin]);
-
   if (!isMounted) {
-    return <div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara V60...</div>;
+    return <div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara Terminal...</div>;
   }
 
   return (
     <div className="min-h-screen lg:h-screen bg-[#111312] text-[#E8E9E4] font-sans p-2 sm:p-3 flex flex-col selection:bg-[#E8E9E4]/20 overflow-y-auto">
       <div className="w-full max-w-[1600px] mx-auto flex flex-col h-full gap-3 min-h-0">
-
-        {/* HEADER */}
         <div className="flex justify-between items-center border-b border-[#E8E9E4]/10 pb-2 shrink-0">
           <div className="flex items-center justify-between w-full sm:w-auto">
             <h1 className="text-lg md:text-xl font-serif tracking-tight text-white flex items-center gap-2">
-              Tara
-              <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V60 Terminal
+              Tara <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V67 Velocity Engine
               </span>
             </h1>
             <div className="flex sm:hidden items-center gap-2">
-              <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-1.5 rounded-md border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`}>{soundEnabled ? <IconVolume2 /> : <IconVolumeX />}</button>
-              <button onClick={() => setShowHelp(true)} className="p-1.5 rounded-md bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors"><IconHelp /></button>
+              <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-1.5 rounded-md border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`}>
+                {soundEnabled ? <IconVolume2 className="w-3.5 h-3.5" /> : <IconVolumeX className="w-3.5 h-3.5" />}
+              </button>
+              <button onClick={() => setShowHelp(true)} className="p-1.5 rounded-md bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors">
+                <IconHelp className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
           <div className="flex bg-[#111312] border border-[#E8E9E4]/20 rounded-lg p-1 shadow-inner w-full sm:w-auto justify-center">
@@ -1056,25 +1236,21 @@ export default function App() {
               <div className="text-sm font-serif text-[#E8E9E4]/90">{String(timeState.currentEST || '--:--:--')}</div>
             </div>
             <div className="flex items-center gap-2 border-l border-[#E8E9E4]/10 pl-4">
-              <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-2 rounded-lg border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`} title="Toggle Audio">{soundEnabled ? <IconVolume2 /> : <IconVolumeX />}</button>
-              <button onClick={() => setShowHelp(true)} className="p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors" title="Manual"><IconHelp /></button>
+              <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-2 rounded-lg border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`} title="Toggle Audio Alerts">{soundEnabled ? <IconVolume2 className="w-4 h-4" /> : <IconVolumeX className="w-4 h-4" />}</button>
+              <button onClick={() => setShowSettings(true)} className="p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-indigo-400 transition-colors" title="Discord Webhook Settings"><IconLink className="w-4 h-4" /></button>
+              <button onClick={() => setShowHelp(true)} className="p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors" title="Operations Manual"><IconHelp className="w-4 h-4" /></button>
             </div>
           </div>
         </div>
 
-        {/* STATS BAR */}
         <div className="bg-[#181A19] p-2 sm:px-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-wrap lg:flex-nowrap items-center justify-between gap-3 shrink-0 relative overflow-hidden">
            <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
            <div className="flex w-full lg:w-auto justify-between lg:justify-start items-center gap-4">
              <div className="flex items-center gap-3 w-1/2 lg:w-auto pl-1 md:pl-2">
-               <div className="p-2 bg-[#111312] rounded-lg border border-[#E8E9E4]/5 shadow-inner">
-                 <IconZap className={`w-5 h-5 transition-colors duration-200 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-[#E8E9E4]/40'}`} />
-               </div>
+               <div className="p-2 bg-[#111312] rounded-lg border border-[#E8E9E4]/5 shadow-inner"><IconZap className={`w-5 h-5 transition-colors duration-200 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-[#E8E9E4]/40'}`} /></div>
                <div>
                  <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-0.5">Live Spot</div>
-                 <div className={`text-lg sm:text-2xl font-serif tracking-tight flex items-center gap-1 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-white'}`}>
-                   ${currentPrice ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '---'}
-                 </div>
+                 <div className={`text-lg sm:text-2xl font-serif tracking-tight flex items-center gap-1 ${tickDirection === 'up' ? 'text-emerald-400' : tickDirection === 'down' ? 'text-rose-400' : 'text-white'}`}>${currentPrice ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '---'}</div>
                </div>
              </div>
              <div className="flex lg:hidden flex-col items-center bg-[#111312] p-1.5 rounded-xl border border-[#E8E9E4]/5 shadow-inner w-1/2">
@@ -1089,31 +1265,20 @@ export default function App() {
            <div className="flex items-center gap-3 md:gap-6 w-full lg:w-auto bg-[#111312] p-2 rounded-xl border border-[#E8E9E4]/5 shadow-inner justify-between overflow-x-auto flex-1">
              <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[120px]">
                <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1">Strike</div>
-               <div className="flex items-center w-full">
-                 <IconCrosshair className="w-3 h-3 md:w-4 md:h-4 text-indigo-400 mr-1 md:mr-2 opacity-80 hidden sm:block" />
-                 <input type="number" value={targetMargin === 0 ? '' : targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-base md:text-lg w-full focus:outline-none py-1 leading-normal" />
-               </div>
+               <div className="flex items-center w-full"><IconCrosshair className="w-3 h-3 md:w-4 md:h-4 text-indigo-400 mr-1 md:mr-2 opacity-80 hidden sm:block" /><input type="number" value={targetMargin === 0 ? '' : targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-base md:text-lg w-full focus:outline-none py-1 leading-normal" /></div>
              </div>
              <div className="flex flex-col items-start pr-3 md:pr-6 border-r border-[#E8E9E4]/10 min-w-[120px]">
                <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1">Bet / Win</div>
-               <div className="flex items-center gap-1 text-white font-serif text-base w-full">
-                 $<input type="number" value={betAmount === 0 ? '' : betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-full text-center outline-none py-1 leading-normal" />
-                 <span className="text-[#E8E9E4]/40 mx-0.5">/</span>
-                 $<input type="number" value={maxPayout === 0 ? '' : maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-full text-center outline-none py-1 leading-normal" />
-               </div>
+               <div className="flex items-center gap-1 text-white font-serif text-base w-full">$<input type="number" value={betAmount === 0 ? '' : betAmount} onChange={(e) => setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-full text-center outline-none py-1 leading-normal" /><span className="text-[#E8E9E4]/40 mx-0.5">/</span>$<input type="number" value={maxPayout === 0 ? '' : maxPayout} onChange={(e) => setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-full text-center outline-none py-1 leading-normal" /></div>
              </div>
              <div className="flex flex-col items-start pl-1 md:pl-2 min-w-[100px]">
                <div className="text-[9px] md:text-[10px] text-emerald-400/80 uppercase tracking-widest font-medium mb-1">Live Offer</div>
-               <div className="flex items-center gap-1 text-emerald-400 font-serif text-base md:text-lg">
-                 $<input type="number" value={currentOffer} onChange={(e) => setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-full text-center outline-none placeholder-emerald-900 py-1 leading-normal" />
-               </div>
+               <div className="flex items-center gap-1 text-emerald-400 font-serif text-base md:text-lg">$<input type="number" value={currentOffer} onChange={(e) => setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-full text-center outline-none placeholder-emerald-900 py-1 leading-normal" /></div>
              </div>
            </div>
            <div className="w-px h-8 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
            <div className="hidden lg:flex flex-col items-start w-48">
-             <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1 flex justify-between w-full">
-               <span className="flex items-center gap-1.5"><IconTerminal className="w-3.5 h-3.5"/> {String(windowType).toUpperCase()} SCORECARD</span>
-             </div>
+             <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1 flex justify-between w-full"><span className="flex items-center gap-1.5"><IconTerminal className="w-3.5 h-3.5"/> {String(windowType).toUpperCase()} SCORECARD</span></div>
              <div className="flex items-center justify-between w-full px-2">
                <div className="flex flex-col items-center">
                  <div className="flex items-center gap-1 text-[9px] text-emerald-400 mb-0.5"><button onClick={() => updateScore(windowType, 'wins', -1)}>-</button> WINS <button onClick={() => updateScore(windowType, 'wins', 1)}>+</button></div>
@@ -1128,200 +1293,83 @@ export default function App() {
            </div>
         </div>
 
-        {/* MIDDLE ROW */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 shrink-0 lg:h-[250px]">
-          {/* Prediction */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 shrink-0 lg:h-[320px]">
           <div className="lg:col-span-4 bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative overflow-hidden h-full">
              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-transparent opacity-30"></div>
              <div className="flex justify-between items-start mb-2">
-               <div className="bg-[#111312] border border-[#E8E9E4]/10 px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 shadow-sm whitespace-nowrap">
-                 <IconClock className="w-3 h-3" />
-                 <span className="text-[#E8E9E4]/60 hidden sm:inline">{String(timeState.startWindowEST)}-{String(timeState.nextWindowEST)}</span>
-                 <span className="text-[#E8E9E4]">{Number(timeState.minsRemaining)}m {Number(timeState.secsRemaining)}s</span>
-               </div>
-               {analysis && analysis.tradeAction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && (
-                 <button onClick={() => executeManualAction("MANUAL PULL OUT", "SIT OUT")} className="bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-colors">
-                   <IconAlertTriangle className="w-3 h-3" /> <span>Force Exit</span>
-                 </button>
-               )}
+               <div className="bg-[#111312] border border-[#E8E9E4]/10 px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 shadow-sm whitespace-nowrap"><IconClock className="w-3 h-3" /><span className="text-[#E8E9E4]/60 hidden sm:inline">{String(timeState.startWindowEST)}-{String(timeState.nextWindowEST)}</span><span className="text-[#E8E9E4]">{Number(timeState.minsRemaining)}m {Number(timeState.secsRemaining)}s</span></div>
+               {analysis && analysis.tradeAction !== "SIT OUT" && analysis.prediction !== "ANALYZING" && (<button onClick={() => executeManualAction("MANUAL PULL OUT", "SIT OUT")} className="bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-colors"><IconAlertTriangle className="w-3 h-3" /> <span>Force Exit</span></button>)}
              </div>
-             {isLoading || !analysis ? (
-               <div className="text-lg font-serif text-[#E8E9E4]/30 animate-pulse mt-4 text-center w-full">Connecting...</div>
-             ) : (
+             {isLoading || !analysis ? (<div className="text-lg font-serif text-[#E8E9E4]/30 animate-pulse mt-4 text-center w-full">Connecting...</div>) : (
                <div className="flex flex-col items-center w-full flex-1 justify-center">
-                 <div className="flex flex-col items-center mb-2">
-                   <span className="text-[9px] text-[#E8E9E4]/40 uppercase tracking-[0.2em] font-bold">Prediction</span>
-                   <h2 className={`text-[48px] sm:text-[56px] xl:text-[64px] font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg transition-all flex items-center justify-center uppercase`}>{String(analysis.prediction)}</h2>
-                 </div>
+                 <div className="flex flex-col items-center mb-4 mt-2"><span className="text-[9px] text-[#E8E9E4]/40 uppercase tracking-[0.2em] mb-1 font-bold">Prediction</span><h2 className={`text-[64px] sm:text-[72px] font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg transition-all flex items-center justify-center uppercase`}>{String(analysis.prediction)}</h2></div>
                  <div className={`w-full p-2.5 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm mt-auto`}>
-                   <div className="flex items-center gap-1.5 mb-1">
-                     <IconBell className={`w-3.5 h-3.5 ${analysis.actionColor}`} />
-                     <span className="text-[9px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span>
-                   </div>
+                   <div className="flex items-center gap-1.5 mb-1"><IconBell className={`w-3.5 h-3.5 ${analysis.actionColor}`} /><span className="text-[9px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span></div>
                    <div className={`text-sm sm:text-base font-serif font-bold mb-1 ${analysis.actionColor} uppercase`}>{String(analysis.tradeAction)}</div>
-                   <p className="text-[9px] sm:text-[10px] opacity-80 text-[#E8E9E4] mb-1.5 leading-tight px-1">{String(analysis.tradeReason)}</p>
-                   {analysis.hasAction && (
-                     <div className="w-full pt-2 border-t border-[#E8E9E4]/10">
-                        {manualAction === analysis.tradeAction ? (
-                           <div className="w-full bg-emerald-500/20 text-emerald-400 py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5"><IconCheck className="w-3.5 h-3.5" /> Logged</div>
-                        ) : (
-                           <button onClick={() => executeManualAction(analysis.tradeAction, analysis.actionTarget)}
-                             className={`w-full py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-widest border transition-all hover:brightness-125 ${analysis.actionColor.includes('rose') ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' : analysis.actionColor.includes('amber') ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'}`}>
-                             {String(analysis.actionButtonLabel)}
-                           </button>
-                        )}
-                     </div>
-                   )}
+                   <p className="text-[9px] sm:text-[10px] opacity-80 text-[#E8E9E4] mb-2 leading-tight px-1">{String(analysis.tradeReason)}</p>
+                   {analysis.hasAction && (<div className="w-full pt-2 border-t border-[#E8E9E4]/10">{manualAction === analysis.tradeAction ? (<div className="w-full bg-emerald-500/20 text-emerald-400 py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest flex items-center justify-center gap-1.5"><IconCheck className="w-3.5 h-3.5" /> Logged</div>) : (<button onClick={() => executeManualAction(analysis.tradeAction, analysis.actionTarget)} className={`w-full py-2 rounded-lg text-[9px] font-bold uppercase tracking-widest border transition-all hover:brightness-125 ${analysis.actionColor.includes('rose') ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' : analysis.actionColor.includes('amber') ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'}`}>{String(analysis.actionButtonLabel)}</button>)}</div>)}
                  </div>
                </div>
              )}
           </div>
 
-          {/* Middle: Posteriors, Forecast, Sync */}
           <div className="lg:col-span-4 flex flex-col gap-3 h-full">
             <div className="flex gap-3 flex-1 min-h-0">
-              <div className="flex-1 bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md flex flex-col justify-center">
-                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-1">CHANCE (UP)</div>
-                 <div className="text-3xl sm:text-4xl xl:text-5xl font-serif text-indigo-300">{analysis ? `${Number(analysis.rawProbAbove || 0).toFixed(1)}%` : '--%'}</div>
-              </div>
-              <div className="flex-1 bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md flex flex-col justify-center">
-                 <div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-1">CHANCE (DN)</div>
-                 <div className="text-3xl sm:text-4xl xl:text-5xl font-serif text-rose-300">{analysis ? `${(100 - Number(analysis.rawProbAbove || 0)).toFixed(1)}%` : '--%'}</div>
-              </div>
+              <div className="flex-1 bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md flex flex-col justify-center"><div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-1">POSTERIOR (UP)</div><div className="text-3xl sm:text-4xl xl:text-5xl font-serif text-indigo-300">{analysis ? `${Number(analysis.rawProbAbove || 0).toFixed(1)}%` : '--%'}</div></div>
+              <div className="flex-1 bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md flex flex-col justify-center"><div className="text-[9px] sm:text-[10px] text-[#E8E9E4]/50 font-bold uppercase mb-1">POSTERIOR (DN)</div><div className="text-3xl sm:text-4xl xl:text-5xl font-serif text-rose-300">{analysis ? `${(100 - Number(analysis.rawProbAbove || 0)).toFixed(1)}%` : '--%'}</div></div>
             </div>
-            {analysis && (
-              <div className="bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md shrink-0">
-                <h2 className="text-[9px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5"><IconTrendingUp className="w-3.5 h-3.5 text-purple-400" /> Forecast</h2>
-                <div className="grid grid-cols-4 gap-2">
-                  {analysis.projections.map((proj, idx) => (
-                    <div key={idx} className="bg-[#111312] rounded-lg p-1.5 text-center border border-[#E8E9E4]/5">
-                      <div className="text-[9px] text-[#E8E9E4]/40 font-bold uppercase mb-0.5">{String(proj.time)}</div>
-                      <div className="text-[11px] font-serif text-purple-100">${Number(proj.price || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {userPosition === null && (
-              <div className="flex flex-col items-center gap-1.5 w-full shrink-0">
-                <span className="text-[8px] uppercase tracking-widest text-[#E8E9E4]/40">Already in a trade? Sync Tara:</span>
-                <div className="flex gap-2 w-full">
-                  <button onClick={() => handleManualSync("YES")} className="flex-1 py-1.5 border border-emerald-500/30 text-emerald-400 rounded-md text-[9px] uppercase font-bold tracking-widest hover:bg-emerald-500/10 transition-colors">I Entered YES</button>
-                  <button onClick={() => handleManualSync("NO")} className="flex-1 py-1.5 border border-rose-500/30 text-rose-400 rounded-md text-[9px] uppercase font-bold tracking-widest hover:bg-rose-500/10 transition-colors">I Entered NO</button>
-                </div>
-              </div>
-            )}
+            {analysis && (<div className="bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md shrink-0"><h2 className="text-[9px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5"><IconTrendingUp className="w-3.5 h-3.5 text-purple-400" /> Forecast</h2><div className="grid grid-cols-4 gap-2">{analysis.projections.map((proj, idx) => (<div key={idx} className="bg-[#111312] rounded-lg p-1.5 text-center border border-[#E8E9E4]/5"><div className="text-[9px] text-[#E8E9E4]/40 font-bold uppercase mb-0.5">{String(proj.time)}</div><div className="text-[11px] font-serif text-purple-100">${Number(proj.price || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div></div>))}</div></div>)}
+            {userPosition === null && (<div className="flex flex-col items-center gap-1.5 w-full shrink-0"><span className="text-[8px] uppercase tracking-widest text-[#E8E9E4]/40">Already in a trade? Sync Tara:</span><div className="flex gap-2 w-full"><button onClick={() => handleManualSync("YES")} className="flex-1 py-1.5 border border-emerald-500/30 text-emerald-400 rounded-md text-[9px] uppercase font-bold tracking-widest hover:bg-emerald-500/10 transition-colors">I Entered YES</button><button onClick={() => handleManualSync("NO")} className="flex-1 py-1.5 border border-rose-500/30 text-rose-400 rounded-md text-[9px] uppercase font-bold tracking-widest hover:bg-rose-500/10 transition-colors">I Entered NO</button></div></div>)}
           </div>
 
-          {/* Right: Engine Logs & Wire */}
           <div className="lg:col-span-4 flex flex-col gap-3 h-full">
-             {analysis && (
-               <div className="bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-0">
-                 <h2 className="text-[9px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest mb-2 flex items-center gap-1.5 border-b border-[#E8E9E4]/10 pb-1"><IconTerminal className="w-3.5 h-3.5 text-amber-400" /> Engine Logs</h2>
-                 <div className="space-y-1.5 font-mono flex-1 overflow-y-auto pr-1 custom-scrollbar">
-                   {(analysis.reasoning || []).map((reason, idx) => (
-                     <div key={idx} className={`bg-[#111312] p-2 rounded-md text-[8.5px] sm:text-[9px] ${reason.includes('RUG') || reason.includes('CRASH') || reason.includes('STOP') ? 'text-rose-400 border border-rose-500/20' : reason.includes('CASHOUT') || reason.includes('TAKE PROFIT') ? 'text-emerald-400 border border-emerald-500/20' : 'text-[#E8E9E4]/70 border border-[#E8E9E4]/5'} flex items-start gap-1.5 uppercase`}>
-                       <span className="text-emerald-500 mt-0.5">{`>`}</span>
-                       <span className="leading-snug">{String(reason)}</span>
-                     </div>
-                   ))}
-                 </div>
-               </div>
-             )}
-             <div className="bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-0">
-               <div className="flex justify-between items-center mb-2 border-b border-[#E8E9E4]/10 pb-1">
-                 <h2 className="text-[9px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest flex items-center gap-1.5"><IconGlobe className="w-3.5 h-3.5 text-blue-400" /> Live Wire</h2>
-               </div>
-               <div className="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1">
-                 {newsEvents.length === 0 ? <div className="text-[10px] text-[#E8E9E4]/40 italic">Generating market intel...</div> :
-                   newsEvents.map((news, i) => (
-                     <div key={i} className={`border-l-[2px] pl-2 py-0.5 ${news.type === 'rugpull' ? 'border-rose-500' : news.type === 'whale' ? 'border-purple-500' : 'border-indigo-500/40'}`}>
-                       <span className={`text-[9px] sm:text-[10px] leading-tight ${news.type === 'rugpull' ? 'text-rose-400 font-bold' : news.type === 'whale' ? 'text-purple-300' : 'text-[#E8E9E4]/90'}`}>{String(news.title)}</span>
-                     </div>
-                   ))
-                 }
-               </div>
-             </div>
+             {analysis && (<div className="bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-0"><h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest mb-2 flex items-center gap-1.5 border-b border-[#E8E9E4]/10 pb-1"><IconTerminal className="w-3.5 h-3.5 text-amber-400" /> Engine Logs</h2><div className="space-y-1.5 font-mono flex-1 overflow-y-auto pr-1 custom-scrollbar">{(analysis.reasoning || []).map((reason, idx) => (<div key={idx} className={`bg-[#111312] p-2 rounded-md text-[8.5px] sm:text-[9px] ${reason.includes('RUG PULL') ? 'text-rose-400 border border-rose-500/20' : 'text-[#E8E9E4]/70 border border-[#E8E9E4]/5'} flex items-start gap-1.5 uppercase`}><span className="text-emerald-500 mt-0.5">{'>'}</span><span className="leading-snug">{String(reason)}</span></div>))}</div></div>)}
+             <div className="bg-[#181A19] p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-0"><div className="flex justify-between items-center mb-2 border-b border-[#E8E9E4]/10 pb-1"><h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest flex items-center gap-1.5"><IconGlobe className="w-3.5 h-3.5 text-blue-400" /> Live Wire</h2></div><div className="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1">{newsEvents.length === 0 ? (<div className="text-[10px] text-[#E8E9E4]/40 italic">Generating market intel...</div>) : (newsEvents.map((news, i) => (<div key={i} className={`border-l-[2px] pl-2 py-0.5 ${news.type === 'rugpull' ? 'border-rose-500' : news.type === 'whale' ? 'border-purple-500' : 'border-indigo-500/40'}`}><span className={`text-[9px] sm:text-[10px] leading-tight ${news.type === 'rugpull' ? 'text-rose-400 font-bold' : news.type === 'whale' ? 'text-purple-300' : 'text-[#E8E9E4]/90'}`}>{String(news.title)}</span></div>)))}</div></div>
           </div>
         </div>
 
-        {/* CHART */}
-        <div className="w-full bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col flex-1 min-h-[200px] mt-2 relative z-10">
-          <div className="flex justify-between items-center mb-2 border-b border-[#E8E9E4]/10 pb-2">
-            <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] flex items-center gap-2"><IconActivity className="w-4 h-4 text-indigo-400" /> LIVE PRICE CHART</h2>
-            <div className="flex items-center gap-3 text-[9px] text-[#E8E9E4]/60 bg-[#111312] px-3 py-1 rounded-lg border border-[#E8E9E4]/5">
-              <label className="flex items-center gap-1 cursor-pointer hover:text-purple-400 transition-colors"><input type="checkbox" checked={showWhaleAlerts} onChange={(e) => setShowWhaleAlerts(e.target.checked)} className="accent-purple-500 w-3 h-3" /> Whale</label>
-              <label className="flex items-center gap-1 cursor-pointer hover:text-purple-400 transition-colors"><input type="checkbox" checked={showRugPullAlerts} onChange={(e) => setShowRugPullAlerts(e.target.checked)} className="accent-purple-500 w-3 h-3" /> Rug Pull</label>
-              <label className="flex items-center gap-1 cursor-pointer hover:text-purple-400 transition-colors"><input type="checkbox" checked={showCandles} onChange={(e) => setShowCandles(e.target.checked)} className="accent-purple-500 w-3 h-3" /> Candles</label>
-              <span className="ml-1 pl-2 border-l border-[#E8E9E4]/10 opacity-50">{liveHistory.length} pts</span>
-            </div>
-          </div>
+        <div className="w-full bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col flex-1 min-h-[300px] mt-2 relative z-10">
+          <div className="flex justify-between items-center mb-2 border-b border-[#E8E9E4]/10 pb-2"><h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] flex items-center gap-2"><IconActivity className="w-4 h-4 text-indigo-400" /> LIVE PRICE CHART</h2><div className="flex items-center gap-3 text-[9px] text-[#E8E9E4]/60 bg-[#111312] px-3 py-1 rounded-lg border border-[#E8E9E4]/5"><label className="flex items-center gap-1 cursor-pointer hover:text-purple-400 transition-colors"><input type="checkbox" checked={showWhaleAlerts} onChange={(e) => setShowWhaleAlerts(e.target.checked)} className="accent-purple-500 w-3 h-3" /> Whale Alerts</label><label className="flex items-center gap-1 cursor-pointer hover:text-purple-400 transition-colors"><input type="checkbox" checked={showRugPullAlerts} onChange={(e) => setShowRugPullAlerts(e.target.checked)} className="accent-purple-500 w-3 h-3" /> Rug Pull Alerts</label><label className="flex items-center gap-1 cursor-pointer hover:text-purple-400 transition-colors"><input type="checkbox" checked={showCandles} onChange={(e) => setShowCandles(e.target.checked)} className="accent-purple-500 w-3 h-3" /> Candlesticks</label><span className="ml-1 pl-2 border-l border-[#E8E9E4]/10 opacity-50">{liveHistory.length} pts</span></div></div>
           <div className="flex-1 w-full h-full relative rounded-md overflow-hidden bg-[#111312]" style={{ backgroundImage: 'linear-gradient(rgba(232, 233, 228, 0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(232, 233, 228, 0.02) 1px, transparent 1px)', backgroundSize: '40px 40px' }}>
-            {liveHistory.length > 0 ? <LiveChart data={liveHistory} currentPrice={currentPrice} targetMargin={targetMargin} showCandles={showCandles} rugPullActive={showRugPullAlerts && analysis?.isRugPull} /> :
-              <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#E8E9E4]/30 uppercase tracking-widest animate-pulse">Aggregating Ticks...</div>
-            }
+            {liveHistory.length > 0 ? (<LiveChart data={liveHistory} currentPrice={currentPrice} targetMargin={targetMargin} showCandles={showCandles} rugPullActive={showRugPullAlerts && analysis?.isRugPull} />) : (<div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#E8E9E4]/30 uppercase tracking-widest animate-pulse">Aggregating Ticks...</div>)}
           </div>
         </div>
       </div>
 
-      {/* CHAT */}
+      {showSettings && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-md shadow-2xl p-6"><div className="flex justify-between items-center mb-4"><h2 className="text-lg font-serif text-white flex items-center gap-2"><IconLink className="w-5 h-5 text-indigo-400" /> Discord Integration</h2><button onClick={() => setShowSettings(false)} className="text-[#E8E9E4]/50 hover:text-white"><IconX className="w-5 h-5" /></button></div><p className="text-xs text-[#E8E9E4]/70 mb-4 leading-relaxed">Paste your Discord server's Webhook URL here. Tara will automatically broadcast entry signals, manual trade confirmations, and scorecard updates to your server.</p><input type="password" value={discordWebhook} onChange={(e) => setDiscordWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." className="w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-400 text-white font-mono mb-6" /><button onClick={() => setShowSettings(false)} className="w-full bg-indigo-500 hover:bg-indigo-400 text-white font-bold py-2.5 rounded-lg text-xs uppercase tracking-widest transition-colors">Save Configuration</button></div>
+        </div>
+      )}
+
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen ? 'w-[90vw] sm:w-80' : 'w-auto'}`}>
         {isChatOpen && (
-          <div className="bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[60vh] sm:h-96">
-            <div className="bg-[#111312] p-3 flex justify-between items-center border-b border-[#E8E9E4]/10">
-              <span className="text-xs font-bold uppercase tracking-widest flex items-center gap-2"><IconMessage className="w-3.5 h-3.5 text-indigo-400" /> Chat w/ Tara</span>
-              <button onClick={() => setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IconX className="w-4 h-4" /></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[#111312]/50">
-              {(chatLog || []).map((msg, i) => (
-                <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <span className={`text-[10px] uppercase opacity-40 mb-1 ${msg.role === 'user' ? 'mr-1' : 'ml-1'}`}>{String(msg.role)}</span>
-                  <div className={`text-xs p-2.5 rounded-lg max-w-[85%] leading-relaxed ${msg.role === 'user' ? 'bg-indigo-500/20 text-indigo-100 border border-indigo-500/30 rounded-tr-none' : 'bg-[#2A2D2C] text-[#E8E9E4] border border-[#E8E9E4]/10 rounded-tl-none'}`}>{String(msg.text)}</div>
-                </div>
-              ))}
-            </div>
-            <div className="p-3 bg-[#111312] border-t border-[#E8E9E4]/10">
-              <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={handleChatSubmit}
-                placeholder={`Ask Tara about the ${windowType.toUpperCase()} window...`} className="w-full bg-[#181A19] border border-[#E8E9E4]/20 rounded-md px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white" />
-            </div>
-          </div>
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[60vh] sm:h-96"><div className="bg-[#111312] p-3 flex justify-between items-center border-b border-[#E8E9E4]/10"><span className="text-xs font-bold uppercase tracking-widest flex items-center gap-2"><IconMessage className="w-3.5 h-3.5 text-indigo-400" /> Chat w/ Tara</span><button onClick={() => setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IconX className="w-4 h-4" /></button></div><div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-[#111312]/50">{(chatLog || []).map((msg, i) => (<div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}><span className={`text-[10px] uppercase opacity-40 mb-1 ${msg.role === 'user' ? 'mr-1' : 'ml-1'}`}>{String(msg.role)}</span><div className={`text-xs p-2.5 rounded-lg max-w-[85%] leading-relaxed ${msg.role === 'user' ? 'bg-indigo-500/20 text-indigo-100 border border-indigo-500/30 rounded-tr-none' : 'bg-[#2A2D2C] text-[#E8E9E4] border border-[#E8E9E4]/10 rounded-tl-none'} ${msg.isLoading ? 'animate-pulse' : ''}`}>{String(msg.text)}</div></div>))}</div><div className="p-3 bg-[#111312] border-t border-[#E8E9E4]/10"><input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={handleChatSubmit} placeholder={`Ask Tara about the ${windowType.toUpperCase()} window...`} className="w-full bg-[#181A19] border border-[#E8E9E4]/20 rounded-md px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white" /></div></div>
         )}
-        {!isChatOpen && <button onClick={() => setIsChatOpen(true)} className="bg-indigo-500 hover:bg-indigo-400 text-white p-3 rounded-full shadow-lg border border-indigo-400/50 flex items-center gap-2 transition-transform hover:scale-105"><IconMessage className="w-5 h-5" /></button>}
+        {!isChatOpen && (<button onClick={() => setIsChatOpen(true)} className="bg-indigo-500 hover:bg-indigo-400 text-white p-3 rounded-full shadow-lg border border-indigo-400/50 flex items-center gap-2 transition-transform hover:scale-105"><IconMessage className="w-5 h-5" /></button>)}
       </div>
 
-      {/* HELP MODAL */}
       {showHelp && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl">
-            <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10">
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IconInfo className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" /> Tara V60 Operations Manual</h2>
-              <button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IconX className="w-5 h-5" /></button>
-            </div>
-            <div className="p-4 sm:p-6 space-y-6 sm:space-y-8 text-xs sm:text-sm text-[#E8E9E4]/80">
-              <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">1. V60 Velocity Engine — Core Innovation</h3>
-                <p className="mb-3 leading-relaxed">V60 fundamentally changes how Tara predicts. Instead of asking "where IS the price?" it asks "where is the price GOING and how FAST?" The Velocity Engine tracks price speed at 4 timeframes (1s, 5s, 15s, 30s), plus acceleration (is speed increasing?) and jerk (sudden momentum snaps).</p>
-                <p className="mb-3 leading-relaxed border-l-2 border-emerald-500 pl-3 bg-emerald-500/5 p-2 rounded-r"><strong>Key principle:</strong> Tara only enters when ALL velocity timeframes agree on direction AND probability exceeds threshold. This eliminates coin-flip calls in choppy markets.</p>
-              </section>
-              <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">2. PnL-Aware Cashout Timing</h3>
-                <p className="mb-3 leading-relaxed">V60 tracks your peak profit and monitors PnL slope (is profit growing or shrinking). When it detects your profit peaked and momentum is reversing against you, it triggers an early "TAKE PROFIT NOW" alert — BEFORE the reversal completes. This prevents the classic "I was up $4 but waited too long" scenario.</p>
-                <p className="mb-3 leading-relaxed">Similarly, loss cuts now combine ATR stops with velocity checks. If you're bleeding AND momentum is accelerating against you, V60 triggers "CUT LOSSES NOW" immediately instead of waiting for a threshold.</p>
-              </section>
-              <section>
-                <h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">3. 5-Minute vs 15-Minute Strategy</h3>
-                <p className="mb-3 leading-relaxed"><strong>15M Mode:</strong> Trusts slower velocities (15s, 30s). Heavier RSI mean-reversion. Needs stronger confirmation to enter (62%). Endgame lock at 90 seconds. Built for structural trades.<br/><strong>5M Mode:</strong> Trusts fast velocities (1s, 5s) with 1.5x tape flow weighting. Lower entry bar (60%). Endgame at 45 seconds. MACD histogram weighted 2x. Built for aggressive scalping. Reacts to jerk (snap moves) more heavily.</p>
-              </section>
-              <section>
-                <h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-[10px] sm:text-xs">4. Chat Commands</h3>
-                <p className="leading-relaxed"><strong>"why"</strong> — Full indicator + velocity breakdown. <strong>"velocity"</strong> — Raw speed data at all timeframes + acceleration. <strong>"pnl"</strong> — Live profit, peak PnL, PnL slope, chance/risk %. <strong>"score"</strong> — Win/loss record.</p>
-              </section>
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl"><div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10"><h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IconInfo className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" /> Tara Operations Manual</h2><button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IconX className="w-5 h-5" /></button></div>
+            <div className="p-4 sm:p-6 space-y-6 text-xs sm:text-sm text-[#E8E9E4]/80">
+              <section><h3 className="text-indigo-400 font-bold uppercase tracking-widest mb-2 flex items-center gap-2"><IconLink className="w-4 h-4" /> Institutional Data Feeds</h3><p className="mb-3 leading-relaxed border-l-2 border-indigo-500 pl-3 bg-indigo-500/5 p-2 rounded-r">Tara V67 aggregates real-time futures data from Binance and Bybit, overlaying global liquidity walls and funding rates directly into the model.</p></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2">1. The Velocity Engine</h3><p className="mb-3 leading-relaxed">Tara no longer uses a single tick slope. She measures 1s, 5s, 15s, and 30s velocity simultaneously, computing true acceleration and jerk to ensure trades are only taken when all timeframes align perfectly.</p></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2">2. PnL-Aware Predictive Exits</h3><p className="leading-relaxed">Tara actively tracks your peak profit (High-Water Mark). If your profit has peaked and the 5s acceleration snaps into a reversal, she will instantly yell SECURE PROFIT before the macro drop executes.</p></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2">3. Gravitational Time Decay</h3><p className="mb-3 leading-relaxed">Tara relies on predictive momentum at start, but shifts weight to the physical price gap as the clock drains. SURVIVAL {'>'} PREDICTION.</p></section>
             </div>
           </div>
         </div>
       )}
-
       <style dangerouslySetInnerHTML={{__html: `.custom-scrollbar::-webkit-scrollbar { width: 4px; } .custom-scrollbar::-webkit-scrollbar-track { background: transparent; } .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(232, 233, 228, 0.1); border-radius: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(232, 233, 228, 0.2); }`}} />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <TaraApp />
+    </ErrorBoundary>
   );
 }
