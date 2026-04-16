@@ -77,15 +77,21 @@ const generateSyntheticBTC=(basePrice=84000,candles=120,intervalSec=60)=>{
 };
 
 // ═══════════════════════════════════════
-// TARA CHART — CANVAS BASED (NO CDN)
+// TARA CHART — CANVAS + ZOOM/SCROLL/PINCH
 // ═══════════════════════════════════════
 const TaraChart=({data,currentPrice,targetMargin,showCandles,showOverlays,rugPullActive,prediction,projections,resolution,onResolutionChange})=>{
   const canvasRef=useRef(null);
   const containerRef=useRef(null);
-  const crossRef=useRef({x:0,y:0});
+  const crossRef=useRef({x:-1,y:-1,active:false});
   const[hover,setHover]=useState(null);
+  const[zoomLevel,setZoomLevel]=useState(100); // display only
   const dataRef=useRef(data);
   const optRef=useRef({currentPrice,targetMargin,showCandles,showOverlays,rugPullActive,prediction,projections});
+  // View window: fractions of total data [0,1]
+  const viewRef=useRef({start:0,end:1});
+  // Interaction state
+  const dragRef=useRef({active:false,lastX:0,lastY:0});
+  const pinchRef=useRef({active:false,startDist:0,startView:null});
   dataRef.current=data;
   optRef.current={currentPrice,targetMargin,showCandles,showOverlays,rugPullActive,prediction,projections};
 
@@ -93,126 +99,173 @@ const TaraChart=({data,currentPrice,targetMargin,showCandles,showOverlays,rugPul
     const canvas=canvasRef.current;const container=containerRef.current;
     if(!canvas||!container)return;
     const dpr=window.devicePixelRatio||1;
-    const W=container.offsetWidth||container.clientWidth||800;const H=container.offsetHeight||container.clientHeight||380;
+    const W=container.offsetWidth||800;const H=container.offsetHeight||360;
     if(W<10||H<10)return;
     canvas.width=W*dpr;canvas.height=H*dpr;
     canvas.style.width=W+'px';canvas.style.height=H+'px';
     const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);ctx.clearRect(0,0,W,H);
     const{currentPrice:cp,targetMargin:tm,showCandles:sc,showOverlays:so,rugPullActive:rp,prediction:pred}=optRef.current;
-    const raw=dataRef.current;const isSynthetic=(!raw||raw.length===0);const d=isSynthetic?generateSyntheticBTC(cp||84000,120,60):raw;
-    if(isSynthetic){ctx.fillStyle="rgba(232,233,228,0.06)";ctx.font="9px monospace";ctx.textAlign="center";ctx.fillText("SYNTHETIC — AWAITING LIVE DATA",W/2,H-6);}
-    
-    if(!d||d.length===0){
-      ctx.fillStyle='rgba(232,233,228,0.15)';ctx.font='11px monospace';ctx.textAlign='center';
-      ctx.fillText('CONNECTING TO MARKET DATA...',W/2,H/2-10);
-      ctx.font='9px monospace';ctx.fillStyle='rgba(232,233,228,0.08)';
-      ctx.fillText('APIs: Coinbase → Binance fallback',W/2,H/2+10);
-      return;
-    }
+    const raw=dataRef.current;const isSyn=(!raw||raw.length===0);
+    const fullD=isSyn?generateSyntheticBTC(cp||84000,150,60):raw;
+    // Apply zoom/pan view window
+    const{start:sf,end:ef}=viewRef.current;
+    const si=Math.max(0,Math.floor(sf*fullD.length));
+    const ei=Math.min(fullD.length,Math.ceil(ef*fullD.length));
+    const d=fullD.slice(si,Math.max(si+4,ei));
+    if(!d||d.length<2)return;
+    if(isSyn){ctx.fillStyle='rgba(232,233,228,0.05)';ctx.font='8px monospace';ctx.textAlign='center';ctx.fillText('SYNTHETIC · AWAITING LIVE DATA',W/2,H-4);}
 
-    const PAD={top:18,right:72,bottom:32,left:8};
+    const PAD={top:16,right:70,bottom:24,left:6};
     const cW=W-PAD.left-PAD.right;const cH=H-PAD.top-PAD.bottom;
-    const VOL_H=cH*0.14;const PRICE_H=cH-VOL_H;
+    const VOL_H=cH*0.13;const PRICE_H=cH-VOL_H;
 
-    const allPrices=d.flatMap(c=>[c.h||c.c,c.l||c.c]);
-    if(cp)allPrices.push(cp);if(tm)allPrices.push(tm);
-    const minRaw=Math.min(...allPrices);const maxRaw=Math.max(...allPrices);
-    const pad=(maxRaw-minRaw)*0.06||cp*0.001;
-    const pMin=minRaw-pad;const pMax=maxRaw+pad;const pRange=pMax-pMin;
-
+    const allP=d.flatMap(c=>[c.h,c.l]);
+    if(cp&&cp>0)allP.push(cp);if(tm&&tm>0)allP.push(tm);
+    const minR=Math.min(...allP);const maxR=Math.max(...allP);
+    const pad=(maxR-minR)*0.06||(cp||84000)*0.001;
+    const pMin=minR-pad;const pMax=maxR+pad;const pRange=pMax-pMin||1;
     const toX=i=>PAD.left+(i/(d.length-1||1))*cW;
     const toY=p=>PAD.top+(1-(p-pMin)/pRange)*PRICE_H;
-    const barW=Math.max(1.5,cW/d.length-1.5);
+    const bW=Math.max(1,cW/d.length-1.2);
 
-    // Rug pull tint
     if(rp){ctx.fillStyle='rgba(251,113,133,0.04)';ctx.fillRect(0,0,W,H);}
 
-    // Grid
+    // Grid lines + price labels
     ctx.strokeStyle='rgba(232,233,228,0.04)';ctx.lineWidth=1;
     for(let i=0;i<=4;i++){const y=PAD.top+(i/4)*PRICE_H;ctx.beginPath();ctx.moveTo(PAD.left,y);ctx.lineTo(W-PAD.right,y);ctx.stroke();
-      const lbl=(pMax-(i/4)*pRange).toFixed(0);ctx.fillStyle='rgba(232,233,228,0.25)';ctx.font='9px monospace';ctx.textAlign='left';ctx.fillText(lbl,W-PAD.right+3,y+3);}
+      ctx.fillStyle='rgba(232,233,228,0.22)';ctx.font='9px monospace';ctx.textAlign='left';ctx.fillText((pMax-(i/4)*pRange).toFixed(0),W-PAD.right+2,y+3);}
 
-    // Volume bars
-    const maxVol=Math.max(...d.map(c=>c.v||0))||1;
-    d.forEach((c,i)=>{const x=toX(i);const vh=((c.v||0)/maxVol)*VOL_H;
-      ctx.fillStyle=c.c>=c.o?'rgba(52,211,153,0.18)':'rgba(251,113,133,0.18)';
-      ctx.fillRect(x-barW/2,PAD.top+cH-vh,barW,vh);});
+    // Volume
+    const mV=Math.max(...d.map(c=>c.v||0))||1;
+    d.forEach((c,i)=>{const x=toX(i),vh=((c.v||0)/mV)*VOL_H;ctx.fillStyle=c.c>=c.o?'rgba(52,211,153,0.15)':'rgba(251,113,133,0.15)';ctx.fillRect(x-bW/2,PAD.top+cH-vh,bW,vh);});
 
-    // EMA & BB
-    if(so){
-      const closes=d.map(c=>c.c);
-      const e9=calcEMA(closes,9);const e21=calcEMA(closes,21);
-      const drawLine=(arr,color,lw,dash=[])=>{ctx.strokeStyle=color;ctx.lineWidth=lw;ctx.setLineDash(dash);ctx.beginPath();let s=false;arr.forEach((v,i)=>{if(v==null)return;const x=toX(i),y=toY(v);s?(ctx.lineTo(x,y)):(ctx.moveTo(x,y));s=true;});ctx.stroke();ctx.setLineDash([]);};
-      drawLine(e9,'rgba(251,191,36,0.9)',1.5);
-      drawLine(e21,'rgba(168,85,247,0.9)',1.5);
-      if(closes.length>=20){
-        const bbu=[],bbl=[];
-        closes.forEach((_,i)=>{if(i<19){bbu.push(null);bbl.push(null);return;}const sl=closes.slice(i-19,i+1);const m=sl.reduce((a,b)=>a+b,0)/20;const sd=Math.sqrt(sl.reduce((a,b)=>a+Math.pow(b-m,2),0)/20);bbu.push(m+2*sd);bbl.push(m-2*sd);});
-        drawLine(bbu,'rgba(99,102,241,0.35)',1,[5,4]);
-        drawLine(bbl,'rgba(99,102,241,0.35)',1,[5,4]);
-      }
-    }
+    // Overlays
+    if(so){const cl=d.map(c=>c.c);
+      const dL=(arr,col,lw,dash=[])=>{ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.setLineDash(dash);ctx.beginPath();let s=false;arr.forEach((v,i)=>{if(v==null)return;const x=toX(i),y=toY(v);s?ctx.lineTo(x,y):ctx.moveTo(x,y);s=true;});ctx.stroke();ctx.setLineDash([]);};
+      dL(calcEMA(cl,9),'rgba(251,191,36,0.85)',1.5);
+      dL(calcEMA(cl,21),'rgba(168,85,247,0.85)',1.5);
+      if(cl.length>=20){const bu=[],bl=[];cl.forEach((_,i)=>{if(i<19){bu.push(null);bl.push(null);return;}const s=cl.slice(i-19,i+1),m=s.reduce((a,b)=>a+b)/20,sd=Math.sqrt(s.reduce((a,b)=>a+Math.pow(b-m,2),0)/20);bu.push(m+2*sd);bl.push(m-2*sd);});dL(bu,'rgba(99,102,241,0.3)',1,[5,4]);dL(bl,'rgba(99,102,241,0.3)',1,[5,4]);}}
 
-    // Candles or line
-    if(sc){d.forEach((c,i)=>{const x=toX(i);const isUp=c.c>=c.o;const col=isUp?'#34d399':'#fb7185';
-      ctx.strokeStyle=col;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,toY(c.h));ctx.lineTo(x,toY(c.l));ctx.stroke();
-      ctx.fillStyle=col;const bt=toY(Math.max(c.o,c.c));const bh=Math.max(1,Math.abs(toY(c.o)-toY(c.c)));ctx.fillRect(x-barW/2,bt,barW,bh);});}
-    else{ctx.strokeStyle='#c084fc';ctx.lineWidth=2;ctx.beginPath();d.forEach((c,i)=>{const x=toX(i),y=toY(c.c);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});ctx.stroke();}
+    // Candles / line
+    if(sc){d.forEach((c,i)=>{const x=toX(i),isUp=c.c>=c.o,col=isUp?'#34d399':'#fb7185';ctx.strokeStyle=col;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,toY(c.h));ctx.lineTo(x,toY(c.l));ctx.stroke();ctx.fillStyle=col;const bt=toY(Math.max(c.o,c.c)),bh=Math.max(1,Math.abs(toY(c.o)-toY(c.c)));ctx.fillRect(x-bW/2,bt,bW,bh);});}
+    else{ctx.strokeStyle='#c084fc';ctx.lineWidth=2;ctx.beginPath();d.forEach((c,i)=>i===0?ctx.moveTo(toX(0),toY(c.c)):ctx.lineTo(toX(i),toY(c.c)));ctx.stroke();}
 
-    // Strike line
-    if(tm>0&&tm>=pMin&&tm<=pMax){const y=toY(tm);ctx.strokeStyle='rgba(129,140,248,0.9)';ctx.lineWidth=1.5;ctx.setLineDash([6,4]);ctx.beginPath();ctx.moveTo(PAD.left,y);ctx.lineTo(W-PAD.right,y);ctx.stroke();ctx.setLineDash([]);
-      ctx.fillStyle='rgba(129,140,248,1)';ctx.font='bold 9px monospace';ctx.textAlign='left';ctx.fillText('STRIKE',W-PAD.right+2,y-2);}
+    // Strike
+    if(tm>0&&tm>=pMin&&tm<=pMax){const y=toY(tm);ctx.strokeStyle='rgba(129,140,248,0.85)';ctx.lineWidth=1.5;ctx.setLineDash([6,4]);ctx.beginPath();ctx.moveTo(PAD.left,y);ctx.lineTo(W-PAD.right,y);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#818cf8';ctx.font='bold 8px monospace';ctx.textAlign='left';ctx.fillText('STRIKE',W-PAD.right+2,y-2);}
 
-    // Current price
-    if(cp&&cp>=pMin&&cp<=pMax){const y=toY(cp);ctx.strokeStyle='rgba(255,255,255,0.3)';ctx.lineWidth=1;ctx.setLineDash([2,5]);ctx.beginPath();ctx.moveTo(PAD.left,y);ctx.lineTo(W-PAD.right,y);ctx.stroke();ctx.setLineDash([]);
-      ctx.fillStyle='rgba(255,255,255,0.9)';ctx.font='bold 10px monospace';ctx.textAlign='left';ctx.fillText(cp.toFixed(0),W-PAD.right+2,y+4);}
+    // Live price
+    if(cp&&cp>0&&cp>=pMin&&cp<=pMax){const y=toY(cp);ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.lineWidth=1;ctx.setLineDash([2,5]);ctx.beginPath();ctx.moveTo(PAD.left,y);ctx.lineTo(W-PAD.right,y);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='rgba(255,255,255,0.85)';ctx.font='bold 9px monospace';ctx.textAlign='left';ctx.fillText(cp.toFixed(0),W-PAD.right+2,y+3);}
 
-    // Prediction arrow
-    if(pred){const isUp=pred.includes('UP')&&pred.includes('LOCK');const isDn=pred.includes('DOWN')&&pred.includes('LOCK');if(isUp||isDn){const col=isUp?'#34d399':'#fb7185';ctx.fillStyle=col;ctx.font='bold 14px sans-serif';ctx.textAlign='right';ctx.fillText(isUp?'▲':'▼',W-PAD.right-4,PAD.top+18);}}
+    // Prediction badge
+    if(pred){const isUpL=pred.includes('UP')&&pred.includes('LOCK'),isDnL=pred.includes('DOWN')&&pred.includes('LOCK');if(isUpL||isDnL){ctx.fillStyle=isUpL?'#34d399':'#fb7185';ctx.font='bold 12px sans-serif';ctx.textAlign='right';ctx.fillText(isUpL?'▲':'▼',W-PAD.right-4,PAD.top+15);}}
 
     // Crosshair
     const ch=crossRef.current;
-    if(ch&&ch.x>0){const x=ch.x,y=ch.y;ctx.strokeStyle='rgba(232,233,228,0.15)';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(x,PAD.top);ctx.lineTo(x,PAD.top+PRICE_H);ctx.stroke();ctx.beginPath();ctx.moveTo(PAD.left,y);ctx.lineTo(W-PAD.right,y);ctx.stroke();ctx.setLineDash([]);}
+    if(ch.active){ctx.strokeStyle='rgba(232,233,228,0.1)';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(ch.x,PAD.top);ctx.lineTo(ch.x,PAD.top+PRICE_H);ctx.stroke();ctx.beginPath();ctx.moveTo(PAD.left,ch.y);ctx.lineTo(W-PAD.right,ch.y);ctx.stroke();ctx.setLineDash([]);
+      const hP=pMin+(1-(ch.y-PAD.top)/PRICE_H)*pRange;ctx.fillStyle='rgba(232,233,228,0.7)';ctx.font='8px monospace';ctx.textAlign='left';ctx.fillText(hP.toFixed(0),W-PAD.right+2,ch.y+3);}
+
+    // Zoom/candle count indicator
+    ctx.fillStyle='rgba(232,233,228,0.14)';ctx.font='8px monospace';ctx.textAlign='left';
+    ctx.fillText(`${Math.round(1/(ef-sf)*100)}% · ${d.length}c`,PAD.left+2,H-5);
   },[]);
 
-  // ResizeObserver + deferred first draw to ensure layout is complete
-  useEffect(()=>{const t1=setTimeout(()=>draw(),50);const t2=setTimeout(()=>draw(),300);const ro=new ResizeObserver(()=>draw());if(containerRef.current)ro.observe(containerRef.current);return()=>{clearTimeout(t1);clearTimeout(t2);ro.disconnect();};},[draw]);
-  useEffect(()=>{draw();},[data,currentPrice,targetMargin,showCandles,showOverlays,rugPullActive,prediction,projections,draw]);
+  // Zoom helper
+  const applyZoom=useCallback((factor,cFrac)=>{
+    const{start:s,end:e}=viewRef.current;const range=e-s;const nr=Math.max(0.04,Math.min(1,range*factor));
+    const c=cFrac!=null?cFrac:(s+e)/2;const ns=Math.max(0,Math.min(1-nr,c-nr/2));
+    viewRef.current={start:ns,end:ns+nr};setZoomLevel(Math.round(1/nr*100));draw();
+  },[draw]);
+  const resetZoom=useCallback(()=>{viewRef.current={start:0,end:1};setZoomLevel(100);draw();},[draw]);
 
-  const handleMouse=useCallback((e)=>{const canvas=canvasRef.current;const container=containerRef.current;if(!canvas||!container||!data||data.length===0)return;const rect=container.getBoundingClientRect();const mx=e.clientX-rect.left;const my=e.clientY-rect.top;const PAD={top:18,right:72,bottom:32,left:8};const cW=rect.width-PAD.left-PAD.right;const idx=Math.max(0,Math.min(data.length-1,Math.round(((mx-PAD.left)/cW)*(data.length-1))));const c=data[idx];if(c){crossRef.current={x:mx,y:my};setHover({open:c.o,high:c.h,low:c.l,close:c.c,vol:c.v||0,x:mx,y:my});}draw();},[data,draw]);
+  // Mouse wheel zoom
+  const handleWheel=useCallback((e)=>{e.preventDefault();const rect=containerRef.current?.getBoundingClientRect();const cx=rect?(e.clientX-rect.left)/(rect.width||1):0.5;const{start:s,end:e2}=viewRef.current;applyZoom(e.deltaY>0?1.15:0.87,s+(cx*(e2-s)));},[applyZoom]);
 
-  const handleLeave=useCallback(()=>{crossRef.current={x:0,y:0};setHover(null);draw();},[draw]);
+  // Mouse drag pan + crosshair
+  const handleMouseDown=useCallback((e)=>{if(e.button!==0)return;dragRef.current={active:true,lastX:e.clientX};},[]);
+  const handleMouseMove=useCallback((e)=>{
+    const container=containerRef.current;if(!container)return;
+    const rect=container.getBoundingClientRect();const mx=e.clientX-rect.left;const my=e.clientY-rect.top;
+    if(dragRef.current.active){
+      const W=rect.width||800;const dx=e.clientX-dragRef.current.lastX;
+      const{start:s,end:e2}=viewRef.current;const r=e2-s;const ns=Math.max(0,Math.min(1-r,s-(dx/W)*r));
+      viewRef.current={start:ns,end:ns+r};dragRef.current.lastX=e.clientX;setHover(null);draw();return;
+    }
+    // Crosshair + tooltip
+    const raw=dataRef.current;const fullD=(!raw||raw.length===0)?generateSyntheticBTC(84000,150,60):raw;
+    const{start:sf,end:ef}=viewRef.current;const si=Math.floor(sf*fullD.length),ei=Math.ceil(ef*fullD.length);
+    const d=fullD.slice(si,Math.max(si+4,ei));const cW=rect.width-76;
+    const idx=Math.max(0,Math.min(d.length-1,Math.round(((mx-6)/cW)*(d.length-1))));
+    const c=d[idx];crossRef.current={x:mx,y:my,active:true};
+    if(c)setHover({open:c.o,high:c.h,low:c.l,close:c.c,vol:c.v||0,x:mx,y:my});
+    draw();
+  },[draw]);
+  const handleMouseUp=useCallback(()=>{dragRef.current.active=false;},[]);
+  const handleLeave=useCallback(()=>{dragRef.current.active=false;crossRef.current={x:0,y:0,active:false};setHover(null);draw();},[draw]);
+
+  // Touch events (mobile pinch + swipe)
+  const handleTouchStart=useCallback((e)=>{
+    if(e.touches.length===2){e.preventDefault();const d=e.touches;pinchRef.current={active:true,startDist:Math.hypot(d[0].clientX-d[1].clientX,d[0].clientY-d[1].clientY),startView:{...viewRef.current}};}
+    else if(e.touches.length===1){dragRef.current={active:true,lastX:e.touches[0].clientX};}
+  },[]);
+  const handleTouchMove=useCallback((e)=>{
+    e.preventDefault();
+    if(e.touches.length===2&&pinchRef.current.active){const t=e.touches;const dist=Math.hypot(t[0].clientX-t[1].clientX,t[0].clientY-t[1].clientY);const scale=pinchRef.current.startDist/dist;const{start:s,end:e2}=pinchRef.current.startView;const r=e2-s;const nr=Math.max(0.04,Math.min(1,r*scale));const c=(s+e2)/2;const ns=Math.max(0,Math.min(1-nr,c-nr/2));viewRef.current={start:ns,end:ns+nr};setZoomLevel(Math.round(1/nr*100));draw();}
+    else if(e.touches.length===1&&dragRef.current.active){const W=containerRef.current?.offsetWidth||800;const dx=e.touches[0].clientX-dragRef.current.lastX;const{start:s,end:e2}=viewRef.current;const r=e2-s;const ns=Math.max(0,Math.min(1-r,s-(dx/W)*r));viewRef.current={start:ns,end:ns+r};dragRef.current.lastX=e.touches[0].clientX;draw();}
+  },[draw]);
+  const handleTouchEnd=useCallback(()=>{dragRef.current.active=false;pinchRef.current.active=false;},[]);
+
+  // Non-passive wheel + resize
+  useEffect(()=>{const el=containerRef.current;if(!el)return;el.addEventListener('wheel',handleWheel,{passive:false});return()=>el.removeEventListener('wheel',handleWheel);},[handleWheel]);
+  useEffect(()=>{const t1=setTimeout(()=>draw(),60);const t2=setTimeout(()=>draw(),400);const ro=new ResizeObserver(()=>draw());if(containerRef.current)ro.observe(containerRef.current);return()=>{clearTimeout(t1);clearTimeout(t2);ro.disconnect();};},[draw]);
+  useEffect(()=>{draw();},[data,currentPrice,targetMargin,showCandles,showOverlays,rugPullActive,prediction,draw]);
 
   return(
-    <div className="flex flex-col w-full h-full">
-      {/* Resolution bar */}
-      <div className="flex items-center justify-between px-2 pb-1.5 shrink-0 flex-wrap gap-1">
+    <div className="flex flex-col w-full" style={{userSelect:'none',WebkitUserSelect:'none'}}>
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-2 pb-1.5 flex-wrap gap-1 shrink-0">
         <div className="flex items-center bg-[#111312] rounded-lg border border-[#E8E9E4]/5 overflow-hidden">
           {['1m','3m','5m','15m','30m','1h'].map(r=>(
-            <button key={r} onClick={()=>onResolutionChange&&onResolutionChange(r)} className={`px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${resolution===r?'bg-indigo-500/20 text-indigo-400':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>{r}</button>
+            <button key={r} onClick={()=>onResolutionChange&&onResolutionChange(r)} className={`px-2 sm:px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors ${resolution===r?'bg-indigo-500/20 text-indigo-400':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70'}`}>{r}</button>
           ))}
         </div>
-        <div className="flex items-center gap-1 text-[8px] text-[#E8E9E4]/40">
-          {showOverlays&&<><span className="w-4 h-px bg-amber-400 inline-block"></span><span>EMA9</span><span className="w-4 h-px bg-purple-400 inline-block ml-1"></span><span>EMA21</span><span className="w-4 h-px bg-indigo-400/50 border-b border-dashed border-indigo-400/50 inline-block ml-1"></span><span>BB</span></>}
-          {prediction&&(prediction.includes('UP-LOCK')||prediction.includes('DOWN-LOCK'))&&<span className={`ml-2 font-bold ${prediction.includes('UP')?'text-emerald-400':'text-rose-400'}`}>{prediction.includes('UP')?'▲ BULL':'▼ BEAR'}</span>}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center bg-[#111312] rounded-lg border border-[#E8E9E4]/5 overflow-hidden">
+            <button onClick={()=>applyZoom(0.7)} className="px-2 py-1 text-[11px] font-bold text-[#E8E9E4]/50 hover:text-white hover:bg-white/5 transition-colors">+</button>
+            <span className="text-[8px] font-mono text-[#E8E9E4]/30 px-1.5 min-w-[34px] text-center">{zoomLevel}%</span>
+            <button onClick={()=>applyZoom(1.4)} className="px-2 py-1 text-[11px] font-bold text-[#E8E9E4]/50 hover:text-white hover:bg-white/5 transition-colors">−</button>
+            <button onClick={resetZoom} className="px-2 py-1 text-[8px] uppercase tracking-wide text-[#E8E9E4]/30 hover:text-indigo-400 hover:bg-white/5 transition-colors border-l border-[#E8E9E4]/5">FIT</button>
+          </div>
+          <div className="hidden sm:flex items-center gap-1 text-[8px] text-[#E8E9E4]/25">
+            {showOverlays&&<><span className="w-3 h-px bg-amber-400 inline-block"/>E9<span className="w-3 h-px bg-purple-400 inline-block ml-1"/>E21</>}
+          </div>
         </div>
       </div>
 
       {/* Canvas */}
-      <div ref={containerRef} className="relative w-full rounded-lg overflow-hidden bg-[#111312] cursor-crosshair" style={{height:"360px",minHeight:"260px"}}>
-        <canvas ref={canvasRef} className="absolute inset-0" onMouseMove={handleMouse} onMouseLeave={handleLeave}/>
-        {hover&&(
-          <div className="absolute z-10 bg-[#181A19]/98 border border-[#E8E9E4]/15 rounded-md p-1.5 shadow-xl pointer-events-none text-[9px] font-mono text-[#E8E9E4]" style={{left:hover.x>300?hover.x-130:hover.x+12,top:Math.max(4,hover.y-60)}}>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-              <span className="opacity-50">O</span><span>{hover.open?.toFixed(2)}</span>
-              <span className="opacity-50">H</span><span className="text-emerald-400">{hover.high?.toFixed(2)}</span>
-              <span className="opacity-50">L</span><span className="text-rose-400">{hover.low?.toFixed(2)}</span>
-              <span className="opacity-50">C</span><span className="text-white font-bold">{hover.close?.toFixed(2)}</span>
-              <span className="opacity-50">V</span><span className="text-purple-300">{hover.vol?.toFixed(2)}</span>
+      <div ref={containerRef} className="relative w-full rounded-lg overflow-hidden bg-[#111312]"
+        style={{height:'360px',minHeight:'200px',cursor:dragRef.current?.active?'grabbing':'crosshair',touchAction:'none'}}
+        onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleLeave}
+        onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+        <canvas ref={canvasRef} style={{position:'absolute',top:0,left:0,display:'block'}}/>
+
+        {/* OHLCV tooltip */}
+        {hover&&!dragRef.current?.active&&(
+          <div className="absolute z-10 bg-[#181A19]/98 border border-[#E8E9E4]/15 rounded-md p-1.5 shadow-xl pointer-events-none"
+            style={{left:hover.x>(containerRef.current?.offsetWidth||400)*0.6?hover.x-118:hover.x+10,top:Math.max(4,Math.min((containerRef.current?.offsetHeight||360)-76,hover.y-44)),fontSize:'9px',fontFamily:'monospace',color:'#E8E9E4'}}>
+            <div style={{display:'grid',gridTemplateColumns:'auto auto',gap:'1px 10px'}}>
+              <span style={{opacity:.4}}>O</span><span>{hover.open?.toFixed(2)}</span>
+              <span style={{opacity:.4}}>H</span><span style={{color:'#34d399'}}>{hover.high?.toFixed(2)}</span>
+              <span style={{opacity:.4}}>L</span><span style={{color:'#fb7185'}}>{hover.low?.toFixed(2)}</span>
+              <span style={{opacity:.4}}>C</span><span style={{fontWeight:'bold'}}>{hover.close?.toFixed(2)}</span>
+              <span style={{opacity:.4}}>V</span><span style={{color:'#c084fc'}}>{hover.vol?.toFixed(1)}</span>
             </div>
           </div>
         )}
-        {rugPullActive&&<div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10"><span className="text-[#fb7185] font-bold text-xl tracking-widest bg-black/50 px-4 py-2 rounded-xl border border-[#fb7185]/50 animate-pulse">🚨 RUG PULL DETECTED</span></div>}
+
+        {/* Hint fades once user zooms */}
+        {zoomLevel===100&&<div className="absolute bottom-5 left-1/2 -translate-x-1/2 text-[7px] text-[#E8E9E4]/15 pointer-events-none tracking-widest uppercase whitespace-nowrap">Scroll · Drag · Pinch</div>}
+
+        {rugPullActive&&<div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10"><span style={{color:'#fb7185',fontWeight:'bold',fontSize:'18px',letterSpacing:'0.15em',background:'rgba(0,0,0,0.6)',padding:'6px 16px',borderRadius:'12px',border:'1px solid rgba(251,113,133,0.5)'}}>🚨 RUG PULL DETECTED</span></div>}
       </div>
     </div>
   );
@@ -256,7 +309,10 @@ const computeAdvisor=(params)=>{
   const momentumWith=(isUP&&tickSlope>0)||(isDN&&tickSlope<0);
   const momentumAgainst=(isUP&&tickSlope<0)||(isDN&&tickSlope>0);
   const adverseAccel=(isUP&&(accel||0)<-0.5)||(isDN&&(accel||0)>0.5);
-  const winSide=isUP?currentOdds:(100-currentOdds);
+  // FIX: use posterior directly so user-direction always maps correctly.
+  // currentOdds already reflects the *prediction* direction, not the user position.
+  // If user=DOWN and prediction=DOWN at 91.6%, we need winSide=91.6%, not 8.4%.
+  const winSide=isUP?posterior:(100-posterior);
   const isWinning=winSide>52;
   const gapForPosition=isUP?gapBps:-gapBps;
   const gapStr=`Gap: ${gapForPosition>=0?'+':''}${gapBps.toFixed(0)} bps`;
@@ -865,16 +921,16 @@ function TaraApp(){
           </div>
         </div>
 
-        {/* ── CHART ── */}
-        <div className={`bg-[#181A19] rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col overflow-hidden ${mobileTab==="chart"?"flex":"hidden lg:flex"}`} style={{minHeight:"460px"}}>
+        {/* ── CHART — always visible on all screens ── */}
+        <div className="bg-[#181A19] rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col overflow-hidden" style={{minHeight:'420px'}}>
           <div className="flex justify-between items-center px-3 py-2 border-b border-[#E8E9E4]/10 shrink-0">
             <h2 className="text-[10px] font-bold text-[#E8E9E4]/70 uppercase tracking-[0.2em] flex items-center gap-2"><IC.Activity className="w-4 h-4 text-indigo-400"/>TARA LIVE CHART</h2>
             <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1 cursor-pointer text-[9px] text-[#E8E9E4]/50 hover:text-amber-400 transition-colors"><input type="checkbox" checked={showOverlays} onChange={e=>setShowOverlays(e.target.checked)} className="accent-amber-500 w-3 h-3"/>EMA/BB</label>
-              <label className="flex items-center gap-1 cursor-pointer text-[9px] text-[#E8E9E4]/50 hover:text-purple-400 transition-colors"><input type="checkbox" checked={showCandles} onChange={e=>setShowCandles(e.target.checked)} className="accent-purple-500 w-3 h-3"/>Candles</label>
+              <label className="flex items-center gap-1 cursor-pointer text-[9px] text-[#E8E9E4]/40 hover:text-amber-400 transition-colors"><input type="checkbox" checked={showOverlays} onChange={e=>setShowOverlays(e.target.checked)} className="accent-amber-500 w-3 h-3"/>EMA/BB</label>
+              <label className="flex items-center gap-1 cursor-pointer text-[9px] text-[#E8E9E4]/40 hover:text-purple-400 transition-colors"><input type="checkbox" checked={showCandles} onChange={e=>setShowCandles(e.target.checked)} className="accent-purple-500 w-3 h-3"/>Candles</label>
             </div>
           </div>
-          <div style={{height:"400px",position:"relative"}} className="p-2">
+          <div style={{padding:'8px',flex:1,minHeight:0}}>
             <TaraChart
               data={chartData}
               currentPrice={currentPrice}
