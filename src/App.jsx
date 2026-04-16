@@ -89,7 +89,6 @@ const useGlobalTape = () => {
       wsBN.onmessage=(e)=>{try{const d=JSON.parse(e.data);const price=parseFloat(d.p),qty=parseFloat(d.q),usd=price*qty,isBuy=!d.m,now=Date.now();
         ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'bn',time:now});
         tapeRef.current.binancePrice=price;
-        // Lowered threshold to $25k for faster validation in testing environments
         if(usd>25000){const alert={src:'Binance',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};tapeRef.current.whaleAlerts.push(alert);tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);setWhaleLog(prev=>[alert,...prev].slice(0,50));}
       }catch(er){}};
     }catch(e){}
@@ -129,7 +128,6 @@ const useBloomberg = () => {
   
   useEffect(()=>{
     if(typeof window==='undefined') return;
-    // Removed isCanvas guard here to ensure background APIs connect flawlessly
     
     const f=async()=>{try{const R=await Promise.allSettled([fetch('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=3').then(r=>r.json()),fetch('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1').then(r=>r.json()),fetch('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=BTCUSDT&period=5m&limit=1').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=50').then(r=>r.json())]);
       const [pR,oR,fR,gR,tR,t24R,dR]=R;const now=Date.now();let u={lastUpdate:now,status:'live'};
@@ -158,12 +156,14 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
 
   useEffect(() => {
     if (window.LightweightCharts && window.LightweightCharts.createChart) { setIsLoaded(true); return; }
+    
+    // Robust Loader
     const loadScript = (src) => new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) return resolve();
         const s = document.createElement('script'); s.src = src; s.async = true;
         s.onload = resolve; s.onerror = reject; document.head.appendChild(s);
     });
     
-    // Load cdnjs first for maximum reliability in restrictive environments
     loadScript('https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.1/lightweight-charts.standalone.production.min.js')
         .then(() => setIsLoaded(true))
         .catch(() => loadScript('https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js').then(() => setIsLoaded(true)).catch(console.error));
@@ -173,15 +173,36 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
   useEffect(() => {
       const fetchKlines = async () => {
           try {
-              // Swapped to fapi to avoid Spot API CORS blocks
               let res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=${resolution}&limit=200`);
-              if (!res.ok) throw new Error("Fallback");
+              if (!res.ok) throw new Error("Fallback 1");
               const data = await res.json();
               const formatted = data.map(d => ({
                   time: d[0] / 1000, o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
               }));
               setKlines(formatted);
-          } catch(e) {}
+          } catch(e) {
+              try {
+                  let res2 = await fetch(`https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=${resolution}&limit=200`);
+                  if (!res2.ok) throw new Error("Fallback 2");
+                  const data2 = await res2.json();
+                  const formatted2 = data2.map(d => ({
+                      time: d[0] / 1000, o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
+                  }));
+                  setKlines(formatted2);
+              } catch(err) {
+                  try {
+                      let intervalMap = { '1m': '1', '3m': '3', '5m': '5', '15m': '15', '30m': '30', '1h': '60' };
+                      let res3 = await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=${intervalMap[resolution]}&limit=200`);
+                      let data3 = await res3.json();
+                      if (data3.retCode === 0) {
+                          const formatted3 = data3.result.list.map(d => ({
+                              time: parseInt(d[0]) / 1000, o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
+                          })).reverse();
+                          setKlines(formatted3);
+                      }
+                  } catch(e3) { console.error("All Kline feeds failed."); }
+              }
+          }
       };
       fetchKlines();
       const iv = setInterval(fetchKlines, 10000);
@@ -191,6 +212,11 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
   useEffect(() => {
     if (!isLoaded || !chartContainerRef.current) return;
     try {
+        // Prevent Canvas ghosts by destroying old instances instead of innerHTML
+        if (chartRefs.current.chart) {
+            chartRefs.current.chart.remove();
+        }
+
         const { createChart, ColorType, LineStyle, CrosshairMode } = window.LightweightCharts;
         const chart = createChart(chartContainerRef.current, {
           layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#E8E9E4' },
@@ -236,11 +262,11 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
             }
         });
 
-        return () => { chart.remove(); chartRefs.current.chart = null; };
+        return () => { if (chartRefs.current.chart) { chartRefs.current.chart.remove(); chartRefs.current.chart = null; } };
     } catch (e) { console.error("Chart Init Error:", e); }
   }, [isLoaded, showCandles]); 
 
-  // Plot Data
+  // Plot Data with Strict Deduplication
   useEffect(() => {
     if (!chartRefs.current.chart || !chartRefs.current.mainSeries) return;
     
@@ -250,42 +276,60 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
     try {
         const getUnix = (t) => t > 1e10 ? Math.floor(t / 1000) : Math.floor(t);
         
-        const sortedData = [...activeData]
+        const cleanData = activeData
             .map(d => ({ ...d, t: getUnix(d.time) }))
-            .filter(d => !isNaN(d.c) && !isNaN(d.t))
+            .filter(d => d.t > 0 && !isNaN(d.c))
             .sort((a,b) => a.t - b.t);
 
-        const uniqueData = [];
-        let lastTime = -1;
-        for (const d of sortedData) {
-            if (d.t > lastTime) { 
-                uniqueData.push({ time: d.t, open: d.o, high: d.h, low: d.l, close: d.c, value: showCandles ? undefined : d.c, v: d.v }); 
-                lastTime = d.t;
+        const uniqueDataMap = new Map();
+        cleanData.forEach(d => uniqueDataMap.set(d.t, d));
+        const uniqueData = Array.from(uniqueDataMap.values()).sort((a,b) => a.t - b.t);
+
+        if (uniqueData.length === 0) return;
+
+        const mainData = [];
+        const volData = [];
+        
+        for (const d of uniqueData) {
+            if (showCandles) {
+                mainData.push({ time: d.t, open: d.o, high: d.h, low: d.l, close: d.c });
+            } else {
+                mainData.push({ time: d.t, value: d.c });
             }
+            volData.push({ time: d.t, value: d.v || 0, color: d.c >= d.o ? 'rgba(52, 211, 153, 0.3)' : 'rgba(251, 113, 133, 0.3)' }); 
         }
 
-        chartRefs.current.mainSeries.setData(uniqueData);
-        chartRefs.current.volSeries.setData(uniqueData.map(d => ({ time: d.time, value: d.v || 0, color: d.close >= d.open ? 'rgba(52, 211, 153, 0.3)' : 'rgba(251, 113, 133, 0.3)' })));
+        chartRefs.current.mainSeries.setData(mainData);
+        chartRefs.current.volSeries.setData(volData);
 
         if (showOverlays) {
-            const closes = uniqueData.map(d => d.close || d.value || 0);
+            const closes = uniqueData.map(d => d.c);
             const e9Arr = calcEMA(closes, 9);
             const e21Arr = calcEMA(closes, 21);
             
-            chartRefs.current.e9.setData(uniqueData.map((d, i) => ({ time: d.time, value: e9Arr[i] })).filter(d => d.value !== null));
-            chartRefs.current.e21.setData(uniqueData.map((d, i) => ({ time: d.time, value: e21Arr[i] })).filter(d => d.value !== null));
-
-            const bbUp = [], bbDn = [];
+            const e9Data = [];
+            const e21Data = [];
+            const bbuData = [];
+            const bblData = [];
+            
             for (let i = 0; i < closes.length; i++) {
-                if (i < 19) continue;
-                const slice = closes.slice(i - 19, i + 1);
-                const m = slice.reduce((a, b) => a + b, 0) / 20;
-                const sd = Math.sqrt(slice.reduce((a, b) => a + Math.pow(b - m, 2), 0) / 20);
-                bbUp.push({ time: uniqueData[i].time, value: m + 2 * sd });
-                bbDn.push({ time: uniqueData[i].time, value: m - 2 * sd });
+                const t = uniqueData[i].t;
+                if (e9Arr[i] !== null) e9Data.push({ time: t, value: e9Arr[i] });
+                if (e21Arr[i] !== null) e21Data.push({ time: t, value: e21Arr[i] });
+                
+                if (i >= 19) {
+                    const slice = closes.slice(i - 19, i + 1);
+                    const m = slice.reduce((a, b) => a + b, 0) / 20;
+                    const sd = Math.sqrt(slice.reduce((a, b) => a + Math.pow(b - m, 2), 0) / 20);
+                    bbuData.push({ time: t, value: m + 2 * sd });
+                    bblData.push({ time: t, value: m - 2 * sd });
+                }
             }
-            chartRefs.current.bbu.setData(bbUp);
-            chartRefs.current.bbl.setData(bbDn);
+            
+            chartRefs.current.e9.setData(e9Data);
+            chartRefs.current.e21.setData(e21Data);
+            chartRefs.current.bbu.setData(bbuData);
+            chartRefs.current.bbl.setData(bblData);
         } else {
             chartRefs.current.e9.setData([]); chartRefs.current.e21.setData([]);
             chartRefs.current.bbu.setData([]); chartRefs.current.bbl.setData([]);
@@ -302,14 +346,11 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
         const newestCandle = activeData.reduce((max, c) => (getUnix(c.time) > getUnix(max.time) ? c : max), activeData[0]);
         const lastT = getUnix(newestCandle.time);
         
-        chartRefs.current.mainSeries.update({
-            time: lastT,
-            open: newestCandle.o,
-            high: Math.max(newestCandle.h, currentPrice),
-            low: Math.min(newestCandle.l, currentPrice),
-            close: currentPrice,
-            value: showCandles ? undefined : currentPrice
-        });
+        const updateData = showCandles
+            ? { time: lastT, open: newestCandle.o, high: Math.max(newestCandle.h, currentPrice), low: Math.min(newestCandle.l, currentPrice), close: currentPrice }
+            : { time: lastT, value: currentPrice };
+            
+        chartRefs.current.mainSeries.update(updateData);
     } catch (e) { console.error("Chart Sync Error:", e); }
   }, [currentPrice, klines, fallbackData, showCandles]);
 
@@ -478,6 +519,7 @@ function TaraApp() {
   const [showRugPullAlerts, setShowRugPullAlerts] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [discordWebhook, setDiscordWebhook] = useState("");
+  const [useLocalTime, setUseLocalTime] = useState(true); 
   
   const [currentPrice, setCurrentPrice] = useState(null);
   const [tickDirection, setTickDirection] = useState(null);
@@ -499,10 +541,12 @@ function TaraApp() {
 
   const [windowType, setWindowType] = useState('15m'); 
   const [chartRes, setChartRes] = useState('1m'); 
-  const [timeState, setTimeState] = useState({ currentEST: '', startWindowEST: '', nextWindowEST: '', minsRemaining: 0, secsRemaining: 0, currentHour: 0 });
+  const [timeState, setTimeState] = useState({ currentTime: '', startWindow: '', nextWindow: '', minsRemaining: 0, secsRemaining: 0, currentHour: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
+  // Core V96 Active Locks
   const lockedPredictionRef = useRef("SIT OUT");
+  const activeCallRef = useRef({ prediction: "SIT OUT", strike: 0 }); 
   const taraAdviceRef = useRef("SKIP");
   const activeAdviceRef = useRef("HOLD FIRM");
   const peakOfferRef = useRef(0);
@@ -516,7 +560,7 @@ function TaraApp() {
   useEffect(() => {
     setIsMounted(true);
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV95');
+      const savedScore = localStorage.getItem('btcOracleScorecardV96');
       if (savedScore) {
           const parsed = JSON.parse(savedScore);
           if (parsed && typeof parsed['15m'] === 'object' && typeof parsed['15m'].wins === 'number') {
@@ -525,8 +569,10 @@ function TaraApp() {
       } else {
           setScorecards({ '15m': { wins: 146, losses: 104 }, '5m': { wins: 10, losses: 7 } });
       }
-      const savedWebhook = localStorage.getItem('btcOracleWebhookV95');
+      const savedWebhook = localStorage.getItem('btcOracleWebhookV96');
       if (savedWebhook) setDiscordWebhook(savedWebhook);
+      const savedTZ = localStorage.getItem('btcOracleTZV96');
+      if (savedTZ !== null) setUseLocalTime(savedTZ === 'true');
     } catch (e) {
       setScorecards({ '15m': { wins: 146, losses: 104 }, '5m': { wins: 10, losses: 7 } });
     }
@@ -535,12 +581,13 @@ function TaraApp() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V95 Master Build online. Unrestricted Connectors Active." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V96 Master Build online. Dynamic Regime Filter Active. Fully Responsive Layout." }]);
   const [chatInput, setChatInput] = useState("");
   
   const lastWindowRef = useRef("");
   const [userPosition, setUserPosition] = useState(null); 
   const [showHelp, setShowHelp] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(false); 
   const prevActionRef = useRef(null);
 
   const velocityRef = useVelocity(tickHistoryRef, currentPrice, targetMargin);
@@ -553,12 +600,13 @@ function TaraApp() {
   useEffect(() => {
     if (isMounted && typeof window !== 'undefined') {
       try { 
-        localStorage.setItem('btcOracleScorecardV95', JSON.stringify(scorecards)); 
-        localStorage.setItem('btcOracleWebhookV95', String(discordWebhook));
+        localStorage.setItem('btcOracleScorecardV96', JSON.stringify(scorecards)); 
+        localStorage.setItem('btcOracleWebhookV96', String(discordWebhook));
+        localStorage.setItem('btcOracleTZV96', String(useLocalTime));
       } 
       catch (e) {}
     }
-  }, [scorecards, discordWebhook, isMounted]);
+  }, [scorecards, discordWebhook, useLocalTime, isMounted]);
 
   useEffect(() => {
       if (userPosition === null) {
@@ -597,7 +645,7 @@ function TaraApp() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: "Tara Terminal V95",
+          username: "Tara Terminal V96",
           avatar_url: "https://i.imgur.com/8nLFCVP.png", 
           embeds: [{
             title: String(title),
@@ -610,10 +658,28 @@ function TaraApp() {
     } catch (e) {}
   };
 
+  const playAlertSound = () => {
+    if (!soundEnabled || typeof window === 'undefined') return;
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      oscillator.type = 'sine'; 
+      oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); 
+      gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.5);
+    } catch(e) {}
+  };
+
   const handleWindowToggle = (type) => {
     if (type === windowType) return;
     setWindowType(String(type));
     lockedPredictionRef.current = "SIT OUT";
+    activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
     taraAdviceRef.current = "SKIP";
     activeAdviceRef.current = "HOLD FIRM";
     setUserPosition(null);
@@ -655,7 +721,7 @@ function TaraApp() {
 
   // Window Rollover logic
   useEffect(() => {
-    if (timeState.nextWindowEST && timeState.nextWindowEST !== lastWindowRef.current) {
+    if (timeState.nextWindow && timeState.nextWindow !== lastWindowRef.current) {
       if (currentPrice !== null) {
         if (lastWindowRef.current !== "") {
           const pc = taraAdviceRef.current;
@@ -679,11 +745,12 @@ function TaraApp() {
         
         setTargetMargin(currentPrice);
         lockedPredictionRef.current = "SIT OUT";
+        activeCallRef.current = { prediction: "SIT OUT", strike: currentPrice };
         taraAdviceRef.current = "SKIP";
         activeAdviceRef.current = "HOLD FIRM";
         setUserPosition(null); 
         setPositionEntry(null);
-        lastWindowRef.current = timeState.nextWindowEST;
+        lastWindowRef.current = timeState.nextWindow;
         setManualAction(null); 
         tickHistoryRef.current = []; 
         setCurrentOffer(""); 
@@ -692,7 +759,7 @@ function TaraApp() {
         hasSetInitialMargin.current = true;
       }
     }
-  }, [timeState.nextWindowEST, currentPrice, windowType, targetMargin]);
+  }, [timeState.nextWindow, currentPrice, windowType, targetMargin]);
 
   // Sub-Second REST Fallback
   useEffect(() => {
@@ -790,6 +857,7 @@ function TaraApp() {
     setNewsEvents(syntheticNews);
   }, [orderBook.imbalance, globalFlow, targetMargin, windowType, showWhaleAlerts, whaleLog]);
 
+  // V96 Timezone Hybrid Engine
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -802,21 +870,23 @@ function TaraApp() {
       
       const diffMs = nextWindow.getTime() - now.getTime();
       
-      let currentEST, startWindowEST, nextWindowEST;
+      const timeZoneOpt = useLocalTime ? undefined : { timeZone: 'America/New_York' };
+
+      let currentTime, startWindowStr, nextWindowStr;
       try {
-         currentEST = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-         startWindowEST = startWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' });
-         nextWindowEST = nextWindow.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: true, hour: '2-digit', minute: '2-digit' });
+         currentTime = now.toLocaleTimeString('en-US', { ...timeZoneOpt, hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+         startWindowStr = startWindow.toLocaleTimeString('en-US', { ...timeZoneOpt, hour12: true, hour: '2-digit', minute: '2-digit' });
+         nextWindowStr = nextWindow.toLocaleTimeString('en-US', { ...timeZoneOpt, hour12: true, hour: '2-digit', minute: '2-digit' });
       } catch (e) {
-         currentEST = now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-         startWindowEST = startWindow.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit' });
-         nextWindowEST = nextWindow.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit' });
+         currentTime = now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+         startWindowStr = startWindow.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit' });
+         nextWindowStr = nextWindow.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit' });
       }
       
       setTimeState({ 
-        currentEST: String(currentEST), 
-        startWindowEST: String(startWindowEST), 
-        nextWindowEST: String(nextWindowEST), 
+        currentTime: String(currentTime), 
+        startWindow: String(startWindowStr), 
+        nextWindow: String(nextWindowStr), 
         minsRemaining: Math.floor(diffMs / 60000), 
         secsRemaining: Math.floor((diffMs % 60000) / 1000), 
         currentHour: now.getHours() 
@@ -825,9 +895,9 @@ function TaraApp() {
     updateTime();
     const timer = setInterval(updateTime, 1000);
     return () => clearInterval(timer);
-  }, [windowType]);
+  }, [windowType, useLocalTime]);
 
-  // --- TARA V94: RENAISSANCE PHYSICS ENGINE ---
+  // --- TARA V96: RENAISSANCE PHYSICS ENGINE ---
   const analysis = useMemo(() => {
     try {
         if (!currentPrice || liveHistory.length < 30 || !targetMargin || !isMounted || !velocityRef.current || !bloomberg) return null;
@@ -837,7 +907,8 @@ function TaraApp() {
         const clockSeconds = (timeState.minsRemaining * 60) + timeState.secsRemaining;
         const timeFraction = Math.max(0, Math.min(1, 1 - (clockSeconds / intervalSeconds)));
         
-        const isEndgameLock = clockSeconds < 120; 
+        // Strict endgame lock based on timeframe
+        const isEndgameLock = is15m ? (clockSeconds < 90) : (clockSeconds < 45); 
         const isCalibrating = (intervalSeconds - clockSeconds) < 25; 
         const isPostDecay = timeFraction > 0.6;
 
@@ -845,26 +916,30 @@ function TaraApp() {
         const rsi = calcRSI(closes, 14) || 50;
         const atr = calcATR(liveHistory, 14) || 10;
         const atrBps = atr > 0 ? (atr / currentPrice) * 10000 : 15; 
-        const vwap = calcVWAP(liveHistory);
         const bb = calcBB([...closes].reverse(), 20);
 
         const realGapBps = targetMargin > 0 ? ((currentPrice - targetMargin) / targetMargin) * 10000 : 0;
-        const vwapGapBps = vwap ? ((currentPrice - vwap) / vwap) * 10000 : 0;
         
-        const v30s_bps = ((currentPrice - getHistoricPrice(30000)) / currentPrice) * 10000;
+        // Securely declared Kinematics
+        const { v1s, v5s, v15s, v30s, accel, pnlSlope } = velocityRef.current;
+        const v5s_bps = (v5s / currentPrice) * 10000;
+        const v15s_bps = (v15s / currentPrice) * 10000;
+        const v30s_bps = (v30s / currentPrice) * 10000;
+
         const v1m_bps = ((currentPrice - getHistoricPrice(60000)) / currentPrice) * 10000;
         const v3m_bps = ((currentPrice - getHistoricPrice(180000)) / currentPrice) * 10000;
+        const v5m_bps = ((currentPrice - getHistoricPrice(300000)) / currentPrice) * 10000;
 
         let aggrFlow = Math.max(-1.0, Math.min(1.0, globalFlow.imbalance - 1));
-        let mktImplied = Math.max(-1.0, Math.min(1.0, orderBook.imbalance - 1));
 
         let baseProb = 50;
         let reasoning = [];
+        let regime = "RANGE/CHOP";
         
         // Constant Diagnostic Logging
         reasoning.push(`[SYS] Volatility (ATR): ${atrBps.toFixed(1)} bps`);
         reasoning.push(`[FLOW] 30s Delta: ${globalFlow.deltaUSD > 0 ? '+' : ''}${formatUSD(globalFlow.deltaUSD)}`);
-        reasoning.push(`[KINEMATICS] 1m Drift: ${v1m_bps.toFixed(1)} bps`);
+        reasoning.push(`[KINEMATICS] v15s: ${v15s_bps.toFixed(1)} bps | v30s: ${v30s_bps.toFixed(1)} bps`);
 
         const ticks = tickHistoryRef.current;
         const tickSlope = ticks.length >= 10 ? (currentPrice - ticks[0].p) : 0;
@@ -881,22 +956,35 @@ function TaraApp() {
             gapEffect += Math.sign(realGapBps) * Math.pow(gapMag - 10, 1.4) * (is15m ? 0.4 : 0.6);
             reasoning.push(`[GRAVITY] Extreme gap (${realGapBps.toFixed(0)}bps) heavily skewing odds.`);
         }
-        
         baseProb += gapEffect;
 
-        // V94 REGIME DETECTION & DYNAMIC THRESHOLDS
+        // V96 Multi-Timeframe Divergence
+        if (is15m) {
+            baseProb += v5m_bps * 0.6 + v1m_bps * 0.4;
+            baseProb += (aggrFlow * 20);
+            if (rsi > 65 && realGapBps > 0) { baseProb -= 25; reasoning.push(`[RSI] Overextended (65+). Fading the top.`); }
+            if (rsi < 35 && realGapBps < 0) { baseProb += 25; reasoning.push(`[RSI] Oversold (<35). Fading the bottom.`); }
+        } else {
+            baseProb += v30s_bps * 1.5 + v1m_bps * 1.0 + v5m_bps * 0.5;
+            baseProb += (aggrFlow * 30);
+            if (accel > 0 && v1m_bps > 0) baseProb += 15;
+            if (accel < 0 && v1m_bps < 0) baseProb -= 15;
+        }
+
+        // V96 REGIME DETECTION & DYNAMIC THRESHOLDS
         const funding = bloomberg.fundingRate || 0.01; 
         const delta = globalFlow.deltaUSD || 0;
         
-        let regime = "MEAN REVERSION";
         let upThreshold = 68;
         let downThreshold = 32;
 
         const isHighVol = atrBps > 35;
         const retailShorting = funding < 0.005; 
         const retailLonging = funding > 0.015;
-        const whalesBuying = delta > 50000;
-        const whalesSelling = delta < -50000;
+        const whalesBuying = delta > 500000;
+        const whalesSelling = delta < -500000;
+        const isCleanTrendUp = v1m_bps > 5 && whalesBuying && atrBps < 30;
+        const isCleanTrendDn = v1m_bps < -5 && whalesSelling && atrBps < 30;
 
         if (retailShorting && whalesBuying) {
             regime = "SHORT SQUEEZE";
@@ -910,59 +998,21 @@ function TaraApp() {
             downThreshold = 40; // Get in early
             reasoning.push(`[REGIME] Smart Money distributing into Retail Longs. Flush imminent.`);
             baseProb -= 15;
-        } else if (v1m_bps > 10 && whalesBuying) {
+        } else if (isCleanTrendUp) {
             regime = "TRENDING UP";
             upThreshold = 64; 
             downThreshold = 25;
-        } else if (v1m_bps < -10 && whalesSelling) {
+            reasoning.push(`[REGIME] Clean Uptrend detected. Lowering UP entry threshold.`);
+        } else if (isCleanTrendDn) {
             regime = "TRENDING DOWN";
             upThreshold = 75;
             downThreshold = 36; 
+            reasoning.push(`[REGIME] Clean Downtrend detected. Lowering DOWN entry threshold.`);
         } else if (isHighVol) {
             regime = "HIGH VOL CHOP";
             upThreshold = 75; // Stay out
             downThreshold = 25;
             reasoning.push(`[REGIME] High Volatility. Enforcing strict entry thresholds.`);
-        }
-
-        // V94 Bayesian Liquidations
-        let liqBuys = 0; let liqSells = 0;
-        liquidations.forEach(l => {
-          if (Date.now() - l.time < 60000) {
-            if (l.side === 'BUY') liqBuys += l.value; 
-            else liqSells += l.value; 
-          }
-        });
-        
-        if (liqBuys > 10000) { 
-            let impact = tickSlope > 0 ? 15 : 5; 
-            baseProb += impact; 
-            reasoning.push(`[LIQ] Shorts wiped. Bayesian impact: +${impact}%.`); 
-        }
-        if (liqSells > 10000) { 
-            let impact = tickSlope < 0 ? 15 : 5; 
-            baseProb -= impact; 
-            reasoning.push(`[LIQ] Longs wiped. Bayesian impact: -${impact}%.`); 
-        }
-
-        // Standard Kinematics
-        const allUp = v30s_bps > 0 && v1m_bps > 0 && v3m_bps > 0;
-        const allDn = v30s_bps < 0 && v1m_bps < 0 && v3m_bps < 0;
-        const velAl = allUp || allDn;
-        const velDir = allUp ? 1 : allDn ? -1 : 0;
-        const accel = Math.abs(v30s_bps) - Math.abs(v1m_bps);
-        const isAcc = accel > 0;
-
-        if(is15m){
-            baseProb += v1m_bps * 0.8 + v3m_bps * 0.5 + v30s_bps * 0.3;
-        } else {
-            baseProb += v30s_bps * 1.2 + v1m_bps * 0.8 + v3m_bps * 0.3;
-        }
-        if (velAl) baseProb += velDir * 15;
-        if (velAl && isAcc) baseProb += velDir * 10;
-
-        if (isEndgameLock && userPosition === null) {
-            reasoning.push(`[ENDGAME] Physics overrule momentum. Physical gap locked in.`);
         }
 
         let posterior = Math.max(1, Math.min(99, baseProb)); 
@@ -982,12 +1032,12 @@ function TaraApp() {
         if (isPostDecay && !isEndgameLock) reasoning.push(`[POST-DECAY] Prediction confidence rising.`);
 
         // Baseline reasoning so logs are never empty
-        if (reasoning.length === 0) {
-            reasoning.push(`[SYS] Aggregate flow normal. Accumulating ticks.`);
-            reasoning.push(`[SYS] Price hovering near baseline. Awaiting catalyst.`);
+        if (reasoning.length < 5) {
+            reasoning.push(`[MACRO] 5m Drift: ${(v5m_bps).toFixed(1)} bps`);
+            reasoning.push(`[SYS] Price hovering near baseline. Awaiting structural signal.`);
         }
 
-        // V94 Dynamic State Logic
+        // V96 Dynamic State Logic
         let activePrediction = userPosition !== null ? (userPosition === 'UP' ? "UP - LOCKED" : "DOWN - LOCKED") : null;
 
         if (!activePrediction) {
@@ -1076,12 +1126,17 @@ function TaraApp() {
             const isBleeding = currentOdds < 45;
             const isHardReversal = currentOdds < 30;
 
+            const adverseAccel = (isUP && accel < 0 && pnlSlope < 0) || (isDN && accel > 0 && pnlSlope < 0);
+            const stopBreached = livePnL < -(betAmount * (atrBps/10000));
+
             let currentAdvice = activeAdviceRef.current;
 
             if (positionStatus?.isStopHit) {
                 currentAdvice = "30% STOP HIT"; 
             } else if (isRugPull && showRugPullAlerts && isUP) {
                 currentAdvice = "RUG PULL DETECTED";
+            } else if (stopBreached && adverseAccel) {
+                currentAdvice = "CUT LOSSES NOW"; 
             } else if (peak > (betAmount * 1.1) && drawdownFromPeak > 0.08) {
                 currentAdvice = "TRAILING STOP HIT"; 
             } else if (offerVal > 0 && livePnL < -2 && momentumAgainst) {
@@ -1159,21 +1214,26 @@ function TaraApp() {
             let nextT = Math.ceil(now / intervalMs) * intervalMs;
             if (nextT - now < intervalMs * 0.1) nextT += intervalMs;
             
+            // V96 Dynamic Timezone mapping for Projections
+            const timeZoneOpt = useLocalTime ? undefined : { timeZone: 'America/New_York' };
+
             for (let i=0; i<steps; i++) {
                 const stepT = nextT + (i * intervalMs);
                 const diffMin = (stepT - now) / 60000;
                 const p = currentPrice * (1 + (trendSlopeBps / 10000) * diffMin);
                 const dateObj = new Date(stepT);
                 let timeStr = `${dateObj.getHours().toString().padStart(2,'0')}:${dateObj.getMinutes().toString().padStart(2,'0')}`;
-                try { timeStr = dateObj.toLocaleTimeString('en-US', { hour12: true, hour: 'numeric', minute: '2-digit' }); } catch(e) {}
+                try { 
+                    timeStr = dateObj.toLocaleTimeString('en-US', { ...timeZoneOpt, hour12: true, hour: 'numeric', minute: '2-digit' }); 
+                } catch(e) {}
                 out.push({ timeStr, timestamp: Math.floor(stepT/1000), price: p });
             }
             return out;
         };
 
-        const t5 = generateTimeline(5, 8);
-        const t15 = generateTimeline(15, 8);
-        const t60 = generateTimeline(60, 8);
+        const t5 = generateTimeline(5, 5);
+        const t15 = generateTimeline(15, 5);
+        const t60 = generateTimeline(60, 5);
         
         projections = [
             { id: '5m', time: "5 MIN", price: t5[0]?.price || currentPrice, conf: Math.min(95, posterior + 5), timeline: t5 },
@@ -1223,7 +1283,7 @@ function TaraApp() {
             regime: "ERROR"
         };
     }
-  }, [currentPrice, liveHistory, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, forceRender, betAmount, maxPayout, currentOffer, globalFlow, liquidations, userPosition, windowType, isMounted, showRugPullAlerts, positionStatus, marketSessions, velocityRef, bloomberg]);
+  }, [currentPrice, liveHistory, targetMargin, timeState.minsRemaining, timeState.secsRemaining, timeState.currentHour, orderBook, forceRender, betAmount, maxPayout, currentOffer, globalFlow, liquidations, userPosition, windowType, isMounted, showRugPullAlerts, positionStatus, marketSessions, velocityRef, bloomberg, useLocalTime]);
 
   const executeManualAction = (actionLabel, targetState) => {
     setManualAction(String(actionLabel));
@@ -1314,15 +1374,15 @@ function TaraApp() {
   const sellPct = (orderBook.localSell / totalDOM) * 100;
 
   return (
-    <div className="min-h-screen bg-[#111312] text-[#E8E9E4] font-sans p-2 sm:p-3 flex flex-col selection:bg-[#E8E9E4]/20">
-      <div className="w-full max-w-[1600px] mx-auto flex flex-col gap-3 flex-1 pb-4">
+    <div className="min-h-screen bg-[#111312] text-[#E8E9E4] font-sans p-2 sm:p-3 flex flex-col selection:bg-[#E8E9E4]/20 overflow-y-auto">
+      <div className="w-full max-w-[1600px] mx-auto flex flex-col h-full gap-3 min-h-0">
         
         {/* HEADER */}
         <div className="flex justify-between items-center border-b border-[#E8E9E4]/10 pb-2 shrink-0">
           <div className="flex items-center justify-between w-full sm:w-auto">
             <h1 className="text-lg md:text-xl font-serif tracking-tight text-white flex items-center gap-2">
               Tara <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V95 Master
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V96 Renaissance
               </span>
               <span className="hidden md:flex items-center gap-1 text-[10px] ml-2">
                 {marketSessions.sessions.map((s,i)=><span key={i} className={`${s.color} opacity-80`}>{s.flag}</span>)}
@@ -1340,12 +1400,17 @@ function TaraApp() {
             <button onClick={() => handleWindowToggle('15m')} className={`flex-1 sm:flex-none px-6 py-1 text-[10px] uppercase font-bold tracking-widest rounded-md transition-all ${windowType === '15m' ? 'bg-emerald-500 text-white shadow-md' : 'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>15 Min</button>
           </div>
           <div className="hidden sm:flex text-right font-sans items-center gap-4">
-            <div className="flex flex-col items-end pl-4">
-              <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest mb-0.5">Current EST</div>
-              <div className="text-sm font-serif text-[#E8E9E4]/90">{String(timeState.currentEST || '--:--:--')}</div>
+            <div className="flex flex-col items-end pl-4 cursor-pointer group" onClick={() => setUseLocalTime(!useLocalTime)} title="Toggle Timezone (Local/EST)">
+              <div className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest mb-0.5 flex items-center gap-1 group-hover:text-indigo-400 transition-colors">
+                 {useLocalTime ? 'LOCAL' : 'EST'} Time <IC.Clock className="w-3 h-3" />
+              </div>
+              <div className="text-sm font-serif text-[#E8E9E4]/90 group-hover:text-white transition-colors">{String(timeState.currentTime || '--:--:--')}</div>
             </div>
             <div className="flex items-center gap-2 border-l border-[#E8E9E4]/10 pl-4">
               <button onClick={() => setShowWhaleLog(!showWhaleLog)} className={`p-2 rounded-lg border ${showWhaleLog?'bg-purple-500/20 border-purple-500/40 text-purple-400':'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40'} hover:text-purple-400 transition-colors`} title="Global Whale Log">🐋</button>
+              <button onClick={() => setSoundEnabled(!soundEnabled)} className={`p-2 rounded-lg border ${soundEnabled ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400' : 'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'} transition-colors`} title="Toggle Audio Alerts">
+                {soundEnabled ? <IC.Vol2 className="w-4 h-4" /> : <IC.VolX className="w-4 h-4" />}
+              </button>
               <button onClick={() => setShowSettings(true)} className="p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-indigo-400 transition-colors" title="Discord Webhook Settings"><IC.Link className="w-4 h-4" /></button>
               <button onClick={() => setShowHelp(true)} className="p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/10 text-[#E8E9E4]/60 hover:text-white transition-colors" title="Operations Manual"><IC.Help className="w-4 h-4" /></button>
             </div>
@@ -1434,7 +1499,7 @@ function TaraApp() {
         </div>
 
         {/* MIDDLE ROW (Fully Responsive Layout) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 shrink-0 lg:flex-1 lg:min-h-0">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 shrink-0 flex-none min-h-0">
           
           {/* Main Prediction Card */}
           <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative min-h-[300px]">
@@ -1442,8 +1507,8 @@ function TaraApp() {
              
              {/* Header */}
              <div className="flex justify-between items-start mb-2 shrink-0">
-               <div className="bg-[#111312] border border-[#E8E9E4]/10 px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 shadow-sm whitespace-nowrap">
-                 <IC.Clock className="w-3 h-3" /><span className="text-[#E8E9E4]/60 hidden sm:inline">{String(timeState.startWindowEST)}-{String(timeState.nextWindowEST)}</span>
+               <div className="bg-[#111312] border border-[#E8E9E4]/10 px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 shadow-sm whitespace-nowrap cursor-pointer hover:border-indigo-500/30 transition-colors" onClick={() => setUseLocalTime(!useLocalTime)}>
+                 <IC.Clock className="w-3 h-3" /><span className="text-[#E8E9E4]/60 hidden sm:inline">{String(timeState.startWindow)}-{String(timeState.nextWindow)} {useLocalTime ? 'LOCAL' : 'EST'}</span>
                  <span className="text-[#E8E9E4]">{Number(timeState.minsRemaining)}m {Number(timeState.secsRemaining)}s</span>
                  {analysis?.isPostDecay && <span className="text-amber-400 ml-1">⚡</span>}
                </div>
@@ -1454,7 +1519,7 @@ function TaraApp() {
                <div className="flex flex-col items-center w-full flex-1 justify-center gap-3">
                  
                  {/* Compacted Prediction text */}
-                 <div className="flex flex-col items-center shrink-0">
+                 <div className="flex flex-col items-center shrink-0 mt-2">
                    <div className="flex items-center gap-2 mb-1">
                       <span className="text-[9px] text-[#E8E9E4]/40 uppercase tracking-[0.2em] font-bold">Prediction</span>
                       {analysis.regime && (
@@ -1466,7 +1531,7 @@ function TaraApp() {
                    <h2 className={`text-3xl sm:text-4xl lg:text-3xl xl:text-4xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg transition-all flex items-center justify-center text-center px-2`}>{String(analysis.prediction)}</h2>
                  </div>
                  
-                 {/* V94 Sync Buttons: Added Lock State UI */}
+                 {/* Sync Buttons */}
                  <div className="flex flex-col items-center gap-1.5 w-full shrink-0 px-2 sm:px-4 border-t border-[#E8E9E4]/10 pt-3">
                     <span className="text-[7px] uppercase tracking-widest text-[#E8E9E4]/40 mb-0.5">-30% Stop Guard Sync:</span>
                     <div className="flex gap-2 w-full">
@@ -1476,7 +1541,7 @@ function TaraApp() {
                  </div>
 
                  {/* Advisor Box */}
-                 <div className={`w-full p-2.5 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm shrink-0`}>
+                 <div className={`w-full p-2.5 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm shrink-0 mt-auto`}>
                    <div className="flex items-center gap-1.5 mb-1"><IC.Bell className={`w-3.5 h-3.5 ${analysis.actionColor}`} /><span className="text-[8px] font-bold uppercase tracking-widest opacity-80 text-[#E8E9E4]">Advisor</span></div>
                    <div className={`text-xs sm:text-sm font-serif font-bold mb-1 ${analysis.actionColor} uppercase leading-tight`}>{String(analysis.tradeAction)}</div>
                    <p className="text-[8px] sm:text-[9px] opacity-80 text-[#E8E9E4] mb-1 leading-tight px-1">{String(analysis.tradeReason)}</p>
@@ -1503,9 +1568,9 @@ function TaraApp() {
             
             {/* Clickable T-Target UI */}
             {analysis && (
-              <div className="bg-[#181A19] p-2 sm:p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md shrink-0 flex flex-col flex-1 min-h-[250px] lg:min-h-0">
+              <div className="bg-[#181A19] p-2 sm:p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-[250px] lg:min-h-0">
                   <h2 className="text-[8px] sm:text-[9px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5"><IC.TrendUp className="w-3.5 h-3.5 text-purple-400" /> T-Target Projections</h2>
-                  <div className="flex gap-1.5 mb-2">
+                  <div className="flex gap-1.5 mb-2 shrink-0">
                       {(analysis.projections || []).map((proj, idx) => (
                           <button key={idx} onClick={() => setActiveProjectionTab(proj.id)} className={`flex-1 rounded-lg p-1.5 text-center border transition-colors ${activeProjectionTab === proj.id ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300' : 'bg-[#111312] border-[#E8E9E4]/5 text-[#E8E9E4]/40 hover:bg-[#E8E9E4]/10'}`}>
                               <div className="text-[7.5px] font-bold uppercase mb-0.5">{String(proj.time)}</div>
@@ -1518,13 +1583,13 @@ function TaraApp() {
                   <div className="bg-[#111312] rounded-lg border border-[#E8E9E4]/5 p-2 flex-1 overflow-y-auto custom-scrollbar">
                       {(analysis.projections || []).filter(p => p.id === activeProjectionTab).map(proj => (
                           <div key={proj.id+"-det"} className="text-[8px] text-[#E8E9E4]/70 flex flex-col h-full">
-                              <div className="flex justify-between items-center mb-1 border-b border-[#E8E9E4]/10 pb-1">
+                              <div className="flex justify-between items-center mb-1 border-b border-[#E8E9E4]/10 pb-1 shrink-0">
                                   <span className="font-bold text-indigo-400">TREND PATH</span>
                                   <span className="opacity-60 bg-[#181A19] px-1.5 py-0.5 rounded">CONF: {proj.conf.toFixed(0)}%</span>
                               </div>
                               <div className="flex flex-col gap-1 w-full mt-0.5">
                                   {proj.timeline && proj.timeline.map((t, idx) => (
-                                      <div key={idx} className="flex justify-between items-center bg-[#181A19] px-2 py-1 rounded border border-[#E8E9E4]/5">
+                                      <div key={idx} className="flex justify-between items-center bg-[#181A19] px-2 py-1 rounded border border-[#E8E9E4]/5 shrink-0">
                                           <span className="text-[#E8E9E4]/60 font-mono tracking-widest">{t.timeStr}</span>
                                           <span className="font-serif text-[#E8E9E4]/90 font-bold">${t.price.toFixed(2)}</span>
                                       </div>
@@ -1537,13 +1602,13 @@ function TaraApp() {
             )}
           </div>
 
-          {/* Live Wire & Engine Logs */}
-          <div className="flex flex-col md:col-span-2 lg:col-span-1 gap-3 h-full">
+          {/* Live Wire & Engine Logs (Spans full width on tablet, 1 col on desktop) */}
+          <div className="flex flex-col gap-3 h-full md:col-span-2 lg:col-span-1">
              <div className="bg-[#181A19] p-2 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col shrink-0 min-h-[120px]">
                  <div className="flex justify-between items-center mb-1.5 border-b border-[#E8E9E4]/10 pb-1">
                      <h2 className="text-[8px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest flex items-center gap-1.5"><IC.Globe className="w-3.5 h-3.5 text-blue-400" /> Live Wire</h2>
                  </div>
-                 <div className="space-y-1.5 overflow-y-auto custom-scrollbar pr-1 flex-1 max-h-[150px] md:max-h-none">
+                 <div className="space-y-1.5 overflow-y-auto custom-scrollbar pr-1 flex-1">
                      {newsEvents.length === 0 ? (<div className="text-[9px] text-[#E8E9E4]/40 italic">Generating market intel...</div>) : (newsEvents.map((news, i) => (<div key={i} className={`border-l-[2px] pl-1.5 py-0.5 ${news.type === 'rugpull' ? 'border-rose-500' : news.type === 'whale' ? 'border-purple-500' : 'border-indigo-500/40'}`}><span className={`text-[8px] sm:text-[9px] leading-tight ${news.type === 'rugpull' ? 'text-rose-400 font-bold' : news.type === 'whale' ? 'text-purple-300' : 'text-[#E8E9E4]/90'}`}>{String(news.title)}</span></div>)))}
                  </div>
              </div>
@@ -1551,7 +1616,7 @@ function TaraApp() {
              {analysis && (
                 <div className="bg-[#181A19] p-2 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-[150px] lg:min-h-0">
                     <h2 className="text-[8px] font-bold text-[#E8E9E4]/80 uppercase tracking-widest mb-1.5 flex items-center gap-1.5 border-b border-[#E8E9E4]/10 pb-1"><IC.Terminal className="w-3.5 h-3.5 text-amber-400" /> Engine Logs</h2>
-                    <div className="space-y-1 font-mono flex-1 overflow-y-auto pr-1 custom-scrollbar max-h-[200px] md:max-h-none">
+                    <div className="space-y-1 font-mono flex-1 overflow-y-auto pr-1 custom-scrollbar">
                         {(analysis.reasoning || []).map((reason, idx) => (
                             <div key={idx} className={`bg-[#111312] p-1.5 rounded-md text-[7px] sm:text-[8px] ${reason.includes('RUG PULL') || reason.includes('CUT LOSSES') || reason.includes('CAP') || reason.includes('GRAVITY') || reason.includes('ReferenceError') || reason.includes('TypeError') ? 'text-rose-400 border border-rose-500/20' : reason.includes('PROFIT') || reason.includes('STOP HIT') ? 'text-emerald-400 border border-emerald-500/20' : 'text-[#E8E9E4]/70 border border-[#E8E9E4]/5'} flex items-start gap-1 uppercase`}>
                                 <span className="text-emerald-500 mt-0.5 shrink-0">{'>'}</span>
@@ -1565,7 +1630,7 @@ function TaraApp() {
         </div>
 
         {/* TRADINGVIEW CHART WIDGET */}
-        <div className="w-full bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col flex-none lg:flex-1 min-h-[400px] sm:min-h-[350px] mt-2 relative z-10">
+        <div className="w-full bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col flex-none lg:flex-1 min-h-[350px] lg:min-h-[350px] mt-2 relative z-10">
           <div className="flex justify-between items-center mb-2 border-b border-[#E8E9E4]/10 pb-2">
               <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] flex items-center gap-2"><IC.Activity className="w-4 h-4 text-indigo-400" /> MULTI-TIMEFRAME CHART</h2>
               
@@ -1647,9 +1712,10 @@ function TaraApp() {
       {/* OPERATIONS MANUAL */}
       {showHelp && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl"><div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10"><h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" /> Tara Operations Manual (V95)</h2><button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5" /></button></div>
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl"><div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10"><h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" /> Tara Operations Manual (V96)</h2><button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5" /></button></div>
             <div className="p-4 sm:p-6 space-y-6 text-xs sm:text-sm text-[#E8E9E4]/80">
-              <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">V95 Ultimate Features</h3><ul className="list-disc pl-4 space-y-2">
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">V96 Ultimate Features</h3><ul className="list-disc pl-4 space-y-2">
+                <li><strong>Hybrid Timezone System:</strong> Click the "EST / LOCAL Time" toggle in the top right to instantly switch the entire app (including projections and chat) between New York EST and your local computer time.</li>
                 <li><strong>Dynamic Regime Filter (RenTec Style):</strong> Tara analyzes Market Volatility (ATR) and Funding Rates. In smooth trends, she enters early (60%). In choppy markets, she demands higher confirmation (75%) to avoid fakeouts.</li>
                 <li><strong>Statistical Arbitrage:</strong> If retail is heavily shorting while smart money flow is buying, Tara detects a "SHORT SQUEEZE TRAP" and dynamically boosts UP probability to catch the snapback.</li>
                 <li><strong>Chamiko Decision Tree:</strong> Tara explicitly shows 🟡 NO LOCK (forming bias), 🔴 LOCKED (confirmed setup), or 🚫 SKIP (unsafe to trade).</li>
