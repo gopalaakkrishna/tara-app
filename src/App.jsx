@@ -166,43 +166,31 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
         .catch(() => loadScript('https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js').then(() => setIsLoaded(true)).catch(console.error));
   }, []);
 
-  // Globally Accessible Kline Fetcher (Bypasses IP Blocks)
+  // V98 Fix: Strictly mapped Coinbase Chart Fetcher (Solves all CORS/IP blocks in browser iframes)
   useEffect(() => {
       const fetchKlines = async () => {
           try {
-              // Primary: KuCoin (Extremely reliable globally, no IP blocks)
-              let typeMap = { '1m': '1min', '3m': '3min', '5m': '5min', '15m': '15min', '30m': '30min', '1h': '1hour' };
-              let res = await fetch(`https://api.kucoin.com/api/v1/market/candles?type=${typeMap[resolution]}&symbol=BTC-USDT`);
-              if (!res.ok) throw new Error("KuCoin error");
+              const cbMap = { '1m': 60, '3m': 60, '5m': 300, '15m': 900, '30m': 900, '1h': 3600 };
+              const gran = cbMap[resolution] || 60;
+              let res = await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`);
+              if (!res.ok) throw new Error("Coinbase Failed");
               const data = await res.json();
-              if (data.code !== "200000") throw new Error("KuCoin error code");
-              const formatted = data.data.map(d => ({
-                  time: parseInt(d[0]), o: parseFloat(d[1]), c: parseFloat(d[2]), h: parseFloat(d[3]), l: parseFloat(d[4]), v: parseFloat(d[5])
+              // Coinbase format: [ time, low, high, open, close, volume ]
+              const formatted = data.map(d => ({
+                  time: d[0], o: parseFloat(d[3]), h: parseFloat(d[2]), l: parseFloat(d[1]), c: parseFloat(d[4]), v: parseFloat(d[5])
               })).reverse();
               setKlines(formatted);
-          } catch(e1) {
+          } catch(e) {
               try {
-                  // Secondary: Gate.io (Very permissive CORS)
-                  let res2 = await fetch(`https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=BTC_USDT&interval=${resolution}`);
-                  if (!res2.ok) throw new Error("Gateio error");
+                  // Fallback to Binance UI API if Coinbase ratelimits
+                  let res2 = await fetch(`https://api.binance.com/api/v3/uiKlines?symbol=BTCUSDT&interval=${resolution}&limit=200`);
                   const data2 = await res2.json();
                   const formatted2 = data2.map(d => ({
-                      time: parseInt(d[0]), v: parseFloat(d[1]), c: parseFloat(d[2]), h: parseFloat(d[3]), l: parseFloat(d[4]), o: parseFloat(d[5])
+                      time: d[0] / 1000, o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
                   }));
                   setKlines(formatted2);
-              } catch (e2) {
-                  try {
-                      // Tertiary: Binance.us (Fallback for US)
-                      let res3 = await fetch(`https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=${resolution}&limit=200`);
-                      if (!res3.ok) throw new Error("BinanceUS error");
-                      const data3 = await res3.json();
-                      const formatted3 = data3.map(d => ({
-                          time: d[0] / 1000, o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
-                      }));
-                      setKlines(formatted3);
-                  } catch (e3) {
-                      console.error("All Kline feeds failed.", e3);
-                  }
+              } catch(e2) {
+                  console.error("All Chart APIs Blocked:", e2);
               }
           }
       };
@@ -214,6 +202,7 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
   useEffect(() => {
     if (!isLoaded || !chartContainerRef.current) return;
     try {
+        // Prevent Canvas ghosts by using official TV API remove
         if (chartRefs.current.chart) {
             chartRefs.current.chart.remove();
         }
@@ -277,9 +266,10 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
     try {
         const getUnix = (t) => t > 1e10 ? Math.floor(t / 1000) : Math.floor(t);
         
+        // V98 Fix: Filter NaN to stop Canvas meltdowns
         const cleanData = activeData
             .map(d => ({ ...d, t: getUnix(d.time) }))
-            .filter(d => d.t > 0 && !isNaN(d.c))
+            .filter(d => d.t > 0 && !isNaN(d.c) && !isNaN(d.o) && !isNaN(d.h) && !isNaN(d.l))
             .sort((a,b) => a.t - b.t);
 
         const uniqueDataMap = new Map();
@@ -454,11 +444,11 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
 
   return (
     <div className="w-full h-full relative" style={{ touchAction: 'none' }}>
-        {!isLoaded && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#E8E9E4]/30 uppercase tracking-widest animate-pulse">Loading TradingView Engine...</div>}
+        {!isLoaded && <div className="absolute inset-0 flex items-center justify-center text-[11px] text-[#E8E9E4]/30 uppercase tracking-widest animate-pulse z-20">Loading TradingView Engine...</div>}
         {isLoaded && klines.length === 0 && fallbackData.length === 0 && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-[#E8E9E4]/30 z-20 gap-2">
                 <IC.Alert className="w-8 h-8 opacity-50" />
-                <span className="text-[10px] uppercase tracking-widest text-center px-4">Awaiting Chart Data...</span>
+                <span className="text-[10px] uppercase tracking-widest text-center px-4">Awaiting Chart Data... (All APIs blocked)</span>
             </div>
         )}
         {rugPullActive && <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10"><span className="text-[#fb7185] font-bold text-2xl tracking-widest bg-black/40 px-4 py-2 rounded-xl backdrop-blur-sm border border-[#fb7185]/50">🚨 RUG PULL DETECTED</span></div>}
@@ -489,7 +479,7 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
             </div>
         )}
 
-        <div ref={chartContainerRef} className="w-full h-full absolute inset-0" />
+        <div ref={chartContainerRef} className="w-full h-full absolute inset-0 z-0" />
     </div>
   );
 };
@@ -661,21 +651,47 @@ function TaraApp() {
       return closest.p;
   };
 
-  const broadcastToDiscord = async (title, color, fields) => {
+  // V98 Exact "Jerome" Formatting for Discord
+  const broadcastToDiscord = async (type, data) => {
     if (!discordWebhook || !discordWebhook.startsWith("http")) return;
     try {
+      let embed = {};
+      
+      if (type === 'SIGNAL') {
+          embed = {
+              title: `${data.dir === 'UP' ? '🟢' : '🔴'} TARA SIGNAL: ${data.dir}`,
+              color: data.dir === 'UP' ? 3404125 : 16478549,
+              fields: [
+                  { name: "BTC Price", value: `$${data.price.toFixed(2)}`, inline: true },
+                  { name: "Strike", value: `$${data.strike.toFixed(2)}`, inline: true },
+                  { name: "Gap", value: `${data.gap.toFixed(2)} bps`, inline: true },
+                  { name: "Round Clock", value: data.clock, inline: true }
+              ],
+              timestamp: new Date().toISOString()
+          };
+      } else if (type === 'LOCK') {
+          embed = {
+              title: `TARA — ${data.dir} LOCKED`,
+              color: data.dir === 'UP' ? 3404125 : 16478549,
+              description: `**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Real Gap:** ${data.gap.toFixed(2)} bps\n**Clock:** ${data.clock} | **Lock:** ${data.dir}\n\n| 🚀 ${data.dir} - LOCKED 🚀`,
+              timestamp: new Date().toISOString()
+          };
+      } else if (type === 'CLOSE') {
+          embed = {
+              title: `TARA ROUND CLOSED: ${data.window}`,
+              color: data.won ? 3404125 : 16478549,
+              description: `**Result:** ${data.won ? 'WIN' : 'LOSS'}\n**Prediction:** ${data.prediction}\n**Closing Price:** $${data.price.toFixed(2)}\n**Regime Recorded:** ${data.regime}`,
+              timestamp: new Date().toISOString()
+          };
+      }
+
       await fetch(discordWebhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: "Tara Terminal V98",
+          username: "Tara Terminal",
           avatar_url: "https://i.imgur.com/8nLFCVP.png", 
-          embeds: [{
-            title: String(title),
-            color: Number(color), 
-            fields: fields.map(f => ({ name: String(f.name), value: String(f.value), inline: Boolean(f.inline) })),
-            timestamp: new Date().toISOString()
-          }]
+          embeds: [embed]
         })
       });
     } catch (e) {}
@@ -774,12 +790,7 @@ function TaraApp() {
              });
           }
           if (pc.includes("LOCKED")) {
-             broadcastToDiscord(`Round Closed: ${windowType.toUpperCase()}`, won ? 3404125 : 16478549, [
-                { name: "Result", value: won ? "WIN" : "LOSS", inline: true },
-                { name: "Prediction", value: String(pc), inline: true },
-                { name: "Regime Recorded", value: lastRegimeRef.current, inline: true },
-                { name: "Closing Price", value: `$${currentPrice.toFixed(2)}`, inline: true }
-             ]);
+             broadcastToDiscord('CLOSE', { window: windowType, won, prediction: pc, regime: lastRegimeRef.current, price: currentPrice });
           }
         }
         
@@ -958,9 +969,11 @@ function TaraApp() {
         const rsi = calcRSI(closes, 14) || 50;
         const atr = calcATR(liveHistory, 14) || 10;
         const atrBps = atr > 0 ? (atr / currentPrice) * 10000 : 15; 
+        const vwap = calcVWAP(liveHistory);
         const bb = calcBB([...closes].reverse(), 20);
 
         const realGapBps = targetMargin > 0 ? ((currentPrice - targetMargin) / targetMargin) * 10000 : 0;
+        const vwapGapBps = vwap ? ((currentPrice - vwap) / vwap) * 10000 : 0;
         
         // Securely referenced kinematics
         const { v1s, v5s, v15s, v30s, accel, pnlSlope } = velocityRef.current || {};
@@ -1000,6 +1013,14 @@ function TaraApp() {
             reasoning.push(`[GRAVITY] Extreme gap (${realGapBps.toFixed(0)}bps) heavily skewing odds.`);
         }
         baseProb += gapEffect;
+
+        // V98 VWAP Filtering to prevent false UP calls during downtrends
+        if (drift1m_bps > 0 && vwapGapBps < -5) {
+             baseProb -= 15; reasoning.push(`[VWAP] Price below VWAP. Suppressing UP bias.`);
+        }
+        if (drift1m_bps < 0 && vwapGapBps > 5) {
+             baseProb += 15; reasoning.push(`[VWAP] Price above VWAP. Suppressing DOWN bias.`);
+        }
 
         // Perfected Multi-Timeframe Divergence
         if (is15m) {
@@ -1350,22 +1371,24 @@ function TaraApp() {
 
   const executeManualAction = (actionLabel, targetState) => {
     setManualAction(String(actionLabel));
-    if (analysis) {
-      broadcastToDiscord(`Action Executed: ${actionLabel}`, 3066993, [
-         { name: "Spot Price", value: `$${currentPrice?.toFixed(2) || '---'}`, inline: true },
-         { name: "Target Margin", value: `$${targetMargin?.toFixed(2) || '---'}`, inline: true },
-         { name: "Live PnL", value: `$${analysis.livePnL.toFixed(2)}`, inline: false }
-      ]);
+    
+    // V98 Fix: Instantly process manual position locks from the Advisor box
+    if (targetState === "UP" || targetState === "DOWN") {
+        handleManualSync(targetState);
+        return;
     }
+    
     if (targetState === "CASH" || targetState === "SIT OUT") {
         setUserPosition(null); 
         setPositionEntry(null);
     }
+    
     if (analysis && (analysis.prediction.includes("UP") || analysis.prediction.includes("DOWN"))) {
       const isWin = (analysis.prediction.includes("UP") && currentPrice > targetMargin) || (analysis.prediction.includes("DOWN") && currentPrice < targetMargin);
       if (isWin) updateScore(windowType, 'wins', 1);
       else updateScore(windowType, 'losses', 1);
     }
+    
     if (targetState) {
       lockedPredictionRef.current = targetState === "CASH" ? "SIT OUT" : String(targetState);
       setForceRender(prev => prev + 1);
@@ -1387,18 +1410,25 @@ function TaraApp() {
         setForceRender(prev => prev + 1);
         return;
     }
+    
     lockedPredictionRef.current = String(dir);
     activeCallRef.current = { prediction: String(dir), strike: targetMargin };
     setUserPosition(String(dir));
+    
     if(currentPrice){
       const stopPrice = dir === 'UP' ? currentPrice * 0.997 : currentPrice * 1.003; 
       setPositionEntry({price: currentPrice, side: dir, time: Date.now(), stopPrice});
+      
+      const gapBps = targetMargin > 0 ? ((currentPrice - targetMargin) / targetMargin) * 10000 : 0;
+      broadcastToDiscord('LOCK', { 
+          dir, 
+          price: currentPrice, 
+          strike: targetMargin, 
+          gap: gapBps, 
+          clock: `${timeState.minsRemaining}m ${timeState.secsRemaining}s` 
+      });
     }
     setForceRender(prev => prev + 1);
-    broadcastToDiscord(`Manual Sync: ${dir}`, 10181046, [
-       { name: "Spot Price", value: `$${currentPrice?.toFixed(2) || '---'}`, inline: true },
-       { name: "Target Margin", value: `$${targetMargin?.toFixed(2) || '---'}`, inline: true }
-    ]);
   };
 
   const handleChatSubmit = (e) => {
@@ -1411,12 +1441,16 @@ function TaraApp() {
         let reply = "";
         const ut = userText.toLowerCase();
         if (ut.includes("/broadcast")) {
-            broadcastToDiscord(`Manual Status Broadcast`, 3447003, [
-                { name: "Prediction", value: analysis?.prediction || 'SIT OUT', inline: true },
-                { name: "Spot Price", value: `$${currentPrice?.toFixed(2)}`, inline: true },
-                { name: "Regime", value: analysis?.regime || 'Unknown', inline: true }
-            ]);
-            reply = `Status successfully broadcasted to Discord.`;
+            const gapBps = targetMargin > 0 ? ((currentPrice - targetMargin) / targetMargin) * 10000 : 0;
+            const dir = analysis?.prediction.includes("UP") ? "UP" : analysis?.prediction.includes("DOWN") ? "DOWN" : "SIT OUT";
+            broadcastToDiscord('SIGNAL', { 
+                dir: dir, 
+                price: currentPrice, 
+                strike: targetMargin, 
+                gap: gapBps, 
+                clock: `${timeState.minsRemaining}m ${timeState.secsRemaining}s` 
+            });
+            reply = `Signal broadcasted to Discord.`;
         } else if (ut.includes("why") || ut.includes("explain")) {
           reply = `Currently, my posterior for UP is ${Number(analysis?.rawProbAbove || 0).toFixed(1)}%. We are in a ${String(analysis?.regime || 'CHOP')} regime.`;
         } else if (ut.includes("whale")) {
@@ -1426,7 +1460,7 @@ function TaraApp() {
         } else if (ut.includes("session")) {
           reply = `Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')}\nDominant: ${marketSessions.dominant}\nUTC: ${marketSessions.utcH}:00`;
         } else {
-          reply = `P: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. ${analysis?.tradeAction}. Try: why, whale, position, session, broadcast.`;
+          reply = `P: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. ${analysis?.tradeAction}. Try: why, whale, position, session, /broadcast.`;
         }
         setChatLog([...currentLog, { role: 'tara', text: reply }]);
       }, 500); 
@@ -1450,7 +1484,7 @@ function TaraApp() {
           <div className="flex items-center justify-between w-full sm:w-auto">
             <h1 className="text-lg md:text-xl font-serif tracking-tight text-white flex items-center gap-2">
               Tara <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V98 Master
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V98 Renaissance
               </span>
               <span className="hidden md:flex items-center gap-1 text-[10px] ml-2">
                 {marketSessions.sessions.map((s,i)=><span key={i} className={`${s.color} opacity-80`}>{s.flag}</span>)}
