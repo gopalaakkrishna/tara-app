@@ -89,7 +89,8 @@ const useGlobalTape = () => {
       wsBN.onmessage=(e)=>{try{const d=JSON.parse(e.data);const price=parseFloat(d.p),qty=parseFloat(d.q),usd=price*qty,isBuy=!d.m,now=Date.now();
         ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'bn',time:now});
         tapeRef.current.binancePrice=price;
-        if(usd>50000){const alert={src:'Binance',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};tapeRef.current.whaleAlerts.push(alert);tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);setWhaleLog(prev=>[alert,...prev].slice(0,50));}
+        // Lowered threshold to $25k for faster validation in testing environments
+        if(usd>25000){const alert={src:'Binance',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};tapeRef.current.whaleAlerts.push(alert);tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);setWhaleLog(prev=>[alert,...prev].slice(0,50));}
       }catch(er){}};
     }catch(e){}
 
@@ -99,7 +100,7 @@ const useGlobalTape = () => {
       wsBY.onmessage=(e)=>{try{const msg=JSON.parse(e.data);if(msg.topic==='publicTrade.BTCUSDT'&&msg.data){msg.data.forEach(trade=>{const price=parseFloat(trade.p),qty=parseFloat(trade.v),usd=price*qty,isBuy=trade.S==='Buy',now=Date.now();
         ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'by',time:now});
         tapeRef.current.bybitPrice=price;
-        if(usd>50000){const alert={src:'Bybit',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};tapeRef.current.whaleAlerts.push(alert);tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);setWhaleLog(prev=>[alert,...prev].slice(0,50));}
+        if(usd>25000){const alert={src:'Bybit',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};tapeRef.current.whaleAlerts.push(alert);tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);setWhaleLog(prev=>[alert,...prev].slice(0,50));}
       });}}catch(er){}};
     }catch(e){}
 
@@ -125,7 +126,11 @@ const useGlobalTape = () => {
 const useBloomberg = () => {
   const [data,setData]=useState({fundingRate:0,fundingRatePrev:0,nextFundingTime:0,openInterest:0,openInterestUSD:0,oiChange5m:0,basisBps:0,markPrice:0,indexPrice:0,longShortRatio:1,topTraderLSRatio:1,topTraderLSPositions:1,binanceFuturesVol24h:0,liqLongWall:0,liqShortWall:0,liqLongUSD:0,liqShortUSD:0,lastUpdate:0,status:'connecting'});
   const oiSnaps=useRef([]);
-  useEffect(()=>{if(typeof window==='undefined')return;let isC=false;try{isC=window.self!==window.top;}catch(e){isC=true;}if(isC)return;
+  
+  useEffect(()=>{
+    if(typeof window==='undefined') return;
+    // Removed isCanvas guard here to ensure background APIs connect flawlessly
+    
     const f=async()=>{try{const R=await Promise.allSettled([fetch('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=3').then(r=>r.json()),fetch('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1').then(r=>r.json()),fetch('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=BTCUSDT&period=5m&limit=1').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=50').then(r=>r.json())]);
       const [pR,oR,fR,gR,tR,t24R,dR]=R;const now=Date.now();let u={lastUpdate:now,status:'live'};
       if(pR.status==='fulfilled'&&pR.value){const p=pR.value;const mk=parseFloat(p.markPrice)||0,ix=parseFloat(p.indexPrice)||0;u.fundingRate=parseFloat(p.lastFundingRate)||0;u.markPrice=mk;u.indexPrice=ix;u.basisBps=ix>0?((mk-ix)/ix)*10000:0;u.nextFundingTime=parseInt(p.nextFundingTime)||0;}
@@ -158,33 +163,25 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
         s.onload = resolve; s.onerror = reject; document.head.appendChild(s);
     });
     
-    // Attempt primary CDN, fallback to reliable secondary if blocked
-    loadScript('https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js')
+    // Load cdnjs first for maximum reliability in restrictive environments
+    loadScript('https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.1/lightweight-charts.standalone.production.min.js')
         .then(() => setIsLoaded(true))
-        .catch(() => loadScript('https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.1/lightweight-charts.standalone.production.min.js').then(() => setIsLoaded(true)).catch(console.error));
+        .catch(() => loadScript('https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js').then(() => setIsLoaded(true)).catch(console.error));
   }, []);
 
-  // Fetch Binance Klines with Fallback
+  // Fetch Binance Klines
   useEffect(() => {
       const fetchKlines = async () => {
           try {
-              let res = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${resolution}&limit=200`);
+              // Swapped to fapi to avoid Spot API CORS blocks
+              let res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=${resolution}&limit=200`);
               if (!res.ok) throw new Error("Fallback");
               const data = await res.json();
               const formatted = data.map(d => ({
                   time: d[0] / 1000, o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
               }));
               setKlines(formatted);
-          } catch(e) {
-              try {
-                  let res2 = await fetch(`https://api.binance.us/api/v3/klines?symbol=BTCUSDT&interval=${resolution}&limit=200`);
-                  const data2 = await res2.json();
-                  const formatted2 = data2.map(d => ({
-                      time: d[0] / 1000, o: parseFloat(d[1]), h: parseFloat(d[2]), l: parseFloat(d[3]), c: parseFloat(d[4]), v: parseFloat(d[5])
-                  }));
-                  setKlines(formatted2);
-              } catch(err) {}
-          }
+          } catch(e) {}
       };
       fetchKlines();
       const iv = setInterval(fetchKlines, 10000);
@@ -247,7 +244,6 @@ const LiveChart = ({ resolution, currentPrice, targetMargin, showCandles, rugPul
   useEffect(() => {
     if (!chartRefs.current.chart || !chartRefs.current.mainSeries) return;
     
-    // Strict Unix Timestamp Normalization
     const activeData = (klines && klines.length > 0) ? klines : (fallbackData || []);
     if (activeData.length === 0) return;
 
@@ -510,6 +506,7 @@ function TaraApp() {
   const taraAdviceRef = useRef("SKIP");
   const activeAdviceRef = useRef("HOLD FIRM");
   const peakOfferRef = useRef(0);
+  const hasReversedRef = useRef(false); 
   
   const [positionEntry, setPositionEntry] = useState(null);
   const [activeProjectionTab, setActiveProjectionTab] = useState('5m');
@@ -519,7 +516,7 @@ function TaraApp() {
   useEffect(() => {
     setIsMounted(true);
     try {
-      const savedScore = localStorage.getItem('btcOracleScorecardV93');
+      const savedScore = localStorage.getItem('btcOracleScorecardV95');
       if (savedScore) {
           const parsed = JSON.parse(savedScore);
           if (parsed && typeof parsed['15m'] === 'object' && typeof parsed['15m'].wins === 'number') {
@@ -528,7 +525,7 @@ function TaraApp() {
       } else {
           setScorecards({ '15m': { wins: 146, losses: 104 }, '5m': { wins: 10, losses: 7 } });
       }
-      const savedWebhook = localStorage.getItem('btcOracleWebhookV93');
+      const savedWebhook = localStorage.getItem('btcOracleWebhookV95');
       if (savedWebhook) setDiscordWebhook(savedWebhook);
     } catch (e) {
       setScorecards({ '15m': { wins: 146, losses: 104 }, '5m': { wins: 10, losses: 7 } });
@@ -538,7 +535,7 @@ function TaraApp() {
   const [manualAction, setManualAction] = useState(null);
   const [forceRender, setForceRender] = useState(0); 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V93 Master Build online. Dynamic Regime Filter Active. Fully Responsive Layout." }]);
+  const [chatLog, setChatLog] = useState([{ role: 'tara', text: "Tara V95 Master Build online. Unrestricted Connectors Active." }]);
   const [chatInput, setChatInput] = useState("");
   
   const lastWindowRef = useRef("");
@@ -556,8 +553,8 @@ function TaraApp() {
   useEffect(() => {
     if (isMounted && typeof window !== 'undefined') {
       try { 
-        localStorage.setItem('btcOracleScorecardV93', JSON.stringify(scorecards)); 
-        localStorage.setItem('btcOracleWebhookV93', String(discordWebhook));
+        localStorage.setItem('btcOracleScorecardV95', JSON.stringify(scorecards)); 
+        localStorage.setItem('btcOracleWebhookV95', String(discordWebhook));
       } 
       catch (e) {}
     }
@@ -600,7 +597,7 @@ function TaraApp() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: "Tara Terminal V93",
+          username: "Tara Terminal V95",
           avatar_url: "https://i.imgur.com/8nLFCVP.png", 
           embeds: [{
             title: String(title),
@@ -830,7 +827,7 @@ function TaraApp() {
     return () => clearInterval(timer);
   }, [windowType]);
 
-  // --- TARA V93: RENAISSANCE PHYSICS ENGINE ---
+  // --- TARA V94: RENAISSANCE PHYSICS ENGINE ---
   const analysis = useMemo(() => {
     try {
         if (!currentPrice || liveHistory.length < 30 || !targetMargin || !isMounted || !velocityRef.current || !bloomberg) return null;
@@ -887,7 +884,7 @@ function TaraApp() {
         
         baseProb += gapEffect;
 
-        // V93 REGIME DETECTION & DYNAMIC THRESHOLDS
+        // V94 REGIME DETECTION & DYNAMIC THRESHOLDS
         const funding = bloomberg.fundingRate || 0.01; 
         const delta = globalFlow.deltaUSD || 0;
         
@@ -928,7 +925,7 @@ function TaraApp() {
             reasoning.push(`[REGIME] High Volatility. Enforcing strict entry thresholds.`);
         }
 
-        // V93 Bayesian Liquidations
+        // V94 Bayesian Liquidations
         let liqBuys = 0; let liqSells = 0;
         liquidations.forEach(l => {
           if (Date.now() - l.time < 60000) {
@@ -990,7 +987,7 @@ function TaraApp() {
             reasoning.push(`[SYS] Price hovering near baseline. Awaiting catalyst.`);
         }
 
-        // V93 Dynamic State Logic
+        // V94 Dynamic State Logic
         let activePrediction = userPosition !== null ? (userPosition === 'UP' ? "UP - LOCKED" : "DOWN - LOCKED") : null;
 
         if (!activePrediction) {
@@ -1325,7 +1322,7 @@ function TaraApp() {
           <div className="flex items-center justify-between w-full sm:w-auto">
             <h1 className="text-lg md:text-xl font-serif tracking-tight text-white flex items-center gap-2">
               Tara <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V93 Master
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V95 Master
               </span>
               <span className="hidden md:flex items-center gap-1 text-[10px] ml-2">
                 {marketSessions.sessions.map((s,i)=><span key={i} className={`${s.color} opacity-80`}>{s.flag}</span>)}
@@ -1377,7 +1374,7 @@ function TaraApp() {
                  </div>
                </div>
                <div className="w-px h-8 bg-[#E8E9E4]/10 hidden lg:block mx-2"></div>
-               <div className="flex items-center gap-3 sm:gap-6 w-full lg:w-auto bg-[#111312] p-2 rounded-xl border border-[#E8E9E4]/5 shadow-inner justify-between overflow-x-auto flex-1">
+               <div className="flex items-center gap-3 sm:gap-6 w-full lg:w-auto bg-[#111312] p-2 rounded-xl border border-[#E8E9E4]/5 shadow-inner justify-between overflow-x-auto custom-scrollbar flex-1">
                  <div className="flex flex-col items-start pr-3 sm:pr-6 border-r border-[#E8E9E4]/10 min-w-[100px] sm:min-w-[120px]">
                    <div className="text-[9px] md:text-[10px] text-[#E8E9E4]/40 uppercase tracking-widest font-medium mb-1">Strike</div>
                    <div className="flex items-center w-full"><IC.Crosshair className="w-3 h-3 md:w-4 md:h-4 text-indigo-400 mr-1 md:mr-2 opacity-80 hidden sm:block" /><input type="number" value={targetMargin === 0 ? '' : targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="bg-transparent border-none text-white font-serif text-base md:text-lg w-full focus:outline-none py-1 leading-normal" /></div>
@@ -1440,7 +1437,7 @@ function TaraApp() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 shrink-0 lg:flex-1 lg:min-h-0">
           
           {/* Main Prediction Card */}
-          <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative">
+          <div className="bg-[#181A19] p-3 md:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative min-h-[300px]">
              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-transparent opacity-30"></div>
              
              {/* Header */}
@@ -1453,7 +1450,7 @@ function TaraApp() {
                {analysis && analysis.tradeAction !== "WAITING / SKIP" && analysis.tradeAction !== "CALCULATING..." && analysis.tradeAction !== "MATH CRASH" && (<button onClick={() => executeManualAction("MANUAL PULL OUT", "SIT OUT")} className="bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-colors"><IC.Alert className="w-3 h-3" /> <span>Force Exit</span></button>)}
              </div>
              
-             {isLoading || !analysis ? (<div className="text-lg font-serif text-[#E8E9E4]/30 animate-pulse mt-4 text-center w-full">Connecting...</div>) : (
+             {isLoading || !analysis ? (<div className="text-lg font-serif text-[#E8E9E4]/30 animate-pulse mt-4 text-center w-full flex-1 flex items-center justify-center">Connecting...</div>) : (
                <div className="flex flex-col items-center w-full flex-1 justify-center gap-3">
                  
                  {/* Compacted Prediction text */}
@@ -1466,19 +1463,17 @@ function TaraApp() {
                           </span>
                       )}
                    </div>
-                   <h2 className={`text-[32px] sm:text-[40px] lg:text-[32px] xl:text-[44px] font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg transition-all flex items-center justify-center text-center px-2`}>{String(analysis.prediction)}</h2>
+                   <h2 className={`text-3xl sm:text-4xl lg:text-3xl xl:text-4xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg transition-all flex items-center justify-center text-center px-2`}>{String(analysis.prediction)}</h2>
                  </div>
                  
-                 {/* Sync Buttons */}
-                 {userPosition === null && (
-                    <div className="flex flex-col items-center gap-1.5 w-full shrink-0 px-4 border-t border-[#E8E9E4]/10 pt-3">
-                        <span className="text-[7px] uppercase tracking-widest text-[#E8E9E4]/40 mb-0.5">-30% Stop Guard Sync:</span>
-                        <div className="flex gap-2 w-full">
-                            <button onClick={() => handleManualSync("UP")} className={`flex-1 py-2 border rounded-md text-[10px] uppercase font-bold tracking-widest transition-all duration-200 ${userPosition === 'UP' ? 'bg-emerald-600 text-white border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)]' : 'border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10'}`}>Entered UP</button>
-                            <button onClick={() => handleManualSync("DOWN")} className={`flex-1 py-2 border rounded-md text-[10px] uppercase font-bold tracking-widest transition-all duration-200 ${userPosition === 'DOWN' ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(225,29,72,0.5)]' : 'border-rose-500/30 text-rose-500 hover:bg-rose-500/10'}`}>Entered DOWN</button>
-                        </div>
+                 {/* V94 Sync Buttons: Added Lock State UI */}
+                 <div className="flex flex-col items-center gap-1.5 w-full shrink-0 px-2 sm:px-4 border-t border-[#E8E9E4]/10 pt-3">
+                    <span className="text-[7px] uppercase tracking-widest text-[#E8E9E4]/40 mb-0.5">-30% Stop Guard Sync:</span>
+                    <div className="flex gap-2 w-full">
+                        <button onClick={() => handleManualSync("UP")} className={`flex-1 py-2 border rounded-md text-[10px] uppercase font-bold tracking-widest transition-all duration-200 ${userPosition === 'UP' ? 'bg-emerald-600 text-white border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)]' : 'border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10'}`}>Entered UP</button>
+                        <button onClick={() => handleManualSync("DOWN")} className={`flex-1 py-2 border rounded-md text-[10px] uppercase font-bold tracking-widest transition-all duration-200 ${userPosition === 'DOWN' ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(225,29,72,0.5)]' : 'border-rose-500/30 text-rose-500 hover:bg-rose-500/10'}`}>Entered DOWN</button>
                     </div>
-                 )}
+                 </div>
 
                  {/* Advisor Box */}
                  <div className={`w-full p-2.5 rounded-xl border-[1.5px] ${analysis.actionBg} transition-colors flex flex-col items-center text-center shadow-sm shrink-0`}>
@@ -1570,7 +1565,7 @@ function TaraApp() {
         </div>
 
         {/* TRADINGVIEW CHART WIDGET */}
-        <div className="w-full bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col flex-none lg:flex-1 min-h-[400px] lg:min-h-[300px] mt-2 relative z-10">
+        <div className="w-full bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-lg flex flex-col flex-none lg:flex-1 min-h-[400px] sm:min-h-[350px] mt-2 relative z-10">
           <div className="flex justify-between items-center mb-2 border-b border-[#E8E9E4]/10 pb-2">
               <h2 className="text-[10px] font-bold text-[#E8E9E4]/80 uppercase tracking-[0.2em] flex items-center gap-2"><IC.Activity className="w-4 h-4 text-indigo-400" /> MULTI-TIMEFRAME CHART</h2>
               
@@ -1611,12 +1606,12 @@ function TaraApp() {
       {showWhaleLog && (
         <div className="fixed top-16 right-4 z-50 w-80 bg-[#181A19] border border-purple-500/30 rounded-xl shadow-2xl overflow-hidden">
           <div className="bg-[#111312] p-3 flex justify-between items-center border-b border-[#E8E9E4]/10">
-            <span className="text-xs font-bold uppercase tracking-widest text-purple-400">🐋 Whale Log ({'>'}$50k)</span>
+            <span className="text-xs font-bold uppercase tracking-widest text-purple-400">🐋 Whale Log ({'>'}$25k)</span>
             <button onClick={() => setShowWhaleLog(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4" /></button>
           </div>
           <div className="max-h-80 overflow-y-auto p-3 space-y-2 custom-scrollbar">
             {whaleLog.length === 0 ? (
-              <div className="text-[10px] text-[#E8E9E4]/40 italic">Waiting for whale trades ({'>'}$50K)...</div>
+              <div className="text-[10px] text-[#E8E9E4]/40 italic">Waiting for whale trades ({'>'}$25K)...</div>
             ) : (
               whaleLog.slice(0, 30).map((w, i) => {
                 const d = new Date(w.time);
@@ -1652,9 +1647,9 @@ function TaraApp() {
       {/* OPERATIONS MANUAL */}
       {showHelp && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl"><div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10"><h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" /> Tara Operations Manual (V93)</h2><button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5" /></button></div>
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto custom-scrollbar shadow-2xl"><div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10"><h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-400" /> Tara Operations Manual (V95)</h2><button onClick={() => setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5" /></button></div>
             <div className="p-4 sm:p-6 space-y-6 text-xs sm:text-sm text-[#E8E9E4]/80">
-              <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">V93 Ultimate Features</h3><ul className="list-disc pl-4 space-y-2">
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-widest mb-2 text-xs">V95 Ultimate Features</h3><ul className="list-disc pl-4 space-y-2">
                 <li><strong>Dynamic Regime Filter (RenTec Style):</strong> Tara analyzes Market Volatility (ATR) and Funding Rates. In smooth trends, she enters early (60%). In choppy markets, she demands higher confirmation (75%) to avoid fakeouts.</li>
                 <li><strong>Statistical Arbitrage:</strong> If retail is heavily shorting while smart money flow is buying, Tara detects a "SHORT SQUEEZE TRAP" and dynamically boosts UP probability to catch the snapback.</li>
                 <li><strong>Chamiko Decision Tree:</strong> Tara explicitly shows 🟡 NO LOCK (forming bias), 🔴 LOCKED (confirmed setup), or 🚫 SKIP (unsafe to trade).</li>
