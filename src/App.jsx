@@ -561,6 +561,7 @@ function TaraApp(){
   const pendingTradeRef=useRef(null);
   const[showAnalytics,setShowAnalytics]=useState(false);
   const[showGuide,setShowGuide]=useState(false);
+  const[selectedTradeId,setSelectedTradeId]=useState(null); // for editable trade log
   const calibration=useMemo(()=>buildCalibration(tradeLog),[tradeLog]);
   const signalAccuracy=useMemo(()=>buildSignalAccuracy(tradeLog),[tradeLog]);
   const sessionPerf=useMemo(()=>buildSessionPerf(tradeLog),[tradeLog]);
@@ -1265,7 +1266,7 @@ function TaraApp(){
                   const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='tara_training_data.csv';a.click();
                 }} className="px-3 py-1 text-xs font-bold uppercase tracking-wide rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/30 transition-colors">Export CSV</button>
                 <button onClick={()=>{if(confirm('Reset all training data and weights? Cannot undo.')){setAdaptiveWeights({...DEFAULT_WEIGHTS});setTradeLog([]);saveWeights({...DEFAULT_WEIGHTS});saveTradeLog([]);pendingTradeRef.current=null;}}} className="px-3 py-1 text-xs font-bold uppercase tracking-wide rounded-lg bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:bg-rose-500/30 transition-colors">Reset</button>
-                <button onClick={()=>setShowAnalytics(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5"/></button>
+                <button onClick={()=>{setShowAnalytics(false);setSelectedTradeId(null);}} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5"/></button>
               </div>
             </div>
             <div className="p-4 space-y-5">
@@ -1354,148 +1355,95 @@ function TaraApp(){
 
               {/* Recent Trade Log — Editable */}
               <section>
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                   <h3 className="text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/60">Trade Log ({tradeLog.length} total)</h3>
-                  <p className="text-[10px] text-[#E8E9E4]/30">Tap any trade to select · Change WIN/LOSS if Tara logged it wrong</p>
+                  <p className="text-[10px] text-[#E8E9E4]/30">Tap a trade to edit · Fix any wrong WIN/LOSS</p>
                 </div>
 
-                {/* Selected trade editor */}
-                {(()=>{
-                  // We use a closure trick since we can't add hooks here — state is lifted
-                  const [selectedId, setSelectedId] = React.useState(null);
-                  const selected = tradeLog.find(t=>t.id===selectedId);
-
-                  const correctTrade=(id, newResult)=>{
-                    // Update the trade log entry
-                    const newLog=tradeLog.map(t=>{
-                      if(t.id!==id)return t;
-                      return{...t,result:newResult,manuallyEdited:true};
-                    });
-                    saveTradeLog(newLog);
-                    setTradeLog(newLog);
-                    // Also update scorecards to reflect the correction
+                {/* Edit panel — shows when a trade is selected */}
+                {selectedTradeId&&(()=>{
+                  const selected=tradeLog.find(t=>t.id===selectedTradeId);
+                  if(!selected)return null;
+                  const correctTrade=(id,newResult)=>{
                     const oldTrade=tradeLog.find(t=>t.id===id);
-                    if(oldTrade&&oldTrade.result&&oldTrade.result!==newResult){
-                      // Flip the score: remove old, add new
+                    const newLog=tradeLog.map(t=>t.id!==id?t:{...t,result:newResult,manuallyEdited:true});
+                    saveTradeLog(newLog);setTradeLog(newLog);
+                    if(oldTrade?.result&&oldTrade.result!==newResult){
                       const wType=oldTrade.windowType||windowType;
-                      if(oldTrade.result==='WIN'){
-                        // Was WIN, now LOSS
-                        updateScore(wType,'wins',-1);
-                        updateScore(wType,'losses',1);
-                      } else {
-                        // Was LOSS, now WIN
-                        updateScore(wType,'losses',-1);
-                        updateScore(wType,'wins',1);
-                      }
+                      if(oldTrade.result==='WIN'){updateScore(wType,'wins',-1);updateScore(wType,'losses',1);}
+                      else{updateScore(wType,'losses',-1);updateScore(wType,'wins',1);}
                     }
-                    // Retrain weights from scratch on corrected log
-                    const corrected=newLog[newLog.findIndex(t=>t.id===id)];
-                    const newWeights=updateWeights(adaptiveWeights,newLog,newResult);
-                    setAdaptiveWeights(newWeights);
-                    setSelectedId(null);
+                    setAdaptiveWeights(updateWeights(adaptiveWeights,newLog,newResult));
+                    setSelectedTradeId(null);
                   };
-
                   const deleteTrade=(id)=>{
                     const oldTrade=tradeLog.find(t=>t.id===id);
                     const newLog=tradeLog.filter(t=>t.id!==id);
-                    saveTradeLog(newLog);
-                    setTradeLog(newLog);
-                    // Remove from scorecard
-                    if(oldTrade?.result){
-                      const wType=oldTrade.windowType||windowType;
-                      updateScore(wType,oldTrade.result==='WIN'?'wins':'losses',-1);
-                    }
-                    setSelectedId(null);
+                    saveTradeLog(newLog);setTradeLog(newLog);
+                    if(oldTrade?.result){const wType=oldTrade.windowType||windowType;updateScore(wType,oldTrade.result==='WIN'?'wins':'losses',-1);}
+                    setSelectedTradeId(null);
                   };
-
                   return(
-                    <>
-                      {/* Edit panel — appears when a trade is selected */}
-                      {selected&&(
-                        <div className="mb-3 p-3 rounded-xl border-2 border-indigo-500/40 bg-indigo-500/8">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`font-bold text-sm ${selected.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{selected.dir}</span>
-                              <span className="text-xs text-[#E8E9E4]/50">{new Date(selected.id).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
-                              <span className="text-xs text-[#E8E9E4]/40">{selected.posterior?.toFixed(0)}% · {selected.regime}</span>
-                              {selected.manuallyEdited&&<span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded">edited</span>}
-                            </div>
-                            <button onClick={()=>setSelectedId(null)} className="text-[#E8E9E4]/40 hover:text-white p-1"><IC.X className="w-3.5 h-3.5"/></button>
-                          </div>
-                          <div className="text-xs text-[#E8E9E4]/50 mb-3">
-                            Currently logged as: <span className={`font-bold ${selected.result==='WIN'?'text-emerald-400':selected.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/30'}`}>{selected.result||'PENDING'}</span>
-                            {selected.earlyExit&&' (early exit)'}{selected.forceExit&&' (force exit)'}
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={()=>correctTrade(selected.id,'WIN')}
-                              className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wide border transition-all ${selected.result==='WIN'?'bg-emerald-500/30 border-emerald-400 text-emerald-300':'border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/15'}`}>
-                              ✓ Mark WIN
-                            </button>
-                            <button
-                              onClick={()=>correctTrade(selected.id,'LOSS')}
-                              className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wide border transition-all ${selected.result==='LOSS'?'bg-rose-500/30 border-rose-400 text-rose-300':'border-rose-500/30 text-rose-500 hover:bg-rose-500/15'}`}>
-                              ✗ Mark LOSS
-                            </button>
-                            <button
-                              onClick={()=>deleteTrade(selected.id)}
-                              className="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wide border border-zinc-500/30 text-zinc-500 hover:bg-zinc-500/15 hover:text-zinc-300 transition-all">
-                              Delete
-                            </button>
-                          </div>
-                          <p className="text-[10px] text-[#E8E9E4]/30 mt-2 text-center">Changing result will update scorecard + retrain signal weights</p>
+                    <div className="mb-3 p-3 rounded-xl border-2 border-indigo-500/40 bg-[#111312]">
+                      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`font-bold text-sm ${selected.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{selected.dir}</span>
+                          <span className="text-xs text-[#E8E9E4]/50">{new Date(selected.id).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
+                          <span className="text-xs text-[#E8E9E4]/40 hidden sm:inline">{selected.posterior?.toFixed(0)}% · {selected.regime}</span>
+                          {selected.manuallyEdited&&<span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded">edited</span>}
                         </div>
-                      )}
-
-                      {/* Trade rows */}
-                      <div className="space-y-1.5 max-h-72 overflow-y-auto" style={{scrollbarWidth:'thin'}}>
-                        {tradeLog.length===0&&(
-                          <div className="text-xs text-[#E8E9E4]/30 italic text-center py-6">No trades logged yet. Trades are recorded automatically when Tara locks and the window closes.</div>
-                        )}
-                        {tradeLog.slice(-30).reverse().map((t,i)=>{
-                          const d=new Date(t.id);
-                          const isSelected=selectedId===t.id;
-                          return(
-                            <button
-                              key={t.id||i}
-                              onClick={()=>setSelectedId(isSelected?null:t.id)}
-                              className={`w-full flex items-center gap-2 text-xs p-2.5 rounded-lg border transition-all text-left ${
-                                isSelected
-                                  ? 'border-indigo-500/60 bg-indigo-500/12 ring-1 ring-indigo-500/40'
-                                  : t.result==='WIN'
-                                    ? 'border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40 hover:bg-emerald-500/10'
-                                    : t.result==='LOSS'
-                                      ? 'border-rose-500/20 bg-rose-500/5 hover:border-rose-500/40 hover:bg-rose-500/10'
-                                      : 'border-[#E8E9E4]/5 hover:border-[#E8E9E4]/15 hover:bg-[#E8E9E4]/3'
-                              }`}
-                            >
-                              {/* Selection indicator */}
-                              <div className={`w-2 h-2 rounded-full shrink-0 ${isSelected?'bg-indigo-400':t.result==='WIN'?'bg-emerald-500/60':t.result==='LOSS'?'bg-rose-500/60':'bg-[#E8E9E4]/20'}`}/>
-
-                              <span className="text-[#E8E9E4]/40 font-mono shrink-0 text-[10px]">
-                                {d.toLocaleDateString('en-US',{month:'short',day:'numeric'})} {d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}
-                              </span>
-
-                              <span className={`font-bold text-xs shrink-0 ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
-
-                              <span className="text-[#E8E9E4]/50 text-[10px] shrink-0">{t.posterior?.toFixed(0)}%</span>
-
-                              <span className="text-[#E8E9E4]/30 text-[10px] truncate hidden sm:block">{t.regime}</span>
-
-                              <span className="text-[#E8E9E4]/25 text-[10px] ml-auto shrink-0">{t.session}</span>
-
-                              <span className={`font-bold text-xs shrink-0 min-w-[40px] text-right ${t.result==='WIN'?'text-emerald-400':t.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/25'}`}>
-                                {t.result||'—'}
-                              </span>
-
-                              {t.manuallyEdited&&<span className="text-[9px] text-amber-400/70 shrink-0">✎</span>}
-                            </button>
-                          );
-                        })}
+                        <button onClick={()=>setSelectedTradeId(null)} className="text-[#E8E9E4]/40 hover:text-white p-1 ml-auto"><IC.X className="w-4 h-4"/></button>
                       </div>
-                    </>
+                      <div className="text-xs text-[#E8E9E4]/50 mb-3">
+                        Logged as: <span className={`font-bold ${selected.result==='WIN'?'text-emerald-400':selected.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/30'}`}>{selected.result||'PENDING'}</span>
+                        {selected.earlyExit&&' · early exit'}{selected.forceExit&&' · force exit'}
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={()=>correctTrade(selected.id,'WIN')}
+                          className={`flex-1 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wide border transition-all ${selected.result==='WIN'?'bg-emerald-500/30 border-emerald-400 text-emerald-300':'border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/15'}`}>
+                          ✓ Mark WIN
+                        </button>
+                        <button onClick={()=>correctTrade(selected.id,'LOSS')}
+                          className={`flex-1 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wide border transition-all ${selected.result==='LOSS'?'bg-rose-500/30 border-rose-400 text-rose-300':'border-rose-500/30 text-rose-500 hover:bg-rose-500/15'}`}>
+                          ✗ Mark LOSS
+                        </button>
+                        <button onClick={()=>deleteTrade(selected.id)}
+                          className="px-3 py-2.5 rounded-lg text-xs font-bold border border-zinc-500/30 text-zinc-500 hover:bg-zinc-500/15 hover:text-zinc-300 transition-all">
+                          Delete
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-[#E8E9E4]/30 mt-2 text-center">Updates scorecard and retrains signal weights</p>
+                    </div>
                   );
                 })()}
+
+                {/* Trade rows */}
+                <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1" style={{scrollbarWidth:'thin'}}>
+                  {tradeLog.length===0?(
+                    <div className="text-xs text-[#E8E9E4]/30 italic text-center py-6">No trades yet — trades log automatically when Tara locks and the window closes.</div>
+                  ):tradeLog.slice(-30).reverse().map((t,i)=>{
+                    const d=new Date(t.id);
+                    const isSel=selectedTradeId===t.id;
+                    return(
+                      <button key={t.id||i} onClick={()=>setSelectedTradeId(isSel?null:t.id)}
+                        className={`w-full flex items-center gap-2 text-xs p-2.5 rounded-lg border transition-all text-left ${
+                          isSel?'border-indigo-500/60 bg-indigo-500/10 ring-1 ring-indigo-500/30'
+                          :t.result==='WIN'?'border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40'
+                          :t.result==='LOSS'?'border-rose-500/20 bg-rose-500/5 hover:border-rose-500/40'
+                          :'border-[#E8E9E4]/5 hover:border-[#E8E9E4]/15'}`}>
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${isSel?'bg-indigo-400':t.result==='WIN'?'bg-emerald-500':'t.result==='LOSS'?'bg-rose-500':'bg-[#E8E9E4]/20'}`}/>
+                        <span className="text-[#E8E9E4]/40 font-mono shrink-0 text-[10px] hidden sm:inline">{d.toLocaleDateString('en-US',{month:'short',day:'numeric'})} </span>
+                        <span className="text-[#E8E9E4]/40 font-mono shrink-0 text-[10px]">{d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
+                        <span className={`font-bold shrink-0 ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
+                        <span className="text-[#E8E9E4]/40 text-[10px] shrink-0">{t.posterior?.toFixed(0)}%</span>
+                        <span className="text-[#E8E9E4]/25 text-[10px] truncate hidden md:block">{t.regime}</span>
+                        <span className="text-[#E8E9E4]/25 text-[10px] ml-auto shrink-0">{t.session}</span>
+                        <span className={`font-bold shrink-0 min-w-[36px] text-right ${t.result==='WIN'?'text-emerald-400':t.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/25'}`}>{t.result||'—'}</span>
+                        {t.manuallyEdited&&<span className="text-amber-400/60 shrink-0 text-[10px]">✎</span>}
+                      </button>
+                    );
+                  })}
+                </div>
               </section>
 
               {/* Training Tips */}
