@@ -679,16 +679,129 @@ function TaraApp(){
   // Heavy data
   useEffect(()=>{const f=async()=>{try{const gran=windowType==='15m'?900:300;const r=await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`);if(r.ok){const d=await r.json();if(Array.isArray(d))setHistory(d.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])})));}const r2=await fetch('https://api.exchange.coinbase.com/products/BTC-USD/book?level=2');if(r2.ok){const d2=await r2.json();if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-150)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+150)ls+=parseFloat(s);});setOrderBook({localBuy:lb,localSell:ls,imbalance:ls===0?1:lb/ls});}}setIsLoading(false);}catch(e){setIsLoading(false);}};f();const iv=setInterval(f,5000);return()=>clearInterval(iv);},[targetMargin,windowType]);
 
-  // ── AUTO-STRIKE: fetch the window's opening candle price ──
-  // ── AUTO-STRIKE: fetch the exact open price of the current window candle ──
-  // Uses Coinbase candles API - granularity matches window (300s=5m, 900s=15m)
-  // On any failure: sets to 0 so user can enter manually
-  const fetchWindowOpenPrice=useCallback(async(wType,fallbackPrice)=>{
-    if(isManualStrikeRef.current)return; // user has manually set it
+  // ── AUTO-STRIKE: Kalshi (15m) / Polymarket (5m) / Coinbase fallback ──
+  const[strikeSource,setStrikeSource]=useState('auto');
+
+  const fetchWindowOpenPrice=useCallback(async(wType)=>{
+    if(isManualStrikeRef.current)return;
+
+    const applyStrike=(price,source)=>{
+      if(!price||price<=0||isNaN(price)){
+        windowOpenPriceRef.current=0;
+        setTargetMargin(0);
+        setStrikeMode('manual');
+        setStrikeSource('manual');
+        return false;
+      }
+      windowOpenPriceRef.current=price;
+      setTargetMargin(price);
+      setStrikeMode('auto');
+      setStrikeSource(source);
+      hasSetInitialMargin.current=true;
+      return true;
+    };
+
+    // Compute next window boundary timestamp (seconds)
+    const now=Date.now();
+    const iMs=(wType==='15m'?15:5)*60*1000;
+    const nextWindowMs=Math.ceil((now+500)/iMs)*iMs;
+    const nextWindowSec=Math.floor(nextWindowMs/1000);
+    // Tolerance: accept markets expiring within ±90s of the window boundary
+    const TOL=90*1000;
+
+    if(wType==='15m'){
+      // ── KALSHI 15m ─────────────────────────────────────────────────
+      // Ticker format: KXBTC-25APR17-T74999 → strike = 74999
+      // Find the open market whose close_time is closest to the next 15m boundary
+      try{
+        const r=await fetch(
+          'https://api.elections.kalshi.com/trade-api/v2/markets?limit=200&ticker_name_prefix=KXBTC&status=open',
+          {signal:AbortSignal.timeout(6000),headers:{'Accept':'application/json'}}
+        );
+        if(!r.ok)throw new Error('Kalshi HTTP '+r.status);
+        const d=await r.json();
+        const markets=d.markets||d.data||[];
+        if(!markets.length)throw new Error('No KXBTC markets');
+
+        // Find market expiring closest to next window boundary
+        let best=null,bestDiff=Infinity;
+        for(const m of markets){
+          const closeMs=m.close_time?new Date(m.close_time).getTime():
+                        m.expiration_time?new Date(m.expiration_time).getTime():0;
+          if(!closeMs)continue;
+          const diff=Math.abs(closeMs-nextWindowMs);
+          if(diff<bestDiff){bestDiff=diff;best=m;}
+        }
+        if(!best)throw new Error('No matching Kalshi market');
+        if(bestDiff>TOL*2)throw new Error(`Closest Kalshi market is ${Math.round(bestDiff/60000)}m off`);
+
+        // Parse strike from ticker: KXBTC-...-T74999.99 → 74999.99
+        const ticker=best.ticker||best.market_ticker||'';
+        const match=ticker.match(/[Tt](\d{4,6}(?:\.\d+)?)/);
+        if(!match)throw new Error('No price in Kalshi ticker: '+ticker);
+        const strike=parseFloat(match[1]);
+        console.log('[Kalshi] Market:',ticker,'Strike:',strike,'Diff:',Math.round(bestDiff/1000)+'s');
+        if(applyStrike(strike,'kalshi'))return;
+      }catch(e){
+        console.warn('[Kalshi] Failed:',e.message);
+      }
+
+    }else{
+      // ── POLYMARKET 5m ───────────────────────────────────────────────
+      // Find the BTC 5-minute market expiring at the next 5m window
+      // Polymarket returns endDateIso / end_date_iso for expiry
+      try{
+        // Try multiple search terms to find the 5m BTC market
+        const queries=['bitcoin 5 minute','btc 5min','btc price 5','bitcoin above'];
+        let markets=[];
+        for(const q of queries){
+          const r=await fetch(
+            `https://gamma-api.polymarket.com/markets?closed=false&limit=100&q=${encodeURIComponent(q)}`,
+            {signal:AbortSignal.timeout(6000),headers:{'Accept':'application/json'}}
+          );
+          if(!r.ok)continue;
+          const d=await r.json();
+          const list=Array.isArray(d)?d:(d.data||d.markets||[]);
+          if(list.length){markets=list;break;}
+        }
+        if(!markets.length)throw new Error('No Polymarket results');
+
+        // Filter: BTC/bitcoin market + expiry close to next window boundary
+        const btcMarkets=markets.filter(m=>{
+          const q=(m.question||m.title||'').toLowerCase();
+          return(q.includes('bitcoin')||q.includes('btc'))&&(q.includes('above')||q.includes('price')||q.includes('exceed'));
+        });
+        if(!btcMarkets.length)throw new Error('No BTC markets in Polymarket results');
+
+        // Find market whose end_date is closest to next window boundary
+        let best=null,bestDiff=Infinity;
+        for(const m of btcMarkets){
+          const endMs=m.endDateIso?new Date(m.endDateIso).getTime():
+                      m.end_date_iso?new Date(m.end_date_iso).getTime():
+                      m.end_date?new Date(m.end_date).getTime():0;
+          if(!endMs)continue;
+          const diff=Math.abs(endMs-nextWindowMs);
+          if(diff<bestDiff){bestDiff=diff;best=m;}
+        }
+        if(!best)throw new Error('No Polymarket market with end date');
+        if(bestDiff>TOL*3)throw new Error(`Closest Polymarket market is ${Math.round(bestDiff/60000)}m off`);
+
+        // Parse price threshold from question text
+        // e.g. "Will Bitcoin be above $75,000 at 4:05 PM?"
+        const question=best.question||best.title||'';
+        const match=question.match(/\$\s*([\d,]+(?:\.\d+)?)/);
+        if(!match)throw new Error('No price in question: '+question);
+        const strike=parseFloat(match[1].replace(/,/g,''));
+        console.log('[Polymarket] Market:',question.slice(0,60),'Strike:',strike,'Diff:',Math.round(bestDiff/1000)+'s');
+        if(applyStrike(strike,'polymarket'))return;
+      }catch(e){
+        console.warn('[Polymarket] Failed:',e.message);
+      }
+    }
+
+    // ── FALLBACK: Coinbase candle open ──────────────────────────────
     try{
       const gran=wType==='15m'?900:300;
-      // Fetch last 2 candles - d[0] is the current (most recent) candle
-      // Format: [timestamp, low, high, open, close, volume]
       const r=await fetch(
         `https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}&limit=2`,
         {signal:AbortSignal.timeout(4000)}
@@ -696,21 +809,14 @@ function TaraApp(){
       if(!r.ok)throw new Error('CB '+r.status);
       const d=await r.json();
       if(!Array.isArray(d)||!d[0])throw new Error('Bad data');
-      const openPrice=parseFloat(d[0][3]); // index 3 = open price
-      if(!openPrice||openPrice<=0)throw new Error('Zero price');
-      windowOpenPriceRef.current=openPrice;
-      setTargetMargin(openPrice);
-      setStrikeMode('auto');
+      const openPrice=parseFloat(d[0][3]);
+      if(applyStrike(openPrice,'coinbase'))return;
     }catch(e){
-      // Failed - set to 0 so user knows to enter manually
-      // Don't use currentPrice as fallback - that's mid-candle noise
-      if(!hasSetInitialMargin.current){
-        windowOpenPriceRef.current=0;
-        setTargetMargin(0);
-        setStrikeMode('manual');
-      }
+      console.warn('[Coinbase fallback] Failed:',e.message);
     }
-    hasSetInitialMargin.current=true;
+
+    // ── FINAL FALLBACK: 0, user enters manually ──────────────────────
+    applyStrike(0,'manual');
   },[]);
 
   // On mount: fetch window open price
@@ -1070,9 +1176,17 @@ function TaraApp(){
                 <div className="text-xs text-[#E8E9E4]/40 uppercase tracking-wide">Strike</div>
                 <span
                   onClick={()=>{isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(windowType);}}
-                  title={strikeMode==='auto'?'Auto-tracking window open — click to reset':'Manual override — click to restore auto'}
-                  className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer select-none font-bold transition-colors ${strikeMode==='auto'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-emerald-500/15 hover:text-emerald-400'}`}
-                >{strikeMode==='auto'?'AUTO':'MANUAL'}</span>
+                  title={strikeMode==='auto'?`Auto — source: ${strikeSource.toUpperCase()} · click to re-fetch`:'Manual override — click to restore auto'}
+                  className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer select-none font-bold transition-colors ${strikeMode==='auto'?
+                    strikeSource==='kalshi'?'bg-purple-500/15 text-purple-400 border border-purple-500/30':
+                    strikeSource==='polymarket'?'bg-blue-500/15 text-blue-400 border border-blue-500/30':
+                    'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                  :'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-emerald-500/15 hover:text-emerald-400'}`}
+                >{strikeMode==='auto'?
+                  strikeSource==='kalshi'?'KALSHI':
+                  strikeSource==='polymarket'?'POLY':
+                  strikeSource==='coinbase'?'AUTO':'AUTO'
+                :'MANUAL'}</span>
               </div>
               <div className="flex items-center gap-1">
                 <IC.Crosshair className="w-4 h-4 text-indigo-400 hidden sm:block"/>
