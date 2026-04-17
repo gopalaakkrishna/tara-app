@@ -247,6 +247,7 @@ const TradingViewChart=({resolution,onResolutionChange})=>{
       <iframe
         key={resolution}
         src={src}
+        className="tv-chart-container"
         style={{
           width:'100%',
           height:'430px',
@@ -867,11 +868,11 @@ function TaraApp(){
   const advisorStyle=advisorColorMap[advisor.color]||advisorColorMap.zinc;
 
   return(
-    <div className="min-h-screen bg-[#111312] text-[#E8E9E4] font-sans flex flex-col selection:bg-[#E8E9E4]/20" style={{fontSize:"16px",lineHeight:"1.5"}}>
+    <div className="min-h-screen bg-[#111312] text-[#E8E9E4] font-sans flex flex-col selection:bg-[#E8E9E4]/20" style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
       
       {/* ── STICKY HEADER ── */}
-      <header className="sticky top-0 z-40 bg-[#111312]/95 backdrop-blur-md border-b border-[#E8E9E4]/10 px-3 sm:px-5 py-3 shrink-0">
-        <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-2">
+      <header className="sticky top-0 z-40 bg-[#111312]/95 backdrop-blur-md border-b border-[#E8E9E4]/10 px-2 sm:px-4 py-2 shrink-0">
+        <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-1 sm:gap-2">
           
           {/* Logo + price */}
           <div className="flex items-center gap-3 min-w-0">
@@ -882,7 +883,7 @@ function TaraApp(){
               </span>
             </div>
             {/* Live Price — always visible */}
-            <div className={`flex items-center gap-1 text-lg sm:text-2xl font-serif font-bold tracking-tight ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
+            <div className={`flex items-center gap-1 text-base sm:text-xl font-serif font-bold tracking-tight ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
               <IC.Zap className={`w-4 h-4 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#E8E9E4]/40'}`}/>
               ${currentPrice?currentPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'---'}
             </div>
@@ -898,7 +899,7 @@ function TaraApp(){
 
           {/* Right controls */}
           <div className="flex items-center gap-1.5 shrink-0">
-            <div className="hidden lg:flex flex-col items-end cursor-pointer" onClick={()=>setUseLocalTime(!useLocalTime)}>
+            <div className="hidden xl:flex flex-col items-end cursor-pointer" onClick={()=>setUseLocalTime(!useLocalTime)}>
               <span className="text-xs text-[#E8E9E4]/40 uppercase">{useLocalTime?'LOCAL':'EST'}</span>
               <span className="text-sm font-mono text-[#E8E9E4]/80">{timeState.currentTime||'--:--:--'}</span>
             </div>
@@ -913,16 +914,16 @@ function TaraApp(){
       </header>
 
       {/* ── MAIN CONTENT ── */}
-      <main className="flex-1 w-full max-w-[1600px] mx-auto px-3 sm:px-4 py-3 sm:py-4 flex flex-col gap-4 min-h-0">
+      <main className="flex-1 w-full max-w-[1600px] mx-auto px-2 sm:px-3 lg:px-4 py-2 sm:py-3 flex flex-col gap-3 min-h-0">
         
         {/* STATS BAR */}
         <div className="bg-[#181A19] rounded-xl border border-[#E8E9E4]/10 shadow-md relative overflow-hidden shrink-0">
           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
-          <div className="p-3 sm:p-4 flex flex-wrap lg:flex-nowrap items-center gap-2 sm:gap-3">
+          <div className="p-2 sm:p-3 grid grid-cols-2 lg:grid-cols-none lg:flex lg:flex-row lg:items-center gap-2 sm:gap-3">
             
             {/* Strike */}
             {/* Strike — auto or manual */}
-            <div className="flex flex-col min-w-[110px] sm:min-w-[140px]">
+            <div className="flex flex-col min-w-0 w-full lg:min-w-[130px] lg:w-auto">
               <div className="flex items-center justify-between mb-1 gap-2">
                 <div className="text-xs text-[#E8E9E4]/40 uppercase tracking-wide">Strike</div>
                 <span
@@ -941,10 +942,10 @@ function TaraApp(){
                 />
               </div>
             </div>
-            <div className="w-px h-8 bg-[#E8E9E4]/10 hidden sm:block"></div>
+            <div className="w-px h-8 bg-[#E8E9E4]/10 hidden lg:block"></div>
 
             {/* Bet/Win */}
-            <div className="flex flex-col min-w-[120px] sm:min-w-[140px]">
+            <div className="flex flex-col min-w-0 w-full lg:min-w-[140px] lg:w-auto">
               <div className="text-xs text-[#E8E9E4]/40 uppercase tracking-wide mb-1">Bet / Max Win</div>
               <div className="flex items-center gap-1 text-sm sm:text-base font-serif">
                 $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-16 text-center outline-none text-white"/>
@@ -952,19 +953,19 @@ function TaraApp(){
                 $<input type="number" value={maxPayout===0?'':maxPayout} onChange={e=>setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-16 text-center outline-none text-white"/>
               </div>
             </div>
-            <div className="w-px h-8 bg-[#E8E9E4]/10 hidden sm:block"></div>
+            <div className="w-px h-8 bg-[#E8E9E4]/10 hidden lg:block"></div>
 
             {/* Live Offer */}
-            <div className="flex flex-col min-w-[90px]">
+            <div className="flex flex-col min-w-0">
               <div className="text-xs text-emerald-400/80 uppercase tracking-wide mb-1">Live Offer</div>
               <div className="flex items-center gap-1 text-emerald-400 text-sm sm:text-base font-serif">
                 $<input type="number" value={currentOffer} onChange={e=>setCurrentOffer(e.target.value)} placeholder="0.00" className="bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-20 text-center outline-none placeholder-emerald-900"/>
               </div>
             </div>
-            <div className="w-px h-8 bg-[#E8E9E4]/10 hidden lg:block ml-auto"></div>
+            <div className="w-px h-8 bg-[#E8E9E4]/10 hidden lg:block lg:ml-auto"></div>
 
             {/* Position / Score */}
-            <div className="ml-auto lg:ml-0 flex flex-col min-w-[160px]">
+            <div className="col-span-2 lg:col-span-none lg:ml-auto flex flex-col">
               {positionStatus?(
                 <div className="bg-[#111312] border border-amber-500/20 rounded-lg p-1.5">
                   <div className="flex justify-between text-xs mb-1"><span className="text-[#E8E9E4]/40 uppercase">POSITION</span><span className={positionStatus.side==='UP'?'text-emerald-400 font-bold':'text-rose-400 font-bold'}>{positionStatus.side} @ ${(positionStatus.entry||0).toFixed(0)}</span></div>
@@ -977,9 +978,9 @@ function TaraApp(){
                 <div>
                   <div className="text-xs text-[#E8E9E4]/40 uppercase tracking-wide mb-1 flex items-center gap-1"><IC.Terminal className="w-4 h-4"/> {windowType.toUpperCase()} SCORE</div>
                   <div className="flex items-center gap-3">
-                    <div className="flex flex-col items-center"><div className="flex items-center gap-1 text-xs text-emerald-400"><button onClick={()=>updateScore(windowType,'wins',-1)} className="hover:bg-emerald-500/20 rounded px-0.5">-</button>W<button onClick={()=>updateScore(windowType,'wins',1)} className="hover:bg-emerald-500/20 rounded px-0.5">+</button></div><span className="text-3xl font-serif text-emerald-400 font-bold">{Number(scorecards[windowType]?.wins||0)}</span></div>
+                    <div className="flex flex-col items-center"><div className="flex items-center gap-1 text-xs text-emerald-400"><button onClick={()=>updateScore(windowType,'wins',-1)} className="hover:bg-emerald-500/20 rounded px-0.5">-</button>W<button onClick={()=>updateScore(windowType,'wins',1)} className="hover:bg-emerald-500/20 rounded px-0.5">+</button></div><span className="text-2xl sm:text-3xl font-serif text-emerald-400 font-bold">{Number(scorecards[windowType]?.wins||0)}</span></div>
                     <div className="h-6 w-px bg-[#E8E9E4]/10"></div>
-                    <div className="flex flex-col items-center"><div className="flex items-center gap-1 text-xs text-rose-400"><button onClick={()=>updateScore(windowType,'losses',-1)} className="hover:bg-rose-500/20 rounded px-0.5">-</button>L<button onClick={()=>updateScore(windowType,'losses',1)} className="hover:bg-rose-500/20 rounded px-0.5">+</button></div><span className="text-3xl font-serif text-rose-400 font-bold">{Number(scorecards[windowType]?.losses||0)}</span></div>
+                    <div className="flex flex-col items-center"><div className="flex items-center gap-1 text-xs text-rose-400"><button onClick={()=>updateScore(windowType,'losses',-1)} className="hover:bg-rose-500/20 rounded px-0.5">-</button>L<button onClick={()=>updateScore(windowType,'losses',1)} className="hover:bg-rose-500/20 rounded px-0.5">+</button></div><span className="text-2xl sm:text-3xl font-serif text-rose-400 font-bold">{Number(scorecards[windowType]?.losses||0)}</span></div>
                     <div className="text-xs text-[#E8E9E4]/30">{(Number(scorecards[windowType]?.wins||0)/(Math.max(1,Number(scorecards[windowType]?.wins||0)+Number(scorecards[windowType]?.losses||0)))*100).toFixed(0)}%</div>
                   </div>
                 </div>
@@ -998,7 +999,7 @@ function TaraApp(){
         </div>
 
         {/* MOBILE TAB NAV */}
-        <div className="flex lg:hidden bg-[#181A19] border border-[#E8E9E4]/10 rounded-xl p-1 gap-1">
+        <div className="flex lg:hidden bg-[#181A19] border border-[#E8E9E4]/10 rounded-xl p-1 gap-1 shrink-0">
           {[{id:'signal',label:'Signal',icon:<IC.Zap className="w-4 h-4"/>},{id:'chart',label:'Chart',icon:<IC.Activity className="w-4 h-4"/>},{id:'logs',label:'Analytics',icon:<IC.BarChart className="w-4 h-4"/>}].map(tab=>(
             <button key={tab.id} onClick={()=>setMobileTab(tab.id)} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${mobileTab===tab.id?'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70'}`}>
               {tab.icon}{tab.label}
@@ -1007,10 +1008,10 @@ function TaraApp(){
         </div>
 
         {/* ── MIDDLE ROW ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 shrink-0">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 shrink-0">
           
           {/* ── PREDICTION CARD ── */}
-          <div className={`bg-[#181A19] p-4 sm:p-5 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
+          <div className={`bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-transparent opacity-30 rounded-t-xl"></div>
             
             {/* Clock + Force Exit */}
@@ -1051,9 +1052,9 @@ function TaraApp(){
                     <span className="text-xs text-[#E8E9E4]/40 uppercase tracking-[0.2em] font-bold">Prediction</span>
                     {analysis.regime&&<span className="text-xs text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded text-xs">{analysis.regime}</span>}
                     {/* Lock badge */}
-                    {analysis.lockInfo&&<span className="text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs px-2 py-1">🔒 LOCKED {Math.floor((Date.now()-analysis.lockInfo.lockedAt)/1000)}s ago @ {analysis.lockInfo.lockedPosterior.toFixed(0)}%</span>}
+                    {analysis.lockInfo&&<span className="text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs px-2 py-1">🔒 {Math.floor((Date.now()-analysis.lockInfo.lockedAt)/1000)}s @ {analysis.lockInfo.lockedPosterior.toFixed(0)}%</span>}
                   </div>
-                  <h2 className={`prediction-heading text-4xl sm:text-5xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg`}>{analysis.prediction}</h2>
+                  <h2 className={`prediction-heading text-3xl sm:text-4xl md:text-5xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg`}>{analysis.prediction}</h2>
                   
                   {/* Confidence forming progress — show when NOT locked */}
                   {!analysis.lockInfo&&(analysis.prediction.includes('FORMING')||analysis.prediction==='SEARCHING...')&&(
@@ -1183,7 +1184,7 @@ function TaraApp(){
         </div>
 
         {/* ── CHART — TradingView ── */}
-        <div className="bg-[#181A19] rounded-xl border border-[#E8E9E4]/10 shadow-lg overflow-hidden" style={{minHeight:'490px'}}>
+        <div className="bg-[#181A19] rounded-xl border border-[#E8E9E4]/10 shadow-lg overflow-hidden" style={{minHeight:'480px',overflow:'hidden'}}>
           <div className="flex justify-between items-center px-3 py-2 border-b border-[#E8E9E4]/10">
             <h2 className="text-xs font-bold text-[#E8E9E4]/70 uppercase tracking-[0.2em] flex items-center gap-2">
               <IC.Activity className="w-4 h-4 text-indigo-400"/>TARA LIVE CHART
@@ -1249,8 +1250,8 @@ function TaraApp(){
       {/* Help */}
       {/* ── ANALYTICS / TRAINING DASHBOARD ── */}
       {showAnalytics&&(
-        <div className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-2xl" style={{scrollbarWidth:'thin'}}>
+        <div className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-3xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl" style={{scrollbarWidth:'thin'}}>
             <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10">
               <div>
                 <h2 className="text-base font-serif text-white flex items-center gap-2"><IC.BarChart className="w-5 h-5 text-indigo-400"/>Tara Training Engine</h2>
@@ -1515,8 +1516,8 @@ function TaraApp(){
 
       {/* ── HOW TARA WORKS GUIDE ── */}
       {showGuide&&(
-        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl" style={{scrollbarWidth:'thin'}}>
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl" style={{scrollbarWidth:'thin'}}>
             <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10">
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
@@ -1673,31 +1674,82 @@ function TaraApp(){
       )}
 
       <style>{`
-        /* ── Tara V100 Global Reset & Responsive Base ── */
-        *, *::before, *::after { box-sizing: border-box; }
-        html { font-size: 16px; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-        body { margin: 0; padding: 0; min-height: 100vh; overflow-x: hidden; }
+        /* ── Tara V101 Global Reset & Responsive Base ── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html {
+          font-size: 16px;
+          -webkit-text-size-adjust: 100%;
+          text-size-adjust: 100%;
+          overflow-x: hidden;
+        }
+        body {
+          overflow-x: hidden;
+          min-height: 100dvh;
+          -webkit-font-smoothing: antialiased;
+        }
+        /* Remove number input spinners */
         input[type=number]::-webkit-inner-spin-button,
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         input[type=number] { -moz-appearance: textfield; }
         /* Scrollbars */
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar { width: 3px; height: 3px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(232,233,228,0.12); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(232,233,228,0.22); }
         /* Mobile tap highlight */
         * { -webkit-tap-highlight-color: transparent; }
-        /* Fluid type scale for small screens */
-        @media (max-width: 480px) {
-          html { font-size: 15px; }
-          .prediction-heading { font-size: 2.4rem !important; }
-        }
+        /* Safe area insets for notched phones */
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+        /* ── Fluid prediction heading ── */
+        .prediction-heading { font-size: clamp(1.8rem, 8vw, 3.5rem) !important; line-height: 1 !important; }
+
+        /* ── Breakpoint-specific font tuning ── */
         @media (max-width: 360px) {
+          html { font-size: 13px; }
+        }
+        @media (min-width: 361px) and (max-width: 480px) {
           html { font-size: 14px; }
-          .prediction-heading { font-size: 2rem !important; }
+        }
+        @media (min-width: 481px) and (max-width: 768px) {
+          html { font-size: 15px; }
+        }
+        @media (min-width: 769px) and (max-width: 1024px) {
+          html { font-size: 15.5px; }
+        }
+        @media (min-width: 1025px) {
+          html { font-size: 16px; }
         }
         @media (min-width: 1400px) {
           html { font-size: 17px; }
+        }
+
+        /* ── Prevent any element causing horizontal scroll ── */
+        main, header, section, div {
+          max-width: 100%;
+        }
+
+        /* ── TradingView iframe responsive ── */
+        iframe {
+          max-width: 100%;
+        }
+
+        /* ── Chart height adapts to screen ── */
+        @media (max-width: 480px) {
+          .tv-chart-container { height: 300px !important; }
+        }
+        @media (min-width: 481px) and (max-width: 768px) {
+          .tv-chart-container { height: 360px !important; }
+        }
+        @media (min-width: 769px) {
+          .tv-chart-container { height: 430px !important; }
+        }
+
+        /* ── Analytics grid adapts ── */
+        @media (max-width: 480px) {
+          .signal-weights-grid { grid-template-columns: repeat(2, 1fr) !important; }
+          .calibration-grid { grid-template-columns: repeat(5, 1fr) !important; }
+          .session-grid { grid-template-columns: repeat(2, 1fr) !important; }
         }
       `}</style>
     </div>
