@@ -201,111 +201,64 @@ const generateSyntheticBTC=(basePrice=84000,candles=120,intervalSec=60)=>{
 };
 
 // ═══════════════════════════════════════
-// TARA CHART — TRADINGVIEW EMBEDDED WIDGET
+// TARA CHART — TRADINGVIEW IFRAME EMBED
+// Iframe is fully sandboxed — no DOM manipulation, no React conflicts
+// key={resolution} forces clean remount on interval change
 // ═══════════════════════════════════════
 const TV_INTERVAL_MAP={'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60'};
 
-const TradingViewChart=({resolution,onResolutionChange,windowType})=>{
-  const containerRef=useRef(null);
-  const widgetCreatedRef=useRef(false);
-  const[loaded,setLoaded]=useState(false);
-  const[error,setError]=useState(false);
-
-  const buildWidget=useCallback(()=>{
-    if(!containerRef.current||widgetCreatedRef.current)return;
-    const interval=TV_INTERVAL_MAP[resolution]||'1';
-    try{
-      containerRef.current.innerHTML='';
-      const el=document.createElement('div');
-      el.id='tara_tv_'+Date.now();
-      el.style.cssText='width:100%;height:100%;';
-      containerRef.current.appendChild(el);
-      // eslint-disable-next-line no-undef
-      new window.TradingView.widget({
-        autosize:true,
-        symbol:'COINBASE:BTCUSD',
-        interval,
-        timezone:'Etc/UTC',
-        theme:'dark',
-        style:'1',
-        locale:'en',
-        toolbar_bg:'#111312',
-        backgroundColor:'rgba(17,19,18,1)',
-        gridColor:'rgba(232,233,228,0.03)',
-        enable_publishing:false,
-        hide_side_toolbar:true,
-        allow_symbol_change:false,
-        save_image:false,
-        container_id:el.id,
-        studies:['STD;Volume'],
-        show_popup_button:false,
-        withdateranges:true,
-        details:false,
-        hotlist:false,
-        calendar:false,
-        hide_volume:false,
-      });
-      widgetCreatedRef.current=true;
-      setLoaded(true);
-    }catch(e){console.error('TV widget error:',e);setError(true);}
-  },[resolution]);
-
-  // Load TradingView script once
-  useEffect(()=>{
-    if(window.TradingView){buildWidget();return;}
-    if(document.getElementById('tv-script')){
-      const poll=setInterval(()=>{if(window.TradingView){clearInterval(poll);buildWidget();}},300);
-      setTimeout(()=>clearInterval(poll),15000);
-      return;
-    }
-    const s=document.createElement('script');
-    s.id='tv-script';s.async=true;
-    s.src='https://s3.tradingview.com/tv.js';
-    s.onload=()=>buildWidget();
-    s.onerror=()=>setError(true);
-    document.head.appendChild(s);
-  },[]);
-
-  // Rebuild widget on resolution change
-  useEffect(()=>{
-    widgetCreatedRef.current=false;
-    setLoaded(false);
-    if(window.TradingView)buildWidget();
-  },[resolution,buildWidget]);
+const TradingViewChart=({resolution,onResolutionChange})=>{
+  const interval=TV_INTERVAL_MAP[resolution]||'1';
+  const src=[
+    'https://www.tradingview.com/widgetembed/?frameElementId=tv_tara_101',
+    `&symbol=COINBASE%3ABTCUSD`,
+    `&interval=${interval}`,
+    '&hidesidetoolbar=1',
+    '&hidetoptoolbar=0',
+    '&symboledit=0',
+    '&saveimage=0',
+    '&toolbarbg=111312',
+    '&studies=%5B%22Volume%40tv-basicstudies%22%5D',
+    '&theme=dark',
+    '&style=1',
+    '&timezone=Etc%2FUTC',
+    '&locale=en',
+    '&withdateranges=1',
+    '&allow_symbol_change=0',
+  ].join('');
 
   return(
     <div style={{userSelect:'none',width:'100%'}}>
-      {/* Toolbar */}
+      {/* Resolution toolbar */}
       <div className="flex items-center justify-between px-3 pb-2 flex-wrap gap-2">
-        <div className="flex items-center gap-1 bg-[#111312] rounded-lg border border-[#E8E9E4]/5 overflow-hidden">
+        <div className="flex items-center gap-0.5 bg-[#111312] rounded-lg border border-[#E8E9E4]/5 overflow-hidden">
           {['1m','3m','5m','15m','30m','1h'].map(r=>(
-            <button key={r} onClick={()=>{widgetCreatedRef.current=false;onResolutionChange&&onResolutionChange(r);}}
-              className={`px-3 py-1.5 text-xs font-bold uppercase transition-colors ${resolution===r?'bg-indigo-500/20 text-indigo-400':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70'}`}>{r}</button>
+            <button key={r}
+              onClick={()=>onResolutionChange&&onResolutionChange(r)}
+              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${resolution===r?'bg-indigo-500/20 text-indigo-400':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70'}`}>
+              {r}
+            </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 text-xs text-[#E8E9E4]/30">
-          <span className="hidden sm:inline">COINBASE:BTCUSD · TradingView</span>
-          {!loaded&&!error&&<span className="text-indigo-400 animate-pulse">Loading chart...</span>}
-          {error&&<span className="text-amber-400">TV blocked — check network</span>}
-        </div>
+        <span className="text-xs text-[#E8E9E4]/25 hidden sm:inline font-mono">COINBASE:BTCUSD · TradingView</span>
       </div>
 
-      {/* TV container */}
-      <div ref={containerRef} style={{width:'100%',height:'420px',borderRadius:'8px',overflow:'hidden',background:'#111312',position:'relative'}}>
-        {!loaded&&!error&&(
-          <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:'8px'}}>
-            <div style={{width:'32px',height:'32px',border:'2px solid rgba(99,102,241,0.3)',borderTop:'2px solid #6366f1',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
-            <span style={{fontSize:'11px',color:'rgba(232,233,228,0.3)',fontFamily:'monospace',letterSpacing:'0.1em'}}>LOADING TRADINGVIEW...</span>
-          </div>
-        )}
-        {error&&(
-          <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:'8px'}}>
-            <span style={{fontSize:'24px'}}>📡</span>
-            <span style={{fontSize:'11px',color:'rgba(232,233,228,0.4)',fontFamily:'monospace',textAlign:'center',padding:'0 16px'}}>TradingView blocked by network/CSP<br/>Check your browser or Vercel headers</span>
-          </div>
-        )}
-      </div>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      {/* iframe — key={resolution} forces clean remount on interval change */}
+      <iframe
+        key={resolution}
+        src={src}
+        style={{
+          width:'100%',
+          height:'430px',
+          border:'none',
+          borderRadius:'8px',
+          background:'#111312',
+          display:'block',
+        }}
+        allowFullScreen
+        title="Tara Live Chart — COINBASE:BTCUSD"
+        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+      />
     </div>
   );
 };
