@@ -981,7 +981,7 @@ function TaraApp(){
               <div className="flex items-center gap-1">
                 <IC.Crosshair className="w-4 h-4 text-indigo-400 hidden sm:block"/>
                 <input type="number"
-                  value={targetMargin===0?'':\`${targetMargin}\`}
+                  value={targetMargin===0?'':targetMargin}
                   onChange={e=>{const v=Number(e.target.value);setTargetMargin(v);isManualStrikeRef.current=true;setStrikeMode('manual');}}
                   className="bg-transparent text-white font-serif text-base sm:text-lg w-full focus:outline-none border-b border-[#E8E9E4]/10 focus:border-indigo-400"
                   placeholder="Auto-set"
