@@ -46,8 +46,9 @@ const sigmoid=(x,steep=0.035)=>1/(1+Math.exp(-steep*x));
 // Adaptive weights + calibration + trade log
 // ═══════════════════════════════════════
 
-// Default signal weights (match original hardcoded values)
-const DEFAULT_WEIGHTS={gap:35,momentum:30,structure:15,flow:20,technical:25,regime:15};
+// Default signal weights — trained via gradient descent on 17-trade dataset
+// 13W/4L (76.5% WR) | EU: 85% | SHORT SQUEEZE: 91% | Flow: 82% acc | Regime: 91% acc
+const DEFAULT_WEIGHTS={gap:36.11,momentum:30.97,structure:15.48,flow:22.27,technical:25.35,regime:16.83};
 const WEIGHT_BOUNDS={gap:[5,55],momentum:[5,50],structure:[2,30],flow:[2,40],technical:[5,45],regime:[2,30]};
 const LEARNING_RATE=0.8; // how aggressively to update weights per trade
 
@@ -56,7 +57,30 @@ const loadWeights=()=>{try{const s=localStorage.getItem('taraWeightsV100');if(s)
 const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV100',JSON.stringify(w));}catch(e){}};
 
 // Load trade log
-const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV100');if(s)return JSON.parse(s);return[];}catch(e){return[];}};
+// Pre-seeded training trades from CSV analysis (17 trades, 13W/4L = 76.5% WR)
+// EU session: 85% | SHORT SQUEEZE: 91% | Regime signal: 91% accuracy
+// These give calibration and gradient descent a head start on any device
+const SEED_TRADES=[
+  {id:1776403212237,dir:'UP',posterior:71.0,regime:'RANGE/CHOP',clockAtLock:587,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.83,momentum:0,structure:0,flow:20.23,technical:0,regime:0},result:'WIN'},
+  {id:1776403812231,dir:'UP',posterior:82.0,regime:'RANGE/CHOP',clockAtLock:887,hour:1,session:'ASIA',windowType:'15m',signals:{gap:35.20,momentum:-5.39,structure:0,flow:-17.15,technical:-8,regime:0},result:'LOSS'},
+  {id:1776407423234,dir:'DOWN',posterior:27.6,regime:'RANGE/CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:-0.28,momentum:-2.75,structure:0,flow:-20.59,technical:0,regime:0},result:'LOSS'},
+  {id:1776408300285,dir:'UP',posterior:94.1,regime:'SHORT SQUEEZE',clockAtLock:899,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.59,momentum:-0.95,structure:9,flow:12.46,technical:10,regime:15.33},result:'WIN'},
+  {id:1776409504121,dir:'UP',posterior:99.0,regime:'RANGE/CHOP',clockAtLock:595,hour:3,session:'EU',windowType:'15m',signals:{gap:35.03,momentum:6.76,structure:15,flow:9.29,technical:3,regime:0},result:'WIN'},
+  {id:1776410109313,dir:'UP',posterior:73.1,regime:'RANGE/CHOP',clockAtLock:890,hour:3,session:'EU',windowType:'15m',signals:{gap:1.27,momentum:-3.68,structure:15,flow:8.73,technical:3,regime:0},result:'LOSS'},
+  {id:1776410445361,dir:'UP',posterior:82.9,regime:'SHORT SQUEEZE',clockAtLock:554,hour:3,session:'EU',windowType:'15m',signals:{gap:-0.42,momentum:3.89,structure:0,flow:20.65,technical:-5,regime:15.56},result:'LOSS'},
+  {id:1776411059805,dir:'UP',posterior:79.9,regime:'SHORT SQUEEZE',clockAtLock:840,hour:3,session:'EU',windowType:'15m',signals:{gap:-0.44,momentum:1.15,structure:0,flow:20.41,technical:-5,regime:15.38},result:'WIN'},
+  {id:1776411899818,dir:'UP',posterior:94.8,regime:'SHORT SQUEEZE',clockAtLock:900,hour:3,session:'EU',windowType:'15m',signals:{gap:0.46,momentum:7.52,structure:0,flow:20.64,technical:3,regime:15.55},result:'WIN'},
+  {id:1776412799704,dir:'UP',posterior:97.7,regime:'SHORT SQUEEZE',clockAtLock:900,hour:3,session:'EU',windowType:'15m',signals:{gap:0.44,momentum:4.45,structure:0,flow:20.95,technical:3,regime:15.79},result:'WIN'},
+  {id:1776413746445,dir:'UP',posterior:84.4,regime:'SHORT SQUEEZE',clockAtLock:853,hour:4,session:'EU',windowType:'15m',signals:{gap:-0.47,momentum:-3.82,structure:0,flow:6.47,technical:18,regime:16.06},result:'WIN'},
+  {id:1776414639749,dir:'UP',posterior:99.7,regime:'SHORT SQUEEZE',clockAtLock:861,hour:4,session:'EU',windowType:'15m',signals:{gap:35.42,momentum:9.58,structure:0,flow:21.39,technical:-5,regime:16.26},result:'WIN'},
+  {id:1776415548790,dir:'UP',posterior:97.4,regime:'SHORT SQUEEZE',clockAtLock:852,hour:4,session:'EU',windowType:'15m',signals:{gap:0.32,momentum:10.36,structure:0,flow:21.58,technical:-5,regime:16.40},result:'WIN'},
+  {id:1776416404562,dir:'UP',posterior:99.4,regime:'SHORT SQUEEZE',clockAtLock:895,hour:5,session:'EU',windowType:'15m',signals:{gap:0,momentum:1.86,structure:15.26,flow:21.89,technical:-5,regime:16.63},result:'WIN'},
+  {id:1776417299867,dir:'UP',posterior:99.7,regime:'SHORT SQUEEZE',clockAtLock:900,hour:5,session:'EU',windowType:'15m',signals:{gap:1.41,momentum:17.19,structure:15.46,flow:22.17,technical:-5,regime:16.85},result:'WIN'},
+  {id:1776418271648,dir:'DOWN',posterior:2.2,regime:'TRENDING DOWN',clockAtLock:828,hour:5,session:'EU',windowType:'15m',signals:{gap:-35.76,momentum:-18.66,structure:0,flow:-13.84,technical:18,regime:0},result:'WIN'},
+  {id:1776419102505,dir:'UP',posterior:99.7,regime:'SHORT SQUEEZE',clockAtLock:900,hour:5,session:'EU',windowType:'15m',signals:{gap:0.50,momentum:12.00,structure:0,flow:22.00,technical:-5,regime:16.83},result:'WIN'},
+];
+
+const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV100');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
 const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV100',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
 
 // ── GRADIENT DESCENT WEIGHT UPDATE ──
@@ -550,8 +574,15 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:159,losses:111},'5m':{wins:10,losses:7}});
-  const[regimeMemory,setRegimeMemory]=useState({'TRENDING UP':{wins:0,losses:0},'TRENDING DOWN':{wins:0,losses:0},'HIGH VOL CHOP':{wins:0,losses:0},'SHORT SQUEEZE':{wins:0,losses:0},'LONG SQUEEZE':{wins:0,losses:0},'RANGE/CHOP':{wins:0,losses:0}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:179,losses:119},'5m':{wins:10,losses:7}});
+  const[regimeMemory,setRegimeMemory]=useState({
+    'TRENDING UP':   {wins:0,losses:0},
+    'TRENDING DOWN': {wins:1,losses:0},   // 100% WR — trust these
+    'HIGH VOL CHOP': {wins:0,losses:0},
+    'SHORT SQUEEZE': {wins:10,losses:1},  // 91% WR — best regime, loosen thresholds
+    'LONG SQUEEZE':  {wins:0,losses:0},
+    'RANGE/CHOP':    {wins:2,losses:3},   // 40% WR — tighten thresholds, be selective
+  });
   const lastRegimeRef=useRef('RANGE/CHOP');
   // ── TARA SELF-TRAINING STATE ──
   const[adaptiveWeights,setAdaptiveWeights]=useState(()=>loadWeights());
@@ -600,36 +631,48 @@ function TaraApp(){
   useEffect(()=>{const f=async()=>{try{const gran=windowType==='15m'?900:300;const r=await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`);if(r.ok){const d=await r.json();if(Array.isArray(d))setHistory(d.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])})));}const r2=await fetch('https://api.exchange.coinbase.com/products/BTC-USD/book?level=2');if(r2.ok){const d2=await r2.json();if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-150)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+150)ls+=parseFloat(s);});setOrderBook({localBuy:lb,localSell:ls,imbalance:ls===0?1:lb/ls});}}setIsLoading(false);}catch(e){setIsLoading(false);}};f();const iv=setInterval(f,5000);return()=>clearInterval(iv);},[targetMargin,windowType]);
 
   // ── AUTO-STRIKE: fetch the window's opening candle price ──
-  const fetchWindowOpenPrice=useCallback(async(wType)=>{
+  // ── AUTO-STRIKE: fetch the exact open price of the current window candle ──
+  // Uses Coinbase candles API - granularity matches window (300s=5m, 900s=15m)
+  // On any failure: sets to 0 so user can enter manually
+  const fetchWindowOpenPrice=useCallback(async(wType,fallbackPrice)=>{
+    if(isManualStrikeRef.current)return; // user has manually set it
     try{
       const gran=wType==='15m'?900:300;
-      // Get the most recent completed + current candle
-      const r=await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}&limit=2`);
-      if(!r.ok)throw new Error('CB fail');
+      // Fetch last 2 candles - d[0] is the current (most recent) candle
+      // Format: [timestamp, low, high, open, close, volume]
+      const r=await fetch(
+        `https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}&limit=2`,
+        {signal:AbortSignal.timeout(4000)}
+      );
+      if(!r.ok)throw new Error('CB '+r.status);
       const d=await r.json();
-      // d[0] = most recent candle [time, low, high, open, close, volume]
-      // Its OPEN price is the price at the start of the current window
-      const openPrice=parseFloat(d[0]?.[3])||0;
-      if(openPrice>0){
-        windowOpenPriceRef.current=openPrice;
-        if(!isManualStrikeRef.current){
-          setTargetMargin(openPrice);
-          setStrikeMode('auto');
-        }
-      }
+      if(!Array.isArray(d)||!d[0])throw new Error('Bad data');
+      const openPrice=parseFloat(d[0][3]); // index 3 = open price
+      if(!openPrice||openPrice<=0)throw new Error('Zero price');
+      windowOpenPriceRef.current=openPrice;
+      setTargetMargin(openPrice);
+      setStrikeMode('auto');
     }catch(e){
-      // Fallback: use current price if API fails
-      if(!hasSetInitialMargin.current&&currentPrice){
-        windowOpenPriceRef.current=currentPrice;
-        if(!isManualStrikeRef.current)setTargetMargin(currentPrice);
+      // Failed - set to 0 so user knows to enter manually
+      // Don't use currentPrice as fallback - that's mid-candle noise
+      if(!hasSetInitialMargin.current){
+        windowOpenPriceRef.current=0;
+        setTargetMargin(0);
+        setStrikeMode('manual');
       }
     }
     hasSetInitialMargin.current=true;
-  },[currentPrice]);
+  },[]);
 
-  // Fetch window open price on mount and when window type changes
+  // On mount: fetch window open price
   useEffect(()=>{fetchWindowOpenPrice(windowType);},[windowType]);
-  useEffect(()=>{if(!hasSetInitialMargin.current&&currentPrice){fetchWindowOpenPrice(windowType);}},[currentPrice]);
+
+  // Also try once we have a live price (in case initial fetch beat the price feed)
+  useEffect(()=>{
+    if(!hasSetInitialMargin.current&&currentPrice){
+      fetchWindowOpenPrice(windowType);
+    }
+  },[currentPrice]);
 
   const liveHistory=useMemo(()=>{if(history.length===0||!currentPrice)return history;const u=[...history];u[0]={...u[0],c:currentPrice,h:Math.max(u[0].h||currentPrice,currentPrice),l:Math.min(u[0].l||currentPrice,currentPrice)};return u;},[history,currentPrice]);
 
@@ -644,7 +687,45 @@ function TaraApp(){
 
   const updateScore=(type,wl,amt)=>setScorecards(prev=>({...prev,[type]:{...prev[type],[wl]:Math.max(0,(Number(prev[type]?.[wl])||0)+amt)}}));
 
-  const broadcastToDiscord=async(type,data)=>{if(!discordWebhook||!discordWebhook.startsWith('http'))return;try{let embed={};if(type==='SIGNAL')embed={title:`${data.dir==='UP'?'🟢':'🔴'} TARA V101 SIGNAL: ${data.dir}`,color:data.dir==='UP'?3404125:16478549,fields:[{name:'BTC Price',value:`$${data.price.toFixed(2)}`,inline:true},{name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},{name:'Gap',value:`${data.gap.toFixed(2)} bps`,inline:true},{name:'Clock',value:data.clock,inline:true}],timestamp:new Date().toISOString()};else if(type==='LOCK')embed={title:`TARA V101 — ${data.dir} LOCKED`,color:data.dir==='UP'?3404125:16478549,description:`**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(2)} bps | **Clock:** ${data.clock}`,timestamp:new Date().toISOString()};else if(type==='CLOSE')embed={title:`TARA V101 ROUND CLOSED: ${data.window}`,color:data.won?3404125:16478549,description:`**Result:** ${data.won?'WIN ✅':'LOSS ❌'}\n**Closing:** $${data.price.toFixed(2)}\n**Regime:** ${data.regime}`,timestamp:new Date().toISOString()};await fetch(discordWebhook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'Tara Terminal V101',embeds:[embed]})});}catch(e){}};
+  const[discordLog,setDiscordLog]=useState([]); // {id, type, label, ts, messageId, webhookId, webhookToken}
+
+  const broadcastToDiscord=async(type,data)=>{
+    if(!discordWebhook||!discordWebhook.startsWith('http'))return;
+    try{
+      let embed={};
+      if(type==='SIGNAL')embed={title:`${data.dir==='UP'?'🟢':'🔴'} TARA V101 SIGNAL: ${data.dir}`,color:data.dir==='UP'?3404125:16478549,fields:[{name:'BTC Price',value:`$${data.price.toFixed(2)}`,inline:true},{name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},{name:'Gap',value:`${data.gap.toFixed(2)} bps`,inline:true},{name:'Clock',value:data.clock,inline:true}],timestamp:new Date().toISOString()};
+      else if(type==='LOCK')embed={title:`TARA V101 — ${data.dir} LOCKED`,color:data.dir==='UP'?3404125:16478549,description:`**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(2)} bps | **Clock:** ${data.clock}`,timestamp:new Date().toISOString()};
+      else if(type==='CLOSE')embed={title:`TARA V101 ROUND CLOSED: ${data.window}`,color:data.won?3404125:16478549,description:`**Result:** ${data.won?'WIN ✅':'LOSS ❌'}\n**Closing:** $${data.price.toFixed(2)}\n**Regime:** ${data.regime}`,timestamp:new Date().toISOString()};
+      // Use ?wait=true so Discord returns the message object with ID
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'Tara Terminal V101',embeds:[embed]})});
+      if(res.ok){
+        const msg=await res.json();
+        // Extract webhook id+token from URL for later edit/delete
+        const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
+        const entry={id:Date.now(),type,label:embed.title||type,ts:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}),messageId:msg.id,webhookId:parts[0],webhookToken:parts[1]};
+        setDiscordLog(prev=>[entry,...prev].slice(0,50));
+      }
+    }catch(e){}
+  };
+
+  const editDiscordMessage=async(entry,newContent)=>{
+    if(!entry.webhookId||!entry.webhookToken||!entry.messageId)return false;
+    try{
+      const url=`https://discord.com/api/webhooks/${entry.webhookId}/${entry.webhookToken}/messages/${entry.messageId}`;
+      const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:newContent,embeds:[]})});
+      return res.ok;
+    }catch(e){return false;}
+  };
+
+  const deleteDiscordMessage=async(entry)=>{
+    if(!entry.webhookId||!entry.webhookToken||!entry.messageId)return false;
+    try{
+      const url=`https://discord.com/api/webhooks/${entry.webhookId}/${entry.webhookToken}/messages/${entry.messageId}`;
+      const res=await fetch(url,{method:'DELETE'});
+      if(res.ok)setDiscordLog(prev=>prev.filter(m=>m.id!==entry.id));
+      return res.ok;
+    }catch(e){return false;}
+  };
 
   // Window rollover
   useEffect(()=>{if(timeState.nextWindow&&timeState.nextWindow!==lastWindowRef.current){if(currentPrice!==null){if(lastWindowRef.current!==''){const pc=taraAdviceRef.current;let won=false,active=false;
@@ -674,12 +755,9 @@ function TaraApp(){
             pendingTradeRef.current=null;
           }
         }}
-        // ── AUTO-STRIKE: fetch new window's opening price, reset manual flag ──
+        // ── AUTO-STRIKE: fetch exact candle open for new window ──
         isManualStrikeRef.current=false;
-        setStrikeMode('auto');
         fetchWindowOpenPrice(windowType);
-        // Fallback set while fetch is in-flight
-        if(!isManualStrikeRef.current)setTargetMargin(currentPrice);
         taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;}}},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights]);
 
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
@@ -705,7 +783,7 @@ function TaraApp(){
       lastRegimeRef.current=regime;
 
       // ══════════════════════════════════════════════════════
-      // COMMITTED LOCK STATE MACHINE (Chamiko/Jerome style)
+      // COMMITTED LOCK STATE MACHINE
       // Rules:
       //  1. Only lock after N consecutive aligned samples (no one-tick locks)
       //  2. Once locked, STAY locked for the window — never flip direction
@@ -857,7 +935,7 @@ function TaraApp(){
 
   const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'🚨 STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast`;setChatLog([...log,{role:'tara',text:r}]);},400);};
 
-  const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
+  const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
   if(!isMounted)return<div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara V101...</div>;
 
@@ -928,7 +1006,7 @@ function TaraApp(){
               <div className="flex items-center justify-between mb-1 gap-2">
                 <div className="text-xs text-[#E8E9E4]/40 uppercase tracking-wide">Strike</div>
                 <span
-                  onClick={()=>{isManualStrikeRef.current=false;setStrikeMode('auto');if(windowOpenPriceRef.current>0)setTargetMargin(windowOpenPriceRef.current);}}
+                  onClick={()=>{isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(windowType);}}
                   title={strikeMode==='auto'?'Auto-tracking window open — click to reset':'Manual override — click to restore auto'}
                   className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer select-none font-bold transition-colors ${strikeMode==='auto'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-emerald-500/15 hover:text-emerald-400'}`}
                 >{strikeMode==='auto'?'AUTO':'MANUAL'}</span>
@@ -1218,16 +1296,100 @@ function TaraApp(){
       )}
 
       {/* Settings */}
-      {showSettings&&(
-        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-md shadow-2xl p-6">
-            <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-serif text-white flex items-center gap-2"><IC.Link className="w-5 h-5 text-indigo-400"/>Discord Integration</h2><button onClick={()=>setShowSettings(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5"/></button></div>
-            <p className="text-xs text-[#E8E9E4]/60 mb-4 leading-relaxed">Paste your Discord Webhook URL. Tara V101 will broadcast entry signals, position locks, and round closures.</p>
-            <input type="password" value={discordWebhook} onChange={e=>setDiscordWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." className="w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-400 text-white font-mono mb-4"/>
-            <button onClick={()=>setShowSettings(false)} className="w-full bg-indigo-500 hover:bg-indigo-400 text-white font-bold py-2.5 rounded-lg text-xs uppercase tracking-wide transition-colors">Save</button>
+      {showSettings&&(()=>{
+        const[editingId,setEditingId]=useState(null);
+        const[editText,setEditText]=useState('');
+        const[statusMsg,setStatusMsg]=useState('');
+        const handleEdit=async(entry)=>{
+          const ok=await editDiscordMessage(entry,editText);
+          setStatusMsg(ok?'Message updated ✓':'Failed to edit — check webhook URL');
+          if(ok){setDiscordLog(prev=>prev.map(m=>m.id===entry.id?{...m,label:editText,edited:true}:m));setEditingId(null);setEditText('');}
+          setTimeout(()=>setStatusMsg(''),3000);
+        };
+        const handleDelete=async(entry)=>{
+          const ok=await deleteDiscordMessage(entry);
+          setStatusMsg(ok?'Message deleted ✓':'Failed to delete — message may be too old (15min limit)');
+          setTimeout(()=>setStatusMsg(''),3000);
+        };
+        return(
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto" style={{scrollbarWidth:'thin'}}>
+            <div className="p-4 sm:p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Link className="w-5 h-5 text-indigo-400"/>Discord Integration</h2>
+                <button onClick={()=>setShowSettings(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5"/></button>
+              </div>
+
+              {/* Webhook URL */}
+              <p className="text-xs text-[#E8E9E4]/60 mb-3 leading-relaxed">Tara broadcasts lock signals, round closures, and entries to your Discord channel.</p>
+              <input type="password" value={discordWebhook} onChange={e=>setDiscordWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." className="w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-400 text-white font-mono mb-2"/>
+              <div className="flex gap-2 mb-5">
+                <button onClick={()=>setShowSettings(false)} className="flex-1 bg-indigo-500 hover:bg-indigo-400 text-white font-bold py-2 rounded-lg text-xs uppercase tracking-wide transition-colors">Save</button>
+                <button onClick={async()=>{const ok=await broadcastToDiscord('SIGNAL',{dir:'UP',price:currentPrice||75000,strike:targetMargin||75000,gap:0,clock:'TEST'});setStatusMsg('Test sent ✓');setTimeout(()=>setStatusMsg(''),3000);}} className="px-4 py-2 border border-indigo-500/30 text-indigo-400 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-indigo-500/10 transition-colors">Test</button>
+              </div>
+
+              {/* Status */}
+              {statusMsg&&<div className="mb-3 text-xs text-center text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg py-2">{statusMsg}</div>}
+
+              {/* Message Log */}
+              <div className="border-t border-[#E8E9E4]/10 pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/60">Sent Messages ({discordLog.length})</h3>
+                  <p className="text-[10px] text-[#E8E9E4]/30">Edit/delete within 15 min of sending</p>
+                </div>
+
+                {discordLog.length===0?(
+                  <div className="text-xs text-[#E8E9E4]/30 italic text-center py-6">No messages sent yet this session</div>
+                ):(
+                  <div className="space-y-2">
+                    {discordLog.map(entry=>(
+                      <div key={entry.id} className="bg-[#111312] rounded-lg border border-[#E8E9E4]/8 overflow-hidden">
+                        {/* Message row */}
+                        <div className="flex items-center gap-2 p-2.5">
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entry.type==='LOCK'?'bg-indigo-400':entry.type==='CLOSE'?'bg-emerald-400':'bg-amber-400'}`}/>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs text-white truncate">{entry.label}</div>
+                            <div className="text-[10px] text-[#E8E9E4]/30">{entry.ts}{entry.edited&&' · edited'}</div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={()=>{setEditingId(editingId===entry.id?null:entry.id);setEditText(entry.label);}}
+                              className="px-2 py-1 text-[10px] font-bold rounded border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/15 transition-colors">
+                              Edit
+                            </button>
+                            <button
+                              onClick={()=>handleDelete(entry)}
+                              className="px-2 py-1 text-[10px] font-bold rounded border border-rose-500/30 text-rose-400 hover:bg-rose-500/15 transition-colors">
+                              Del
+                            </button>
+                          </div>
+                        </div>
+                        {/* Edit panel */}
+                        {editingId===entry.id&&(
+                          <div className="border-t border-[#E8E9E4]/8 p-2.5">
+                            <textarea
+                              value={editText}
+                              onChange={e=>setEditText(e.target.value)}
+                              rows={2}
+                              className="w-full bg-[#181A19] border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-400 resize-none mb-2"
+                              placeholder="Edit message content..."
+                            />
+                            <div className="flex gap-2">
+                              <button onClick={()=>handleEdit(entry)} className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors">Save Edit</button>
+                              <button onClick={()=>{setEditingId(null);setEditText('');}} className="px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors">Cancel</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[10px] text-[#E8E9E4]/20 mt-3 text-center leading-relaxed">Message log resets on page refresh. Discord only allows editing/deleting messages sent via the same webhook within 15 minutes.</p>
+              </div>
+            </div>
           </div>
         </div>
-      )}
+      );})()}
 
       {/* Chat */}
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
@@ -1454,7 +1616,7 @@ function TaraApp(){
                   <p>• <strong className="text-indigo-300">Export CSV</strong> and run external regression (Python sklearn) on 500+ trades to get optimal weights, then paste them back.</p>
                   <p>• <strong className="text-indigo-300">Best regime to focus on:</strong> Look at session performance — if US session is 70%+ WR, run exclusively during US hours.</p>
                   <p>• <strong className="text-indigo-300">Calibration corrects overconfidence</strong> — if Tara says 80% but only wins 60% of those, calibration fixes the displayed number after 3+ samples.</p>
-                  <p>• <strong className="text-indigo-300">To beat Chamiko's 79.5%</strong>: need 100+ trades in the log. At that point weights will have converged and calibration will be reliable.</p>
+                  <p>• <strong className="text-indigo-300">Accuracy improves with volume:</strong> need 100+ trades in the log for weights to converge and calibration to become reliable.</p>
                 </div>
               </section>
             </div>
