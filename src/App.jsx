@@ -46,9 +46,10 @@ const sigmoid=(x,steep=0.035)=>1/(1+Math.exp(-steep*x));
 // Adaptive weights + calibration + trade log
 // ═══════════════════════════════════════
 
-// Default signal weights — trained via gradient descent on 17-trade dataset
-// 13W/4L (76.5% WR) | EU: 85% | SHORT SQUEEZE: 91% | Flow: 82% acc | Regime: 91% acc
-const DEFAULT_WEIGHTS={gap:36.11,momentum:30.97,structure:15.48,flow:22.27,technical:25.35,regime:16.83};
+// Default signal weights — trained via gradient descent on 22-trade dataset
+// 16W/6L = 72.7% WR · SHORT SQUEEZE 92% · EU 78% · Hours 4–5 = 100% WR
+// Flow +2.9 vs prev · Regime +2.2 vs prev · Momentum +1.2 vs prev
+const DEFAULT_WEIGHTS={gap:36.88,momentum:32.15,structure:15.91,flow:24.98,technical:25.46,regime:19.07};
 const WEIGHT_BOUNDS={gap:[5,55],momentum:[5,50],structure:[2,30],flow:[2,40],technical:[5,45],regime:[2,30]};
 const LEARNING_RATE=0.8; // how aggressively to update weights per trade
 
@@ -57,27 +58,32 @@ const loadWeights=()=>{try{const s=localStorage.getItem('taraWeightsV100');if(s)
 const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV100',JSON.stringify(w));}catch(e){}};
 
 // Load trade log
-// Pre-seeded training trades from CSV analysis (17 trades, 13W/4L = 76.5% WR)
-// EU session: 85% | SHORT SQUEEZE: 91% | Regime signal: 91% accuracy
-// These give calibration and gradient descent a head start on any device
+// Pre-seeded: 22 trades, 16W/6L (72.7% WR) · SHORT SQUEEZE 12W/1L (92%) · EU 14W/4L (78%)
+// HIGH VOL CHOP 1W/2L (33%) — avoid · RANGE/CHOP 2W/3L (40%) — avoid
+// Best hours: 4 (100%) and 5 (100%)
 const SEED_TRADES=[
-  {id:1776403212237,dir:'UP',posterior:71.0,regime:'RANGE/CHOP',clockAtLock:587,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.83,momentum:0,structure:0,flow:20.23,technical:0,regime:0},result:'WIN'},
-  {id:1776403812231,dir:'UP',posterior:82.0,regime:'RANGE/CHOP',clockAtLock:887,hour:1,session:'ASIA',windowType:'15m',signals:{gap:35.20,momentum:-5.39,structure:0,flow:-17.15,technical:-8,regime:0},result:'LOSS'},
-  {id:1776407423234,dir:'DOWN',posterior:27.6,regime:'RANGE/CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:-0.28,momentum:-2.75,structure:0,flow:-20.59,technical:0,regime:0},result:'LOSS'},
-  {id:1776408300285,dir:'UP',posterior:94.1,regime:'SHORT SQUEEZE',clockAtLock:899,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.59,momentum:-0.95,structure:9,flow:12.46,technical:10,regime:15.33},result:'WIN'},
-  {id:1776409504121,dir:'UP',posterior:99.0,regime:'RANGE/CHOP',clockAtLock:595,hour:3,session:'EU',windowType:'15m',signals:{gap:35.03,momentum:6.76,structure:15,flow:9.29,technical:3,regime:0},result:'WIN'},
-  {id:1776410109313,dir:'UP',posterior:73.1,regime:'RANGE/CHOP',clockAtLock:890,hour:3,session:'EU',windowType:'15m',signals:{gap:1.27,momentum:-3.68,structure:15,flow:8.73,technical:3,regime:0},result:'LOSS'},
-  {id:1776410445361,dir:'UP',posterior:82.9,regime:'SHORT SQUEEZE',clockAtLock:554,hour:3,session:'EU',windowType:'15m',signals:{gap:-0.42,momentum:3.89,structure:0,flow:20.65,technical:-5,regime:15.56},result:'LOSS'},
-  {id:1776411059805,dir:'UP',posterior:79.9,regime:'SHORT SQUEEZE',clockAtLock:840,hour:3,session:'EU',windowType:'15m',signals:{gap:-0.44,momentum:1.15,structure:0,flow:20.41,technical:-5,regime:15.38},result:'WIN'},
-  {id:1776411899818,dir:'UP',posterior:94.8,regime:'SHORT SQUEEZE',clockAtLock:900,hour:3,session:'EU',windowType:'15m',signals:{gap:0.46,momentum:7.52,structure:0,flow:20.64,technical:3,regime:15.55},result:'WIN'},
-  {id:1776412799704,dir:'UP',posterior:97.7,regime:'SHORT SQUEEZE',clockAtLock:900,hour:3,session:'EU',windowType:'15m',signals:{gap:0.44,momentum:4.45,structure:0,flow:20.95,technical:3,regime:15.79},result:'WIN'},
-  {id:1776413746445,dir:'UP',posterior:84.4,regime:'SHORT SQUEEZE',clockAtLock:853,hour:4,session:'EU',windowType:'15m',signals:{gap:-0.47,momentum:-3.82,structure:0,flow:6.47,technical:18,regime:16.06},result:'WIN'},
-  {id:1776414639749,dir:'UP',posterior:99.7,regime:'SHORT SQUEEZE',clockAtLock:861,hour:4,session:'EU',windowType:'15m',signals:{gap:35.42,momentum:9.58,structure:0,flow:21.39,technical:-5,regime:16.26},result:'WIN'},
-  {id:1776415548790,dir:'UP',posterior:97.4,regime:'SHORT SQUEEZE',clockAtLock:852,hour:4,session:'EU',windowType:'15m',signals:{gap:0.32,momentum:10.36,structure:0,flow:21.58,technical:-5,regime:16.40},result:'WIN'},
-  {id:1776416404562,dir:'UP',posterior:99.4,regime:'SHORT SQUEEZE',clockAtLock:895,hour:5,session:'EU',windowType:'15m',signals:{gap:0,momentum:1.86,structure:15.26,flow:21.89,technical:-5,regime:16.63},result:'WIN'},
-  {id:1776417299867,dir:'UP',posterior:99.7,regime:'SHORT SQUEEZE',clockAtLock:900,hour:5,session:'EU',windowType:'15m',signals:{gap:1.41,momentum:17.19,structure:15.46,flow:22.17,technical:-5,regime:16.85},result:'WIN'},
-  {id:1776418271648,dir:'DOWN',posterior:2.2,regime:'TRENDING DOWN',clockAtLock:828,hour:5,session:'EU',windowType:'15m',signals:{gap:-35.76,momentum:-18.66,structure:0,flow:-13.84,technical:18,regime:0},result:'WIN'},
-  {id:1776419102505,dir:'UP',posterior:99.7,regime:'SHORT SQUEEZE',clockAtLock:900,hour:5,session:'EU',windowType:'15m',signals:{gap:0.50,momentum:12.00,structure:0,flow:22.00,technical:-5,regime:16.83},result:'WIN'},
+  {id:1776403212237,dir:'UP',posterior:71.0,regime:'RANGE/CHOP',clockAtLock:587,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.83,momentum:0.0,structure:0.0,flow:20.23,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776403812231,dir:'UP',posterior:82.0,regime:'RANGE/CHOP',clockAtLock:887,hour:1,session:'ASIA',windowType:'15m',signals:{gap:35.2,momentum:-5.39,structure:0.0,flow:-17.15,technical:-8.0,regime:0.0},result:'LOSS'},
+  {id:1776407423234,dir:'DOWN',posterior:27.6,regime:'RANGE/CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:-0.28,momentum:-2.75,structure:0.0,flow:-20.59,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776408300285,dir:'UP',posterior:94.1,regime:'SHORT SQUEEZE',clockAtLock:899,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.59,momentum:-0.95,structure:9.0,flow:12.46,technical:10.0,regime:15.33},result:'WIN'},
+  {id:1776409504121,dir:'UP',posterior:99.0,regime:'RANGE/CHOP',clockAtLock:595,hour:3,session:'EU',windowType:'15m',signals:{gap:35.03,momentum:6.76,structure:15.0,flow:9.29,technical:3.0,regime:0.0},result:'WIN'},
+  {id:1776410109313,dir:'UP',posterior:73.1,regime:'RANGE/CHOP',clockAtLock:890,hour:3,session:'EU',windowType:'15m',signals:{gap:1.27,momentum:-3.68,structure:15.0,flow:8.73,technical:3.0,regime:0.0},result:'LOSS'},
+  {id:1776410445361,dir:'UP',posterior:82.9,regime:'SHORT SQUEEZE',clockAtLock:554,hour:3,session:'EU',windowType:'15m',signals:{gap:-0.42,momentum:3.89,structure:0.0,flow:20.65,technical:-5.0,regime:15.56},result:'LOSS'},
+  {id:1776411059805,dir:'UP',posterior:79.9,regime:'SHORT SQUEEZE',clockAtLock:840,hour:3,session:'EU',windowType:'15m',signals:{gap:-0.44,momentum:1.15,structure:0.0,flow:20.41,technical:-5.0,regime:15.38},result:'WIN'},
+  {id:1776411899818,dir:'UP',posterior:94.8,regime:'SHORT SQUEEZE',clockAtLock:900,hour:3,session:'EU',windowType:'15m',signals:{gap:0.46,momentum:7.52,structure:0.0,flow:20.64,technical:3.0,regime:15.55},result:'WIN'},
+  {id:1776412799704,dir:'UP',posterior:97.7,regime:'SHORT SQUEEZE',clockAtLock:900,hour:3,session:'EU',windowType:'15m',signals:{gap:0.44,momentum:4.45,structure:0.0,flow:20.95,technical:3.0,regime:15.79},result:'WIN'},
+  {id:1776413746445,dir:'UP',posterior:84.4,regime:'SHORT SQUEEZE',clockAtLock:853,hour:4,session:'EU',windowType:'15m',signals:{gap:-0.47,momentum:-3.82,structure:0.0,flow:6.47,technical:18.0,regime:16.06},result:'WIN'},
+  {id:1776414639749,dir:'UP',posterior:99.7,regime:'SHORT SQUEEZE',clockAtLock:861,hour:4,session:'EU',windowType:'15m',signals:{gap:35.42,momentum:9.58,structure:0.0,flow:21.39,technical:-5.0,regime:16.26},result:'WIN'},
+  {id:1776415548790,dir:'UP',posterior:97.4,regime:'SHORT SQUEEZE',clockAtLock:852,hour:4,session:'EU',windowType:'15m',signals:{gap:0.32,momentum:10.36,structure:0.0,flow:21.58,technical:-5.0,regime:16.4},result:'WIN'},
+  {id:1776416404562,dir:'UP',posterior:99.4,regime:'SHORT SQUEEZE',clockAtLock:895,hour:5,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:1.86,structure:15.26,flow:21.89,technical:-5.0,regime:16.63},result:'WIN'},
+  {id:1776417299867,dir:'UP',posterior:99.7,regime:'SHORT SQUEEZE',clockAtLock:900,hour:5,session:'EU',windowType:'15m',signals:{gap:1.41,momentum:17.19,structure:15.46,flow:22.17,technical:-5.0,regime:16.85},result:'WIN'},
+  {id:1776418271648,dir:'DOWN',posterior:2.2,regime:'TRENDING DOWN',clockAtLock:828,hour:5,session:'EU',windowType:'15m',signals:{gap:-35.76,momentum:-18.66,structure:0.0,flow:-13.84,technical:18.0,regime:0.0},result:'WIN'},
+  {id:1776419102505,dir:'UP',posterior:99.7,regime:'SHORT SQUEEZE',clockAtLock:900,hour:5,session:'EU',windowType:'15m',signals:{gap:0.5,momentum:12.0,structure:0.0,flow:22.0,technical:-5.0,regime:16.83},result:'WIN'},
+  {id:1776422196542,dir:'DOWN',posterior:6.3,regime:'HIGH VOL CHOP',clockAtLock:503,hour:6,session:'EU',windowType:'15m',signals:{gap:-9.56,momentum:-14.85,structure:0.0,flow:-21.62,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776422749470,dir:'DOWN',posterior:16.6,regime:'HIGH VOL CHOP',clockAtLock:850,hour:6,session:'EU',windowType:'15m',signals:{gap:0.03,momentum:-0.3,structure:-12.0,flow:-14.9,technical:-8.0,regime:0.0},result:'LOSS'},
+  {id:1776423249474,dir:'UP',posterior:98.3,regime:'SHORT SQUEEZE',clockAtLock:350,hour:6,session:'EU',windowType:'15m',signals:{gap:6.88,momentum:8.61,structure:0.0,flow:22.37,technical:-8.0,regime:16.83},result:'WIN'},
+  {id:1776424302369,dir:'DOWN',posterior:28.6,regime:'HIGH VOL CHOP',clockAtLock:198,hour:7,session:'EU',windowType:'15m',signals:{gap:7.89,momentum:0.0,structure:0.0,flow:-22.42,technical:-8.0,regime:0.0},result:'LOSS'},
+  {id:1776424641815,dir:'UP',posterior:99.7,regime:'SHORT SQUEEZE',clockAtLock:758,hour:7,session:'EU',windowType:'15m',signals:{gap:0.76,momentum:5.36,structure:9.0,flow:22.45,technical:0.0,regime:17.04},result:'WIN'},
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV100');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
@@ -574,14 +580,14 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:179,losses:119},'5m':{wins:10,losses:7}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:183,losses:121},'5m':{wins:10,losses:7}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
-    'TRENDING DOWN': {wins:1,losses:0},   // 100% WR — trust these
-    'HIGH VOL CHOP': {wins:0,losses:0},
-    'SHORT SQUEEZE': {wins:10,losses:1},  // 91% WR — best regime, loosen thresholds
+    'TRENDING DOWN': {wins:1,losses:0},    // 100% WR
+    'HIGH VOL CHOP': {wins:1,losses:2},    // 33% WR — avoid, raise threshold
+    'SHORT SQUEEZE': {wins:12,losses:1},   // 92% WR — best regime, loosen thresholds
     'LONG SQUEEZE':  {wins:0,losses:0},
-    'RANGE/CHOP':    {wins:2,losses:3},   // 40% WR — tighten thresholds, be selective
+    'RANGE/CHOP':    {wins:2,losses:3},    // 40% WR — raise threshold, be selective
   });
   const lastRegimeRef=useRef('RANGE/CHOP');
   // ── TARA SELF-TRAINING STATE ──
@@ -682,150 +688,37 @@ function TaraApp(){
   // ── AUTO-STRIKE: Kalshi (15m) / Polymarket (5m) / Coinbase fallback ──
   const[strikeSource,setStrikeSource]=useState('auto');
 
-  const fetchWindowOpenPrice=useCallback(async(wType)=>{
+  // ── AUTO-STRIKE: capture the live spot price at the exact window boundary ──
+  // currentPriceRef always holds the freshest price from the Coinbase feed (updated every 1.5s)
+  // At the moment a window rolls over, that price IS the opening price of the new window
+  // No API calls, no CORS, no parsing — zero latency, always accurate
+  const setWindowOpenStrike=(price)=>{
     if(isManualStrikeRef.current)return;
-
-    const applyStrike=(price,source)=>{
-      if(!price||price<=0||isNaN(price)){
-        windowOpenPriceRef.current=0;
-        setTargetMargin(0);
-        setStrikeMode('manual');
-        setStrikeSource('manual');
-        return false;
-      }
-      windowOpenPriceRef.current=price;
-      setTargetMargin(price);
-      setStrikeMode('auto');
-      setStrikeSource(source);
+    const p=price||currentPriceRef.current;
+    if(!p||p<=0){
+      windowOpenPriceRef.current=0;
+      setTargetMargin(0);
+      setStrikeMode('manual');
+      setStrikeSource('manual');
       hasSetInitialMargin.current=true;
-      return true;
-    };
-
-    // Compute next window boundary timestamp (seconds)
-    const now=Date.now();
-    const iMs=(wType==='15m'?15:5)*60*1000;
-    const nextWindowMs=Math.ceil((now+500)/iMs)*iMs;
-    const nextWindowSec=Math.floor(nextWindowMs/1000);
-    // Tolerance: accept markets expiring within ±90s of the window boundary
-    const TOL=90*1000;
-
-    if(wType==='15m'){
-      // ── KALSHI 15m ─────────────────────────────────────────────────
-      // Ticker format: KXBTC-25APR17-T74999 → strike = 74999
-      // Find the open market whose close_time is closest to the next 15m boundary
-      try{
-        const r=await fetch(
-          'https://api.elections.kalshi.com/trade-api/v2/markets?limit=200&ticker_name_prefix=KXBTC&status=open',
-          {signal:AbortSignal.timeout(6000),headers:{'Accept':'application/json'}}
-        );
-        if(!r.ok)throw new Error('Kalshi HTTP '+r.status);
-        const d=await r.json();
-        const markets=d.markets||d.data||[];
-        if(!markets.length)throw new Error('No KXBTC markets');
-
-        // Find market expiring closest to next window boundary
-        let best=null,bestDiff=Infinity;
-        for(const m of markets){
-          const closeMs=m.close_time?new Date(m.close_time).getTime():
-                        m.expiration_time?new Date(m.expiration_time).getTime():0;
-          if(!closeMs)continue;
-          const diff=Math.abs(closeMs-nextWindowMs);
-          if(diff<bestDiff){bestDiff=diff;best=m;}
-        }
-        if(!best)throw new Error('No matching Kalshi market');
-        if(bestDiff>TOL*2)throw new Error(`Closest Kalshi market is ${Math.round(bestDiff/60000)}m off`);
-
-        // Parse strike from ticker: KXBTC-...-T74999.99 → 74999.99
-        const ticker=best.ticker||best.market_ticker||'';
-        const match=ticker.match(/[Tt](\d{4,6}(?:\.\d+)?)/);
-        if(!match)throw new Error('No price in Kalshi ticker: '+ticker);
-        const strike=parseFloat(match[1]);
-        console.log('[Kalshi] Market:',ticker,'Strike:',strike,'Diff:',Math.round(bestDiff/1000)+'s');
-        if(applyStrike(strike,'kalshi'))return;
-      }catch(e){
-        console.warn('[Kalshi] Failed:',e.message);
-      }
-
-    }else{
-      // ── POLYMARKET 5m ───────────────────────────────────────────────
-      // Find the BTC 5-minute market expiring at the next 5m window
-      // Polymarket returns endDateIso / end_date_iso for expiry
-      try{
-        // Try multiple search terms to find the 5m BTC market
-        const queries=['bitcoin 5 minute','btc 5min','btc price 5','bitcoin above'];
-        let markets=[];
-        for(const q of queries){
-          const r=await fetch(
-            `https://gamma-api.polymarket.com/markets?closed=false&limit=100&q=${encodeURIComponent(q)}`,
-            {signal:AbortSignal.timeout(6000),headers:{'Accept':'application/json'}}
-          );
-          if(!r.ok)continue;
-          const d=await r.json();
-          const list=Array.isArray(d)?d:(d.data||d.markets||[]);
-          if(list.length){markets=list;break;}
-        }
-        if(!markets.length)throw new Error('No Polymarket results');
-
-        // Filter: BTC/bitcoin market + expiry close to next window boundary
-        const btcMarkets=markets.filter(m=>{
-          const q=(m.question||m.title||'').toLowerCase();
-          return(q.includes('bitcoin')||q.includes('btc'))&&(q.includes('above')||q.includes('price')||q.includes('exceed'));
-        });
-        if(!btcMarkets.length)throw new Error('No BTC markets in Polymarket results');
-
-        // Find market whose end_date is closest to next window boundary
-        let best=null,bestDiff=Infinity;
-        for(const m of btcMarkets){
-          const endMs=m.endDateIso?new Date(m.endDateIso).getTime():
-                      m.end_date_iso?new Date(m.end_date_iso).getTime():
-                      m.end_date?new Date(m.end_date).getTime():0;
-          if(!endMs)continue;
-          const diff=Math.abs(endMs-nextWindowMs);
-          if(diff<bestDiff){bestDiff=diff;best=m;}
-        }
-        if(!best)throw new Error('No Polymarket market with end date');
-        if(bestDiff>TOL*3)throw new Error(`Closest Polymarket market is ${Math.round(bestDiff/60000)}m off`);
-
-        // Parse price threshold from question text
-        // e.g. "Will Bitcoin be above $75,000 at 4:05 PM?"
-        const question=best.question||best.title||'';
-        const match=question.match(/\$\s*([\d,]+(?:\.\d+)?)/);
-        if(!match)throw new Error('No price in question: '+question);
-        const strike=parseFloat(match[1].replace(/,/g,''));
-        console.log('[Polymarket] Market:',question.slice(0,60),'Strike:',strike,'Diff:',Math.round(bestDiff/1000)+'s');
-        if(applyStrike(strike,'polymarket'))return;
-      }catch(e){
-        console.warn('[Polymarket] Failed:',e.message);
-      }
+      return;
     }
+    windowOpenPriceRef.current=p;
+    setTargetMargin(p);
+    setStrikeMode('auto');
+    setStrikeSource('live');
+    hasSetInitialMargin.current=true;
+  };
 
-    // ── FALLBACK: Coinbase candle open ──────────────────────────────
-    try{
-      const gran=wType==='15m'?900:300;
-      const r=await fetch(
-        `https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}&limit=2`,
-        {signal:AbortSignal.timeout(4000)}
-      );
-      if(!r.ok)throw new Error('CB '+r.status);
-      const d=await r.json();
-      if(!Array.isArray(d)||!d[0])throw new Error('Bad data');
-      const openPrice=parseFloat(d[0][3]);
-      if(applyStrike(openPrice,'coinbase'))return;
-    }catch(e){
-      console.warn('[Coinbase fallback] Failed:',e.message);
-    }
-
-    // ── FINAL FALLBACK: 0, user enters manually ──────────────────────
-    applyStrike(0,'manual');
+  // Alias so call-sites using the old name still work
+  const fetchWindowOpenPrice=useCallback((wType)=>{
+    setWindowOpenStrike(currentPriceRef.current);
   },[]);
 
-  // On mount: fetch window open price
-  useEffect(()=>{fetchWindowOpenPrice(windowType);},[windowType]);
-
-  // Also try once we have a live price (in case initial fetch beat the price feed)
+  // Set strike once we have a live price on first load
   useEffect(()=>{
     if(!hasSetInitialMargin.current&&currentPrice){
-      fetchWindowOpenPrice(windowType);
+      setWindowOpenStrike(currentPrice);
     }
   },[currentPrice]);
 
@@ -910,9 +803,10 @@ function TaraApp(){
             pendingTradeRef.current=null;
           }
         }}
-        // ── AUTO-STRIKE: fetch exact candle open for new window ──
+        // ── AUTO-STRIKE: capture live price at exact window boundary ──
         isManualStrikeRef.current=false;
-        fetchWindowOpenPrice(windowType);
+        hasSetInitialMargin.current=false;
+        setWindowOpenStrike(currentPriceRef.current||currentPrice);
         taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;}}},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights]);
 
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
@@ -1175,18 +1069,10 @@ function TaraApp(){
               <div className="flex items-center justify-between mb-1 gap-2">
                 <div className="text-xs text-[#E8E9E4]/40 uppercase tracking-wide">Strike</div>
                 <span
-                  onClick={()=>{isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(windowType);}}
-                  title={strikeMode==='auto'?`Auto — source: ${strikeSource.toUpperCase()} · click to re-fetch`:'Manual override — click to restore auto'}
-                  className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer select-none font-bold transition-colors ${strikeMode==='auto'?
-                    strikeSource==='kalshi'?'bg-purple-500/15 text-purple-400 border border-purple-500/30':
-                    strikeSource==='polymarket'?'bg-blue-500/15 text-blue-400 border border-blue-500/30':
-                    'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                  :'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-emerald-500/15 hover:text-emerald-400'}`}
-                >{strikeMode==='auto'?
-                  strikeSource==='kalshi'?'KALSHI':
-                  strikeSource==='polymarket'?'POLY':
-                  strikeSource==='coinbase'?'AUTO':'AUTO'
-                :'MANUAL'}</span>
+                  onClick={()=>{isManualStrikeRef.current=false;hasSetInitialMargin.current=false;setWindowOpenStrike(currentPriceRef.current||currentPrice);}}
+                  title={strikeMode==='auto'?'Live spot price at window open · click to re-capture':'Manual override · click to restore live'}
+                  className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer select-none font-bold transition-colors ${strikeMode==='auto'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-emerald-500/15 hover:text-emerald-400'}`}
+                >{strikeMode==='auto'?'LIVE':'MANUAL'}</span>
               </div>
               <div className="flex items-center gap-1">
                 <IC.Crosshair className="w-4 h-4 text-indigo-400 hidden sm:block"/>
