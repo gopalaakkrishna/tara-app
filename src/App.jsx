@@ -275,7 +275,7 @@ const TaraChart=({data,currentPrice,targetMargin,showCandles,showOverlays,rugPul
 // V99 ADVISOR STATE MACHINE
 // ═══════════════════════════════════════
 const computeAdvisor=(params)=>{
-  const{userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining,secsRemaining,accel,pnlSlope,atrBps}=params;
+  const{userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining,secsRemaining,accel,pnlSlope,atrBps,activePrediction,lockInfo}=params;
   const intervalSeconds=windowType==='15m'?900:300;
   const timeRemainingFrac=Math.max(0,clockSeconds/intervalSeconds);
   const timeLabel=`${minsRemaining}m ${secsRemaining}s left`;
@@ -285,19 +285,36 @@ const computeAdvisor=(params)=>{
   const tm=targetMargin||0;
   const gapBps=tm>0?((cp-tm)/tm)*10000:0;
   const isUP=userPosition==='UP';const isDN=userPosition==='DOWN';
+  const isLocked=activePrediction?.includes('LOCKED');
+  const lockDir=lockInfo?.dir||null;
 
-  // No position — entry advisor
+  // ── NO POSITION — pre-entry advisor ──
   if(!userPosition){
-    const isUPLocked=posterior>=68;const isDNLocked=posterior<=32;
-    const isUPBias=posterior>=53;const isDNBias=posterior<=47;
+    // Rug pull always first
     if(isRugPull&&showRugPullAlerts)return{label:'RUG PULL — ABORT LONGS',reason:`Massive liquidity collapse detected. Do not enter long. [${timeLabel}]`,color:'rose',animate:true,hasAction:false};
-    if(isVeryLate&&!isUPLocked&&!isDNLocked)return{label:'WINDOW CLOSING',reason:`Only ${secsRemaining}s remain. Entry window is closed — too late for safe entry.`,color:'zinc',animate:false,hasAction:false};
-    if(isLate&&!isUPLocked&&!isDNLocked)return{label:'WINDOW CLOSING',reason:`${timeLabel} — late-stage entry is high-risk. Stand by for next window.`,color:'amber',animate:false,hasAction:false};
-    if(isUPLocked)return{label:'ENTRY SIGNAL: UP',reason:`Composite score ${posterior.toFixed(1)}% confirms bullish setup. Gap: ${gapBps.toFixed(1)} bps. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:`CONFIRM ENTRY 'UP'`,actionTarget:'UP'};
-    if(isDNLocked)return{label:'ENTRY SIGNAL: DOWN',reason:`Composite score ${(100-posterior).toFixed(1)}% confirms bearish setup. Gap: ${gapBps.toFixed(1)} bps. [${timeLabel}]`,color:'rose',animate:false,hasAction:true,actionLabel:`CONFIRM ENTRY 'DOWN'`,actionTarget:'DOWN'};
-    if(isUPBias)return{label:'BIAS FORMING — UP',reason:`Early lean to UP (${posterior.toFixed(1)}%) — not locked yet. Watching for confirmation. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
-    if(isDNBias)return{label:'BIAS FORMING — DOWN',reason:`Early lean to DOWN (${(100-posterior).toFixed(1)}%) — not locked yet. Watching for confirmation. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
-    return{label:'SCANNING...',reason:`No clear edge. Odds at ${posterior.toFixed(1)}% UP / ${(100-posterior).toFixed(1)}% DOWN. Waiting for structural signal. [${timeLabel}]`,color:'zinc',animate:false,hasAction:false};
+
+    // Window too late
+    if(isVeryLate)return{label:'WINDOW CLOSED',reason:`Only ${secsRemaining}s remain. Entry window is closed — wait for next candle.`,color:'zinc',animate:false,hasAction:false};
+    if(isLate&&!isLocked)return{label:'WINDOW CLOSING',reason:`${timeLabel} — no confirmed lock. High-risk to enter now. Stand by for next window.`,color:'amber',animate:false,hasAction:false};
+
+    // Tara has a committed lock — this is the ONLY time to show an entry signal
+    if(isLocked&&lockDir){
+      const lockGap=lockInfo?.lockPrice>0?((cp-lockInfo.lockPrice)/lockInfo.lockPrice)*10000:0;
+      const lockedSec=lockInfo?.lockedAt>0?Math.floor((Date.now()-lockInfo.lockedAt)/1000):0;
+      if(lockDir==='UP')return{label:`ENTRY SIGNAL: UP`,reason:`Tara locked UP ${lockedSec}s ago at ${lockInfo.lockedPosterior?.toFixed(0)||'—'}% conf. Gap: ${gapBps.toFixed(1)} bps. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:`CONFIRM ENTRY 'UP'`,actionTarget:'UP'};
+      if(lockDir==='DOWN')return{label:`ENTRY SIGNAL: DOWN`,reason:`Tara locked DOWN ${lockedSec}s ago at ${lockInfo.lockedPosterior?.toFixed(0)||'—'}% conf. Gap: ${gapBps.toFixed(1)} bps. [${timeLabel}]`,color:'rose',animate:false,hasAction:true,actionLabel:`CONFIRM ENTRY 'DOWN'`,actionTarget:'DOWN'};
+    }
+
+    // Lock was released
+    if(activePrediction==='LOCK RELEASED')return{label:'LOCK RELEASED',reason:`Position reversed beyond safe threshold. No new entry recommended this window. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
+
+    // Forming — show progress, no action button
+    if(activePrediction?.includes('UP (FORMING)'))return{label:'SIGNAL FORMING — UP',reason:`Bullish bias building (${posterior.toFixed(1)}%). Waiting for ${windowType==='15m'?3:2} consecutive samples to confirm lock. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
+    if(activePrediction?.includes('DOWN (FORMING)'))return{label:'SIGNAL FORMING — DOWN',reason:`Bearish bias building (${(100-posterior).toFixed(1)}%). Waiting for ${windowType==='15m'?3:2} consecutive samples to confirm lock. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
+
+    // No call yet / endgame no-call
+    if(activePrediction==='NO CALL')return{label:'NO CALL THIS WINDOW',reason:`Lock threshold not reached before endgame. Sit out and wait for next window.`,color:'zinc',animate:false,hasAction:false};
+    return{label:'SCANNING...',reason:`Analyzing ${windowType} window. No confirmed lock yet — ${posterior.toFixed(1)}% UP / ${(100-posterior).toFixed(1)}% DN. [${timeLabel}]`,color:'zinc',animate:false,hasAction:false};
   }
 
   // ── IN-TRADE ADVISOR ──
@@ -309,9 +326,6 @@ const computeAdvisor=(params)=>{
   const momentumWith=(isUP&&tickSlope>0)||(isDN&&tickSlope<0);
   const momentumAgainst=(isUP&&tickSlope<0)||(isDN&&tickSlope>0);
   const adverseAccel=(isUP&&(accel||0)<-0.5)||(isDN&&(accel||0)>0.5);
-  // FIX: use posterior directly so user-direction always maps correctly.
-  // currentOdds already reflects the *prediction* direction, not the user position.
-  // If user=DOWN and prediction=DOWN at 91.6%, we need winSide=91.6%, not 8.4%.
   const winSide=isUP?posterior:(100-posterior);
   const isWinning=winSide>52;
   const gapForPosition=isUP?gapBps:-gapBps;
@@ -686,8 +700,8 @@ function TaraApp(){
       let kellyPct=0;
       if((isUP||isDN)&&betAmount>0&&maxPayout>betAmount){const b=(maxPayout-betAmount)/betAmount;const p=currentOdds/100;const k=((p*b)-(1-p))/b;kellyPct=Math.max(0,(k/2)*100);}
 
-      // V99 Smart Advisor
-      const advisor=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps});
+      // V99 Smart Advisor — lock-state-aware
+      const advisor=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps,activePrediction,lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null});
 
       // Projections
       const getHP=(msAgo)=>{const t=Date.now()-msAgo;const m=priceMemoryRef.current;if(!m||m.length===0)return currentPrice;let c=m[0];for(let i=m.length-1;i>=0;i--){if(m[i].time<=t){c=m[i];break;}}return c.p;};
