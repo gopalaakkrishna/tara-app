@@ -1431,7 +1431,7 @@ function TaraApp(){
                           :t.result==='WIN'?'border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40'
                           :t.result==='LOSS'?'border-rose-500/20 bg-rose-500/5 hover:border-rose-500/40'
                           :'border-[#E8E9E4]/5 hover:border-[#E8E9E4]/15'}`}>
-                        <div className={`w-2 h-2 rounded-full shrink-0 ${isSel?'bg-indigo-400':t.result==='WIN'?'bg-emerald-500':'t.result==='LOSS'?'bg-rose-500':'bg-[#E8E9E4]/20'}`}/>
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${isSel?'bg-indigo-400':t.result==='WIN'?'bg-emerald-500':t.result==='LOSS'?'bg-rose-500':'bg-[#E8E9E4]/20'}`}/>
                         <span className="text-[#E8E9E4]/40 font-mono shrink-0 text-[10px] hidden sm:inline">{d.toLocaleDateString('en-US',{month:'short',day:'numeric'})} </span>
                         <span className="text-[#E8E9E4]/40 font-mono shrink-0 text-[10px]">{d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
                         <span className={`font-bold shrink-0 ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
