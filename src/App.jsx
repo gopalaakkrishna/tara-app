@@ -715,6 +715,8 @@ function TaraApp(){
     // Play alert sound on lock
     if(soundEnabled){try{const a=new(window.AudioContext||window.webkitAudioContext)();const o=a.createOscillator();const g=a.createGain();o.type='sine';o.frequency.setValueAtTime(lock.dir==='UP'?587.33:369.99,a.currentTime);g.gain.setValueAtTime(0.08,a.currentTime);g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+0.6);o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+0.6);}catch(e){}}
   },[analysis?.lockInfo?.lockedAt]);
+
+  const handleManualSync=(dir)=>{
     if(userPosition!==null&&userPosition!==dir)hasReversedRef.current=true;
     if(userPosition===dir){taraAdviceRef.current='SEARCHING...';setUserPosition(null);setPositionEntry(null);setForceRender(p=>p+1);return;}
     taraAdviceRef.current=String(dir);setUserPosition(String(dir));
