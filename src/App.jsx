@@ -859,7 +859,7 @@ function TaraApp(){
         isManualStrikeRef.current=false;
         hasSetInitialMargin.current=false;
         setWindowOpenStrike(currentPriceRef.current||currentPrice);
-        taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;setPendingStrike(null);setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;}}},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights,userPosition]);
+        taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;setPendingStrike(null);setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;}},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights,userPosition]);
 
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
 
