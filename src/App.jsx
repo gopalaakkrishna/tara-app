@@ -609,84 +609,51 @@ function TaraApp(){
   const[userPosition,setUserPosition]=useState(null);
   const[showHelp,setShowHelp]=useState(false);
   const[soundEnabled,setSoundEnabled]=useState(false);
-  const audioCtxRef=useRef(null); // persisted AudioContext — created on first user gesture
-  const soundEnabledRef=useRef(false); // ref so effects always see current value
+  const audioCtxRef=useRef(null);
+  const soundEnabledRef=useRef(false);
   soundEnabledRef.current=soundEnabled;
 
-  // Create/resume AudioContext on sound toggle — satisfies browser autoplay policy
-  const handleSoundToggle=useCallback(()=>{
+  const handleSoundToggle=()=>{
     const next=!soundEnabled;
     setSoundEnabled(next);
     if(next){
       try{
-        if(!audioCtxRef.current){
-          audioCtxRef.current=new(window.AudioContext||window.webkitAudioContext)();
-        }
-        if(audioCtxRef.current.state==='suspended'){
-          audioCtxRef.current.resume();
-        }
-        // Play a tiny confirmation beep so user knows sound is on
-        playTone(audioCtxRef.current,880,0.06,0.15,'sine');
+        const Ctx=window.AudioContext||window.webkitAudioContext;
+        if(!audioCtxRef.current)audioCtxRef.current=new Ctx();
+        if(audioCtxRef.current.state==='suspended')audioCtxRef.current.resume();
+        // Confirmation beep
+        const ctx=audioCtxRef.current;
+        const o=ctx.createOscillator(),g=ctx.createGain();
+        o.type='sine';o.frequency.value=880;
+        g.gain.setValueAtTime(0.06,ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.15);
+        o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+0.15);
       }catch(e){}
     }
-  },[soundEnabled]);
+  };
 
-  const playTone=useCallback((ctx,freq,vol,dur,type='sine')=>{
-    if(!ctx)return;
+  const playAlert=(type)=>{
+    if(!soundEnabledRef.current)return;
     try{
-      const o=ctx.createOscillator();
-      const g=ctx.createGain();
-      o.type=type;
-      o.frequency.setValueAtTime(freq,ctx.currentTime);
-      g.gain.setValueAtTime(vol,ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);
-      o.connect(g);g.connect(ctx.destination);
-      o.start();o.stop(ctx.currentTime+dur);
+      const Ctx=window.AudioContext||window.webkitAudioContext;
+      if(!audioCtxRef.current)audioCtxRef.current=new Ctx();
+      const ctx=audioCtxRef.current;
+      if(ctx.state==='suspended'){ctx.resume();return;}
+      const tone=(freq,vol,dur,wave)=>{
+        const o=ctx.createOscillator(),g=ctx.createGain();
+        o.type=wave||'sine';o.frequency.value=freq;
+        g.gain.setValueAtTime(vol,ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);
+        o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+dur);
+      };
+      if(type==='lock-up'){tone(523,0.08,0.2);setTimeout(()=>tone(659,0.1,0.3),180);}
+      else if(type==='lock-down'){tone(659,0.08,0.2);setTimeout(()=>tone(523,0.1,0.3),180);}
+      else if(type==='entry'){tone(880,0.07,0.12,'square');setTimeout(()=>tone(880,0.07,0.12,'square'),120);setTimeout(()=>tone(880,0.07,0.12,'square'),240);}
+      else if(type==='profit'){tone(523,0.07,0.15);setTimeout(()=>tone(659,0.07,0.15),100);setTimeout(()=>tone(784,0.09,0.3),200);}
+      else if(type==='warning'){tone(220,0.1,0.15,'sawtooth');setTimeout(()=>tone(220,0.1,0.15,'sawtooth'),200);}
+      else if(type==='emergency'){tone(180,0.12,0.12,'sawtooth');setTimeout(()=>tone(180,0.12,0.12,'sawtooth'),150);setTimeout(()=>tone(180,0.12,0.12,'sawtooth'),300);}
+      else{tone(440,0.06,0.2);}
     }catch(e){}
-  },[]);
-
-  // ── PLAY SOUND — central function for all alert types ──
-  const playAlert=useCallback((type)=>{
-    if(!soundEnabledRef.current||!audioCtxRef.current)return;
-    const ctx=audioCtxRef.current;
-    if(ctx.state==='suspended'){ctx.resume().then(()=>_doPlayAlert(ctx,type));return;}
-    _doPlayAlert(ctx,type);
-  },[playTone]);
-
-  const _doPlayAlert=(ctx,type)=>{
-    // Each alert type has a distinct sound signature
-    switch(type){
-      case 'lock-up':
-        // Two ascending tones — UP lock confirmed
-        playTone(ctx,523.25,0.08,0.2,'sine');
-        setTimeout(()=>playTone(ctx,659.25,0.1,0.3,'sine'),180);
-        break;
-      case 'lock-down':
-        // Two descending tones — DOWN lock confirmed
-        playTone(ctx,659.25,0.08,0.2,'sine');
-        setTimeout(()=>playTone(ctx,523.25,0.1,0.3,'sine'),180);
-        break;
-      case 'entry':
-        // Three quick beeps — entry signal
-        [0,120,240].forEach((d,i)=>setTimeout(()=>playTone(ctx,880,0.07,0.12,'square'),d));
-        break;
-      case 'profit':
-        // Bright ascending chord — take profit / cashout opportunity
-        playTone(ctx,523.25,0.07,0.15,'sine');
-        setTimeout(()=>playTone(ctx,659.25,0.07,0.15,'sine'),100);
-        setTimeout(()=>playTone(ctx,783.99,0.09,0.3,'sine'),200);
-        break;
-      case 'warning':
-        // Low double pulse — cut losses / adverse
-        [0,200].forEach(d=>setTimeout(()=>playTone(ctx,220,0.1,0.15,'sawtooth'),d));
-        break;
-      case 'emergency':
-        // Rapid triple low buzz — stop hit / rug pull
-        [0,150,300].forEach(d=>setTimeout(()=>playTone(ctx,180,0.12,0.12,'sawtooth'),d));
-        break;
-      default:
-        playTone(ctx,440,0.06,0.2,'sine');
-    }
   };
   const[showWhaleLog,setShowWhaleLog]=useState(false);
   const velocityRef=useVelocity(tickHistoryRef,currentPrice,targetMargin);
@@ -991,6 +958,8 @@ function TaraApp(){
     else if(label.includes('STOP HIT')||label.includes('RUG PULL')||label.includes('REVERSE POSITION'))
                                                        playAlert('emergency');
   },[analysis?.advisor?.label]);
+
+  const handleManualSync=(dir)=>{
     if(userPosition!==null&&userPosition!==dir)hasReversedRef.current=true;
     if(userPosition===dir){taraAdviceRef.current='SEARCHING...';setUserPosition(null);setPositionEntry(null);setForceRender(p=>p+1);return;}
     taraAdviceRef.current=String(dir);setUserPosition(String(dir));
