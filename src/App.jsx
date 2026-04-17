@@ -42,6 +42,130 @@ const calcMomentumAlignment=(d1,d5,d15)=>{const signs=[Math.sign(d1),Math.sign(d
 const sigmoid=(x,steep=0.035)=>1/(1+Math.exp(-steep*x));
 
 // ═══════════════════════════════════════
+// TARA SELF-TRAINING ENGINE V1
+// Adaptive weights + calibration + trade log
+// ═══════════════════════════════════════
+
+// Default signal weights (match original hardcoded values)
+const DEFAULT_WEIGHTS={gap:35,momentum:30,structure:15,flow:20,technical:25,regime:15};
+const WEIGHT_BOUNDS={gap:[5,55],momentum:[5,50],structure:[2,30],flow:[2,40],technical:[5,45],regime:[2,30]};
+const LEARNING_RATE=0.8; // how aggressively to update weights per trade
+
+// Load weights from localStorage or use defaults
+const loadWeights=()=>{try{const s=localStorage.getItem('taraWeightsV1');if(s){const w=JSON.parse(s);if(w&&typeof w.gap==='number')return w;}return{...DEFAULT_WEIGHTS};}catch(e){return{...DEFAULT_WEIGHTS};}};
+const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV1',JSON.stringify(w));}catch(e){}};
+
+// Load trade log
+const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV1');if(s)return JSON.parse(s);return[];}catch(e){return[];}};
+const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV1',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
+
+// ── GRADIENT DESCENT WEIGHT UPDATE ──
+// After each trade, credit/blame each signal proportionally to its contribution
+const updateWeights=(weights,tradeLog,result)=>{
+  // Only update if we have signal data
+  const last=tradeLog[tradeLog.length-1];
+  if(!last||!last.signals||!last.posterior)return weights;
+  const won=result==='WIN';
+  const sig=last.signals;
+  const totalAbs=Object.values(sig).reduce((s,v)=>s+Math.abs(v),0)||1;
+  const conviction=Math.abs(last.posterior-50)/50; // how confident was the prediction
+  const newW={...weights};
+
+  Object.keys(sig).forEach(k=>{
+    if(!(k in newW))return;
+    const contribution=Math.abs(sig[k])/totalAbs; // how much this signal contributed (0-1)
+    const aligned=Math.sign(sig[k])===Math.sign(last.posterior-50); // did signal agree with direction?
+    // If we won AND signal was aligned → reinforce it
+    // If we lost AND signal was aligned → reduce it (it was wrong)
+    // If signal was opposite to final call → inverse logic
+    let delta=LEARNING_RATE*contribution*conviction;
+    if(won&&aligned)newW[k]+=delta;
+    else if(won&&!aligned)newW[k]-=delta*0.3; // mild penalty for opposing signals on wins
+    else if(!won&&aligned)newW[k]-=delta;      // strong penalty for aligned signals on losses
+    else if(!won&&!aligned)newW[k]+=delta*0.2; // mild reward for opposing signals on losses
+    // Clamp to bounds
+    const[lo,hi]=WEIGHT_BOUNDS[k]||[2,55];
+    newW[k]=Math.max(lo,Math.min(hi,newW[k]));
+  });
+  saveWeights(newW);
+  return newW;
+};
+
+// ── CALIBRATION ENGINE ──
+// Maps raw posterior buckets → actual historical win rates
+const buildCalibration=(tradeLog)=>{
+  const buckets={};
+  for(let b=0;b<=90;b+=10)buckets[b]={wins:0,total:0};
+  tradeLog.filter(t=>t.result).forEach(t=>{
+    const bucket=Math.floor(Math.max(0,Math.min(90,t.posterior-50+50))/10)*10; // center on 50
+    // Map: posterior 50=neutral, >50=UP bias
+    const upBias=t.posterior>50;
+    const b2=Math.floor(t.posterior/10)*10;
+    const key=Math.max(0,Math.min(90,b2));
+    if(!buckets[key])buckets[key]={wins:0,total:0};
+    buckets[key].total++;
+    if(t.result==='WIN')buckets[key].wins++;
+  });
+  // Compute calibrated win rates per bucket
+  const cal={};
+  Object.keys(buckets).forEach(k=>{
+    const{wins,total}=buckets[k];
+    cal[k]=total>=3?(wins/total)*100:null; // null = not enough data
+  });
+  return cal;
+};
+
+// Apply calibration correction to raw posterior
+const calibratePosterior=(raw,calibration)=>{
+  if(!calibration)return raw;
+  const bucket=Math.floor(raw/10)*10;
+  const calVal=calibration[Math.max(0,Math.min(90,bucket))];
+  if(calVal==null)return raw; // no data for this bucket yet
+  // Blend: 70% calibrated, 30% raw (trust grows with more data)
+  return calVal*0.7+raw*0.3;
+};
+
+// ── PER-SIGNAL ACCURACY TRACKER ──
+const buildSignalAccuracy=(tradeLog)=>{
+  const signals={gap:{right:0,total:0},momentum:{right:0,total:0},structure:{right:0,total:0},flow:{right:0,total:0},technical:{right:0,total:0},regime:{right:0,total:0}};
+  tradeLog.filter(t=>t.result&&t.signals).forEach(t=>{
+    const won=t.result==='WIN';
+    const finalDir=t.posterior>50; // true=UP prediction
+    Object.keys(t.signals).forEach(k=>{
+      if(!signals[k])return;
+      const sigDir=t.signals[k]>0; // true=this signal voted UP
+      const aligned=sigDir===finalDir;
+      signals[k].total++;
+      // Signal was "right" if it voted same direction as outcome
+      const outcomeUp=t.dir==='UP';
+      if(sigDir===outcomeUp)signals[k].right++;
+    });
+  });
+  return signals;
+};
+
+// ── SESSION PERFORMANCE ──
+const buildSessionPerf=(tradeLog)=>{
+  const sessions={ASIA:{wins:0,losses:0},EU:{wins:0,losses:0},US:{wins:0,losses:0},'OFF-HOURS':{wins:0,losses:0}};
+  tradeLog.filter(t=>t.result).forEach(t=>{
+    const s=t.session||'OFF-HOURS';
+    if(!sessions[s])sessions[s]={wins:0,losses:0};
+    if(t.result==='WIN')sessions[s].wins++;else sessions[s].losses++;
+  });
+  return sessions;
+};
+
+// ── TIME-OF-DAY PERFORMANCE ──
+const buildHourlyPerf=(tradeLog)=>{
+  const hourly={};
+  tradeLog.filter(t=>t.result&&t.hour!=null).forEach(t=>{
+    const h=t.hour;if(!hourly[h])hourly[h]={wins:0,losses:0};
+    if(t.result==='WIN')hourly[h].wins++;else hourly[h].losses++;
+  });
+  return hourly;
+};
+
+// ═══════════════════════════════════════
 // MARKET SESSIONS
 // ═══════════════════════════════════════
 const getMarketSessions=()=>{const now=new Date();const utcH=now.getUTCHours();const asia=utcH>=0&&utcH<9;const eu=utcH>=7&&utcH<16;const us=utcH>=13&&utcH<22;const sessions=[];if(asia)sessions.push({name:'ASIA',flag:'🌏',color:'text-amber-400'});if(eu)sessions.push({name:'EU',flag:'🌍',color:'text-blue-400'});if(us)sessions.push({name:'US',flag:'🌎',color:'text-emerald-400'});const dominant=sessions.length>0?sessions[sessions.length-1].name:'OFF-HOURS';return{sessions,dominant,utcH};};
@@ -305,8 +429,8 @@ const computeAdvisor=(params)=>{
       if(lockDir==='DOWN')return{label:`ENTRY SIGNAL: DOWN`,reason:`Tara locked DOWN ${lockedSec}s ago at ${lockInfo.lockedPosterior?.toFixed(0)||'—'}% conf. Gap: ${gapBps.toFixed(1)} bps. [${timeLabel}]`,color:'rose',animate:false,hasAction:true,actionLabel:`CONFIRM ENTRY 'DOWN'`,actionTarget:'DOWN'};
     }
 
-    // Lock was released
-    if(activePrediction==='LOCK RELEASED')return{label:'LOCK RELEASED',reason:`Position reversed beyond safe threshold. No new entry recommended this window. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
+    // Already manually closed this window — no new entries
+    if(activePrediction==='CLOSED'||activePrediction==='SIT OUT')return{label:'TRADE CLOSED',reason:`Position manually closed this window. Score recorded. Standing by for next window. [${timeLabel}]`,color:'zinc',animate:false,hasAction:false};
 
     // Forming — show progress, no action button
     if(activePrediction?.includes('UP (FORMING)'))return{label:'SIGNAL FORMING — UP',reason:`Bullish bias building (${posterior.toFixed(1)}%). Waiting for ${windowType==='15m'?3:2} consecutive samples to confirm lock. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
@@ -351,11 +475,13 @@ const computeAdvisor=(params)=>{
 };
 
 // ═══════════════════════════════════════
-// V99 PREDICTION ENGINE (Weighted Composite)
+// V99 PREDICTION ENGINE (Weighted Composite + Adaptive)
 // ═══════════════════════════════════════
 const computeV99Posterior=(params)=>{
-  const{currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory}=params;
+  const{currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,calibration}=params;
+  const W=adaptiveWeights||DEFAULT_WEIGHTS; // use adaptive or default
   const reasoning=[];let totalScore=0;
+  const rawSignalScores={}; // for training log
 
   const closes=liveHistory.map(x=>x.c);
   const rsi=calcRSI(closes,14)||50;
@@ -382,62 +508,67 @@ const computeV99Posterior=(params)=>{
   const ticks=tickHistoryRef.current;
   const tickSlope=ticks.length>=10?(currentPrice-ticks[0].p):0;
 
-  // ── SIGNAL 1: GAP GRAVITY (Weight: 35) ──
+  // ── SIGNAL 1: GAP GRAVITY ──
   const timeDecay=Math.pow(timeFraction,is15m?1.8:1.3);
   const isPostDecay=timeFraction>0.6;
   const decayMult=isPostDecay?1.5:1.0;
   let gapScore=realGapBps*(is15m?0.65:0.85)*(0.15+0.85*timeDecay)*decayMult;
   const gapMag=Math.abs(realGapBps);
   if(gapMag>15)gapScore+=Math.sign(realGapBps)*Math.pow(gapMag-10,1.3)*(is15m?0.45:0.65);
-  if(gapMag>50)gapScore*=0.7; // extreme gaps often reverse
-  totalScore+=Math.max(-35,Math.min(35,gapScore));
-  if(gapMag>15)reasoning.push(`[GAP] ${realGapBps.toFixed(1)} bps — gravity ${realGapBps>0?'bullish':'bearish'}`);
+  if(gapMag>50)gapScore*=0.7;
+  const gapClamped=Math.max(-W.gap,Math.min(W.gap,gapScore));
+  rawSignalScores.gap=gapClamped;
+  totalScore+=gapClamped;
+  if(gapMag>15)reasoning.push(`[GAP] ${realGapBps.toFixed(1)} bps — gravity ${realGapBps>0?'bullish':'bearish'} | W:${W.gap.toFixed(0)}`);
 
-  // ── SIGNAL 2: MOMENTUM COMPOSITE (Weight: 30) ──
+  // ── SIGNAL 2: MOMENTUM COMPOSITE ──
   let momScore=0;
   if(is15m){momScore=drift5m*0.6+drift1m*0.4;}
   else{momScore=(v30s||0)*(10000/currentPrice)*1.5+drift1m*1.0+drift5m*0.5;}
   if(momentumAlign.aligned&&momentumAlign.strong)momScore*=1.5;
   else if(momentumAlign.aligned)momScore*=1.2;
-  totalScore+=Math.max(-30,Math.min(30,momScore*0.8));
-  reasoning.push(`[MOMENTUM] ${drift1m.toFixed(1)} bps/1m | ${drift5m.toFixed(1)} bps/5m${momentumAlign.aligned?' ✦ ALIGNED':''}`);
+  const momClamped=Math.max(-W.momentum,Math.min(W.momentum,momScore*0.8));
+  rawSignalScores.momentum=momClamped;
+  totalScore+=momClamped;
+  reasoning.push(`[MOMENTUM] ${drift1m.toFixed(1)} bps/1m | ${drift5m.toFixed(1)} bps/5m${momentumAlign.aligned?' ✦ ALIGNED':''} | W:${W.momentum.toFixed(0)}`);
 
-  // ── SIGNAL 3: CANDLE STRUCTURE (Weight: 15 — V99 NEW) ──
+  // ── SIGNAL 3: CANDLE STRUCTURE ──
   let structScore=0;
   if(consecutive.green>=3)structScore+=consecutive.green*3;
   if(consecutive.red>=3)structScore-=consecutive.red*3;
-  if(volRatio>1.5&&consecutive.green>=2)structScore+=8; // volume confirming move up
-  if(volRatio>1.5&&consecutive.red>=2)structScore-=8;   // volume confirming move down
-  totalScore+=Math.max(-15,Math.min(15,structScore));
-  if(consecutive.green>=2||consecutive.red>=2)reasoning.push(`[STRUCTURE] ${consecutive.green>0?consecutive.green+'× green':consecutive.red+'× red'} candles | Vol ratio: ${volRatio.toFixed(1)}x`);
+  if(volRatio>1.5&&consecutive.green>=2)structScore+=8;
+  if(volRatio>1.5&&consecutive.red>=2)structScore-=8;
+  const structClamped=Math.max(-W.structure,Math.min(W.structure,structScore));
+  rawSignalScores.structure=structClamped;
+  totalScore+=structClamped;
+  if(consecutive.green>=2||consecutive.red>=2)reasoning.push(`[STRUCTURE] ${consecutive.green>0?consecutive.green+'× green':consecutive.red+'× red'} | Vol: ${volRatio.toFixed(1)}x | W:${W.structure.toFixed(0)}`);
 
-  // ── SIGNAL 4: FLOW IMBALANCE (Weight: 20) ──
-  let flowScore=aggrFlow*20;
-  if(is15m)flowScore=aggrFlow*20;else flowScore=aggrFlow*30;
+  // ── SIGNAL 4: FLOW IMBALANCE ──
+  let flowScore=aggrFlow*(is15m?W.flow:W.flow*1.5);
   if(accel&&drift1m>0&&accel>0)flowScore+=8;
   if(accel&&drift1m<0&&accel<0)flowScore-=8;
-  totalScore+=Math.max(-20,Math.min(20,flowScore));
-  reasoning.push(`[FLOW] Delta: ${globalFlow.deltaUSD>0?'+':''}${formatUSD(globalFlow.deltaUSD)} | Imbalance: ${aggrFlow.toFixed(2)}`);
+  const flowClamped=Math.max(-W.flow,Math.min(W.flow,flowScore));
+  rawSignalScores.flow=flowClamped;
+  totalScore+=flowClamped;
+  reasoning.push(`[FLOW] Delta: ${globalFlow.deltaUSD>0?'+':''}${formatUSD(globalFlow.deltaUSD)} | Imbalance: ${aggrFlow.toFixed(2)} | W:${W.flow.toFixed(0)}`);
 
-  // ── SIGNAL 5: TECHNICAL COMPOSITE (Weight: 25) ──
+  // ── SIGNAL 5: TECHNICAL COMPOSITE ──
   let techScore=0;
-  // RSI
   if(rsi>70&&realGapBps>0){techScore-=15;reasoning.push(`[RSI] Overbought (${rsi.toFixed(0)}) — fading top`);}
   else if(rsi<30&&realGapBps<0){techScore+=15;reasoning.push(`[RSI] Oversold (${rsi.toFixed(0)}) — fading bottom`);}
-  else if(rsi>60&&drift1m<0)techScore-=8; // RSI divergence
+  else if(rsi>60&&drift1m<0)techScore-=8;
   else if(rsi<40&&drift1m>0)techScore+=8;
-  // VWAP
   if(drift1m>0&&vwapGapBps<-5){techScore-=10;reasoning.push(`[VWAP] Below VWAP — suppressing UP`);}
   if(drift1m<0&&vwapGapBps>5){techScore+=10;reasoning.push(`[VWAP] Above VWAP — suppressing DOWN`);}
-  // BB position
   if(bb.pctB>0.85&&realGapBps>0){techScore-=8;reasoning.push(`[BB] Upper band squeeze — overbought`);}
   if(bb.pctB<0.15&&realGapBps<0){techScore+=8;reasoning.push(`[BB] Lower band squeeze — oversold`);}
-  // Price channel
-  if(channel>0.8&&drift1m>0)techScore-=5;   // near top of channel
-  if(channel<0.2&&drift1m<0)techScore+=5;   // near bottom of channel
-  totalScore+=Math.max(-25,Math.min(25,techScore));
+  if(channel>0.8&&drift1m>0)techScore-=5;
+  if(channel<0.2&&drift1m<0)techScore+=5;
+  const techClamped=Math.max(-W.technical,Math.min(W.technical,techScore));
+  rawSignalScores.technical=techClamped;
+  totalScore+=techClamped;
 
-  // ── SIGNAL 6: FUNDING & REGIME (Weight: 15) ──
+  // ── SIGNAL 6: FUNDING & REGIME ──
   const funding=bloomberg?.fundingRate||0;
   const fundingPrev=bloomberg?.fundingRatePrev||0;
   const delta=globalFlow.deltaUSD||0;
@@ -449,21 +580,23 @@ const computeV99Posterior=(params)=>{
   const whalesBuying=delta>500000,whalesSelling=delta<-500000;
   const isCleanUp=drift1m>5&&whalesBuying&&atrBps<30;
   const isCleanDn=drift1m<-5&&whalesSelling&&atrBps<30;
-  const fundingAccel=(funding-fundingPrev); // funding trend
-  if(retailShorting&&whalesBuying){regime='SHORT SQUEEZE';regimeBonus=15;upThreshold=60;downThreshold=20;}
-  else if(retailLonging&&whalesSelling){regime='LONG SQUEEZE';regimeBonus=-15;upThreshold=80;downThreshold=40;}
+  const fundingAccel=(funding-fundingPrev);
+  if(retailShorting&&whalesBuying){regime='SHORT SQUEEZE';regimeBonus=W.regime;upThreshold=60;downThreshold=20;}
+  else if(retailLonging&&whalesSelling){regime='LONG SQUEEZE';regimeBonus=-W.regime;upThreshold=80;downThreshold=40;}
   else if(isCleanUp){regime='TRENDING UP';upThreshold=64;downThreshold=25;}
   else if(isCleanDn){regime='TRENDING DOWN';upThreshold=75;downThreshold=36;}
   else if(isHighVol){regime='HIGH VOL CHOP';upThreshold=75;downThreshold=25;reasoning.push(`[REGIME] High vol — strict thresholds`);}
-  if(fundingAccel>0.0001)regimeBonus-=5; // rising funding = leverage danger
-  if(fundingAccel<-0.0001)regimeBonus+=5; // falling funding = shorts covering
-  totalScore+=Math.max(-15,Math.min(15,regimeBonus));
+  if(fundingAccel>0.0001)regimeBonus-=5;
+  if(fundingAccel<-0.0001)regimeBonus+=5;
+  const regimeClamped=Math.max(-W.regime,Math.min(W.regime,regimeBonus));
+  rawSignalScores.regime=regimeClamped;
+  totalScore+=regimeClamped;
 
   // Synaptic memory override
   const mem=regimeMemory?regimeMemory[regime]:null;
   if(mem&&(mem.wins+mem.losses)>=3){const wr=mem.wins/(mem.wins+mem.losses);if(wr<0.45){upThreshold+=6;downThreshold-=6;reasoning.push(`[MEMORY] Low WR (${(wr*100).toFixed(0)}%) in ${regime} — tightening`);}else if(wr>0.65){upThreshold-=4;downThreshold+=4;reasoning.push(`[MEMORY] High WR (${(wr*100).toFixed(0)}%) in ${regime} — loosening`);}}
 
-  // Convert to posterior via sigmoid
+  // Convert to posterior
   const rawPosterior=50+totalScore*0.95;
   let posterior=Math.max(1,Math.min(99,rawPosterior));
 
@@ -473,12 +606,17 @@ const computeV99Posterior=(params)=>{
   else if(realGapBps>40){posterior=Math.max(posterior,82);reasoning.push(`[CAP] Deep ITM — UP floored at 82%`);}
   else if(realGapBps>18){posterior=Math.max(posterior,58);}
 
+  // Apply calibration if available (makes % accurate to actual historical win rate)
+  const calibratedPosterior=calibration?calibratePosterior(posterior,calibration):posterior;
+  const totalSignalWeight=Object.values(W).reduce((a,b)=>a+b,0)||1;
+
   reasoning.push(`[ATR] Volatility: ${atrBps.toFixed(1)} bps | Regime: ${regime}${isPostDecay?' | POST-DECAY ⚡':''}`);
+  if(calibration&&Object.values(calibration).some(v=>v!=null))reasoning.push(`[CAL] Calibrated posterior applied (${calibratedPosterior.toFixed(1)}% vs raw ${posterior.toFixed(1)}%)`);
 
   // Rug pull check
   const isRugPull=tickSlope<-5&&aggrFlow<-0.6;
 
-  return{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign};
+  return{posterior:calibratedPosterior,rawPosterior:posterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight};
 };
 
 // ═══════════════════════════════════════
@@ -531,11 +669,25 @@ function TaraApp(){
   const biasCountRef=useRef({UP:0,DOWN:0}); // consecutive samples in same direction before lock
   const peakOfferRef=useRef(0);
   const hasReversedRef=useRef(false);
+  // Tracks whether user manually closed the trade this window (prevents double-scoring at rollover)
+  // Values: null=no trade, 'WIN'=user cashed out profit, 'LOSS'=user cut losses
+  const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:146,losses:104},'5m':{wins:10,losses:7}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:159,losses:111},'5m':{wins:10,losses:7}});
   const[regimeMemory,setRegimeMemory]=useState({'TRENDING UP':{wins:0,losses:0},'TRENDING DOWN':{wins:0,losses:0},'HIGH VOL CHOP':{wins:0,losses:0},'SHORT SQUEEZE':{wins:0,losses:0},'LONG SQUEEZE':{wins:0,losses:0},'RANGE/CHOP':{wins:0,losses:0}});
   const lastRegimeRef=useRef('RANGE/CHOP');
+  // ── TARA SELF-TRAINING STATE ──
+  const[adaptiveWeights,setAdaptiveWeights]=useState(()=>loadWeights());
+  const[tradeLog,setTradeLog]=useState(()=>loadTradeLog());
+  const tradeLogRef=useRef([]);
+  tradeLogRef.current=tradeLog;
+  const pendingTradeRef=useRef(null);
+  const[showAnalytics,setShowAnalytics]=useState(false);
+  const calibration=useMemo(()=>buildCalibration(tradeLog),[tradeLog]);
+  const signalAccuracy=useMemo(()=>buildSignalAccuracy(tradeLog),[tradeLog]);
+  const sessionPerf=useMemo(()=>buildSessionPerf(tradeLog),[tradeLog]);
+  const hourlyPerf=useMemo(()=>buildHourlyPerf(tradeLog),[tradeLog]);
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
@@ -587,7 +739,33 @@ function TaraApp(){
   const broadcastToDiscord=async(type,data)=>{if(!discordWebhook||!discordWebhook.startsWith('http'))return;try{let embed={};if(type==='SIGNAL')embed={title:`${data.dir==='UP'?'🟢':'🔴'} TARA V99 SIGNAL: ${data.dir}`,color:data.dir==='UP'?3404125:16478549,fields:[{name:'BTC Price',value:`$${data.price.toFixed(2)}`,inline:true},{name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},{name:'Gap',value:`${data.gap.toFixed(2)} bps`,inline:true},{name:'Clock',value:data.clock,inline:true}],timestamp:new Date().toISOString()};else if(type==='LOCK')embed={title:`TARA V99 — ${data.dir} LOCKED`,color:data.dir==='UP'?3404125:16478549,description:`**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(2)} bps | **Clock:** ${data.clock}`,timestamp:new Date().toISOString()};else if(type==='CLOSE')embed={title:`TARA V99 ROUND CLOSED: ${data.window}`,color:data.won?3404125:16478549,description:`**Result:** ${data.won?'WIN ✅':'LOSS ❌'}\n**Closing:** $${data.price.toFixed(2)}\n**Regime:** ${data.regime}`,timestamp:new Date().toISOString()};await fetch(discordWebhook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'Tara Terminal V99',embeds:[embed]})});}catch(e){}};
 
   // Window rollover
-  useEffect(()=>{if(timeState.nextWindow&&timeState.nextWindow!==lastWindowRef.current){if(currentPrice!==null){if(lastWindowRef.current!==''){const pc=taraAdviceRef.current;let won=false,active=false;if(pc.includes('UP-LOCK')||pc.includes('UP - LOCK')){active=true;if(currentPrice>targetMargin){updateScore(windowType,'wins',1);won=true;}else updateScore(windowType,'losses',1);}else if(pc.includes('DOWN-LOCK')||pc.includes('DOWN - LOCK')){active=true;if(currentPrice<targetMargin){updateScore(windowType,'wins',1);won=true;}else updateScore(windowType,'losses',1);}if(active){setRegimeMemory(prev=>{const u={...prev};const r=lastRegimeRef.current||'RANGE/CHOP';if(!u[r])u[r]={wins:0,losses:0};if(won)u[r].wins++;else u[r].losses++;return u;});broadcastToDiscord('CLOSE',{window:windowType,won,prediction:pc,regime:lastRegimeRef.current,price:currentPrice});}}setTargetMargin(currentPrice);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;}};},[timeState.nextWindow,currentPrice,windowType,targetMargin]);
+  useEffect(()=>{if(timeState.nextWindow&&timeState.nextWindow!==lastWindowRef.current){if(currentPrice!==null){if(lastWindowRef.current!==''){const pc=taraAdviceRef.current;let won=false,active=false;
+          // ── SCORING: only auto-score if user did NOT manually close this window ──
+          if(manuallyClosedRef.current!==null){
+            // User already settled — use their recorded result
+            won=manuallyClosedRef.current==='WIN';
+            active=true;
+          } else if(pc.includes('UP-LOCK')||pc.includes('UP - LOCK')){
+            active=true;
+            if(currentPrice>targetMargin){won=true;updateScore(windowType,'wins',1);}
+            else updateScore(windowType,'losses',1);
+          } else if(pc.includes('DOWN-LOCK')||pc.includes('DOWN - LOCK')){
+            active=true;
+            if(currentPrice<targetMargin){won=true;updateScore(windowType,'wins',1);}
+            else updateScore(windowType,'losses',1);
+          }
+          if(active){setRegimeMemory(prev=>{const u={...prev};const r=lastRegimeRef.current||'RANGE/CHOP';if(!u[r])u[r]={wins:0,losses:0};if(won)u[r].wins++;else u[r].losses++;return u;});broadcastToDiscord('CLOSE',{window:windowType,won,prediction:pc,regime:lastRegimeRef.current,price:currentPrice});
+          // ── TRAINING ENGINE: resolve pending trade + update weights ──
+          if(pendingTradeRef.current&&pendingTradeRef.current.result===null){
+            const result=won?'WIN':'LOSS';
+            const resolvedTrade={...pendingTradeRef.current,result,closingPrice:currentPrice,strikePrice:targetMargin};
+            const newLog=[...tradeLogRef.current,resolvedTrade];
+            saveTradeLog(newLog);setTradeLog(newLog);
+            const newWeights=updateWeights(adaptiveWeights,newLog,result);
+            setAdaptiveWeights(newWeights);
+            pendingTradeRef.current=null;
+          }
+        }}setTargetMargin(currentPrice);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;}}},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights]);
 
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
 
@@ -606,8 +784,8 @@ function TaraApp(){
       const isCalibrating=(intervalSeconds-clockSeconds)<10;
       const isEarlyWindow=is15m?((intervalSeconds-clockSeconds)<300):((intervalSeconds-clockSeconds)<90);
 
-      // V99 weighted posterior
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory});
+      // V99 weighted posterior (adaptive)
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,calibration});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb}=eng;
       lastRegimeRef.current=regime;
 
@@ -635,22 +813,17 @@ function TaraApp(){
       // ── Phase 1: Pre-lock ──
       if(!lockedCallRef.current){
         if(bullCount>=CONSECUTIVE_NEEDED&&!isEndgameLock){
-          // Confirmed UP lock
           lockedCallRef.current={dir:'UP',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice};
           taraAdviceRef.current='UP - LOCKED';
           biasCountRef.current={UP:0,DOWN:0};
-          // Auto-broadcast lock
-          const gapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
-          
+          // Log pending trade for training
+          pendingTradeRef.current={id:Date.now(),dir:'UP',posterior,regime,clockAtLock:clockSeconds,hour:new Date().getHours(),session:getMarketSessions().dominant,windowType,signals:eng.rawSignalScores,result:null};
         } else if(bearCount>=CONSECUTIVE_NEEDED&&!isEndgameLock){
-          // Confirmed DOWN lock
           lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice};
           taraAdviceRef.current='DOWN - LOCKED';
           biasCountRef.current={UP:0,DOWN:0};
-          const gapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
-          
+          pendingTradeRef.current={id:Date.now(),dir:'DOWN',posterior,regime,clockAtLock:clockSeconds,hour:new Date().getHours(),session:getMarketSessions().dominant,windowType,signals:eng.rawSignalScores,result:null};
         } else {
-          // No lock yet — show forming bias as info only (no flipping)
           const avgRecent=recentHist.reduce((a,b)=>a+b,0)/(recentHist.length||1);
           if(avgRecent>=58&&!isEndgameLock)taraAdviceRef.current='UP (FORMING)';
           else if(avgRecent<=42&&!isEndgameLock)taraAdviceRef.current='DOWN (FORMING)';
@@ -740,13 +913,36 @@ function TaraApp(){
 
   const executeAction=(target)=>{
     if(target==='UP'||target==='DOWN'){handleManualSync(target);return;}
-    if(target==='CASH'||target==='SIT OUT'){if(analysis&&(analysis.prediction.includes('UP')||analysis.prediction.includes('DOWN'))){const w=(analysis.prediction.includes('UP')&&currentPrice>targetMargin)||(analysis.prediction.includes('DOWN')&&currentPrice<targetMargin);if(w)updateScore(windowType,'wins',1);else updateScore(windowType,'losses',1);}setUserPosition(null);setPositionEntry(null);setCurrentOffer('');setForceRender(p=>p+1);}
-    if(target==='SIT OUT'){taraAdviceRef.current='SIT OUT';}
+    if(target==='CASH'||target==='SIT OUT'){
+      const hasActiveLock=taraAdviceRef.current.includes('LOCKED');
+      if(hasActiveLock&&manuallyClosedRef.current===null){
+        // ── CORRECT SCORING ──
+        // CASH = user took profit = WIN regardless of current price vs strike
+        // SIT OUT = user cut losses or stopped out = LOSS
+        const result=target==='CASH'?'WIN':'LOSS';
+        manuallyClosedRef.current=result; // prevent double-scoring at rollover
+        if(result==='WIN')updateScore(windowType,'wins',1);
+        else updateScore(windowType,'losses',1);
+        // Resolve training trade immediately
+        if(pendingTradeRef.current&&pendingTradeRef.current.result===null){
+          const resolvedTrade={...pendingTradeRef.current,result,closingPrice:currentPrice,strikePrice:targetMargin,earlyExit:true};
+          const newLog=[...tradeLogRef.current,resolvedTrade];
+          saveTradeLog(newLog);setTradeLog(newLog);
+          const newWeights=updateWeights(adaptiveWeights,newLog,result);
+          setAdaptiveWeights(newWeights);
+          pendingTradeRef.current=null;
+        }
+      }
+      // Clear position state
+      setUserPosition(null);setPositionEntry(null);setCurrentOffer('');
+      taraAdviceRef.current='CLOSED';
+      setForceRender(p=>p+1);
+    }
   };
 
   const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'🚨 STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast`;setChatLog([...log,{role:'tara',text:r}]);},400);};
 
-  const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
+  const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
   if(!isMounted)return<div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara V99...</div>;
 
@@ -796,6 +992,7 @@ function TaraApp(){
             <button onClick={()=>setShowWhaleLog(!showWhaleLog)} className={`p-1.5 rounded-lg border text-[10px] transition-colors ${showWhaleLog?'bg-purple-500/20 border-purple-500/40 text-purple-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-purple-400'}`}>🐋</button>
             <button onClick={()=>setSoundEnabled(!soundEnabled)} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
             <button onClick={()=>setShowSettings(true)} className="p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors hidden sm:block"><IC.Link className="w-3.5 h-3.5"/></button>
+            <button onClick={()=>setShowAnalytics(true)} className="p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Training Analytics"><IC.BarChart className="w-3.5 h-3.5"/></button>
             <button onClick={()=>setShowHelp(true)} className="p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors"><IC.Help className="w-3.5 h-3.5"/></button>
           </div>
         </div>
@@ -894,7 +1091,22 @@ function TaraApp(){
                 <span className="text-white font-bold">{timeState.minsRemaining}m {timeState.secsRemaining}s</span>
                 {analysis?.isPostDecay&&<span className="text-amber-400">⚡</span>}
               </div>
-              <button onClick={()=>{setUserPosition(null);setPositionEntry(null);taraAdviceRef.current='SIT OUT';setForceRender(p=>p+1);}} className="bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-colors">
+              <button onClick={()=>{
+                // Force exit: score based on whether offer > bet (profit) or position in loss
+                if(userPosition&&manuallyClosedRef.current===null&&taraAdviceRef.current.includes('LOCKED')){
+                  const offerVal=parseFloat(currentOffer)||0;
+                  const inProfit=offerVal>betAmount||(positionStatus&&positionStatus.pnlPct>0);
+                  const result=inProfit?'WIN':'LOSS';
+                  manuallyClosedRef.current=result;
+                  if(result==='WIN')updateScore(windowType,'wins',1);else updateScore(windowType,'losses',1);
+                  if(pendingTradeRef.current&&pendingTradeRef.current.result===null){
+                    const resolvedTrade={...pendingTradeRef.current,result,closingPrice:currentPrice,strikePrice:targetMargin,forceExit:true};
+                    const newLog=[...tradeLogRef.current,resolvedTrade];saveTradeLog(newLog);setTradeLog(newLog);
+                    const newW=updateWeights(adaptiveWeights,newLog,result);setAdaptiveWeights(newW);pendingTradeRef.current=null;
+                  }
+                }
+                setUserPosition(null);setPositionEntry(null);taraAdviceRef.current='CLOSED';setForceRender(p=>p+1);
+              }} className="bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-colors">
                 <IC.Alert className="w-3 h-3"/>Force Exit
               </button>
             </div>
@@ -1110,6 +1322,144 @@ function TaraApp(){
       </div>
 
       {/* Help */}
+      {/* ── ANALYTICS / TRAINING DASHBOARD ── */}
+      {showAnalytics&&(
+        <div className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-2xl" style={{scrollbarWidth:'thin'}}>
+            <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10">
+              <div>
+                <h2 className="text-base font-serif text-white flex items-center gap-2"><IC.BarChart className="w-5 h-5 text-indigo-400"/>Tara Training Engine</h2>
+                <p className="text-[9px] text-[#E8E9E4]/40 mt-0.5">{tradeLog.length} trades logged · Weights auto-updating every window</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={()=>{
+                  const csv=['id,dir,posterior,regime,clockAtLock,hour,session,windowType,gap,momentum,structure,flow,technical,regime_s,result'].concat(
+                    tradeLog.map(t=>`${t.id},${t.dir},${t.posterior?.toFixed(1)},${t.regime},${t.clockAtLock},${t.hour},${t.session},${t.windowType},${t.signals?.gap?.toFixed(2)||0},${t.signals?.momentum?.toFixed(2)||0},${t.signals?.structure?.toFixed(2)||0},${t.signals?.flow?.toFixed(2)||0},${t.signals?.technical?.toFixed(2)||0},${t.signals?.regime?.toFixed(2)||0},${t.result||'PENDING'}`)
+                  ).join('\n');
+                  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='tara_training_data.csv';a.click();
+                }} className="px-3 py-1 text-[9px] font-bold uppercase tracking-widest rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/30 transition-colors">Export CSV</button>
+                <button onClick={()=>{if(confirm('Reset all training data and weights? Cannot undo.')){setAdaptiveWeights({...DEFAULT_WEIGHTS});setTradeLog([]);saveWeights({...DEFAULT_WEIGHTS});saveTradeLog([]);pendingTradeRef.current=null;}}} className="px-3 py-1 text-[9px] font-bold uppercase tracking-widest rounded-lg bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:bg-rose-500/30 transition-colors">Reset</button>
+                <button onClick={()=>setShowAnalytics(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5"/></button>
+              </div>
+            </div>
+            <div className="p-4 space-y-5">
+
+              {/* Adaptive Weights */}
+              <section>
+                <h3 className="text-[10px] font-bold uppercase tracking-widest text-indigo-400 mb-3">Adaptive Signal Weights (auto-tuning)</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {Object.entries(adaptiveWeights).map(([key,val])=>{
+                    const def=DEFAULT_WEIGHTS[key]||20;const pct=(val/55)*100;
+                    const acc=signalAccuracy[key];const wrPct=acc?.total>=3?((acc.right/acc.total)*100).toFixed(0):null;
+                    const delta=val-def;
+                    return(<div key={key} className="bg-[#111312] rounded-lg p-2.5 border border-[#E8E9E4]/5">
+                      <div className="flex justify-between items-center mb-1.5">
+                        <span className="text-[9px] font-bold uppercase text-[#E8E9E4]/70">{key}</span>
+                        <div className="flex items-center gap-1.5">
+                          {wrPct&&<span className="text-[8px] text-indigo-400/80">{wrPct}% acc</span>}
+                          <span className={`text-[10px] font-mono font-bold ${delta>0?'text-emerald-400':delta<0?'text-rose-400':'text-[#E8E9E4]/50'}`}>{val.toFixed(1)}</span>
+                          <span className={`text-[7px] ${delta>0?'text-emerald-400':delta<0?'text-rose-400':'text-[#E8E9E4]/30'}`}>{delta>0?'+':''}{delta.toFixed(1)}</span>
+                        </div>
+                      </div>
+                      <div className="w-full h-1.5 bg-[#181A19] rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all duration-500 ${delta>2?'bg-emerald-500':delta<-2?'bg-rose-500':'bg-indigo-500'}`} style={{width:`${Math.min(100,pct)}%`}}/>
+                      </div>
+                      <div className="flex justify-between mt-0.5 text-[7px] text-[#E8E9E4]/20">
+                        <span>default: {def}</span>
+                        <span>{acc?.total||0} samples</span>
+                      </div>
+                    </div>);
+                  })}
+                </div>
+              </section>
+
+              {/* Calibration */}
+              <section>
+                <h3 className="text-[10px] font-bold uppercase tracking-widest text-amber-400 mb-3">Probability Calibration (posterior accuracy)</h3>
+                {tradeLog.filter(t=>t.result).length<10?(
+                  <div className="text-[10px] text-[#E8E9E4]/40 italic text-center py-4 bg-[#111312] rounded-lg border border-[#E8E9E4]/5">Need 10+ resolved trades to calibrate. Currently: {tradeLog.filter(t=>t.result).length}</div>
+                ):(
+                  <div className="grid grid-cols-5 sm:grid-cols-10 gap-1">
+                    {[0,10,20,30,40,50,60,70,80,90].map(b=>{
+                      const calVal=calibration[b];const isNull=calVal==null;
+                      const diff=isNull?0:calVal-b;
+                      return(<div key={b} className="bg-[#111312] rounded-lg p-1.5 border border-[#E8E9E4]/5 text-center">
+                        <div className="text-[7px] text-[#E8E9E4]/30 mb-1">{b}-{b+10}%</div>
+                        <div className={`text-[10px] font-bold font-mono ${isNull?'text-[#E8E9E4]/20':Math.abs(diff)<5?'text-emerald-400':Math.abs(diff)<15?'text-amber-400':'text-rose-400'}`}>
+                          {isNull?'—':`${calVal.toFixed(0)}%`}
+                        </div>
+                        {!isNull&&<div className={`text-[7px] ${diff>0?'text-emerald-400':diff<0?'text-rose-400':'text-[#E8E9E4]/30'}`}>{diff>0?'+':''}{diff.toFixed(0)}</div>}
+                      </div>);
+                    })}
+                  </div>
+                )}
+                <p className="text-[8px] text-[#E8E9E4]/30 mt-2">Green = well-calibrated. Red = raw posterior is over/underestimating actual win rate. Tara applies calibration automatically after 3+ samples per bucket.</p>
+              </section>
+
+              {/* Session Performance */}
+              <section>
+                <h3 className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 mb-3">Performance by Session</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {Object.entries(sessionPerf).map(([sess,data])=>{
+                    const total=data.wins+data.losses;const wr=total>0?((data.wins/total)*100):0;
+                    return(<div key={sess} className="bg-[#111312] rounded-lg p-2.5 border border-[#E8E9E4]/5 text-center">
+                      <div className="text-[9px] font-bold text-[#E8E9E4]/70 mb-1">{sess}</div>
+                      <div className={`text-lg font-serif font-bold ${wr>=60?'text-emerald-400':wr>=45?'text-amber-400':'text-rose-400'}`}>{total>0?`${wr.toFixed(0)}%`:'—'}</div>
+                      <div className="text-[8px] text-[#E8E9E4]/30">{data.wins}W / {data.losses}L</div>
+                    </div>);
+                  })}
+                </div>
+              </section>
+
+              {/* Hourly Heatmap */}
+              <section>
+                <h3 className="text-[10px] font-bold uppercase tracking-widest text-purple-400 mb-3">Performance by Hour (local)</h3>
+                {Object.keys(hourlyPerf).length<3?<div className="text-[10px] text-[#E8E9E4]/40 italic text-center py-4 bg-[#111312] rounded-lg border border-[#E8E9E4]/5">Need more trades to build hourly map.</div>:(
+                <div className="grid grid-cols-6 sm:grid-cols-12 gap-1">
+                  {Array.from({length:24},(_,h)=>{
+                    const d=hourlyPerf[h];const total=d?(d.wins+d.losses):0;const wr=total>0?((d.wins/total)*100):null;
+                    return(<div key={h} className="rounded p-1 text-center" style={{background:wr==null?'rgba(232,233,228,0.03)':wr>=65?'rgba(52,211,153,0.2)':wr>=45?'rgba(251,191,36,0.15)':'rgba(251,113,133,0.2)'}}>
+                      <div className="text-[7px] text-[#E8E9E4]/30">{h}h</div>
+                      <div className={`text-[9px] font-bold ${wr==null?'text-[#E8E9E4]/20':wr>=65?'text-emerald-400':wr>=45?'text-amber-400':'text-rose-400'}`}>{wr!=null?`${wr.toFixed(0)}%`:'·'}</div>
+                    </div>);
+                  })}
+                </div>)}
+              </section>
+
+              {/* Recent Trade Log */}
+              <section>
+                <h3 className="text-[10px] font-bold uppercase tracking-widest text-[#E8E9E4]/60 mb-3">Recent Trade Log ({tradeLog.length} total)</h3>
+                <div className="space-y-1 max-h-48 overflow-y-auto" style={{scrollbarWidth:'thin'}}>
+                  {tradeLog.slice(-20).reverse().map((t,i)=>{
+                    const d=new Date(t.id);return(
+                    <div key={i} className={`flex items-center gap-2 text-[9px] p-1.5 rounded border ${t.result==='WIN'?'border-emerald-500/20 bg-emerald-500/5':t.result==='LOSS'?'border-rose-500/20 bg-rose-500/5':'border-[#E8E9E4]/5'}`}>
+                      <span className="text-[#E8E9E4]/30 font-mono shrink-0">{d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</span>
+                      <span className={`font-bold ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
+                      <span className="text-[#E8E9E4]/50">{t.posterior?.toFixed(0)}%</span>
+                      <span className="text-[#E8E9E4]/30 text-[8px]">{t.regime}</span>
+                      <span className="ml-auto text-[8px]">{t.clockAtLock}s left</span>
+                      <span className={`font-bold text-[8px] ${t.result==='WIN'?'text-emerald-400':t.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/30'}`}>{t.result||'PENDING'}</span>
+                    </div>);
+                  })}
+                </div>
+              </section>
+
+              {/* Training Tips */}
+              <section className="bg-indigo-500/5 border border-indigo-500/15 rounded-xl p-3">
+                <h3 className="text-[10px] font-bold uppercase tracking-widest text-indigo-400 mb-2">How to Train Tara Faster</h3>
+                <div className="text-[9px] text-[#E8E9E4]/60 space-y-1 leading-relaxed">
+                  <p>• <strong className="text-indigo-300">Every window auto-updates weights.</strong> The more she trades, the more accurate her signal weights become.</p>
+                  <p>• <strong className="text-indigo-300">Export CSV</strong> and run external regression (Python sklearn) on 500+ trades to get optimal weights, then paste them back.</p>
+                  <p>• <strong className="text-indigo-300">Best regime to focus on:</strong> Look at session performance — if US session is 70%+ WR, run exclusively during US hours.</p>
+                  <p>• <strong className="text-indigo-300">Calibration corrects overconfidence</strong> — if Tara says 80% but only wins 60% of those, calibration fixes the displayed number after 3+ samples.</p>
+                  <p>• <strong className="text-indigo-300">To beat Chamiko's 79.5%</strong>: need 100+ trades in the log. At that point weights will have converged and calibration will be reliable.</p>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showHelp&&(
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl" style={{scrollbarWidth:'thin'}}>
