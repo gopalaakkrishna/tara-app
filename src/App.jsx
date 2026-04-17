@@ -1351,22 +1351,150 @@ function TaraApp(){
                 </div>)}
               </section>
 
-              {/* Recent Trade Log */}
+              {/* Recent Trade Log — Editable */}
               <section>
-                <h3 className="text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/60 mb-3">Recent Trade Log ({tradeLog.length} total)</h3>
-                <div className="space-y-1 max-h-48 overflow-y-auto" style={{scrollbarWidth:'thin'}}>
-                  {tradeLog.slice(-20).reverse().map((t,i)=>{
-                    const d=new Date(t.id);return(
-                    <div key={i} className={`flex items-center gap-2 text-xs p-1.5 rounded border ${t.result==='WIN'?'border-emerald-500/20 bg-emerald-500/5':t.result==='LOSS'?'border-rose-500/20 bg-rose-500/5':'border-[#E8E9E4]/5'}`}>
-                      <span className="text-[#E8E9E4]/30 font-mono shrink-0">{d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</span>
-                      <span className={`font-bold ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
-                      <span className="text-[#E8E9E4]/50">{t.posterior?.toFixed(0)}%</span>
-                      <span className="text-[#E8E9E4]/30 text-xs">{t.regime}</span>
-                      <span className="ml-auto text-xs">{t.clockAtLock}s left</span>
-                      <span className={`font-bold text-xs ${t.result==='WIN'?'text-emerald-400':t.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/30'}`}>{t.result||'PENDING'}</span>
-                    </div>);
-                  })}
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/60">Trade Log ({tradeLog.length} total)</h3>
+                  <p className="text-[10px] text-[#E8E9E4]/30">Tap any trade to select · Change WIN/LOSS if Tara logged it wrong</p>
                 </div>
+
+                {/* Selected trade editor */}
+                {(()=>{
+                  // We use a closure trick since we can't add hooks here — state is lifted
+                  const [selectedId, setSelectedId] = React.useState(null);
+                  const selected = tradeLog.find(t=>t.id===selectedId);
+
+                  const correctTrade=(id, newResult)=>{
+                    // Update the trade log entry
+                    const newLog=tradeLog.map(t=>{
+                      if(t.id!==id)return t;
+                      return{...t,result:newResult,manuallyEdited:true};
+                    });
+                    saveTradeLog(newLog);
+                    setTradeLog(newLog);
+                    // Also update scorecards to reflect the correction
+                    const oldTrade=tradeLog.find(t=>t.id===id);
+                    if(oldTrade&&oldTrade.result&&oldTrade.result!==newResult){
+                      // Flip the score: remove old, add new
+                      const wType=oldTrade.windowType||windowType;
+                      if(oldTrade.result==='WIN'){
+                        // Was WIN, now LOSS
+                        updateScore(wType,'wins',-1);
+                        updateScore(wType,'losses',1);
+                      } else {
+                        // Was LOSS, now WIN
+                        updateScore(wType,'losses',-1);
+                        updateScore(wType,'wins',1);
+                      }
+                    }
+                    // Retrain weights from scratch on corrected log
+                    const corrected=newLog[newLog.findIndex(t=>t.id===id)];
+                    const newWeights=updateWeights(adaptiveWeights,newLog,newResult);
+                    setAdaptiveWeights(newWeights);
+                    setSelectedId(null);
+                  };
+
+                  const deleteTrade=(id)=>{
+                    const oldTrade=tradeLog.find(t=>t.id===id);
+                    const newLog=tradeLog.filter(t=>t.id!==id);
+                    saveTradeLog(newLog);
+                    setTradeLog(newLog);
+                    // Remove from scorecard
+                    if(oldTrade?.result){
+                      const wType=oldTrade.windowType||windowType;
+                      updateScore(wType,oldTrade.result==='WIN'?'wins':'losses',-1);
+                    }
+                    setSelectedId(null);
+                  };
+
+                  return(
+                    <>
+                      {/* Edit panel — appears when a trade is selected */}
+                      {selected&&(
+                        <div className="mb-3 p-3 rounded-xl border-2 border-indigo-500/40 bg-indigo-500/8">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className={`font-bold text-sm ${selected.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{selected.dir}</span>
+                              <span className="text-xs text-[#E8E9E4]/50">{new Date(selected.id).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
+                              <span className="text-xs text-[#E8E9E4]/40">{selected.posterior?.toFixed(0)}% · {selected.regime}</span>
+                              {selected.manuallyEdited&&<span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded">edited</span>}
+                            </div>
+                            <button onClick={()=>setSelectedId(null)} className="text-[#E8E9E4]/40 hover:text-white p-1"><IC.X className="w-3.5 h-3.5"/></button>
+                          </div>
+                          <div className="text-xs text-[#E8E9E4]/50 mb-3">
+                            Currently logged as: <span className={`font-bold ${selected.result==='WIN'?'text-emerald-400':selected.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/30'}`}>{selected.result||'PENDING'}</span>
+                            {selected.earlyExit&&' (early exit)'}{selected.forceExit&&' (force exit)'}
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={()=>correctTrade(selected.id,'WIN')}
+                              className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wide border transition-all ${selected.result==='WIN'?'bg-emerald-500/30 border-emerald-400 text-emerald-300':'border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/15'}`}>
+                              ✓ Mark WIN
+                            </button>
+                            <button
+                              onClick={()=>correctTrade(selected.id,'LOSS')}
+                              className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wide border transition-all ${selected.result==='LOSS'?'bg-rose-500/30 border-rose-400 text-rose-300':'border-rose-500/30 text-rose-500 hover:bg-rose-500/15'}`}>
+                              ✗ Mark LOSS
+                            </button>
+                            <button
+                              onClick={()=>deleteTrade(selected.id)}
+                              className="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wide border border-zinc-500/30 text-zinc-500 hover:bg-zinc-500/15 hover:text-zinc-300 transition-all">
+                              Delete
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-[#E8E9E4]/30 mt-2 text-center">Changing result will update scorecard + retrain signal weights</p>
+                        </div>
+                      )}
+
+                      {/* Trade rows */}
+                      <div className="space-y-1.5 max-h-72 overflow-y-auto" style={{scrollbarWidth:'thin'}}>
+                        {tradeLog.length===0&&(
+                          <div className="text-xs text-[#E8E9E4]/30 italic text-center py-6">No trades logged yet. Trades are recorded automatically when Tara locks and the window closes.</div>
+                        )}
+                        {tradeLog.slice(-30).reverse().map((t,i)=>{
+                          const d=new Date(t.id);
+                          const isSelected=selectedId===t.id;
+                          return(
+                            <button
+                              key={t.id||i}
+                              onClick={()=>setSelectedId(isSelected?null:t.id)}
+                              className={`w-full flex items-center gap-2 text-xs p-2.5 rounded-lg border transition-all text-left ${
+                                isSelected
+                                  ? 'border-indigo-500/60 bg-indigo-500/12 ring-1 ring-indigo-500/40'
+                                  : t.result==='WIN'
+                                    ? 'border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40 hover:bg-emerald-500/10'
+                                    : t.result==='LOSS'
+                                      ? 'border-rose-500/20 bg-rose-500/5 hover:border-rose-500/40 hover:bg-rose-500/10'
+                                      : 'border-[#E8E9E4]/5 hover:border-[#E8E9E4]/15 hover:bg-[#E8E9E4]/3'
+                              }`}
+                            >
+                              {/* Selection indicator */}
+                              <div className={`w-2 h-2 rounded-full shrink-0 ${isSelected?'bg-indigo-400':t.result==='WIN'?'bg-emerald-500/60':t.result==='LOSS'?'bg-rose-500/60':'bg-[#E8E9E4]/20'}`}/>
+
+                              <span className="text-[#E8E9E4]/40 font-mono shrink-0 text-[10px]">
+                                {d.toLocaleDateString('en-US',{month:'short',day:'numeric'})} {d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}
+                              </span>
+
+                              <span className={`font-bold text-xs shrink-0 ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
+
+                              <span className="text-[#E8E9E4]/50 text-[10px] shrink-0">{t.posterior?.toFixed(0)}%</span>
+
+                              <span className="text-[#E8E9E4]/30 text-[10px] truncate hidden sm:block">{t.regime}</span>
+
+                              <span className="text-[#E8E9E4]/25 text-[10px] ml-auto shrink-0">{t.session}</span>
+
+                              <span className={`font-bold text-xs shrink-0 min-w-[40px] text-right ${t.result==='WIN'?'text-emerald-400':t.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/25'}`}>
+                                {t.result||'—'}
+                              </span>
+
+                              {t.manuallyEdited&&<span className="text-[9px] text-amber-400/70 shrink-0">✎</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
               </section>
 
               {/* Training Tips */}
