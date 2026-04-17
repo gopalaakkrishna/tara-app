@@ -593,6 +593,9 @@ function TaraApp(){
   const[showAnalytics,setShowAnalytics]=useState(false);
   const[showGuide,setShowGuide]=useState(false);
   const[selectedTradeId,setSelectedTradeId]=useState(null); // for editable trade log
+  const[discordEditingId,setDiscordEditingId]=useState(null); // for discord message edit
+  const[discordEditText,setDiscordEditText]=useState('');
+  const[discordStatusMsg,setDiscordStatusMsg]=useState('');
   const calibration=useMemo(()=>buildCalibration(tradeLog),[tradeLog]);
   const signalAccuracy=useMemo(()=>buildSignalAccuracy(tradeLog),[tradeLog]);
   const sessionPerf=useMemo(()=>buildSessionPerf(tradeLog),[tradeLog]);
@@ -606,6 +609,85 @@ function TaraApp(){
   const[userPosition,setUserPosition]=useState(null);
   const[showHelp,setShowHelp]=useState(false);
   const[soundEnabled,setSoundEnabled]=useState(false);
+  const audioCtxRef=useRef(null); // persisted AudioContext — created on first user gesture
+  const soundEnabledRef=useRef(false); // ref so effects always see current value
+  soundEnabledRef.current=soundEnabled;
+
+  // Create/resume AudioContext on sound toggle — satisfies browser autoplay policy
+  const handleSoundToggle=useCallback(()=>{
+    const next=!soundEnabled;
+    setSoundEnabled(next);
+    if(next){
+      try{
+        if(!audioCtxRef.current){
+          audioCtxRef.current=new(window.AudioContext||window.webkitAudioContext)();
+        }
+        if(audioCtxRef.current.state==='suspended'){
+          audioCtxRef.current.resume();
+        }
+        // Play a tiny confirmation beep so user knows sound is on
+        playTone(audioCtxRef.current,880,0.06,0.15,'sine');
+      }catch(e){}
+    }
+  },[soundEnabled]);
+
+  const playTone=useCallback((ctx,freq,vol,dur,type='sine')=>{
+    if(!ctx)return;
+    try{
+      const o=ctx.createOscillator();
+      const g=ctx.createGain();
+      o.type=type;
+      o.frequency.setValueAtTime(freq,ctx.currentTime);
+      g.gain.setValueAtTime(vol,ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);
+      o.connect(g);g.connect(ctx.destination);
+      o.start();o.stop(ctx.currentTime+dur);
+    }catch(e){}
+  },[]);
+
+  // ── PLAY SOUND — central function for all alert types ──
+  const playAlert=useCallback((type)=>{
+    if(!soundEnabledRef.current||!audioCtxRef.current)return;
+    const ctx=audioCtxRef.current;
+    if(ctx.state==='suspended'){ctx.resume().then(()=>_doPlayAlert(ctx,type));return;}
+    _doPlayAlert(ctx,type);
+  },[playTone]);
+
+  const _doPlayAlert=(ctx,type)=>{
+    // Each alert type has a distinct sound signature
+    switch(type){
+      case 'lock-up':
+        // Two ascending tones — UP lock confirmed
+        playTone(ctx,523.25,0.08,0.2,'sine');
+        setTimeout(()=>playTone(ctx,659.25,0.1,0.3,'sine'),180);
+        break;
+      case 'lock-down':
+        // Two descending tones — DOWN lock confirmed
+        playTone(ctx,659.25,0.08,0.2,'sine');
+        setTimeout(()=>playTone(ctx,523.25,0.1,0.3,'sine'),180);
+        break;
+      case 'entry':
+        // Three quick beeps — entry signal
+        [0,120,240].forEach((d,i)=>setTimeout(()=>playTone(ctx,880,0.07,0.12,'square'),d));
+        break;
+      case 'profit':
+        // Bright ascending chord — take profit / cashout opportunity
+        playTone(ctx,523.25,0.07,0.15,'sine');
+        setTimeout(()=>playTone(ctx,659.25,0.07,0.15,'sine'),100);
+        setTimeout(()=>playTone(ctx,783.99,0.09,0.3,'sine'),200);
+        break;
+      case 'warning':
+        // Low double pulse — cut losses / adverse
+        [0,200].forEach(d=>setTimeout(()=>playTone(ctx,220,0.1,0.15,'sawtooth'),d));
+        break;
+      case 'emergency':
+        // Rapid triple low buzz — stop hit / rug pull
+        [0,150,300].forEach(d=>setTimeout(()=>playTone(ctx,180,0.12,0.12,'sawtooth'),d));
+        break;
+      default:
+        playTone(ctx,440,0.06,0.2,'sine');
+    }
+  };
   const[showWhaleLog,setShowWhaleLog]=useState(false);
   const velocityRef=useVelocity(tickHistoryRef,currentPrice,targetMargin);
   const bloomberg=useBloomberg();
@@ -888,15 +970,27 @@ function TaraApp(){
   useEffect(()=>{
     if(!analysis?.lockInfo)return;
     const lock=analysis.lockInfo;
-    if(lastBroadcastLockRef.current===lock.lockedAt)return; // already broadcast this lock
+    if(lastBroadcastLockRef.current===lock.lockedAt)return;
     lastBroadcastLockRef.current=lock.lockedAt;
     const gapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
     broadcastToDiscord('LOCK',{dir:lock.dir,price:lock.lockPrice,strike:targetMargin,gap:gapBps,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,regime:lock.lockRegime,posterior:lock.lockedPosterior});
-    // Play alert sound on lock
-    if(soundEnabled){try{const a=new(window.AudioContext||window.webkitAudioContext)();const o=a.createOscillator();const g=a.createGain();o.type='sine';o.frequency.setValueAtTime(lock.dir==='UP'?587.33:369.99,a.currentTime);g.gain.setValueAtTime(0.08,a.currentTime);g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+0.6);o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+0.6);}catch(e){}}
+    // Sound: distinct tone for UP vs DOWN lock
+    playAlert(lock.dir==='UP'?'lock-up':'lock-down');
   },[analysis?.lockInfo?.lockedAt]);
 
-  const handleManualSync=(dir)=>{
+  // ── ADVISOR SOUND ALERTS — fires when advisor label changes to something critical ──
+  const lastAdvisorLabelRef=useRef('');
+  useEffect(()=>{
+    const label=analysis?.advisor?.label||'';
+    if(!label||label===lastAdvisorLabelRef.current)return;
+    lastAdvisorLabelRef.current=label;
+    if(label.includes('ENTRY SIGNAL'))                playAlert('entry');
+    else if(label.includes('TAKE MAX PROFIT')||label.includes('TRAILING STOP')||label.includes('SCALP PROFIT')||label.includes('SECURE PROFIT')||label.includes('MAX PROFIT ZONE'))
+                                                       playAlert('profit');
+    else if(label.includes('CUT LOSSES'))              playAlert('warning');
+    else if(label.includes('STOP HIT')||label.includes('RUG PULL')||label.includes('REVERSE POSITION'))
+                                                       playAlert('emergency');
+  },[analysis?.advisor?.label]);
     if(userPosition!==null&&userPosition!==dir)hasReversedRef.current=true;
     if(userPosition===dir){taraAdviceRef.current='SEARCHING...';setUserPosition(null);setPositionEntry(null);setForceRender(p=>p+1);return;}
     taraAdviceRef.current=String(dir);setUserPosition(String(dir));
@@ -983,7 +1077,7 @@ function TaraApp(){
               <span className="text-sm font-mono text-[#E8E9E4]/80">{timeState.currentTime||'--:--:--'}</span>
             </div>
             <button onClick={()=>setShowWhaleLog(!showWhaleLog)} className={`p-2 rounded-lg border text-xs transition-colors ${showWhaleLog?'bg-purple-500/20 border-purple-500/40 text-purple-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-purple-400'}`}>🐋</button>
-            <button onClick={()=>setSoundEnabled(!soundEnabled)} className={`p-2 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`}>{soundEnabled?<IC.Vol2 className="w-4 h-4"/>:<IC.VolX className="w-4 h-4"/>}</button>
+            <button onClick={handleSoundToggle} className={`p-2 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`}>{soundEnabled?<IC.Vol2 className="w-4 h-4"/>:<IC.VolX className="w-4 h-4"/>}</button>
             <button onClick={()=>setShowSettings(true)} className="p-2 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors hidden sm:block"><IC.Link className="w-4 h-4"/></button>
             <button onClick={()=>setShowAnalytics(true)} className="p-2 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Training Analytics"><IC.BarChart className="w-4 h-4"/></button>
             <button onClick={()=>setShowGuide(true)} className="p-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors" title="How Tara Works">?</button>
@@ -1296,46 +1390,32 @@ function TaraApp(){
       )}
 
       {/* Settings */}
-      {showSettings&&(()=>{
-        const[editingId,setEditingId]=useState(null);
-        const[editText,setEditText]=useState('');
-        const[statusMsg,setStatusMsg]=useState('');
-        const handleEdit=async(entry)=>{
-          const ok=await editDiscordMessage(entry,editText);
-          setStatusMsg(ok?'Message updated ✓':'Failed to edit — check webhook URL');
-          if(ok){setDiscordLog(prev=>prev.map(m=>m.id===entry.id?{...m,label:editText,edited:true}:m));setEditingId(null);setEditText('');}
-          setTimeout(()=>setStatusMsg(''),3000);
-        };
-        const handleDelete=async(entry)=>{
-          const ok=await deleteDiscordMessage(entry);
-          setStatusMsg(ok?'Message deleted ✓':'Failed to delete — message may be too old (15min limit)');
-          setTimeout(()=>setStatusMsg(''),3000);
-        };
-        return(
+      {showSettings&&(
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto" style={{scrollbarWidth:'thin'}}>
             <div className="p-4 sm:p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Link className="w-5 h-5 text-indigo-400"/>Discord Integration</h2>
-                <button onClick={()=>setShowSettings(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5"/></button>
+                <button onClick={()=>{setShowSettings(false);setDiscordEditingId(null);setDiscordEditText('');setDiscordStatusMsg('');}} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5"/></button>
               </div>
 
-              {/* Webhook URL */}
               <p className="text-xs text-[#E8E9E4]/60 mb-3 leading-relaxed">Tara broadcasts lock signals, round closures, and entries to your Discord channel.</p>
               <input type="password" value={discordWebhook} onChange={e=>setDiscordWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." className="w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-400 text-white font-mono mb-2"/>
               <div className="flex gap-2 mb-5">
                 <button onClick={()=>setShowSettings(false)} className="flex-1 bg-indigo-500 hover:bg-indigo-400 text-white font-bold py-2 rounded-lg text-xs uppercase tracking-wide transition-colors">Save</button>
-                <button onClick={async()=>{const ok=await broadcastToDiscord('SIGNAL',{dir:'UP',price:currentPrice||75000,strike:targetMargin||75000,gap:0,clock:'TEST'});setStatusMsg('Test sent ✓');setTimeout(()=>setStatusMsg(''),3000);}} className="px-4 py-2 border border-indigo-500/30 text-indigo-400 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-indigo-500/10 transition-colors">Test</button>
+                <button onClick={async()=>{
+                  await broadcastToDiscord('SIGNAL',{dir:'UP',price:currentPrice||75000,strike:targetMargin||75000,gap:0,clock:'TEST'});
+                  setDiscordStatusMsg('Test sent ✓');
+                  setTimeout(()=>setDiscordStatusMsg(''),3000);
+                }} className="px-4 py-2 border border-indigo-500/30 text-indigo-400 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-indigo-500/10 transition-colors">Test</button>
               </div>
 
-              {/* Status */}
-              {statusMsg&&<div className="mb-3 text-xs text-center text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg py-2">{statusMsg}</div>}
+              {discordStatusMsg&&<div className="mb-3 text-xs text-center text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg py-2">{discordStatusMsg}</div>}
 
-              {/* Message Log */}
               <div className="border-t border-[#E8E9E4]/10 pt-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/60">Sent Messages ({discordLog.length})</h3>
-                  <p className="text-[10px] text-[#E8E9E4]/30">Edit/delete within 15 min of sending</p>
+                  <p className="text-[10px] text-[#E8E9E4]/30">Edit/delete within 15 min</p>
                 </div>
 
                 {discordLog.length===0?(
@@ -1344,7 +1424,6 @@ function TaraApp(){
                   <div className="space-y-2">
                     {discordLog.map(entry=>(
                       <div key={entry.id} className="bg-[#111312] rounded-lg border border-[#E8E9E4]/8 overflow-hidden">
-                        {/* Message row */}
                         <div className="flex items-center gap-2 p-2.5">
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entry.type==='LOCK'?'bg-indigo-400':entry.type==='CLOSE'?'bg-emerald-400':'bg-amber-400'}`}/>
                           <div className="flex-1 min-w-0">
@@ -1352,31 +1431,29 @@ function TaraApp(){
                             <div className="text-[10px] text-[#E8E9E4]/30">{entry.ts}{entry.edited&&' · edited'}</div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              onClick={()=>{setEditingId(editingId===entry.id?null:entry.id);setEditText(entry.label);}}
-                              className="px-2 py-1 text-[10px] font-bold rounded border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/15 transition-colors">
-                              Edit
-                            </button>
-                            <button
-                              onClick={()=>handleDelete(entry)}
-                              className="px-2 py-1 text-[10px] font-bold rounded border border-rose-500/30 text-rose-400 hover:bg-rose-500/15 transition-colors">
-                              Del
-                            </button>
+                            <button onClick={()=>{setDiscordEditingId(discordEditingId===entry.id?null:entry.id);setDiscordEditText(entry.label);}}
+                              className="px-2 py-1 text-[10px] font-bold rounded border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/15 transition-colors">Edit</button>
+                            <button onClick={async()=>{
+                              const ok=await deleteDiscordMessage(entry);
+                              setDiscordStatusMsg(ok?'Deleted ✓':'Failed — may be >15 min old');
+                              setTimeout(()=>setDiscordStatusMsg(''),3000);
+                            }} className="px-2 py-1 text-[10px] font-bold rounded border border-rose-500/30 text-rose-400 hover:bg-rose-500/15 transition-colors">Del</button>
                           </div>
                         </div>
-                        {/* Edit panel */}
-                        {editingId===entry.id&&(
+                        {discordEditingId===entry.id&&(
                           <div className="border-t border-[#E8E9E4]/8 p-2.5">
-                            <textarea
-                              value={editText}
-                              onChange={e=>setEditText(e.target.value)}
-                              rows={2}
+                            <textarea value={discordEditText} onChange={e=>setDiscordEditText(e.target.value)} rows={2}
                               className="w-full bg-[#181A19] border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-400 resize-none mb-2"
-                              placeholder="Edit message content..."
-                            />
+                              placeholder="Edit message content..."/>
                             <div className="flex gap-2">
-                              <button onClick={()=>handleEdit(entry)} className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors">Save Edit</button>
-                              <button onClick={()=>{setEditingId(null);setEditText('');}} className="px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors">Cancel</button>
+                              <button onClick={async()=>{
+                                const ok=await editDiscordMessage(entry,discordEditText);
+                                setDiscordStatusMsg(ok?'Updated ✓':'Failed to edit');
+                                if(ok){setDiscordLog(prev=>prev.map(m=>m.id===entry.id?{...m,label:discordEditText,edited:true}:m));setDiscordEditingId(null);setDiscordEditText('');}
+                                setTimeout(()=>setDiscordStatusMsg(''),3000);
+                              }} className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors">Save Edit</button>
+                              <button onClick={()=>{setDiscordEditingId(null);setDiscordEditText('');}}
+                                className="px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors">Cancel</button>
                             </div>
                           </div>
                         )}
@@ -1384,12 +1461,12 @@ function TaraApp(){
                     ))}
                   </div>
                 )}
-                <p className="text-[10px] text-[#E8E9E4]/20 mt-3 text-center leading-relaxed">Message log resets on page refresh. Discord only allows editing/deleting messages sent via the same webhook within 15 minutes.</p>
+                <p className="text-[10px] text-[#E8E9E4]/20 mt-3 text-center leading-relaxed">Log resets on page refresh. Discord allows edits/deletes within 15 minutes of sending.</p>
               </div>
             </div>
           </div>
         </div>
-      );})()}
+      )}
 
       {/* Chat */}
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
