@@ -46,10 +46,10 @@ const sigmoid=(x,steep=0.035)=>1/(1+Math.exp(-steep*x));
 // Adaptive weights + calibration + trade log
 // ═══════════════════════════════════════
 
-// Default signal weights — trained via gradient descent on 44-trade dataset
-// 29W/15L = 65.9% · SHORT SQUEEZE 17W/4L (81%) · EU 16W/6L (73%) · US 9W/5L (64%)
-// OFF-HOURS 2W/2L (50%) · RANGE/CHOP 4W/5L (44%) · HIGH VOL CHOP 6W/6L (50%)
-const DEFAULT_WEIGHTS={gap:40.34,momentum:35.76,structure:17.19,flow:33.60,technical:25.80,regime:24.95};
+// Default signal weights — trained via gradient descent on 57-trade dataset
+// 37W/20L = 64.9% · SHORT SQUEEZE 19W/6L (76%) · TRENDING DOWN 5W/0L (100%)
+// EU 16W/6L (73%) · US 9W/5L (64%) · Flow highest ever: 38.23
+const DEFAULT_WEIGHTS={gap:42.13,momentum:37.82,structure:17.83,flow:38.23,technical:25.95,regime:27.89};
 const WEIGHT_BOUNDS={gap:[5,55],momentum:[5,50],structure:[2,30],flow:[2,40],technical:[5,45],regime:[2,30]};
 const LEARNING_RATE=0.8; // how aggressively to update weights per trade
 
@@ -62,7 +62,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV100',JSON.stringif
 // HIGH VOL CHOP 1W/2L (33%) — avoid · RANGE/CHOP 2W/3L (40%) — avoid
 // Best hours: 4 (100%) and 5 (100%)
 const SEED_TRADES=[
-  // 44 trades · 29W/15L = 65.9% · SHORT SQUEEZE 81% · EU 73% · US 64%
+  // 57 trades · 37W/20L = 64.9% · SHORT SQUEEZE 76% · TRENDING DOWN 100% · EU 73%
   {id:1776403212237,dir:'UP',posterior:71.0,regime:'RANGE/CHOP',clockAtLock:587,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.83,momentum:0.0,structure:0.0,flow:20.23,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776403812231,dir:'UP',posterior:82.0,regime:'RANGE/CHOP',clockAtLock:887,hour:1,session:'ASIA',windowType:'15m',signals:{gap:35.2,momentum:-5.39,structure:0.0,flow:-17.15,technical:-8.0,regime:0.0},result:'LOSS'},
   {id:1776407423234,dir:'DOWN',posterior:27.6,regime:'RANGE/CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:-0.28,momentum:-2.75,structure:0.0,flow:-20.59,technical:0.0,regime:0.0},result:'LOSS'},
@@ -107,6 +107,19 @@ const SEED_TRADES=[
   {id:1776464102445,dir:'DOWN',posterior:7.7,regime:'TRENDING DOWN',clockAtLock:897,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:-0.6,momentum:-12.76,structure:0.0,flow:-14.41,technical:2.0,regime:0.0},result:'WIN'},
   {id:1776468632061,dir:'UP',posterior:94.0,regime:'SHORT SQUEEZE',clockAtLock:868,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776469543660,dir:'DOWN',posterior:8.3,regime:'RANGE/CHOP',clockAtLock:857,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776470307745,dir:'UP',posterior:91.5,regime:'SHORT SQUEEZE',clockAtLock:93,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776470411063,dir:'DOWN',posterior:16.3,regime:'TRENDING DOWN',clockAtLock:889,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776471435490,dir:'UP',posterior:90.1,regime:'SHORT SQUEEZE',clockAtLock:765,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776473754856,dir:'DOWN',posterior:7.2,regime:'SHORT SQUEEZE',clockAtLock:245,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776474078453,dir:'DOWN',posterior:6.1,regime:'RANGE/CHOP',clockAtLock:822,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776474925320,dir:'UP',posterior:92.3,regime:'SHORT SQUEEZE',clockAtLock:875,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776475830221,dir:'DOWN',posterior:8.0,regime:'RANGE/CHOP',clockAtLock:870,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776476723095,dir:'DOWN',posterior:8.9,regime:'TRENDING DOWN',clockAtLock:877,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776477614063,dir:'DOWN',posterior:8.8,regime:'RANGE/CHOP',clockAtLock:886,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776478663077,dir:'UP',posterior:86.5,regime:'RANGE/CHOP',clockAtLock:737,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776479465721,dir:'DOWN',posterior:8.0,regime:'TRENDING DOWN',clockAtLock:835,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776480331504,dir:'DOWN',posterior:8.2,regime:'RANGE/CHOP',clockAtLock:869,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776481238592,dir:'UP',posterior:87.4,regime:'RANGE/CHOP',clockAtLock:862,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV100');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
@@ -605,14 +618,14 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:192,losses:127},'5m':{wins:10,losses:7}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:203,losses:135},'5m':{wins:10,losses:7}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
-    'TRENDING DOWN': {wins:2,losses:0},    // 100% WR (n=2)
+    'TRENDING DOWN': {wins:5,losses:0},    // 100% WR (n=5) — always trust
     'HIGH VOL CHOP': {wins:6,losses:6},    // 50% WR (n=12) — coin flip, raise threshold
-    'SHORT SQUEEZE': {wins:17,losses:4},   // 81% WR (n=21) — primary regime, trust calls
+    'SHORT SQUEEZE': {wins:19,losses:6},   // 76% WR (n=25) — primary regime, trust calls
     'LONG SQUEEZE':  {wins:0,losses:0},
-    'RANGE/CHOP':    {wins:4,losses:5},    // 44% WR (n=9) — raise threshold, be selective
+    'RANGE/CHOP':    {wins:7,losses:8},    // 47% WR (n=15) — below 50%, be selective
   });
   const lastRegimeRef=useRef('RANGE/CHOP');
   // ── TARA SELF-TRAINING STATE ──
@@ -634,7 +647,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V103 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V104 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -770,8 +783,8 @@ function TaraApp(){
     if(!discordWebhook||!discordWebhook.startsWith('http'))return;
     try{
       let embed={};
-      if(type==='SIGNAL')embed={title:`${data.dir==='UP'?'🟢':'🔴'} TARA V103 SIGNAL: ${data.dir}`,color:data.dir==='UP'?3404125:16478549,fields:[{name:'BTC Price',value:`$${data.price.toFixed(2)}`,inline:true},{name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},{name:'Gap',value:`${data.gap.toFixed(2)} bps`,inline:true},{name:'Clock',value:data.clock,inline:true}],timestamp:new Date().toISOString()};
-      else if(type==='LOCK')embed={title:`TARA V103 — ${data.dir} LOCKED`,color:data.dir==='UP'?3404125:16478549,description:`**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(2)} bps | **Clock:** ${data.clock}`,timestamp:new Date().toISOString()};
+      if(type==='SIGNAL')embed={title:`${data.dir==='UP'?'🟢':'🔴'} TARA V104 SIGNAL: ${data.dir}`,color:data.dir==='UP'?3404125:16478549,fields:[{name:'BTC Price',value:`$${data.price.toFixed(2)}`,inline:true},{name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},{name:'Gap',value:`${data.gap.toFixed(2)} bps`,inline:true},{name:'Clock',value:data.clock,inline:true}],timestamp:new Date().toISOString()};
+      else if(type==='LOCK')embed={title:`TARA V104 — ${data.dir} LOCKED`,color:data.dir==='UP'?3404125:16478549,description:`**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(2)} bps | **Clock:** ${data.clock}`,timestamp:new Date().toISOString()};
       else if(type==='CLOSE'){
         const gap=data.strike>0?((data.price-data.strike)/data.strike*10000):0;
         const gapStr=gap>=0?`+${gap.toFixed(1)}`:`${gap.toFixed(1)}`;
@@ -786,28 +799,34 @@ function TaraApp(){
             {name:'Close Price',value:`$${(data.price||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`,inline:true},
             {name:'Gap at Close',value:`${gapStr} bps ${data.won?(data.dir==='UP'?'🟢 above':'🟢 below'):(data.dir==='UP'?'🔴 below':'🔴 above')}`,inline:true},
           ],
-          footer:{text:'Tara V103'},
+          footer:{text:'Tara V104'},
           timestamp:new Date().toISOString(),
         };
       }
       else if(type==='EXIT')embed={title:`${data.result==='WIN'?'💰':'✂️'} ${data.action}`,color:data.result==='WIN'?3404125:16478549,description:`**Action:** ${data.action}\n**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(1)} bps | **Clock:** ${data.clock}\n**Regime:** ${data.regime}`,timestamp:new Date().toISOString()};
       // Use ?wait=true so Discord returns the message object with ID
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'Tara Terminal V103',embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'Tara Terminal V104',embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
-        // Extract webhook id+token from URL for later edit/delete
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
-        const entry={id:Date.now(),type,label:embed.title||type,ts:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}),messageId:msg.id,webhookId:parts[0],webhookToken:parts[1]};
+        const entry={id:Date.now(),type,label:embed.title||type,ts:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}),messageId:msg.id,webhookId:parts[0],webhookToken:parts[1],embed};
         setDiscordLog(prev=>[entry,...prev].slice(0,50));
       }
     }catch(e){}
   };
 
-  const editDiscordMessage=async(entry,newContent)=>{
+  const editDiscordMessage=async(entry,noteText)=>{
     if(!entry.webhookId||!entry.webhookToken||!entry.messageId)return false;
     try{
       const url=`https://discord.com/api/webhooks/${entry.webhookId}/${entry.webhookToken}/messages/${entry.messageId}`;
-      const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:newContent,embeds:[]})});
+      // Build updated embed — keep original structure, append edit note to description
+      const originalEmbed=entry.embed||{title:entry.label,color:9807270};
+      const updatedEmbed={
+        ...originalEmbed,
+        description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'📝 **Note:** '+noteText,
+        footer:{text:`Tara V104 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+      };
+      const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
     }catch(e){return false;}
   };
@@ -865,7 +884,8 @@ function TaraApp(){
         isManualStrikeRef.current=false;
         hasSetInitialMargin.current=false;
         setWindowOpenStrike(currentPriceRef.current||currentPrice);
-        taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;setPendingStrike(null);setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;}},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights,userPosition]);
+        // NOTE: do NOT setPendingStrike(null) here — setWindowOpenStrike just set it
+        taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;}},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights,userPosition]);
 
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
 
@@ -884,7 +904,7 @@ function TaraApp(){
       const isCalibrating=(intervalSeconds-clockSeconds)<10;
       const isEarlyWindow=is15m?((intervalSeconds-clockSeconds)<300):((intervalSeconds-clockSeconds)<90);
 
-      // V103 weighted posterior (adaptive)
+      // V104 weighted posterior (adaptive)
       const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,calibration});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb}=eng;
       lastRegimeRef.current=regime;
@@ -972,7 +992,7 @@ function TaraApp(){
       let kellyPct=0;
       if((isUP||isDN)&&betAmount>0&&maxPayout>betAmount){const b=(maxPayout-betAmount)/betAmount;const p=currentOdds/100;const k=((p*b)-(1-p))/b;kellyPct=Math.max(0,(k/2)*100);}
 
-      // V103 Smart Advisor — lock-state-aware
+      // V104 Smart Advisor — lock-state-aware
       const advisor=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps,activePrediction,lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null});
 
       // Projections
@@ -1091,7 +1111,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara V103...</div>;
+  if(!isMounted)return<div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara V104...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -1112,7 +1132,7 @@ function TaraApp(){
             <div className="flex items-center gap-2 shrink-0">
               <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
               <span className="hidden sm:flex items-center gap-1 text-xs font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V103
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V104
               </span>
             </div>
             {/* Live Price — always visible */}
@@ -1427,7 +1447,7 @@ function TaraApp(){
             </div>
             {analysis&&(
               <div className="bg-[#181A19] p-2.5 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-[140px]">
-                <div className="flex items-center gap-1.5 mb-1.5 border-b border-[#E8E9E4]/10 pb-1"><IC.Terminal className="w-3.5 h-3.5 text-amber-400"/><h2 className="text-xs font-bold text-[#E8E9E4]/70 uppercase tracking-wide">Engine Logs (V103)</h2></div>
+                <div className="flex items-center gap-1.5 mb-1.5 border-b border-[#E8E9E4]/10 pb-1"><IC.Terminal className="w-3.5 h-3.5 text-amber-400"/><h2 className="text-xs font-bold text-[#E8E9E4]/70 uppercase tracking-wide">Engine Logs (V104)</h2></div>
                 <div className="space-y-1 overflow-y-auto flex-1 font-mono max-h-48 lg:max-h-none" style={{scrollbarWidth:'thin'}}>
                   {(analysis.reasoning||[]).map((r,i)=>(
                     <div key={i} className={`p-1.5 rounded text-xs flex items-start gap-1 uppercase ${r.includes('CAP')||r.includes('GRAVITY')||r.includes('MEMORY')?'text-rose-400 border border-rose-500/20 bg-rose-500/5':r.includes('ALIGNED')||r.includes('STRUCTURE')?'text-emerald-400 border border-emerald-500/20 bg-emerald-500/5':'text-[#E8E9E4]/60 border border-[#E8E9E4]/5'}`}>
@@ -1528,14 +1548,14 @@ function TaraApp(){
                           <div className="border-t border-[#E8E9E4]/8 p-2.5">
                             <textarea value={discordEditText} onChange={e=>setDiscordEditText(e.target.value)} rows={2}
                               className="w-full bg-[#181A19] border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-400 resize-none mb-2"
-                              placeholder="Edit message content..."/>
+                              placeholder="Add a note to this message (e.g. 'Closed early, took profits at $75,200')"/>
                             <div className="flex gap-2">
                               <button onClick={async()=>{
                                 const ok=await editDiscordMessage(entry,discordEditText);
-                                setDiscordStatusMsg(ok?'Updated ✓':'Failed to edit');
-                                if(ok){setDiscordLog(prev=>prev.map(m=>m.id===entry.id?{...m,label:discordEditText,edited:true}:m));setDiscordEditingId(null);setDiscordEditText('');}
+                                setDiscordStatusMsg(ok?'Note added ✓':'Edit failed — may be >15 min old or webhook mismatch');
+                                if(ok){setDiscordLog(prev=>prev.map(m=>m.id===entry.id?{...m,label:m.label,edited:true}:m));setDiscordEditingId(null);setDiscordEditText('');}
                                 setTimeout(()=>setDiscordStatusMsg(''),3000);
-                              }} className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors">Save Edit</button>
+                              }} className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors">Add Note</button>
                               <button onClick={()=>{setDiscordEditingId(null);setDiscordEditText('');}}
                                 className="px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors">Cancel</button>
                             </div>
@@ -1556,7 +1576,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96">
-            <div className="bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10"><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat w/ Tara V103</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className="bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10"><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat w/ Tara V104</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50" style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -1792,7 +1812,7 @@ function TaraApp(){
             <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10">
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V103 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V104 Works
                 </h2>
                 <p className="text-xs text-[#E8E9E4]/40 mt-0.5">Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -1931,11 +1951,11 @@ function TaraApp(){
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl" style={{scrollbarWidth:'thin'}}>
             <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center">
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V103 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V104 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5"/></button>
             </div>
             <div className="p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80">
-              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">V103 Prediction Engine</h3><p className="leading-relaxed">Predictions now use a <strong>6-signal weighted composite</strong> instead of simple addition: (1) Gap Gravity, (2) Momentum Composite with alignment detection, (3) Candle Structure — consecutive candles + volume confirmation, (4) Flow Imbalance, (5) Technical Composite — RSI divergence, VWAP, Bollinger Bands, price channel, (6) Funding Momentum. Signals are weighted by reliability, preventing single-factor dominance.</p></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">V104 Prediction Engine</h3><p className="leading-relaxed">Predictions now use a <strong>6-signal weighted composite</strong> instead of simple addition: (1) Gap Gravity, (2) Momentum Composite with alignment detection, (3) Candle Structure — consecutive candles + volume confirmation, (4) Flow Imbalance, (5) Technical Composite — RSI divergence, VWAP, Bollinger Bands, price channel, (6) Funding Momentum. Signals are weighted by reliability, preventing single-factor dominance.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">Smart Advisor (In-Trade)</h3><p className="leading-relaxed">The advisor now runs a <strong>10-state priority machine</strong> with time-remaining awareness. Every message shows how many minutes are left and specific price context. It distinguishes between "cut now" (late window, losing) and "hold" (time to recover). Profit recommendations include specific exit triggers relative to peak offer.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">Canvas Chart (No CDN)</h3><p className="leading-relaxed">Chart is now built entirely in canvas — no external library needed. Always renders. Dual API fallback: Coinbase first, Binance if blocked. Supports full EMA/BB overlays, strike line, live price sync, crosshair hover, and volume bars. Resize-aware.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">New Signals</h3><ul className="list-disc pl-4 space-y-1"><li><strong>Candle Structure:</strong> 3+ consecutive candles in same direction = momentum confirmation. Volume surge compounds the signal.</li><li><strong>Price Channel:</strong> Near top of 20-candle range with upward drift = resistance signal, and vice versa.</li><li><strong>RSI Divergence:</strong> Price moving up but RSI flat = hidden weakness. Price down but RSI flat = hidden strength.</li><li><strong>Funding Momentum:</strong> Direction of funding rate change, not just the level.</li></ul></section>
