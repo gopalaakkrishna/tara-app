@@ -54,12 +54,12 @@ const DEFAULT_WEIGHTS={gap:47.50,momentum:44.00,structure:19.75,flow:44.63,techn
 // Per-regime weight sets — each regime gets its own gradient descent
 // Initialized from global defaults, diverge over time based on what works in each regime
 const DEFAULT_REGIME_WEIGHTS={
-  'SHORT SQUEEZE': {gap:45.71,momentum:41.94,structure:19.11,flow:40.00,technical:26.25,regime:30.00},
-  'RANGE/CHOP':    {gap:45.71,momentum:41.94,structure:19.11,flow:40.00,technical:26.25,regime:30.00},
-  'HIGH VOL CHOP': {gap:45.71,momentum:41.94,structure:19.11,flow:40.00,technical:26.25,regime:30.00},
-  'TRENDING DOWN': {gap:45.71,momentum:41.94,structure:19.11,flow:40.00,technical:26.25,regime:30.00},
+  'SHORT SQUEEZE': {gap:49.29,momentum:46.06,structure:20.39,flow:49.26,technical:26.55,regime:35.88},
+  'RANGE/CHOP':    {gap:49.29,momentum:46.06,structure:20.39,flow:49.26,technical:26.55,regime:35.88},
+  'HIGH VOL CHOP': {gap:49.29,momentum:46.06,structure:20.39,flow:49.26,technical:26.55,regime:35.88},
+  'TRENDING DOWN': {gap:49.29,momentum:46.06,structure:20.39,flow:49.26,technical:26.55,regime:35.88},
 };
-const REGIME_WEIGHT_KEYS={'SHORT SQUEEZE':'taraV107RW_SS_V107','RANGE/CHOP':'taraV107RW_RC_V107','HIGH VOL CHOP':'taraV107RW_HVC_V107','TRENDING DOWN':'taraV107RW_TD_V107'};
+const REGIME_WEIGHT_KEYS={'SHORT SQUEEZE':'taraV108RW_SS_V108','RANGE/CHOP':'taraV108RW_RC_V108','HIGH VOL CHOP':'taraV108RW_HVC_V108','TRENDING DOWN':'taraV108RW_TD_V108'};
 const loadRegimeWeights=()=>{
   const out={};
   Object.entries(REGIME_WEIGHT_KEYS).forEach(([rg,key])=>{
@@ -77,15 +77,15 @@ const WEIGHT_BOUNDS={gap:[5,60],momentum:[5,55],structure:[2,35],flow:[2,50],tec
 const LEARNING_RATE=0.8; // how aggressively to update weights per trade
 
 // Load weights from localStorage or use defaults
-const loadWeights=()=>{try{const s=localStorage.getItem('taraWeightsV107');if(s){const w=JSON.parse(s);if(w&&typeof w.gap==='number')return w;}return{...DEFAULT_WEIGHTS};}catch(e){return{...DEFAULT_WEIGHTS};}};
-const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV107',JSON.stringify(w));}catch(e){}};
+const loadWeights=()=>{try{const s=localStorage.getItem('taraWeightsV108');if(s){const w=JSON.parse(s);if(w&&typeof w.gap==='number')return w;}return{...DEFAULT_WEIGHTS};}catch(e){return{...DEFAULT_WEIGHTS};}};
+const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV108',JSON.stringify(w));}catch(e){}};
 
 // Load trade log
 // Pre-seeded: 22 trades, 16W/6L (72.7% WR) · SHORT SQUEEZE 12W/1L (92%) · EU 14W/4L (78%)
 // HIGH VOL CHOP 1W/2L (33%) — avoid · RANGE/CHOP 2W/3L (40%) — avoid
 // Best hours: 4 (100%) and 5 (100%)
 const SEED_TRADES=[
-  // 126 trades · 85W/41L = 67.5% · SS 77% · TD 91% · ASIA 72% · V107 baseline
+  // 128 trades · 86W/42L = 67.2% · SS 77% · TD 91% · ASIA 72% · V108 baseline
   {id:1776403212237,dir:'UP',posterior:71.0,regime:'RANGE/CHOP',clockAtLock:587,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.83,momentum:0.0,structure:0.0,flow:20.23,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776403812231,dir:'UP',posterior:82.0,regime:'RANGE/CHOP',clockAtLock:887,hour:1,session:'ASIA',windowType:'15m',signals:{gap:35.2,momentum:-5.39,structure:0.0,flow:-17.15,technical:-8.0,regime:0.0},result:'LOSS'},
   {id:1776407423234,dir:'DOWN',posterior:27.6,regime:'RANGE/CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:-0.28,momentum:-2.75,structure:0.0,flow:-20.59,technical:0.0,regime:0.0},result:'LOSS'},
@@ -212,10 +212,12 @@ const SEED_TRADES=[
   {id:1776672080674,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:819,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776672935569,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:864,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776673905975,dir:'UP',posterior:68.5,regime:'SHORT SQUEEZE',clockAtLock:794,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776706916492,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:630,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776707129284,dir:'DOWN',posterior:8.4,regime:'HIGH VOL CHOP',clockAtLock:855,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
 ];
 
-const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV107');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
-const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV107',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
+const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV108');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
+const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV108',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
 
 // ── GRADIENT DESCENT WEIGHT UPDATE ──
 // After each trade, credit/blame each signal proportionally to its contribution
@@ -700,11 +702,11 @@ function TaraApp(){
   const[showRugPullAlerts,setShowRugPullAlerts]=useState(true);
   const[showSettings,setShowSettings]=useState(false);
   const[discordWebhook,setDiscordWebhook]=useState('');
-  const[discordUsername,setDiscordUsername]=useState('Tara Terminal V107');
+  const[discordUsername,setDiscordUsername]=useState('Tara Terminal V108');
   const[discordAvatar,setDiscordAvatar]=useState('');
   const[windowRecap,setWindowRecap]=useState(null); // {won,dir,closePrice,strike,gapBps,regime} — clears after 6s
   const[sessionPnL,setSessionPnL]=useState(0);      // dollar P&L this browser session
-  const[lifetimePnL,setLifetimePnL]=useState(()=>{try{return parseFloat(localStorage.getItem('taraV107PnL')||'0');}catch(e){return 0;}})
+  const[lifetimePnL,setLifetimePnL]=useState(()=>{try{return parseFloat(localStorage.getItem('taraV108PnL')||'0');}catch(e){return 0;}})
   // MTF: track last known lock for each timeframe so we can detect confluence
   const mtfLocksRef=useRef({'5m':null,'15m':null}); // {dir,lockedAt,posterior};
 
@@ -752,11 +754,11 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:254,losses:156},'5m':{wins:10,losses:7}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:256,losses:157},'5m':{wins:10,losses:7}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:10,losses:1},   // 91% WR (n=11) — extremely reliable
-    'HIGH VOL CHOP': {wins:7,losses:6},    // 54% WR (n=13) — slight edge, selective
+    'HIGH VOL CHOP': {wins:8,losses:7},    // 53% WR (n=15) — coin flip, be selective
     'SHORT SQUEEZE': {wins:33,losses:10},  // 77% WR (n=43) — primary regime, trust calls
     'LONG SQUEEZE':  {wins:0,losses:0},
     'RANGE/CHOP':    {wins:35,losses:24},  // 59% WR (n=59) — solid, trade with confidence
@@ -799,7 +801,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V107 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V108 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -868,8 +870,8 @@ function TaraApp(){
         }
       }).catch(()=>{});
     }
-    try{const s=localStorage.getItem('taraV107Score');if(s){const p=JSON.parse(s);if(p?.['15m']?.wins!=null)setScorecards(p);}const m=localStorage.getItem('taraV107Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV107Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV107TZ');if(tz!=null)setUseLocalTime(tz==='true');const du=localStorage.getItem('taraV107DU');if(du)setDiscordUsername(du);const da=localStorage.getItem('taraV107DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
-  useEffect(()=>{if(!isMounted)return;try{localStorage.setItem('taraV107Score',JSON.stringify(scorecards));localStorage.setItem('taraV107Mem',JSON.stringify(regimeMemory));localStorage.setItem('taraV107Hook',discordWebhook);localStorage.setItem('taraV107TZ',String(useLocalTime));localStorage.setItem('taraV107DU',discordUsername);localStorage.setItem('taraV107DA',discordAvatar);}catch(e){};},[scorecards,regimeMemory,discordWebhook,useLocalTime,discordUsername,discordAvatar,isMounted]);
+    try{const s=localStorage.getItem('taraV108Score');if(s){const p=JSON.parse(s);if(p?.['15m']?.wins!=null)setScorecards(p);}const m=localStorage.getItem('taraV108Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV108Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV108TZ');if(tz!=null)setUseLocalTime(tz==='true');const du=localStorage.getItem('taraV108DU');if(du)setDiscordUsername(du);const da=localStorage.getItem('taraV108DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
+  useEffect(()=>{if(!isMounted)return;try{localStorage.setItem('taraV108Score',JSON.stringify(scorecards));localStorage.setItem('taraV108Mem',JSON.stringify(regimeMemory));localStorage.setItem('taraV108Hook',discordWebhook);localStorage.setItem('taraV108TZ',String(useLocalTime));localStorage.setItem('taraV108DU',discordUsername);localStorage.setItem('taraV108DA',discordAvatar);}catch(e){};},[scorecards,regimeMemory,discordWebhook,useLocalTime,discordUsername,discordAvatar,isMounted]);
 
   useEffect(()=>{if(!currentPrice)return;const iv=setInterval(()=>{priceMemoryRef.current.push({p:currentPrice,time:Date.now()});priceMemoryRef.current=priceMemoryRef.current.filter(t=>Date.now()-t.time<600000);},2000);return()=>clearInterval(iv);},[currentPrice]);
 
@@ -945,8 +947,8 @@ function TaraApp(){
     if(!discordWebhook||!discordWebhook.startsWith('http'))return;
     try{
       let embed={};
-      if(type==='SIGNAL')embed={title:`${data.dir==='UP'?'🟢':'🔴'} TARA V107 SIGNAL: ${data.dir}`,color:data.dir==='UP'?3404125:16478549,fields:[{name:'BTC Price',value:`$${data.price.toFixed(2)}`,inline:true},{name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},{name:'Gap',value:`${data.gap.toFixed(2)} bps`,inline:true},{name:'Clock',value:data.clock,inline:true}],timestamp:new Date().toISOString()};
-      else if(type==='LOCK')embed={title:`TARA V107 — ${data.dir} LOCKED`,color:data.dir==='UP'?3404125:16478549,description:`**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(2)} bps | **Clock:** ${data.clock}`,timestamp:new Date().toISOString()};
+      if(type==='SIGNAL')embed={title:`${data.dir==='UP'?'🟢':'🔴'} TARA V108 SIGNAL: ${data.dir}`,color:data.dir==='UP'?3404125:16478549,fields:[{name:'BTC Price',value:`$${data.price.toFixed(2)}`,inline:true},{name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},{name:'Gap',value:`${data.gap.toFixed(2)} bps`,inline:true},{name:'Clock',value:data.clock,inline:true}],timestamp:new Date().toISOString()};
+      else if(type==='LOCK')embed={title:`TARA V108 — ${data.dir} LOCKED`,color:data.dir==='UP'?3404125:16478549,description:`**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(2)} bps | **Clock:** ${data.clock}`,timestamp:new Date().toISOString()};
       else if(type==='CLOSE'){
         const gap=data.strike>0?((data.price-data.strike)/data.strike*10000):0;
         const gapStr=gap>=0?`+${gap.toFixed(1)}`:`${gap.toFixed(1)}`;
@@ -966,13 +968,13 @@ function TaraApp(){
             {name:'Gap at Close',value:`${gapStr} bps ${data.won?(data.dir==='UP'?'🟢 above':'🟢 below'):(data.dir==='UP'?'🔴 below':'🔴 above')}`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L (${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%)`,inline:false},
           ],
-          footer:{text:'Tara V107'},
+          footer:{text:'Tara V108'},
           timestamp:new Date().toISOString(),
         };
       }
       else if(type==='EXIT')embed={title:`${data.result==='WIN'?'💰':'✂️'} ${data.action}`,color:data.result==='WIN'?3404125:16478549,description:`**Action:** ${data.action}\n**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(1)} bps | **Clock:** ${data.clock}\n**Regime:** ${data.regime}`,timestamp:new Date().toISOString()};
       // Use ?wait=true so Discord returns the message object with ID
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara Terminal V107',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara Terminal V108',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -991,7 +993,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'📝 **Note:** '+noteText,
-        footer:{text:`Tara V107 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V108 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -1018,7 +1020,7 @@ function TaraApp(){
     setSessionPnL(prev=>prev+delta);
     setLifetimePnL(prev=>{
       const next=prev+delta;
-      try{localStorage.setItem('taraV107PnL',String(next));}catch(e){}
+      try{localStorage.setItem('taraV108PnL',String(next));}catch(e){}
       return next;
     });
   };
@@ -1129,7 +1131,7 @@ function TaraApp(){
       const isCalibrating=(intervalSeconds-clockSeconds)<10;
       const isEarlyWindow=is15m?((intervalSeconds-clockSeconds)<300):((intervalSeconds-clockSeconds)<90);
 
-      // V107 weighted posterior (adaptive)
+      // V108 weighted posterior (adaptive)
       const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE/CHOP',calibration});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb}=eng;
       lastRegimeRef.current=regime;
@@ -1221,7 +1223,7 @@ function TaraApp(){
       let kellyPct=0;
       if((isUP||isDN)&&betAmount>0&&maxPayout>betAmount){const b=(maxPayout-betAmount)/betAmount;const p=currentOdds/100;const k=((p*b)-(1-p))/b;kellyPct=Math.max(0,(k/2)*100);}
 
-      // V107 Smart Advisor — lock-state-aware
+      // V108 Smart Advisor — lock-state-aware
       const advisor=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps,activePrediction,lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null});
 
       // Projections
@@ -1352,7 +1354,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara V107...</div>;
+  if(!isMounted)return<div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara V108...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -1366,43 +1368,50 @@ function TaraApp(){
       
       {/* ── STICKY HEADER ── */}
       <header className="sticky top-0 z-40 bg-[#111312]/95 backdrop-blur-md border-b border-[#E8E9E4]/10 px-2 sm:px-4 py-2 shrink-0">
-        <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-1 sm:gap-2">
+        <div className="max-w-[1600px] mx-auto flex items-center gap-1 sm:gap-2">
           
-          {/* Logo + price */}
-          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
-            <div className="flex items-center gap-1.5 shrink-0">
-              <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
-              <span className="flex items-center gap-1 text-[10px] sm:text-xs font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V107
-              </span>
-            </div>
-            {/* Live Price — always visible */}
-            <div className={`flex items-center gap-1 text-sm sm:text-xl font-serif font-bold tracking-tight ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
-              <IC.Zap className={`w-3 h-3 sm:w-4 sm:h-4 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#E8E9E4]/40'}`}/>
-              <span className="truncate">${currentPrice?currentPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'---'}</span>
-            </div>
-            {/* Market sessions */}
-            <div className="hidden md:flex items-center gap-1 text-xs">{marketSessions.sessions.map((s,i)=><span key={i} className={`${s.color} opacity-80`}>{s.flag}</span>)}</div>
+          {/* Logo — text only on mobile, badge on sm+ */}
+          <div className="flex items-center gap-1 shrink-0">
+            <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
+            <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V108
+            </span>
           </div>
+
+          {/* Live Price — shrinks gracefully, never truncates on sm+ */}
+          <div className={`flex items-center gap-0.5 font-serif font-bold shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
+            <IC.Zap className={`w-3 h-3 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#E8E9E4]/40'}`}/>
+            {/* Mobile: no decimals to save space. sm+: full price */}
+            <span className="text-sm sm:hidden">${currentPrice?Math.round(currentPrice).toLocaleString():'---'}</span>
+            <span className="hidden sm:inline text-xl">${currentPrice?currentPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'---'}</span>
+          </div>
+
+          {/* Market sessions — md+ only */}
+          <div className="hidden md:flex items-center gap-1 text-xs shrink-0">{marketSessions.sessions.map((s,i)=><span key={i} className={`${s.color} opacity-80`}>{s.flag}</span>)}</div>
+
+          {/* Spacer */}
+          <div className="flex-1"/>
 
           {/* Window toggle */}
           <div className="flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0">
-            <button onClick={()=>handleWindowToggle('5m')} className={`px-3 sm:px-6 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='5m'?'bg-indigo-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>5m</button>
-            <button onClick={()=>handleWindowToggle('15m')} className={`px-3 sm:px-6 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='15m'?'bg-emerald-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>15m</button>
+            <button onClick={()=>handleWindowToggle('5m')} className={`px-2.5 sm:px-5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='5m'?'bg-indigo-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>5m</button>
+            <button onClick={()=>handleWindowToggle('15m')} className={`px-2.5 sm:px-5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='15m'?'bg-emerald-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>15m</button>
           </div>
 
-          {/* Right controls */}
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            <div className="hidden xl:flex flex-col items-end cursor-pointer" onClick={()=>setUseLocalTime(!useLocalTime)}>
+          {/* Right controls — on mobile show only 3 most critical: sound, ?, whale */}
+          <div className="flex items-center gap-1 shrink-0">
+            <div className="hidden xl:flex flex-col items-end cursor-pointer mr-1" onClick={()=>setUseLocalTime(!useLocalTime)}>
               <span className="text-xs text-[#E8E9E4]/40 uppercase">{useLocalTime?'LOCAL':'EST'}</span>
               <span className="text-sm font-mono text-[#E8E9E4]/80">{timeState.currentTime||'--:--:--'}</span>
             </div>
-            <button onClick={()=>setShowWhaleLog(!showWhaleLog)} className={`p-1.5 sm:p-2 rounded-lg border text-xs transition-colors ${showWhaleLog?'bg-purple-500/20 border-purple-500/40 text-purple-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-purple-400'}`}>🐋</button>
-            <button onClick={handleSoundToggle} className={`p-1.5 sm:p-2 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
-            <button onClick={()=>setShowSettings(true)} className="p-1.5 sm:p-2 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors"><IC.Link className="w-3.5 h-3.5"/></button>
-            <button onClick={()=>setShowAnalytics(true)} className="p-1.5 sm:p-2 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Training Analytics"><IC.BarChart className="w-3.5 h-3.5"/></button>
-            <button onClick={()=>setShowGuide(true)} className="p-1.5 sm:p-2 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors" title="How Tara Works">?</button>
-            <button onClick={()=>setShowHelp(true)} className="p-1.5 sm:p-2 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors"><IC.Help className="w-3.5 h-3.5"/></button>
+            {/* Always visible */}
+            <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
+            <button onClick={()=>setShowGuide(true)} className="p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors" title="How Tara Works">?</button>
+            {/* Hidden on mobile — accessible via mobile tab nav or sm+ */}
+            <button onClick={()=>setShowWhaleLog(!showWhaleLog)} className={`hidden sm:flex p-1.5 rounded-lg border text-xs transition-colors ${showWhaleLog?'bg-purple-500/20 border-purple-500/40 text-purple-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-purple-400'}`}>🐋</button>
+            <button onClick={()=>setShowSettings(true)} className="hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors"><IC.Link className="w-3.5 h-3.5"/></button>
+            <button onClick={()=>setShowAnalytics(true)} className="hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Analytics"><IC.BarChart className="w-3.5 h-3.5"/></button>
+            <button onClick={()=>setShowHelp(true)} className="hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors"><IC.Help className="w-3.5 h-3.5"/></button>
           </div>
         </div>
       </header>
@@ -1504,7 +1513,7 @@ function TaraApp(){
                       <div className="flex items-center gap-1">
                         <span className="text-[9px] text-[#E8E9E4]/30 uppercase">All-time</span>
                         <span className={`text-[11px] font-mono font-bold ${lifetimePnL>0?'text-emerald-300':'text-rose-300'}`}>{lifetimePnL>0?'+':''}{lifetimePnL>=0?'$'+lifetimePnL.toFixed(2):'-$'+Math.abs(lifetimePnL).toFixed(2)}</span>
-                        <button onClick={()=>{if(confirm('Reset lifetime P&L to zero?')){setLifetimePnL(0);try{localStorage.removeItem('taraV107PnL');}catch(e){}}}} className="text-[8px] text-[#E8E9E4]/20 hover:text-rose-400 ml-0.5" title="Reset lifetime P&L">✕</button>
+                        <button onClick={()=>{if(confirm('Reset lifetime P&L to zero?')){setLifetimePnL(0);try{localStorage.removeItem('taraV108PnL');}catch(e){}}}} className="text-[8px] text-[#E8E9E4]/20 hover:text-rose-400 ml-0.5" title="Reset lifetime P&L">✕</button>
                       </div>
                     )}
                   </div>
@@ -1530,6 +1539,9 @@ function TaraApp(){
               {tab.icon}{tab.label}
             </button>
           ))}
+          {/* Mobile-only quick access row for hidden header buttons */}
+          <button onClick={()=>setShowWhaleLog(!showWhaleLog)} className={`flex items-center justify-center px-2 py-1.5 rounded-lg text-xs transition-all ${showWhaleLog?'bg-purple-500/20 text-purple-400 border border-purple-500/30':'text-[#E8E9E4]/30 hover:text-purple-400'}`} title="Whale Log">🐋</button>
+          <button onClick={()=>setShowSettings(true)} className="flex items-center justify-center px-2 py-1.5 rounded-lg text-xs text-[#E8E9E4]/30 hover:text-indigo-400 transition-all" title="Discord"><IC.Link className="w-3.5 h-3.5"/></button>
         </div>
 
         {/* ── PENDING STRIKE CONFIRMATION BANNER — always visible ── */}
@@ -1782,7 +1794,7 @@ function TaraApp(){
             </div>
             {analysis&&(
               <div className="bg-[#181A19] p-2.5 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-[140px]">
-                <div className="flex items-center gap-1.5 mb-1.5 border-b border-[#E8E9E4]/10 pb-1"><IC.Terminal className="w-3.5 h-3.5 text-amber-400"/><h2 className="text-xs font-bold text-[#E8E9E4]/70 uppercase tracking-wide">Engine Logs (V107)</h2></div>
+                <div className="flex items-center gap-1.5 mb-1.5 border-b border-[#E8E9E4]/10 pb-1"><IC.Terminal className="w-3.5 h-3.5 text-amber-400"/><h2 className="text-xs font-bold text-[#E8E9E4]/70 uppercase tracking-wide">Engine Logs (V108)</h2></div>
                 <div className="space-y-1 overflow-y-auto flex-1 font-mono max-h-48 lg:max-h-none" style={{scrollbarWidth:'thin'}}>
                   {(analysis.reasoning||[]).map((r,i)=>(
                     <div key={i} className={`p-1.5 rounded text-xs flex items-start gap-1 uppercase ${r.includes('CAP')||r.includes('GRAVITY')||r.includes('MEMORY')?'text-rose-400 border border-rose-500/20 bg-rose-500/5':r.includes('ALIGNED')||r.includes('STRUCTURE')?'text-emerald-400 border border-emerald-500/20 bg-emerald-500/5':'text-[#E8E9E4]/60 border border-[#E8E9E4]/5'}`}>
@@ -1845,7 +1857,7 @@ function TaraApp(){
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <div>
                   <label className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-wide mb-1 block">Bot Display Name</label>
-                  <input type="text" value={discordUsername} onChange={e=>setDiscordUsername(e.target.value)} placeholder="Tara Terminal V107" className="w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white"/>
+                  <input type="text" value={discordUsername} onChange={e=>setDiscordUsername(e.target.value)} placeholder="Tara Terminal V108" className="w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white"/>
                 </div>
                 <div>
                   <label className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-wide mb-1 block">Avatar Image URL</label>
@@ -1856,7 +1868,7 @@ function TaraApp(){
                 <div className="flex items-center gap-2 mb-3 p-2 bg-[#111312] rounded-lg border border-[#E8E9E4]/8">
                   <img src={discordAvatar} alt="Bot avatar preview" className="w-8 h-8 rounded-full object-cover border border-[#E8E9E4]/20" onError={e=>e.target.style.display='none'}/>
                   <div>
-                    <div className="text-xs font-bold text-white">{discordUsername||'Tara Terminal V107'}</div>
+                    <div className="text-xs font-bold text-white">{discordUsername||'Tara Terminal V108'}</div>
                     <div className="text-[10px] text-[#E8E9E4]/40">Preview of how bot appears in Discord</div>
                   </div>
                 </div>
@@ -1932,7 +1944,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96">
-            <div className="bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10"><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat w/ Tara V107</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className="bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10"><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat w/ Tara V108</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50" style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -2230,7 +2242,7 @@ function TaraApp(){
             <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10">
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V107 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V108 Works
                 </h2>
                 <p className="text-xs text-[#E8E9E4]/40 mt-0.5">Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -2369,11 +2381,11 @@ function TaraApp(){
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl" style={{scrollbarWidth:'thin'}}>
             <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center">
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V107 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V108 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5"/></button>
             </div>
             <div className="p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80">
-              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">V107 Prediction Engine</h3><p className="leading-relaxed">Predictions now use a <strong>6-signal weighted composite</strong> instead of simple addition: (1) Gap Gravity, (2) Momentum Composite with alignment detection, (3) Candle Structure — consecutive candles + volume confirmation, (4) Flow Imbalance, (5) Technical Composite — RSI divergence, VWAP, Bollinger Bands, price channel, (6) Funding Momentum. Signals are weighted by reliability, preventing single-factor dominance.</p></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">V108 Prediction Engine</h3><p className="leading-relaxed">Predictions now use a <strong>6-signal weighted composite</strong> instead of simple addition: (1) Gap Gravity, (2) Momentum Composite with alignment detection, (3) Candle Structure — consecutive candles + volume confirmation, (4) Flow Imbalance, (5) Technical Composite — RSI divergence, VWAP, Bollinger Bands, price channel, (6) Funding Momentum. Signals are weighted by reliability, preventing single-factor dominance.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">Smart Advisor (In-Trade)</h3><p className="leading-relaxed">The advisor now runs a <strong>10-state priority machine</strong> with time-remaining awareness. Every message shows how many minutes are left and specific price context. It distinguishes between "cut now" (late window, losing) and "hold" (time to recover). Profit recommendations include specific exit triggers relative to peak offer.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">Canvas Chart (No CDN)</h3><p className="leading-relaxed">Chart is now built entirely in canvas — no external library needed. Always renders. Dual API fallback: Coinbase first, Binance if blocked. Supports full EMA/BB overlays, strike line, live price sync, crosshair hover, and volume bars. Resize-aware.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">New Signals</h3><ul className="list-disc pl-4 space-y-1"><li><strong>Candle Structure:</strong> 3+ consecutive candles in same direction = momentum confirmation. Volume surge compounds the signal.</li><li><strong>Price Channel:</strong> Near top of 20-candle range with upward drift = resistance signal, and vice versa.</li><li><strong>RSI Divergence:</strong> Price moving up but RSI flat = hidden weakness. Price down but RSI flat = hidden strength.</li><li><strong>Funding Momentum:</strong> Direction of funding rate change, not just the level.</li></ul></section>
