@@ -693,6 +693,11 @@ function TaraApp(){
   const[discordUsername,setDiscordUsername]=useState('Tara Terminal V106');
   const[discordAvatar,setDiscordAvatar]=useState('');
   const[windowRecap,setWindowRecap]=useState(null); // {won,dir,closePrice,strike,gapBps,regime} — clears after 6s
+  const[sessionPnL,setSessionPnL]=useState(0);      // dollar P&L this browser session
+  const[lifetimePnL,setLifetimePnL]=useState(()=>{try{return parseFloat(localStorage.getItem('taraV106PnL')||'0');}catch(e){return 0;}})
+  // MTF: track last known lock for each timeframe so we can detect confluence
+  const mtfLocksRef=useRef({'5m':null,'15m':null}); // {dir,lockedAt,posterior};
+
   const[kalshiYesPrice,setKalshiYesPrice]=useState(null); // live YES price from active Kalshi market
   // Streak analysis — computed from live tradeLog
   const streakData=useMemo(()=>{
@@ -982,6 +987,19 @@ function TaraApp(){
   };
 
 
+
+  const recordPnL=(won,trade)=>{
+    const bet=trade?.betAmt||0;
+    const pay=trade?.maxPay||0;
+    if(bet<=0)return; // no bet amount entered, skip
+    const delta=won?(pay-bet):-bet; // WIN: profit = maxPayout-bet; LOSS: lose bet
+    setSessionPnL(prev=>prev+delta);
+    setLifetimePnL(prev=>{
+      const next=prev+delta;
+      try{localStorage.setItem('taraV106PnL',String(next));}catch(e){}
+      return next;
+    });
+  };
   // ── KALSHI LIVE MARKET REFERENCE ── polls every 30s for YES price on active BTC market
   useEffect(()=>{
     const fetchKalshi=async()=>{
@@ -1041,6 +1059,7 @@ function TaraApp(){
             setRegimeMemory(prev=>{const u={...prev};const r=lastRegimeRef.current||'RANGE/CHOP';if(!u[r])u[r]={wins:0,losses:0};if(won)u[r].wins++;else u[r].losses++;return u;});
             // Broadcast result of the trade user was actually in
             if(manuallyClosedRef.current===null){
+              recordPnL(won,pendingTradeRef.current);
               // Show post-window recap toast
               const gapBpsRecap=targetMargin>0?((currentPrice-targetMargin)/targetMargin*10000):0;
               setWindowRecap({won,dir:userPosition,closePrice:currentPrice,strike:targetMargin,gapBps:gapBpsRecap,regime:lastRegimeRef.current});
@@ -1066,6 +1085,7 @@ function TaraApp(){
         hasSetInitialMargin.current=false;
         setWindowOpenStrike(currentPriceRef.current||currentPrice);
         // NOTE: do NOT setPendingStrike(null) here — setWindowOpenStrike just set it
+        mtfLocksRef.current[windowType]=null; // clear this timeframe's lock on rollover
         taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;}},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights,userPosition]);
 
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
@@ -1188,7 +1208,13 @@ function TaraApp(){
       const t5=genTimeline(5,8),t15=genTimeline(15,8),t60=genTimeline(60,8);
       const projections=[{id:'5m',time:'5 MIN',price:t5[0]?.price||currentPrice,conf:Math.min(95,posterior+5),timeline:t5},{id:'15m',time:'15 MIN',price:t15[0]?.price||currentPrice,conf:posterior,timeline:t15},{id:'1h',time:'1 HOUR',price:t60[0]?.price||currentPrice,conf:Math.max(10,posterior-15),timeline:t60}];
 
-      return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),
+      // Multi-timeframe confluence: check if the OTHER timeframe has a recent lock in same direction
+      const _otherTF=windowType==='15m'?'5m':'15m';
+      const _otherLock=mtfLocksRef.current[_otherTF];
+      const _thisLock=lockedCallRef.current;
+      const mtfAligned=_thisLock&&_otherLock&&_otherLock.dir===_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
+      const mtfOpposed=_thisLock&&_otherLock&&_otherLock.dir!==_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
+      return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),
         lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null,
         bullCount:Number(bullCount),bearCount:Number(bearCount),consecutiveNeeded:Number(CONSECUTIVE_NEEDED)};
     }catch(err){return{prediction:'ERROR',rawProbAbove:50,projections:[],reasoning:[err.stack||String(err)],textColor:'text-rose-500',advisor:{label:'MATH CRASH',reason:String(err),color:'rose',animate:false,hasAction:false},regime:'ERROR'};}
@@ -1201,6 +1227,8 @@ function TaraApp(){
     const lock=analysis.lockInfo;
     if(lastBroadcastLockRef.current===lock.lockedAt)return;
     lastBroadcastLockRef.current=lock.lockedAt;
+    // Record this lock for multi-timeframe confluence tracking
+    mtfLocksRef.current[windowType]={dir:lock.dir,lockedAt:lock.lockedAt,posterior:lock.lockedPosterior};
     // Sound alert only — no auto Discord broadcast
     playAlert(lock.dir==='UP'?'lock-up':'lock-down');
   },[analysis?.lockInfo?.lockedAt]);
@@ -1259,7 +1287,8 @@ function TaraApp(){
         regime:lastRegimeRef.current,
         clockAtLock:timeState.minsRemaining*60+timeState.secsRemaining,
         hour:new Date().getHours(),session:getMarketSessions().dominant,windowType,
-        signals:analysis?.rawSignalScores||{},result:null
+        signals:analysis?.rawSignalScores||{},result:null,
+        betAmt:betAmount||0,maxPay:maxPayout||0  // captured at entry for P&L calc
       };
       // Broadcast the new entry after the reversal loss
       broadcastToDiscord('LOCK',{dir,price:currentPrice,strike:targetMargin,gap:gapBps,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,regime:lastRegimeRef.current,posterior:analysis?.rawProbAbove||0});
@@ -1283,6 +1312,7 @@ function TaraApp(){
           saveTradeLog(newLog);setTradeLog(newLog);
           setAdaptiveWeights(updateWeights(adaptiveWeights,newLog,result));
           setRegimeWeights(prev=>updateRegimeWeights(prev,resolvedTrade,result));
+          recordPnL(result==='WIN',resolvedTrade);
           pendingTradeRef.current=null;
         }
         // Broadcast exit/switch action since user explicitly confirmed it
