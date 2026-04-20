@@ -1,9 +1,0 @@
-{
-  "name": "Tara Trading Terminal",
-  "short_name": "Tara",
-  "description": "BTC Binary Options Prediction Engine",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#111312",
-  "theme_color": "#111312"
-}
