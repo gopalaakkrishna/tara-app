@@ -205,7 +205,7 @@ const SEED_TRADES=[
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV106');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
-const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV100',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
+const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV106',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
 
 // ── GRADIENT DESCENT WEIGHT UPDATE ──
 // After each trade, credit/blame each signal proportionally to its contribution
@@ -699,23 +699,7 @@ function TaraApp(){
   const mtfLocksRef=useRef({'5m':null,'15m':null}); // {dir,lockedAt,posterior};
 
   const[kalshiYesPrice,setKalshiYesPrice]=useState(null); // live YES price from active Kalshi market
-  // Streak analysis — computed from live tradeLog
-  const streakData=useMemo(()=>{
-    const recent=tradeLog.filter(t=>t.result).slice(-10);
-    if(recent.length<3)return{streak:0,type:'neutral',last5WR:null,warning:false};
-    let streak=0;
-    const lastResult=recent[recent.length-1].result;
-    for(let i=recent.length-1;i>=0;i--){
-      if(recent[i].result===lastResult)streak++;
-      else break;
-    }
-    const last5=recent.slice(-5);
-    const last5W=last5.filter(t=>t.result==='WIN').length;
-    const last5WR=last5.length>=3?Math.round((last5W/last5.length)*100):null;
-    const warning=lastResult==='LOSS'&&streak>=3;
-    const strongWarn=lastResult==='LOSS'&&streak>=5;
-    return{streak,type:lastResult==='WIN'?'hot':'cold',last5WR,warning,strongWarn:strongWarn||false};
-  },[tradeLog]);
+  // streakData moved below tradeLog declaration
   const[useLocalTime,setUseLocalTime]=useState(true);
   const[mobileTab,setMobileTab]=useState('signal'); // signal | chart | logs
   const[currentPrice,setCurrentPrice]=useState(null);
@@ -771,6 +755,23 @@ function TaraApp(){
   const[adaptiveWeights,setAdaptiveWeights]=useState(()=>loadWeights());
   const[regimeWeights,setRegimeWeights]=useState(()=>loadRegimeWeights());
   const[tradeLog,setTradeLog]=useState(()=>loadTradeLog());
+  // Streak analysis — computed from tradeLog (declared above)
+  const streakData=useMemo(()=>{
+    const recent=tradeLog.filter(t=>t.result).slice(-10);
+    if(recent.length<3)return{streak:0,type:'neutral',last5WR:null,warning:false,strongWarn:false};
+    let streak=0;
+    const lastResult=recent[recent.length-1].result;
+    for(let i=recent.length-1;i>=0;i--){
+      if(recent[i].result===lastResult)streak++;
+      else break;
+    }
+    const last5=recent.slice(-5);
+    const last5W=last5.filter(t=>t.result==='WIN').length;
+    const last5WR=last5.length>=3?Math.round((last5W/last5.length)*100):null;
+    const warning=lastResult==='LOSS'&&streak>=3;
+    const strongWarn=lastResult==='LOSS'&&streak>=5;
+    return{streak,type:lastResult==='WIN'?'hot':'cold',last5WR,warning,strongWarn};
+  },[tradeLog]);
   const tradeLogRef=useRef([]);
   tradeLogRef.current=tradeLog;
   const pendingTradeRef=useRef(null);
