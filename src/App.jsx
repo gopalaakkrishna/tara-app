@@ -846,7 +846,17 @@ function TaraApp(){
   const marketSessions=useMemo(()=>getMarketSessions(),[timeState.currentHour]);
   const[klines,setKlines]=useState([]);
 
-  useEffect(()=>{setIsMounted(true);try{const s=localStorage.getItem('taraV106Score');if(s){const p=JSON.parse(s);if(p?.['15m']?.wins!=null)setScorecards(p);}const m=localStorage.getItem('taraV106Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV106Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV106TZ');if(tz!=null)setUseLocalTime(tz==='true');const du=localStorage.getItem('taraV106DU');if(du)setDiscordUsername(du);const da=localStorage.getItem('taraV106DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
+  useEffect(()=>{setIsMounted(true);
+    // ── PWA: register service worker for installability + keep-alive ──
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.register('/sw.js').then(reg=>{
+        // Request periodic background sync if supported
+        if('periodicSync' in reg){
+          reg.periodicSync.register('tara-keepalive',{minInterval:60*1000}).catch(()=>{});
+        }
+      }).catch(()=>{});
+    }
+    try{const s=localStorage.getItem('taraV106Score');if(s){const p=JSON.parse(s);if(p?.['15m']?.wins!=null)setScorecards(p);}const m=localStorage.getItem('taraV106Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV106Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV106TZ');if(tz!=null)setUseLocalTime(tz==='true');const du=localStorage.getItem('taraV106DU');if(du)setDiscordUsername(du);const da=localStorage.getItem('taraV106DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
   useEffect(()=>{if(!isMounted)return;try{localStorage.setItem('taraV106Score',JSON.stringify(scorecards));localStorage.setItem('taraV106Mem',JSON.stringify(regimeMemory));localStorage.setItem('taraV106Hook',discordWebhook);localStorage.setItem('taraV106TZ',String(useLocalTime));localStorage.setItem('taraV106DU',discordUsername);localStorage.setItem('taraV106DA',discordAvatar);}catch(e){};},[scorecards,regimeMemory,discordWebhook,useLocalTime,discordUsername,discordAvatar,isMounted]);
 
   useEffect(()=>{if(!currentPrice)return;const iv=setInterval(()=>{priceMemoryRef.current.push({p:currentPrice,time:Date.now()});priceMemoryRef.current=priceMemoryRef.current.filter(t=>Date.now()-t.time<600000);},2000);return()=>clearInterval(iv);},[currentPrice]);
@@ -1467,6 +1477,22 @@ function TaraApp(){
                     <div className="flex flex-col items-center"><div className="flex items-center gap-1 text-xs text-rose-400"><button onClick={()=>updateScore(windowType,'losses',-1)} className="hover:bg-rose-500/20 rounded px-0.5">-</button>L<button onClick={()=>updateScore(windowType,'losses',1)} className="hover:bg-rose-500/20 rounded px-0.5">+</button></div><span className="text-2xl sm:text-3xl font-serif text-rose-400 font-bold">{Number(scorecards[windowType]?.losses||0)}</span></div>
                     <div className="text-xs text-[#E8E9E4]/30">{(Number(scorecards[windowType]?.wins||0)/(Math.max(1,Number(scorecards[windowType]?.wins||0)+Number(scorecards[windowType]?.losses||0)))*100).toFixed(0)}%</div>
                   </div>
+                  {/* Session + Lifetime P&L */}
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {sessionPnL!==0&&(
+                      <div className="flex items-center gap-1">
+                        <span className="text-[9px] text-[#E8E9E4]/30 uppercase">Session</span>
+                        <span className={`text-[11px] font-mono font-bold ${sessionPnL>0?'text-emerald-400':'text-rose-400'}`}>{sessionPnL>0?'+':''}{sessionPnL>=0?'$'+sessionPnL.toFixed(2):'-$'+Math.abs(sessionPnL).toFixed(2)}</span>
+                      </div>
+                    )}
+                    {lifetimePnL!==0&&(
+                      <div className="flex items-center gap-1">
+                        <span className="text-[9px] text-[#E8E9E4]/30 uppercase">All-time</span>
+                        <span className={`text-[11px] font-mono font-bold ${lifetimePnL>0?'text-emerald-300':'text-rose-300'}`}>{lifetimePnL>0?'+':''}{lifetimePnL>=0?'$'+lifetimePnL.toFixed(2):'-$'+Math.abs(lifetimePnL).toFixed(2)}</span>
+                        <button onClick={()=>{if(confirm('Reset lifetime P&L to zero?')){setLifetimePnL(0);try{localStorage.removeItem('taraV106PnL');}catch(e){}}}} className="text-[8px] text-[#E8E9E4]/20 hover:text-rose-400 ml-0.5" title="Reset lifetime P&L">✕</button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -1579,6 +1605,13 @@ function TaraApp(){
                     {analysis.regime&&<span className="text-xs text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded text-xs">{analysis.regime}</span>}
                     {/* Lock badge */}
                     {analysis.lockInfo&&<span className="text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs px-2 py-1">🔒 {Math.floor((Date.now()-analysis.lockInfo.lockedAt)/1000)}s @ {analysis.lockInfo.lockedPosterior.toFixed(0)}%</span>}
+                    {/* Multi-timeframe confluence badge */}
+                    {analysis.mtfAligned&&(
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 animate-pulse" title={`Both 5m and 15m locked ${analysis.lockInfo?.dir} — stronger conviction`}>🔗 DUAL LOCK</span>
+                    )}
+                    {analysis.mtfOpposed&&(
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400" title="5m and 15m are pointing in opposite directions — conflicting signal, trade carefully">⚡ CONFLICT</span>
+                    )}
                   </div>
                   <h2 className={`prediction-heading text-3xl sm:text-4xl md:text-5xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg`}>{analysis.prediction}</h2>
                   
