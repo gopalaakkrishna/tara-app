@@ -54,12 +54,12 @@ const DEFAULT_WEIGHTS={gap:47.50,momentum:44.00,structure:19.75,flow:44.63,techn
 // Per-regime weight sets — each regime gets its own gradient descent
 // Initialized from global defaults, diverge over time based on what works in each regime
 const DEFAULT_REGIME_WEIGHTS={
-  'SHORT SQUEEZE': {gap:49.29,momentum:46.06,structure:20.39,flow:49.26,technical:26.55,regime:35.88},
-  'RANGE/CHOP':    {gap:49.29,momentum:46.06,structure:20.39,flow:49.26,technical:26.55,regime:35.88},
-  'HIGH VOL CHOP': {gap:49.29,momentum:46.06,structure:20.39,flow:49.26,technical:26.55,regime:35.88},
-  'TRENDING DOWN': {gap:49.29,momentum:46.06,structure:20.39,flow:49.26,technical:26.55,regime:35.88},
+  'SHORT SQUEEZE': {gap:50.46,momentum:47.41,structure:20.78,flow:50.00,technical:26.60,regime:37.67},
+  'RANGE/CHOP':    {gap:50.46,momentum:47.41,structure:20.78,flow:50.00,technical:26.60,regime:37.67},
+  'HIGH VOL CHOP': {gap:50.46,momentum:47.41,structure:20.78,flow:50.00,technical:26.60,regime:37.67},
+  'TRENDING DOWN': {gap:50.46,momentum:47.41,structure:20.78,flow:50.00,technical:26.60,regime:37.67},
 };
-const REGIME_WEIGHT_KEYS={'SHORT SQUEEZE':'taraV108RW_SS_V108','RANGE/CHOP':'taraV108RW_RC_V108','HIGH VOL CHOP':'taraV108RW_HVC_V108','TRENDING DOWN':'taraV108RW_TD_V108'};
+const REGIME_WEIGHT_KEYS={'SHORT SQUEEZE':'taraV109RW_SS_V109','RANGE/CHOP':'taraV109RW_RC_V109','HIGH VOL CHOP':'taraV109RW_HVC_V109','TRENDING DOWN':'taraV109RW_TD_V109'};
 const loadRegimeWeights=()=>{
   const out={};
   Object.entries(REGIME_WEIGHT_KEYS).forEach(([rg,key])=>{
@@ -73,19 +73,19 @@ const saveRegimeWeights=(rwObj)=>{
     if(rwObj[rg])try{localStorage.setItem(key,JSON.stringify(rwObj[rg]));}catch(e){}
   });
 };
-const WEIGHT_BOUNDS={gap:[5,60],momentum:[5,55],structure:[2,35],flow:[2,50],technical:[5,45],regime:[2,40]}; // bounds expanded so flow/regime can keep growing
+const WEIGHT_BOUNDS={gap:[5,65],momentum:[5,58],structure:[2,38],flow:[2,55],technical:[5,48],regime:[2,45]}; // expanded — flow/gap were hitting ceilings // bounds expanded so flow/regime can keep growing
 const LEARNING_RATE=0.8; // how aggressively to update weights per trade
 
 // Load weights from localStorage or use defaults
-const loadWeights=()=>{try{const s=localStorage.getItem('taraWeightsV108');if(s){const w=JSON.parse(s);if(w&&typeof w.gap==='number')return w;}return{...DEFAULT_WEIGHTS};}catch(e){return{...DEFAULT_WEIGHTS};}};
-const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV108',JSON.stringify(w));}catch(e){}};
+const loadWeights=()=>{try{const s=localStorage.getItem('taraWeightsV109');if(s){const w=JSON.parse(s);if(w&&typeof w.gap==='number')return w;}return{...DEFAULT_WEIGHTS};}catch(e){return{...DEFAULT_WEIGHTS};}};
+const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV109',JSON.stringify(w));}catch(e){}};
 
 // Load trade log
 // Pre-seeded: 22 trades, 16W/6L (72.7% WR) · SHORT SQUEEZE 12W/1L (92%) · EU 14W/4L (78%)
 // HIGH VOL CHOP 1W/2L (33%) — avoid · RANGE/CHOP 2W/3L (40%) — avoid
 // Best hours: 4 (100%) and 5 (100%)
 const SEED_TRADES=[
-  // 128 trades · 86W/42L = 67.2% · SS 77% · TD 91% · ASIA 72% · V108 baseline
+  // 211 trades · 131W/80L = 62.1% · UP 69% · DOWN 55% · SS 67% · TD 86% · V109 baseline
   {id:1776403212237,dir:'UP',posterior:71.0,regime:'RANGE/CHOP',clockAtLock:587,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.83,momentum:0.0,structure:0.0,flow:20.23,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776403812231,dir:'UP',posterior:82.0,regime:'RANGE/CHOP',clockAtLock:887,hour:1,session:'ASIA',windowType:'15m',signals:{gap:35.2,momentum:-5.39,structure:0.0,flow:-17.15,technical:-8.0,regime:0.0},result:'LOSS'},
   {id:1776407423234,dir:'DOWN',posterior:27.6,regime:'RANGE/CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:-0.28,momentum:-2.75,structure:0.0,flow:-20.59,technical:0.0,regime:0.0},result:'LOSS'},
@@ -214,10 +214,93 @@ const SEED_TRADES=[
   {id:1776673905975,dir:'UP',posterior:68.5,regime:'SHORT SQUEEZE',clockAtLock:794,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776706916492,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:630,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776707129284,dir:'DOWN',posterior:8.4,regime:'HIGH VOL CHOP',clockAtLock:855,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-];
+  {id:1776709831679,dir:'DOWN',posterior:6.2,regime:'HIGH VOL CHOP',clockAtLock:869,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776710716457,dir:'UP',posterior:78.5,regime:'SHORT SQUEEZE',clockAtLock:884,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776711654828,dir:'UP',posterior:77.3,regime:'SHORT SQUEEZE',clockAtLock:845,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776712530621,dir:'DOWN',posterior:6.4,regime:'HIGH VOL CHOP',clockAtLock:870,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776713442075,dir:'DOWN',posterior:8.9,regime:'HIGH VOL CHOP',clockAtLock:858,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776714346358,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:854,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776715264080,dir:'DOWN',posterior:6.0,regime:'RANGE/CHOP',clockAtLock:836,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776716132991,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:867,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776717021935,dir:'DOWN',posterior:6.4,regime:'RANGE/CHOP',clockAtLock:878,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776717915688,dir:'DOWN',posterior:6.9,regime:'RANGE/CHOP',clockAtLock:885,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776718824483,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:875,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776719923236,dir:'UP',posterior:7.9,regime:'TRENDING DOWN',clockAtLock:677,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776720664046,dir:'DOWN',posterior:6.9,regime:'TRENDING DOWN',clockAtLock:836,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776721672456,dir:'DOWN',posterior:8.5,regime:'RANGE/CHOP',clockAtLock:728,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776739718264,dir:'DOWN',posterior:8.3,regime:'RANGE/CHOP',clockAtLock:682,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776740422182,dir:'DOWN',posterior:7.2,regime:'RANGE/CHOP',clockAtLock:878,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776741357491,dir:'DOWN',posterior:7.2,regime:'RANGE/CHOP',clockAtLock:843,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776742403016,dir:'DOWN',posterior:6.8,regime:'RANGE/CHOP',clockAtLock:697,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776743119467,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:881,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776744034938,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:865,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776744937240,dir:'DOWN',posterior:6.2,regime:'RANGE/CHOP',clockAtLock:863,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776745823975,dir:'DOWN',posterior:7.7,regime:'RANGE/CHOP',clockAtLock:876,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776746727488,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:873,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776747631426,dir:'UP',posterior:74.3,regime:'SHORT SQUEEZE',clockAtLock:869,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776748555699,dir:'DOWN',posterior:6.1,regime:'RANGE/CHOP',clockAtLock:845,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776748636631,dir:'DOWN',posterior:6.7,regime:'RANGE/CHOP',clockAtLock:763,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776749424129,dir:'DOWN',posterior:8.8,regime:'RANGE/CHOP',clockAtLock:876,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776750330449,dir:'DOWN',posterior:8.4,regime:'RANGE/CHOP',clockAtLock:869,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776751307104,dir:'DOWN',posterior:7.7,regime:'RANGE/CHOP',clockAtLock:793,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776752168512,dir:'UP',posterior:72.4,regime:'RANGE/CHOP',clockAtLock:832,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776753042111,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:858,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776754165301,dir:'UP',posterior:73.4,regime:'SHORT SQUEEZE',clockAtLock:635,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776754830274,dir:'DOWN',posterior:6.0,regime:'TRENDING DOWN',clockAtLock:870,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776755728173,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:872,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776756633505,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:867,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776757547585,dir:'DOWN',posterior:8.6,regime:'RANGE/CHOP',clockAtLock:853,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776758428829,dir:'UP',posterior:75.5,regime:'SHORT SQUEEZE',clockAtLock:872,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776759333181,dir:'DOWN',posterior:31.8,regime:'RANGE/CHOP',clockAtLock:867,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776760246540,dir:'DOWN',posterior:30.6,regime:'RANGE/CHOP',clockAtLock:854,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776761211456,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:788,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776762019804,dir:'UP',posterior:75.1,regime:'RANGE/CHOP',clockAtLock:880,hour:5,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776762930253,dir:'UP',posterior:75.2,regime:'SHORT SQUEEZE',clockAtLock:869,hour:5,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776763857323,dir:'DOWN',posterior:8.7,regime:'SHORT SQUEEZE',clockAtLock:842,hour:5,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776793971910,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:428,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776794437610,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:863,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776795330051,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:870,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776796215730,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:884,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776797162666,dir:'DOWN',posterior:7.6,regime:'SHORT SQUEEZE',clockAtLock:837,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776798024282,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:876,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776798947885,dir:'UP',posterior:88.5,regime:'HIGH VOL CHOP',clockAtLock:852,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776799826365,dir:'DOWN',posterior:8.7,regime:'HIGH VOL CHOP',clockAtLock:874,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776800735953,dir:'UP',posterior:87.1,regime:'SHORT SQUEEZE',clockAtLock:864,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776801620045,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:880,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776803656794,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:643,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776805775678,dir:'DOWN',posterior:8.6,regime:'HIGH VOL CHOP',clockAtLock:324,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776808310202,dir:'DOWN',posterior:8.0,regime:'HIGH VOL CHOP',clockAtLock:490,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776809053540,dir:'DOWN',posterior:7.5,regime:'HIGH VOL CHOP',clockAtLock:646,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776809738802,dir:'DOWN',posterior:8.5,regime:'HIGH VOL CHOP',clockAtLock:861,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776810629265,dir:'UP',posterior:89.1,regime:'HIGH VOL CHOP',clockAtLock:870,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776811544897,dir:'DOWN',posterior:6.4,regime:'HIGH VOL CHOP',clockAtLock:855,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776812421573,dir:'DOWN',posterior:8.0,regime:'HIGH VOL CHOP',clockAtLock:878,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776812669613,dir:'UP',posterior:89.0,regime:'SHORT SQUEEZE',clockAtLock:630,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776817255207,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:545,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776818015399,dir:'UP',posterior:51.7,regime:'RANGE/CHOP',clockAtLock:685,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776819717365,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:782,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776820540264,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:859,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776821442251,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:857,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776822321971,dir:'DOWN',posterior:8.0,regime:'RANGE/CHOP',clockAtLock:878,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776823241483,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:858,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776830055338,dir:'UP',posterior:88.1,regime:'RANGE/CHOP',clockAtLock:344,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776830482304,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:818,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776831345036,dir:'DOWN',posterior:6.2,regime:'RANGE/CHOP',clockAtLock:855,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776832239920,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:860,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776833117685,dir:'DOWN',posterior:9.0,regime:'HIGH VOL CHOP',clockAtLock:883,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776834230092,dir:'DOWN',posterior:6.0,regime:'RANGE/CHOP',clockAtLock:670,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776835568287,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:232,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776835845995,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:854,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776836722893,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:878,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776837624794,dir:'DOWN',posterior:8.8,regime:'HIGH VOL CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776838527897,dir:'DOWN',posterior:8.1,regime:'SHORT SQUEEZE',clockAtLock:873,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776839461939,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:838,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776841020326,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:180,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776841233662,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:867,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+];];
 
-const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV108');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
-const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV108',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
+const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV109');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
+const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV109',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
 
 // ── GRADIENT DESCENT WEIGHT UPDATE ──
 // After each trade, credit/blame each signal proportionally to its contribution
@@ -362,7 +445,7 @@ const getMarketSessions=()=>{const now=new Date();const utcH=now.getUTCHours();c
 // ═══════════════════════════════════════
 const useVelocity=(tickH,price,target)=>{const ref=useRef({v1s:0,v5s:0,v15s:0,v30s:0,accel:0,jerk:0,peakPnL:0,troughPnL:0,pnlSlope:0});const pnlH=useRef([]);useEffect(()=>{const iv=setInterval(()=>{if(!price||!target)return;const now=Date.now(),ticks=tickH.current||[];const ga=(ms)=>{const r=ticks.filter(t=>Math.abs((now-t.time)-ms)<2000);return r.length>0?r.reduce((a,b)=>a+b.p,0)/r.length:null;};const p1=ga(1000),p5=ga(5000),p15=ga(15000),p30=ga(30000);const v1s=p1?(price-p1):0,v5s=p5?(price-p5)/5:0,v15s=p15?(price-p15)/15:0,v30s=p30?(price-p30)/30:0;const cpnl=target>0?((price-target)/target)*10000:0;pnlH.current.push({pnl:cpnl,time:now});pnlH.current=pnlH.current.filter(p=>now-p.time<120000);const peakPnL=Math.max(...pnlH.current.map(p=>p.pnl),cpnl);const troughPnL=Math.min(...pnlH.current.map(p=>p.pnl),cpnl);const recent=pnlH.current.filter(p=>now-p.time<10000);const pnlSlope=recent.length>=3?recent[recent.length-1].pnl-recent[0].pnl:0;ref.current={v1s,v5s,v15s,v30s,accel:v5s-v15s,jerk:v1s-v5s,peakPnL,troughPnL,pnlSlope};},500);return()=>clearInterval(iv);},[price,target]);return ref;};
 
-const useGlobalTape=()=>{const tapeRef=useRef({coinbase:{buys:0,sells:0},binanceFutures:{buys:0,sells:0},bybit:{buys:0,sells:0},globalBuys:0,globalSells:0,globalImbalance:1,cbFlow:0,bnFlow:0,byFlow:0,divergence:0,whaleAlerts:[],binancePrice:0,bybitPrice:0});const ticksRef=useRef([]);const[whaleLog,setWhaleLog]=useState([]);const[globalFlow,setGlobalFlow]=useState({imbalance:1,divergence:0,whaleAlert:null,feeds:0,deltaUSD:0});useEffect(()=>{if(typeof window==='undefined')return;let wsBN=null,wsBY=null,feedCount=0;try{wsBN=new WebSocket('wss://fstream.binance.com/ws/btcusdt@aggTrade');wsBN.onopen=()=>{feedCount++;};wsBN.onmessage=(e)=>{try{const d=JSON.parse(e.data);const price=parseFloat(d.p),qty=parseFloat(d.q),usd=price*qty,isBuy=!d.m,now=Date.now();ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'bn',time:now});tapeRef.current.binancePrice=price;if(usd>25000){const alert={src:'Binance',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};tapeRef.current.whaleAlerts.push(alert);tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);setWhaleLog(prev=>[alert,...prev].slice(0,50));}}catch(er){}}}catch(e){}try{wsBY=new WebSocket('wss://stream.bybit.com/v5/public/linear');wsBY.onopen=()=>{feedCount++;wsBY.send(JSON.stringify({op:'subscribe',args:['publicTrade.BTCUSDT']}));};wsBY.onmessage=(e)=>{try{const msg=JSON.parse(e.data);if(msg.topic==='publicTrade.BTCUSDT'&&msg.data){msg.data.forEach(trade=>{const price=parseFloat(trade.p),qty=parseFloat(trade.v),usd=price*qty,isBuy=trade.S==='Buy',now=Date.now();ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'by',time:now});tapeRef.current.bybitPrice=price;if(usd>25000){const alert={src:'Bybit',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};tapeRef.current.whaleAlerts.push(alert);tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);setWhaleLog(prev=>[alert,...prev].slice(0,50));}});}}catch(er){}}}catch(e){}const aggIv=setInterval(()=>{const now=Date.now();ticksRef.current=ticksRef.current.filter(t=>now-t.time<30000);let cbB=0,cbS=0,bnB=0,bnS=0,byB=0,byS=0;ticksRef.current.forEach(t=>{const u=t.usd||(t.s*t.p);if(t.src==='cb'){if(t.t==='B')cbB+=u;else cbS+=u;}else if(t.src==='bn'){if(t.t==='B')bnB+=u;else bnS+=u;}else if(t.src==='by'){if(t.t==='B')byB+=u;else byS+=u;}});const gB=cbB+bnB+byB,gS=cbS+bnS+byS,gI=gS===0?(gB>0?2:1):gB/gS;const cbF=(cbB+cbS)>0?(cbB-cbS)/(cbB+cbS):0,bnF=(bnB+bnS)>0?(bnB-bnS)/(bnB+bnS):0,byF=(byB+byS)>0?(byB-byS)/(byB+byS):0;const dF=(bnB+byB-bnS-byS),sF=(cbB-cbS);const div=(bnB+bnS+byB+byS)>0?(sF>0&&dF<0?-1:sF<0&&dF>0?1:0)*Math.min(1,Math.abs(sF-dF)/Math.max(1,gB+gS)*10):0;tapeRef.current={...tapeRef.current,coinbase:{buys:cbB,sells:cbS},binanceFutures:{buys:bnB,sells:bnS},bybit:{buys:byB,sells:byS},globalBuys:gB,globalSells:gS,globalImbalance:gI,cbFlow:cbF,bnFlow:bnF,byFlow:byF,divergence:div};const rW=tapeRef.current.whaleAlerts.find(w=>now-w.time<5000);setGlobalFlow({imbalance:gI,divergence:div,whaleAlert:rW||null,feeds:feedCount,deltaUSD:gB-gS});},1000);return()=>{clearInterval(aggIv);if(wsBN?.readyState===1)wsBN.close();if(wsBY?.readyState===1)wsBY.close();};},[]);return{tapeRef,globalFlow,ticksRef,whaleLog};};
+const useGlobalTape=()=>{const tapeRef=useRef({coinbase:{buys:0,sells:0},binanceFutures:{buys:0,sells:0},bybit:{buys:0,sells:0},globalBuys:0,globalSells:0,globalImbalance:1,cbFlow:0,bnFlow:0,byFlow:0,divergence:0,whaleAlerts:[],binancePrice:0,bybitPrice:0});const ticksRef=useRef([]);const[whaleLog,setWhaleLog]=useState([]);const[globalFlow,setGlobalFlow]=useState({imbalance:1,divergence:0,whaleAlert:null,feeds:0,deltaUSD:0});useEffect(()=>{if(typeof window==='undefined')return;let wsBN=null,wsBY=null,feedCount=0;try{wsBN=new WebSocket('wss://fstream.binance.com/ws/btcusdt@aggTrade');wsBN.onopen=()=>{feedCount++;};wsBN.onmessage=(e)=>{try{const d=JSON.parse(e.data);const price=parseFloat(d.p),qty=parseFloat(d.q),usd=price*qty,isBuy=!d.m,now=Date.now();ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'bn',time:now});tapeRef.current.binancePrice=price;if(usd>100000){const alert={src:'Binance',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};tapeRef.current.whaleAlerts.push(alert);tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);setWhaleLog(prev=>[alert,...prev].slice(0,30));}}catch(er){}}}catch(e){}try{wsBY=new WebSocket('wss://stream.bybit.com/v5/public/linear');wsBY.onopen=()=>{feedCount++;wsBY.send(JSON.stringify({op:'subscribe',args:['publicTrade.BTCUSDT']}));};wsBY.onmessage=(e)=>{try{const msg=JSON.parse(e.data);if(msg.topic==='publicTrade.BTCUSDT'&&msg.data){msg.data.forEach(trade=>{const price=parseFloat(trade.p),qty=parseFloat(trade.v),usd=price*qty,isBuy=trade.S==='Buy',now=Date.now();ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'by',time:now});tapeRef.current.bybitPrice=price;if(usd>100000){const alert={src:'Bybit',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};tapeRef.current.whaleAlerts.push(alert);tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);setWhaleLog(prev=>[alert,...prev].slice(0,30));}});}}catch(er){}}}catch(e){}const aggIv=setInterval(()=>{const now=Date.now();ticksRef.current=ticksRef.current.filter(t=>now-t.time<30000);let cbB=0,cbS=0,bnB=0,bnS=0,byB=0,byS=0;ticksRef.current.forEach(t=>{const u=t.usd||(t.s*t.p);if(t.src==='cb'){if(t.t==='B')cbB+=u;else cbS+=u;}else if(t.src==='bn'){if(t.t==='B')bnB+=u;else bnS+=u;}else if(t.src==='by'){if(t.t==='B')byB+=u;else byS+=u;}});const gB=cbB+bnB+byB,gS=cbS+bnS+byS,gI=gS===0?(gB>0?2:1):gB/gS;const cbF=(cbB+cbS)>0?(cbB-cbS)/(cbB+cbS):0,bnF=(bnB+bnS)>0?(bnB-bnS)/(bnB+bnS):0,byF=(byB+byS)>0?(byB-byS)/(byB+byS):0;const dF=(bnB+byB-bnS-byS),sF=(cbB-cbS);const div=(bnB+bnS+byB+byS)>0?(sF>0&&dF<0?-1:sF<0&&dF>0?1:0)*Math.min(1,Math.abs(sF-dF)/Math.max(1,gB+gS)*10):0;tapeRef.current={...tapeRef.current,coinbase:{buys:cbB,sells:cbS},binanceFutures:{buys:bnB,sells:bnS},bybit:{buys:byB,sells:byS},globalBuys:gB,globalSells:gS,globalImbalance:gI,cbFlow:cbF,bnFlow:bnF,byFlow:byF,divergence:div};const rW=tapeRef.current.whaleAlerts.find(w=>now-w.time<5000);setGlobalFlow({imbalance:gI,divergence:div,whaleAlert:rW||null,feeds:feedCount,deltaUSD:gB-gS});},1000);return()=>{clearInterval(aggIv);if(wsBN?.readyState===1)wsBN.close();if(wsBY?.readyState===1)wsBY.close();};},[]);return{tapeRef,globalFlow,ticksRef,whaleLog};};
 
 const useBloomberg=()=>{const[data,setData]=useState({fundingRate:0,fundingRatePrev:0,nextFundingTime:0,openInterest:0,openInterestUSD:0,oiChange5m:0,basisBps:0,markPrice:0,indexPrice:0,longShortRatio:1,topTraderLSPositions:1,binanceFuturesVol24h:0,liqLongWall:0,liqShortWall:0,liqLongUSD:0,liqShortUSD:0,lastUpdate:0,status:'connecting'});const oiSnaps=useRef([]);useEffect(()=>{if(typeof window==='undefined')return;const f=async()=>{try{const R=await Promise.allSettled([fetch('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=3').then(r=>r.json()),fetch('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1').then(r=>r.json()),fetch('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=BTCUSDT&period=5m&limit=1').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=50').then(r=>r.json())]);const[pR,oR,fR,gR,tR,t24R,dR]=R;const now=Date.now();let u={lastUpdate:now,status:'live'};if(pR.status==='fulfilled'&&pR.value){const p=pR.value;const mk=parseFloat(p.markPrice)||0,ix=parseFloat(p.indexPrice)||0;u.fundingRate=parseFloat(p.lastFundingRate)||0;u.markPrice=mk;u.indexPrice=ix;u.basisBps=ix>0?((mk-ix)/ix)*10000:0;u.nextFundingTime=parseInt(p.nextFundingTime)||0;}if(oR.status==='fulfilled'&&oR.value){const oi=parseFloat(oR.value.openInterest)||0;oiSnaps.current.push({oi,time:now});oiSnaps.current=oiSnaps.current.filter(s=>now-s.time<600000);const o5=oiSnaps.current.find(s=>now-s.time>=270000&&now-s.time<=330000);u.openInterest=oi;u.openInterestUSD=oi*(u.markPrice||0);u.oiChange5m=o5?((oi-o5.oi)/o5.oi)*100:0;}if(fR.status==='fulfilled'&&Array.isArray(fR.value)&&fR.value.length>=2)u.fundingRatePrev=parseFloat(fR.value[1]?.fundingRate)||0;if(gR.status==='fulfilled'&&Array.isArray(gR.value)&&gR.value[0])u.longShortRatio=parseFloat(gR.value[0].longShortRatio)||1;if(tR.status==='fulfilled'&&Array.isArray(tR.value)&&tR.value[0])u.topTraderLSPositions=parseFloat(tR.value[0].longShortRatio)||1;if(t24R.status==='fulfilled'&&t24R.value)u.binanceFuturesVol24h=parseFloat(t24R.value.quoteVolume)||0;if(dR.status==='fulfilled'&&dR.value?.bids&&dR.value?.asks){const mp=u.markPrice||0;if(mp>0){let mBW=0,mBP=0,tBL=0,mAW=0,mAP=0,tAL=0;dR.value.bids.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((mp-pr)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tBL+=usd;if(usd>mBW){mBW=usd;mBP=pr;}}});dR.value.asks.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((pr-mp)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tAL+=usd;if(usd>mAW){mAW=usd;mAP=pr;}}});u.liqLongWall=mAP;u.liqShortWall=mBP;u.liqLongUSD=tAL;u.liqShortUSD=tBL;}}setData(prev=>({...prev,...u}));}catch(e){setData(prev=>({...prev,status:'error'}));}};f();const iv=setInterval(f,8000);return()=>clearInterval(iv);},[]);return data;};
 
@@ -508,29 +591,66 @@ const computeAdvisor=(params)=>{
   const momentumWith=(isUP&&tickSlope>0)||(isDN&&tickSlope<0);
   const momentumAgainst=(isUP&&tickSlope<0)||(isDN&&tickSlope>0);
   const adverseAccel=(isUP&&(accel||0)<-0.5)||(isDN&&(accel||0)>0.5);
-  const winSide=isUP?posterior:(100-posterior);
-  const isWinning=winSide>52;
+  const winSide=isUP?posterior:(100-posterior); // Tara model confidence only
+  // REAL truth: is price actually above/below strike right now?
   const gapForPosition=isUP?gapBps:-gapBps;
-  const gapStr=`Gap: ${gapForPosition>=0?'+':''}${gapBps.toFixed(0)} bps`;
+  const isActuallyWinning=gapForPosition>0;
+  const isActuallyLosing=gapForPosition<-5;
+  const gapMagnitude=Math.abs(gapForPosition);
+  const gapStr=`Gap: ${gapForPosition>=0?'+':''}${gapForPosition.toFixed(1)} bps`;
+  // Direction reliability factor from 211-trade data: UP 69%, DOWN 55%
+  const dirReliability=isUP?1.0:0.80;
+  // Regime reliability from data: SS 67%, TD 86%, HVC 59%, RC 56%
+  const _rg=regime||'RANGE/CHOP';
+  const regimeReliability=_rg==='TRENDING DOWN'?1.28:_rg==='SHORT SQUEEZE'?1.0:_rg==='HIGH VOL CHOP'?0.88:0.84;
+  // Comeback score: how likely is Tara's model to be right when adverse?
+  // High score = hold, low score = cut
+  const comebackScore=Math.max(0,
+    (winSide*dirReliability*regimeReliability)   // base model confidence adjusted
+    - (gapMagnitude*2.5)                          // penalise depth of adverse
+    - (isLate?25:0)                               // time pressure penalty
+    - (adverseAccel?15:0)                         // momentum worsening penalty
+    + (momentumWith?10:0)                         // momentum recovering bonus
+  );
 
-  // Priority chain (highest first)
+  // ── 1. HARD STOPS — always fire first ────────────────────────────────────
   if(positionStatus?.isStopHit)return{label:'30% STOP HIT — EXIT NOW',reason:`Hard stop breached. Entry: $${(positionStatus.entry||0).toFixed(0)} → Now: $${cp.toFixed(0)}. PnL: ${pnlPct.toFixed(1)}%. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EXECUTE EMERGENCY EXIT',actionTarget:'SIT OUT'};
-  if(isRugPull&&showRugPullAlerts&&isUP)return{label:'RUG PULL — EMERGENCY EXIT',reason:`Catastrophic liquidity drop. Exit long immediately. Price collapsing. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EMERGENCY CASHOUT',actionTarget:'SIT OUT'};
-  if(winSide<20&&timeRemainingFrac>0.25&&!offerAboveBet)return{label:'EXIT NOW — ODDS COLLAPSED',reason:`Win rate at ${winSide.toFixed(0)}% with ${timeLabel} left. Exit and wait for Tara's next call. ${gapStr}. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EXIT TRADE',actionTarget:'SIT OUT'};
-  if(winSide<20&&!offerAboveBet)return{label:'CUT LOSSES — EXIT NOW',reason:`Win rate at ${winSide.toFixed(0)}%. Cut and protect capital. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT LOSSES — CASHOUT',actionTarget:'SIT OUT'};
-  if(profitPct>40&&momentumAgainst)return{label:'TAKE MAX PROFIT',reason:`Outstanding profit (+${profitPct.toFixed(0)}%). Momentum reversing. Lock it in now. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:true,hasAction:true,actionLabel:'CASHOUT — MAX PROFIT',actionTarget:'CASH'};
-  if(profitPct>20&&drawdownFromPeak>0.12)return{label:'TRAILING STOP HIT',reason:`Pulled back ${(drawdownFromPeak*100).toFixed(0)}% from peak offer. Securing profits before further drop. [${timeLabel}]`,color:'emerald',animate:true,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'CASH'};
-  if(profitPct>12&&momentumAgainst&&isLate)return{label:'SCALP PROFIT',reason:`+${profitPct.toFixed(0)}% on offer with ${timeLabel} left. Momentum fading — scalp now. ${gapStr}.`,color:'emerald',animate:false,hasAction:true,actionLabel:'SCALP CASHOUT',actionTarget:'CASH'};
-  if(offerAboveBet&&momentumAgainst&&winSide<60)return{label:'SECURE PROFIT',reason:`Profit on table (+${profitPct.toFixed(0)}%) but odds slipping to ${winSide.toFixed(0)}%. Consider exit. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'CASH'};
-  // Only fire loss signals when position is actually losing (not in profit on offer)
-  if(winSide<38&&momentumAgainst&&adverseAccel&&!offerAboveBet)return{label:'CUT LOSSES — NOW',reason:`${winSide.toFixed(0)}% win rate + adverse acceleration. Exit before this worsens. ${gapStr}. [${timeLabel}]`,color:'rose',animate:false,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'SIT OUT'};
-  if(winSide<42&&isLate&&!isWinning&&!offerAboveBet)return{label:'CUT LOSSES',reason:`Only ${timeLabel} remain. At ${winSide.toFixed(0)}% odds and losing — unlikely recovery. ${gapStr}.`,color:'rose',animate:false,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'SIT OUT'};
-  if(winSide<42&&momentumAgainst&&!offerAboveBet)return{label:'CUT LOSSES',reason:`Win rate declining (${winSide.toFixed(0)}%) with momentum against. ${gapStr}. [${timeLabel}]`,color:'rose',animate:false,hasAction:true,actionLabel:'EXIT IF NEEDED',actionTarget:'SIT OUT'};
-  if(winSide>82&&!offerAboveBet)return{label:'MAX PROFIT ZONE',reason:`Odds at ${winSide.toFixed(0)}% — excellent position. Stand by to lock gains if offer appears. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT IF OFFERED',actionTarget:'CASH'};
-  if(isWinning&&momentumWith)return{label:'HOLD STRONG',reason:`Win rate: ${winSide.toFixed(0)}%. Momentum aligned. Price firmly ${gapForPosition>=0?'above':'below'} strike by ${Math.abs(gapBps).toFixed(0)} bps. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
-  if(isWinning&&!momentumAgainst)return{label:'HOLD FIRM',reason:`${winSide.toFixed(0)}% win chance. ${gapStr}. Momentum neutral — position stable. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
-  if(!isWinning&&momentumWith)return{label:'RECOVERY IN PROGRESS',reason:`Price moving toward strike. Momentum is with you. ${gapStr}. Win rate: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'EXIT EARLY',actionTarget:'SIT OUT'};
-  return{label:'HOLD FIRM',reason:`${winSide.toFixed(0)}% win rate. ${gapStr}. Watching for cleaner signal. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+  if(isRugPull&&showRugPullAlerts&&isUP)return{label:'RUG PULL — EMERGENCY EXIT',reason:`Catastrophic drop detected. Exit long immediately. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EMERGENCY CASHOUT',actionTarget:'SIT OUT'};
+
+  // ── 2. DEEP ADVERSE — always cut regardless of model confidence ───────────
+  // Data: even 89% UP calls fail in adverse. Don't let model override reality.
+  if(gapMagnitude>30&&isActuallyLosing)return{label:'CUT LOSSES — EXIT NOW',reason:`${gapMagnitude.toFixed(0)} bps adverse — too deep to recover. ${gapStr}. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT NOW',actionTarget:'SIT OUT'};
+
+  // ── 3. REAL PROFIT ON TABLE — offer above your bet ────────────────────────
+  if(profitPct>40&&momentumAgainst)return{label:'TAKE MAX PROFIT',reason:`+${profitPct.toFixed(0)}% on offer. Momentum reversing — lock in now before it fades. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:true,hasAction:true,actionLabel:'CASHOUT — MAX PROFIT',actionTarget:'CASH'};
+  if(profitPct>20&&drawdownFromPeak>0.12)return{label:'TRAILING STOP HIT',reason:`Offer pulled back ${(drawdownFromPeak*100).toFixed(0)}% from its peak. Protect your gains now. [${timeLabel}]`,color:'emerald',animate:true,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'CASH'};
+  if(profitPct>12&&momentumAgainst&&isLate)return{label:'SCALP PROFIT',reason:`+${profitPct.toFixed(0)}% with ${timeLabel} left. Momentum turning — good time to scalp. ${gapStr}.`,color:'emerald',animate:false,hasAction:true,actionLabel:'SCALP CASHOUT',actionTarget:'CASH'};
+  if(profitPct>8&&isLate)return{label:'SECURE PROFIT',reason:`Profit on table (+${profitPct.toFixed(0)}%) and time running out. Consider locking in. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'CASH'};
+  if(offerAboveBet&&momentumAgainst&&winSide<60)return{label:'SECURE PROFIT',reason:`+${profitPct.toFixed(0)}% profit but odds slipping. Consider exit. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'CASH'};
+
+  // ── 4. ADVERSE POSITION — comeback score decides hold vs cut ─────────────
+  // comebackScore > 55: Tara is highly confident, regime reliable, momentum helping
+  // comebackScore 35-55: borderline — monitor
+  // comebackScore < 35: cut losses
+  if(isActuallyLosing){
+    if(comebackScore<35||isVeryLate)return{label:'CUT LOSSES — EXIT NOW',reason:`${gapMagnitude.toFixed(0)} bps adverse. Comeback score: ${comebackScore.toFixed(0)}/100 — not worth holding. ${gapStr}. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT LOSSES NOW',actionTarget:'SIT OUT'};
+    if(isLate&&comebackScore<55)return{label:'CUT LOSSES',reason:`${gapMagnitude.toFixed(0)} bps adverse with ${timeLabel} left. Score: ${comebackScore.toFixed(0)}/100. Take the loss. ${gapStr}.`,color:'rose',animate:false,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'SIT OUT'};
+    if(comebackScore>65&&momentumWith)return{label:'TARA HOLDS — RECOVERY LIKELY',reason:`${gapMagnitude.toFixed(0)} bps adverse BUT comeback score ${comebackScore.toFixed(0)}/100 — high confidence recovery. ${gapStr}. [${timeLabel}]`,color:'amber',animate:true,hasAction:true,actionLabel:'EXIT IF UNSURE',actionTarget:'SIT OUT'};
+    if(comebackScore>50)return{label:'ADVERSE — TARA WATCHING',reason:`${gapMagnitude.toFixed(0)} bps adverse. Score: ${comebackScore.toFixed(0)}/100. Tara: ${winSide.toFixed(0)}% confident. Momentum${momentumWith?' turning':' flat'}. ${gapStr}. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'EXIT IF NEEDED',actionTarget:'SIT OUT'};
+    return{label:'ADVERSE — EXIT IF NEEDED',reason:`${gapMagnitude.toFixed(0)} bps adverse. Score: ${comebackScore.toFixed(0)}/100. Momentum against. Consider exit. ${gapStr}. [${timeLabel}]`,color:'rose',animate:false,hasAction:true,actionLabel:'EXIT IF NEEDED',actionTarget:'SIT OUT'};
+  }
+
+  // ── 5. NEAR STRIKE (small adverse buffer zone) ─────────────────────────────
+  if(!isActuallyWinning&&momentumWith)return{label:'RECOVERY IN PROGRESS',reason:`Price moving toward strike. Tara: ${winSide.toFixed(0)}%. Comeback score: ${comebackScore.toFixed(0)}/100. ${gapStr}. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'EXIT EARLY',actionTarget:'SIT OUT'};
+  if(!isActuallyWinning)return{label:'AT STRIKE — WATCH CLOSELY',reason:`Price at strike (${gapStr}). No clear edge. Tara: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'EXIT IF NEEDED',actionTarget:'SIT OUT'};
+
+  // ── 6. WINNING POSITION ────────────────────────────────────────────────────
+  if(isActuallyWinning&&winSide>80&&!offerAboveBet)return{label:'MAX PROFIT ZONE',reason:`${gapForPosition.toFixed(0)} bps favorable. Tara: ${winSide.toFixed(0)}% confident. Wait for offer to appear. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT IF OFFERED',actionTarget:'CASH'};
+  if(isActuallyWinning&&momentumWith&&gapMagnitude>10)return{label:'HOLD STRONG',reason:`${gapForPosition.toFixed(0)} bps above/below strike. Momentum aligned. ${gapStr}. Tara: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+  if(isActuallyWinning&&momentumAgainst)return{label:'SECURE HOLD — WATCH MOMENTUM',reason:`Winning by ${gapForPosition.toFixed(0)} bps but momentum flipping. Consider locking in. ${gapStr}. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+  if(isActuallyWinning&&isLate)return{label:'HOLD FIRM — ALMOST THERE',reason:`${gapForPosition.toFixed(0)} bps favorable with ${timeLabel} left. ${gapStr}. Tara: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+  if(isActuallyWinning)return{label:'HOLD FIRM',reason:`${gapStr}. Tara: ${winSide.toFixed(0)}% win rate. Position solid. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+  return{label:'HOLD FIRM',reason:`${gapStr}. Tara: ${winSide.toFixed(0)}% win rate. Watching for cleaner signal. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
 };
 
 // ═══════════════════════════════════════
@@ -702,11 +822,11 @@ function TaraApp(){
   const[showRugPullAlerts,setShowRugPullAlerts]=useState(true);
   const[showSettings,setShowSettings]=useState(false);
   const[discordWebhook,setDiscordWebhook]=useState('');
-  const[discordUsername,setDiscordUsername]=useState('Tara Terminal V108');
+  const[discordUsername,setDiscordUsername]=useState('Tara Terminal V109');
   const[discordAvatar,setDiscordAvatar]=useState('');
   const[windowRecap,setWindowRecap]=useState(null); // {won,dir,closePrice,strike,gapBps,regime} — clears after 6s
   const[sessionPnL,setSessionPnL]=useState(0);      // dollar P&L this browser session
-  const[lifetimePnL,setLifetimePnL]=useState(()=>{try{return parseFloat(localStorage.getItem('taraV108PnL')||'0');}catch(e){return 0;}})
+  const[lifetimePnL,setLifetimePnL]=useState(()=>{try{return parseFloat(localStorage.getItem('taraV109PnL')||'0');}catch(e){return 0;}})
   // MTF: track last known lock for each timeframe so we can detect confluence
   const mtfLocksRef=useRef({'5m':null,'15m':null}); // {dir,lockedAt,posterior};
 
@@ -754,14 +874,14 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:256,losses:157},'5m':{wins:10,losses:7}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:301,losses:195},'5m':{wins:10,losses:7}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:10,losses:1},   // 91% WR (n=11) — extremely reliable
-    'HIGH VOL CHOP': {wins:8,losses:7},    // 53% WR (n=15) — coin flip, be selective
-    'SHORT SQUEEZE': {wins:33,losses:10},  // 77% WR (n=43) — primary regime, trust calls
+    'HIGH VOL CHOP': {wins:20,losses:14},  // 59% WR (n=34) — improving, moderate confidence
+    'SHORT SQUEEZE': {wins:48,losses:24},  // 67% WR (n=72) — primary regime, trust calls
     'LONG SQUEEZE':  {wins:0,losses:0},
-    'RANGE/CHOP':    {wins:35,losses:24},  // 59% WR (n=59) — solid, trade with confidence
+    'RANGE/CHOP':    {wins:51,losses:40},  // 56% WR (n=91) — slight edge, be selective
   });
   const lastRegimeRef=useRef('RANGE/CHOP');
   // ── TARA SELF-TRAINING STATE ──
@@ -801,7 +921,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V108 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V109 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -870,8 +990,8 @@ function TaraApp(){
         }
       }).catch(()=>{});
     }
-    try{const s=localStorage.getItem('taraV108Score');if(s){const p=JSON.parse(s);if(p?.['15m']?.wins!=null)setScorecards(p);}const m=localStorage.getItem('taraV108Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV108Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV108TZ');if(tz!=null)setUseLocalTime(tz==='true');const du=localStorage.getItem('taraV108DU');if(du)setDiscordUsername(du);const da=localStorage.getItem('taraV108DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
-  useEffect(()=>{if(!isMounted)return;try{localStorage.setItem('taraV108Score',JSON.stringify(scorecards));localStorage.setItem('taraV108Mem',JSON.stringify(regimeMemory));localStorage.setItem('taraV108Hook',discordWebhook);localStorage.setItem('taraV108TZ',String(useLocalTime));localStorage.setItem('taraV108DU',discordUsername);localStorage.setItem('taraV108DA',discordAvatar);}catch(e){};},[scorecards,regimeMemory,discordWebhook,useLocalTime,discordUsername,discordAvatar,isMounted]);
+    try{const s=localStorage.getItem('taraV109Score');if(s){const p=JSON.parse(s);if(p?.['15m']?.wins!=null)setScorecards(p);}const m=localStorage.getItem('taraV109Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV109Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV109TZ');if(tz!=null)setUseLocalTime(tz==='true');const du=localStorage.getItem('taraV109DU');if(du)setDiscordUsername(du);const da=localStorage.getItem('taraV109DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
+  useEffect(()=>{if(!isMounted)return;try{localStorage.setItem('taraV109Score',JSON.stringify(scorecards));localStorage.setItem('taraV109Mem',JSON.stringify(regimeMemory));localStorage.setItem('taraV109Hook',discordWebhook);localStorage.setItem('taraV109TZ',String(useLocalTime));localStorage.setItem('taraV109DU',discordUsername);localStorage.setItem('taraV109DA',discordAvatar);}catch(e){};},[scorecards,regimeMemory,discordWebhook,useLocalTime,discordUsername,discordAvatar,isMounted]);
 
   useEffect(()=>{if(!currentPrice)return;const iv=setInterval(()=>{priceMemoryRef.current.push({p:currentPrice,time:Date.now()});priceMemoryRef.current=priceMemoryRef.current.filter(t=>Date.now()-t.time<600000);},2000);return()=>clearInterval(iv);},[currentPrice]);
 
@@ -947,8 +1067,8 @@ function TaraApp(){
     if(!discordWebhook||!discordWebhook.startsWith('http'))return;
     try{
       let embed={};
-      if(type==='SIGNAL')embed={title:`${data.dir==='UP'?'🟢':'🔴'} TARA V108 SIGNAL: ${data.dir}`,color:data.dir==='UP'?3404125:16478549,fields:[{name:'BTC Price',value:`$${data.price.toFixed(2)}`,inline:true},{name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},{name:'Gap',value:`${data.gap.toFixed(2)} bps`,inline:true},{name:'Clock',value:data.clock,inline:true}],timestamp:new Date().toISOString()};
-      else if(type==='LOCK')embed={title:`TARA V108 — ${data.dir} LOCKED`,color:data.dir==='UP'?3404125:16478549,description:`**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(2)} bps | **Clock:** ${data.clock}`,timestamp:new Date().toISOString()};
+      if(type==='SIGNAL')embed={title:`${data.dir==='UP'?'🟢':'🔴'} TARA V109 SIGNAL: ${data.dir}`,color:data.dir==='UP'?3404125:16478549,fields:[{name:'BTC Price',value:`$${data.price.toFixed(2)}`,inline:true},{name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},{name:'Gap',value:`${data.gap.toFixed(2)} bps`,inline:true},{name:'Clock',value:data.clock,inline:true}],timestamp:new Date().toISOString()};
+      else if(type==='LOCK')embed={title:`TARA V109 — ${data.dir} LOCKED`,color:data.dir==='UP'?3404125:16478549,description:`**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(2)} bps | **Clock:** ${data.clock}`,timestamp:new Date().toISOString()};
       else if(type==='CLOSE'){
         const gap=data.strike>0?((data.price-data.strike)/data.strike*10000):0;
         const gapStr=gap>=0?`+${gap.toFixed(1)}`:`${gap.toFixed(1)}`;
@@ -968,13 +1088,13 @@ function TaraApp(){
             {name:'Gap at Close',value:`${gapStr} bps ${data.won?(data.dir==='UP'?'🟢 above':'🟢 below'):(data.dir==='UP'?'🔴 below':'🔴 above')}`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L (${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%)`,inline:false},
           ],
-          footer:{text:'Tara V108'},
+          footer:{text:'Tara V109'},
           timestamp:new Date().toISOString(),
         };
       }
       else if(type==='EXIT')embed={title:`${data.result==='WIN'?'💰':'✂️'} ${data.action}`,color:data.result==='WIN'?3404125:16478549,description:`**Action:** ${data.action}\n**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(1)} bps | **Clock:** ${data.clock}\n**Regime:** ${data.regime}`,timestamp:new Date().toISOString()};
       // Use ?wait=true so Discord returns the message object with ID
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara Terminal V108',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara Terminal V109',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -993,7 +1113,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'📝 **Note:** '+noteText,
-        footer:{text:`Tara V108 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V109 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -1020,7 +1140,7 @@ function TaraApp(){
     setSessionPnL(prev=>prev+delta);
     setLifetimePnL(prev=>{
       const next=prev+delta;
-      try{localStorage.setItem('taraV108PnL',String(next));}catch(e){}
+      try{localStorage.setItem('taraV109PnL',String(next));}catch(e){}
       return next;
     });
   };
@@ -1131,7 +1251,7 @@ function TaraApp(){
       const isCalibrating=(intervalSeconds-clockSeconds)<10;
       const isEarlyWindow=is15m?((intervalSeconds-clockSeconds)<300):((intervalSeconds-clockSeconds)<90);
 
-      // V108 weighted posterior (adaptive)
+      // V109 weighted posterior (adaptive)
       const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE/CHOP',calibration});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb}=eng;
       lastRegimeRef.current=regime;
@@ -1223,7 +1343,7 @@ function TaraApp(){
       let kellyPct=0;
       if((isUP||isDN)&&betAmount>0&&maxPayout>betAmount){const b=(maxPayout-betAmount)/betAmount;const p=currentOdds/100;const k=((p*b)-(1-p))/b;kellyPct=Math.max(0,(k/2)*100);}
 
-      // V108 Smart Advisor — lock-state-aware
+      // V109 Smart Advisor — lock-state-aware
       const advisor=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps,activePrediction,lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null});
 
       // Projections
@@ -1354,7 +1474,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara V108...</div>;
+  if(!isMounted)return<div className="min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse">Initializing Tara V109...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -1374,7 +1494,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className="hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V108
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V109
             </span>
           </div>
 
@@ -1513,7 +1633,7 @@ function TaraApp(){
                       <div className="flex items-center gap-1">
                         <span className="text-[9px] text-[#E8E9E4]/30 uppercase">All-time</span>
                         <span className={`text-[11px] font-mono font-bold ${lifetimePnL>0?'text-emerald-300':'text-rose-300'}`}>{lifetimePnL>0?'+':''}{lifetimePnL>=0?'$'+lifetimePnL.toFixed(2):'-$'+Math.abs(lifetimePnL).toFixed(2)}</span>
-                        <button onClick={()=>{if(confirm('Reset lifetime P&L to zero?')){setLifetimePnL(0);try{localStorage.removeItem('taraV108PnL');}catch(e){}}}} className="text-[8px] text-[#E8E9E4]/20 hover:text-rose-400 ml-0.5" title="Reset lifetime P&L">✕</button>
+                        <button onClick={()=>{if(confirm('Reset lifetime P&L to zero?')){setLifetimePnL(0);try{localStorage.removeItem('taraV109PnL');}catch(e){}}}} className="text-[8px] text-[#E8E9E4]/20 hover:text-rose-400 ml-0.5" title="Reset lifetime P&L">✕</button>
                       </div>
                     )}
                   </div>
@@ -1794,7 +1914,7 @@ function TaraApp(){
             </div>
             {analysis&&(
               <div className="bg-[#181A19] p-2.5 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-[140px]">
-                <div className="flex items-center gap-1.5 mb-1.5 border-b border-[#E8E9E4]/10 pb-1"><IC.Terminal className="w-3.5 h-3.5 text-amber-400"/><h2 className="text-xs font-bold text-[#E8E9E4]/70 uppercase tracking-wide">Engine Logs (V108)</h2></div>
+                <div className="flex items-center gap-1.5 mb-1.5 border-b border-[#E8E9E4]/10 pb-1"><IC.Terminal className="w-3.5 h-3.5 text-amber-400"/><h2 className="text-xs font-bold text-[#E8E9E4]/70 uppercase tracking-wide">Engine Logs (V109)</h2></div>
                 <div className="space-y-1 overflow-y-auto flex-1 font-mono max-h-48 lg:max-h-none" style={{scrollbarWidth:'thin'}}>
                   {(analysis.reasoning||[]).map((r,i)=>(
                     <div key={i} className={`p-1.5 rounded text-xs flex items-start gap-1 uppercase ${r.includes('CAP')||r.includes('GRAVITY')||r.includes('MEMORY')?'text-rose-400 border border-rose-500/20 bg-rose-500/5':r.includes('ALIGNED')||r.includes('STRUCTURE')?'text-emerald-400 border border-emerald-500/20 bg-emerald-500/5':'text-[#E8E9E4]/60 border border-[#E8E9E4]/5'}`}>
@@ -1857,7 +1977,7 @@ function TaraApp(){
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <div>
                   <label className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-wide mb-1 block">Bot Display Name</label>
-                  <input type="text" value={discordUsername} onChange={e=>setDiscordUsername(e.target.value)} placeholder="Tara Terminal V108" className="w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white"/>
+                  <input type="text" value={discordUsername} onChange={e=>setDiscordUsername(e.target.value)} placeholder="Tara Terminal V109" className="w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white"/>
                 </div>
                 <div>
                   <label className="text-[10px] text-[#E8E9E4]/40 uppercase tracking-wide mb-1 block">Avatar Image URL</label>
@@ -1868,7 +1988,7 @@ function TaraApp(){
                 <div className="flex items-center gap-2 mb-3 p-2 bg-[#111312] rounded-lg border border-[#E8E9E4]/8">
                   <img src={discordAvatar} alt="Bot avatar preview" className="w-8 h-8 rounded-full object-cover border border-[#E8E9E4]/20" onError={e=>e.target.style.display='none'}/>
                   <div>
-                    <div className="text-xs font-bold text-white">{discordUsername||'Tara Terminal V108'}</div>
+                    <div className="text-xs font-bold text-white">{discordUsername||'Tara Terminal V109'}</div>
                     <div className="text-[10px] text-[#E8E9E4]/40">Preview of how bot appears in Discord</div>
                   </div>
                 </div>
@@ -1944,7 +2064,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96">
-            <div className="bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10"><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat w/ Tara V108</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className="bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10"><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat w/ Tara V109</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50" style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -2242,7 +2362,7 @@ function TaraApp(){
             <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10">
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V108 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V109 Works
                 </h2>
                 <p className="text-xs text-[#E8E9E4]/40 mt-0.5">Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -2381,11 +2501,11 @@ function TaraApp(){
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl" style={{scrollbarWidth:'thin'}}>
             <div className="sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center">
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V108 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V109 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className="text-[#E8E9E4]/50 hover:text-white"><IC.X className="w-5 h-5"/></button>
             </div>
             <div className="p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80">
-              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">V108 Prediction Engine</h3><p className="leading-relaxed">Predictions now use a <strong>6-signal weighted composite</strong> instead of simple addition: (1) Gap Gravity, (2) Momentum Composite with alignment detection, (3) Candle Structure — consecutive candles + volume confirmation, (4) Flow Imbalance, (5) Technical Composite — RSI divergence, VWAP, Bollinger Bands, price channel, (6) Funding Momentum. Signals are weighted by reliability, preventing single-factor dominance.</p></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">V109 Prediction Engine</h3><p className="leading-relaxed">Predictions now use a <strong>6-signal weighted composite</strong> instead of simple addition: (1) Gap Gravity, (2) Momentum Composite with alignment detection, (3) Candle Structure — consecutive candles + volume confirmation, (4) Flow Imbalance, (5) Technical Composite — RSI divergence, VWAP, Bollinger Bands, price channel, (6) Funding Momentum. Signals are weighted by reliability, preventing single-factor dominance.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">Smart Advisor (In-Trade)</h3><p className="leading-relaxed">The advisor now runs a <strong>10-state priority machine</strong> with time-remaining awareness. Every message shows how many minutes are left and specific price context. It distinguishes between "cut now" (late window, losing) and "hold" (time to recover). Profit recommendations include specific exit triggers relative to peak offer.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">Canvas Chart (No CDN)</h3><p className="leading-relaxed">Chart is now built entirely in canvas — no external library needed. Always renders. Dual API fallback: Coinbase first, Binance if blocked. Supports full EMA/BB overlays, strike line, live price sync, crosshair hover, and volume bars. Resize-aware.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">New Signals</h3><ul className="list-disc pl-4 space-y-1"><li><strong>Candle Structure:</strong> 3+ consecutive candles in same direction = momentum confirmation. Volume surge compounds the signal.</li><li><strong>Price Channel:</strong> Near top of 20-candle range with upward drift = resistance signal, and vice versa.</li><li><strong>RSI Divergence:</strong> Price moving up but RSI flat = hidden weakness. Price down but RSI flat = hidden strength.</li><li><strong>Funding Momentum:</strong> Direction of funding rate change, not just the level.</li></ul></section>
