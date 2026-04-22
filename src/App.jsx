@@ -297,7 +297,7 @@ const SEED_TRADES=[
   {id:1776839461939,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:838,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776841020326,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:180,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776841233662,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:867,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-];];
+];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV109');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
 const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV109',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
@@ -792,13 +792,34 @@ const computeV99Posterior=(params)=>{
   const calibratedPosterior=calibration?calibratePosterior(posterior,calibration):posterior;
   const totalSignalWeight=Object.values(W).reduce((a,b)=>a+b,0)||1;
 
+  // ── IMPROVEMENT 1: Direction prior calibration ───────────────────────────
+  // 211-trade data: UP 69% WR vs DOWN 55% WR — DOWN is structurally less reliable
+  // Pull DOWN posteriors 15% closer to 50 to match actual empirical reliability
+  let dirCalibrated=calibratedPosterior;
+  if(calibratedPosterior<50){
+    dirCalibrated=50-(50-calibratedPosterior)*0.85;
+    reasoning.push(`[DIR] DOWN prior adj: ${calibratedPosterior.toFixed(1)}%→${dirCalibrated.toFixed(1)}% (DOWN WR=55% correction)`);
+  }
+
+  // ── IMPROVEMENT 5: Posterior time-decay for late window locks ─────────────
+  // Data: losses lock avg 777s, wins avg 744s. Late locks structurally weaker.
+  // Decay confidence toward 50 in the final stretch of the window.
+  const windowAge=1-timeFraction; // 0=just opened, 1=almost closed
+  const lateDecayFactor=windowAge>0.88?0.82:windowAge>0.78?0.91:1.0;
+  if(lateDecayFactor<1.0){
+    const beforeDecay=dirCalibrated;
+    dirCalibrated=50+(dirCalibrated-50)*lateDecayFactor;
+    reasoning.push(`[TIME] Late lock decay ×${lateDecayFactor}: ${beforeDecay.toFixed(1)}%→${dirCalibrated.toFixed(1)}%`);
+  }
+  const finalPosterior=Math.max(1,Math.min(99,dirCalibrated));
+
   reasoning.push(`[ATR] Volatility: ${atrBps.toFixed(1)} bps | Regime: ${regime}${isPostDecay?' | POST-DECAY ⚡':''}`);
-  if(calibration&&Object.values(calibration).some(v=>v!=null))reasoning.push(`[CAL] Calibrated posterior applied (${calibratedPosterior.toFixed(1)}% vs raw ${posterior.toFixed(1)}%)`);
+  if(calibration&&Object.values(calibration).some(v=>v!=null))reasoning.push(`[CAL] Pipeline: raw ${posterior.toFixed(1)}% → cal ${calibratedPosterior.toFixed(1)}% → dir+time ${finalPosterior.toFixed(1)}%`);
 
   // Rug pull check
   const isRugPull=tickSlope<-5&&aggrFlow<-0.6;
 
-  return{posterior:calibratedPosterior,rawPosterior:posterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight};
+  return{posterior:finalPosterior,rawPosterior:posterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight};
 };
 
 // ═══════════════════════════════════════
@@ -1265,12 +1286,29 @@ function TaraApp(){
       //  4. Endgame (last 90s/45s): freeze whatever state we're in
       // ══════════════════════════════════════════════════════
       // Session-aware thresholds based on historical WR:
-      // EU 73%, ASIA 68%, US 64%, OFF-HOURS 60%
+      // EU 65%, ASIA 64%, US 59%, OFF-HOURS 55%
       const _sess=getMarketSessions().dominant;
-      const _sessThreshAdj=_sess==='EU'?-3:_sess==='ASIA'?0:_sess==='US'?2:4;
+      const _sessThreshAdj=_sess==='EU'?-3:_sess==='ASIA'?-1:_sess==='US'?3:5;
       const LOCK_THRESHOLD_UP=(is15m?70:68)+_sessThreshAdj;
       const LOCK_THRESHOLD_DN=(is15m?30:32)-_sessThreshAdj;
-      const CONSECUTIVE_NEEDED=is15m?3:2; // N consecutive samples above threshold
+
+      // ── IMPROVEMENT 2: Regime-gated consecutive requirement ──────────────
+      // RANGE/CHOP is 56% WR (near coin flip) — needs one extra confirmation sample
+      // TRENDING DOWN is 86% WR — can fire faster (2 samples)
+      // ── IMPROVEMENT 3: Session multiplier on consecutive requirement ─────
+      // US session 59% WR — needs one extra sample to reduce false locks
+      const _regime=lastRegimeRef.current||'RANGE/CHOP';
+      const _regimeConsecAdj=_regime==='RANGE/CHOP'?1:_regime==='HIGH VOL CHOP'?1:_regime==='TRENDING DOWN'?-1:0;
+      const _sessConsecAdj=_sess==='US'?1:_sess==='OFF-HOURS'?1:0;
+      const CONSECUTIVE_NEEDED=Math.max(1,(is15m?3:2)+_regimeConsecAdj+_sessConsecAdj);
+
+      // ── IMPROVEMENT 4: Late lock penalty ─────────────────────────────────
+      // Very late locks (>820s elapsed in 15m = last 80s) get suppressed
+      // Data shows losses lock avg 777s vs wins 744s — very late = higher risk
+      const elapsedSeconds=(is15m?900:300)-clockSeconds;
+      const isVeryLateLock=is15m?(elapsedSeconds>820):(elapsedSeconds>260);
+      // Late lock warning zone (700-820s elapsed) — show indicator, allow but note
+      const isLateLockZone=is15m?(elapsedSeconds>700&&elapsedSeconds<=820):(elapsedSeconds>220&&elapsedSeconds<=260);
 
       // Add current posterior to history (capped at 12 samples)
       posteriorHistoryRef.current.push(posterior);
@@ -1283,20 +1321,25 @@ function TaraApp(){
 
       // ── Phase 1: Pre-lock ──
       if(!lockedCallRef.current){
-        if(bullCount>=CONSECUTIVE_NEEDED&&!isEndgameLock){
-          lockedCallRef.current={dir:'UP',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice};
+        // IMPROVEMENT 4: Suppress new locks in the very late window (>820s elapsed 15m)
+        if(isVeryLateLock){
+          // Don't fire new locks — too late, data shows losses are more frequent here
+          taraAdviceRef.current=taraAdviceRef.current||'SEARCHING...';
+        } else if(bullCount>=CONSECUTIVE_NEEDED&&!isEndgameLock){
+          lockedCallRef.current={dir:'UP',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone};
           taraAdviceRef.current='UP - LOCKED';
           biasCountRef.current={UP:0,DOWN:0};
           // NOTE: pendingTradeRef is set in handleManualSync when user confirms entry
         } else if(bearCount>=CONSECUTIVE_NEEDED&&!isEndgameLock){
-          lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice};
+          lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone};
           taraAdviceRef.current='DOWN - LOCKED';
           biasCountRef.current={UP:0,DOWN:0};
           // NOTE: pendingTradeRef is set in handleManualSync when user confirms entry
         } else {
           const avgRecent=recentHist.reduce((a,b)=>a+b,0)/(recentHist.length||1);
-          if(avgRecent>=58&&!isEndgameLock)taraAdviceRef.current='UP (FORMING)';
-          else if(avgRecent<=42&&!isEndgameLock)taraAdviceRef.current='DOWN (FORMING)';
+          if(isVeryLateLock)taraAdviceRef.current='NO CALL';
+          else if(avgRecent>=58&&!isEndgameLock)taraAdviceRef.current=`UP (FORMING)${isLateLockZone?' ⚠️ LATE':''}`;
+          else if(avgRecent<=42&&!isEndgameLock)taraAdviceRef.current=`DOWN (FORMING)${isLateLockZone?' ⚠️ LATE':''}`;
           else taraAdviceRef.current='SEARCHING...';
         }
       }
@@ -1360,7 +1403,7 @@ function TaraApp(){
       const _thisLock=lockedCallRef.current;
       const mtfAligned=_thisLock&&_otherLock&&_otherLock.dir===_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
       const mtfOpposed=_thisLock&&_otherLock&&_otherLock.dir!==_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
-      return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),
+      return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
         lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null,
         bullCount:Number(bullCount),bearCount:Number(bearCount),consecutiveNeeded:Number(CONSECUTIVE_NEEDED)};
     }catch(err){return{prediction:'ERROR',rawProbAbove:50,projections:[],reasoning:[err.stack||String(err)],textColor:'text-rose-500',advisor:{label:'MATH CRASH',reason:String(err),color:'rose',animate:false,hasAction:false},regime:'ERROR'};}
@@ -1757,7 +1800,14 @@ function TaraApp(){
                     <span className="text-xs text-[#E8E9E4]/40 uppercase tracking-[0.2em] font-bold">Prediction</span>
                     {analysis.regime&&<span className="text-xs text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded text-xs">{analysis.regime}</span>}
                     {/* Lock badge */}
-                    {analysis.lockInfo&&<span className="text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs px-2 py-1">🔒 {Math.floor((Date.now()-analysis.lockInfo.lockedAt)/1000)}s @ {analysis.lockInfo.lockedPosterior.toFixed(0)}%</span>}
+                    {analysis.lockInfo&&<span className="text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs px-2 py-1">🔒 {Math.floor((Date.now()-analysis.lockInfo.lockedAt)/1000)}s @ {analysis.lockInfo.lockedPosterior.toFixed(0)}%{analysis.lockInfo.isLateLock?' ⚠️':''}</span>}
+                    {/* Late-lock zone warning — no lock yet but window is old */}
+                    {!analysis.lockInfo&&analysis.isLateLockZone&&(
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400" title="Late in window — lock reliability reduced">⚠️ LATE WINDOW</span>
+                    )}
+                    {analysis.isVeryLateLock&&!analysis.lockInfo&&(
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-zinc-500/15 border border-zinc-500/30 text-zinc-400">⛔ NO CALL ZONE</span>
+                    )}
                     {/* Multi-timeframe confluence badge */}
                     {analysis.mtfAligned&&(
                       <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 animate-pulse" title={`Both 5m and 15m locked ${analysis.lockInfo?.dir} — stronger conviction`}>🔗 DUAL LOCK</span>
