@@ -445,7 +445,165 @@ const getMarketSessions=()=>{const now=new Date();const utcH=now.getUTCHours();c
 // ═══════════════════════════════════════
 const useVelocity=(tickH,price,target)=>{const ref=useRef({v1s:0,v5s:0,v15s:0,v30s:0,accel:0,jerk:0,peakPnL:0,troughPnL:0,pnlSlope:0});const pnlH=useRef([]);useEffect(()=>{const iv=setInterval(()=>{if(!price||!target)return;const now=Date.now(),ticks=tickH.current||[];const ga=(ms)=>{const r=ticks.filter(t=>Math.abs((now-t.time)-ms)<2000);return r.length>0?r.reduce((a,b)=>a+b.p,0)/r.length:null;};const p1=ga(1000),p5=ga(5000),p15=ga(15000),p30=ga(30000);const v1s=p1?(price-p1):0,v5s=p5?(price-p5)/5:0,v15s=p15?(price-p15)/15:0,v30s=p30?(price-p30)/30:0;const cpnl=target>0?((price-target)/target)*10000:0;pnlH.current.push({pnl:cpnl,time:now});pnlH.current=pnlH.current.filter(p=>now-p.time<120000);const peakPnL=Math.max(...pnlH.current.map(p=>p.pnl),cpnl);const troughPnL=Math.min(...pnlH.current.map(p=>p.pnl),cpnl);const recent=pnlH.current.filter(p=>now-p.time<10000);const pnlSlope=recent.length>=3?recent[recent.length-1].pnl-recent[0].pnl:0;ref.current={v1s,v5s,v15s,v30s,accel:v5s-v15s,jerk:v1s-v5s,peakPnL,troughPnL,pnlSlope};},500);return()=>clearInterval(iv);},[price,target]);return ref;};
 
-const useGlobalTape=()=>{const tapeRef=useRef({coinbase:{buys:0,sells:0},binanceFutures:{buys:0,sells:0},bybit:{buys:0,sells:0},globalBuys:0,globalSells:0,globalImbalance:1,cbFlow:0,bnFlow:0,byFlow:0,divergence:0,whaleAlerts:[],binancePrice:0,bybitPrice:0});const ticksRef=useRef([]);const[whaleLog,setWhaleLog]=useState([]);const[globalFlow,setGlobalFlow]=useState({imbalance:1,divergence:0,whaleAlert:null,feeds:0,deltaUSD:0});useEffect(()=>{if(typeof window==='undefined')return;let wsBN=null,wsBY=null,feedCount=0;try{wsBN=new WebSocket('wss://fstream.binance.com/ws/btcusdt@aggTrade');wsBN.onopen=()=>{feedCount++;};wsBN.onmessage=(e)=>{try{const d=JSON.parse(e.data);const price=parseFloat(d.p),qty=parseFloat(d.q),usd=price*qty,isBuy=!d.m,now=Date.now();ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'bn',time:now});tapeRef.current.binancePrice=price;if(usd>100000){const alert={src:'Binance',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};tapeRef.current.whaleAlerts.push(alert);tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);setWhaleLog(prev=>[alert,...prev].slice(0,30));}}catch(er){}}}catch(e){}try{wsBY=new WebSocket('wss://stream.bybit.com/v5/public/linear');wsBY.onopen=()=>{feedCount++;wsBY.send(JSON.stringify({op:'subscribe',args:['publicTrade.BTCUSDT']}));};wsBY.onmessage=(e)=>{try{const msg=JSON.parse(e.data);if(msg.topic==='publicTrade.BTCUSDT'&&msg.data){msg.data.forEach(trade=>{const price=parseFloat(trade.p),qty=parseFloat(trade.v),usd=price*qty,isBuy=trade.S==='Buy',now=Date.now();ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'by',time:now});tapeRef.current.bybitPrice=price;if(usd>100000){const alert={src:'Bybit',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};tapeRef.current.whaleAlerts.push(alert);tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);setWhaleLog(prev=>[alert,...prev].slice(0,30));}});}}catch(er){}}}catch(e){}const aggIv=setInterval(()=>{const now=Date.now();ticksRef.current=ticksRef.current.filter(t=>now-t.time<30000);let cbB=0,cbS=0,bnB=0,bnS=0,byB=0,byS=0;ticksRef.current.forEach(t=>{const u=t.usd||(t.s*t.p);if(t.src==='cb'){if(t.t==='B')cbB+=u;else cbS+=u;}else if(t.src==='bn'){if(t.t==='B')bnB+=u;else bnS+=u;}else if(t.src==='by'){if(t.t==='B')byB+=u;else byS+=u;}});const gB=cbB+bnB+byB,gS=cbS+bnS+byS,gI=gS===0?(gB>0?2:1):gB/gS;const cbF=(cbB+cbS)>0?(cbB-cbS)/(cbB+cbS):0,bnF=(bnB+bnS)>0?(bnB-bnS)/(bnB+bnS):0,byF=(byB+byS)>0?(byB-byS)/(byB+byS):0;const dF=(bnB+byB-bnS-byS),sF=(cbB-cbS);const div=(bnB+bnS+byB+byS)>0?(sF>0&&dF<0?-1:sF<0&&dF>0?1:0)*Math.min(1,Math.abs(sF-dF)/Math.max(1,gB+gS)*10):0;tapeRef.current={...tapeRef.current,coinbase:{buys:cbB,sells:cbS},binanceFutures:{buys:bnB,sells:bnS},bybit:{buys:byB,sells:byS},globalBuys:gB,globalSells:gS,globalImbalance:gI,cbFlow:cbF,bnFlow:bnF,byFlow:byF,divergence:div};const rW=tapeRef.current.whaleAlerts.find(w=>now-w.time<5000);setGlobalFlow({imbalance:gI,divergence:div,whaleAlert:rW||null,feeds:feedCount,deltaUSD:gB-gS});},1000);return()=>{clearInterval(aggIv);if(wsBN?.readyState===1)wsBN.close();if(wsBY?.readyState===1)wsBY.close();};},[]);return{tapeRef,globalFlow,ticksRef,whaleLog};};
+const useGlobalTape=()=>{
+  const tapeRef=useRef({coinbase:{buys:0,sells:0},binanceFutures:{buys:0,sells:0},bybit:{buys:0,sells:0},globalBuys:0,globalSells:0,globalImbalance:1,cbFlow:0,bnFlow:0,byFlow:0,divergence:0,whaleAlerts:[],binancePrice:0,bybitPrice:0});
+  const ticksRef=useRef([]);
+  const streakRef=useRef({dir:null,count:0,startTime:Date.now(),totalUSD:0,trades:[]}); // consecutive whale prints
+  const flowHistoryRef=useRef([]); // 5-min rolling net delta history for trend
+  const[whaleLog,setWhaleLog]=useState([]);
+  const[globalFlow,setGlobalFlow]=useState({imbalance:1,divergence:0,whaleAlert:null,feeds:0,deltaUSD:0});
+  const[flowSignal,setFlowSignal]=useState({
+    score:0,           // 0-100 actionable score
+    label:'NEUTRAL',   // NOISE | EMERGING | STRONG | CONVICTION
+    streakDir:null,    // 'BUY' | 'SELL' | null
+    streakCount:0,     // consecutive whale prints same direction
+    streakDuration:0,  // seconds
+    streakUSD:0,       // total USD in streak
+    oiContext:'',      // human-readable OI interpretation
+    divergence:false,  // spot vs futures diverging
+    netDelta30s:0,     // net buy-sell USD in last 30s
+    netDelta90s:0,     // net buy-sell USD in last 90s
+    trend:'flat',      // '↑ accelerating' | '↓ fading' | 'flat'
+  });
+
+  useEffect(()=>{
+    if(typeof window==='undefined')return;
+    let wsBN=null,wsBY=null,feedCount=0;
+
+    const processWhalePrint=(alert)=>{
+      const sk=streakRef.current;
+      const now=Date.now();
+      const streakWindow=120000; // 2 min streak window
+      if(sk.dir===alert.side&&(now-sk.startTime)<streakWindow){
+        // Same direction — extend streak
+        sk.count++;sk.totalUSD+=alert.usd;sk.trades.push(alert);
+      } else {
+        // Direction changed or streak expired — reset
+        sk.dir=alert.side;sk.count=1;sk.startTime=now;sk.totalUSD=alert.usd;sk.trades=[alert];
+      }
+      streakRef.current=sk;
+    };
+
+    try{
+      wsBN=new WebSocket('wss://fstream.binance.com/ws/btcusdt@aggTrade');
+      wsBN.onopen=()=>{feedCount++;};
+      wsBN.onmessage=(e)=>{
+        try{
+          const d=JSON.parse(e.data);
+          const price=parseFloat(d.p),qty=parseFloat(d.q),usd=price*qty,isBuy=!d.m,now=Date.now();
+          ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'bn',time:now});
+          tapeRef.current.binancePrice=price;
+          if(usd>100000){
+            const alert={src:'Binance',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};
+            tapeRef.current.whaleAlerts.push(alert);
+            tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);
+            processWhalePrint(alert);
+            setWhaleLog(prev=>[alert,...prev].slice(0,30));
+          }
+        }catch(er){}
+      };
+    }catch(e){}
+
+    try{
+      wsBY=new WebSocket('wss://stream.bybit.com/v5/public/linear');
+      wsBY.onopen=()=>{feedCount++;wsBY.send(JSON.stringify({op:'subscribe',args:['publicTrade.BTCUSDT']}));};
+      wsBY.onmessage=(e)=>{
+        try{
+          const msg=JSON.parse(e.data);
+          if(msg.topic==='publicTrade.BTCUSDT'&&msg.data){
+            msg.data.forEach(trade=>{
+              const price=parseFloat(trade.p),qty=parseFloat(trade.v),usd=price*qty,isBuy=trade.S==='Buy',now=Date.now();
+              ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'by',time:now});
+              tapeRef.current.bybitPrice=price;
+              if(usd>100000){
+                const alert={src:'Bybit',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};
+                tapeRef.current.whaleAlerts.push(alert);
+                tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);
+                processWhalePrint(alert);
+                setWhaleLog(prev=>[alert,...prev].slice(0,30));
+              }
+            });
+          }
+        }catch(er){}
+      };
+    }catch(e){}
+
+    const aggIv=setInterval(()=>{
+      const now=Date.now();
+      ticksRef.current=ticksRef.current.filter(t=>now-t.time<90000); // keep 90s
+
+      // Split into time windows
+      let cbB=0,cbS=0,bnB=0,bnS=0,byB=0,byS=0;
+      let net30=0,net90=0;
+      ticksRef.current.forEach(t=>{
+        const u=t.usd||(t.s*t.p);
+        const sign=t.t==='B'?1:-1;
+        if(now-t.time<30000)net30+=u*sign;
+        if(now-t.time<90000)net90+=u*sign;
+        if(t.src==='cb'){if(t.t==='B')cbB+=u;else cbS+=u;}
+        else if(t.src==='bn'){if(t.t==='B')bnB+=u;else bnS+=u;}
+        else if(t.src==='by'){if(t.t==='B')byB+=u;else byS+=u;}
+      });
+      const gB=cbB+bnB+byB,gS=cbS+bnS+byS;
+      const gI=gS===0?(gB>0?2:1):gB/gS;
+      const cbF=(cbB+cbS)>0?(cbB-cbS)/(cbB+cbS):0;
+      const bnF=(bnB+bnS)>0?(bnB-bnS)/(bnB+bnS):0;
+      const byF=(byB+byS)>0?(byB-byS)/(byB+byS):0;
+      // Spot vs futures divergence: cbF opposite to (bnF+byF)/2
+      const futuresFlow=(bnF+byF)/2;
+      const div=(gB+gS)>50000&&Math.abs(cbF)>0.2&&Math.abs(futuresFlow)>0.2&&Math.sign(cbF)!==Math.sign(futuresFlow)?Math.sign(futuresFlow):-0;
+      tapeRef.current={...tapeRef.current,coinbase:{buys:cbB,sells:cbS},binanceFutures:{buys:bnB,sells:bnS},bybit:{buys:byB,sells:byS},globalBuys:gB,globalSells:gS,globalImbalance:gI,cbFlow:cbF,bnFlow:bnF,byFlow:byF,divergence:div};
+      const rW=tapeRef.current.whaleAlerts.find(w=>now-w.time<5000);
+      setGlobalFlow({imbalance:gI,divergence:div,whaleAlert:rW||null,feeds:feedCount,deltaUSD:gB-gS});
+
+      // ── FLOW SIGNAL COMPUTATION ─────────────────────────────────────────
+      const sk=streakRef.current;
+      const streakAge=(now-sk.startTime)/1000;
+      const isStreakFresh=sk.count>=1&&streakAge<120;
+
+      // Expire streak if no activity for 2 min
+      if(streakAge>120){streakRef.current={dir:null,count:0,startTime:now,totalUSD:0,trades:[]};}
+
+      // Net delta trend: compare 30s vs 90s (is flow accelerating or fading?)
+      let trend='flat';
+      if(Math.abs(net30)>10000&&Math.abs(net90)>10000){
+        const rate30=net30/30,rate90=net90/90;
+        if(Math.sign(rate30)===Math.sign(rate90)&&Math.abs(rate30)>Math.abs(rate90)*1.3)trend=`${net30>0?'↑':'↓'} accel`;
+        else if(Math.sign(rate30)===Math.sign(rate90)&&Math.abs(rate30)<Math.abs(rate90)*0.7)trend=`${net30>0?'↑':'↓'} fading`;
+        else trend=`${net30>0?'↑':'↓'} steady`;
+      }
+
+      // Score components (0-100)
+      const imbalanceScore=Math.min(40,Math.abs(gI-1)*30); // flow pressure
+      const streakScore=isStreakFresh?Math.min(40,(sk.count-1)*12):0; // streak conviction
+      const accelScore=trend.includes('accel')?15:trend.includes('fading')?-10:0;
+      const divPenalty=div!==0?-20:0; // divergence = basis trade = not directional
+      const rawScore=Math.max(0,Math.min(100,imbalanceScore+streakScore+accelScore+divPenalty));
+
+      const label=rawScore<25?'NOISE':rawScore<50?'EMERGING':rawScore<75?'STRONG':'CONVICTION';
+      const isDivergence=div!==0;
+      const streakDir=isStreakFresh?sk.dir:null;
+
+      setFlowSignal({
+        score:rawScore,label,streakDir,
+        streakCount:isStreakFresh?sk.count:0,
+        streakDuration:isStreakFresh?Math.round(streakAge):0,
+        streakUSD:isStreakFresh?sk.totalUSD:0,
+        divergence:isDivergence,
+        netDelta30s:net30,netDelta90s:net90,trend,
+        oiContext:'', // filled by component using bloomberg
+      });
+    },1000);
+
+    return()=>{
+      clearInterval(aggIv);
+      if(wsBN?.readyState===1)wsBN.close();
+      if(wsBY?.readyState===1)wsBY.close();
+    };
+  },[]);
+
+  return{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal};
+};
 
 const useBloomberg=()=>{const[data,setData]=useState({fundingRate:0,fundingRatePrev:0,nextFundingTime:0,openInterest:0,openInterestUSD:0,oiChange5m:0,basisBps:0,markPrice:0,indexPrice:0,longShortRatio:1,topTraderLSPositions:1,binanceFuturesVol24h:0,liqLongWall:0,liqShortWall:0,liqLongUSD:0,liqShortUSD:0,lastUpdate:0,status:'connecting'});const oiSnaps=useRef([]);useEffect(()=>{if(typeof window==='undefined')return;const f=async()=>{try{const R=await Promise.allSettled([fetch('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=3').then(r=>r.json()),fetch('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1').then(r=>r.json()),fetch('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=BTCUSDT&period=5m&limit=1').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=50').then(r=>r.json())]);const[pR,oR,fR,gR,tR,t24R,dR]=R;const now=Date.now();let u={lastUpdate:now,status:'live'};if(pR.status==='fulfilled'&&pR.value){const p=pR.value;const mk=parseFloat(p.markPrice)||0,ix=parseFloat(p.indexPrice)||0;u.fundingRate=parseFloat(p.lastFundingRate)||0;u.markPrice=mk;u.indexPrice=ix;u.basisBps=ix>0?((mk-ix)/ix)*10000:0;u.nextFundingTime=parseInt(p.nextFundingTime)||0;}if(oR.status==='fulfilled'&&oR.value){const oi=parseFloat(oR.value.openInterest)||0;oiSnaps.current.push({oi,time:now});oiSnaps.current=oiSnaps.current.filter(s=>now-s.time<600000);const o5=oiSnaps.current.find(s=>now-s.time>=270000&&now-s.time<=330000);u.openInterest=oi;u.openInterestUSD=oi*(u.markPrice||0);u.oiChange5m=o5?((oi-o5.oi)/o5.oi)*100:0;}if(fR.status==='fulfilled'&&Array.isArray(fR.value)&&fR.value.length>=2)u.fundingRatePrev=parseFloat(fR.value[1]?.fundingRate)||0;if(gR.status==='fulfilled'&&Array.isArray(gR.value)&&gR.value[0])u.longShortRatio=parseFloat(gR.value[0].longShortRatio)||1;if(tR.status==='fulfilled'&&Array.isArray(tR.value)&&tR.value[0])u.topTraderLSPositions=parseFloat(tR.value[0].longShortRatio)||1;if(t24R.status==='fulfilled'&&t24R.value)u.binanceFuturesVol24h=parseFloat(t24R.value.quoteVolume)||0;if(dR.status==='fulfilled'&&dR.value?.bids&&dR.value?.asks){const mp=u.markPrice||0;if(mp>0){let mBW=0,mBP=0,tBL=0,mAW=0,mAP=0,tAL=0;dR.value.bids.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((mp-pr)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tBL+=usd;if(usd>mBW){mBW=usd;mBP=pr;}}});dR.value.asks.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((pr-mp)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tAL+=usd;if(usd>mAW){mAW=usd;mAP=pr;}}});u.liqLongWall=mAP;u.liqShortWall=mBP;u.liqLongUSD=tAL;u.liqShortUSD=tBL;}}setData(prev=>({...prev,...u}));}catch(e){setData(prev=>({...prev,status:'error'}));}};f();const iv=setInterval(f,8000);return()=>clearInterval(iv);},[]);return data;};
 
@@ -997,7 +1155,7 @@ function TaraApp(){
   const[showWhaleLog,setShowWhaleLog]=useState(false);
   const velocityRef=useVelocity(tickHistoryRef,currentPrice,targetMargin);
   const bloomberg=useBloomberg();
-  const{tapeRef,globalFlow,ticksRef,whaleLog}=useGlobalTape();
+  const{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal}=useGlobalTape();
   const marketSessions=useMemo(()=>getMarketSessions(),[timeState.currentHour]);
   const[klines,setKlines]=useState([]);
 
@@ -2000,16 +2158,167 @@ function TaraApp(){
 
       {/* ── MODALS & FLOATING UI ── */}
 
-      {/* Whale Log */}
+      {/* ── FLOW INTELLIGENCE PANEL ── */}
       {showWhaleLog&&(
-        <div className="fixed top-14 right-2 sm:right-4 z-50 w-72 sm:w-80 bg-[#181A19] border border-purple-500/30 rounded-xl shadow-2xl overflow-hidden">
-          <div className="bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10"><span className="text-xs font-bold uppercase tracking-wide text-purple-400">🐋 Whale Log (&gt;$25K)</span><button onClick={()=>setShowWhaleLog(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
-          <div className="max-h-72 overflow-y-auto p-2.5 space-y-1.5" style={{scrollbarWidth:'thin'}}>
-            {whaleLog.length===0?<div className="text-xs text-[#E8E9E4]/40 italic text-center py-4">Waiting for whale trades...</div>:whaleLog.slice(0,25).map((w,i)=>{const d=new Date(w.time);return(<div key={i} className={`flex items-center gap-2 text-xs p-1.5 rounded bg-[#111312] border ${w.side==='BUY'?'border-emerald-500/20':'border-rose-500/20'}`}><span className="text-[#E8E9E4]/30 font-mono shrink-0">{d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span><span className={`font-bold ${w.side==='BUY'?'text-emerald-400':'text-rose-400'}`}>{w.side}</span><span className="text-[#E8E9E4]/70">${(w.usd/1000).toFixed(0)}K</span><span className="text-[#E8E9E4]/30 text-xs ml-auto">{w.src}</span></div>);})}
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={()=>setShowWhaleLog(false)}>
+          <div className="bg-[#111312] border border-purple-500/30 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[85vh] overflow-hidden flex flex-col shadow-2xl" onClick={e=>e.stopPropagation()}>
+            {/* Header */}
+            <div className="p-3 bg-[#181A19] border-b border-[#E8E9E4]/10 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-purple-400 text-sm">⚡</span>
+                <span className="text-xs font-bold uppercase tracking-wide text-purple-400">Flow Intelligence</span>
+                <span className="text-[10px] text-[#E8E9E4]/30">Futures tape · $100K+ trades</span>
+              </div>
+              <button onClick={()=>setShowWhaleLog(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 p-3 space-y-3">
+
+              {/* ── FLOW SIGNAL SCORE ── */}
+              {(()=>{
+                const fs=flowSignal;
+                const scoreColor=fs.score>=75?'text-emerald-400':fs.score>=50?'text-amber-400':fs.score>=25?'text-[#E8E9E4]/60':'text-[#E8E9E4]/30';
+                const barColor=fs.score>=75?'bg-emerald-500':fs.score>=50?'bg-amber-500':fs.score>=25?'bg-indigo-500':'bg-zinc-600';
+                const isBuyFlow=fs.netDelta30s>0||fs.streakDir==='BUY';
+                const isNote=fs.divergence;
+                return(
+                  <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/10">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <div className={`text-lg font-bold font-serif ${scoreColor}`}>{fs.score.toFixed(0)}<span className="text-xs font-sans ml-1 opacity-60">/100</span></div>
+                        <div className={`text-xs font-bold uppercase tracking-widest ${scoreColor}`}>{fs.label}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className={`text-xs font-bold ${isBuyFlow?'text-emerald-400':'text-rose-400'}`}>{fs.netDelta30s>0?'NET BUY':'NET SELL'} (30s)</div>
+                        <div className={`text-xs font-mono ${isBuyFlow?'text-emerald-300':'text-rose-300'}`}>{fs.netDelta30s>=0?'+':''}{(fs.netDelta30s/1000).toFixed(0)}K</div>
+                      </div>
+                    </div>
+                    {/* Score bar */}
+                    <div className="h-1.5 bg-[#E8E9E4]/10 rounded-full overflow-hidden mb-2">
+                      <div className={`h-full ${barColor} rounded-full transition-all duration-500`} style={{width:`${fs.score}%`}}/>
+                    </div>
+                    {isNote&&<div className="text-[10px] text-amber-400 mt-1">⚡ Spot/futures diverging — likely basis trade, not directional flow</div>}
+                    <div className="text-[10px] text-[#E8E9E4]/30 mt-1">{fs.trend} · 90s delta: {fs.netDelta90s>=0?'+':''}{(fs.netDelta90s/1000).toFixed(0)}K</div>
+                  </div>
+                );
+              })()}
+
+              {/* ── WHALE STREAK ── */}
+              {(()=>{
+                const fs=flowSignal;
+                const hasStreak=fs.streakCount>=2;
+                const isBuy=fs.streakDir==='BUY';
+                return(
+                  <div className={`p-3 rounded-xl border ${hasStreak?(isBuy?'bg-emerald-500/5 border-emerald-500/30':'bg-rose-500/5 border-rose-500/30'):'bg-[#181A19] border-[#E8E9E4]/8'}`}>
+                    <div className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-1.5 font-bold">Whale Streak</div>
+                    {hasStreak?(
+                      <>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`text-base font-bold font-serif ${isBuy?'text-emerald-400':'text-rose-400'}`}>{fs.streakCount}×</span>
+                          <span className={`text-sm font-bold ${isBuy?'text-emerald-400':'text-rose-400'}`}>{fs.streakDir}</span>
+                          <span className="text-xs text-[#E8E9E4]/40">in {fs.streakDuration}s</span>
+                        </div>
+                        <div className="text-xs text-[#E8E9E4]/60">${(fs.streakUSD/1000).toFixed(0)}K total · {isBuy?'Accumulation pressure':'Distribution pressure'}</div>
+                        {fs.streakCount>=4&&<div className={`text-[10px] mt-1 font-bold ${isBuy?'text-emerald-400':'text-rose-400'}`}>🔥 High conviction streak — watch for price follow-through</div>}
+                        {fs.streakCount>=2&&fs.streakCount<4&&<div className="text-[10px] mt-1 text-[#E8E9E4]/40">Wait for more prints before treating as directional</div>}
+                      </>
+                    ):(
+                      <div className="text-xs text-[#E8E9E4]/30 italic">No streak — random prints, not directional</div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── OI CONTEXT ── */}
+              {(()=>{
+                const oi=bloomberg?.oiChange5m||0;
+                const ls=bloomberg?.longShortRatio||1;
+                const fr=bloomberg?.fundingRate||0;
+                const fs=flowSignal;
+                const isBuyFlow=fs.netDelta30s>0;
+                let oiMsg='',oiColor='text-[#E8E9E4]/40',oiIcon='📊';
+                if(Math.abs(oi)>0.15){
+                  if(oi>0&&isBuyFlow){oiMsg='OI rising + buy flow → New longs opening. Conviction. More likely to follow through.';oiColor='text-emerald-400';oiIcon='🟢';}
+                  else if(oi<0&&isBuyFlow){oiMsg='OI falling + buy flow → Shorts covering, not fresh longs. Rally may be temporary.';oiColor='text-amber-400';oiIcon='🟡';}
+                  else if(oi>0&&!isBuyFlow){oiMsg='OI rising + sell flow → New shorts opening. Conviction sell.';oiColor='text-rose-400';oiIcon='🔴';}
+                  else if(oi<0&&!isBuyFlow){oiMsg='OI falling + sell flow → Longs exiting. Bearish unwind in progress.';oiColor='text-amber-400';oiIcon='🟡';}
+                } else {
+                  oiMsg='OI stable — no major position building. Flow less likely to drive sustained move.';
+                }
+                const frSign=fr>0?'Longs paying shorts':'Shorts paying longs';
+                const frColor=fr>0?'text-emerald-400':'text-rose-400';
+                return(
+                  <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/8">
+                    <div className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-1.5 font-bold">Open Interest Context</div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span>{oiIcon}</span>
+                      <span className={`text-xs font-bold ${oiColor}`}>OI {oi>=0?'+':''}{oi.toFixed(2)}% (5m)</span>
+                    </div>
+                    <div className={`text-xs ${oiColor} leading-relaxed`}>{oiMsg}</div>
+                    <div className={`text-[10px] mt-2 ${frColor}`}>Funding: {(fr*100).toFixed(4)}% · {frSign} · {fr>0.01?'Heavily long-biased market':fr<-0.01?'Heavily short-biased market':'Neutral'}</div>
+                    {Math.abs(bloomberg?.basisBps||0)>5&&<div className="text-[10px] text-amber-400 mt-1">Basis: {(bloomberg?.basisBps||0).toFixed(1)} bps — elevated spread suggests basis trading activity</div>}
+                  </div>
+                );
+              })()}
+
+              {/* ── SPOT vs FUTURES DIVERGENCE ── */}
+              {(()=>{
+                const div=tapeRef.current.divergence;
+                const cbF=tapeRef.current.cbFlow;
+                const futF=(tapeRef.current.bnFlow+tapeRef.current.byFlow)/2;
+                const hasMeaningfulDiv=Math.abs(cbF)>0.15&&Math.abs(futF)>0.15&&Math.sign(cbF)!==Math.sign(futF);
+                if(!hasMeaningfulDiv)return null;
+                const spotDir=cbF>0?'BUYING':'SELLING';
+                const futDir=futF>0?'BUYING':'SELLING';
+                return(
+                  <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/25">
+                    <div className="text-[10px] uppercase tracking-widest text-amber-400 mb-1.5 font-bold">⚡ Spot/Futures Divergence</div>
+                    <div className="text-xs text-amber-300 mb-1">Spot (Coinbase): <strong>{spotDir}</strong> · Futures (Binance): <strong>{futDir}</strong></div>
+                    <div className="text-[10px] text-[#E8E9E4]/50 leading-relaxed">Opposite flows between spot and futures typically indicate basis traders — not directional conviction. Treat futures whale prints as less reliable until spot confirms.</div>
+                  </div>
+                );
+              })()}
+
+              {/* ── LONG/SHORT RATIO ── */}
+              {bloomberg?.longShortRatio&&(
+                <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/8">
+                  <div className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-2 font-bold">Market Positioning (Binance)</div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="flex-1 h-2 bg-[#E8E9E4]/10 rounded-full overflow-hidden">
+                      <div className="h-full bg-emerald-500 rounded-full transition-all" style={{width:`${Math.min(100,(bloomberg.longShortRatio/(bloomberg.longShortRatio+1))*100)}%`}}/>
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-[10px]">
+                    <span className="text-emerald-400">Long {(bloomberg.longShortRatio/(bloomberg.longShortRatio+1)*100).toFixed(0)}%</span>
+                    <span className="text-rose-400">Short {(1/(bloomberg.longShortRatio+1)*100).toFixed(0)}%</span>
+                  </div>
+                  {bloomberg.longShortRatio>1.5&&<div className="text-[10px] text-rose-400 mt-1">Crowd is heavily long — contrarian warning. Longs get squeezed harder.</div>}
+                  {bloomberg.longShortRatio<0.7&&<div className="text-[10px] text-emerald-400 mt-1">Crowd is heavily short — short squeeze risk elevated.</div>}
+                </div>
+              )}
+
+              {/* ── RAW PRINTS (collapsed, for transparency) ── */}
+              <details className="group">
+                <summary className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/25 cursor-pointer hover:text-[#E8E9E4]/50 font-bold list-none flex items-center gap-1">
+                  <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
+                  Raw prints ({whaleLog.length}) — futures $100K+, not directional on their own
+                </summary>
+                <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                  {whaleLog.length===0?<div className="text-xs text-[#E8E9E4]/30 italic">No prints yet</div>:whaleLog.slice(0,20).map((w,i)=>{
+                    const d=new Date(w.time);
+                    return(<div key={i} className={`flex items-center gap-2 text-xs p-1.5 rounded bg-[#111312] border ${w.side==='BUY'?'border-emerald-500/15':'border-rose-500/15'}`}>
+                      <span className="text-[#E8E9E4]/25 font-mono shrink-0">{d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+                      <span className={`font-bold text-[10px] ${w.side==='BUY'?'text-emerald-500':'text-rose-500'}`}>{w.side}</span>
+                      <span className="text-[#E8E9E4]/50">${(w.usd/1000).toFixed(0)}K</span>
+                      <span className="text-[#E8E9E4]/25 text-[10px] ml-auto">{w.src}</span>
+                    </div>);
+                  })}
+                </div>
+              </details>
+            </div>
           </div>
         </div>
       )}
-
       {/* Settings */}
       {showSettings&&(
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
