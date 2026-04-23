@@ -2488,26 +2488,30 @@ function TaraApp(){
                 </div>
 
                 {/* Quality Gate — shown whenever a lock is active */}
-                {analysis?.lockInfo&&(
-                  <div className={`mb-2 p-2.5 rounded-lg border ${qualityGate.color==='emerald'?'bg-emerald-500/5 border-emerald-500/25':qualityGate.color==='amber'?'bg-amber-500/5 border-amber-500/20':'bg-rose-500/5 border-rose-500/20'}`}>
+                {analysis?.lockInfo&&(()=>{
+                  const qc=qualityGate.color;
+                  const qBg=qc==='emerald'?'bg-emerald-500/5 border-emerald-500/25':qc==='amber'?'bg-amber-500/5 border-amber-500/20':'bg-rose-500/5 border-rose-500/20';
+                  const qTxt=qc==='emerald'?'text-emerald-400':qc==='amber'?'text-amber-400':'text-rose-400';
+                  const qBar=qc==='emerald'?'bg-emerald-500':qc==='amber'?'bg-amber-500':'bg-rose-500';
+                  const qSub=qc==='emerald'?'text-emerald-400 opacity-70':qc==='amber'?'text-amber-400 opacity-70':'text-rose-400 opacity-70';
+                  const qMsg=qualityGate.score>=75
+                    ?'High-confidence setup. '+analysis.regime+' in '+getMarketSessions().dominant+' historically reliable.'
+                    :qualityGate.score>=55
+                    ?'Moderate setup. Trade smaller or wait for stronger signal.'
+                    :'Low quality — '+analysis.regime+' in '+getMarketSessions().dominant+' has weak historical WR. Consider sitting out.';
+                  return(
+                  <div className={`mb-2 p-2.5 rounded-lg border ${qBg}`}>
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/30 font-bold">Quality Gate</span>
-                      <span className={`text-xs font-bold uppercase tracking-wider ${qualityGate.color==='emerald'?'text-emerald-400':qualityGate.color==='amber'?'text-amber-400':'text-rose-400'}`}>{qualityGate.label} — {qualityGate.score?.toFixed(0)}/100</span>
+                      <span className={`text-xs font-bold uppercase tracking-wider ${qTxt}`}>{qualityGate.label} — {qualityGate.score?.toFixed(0)}&#47;100</span>
                     </div>
-                    {/* Score bar */}
                     <div className="h-1 bg-[#E8E9E4]/10 rounded-full overflow-hidden mb-1.5">
-                      <div className={`h-full rounded-full transition-all duration-700 ${qualityGate.color==='emerald'?'bg-emerald-500':qualityGate.color==='amber'?'bg-amber-500':'bg-rose-500'}`} style={{width:`${qualityGate.score||0}%`}}/>
+                      <div className={`h-full rounded-full transition-all duration-700 ${qBar}`} style={{width:(qualityGate.score||0)+'%'}}/>
                     </div>
-                    <div className={`text-[10px] ${qualityGate.color==='emerald'?'text-emerald-400/70':qualityGate.color==='amber'?'text-amber-400/70':'text-rose-400/70'}`}>
-                      {qualityGate.score>=75
-                        ?`High-confidence setup. ${qualityGate.score>=75?analysis.regime:'check conditions'} + ${getMarketSessions().dominant} historically reliable.`
-                        :qualityGate.score>=55
-                        ?`Moderate setup. Trade smaller or wait for stronger signal.`
-                        :`Low quality — ${analysis.regime} in ${getMarketSessions().dominant} has weak historical WR. Consider sitting out.`
-                      }
-                    </div>
+                    <div className={`text-[10px] ${qSub}`}>{qMsg}</div>
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* Pre-entry checklist — shown when not yet in trade */}
                 {!userPosition&&analysis?.lockInfo&&(
