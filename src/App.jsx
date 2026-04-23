@@ -1669,7 +1669,7 @@ function TaraApp(){
       const _regimeWR=_regimeTot>5?(_regimeMem.wins/_regimeTot)*100:60; // fallback 60% if insufficient data
       const _sessWR={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[getMarketSessions().dominant]||57;
       const _dirReliability=(eng.bullCount>0||lockedCallRef.current?.dir==='UP')?66:55; // UP=66%, DOWN=55% empirical
-      const _posteriorStrength=Math.min(40,Math.max(0,(Math.abs(finalPosterior-50)-15)*1.6)); // 0-40 pts
+      const _posteriorStrength=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6)); // 0-40 pts. Uses eng.posterior = calibrated+dir+time-decayed value
       const _clockPenalty=isVeryLateLock?-20:isLateLockZone?-8:0;
       const _regimeScore=Math.min(30,(_regimeWR-50)*0.6); // 0-30 pts: 80% regime = 18pts, 50% = 0pts
       const _sessScore=Math.min(15,(_sessWR-50)*0.6);     // 0-15 pts
