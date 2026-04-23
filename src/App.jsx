@@ -1011,7 +1011,7 @@ const computeV99Posterior=(params)=>{
   }
   const finalPosterior=Math.max(1,Math.min(99,dirCalibrated));
 
-  reasoning.push(`[ATR] Volatility: ${atrBps.toFixed(1)} bps | Regime: ${regime}${isPostDecay?' | POST-DECAY ⚡':''}`);
+  reasoning.push(`[ATR] Volatility: ${atrBps.toFixed(1)} bps | Regime: ${regime}${isPostDecay?' | POST-DECAY':''}`);
   if(calibration&&Object.values(calibration).some(v=>v!=null))reasoning.push(`[CAL] Pipeline: raw ${posterior.toFixed(1)}% → cal ${calibratedPosterior.toFixed(1)}% → dir+time ${finalPosterior.toFixed(1)}%`);
 
   // Rug pull check
@@ -1209,7 +1209,13 @@ function TaraApp(){
         }
       }).catch(()=>{});
     }
-    try{const s=localStorage.getItem('taraV110Score');if(s){const p=JSON.parse(s);if(p?.['15m']?.wins!=null)setScorecards(p);}const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');const du=localStorage.getItem('taraV110DU');if(du)setDiscordUsername(du);const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
+    try{const s=localStorage.getItem('taraV110Score');if(s){const p=JSON.parse(s);if(p?.['15m']?.wins!=null)setScorecards(p);}const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
+      // Username migration: always sync to current version, never keep stale Vxxx strings
+      const du=localStorage.getItem('taraV110DU');
+      const cleanDU=(du&&!du.match(/V1\d\d/))?du:'Tara V110'; // if stored name has old Vxxx, reset
+      setDiscordUsername(cleanDU);
+      if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
+      const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
   useEffect(()=>{if(!isMounted)return;try{localStorage.setItem('taraV110Score',JSON.stringify(scorecards));localStorage.setItem('taraV110Mem',JSON.stringify(regimeMemory));localStorage.setItem('taraV110Hook',discordWebhook);localStorage.setItem('taraV110TZ',String(useLocalTime));localStorage.setItem('taraV110DU',discordUsername);localStorage.setItem('taraV110DA',discordAvatar);}catch(e){};},[scorecards,regimeMemory,discordWebhook,useLocalTime,discordUsername,discordAvatar,isMounted]);
 
   useEffect(()=>{if(!currentPrice)return;const iv=setInterval(()=>{priceMemoryRef.current.push({p:currentPrice,time:Date.now()});priceMemoryRef.current=priceMemoryRef.current.filter(t=>Date.now()-t.time<600000);},2000);return()=>clearInterval(iv);},[currentPrice]);
@@ -1286,78 +1292,102 @@ function TaraApp(){
     if(!discordWebhook||!discordWebhook.startsWith('http'))return;
     try{
       let embed={};
-      // ── STAGE 1: SIGNAL (forming, not yet locked) ──
+
       if(type==='SIGNAL')embed={
-        title:`${data.dir==='UP'?'🟢':'🔴'} TARA SIGNAL: ${data.dir}`,
+        title:`TARA SIGNAL  ${data.dir}`,
         color:data.dir==='UP'?3404125:16478549,
-        description:`Initial signal forming — waiting for lock confirmation.`,
+        description:`Signal forming. Awaiting lock confirmation.`,
         fields:[
-          {name:'BTC Price',value:`$${data.price.toFixed(2)}`,inline:true},
+          {name:'Price',value:`$${data.price.toFixed(2)}`,inline:true},
           {name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},
-          {name:'Gap',value:`${data.gap.toFixed(2)} bps`,inline:true},
+          {name:'Gap',value:`${data.gap.toFixed(1)} bps`,inline:true},
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
-          {name:'Posterior',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
+          {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V110 · Awaiting lock confirmation'},
+        footer:{text:'Tara V110  |  signal'},
         timestamp:new Date().toISOString(),
       };
-      // ── STAGE 2: LOCKED (confirmed, actionable) ──
+
       else if(type==='LOCK')embed={
-        title:`${data.dir==='UP'?'🚀':'🔻'} TARA — ${data.dir} LOCKED`,
+        title:`TARA  ${data.dir}  LOCKED`,
         color:data.dir==='UP'?3404125:16478549,
-        description:`**${data.dir} — LOCKED** 🔒\n\n_This is the confirmed call. Enter on ${data.dir}._`,
+        description:`Lock confirmed. Enter ${data.dir}.`,
         fields:[
-          {name:'BTC Price',value:`$${data.price.toFixed(2)}`,inline:true},
+          {name:'Price',value:`$${data.price.toFixed(2)}`,inline:true},
           {name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},
-          {name:'Real Gap',value:`${data.gap.toFixed(2)} bps`,inline:true},
-          {name:'Round Clock',value:data.clock,inline:true},
-          {name:'Lock',value:data.dir,inline:true},
+          {name:'Gap',value:`${data.gap.toFixed(1)} bps`,inline:true},
+          {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
-          {name:'Record',value:data.record||'—',inline:false},
+          {name:'Record',value:data.record||'—',inline:true},
         ],
-        footer:{text:`Tara V110 · ${data.dir} — LOCKED`},
+        footer:{text:'Tara V110  |  lock'},
         timestamp:new Date().toISOString(),
       };
+
       else if(type==='CLOSE'){
         const gap=data.strike>0?((data.price-data.strike)/data.strike*10000):0;
-        const gapStr=gap>=0?`+${gap.toFixed(1)}`:`${gap.toFixed(1)}`;
         embed={
-          title:`${data.won?'✅ WIN':'❌ LOSS'} · ${data.dir||'—'} · ${data.window||windowType}`,
+          title:`${data.won?'WIN':'LOSS'}  ${data.dir||'—'}  ${data.window||windowType}`,
           color:data.won?3404125:16478549,
           fields:[
-            {name:'Tara\'s Call',value:data.dir==='UP'?'📈 UP (above strike)':'📉 DOWN (below strike)',inline:true},
-            {name:'Result',value:data.won?'WIN ✅':'LOSS ❌',inline:true},
+            {name:'Call',value:`${data.dir==='UP'?'UP — above strike':'DOWN — below strike'}`,inline:true},
             {name:'Regime',value:data.regime||'—',inline:true},
-            {name:'Strike Price',value:`$${(data.strike||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`,inline:true},
-            {name:'Close Price',value:`$${(data.price||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`,inline:true},
-            {name:'Gap at Close',value:`${gapStr} bps ${data.won?(data.dir==='UP'?'🟢 above':'🟢 below'):(data.dir==='UP'?'🔴 below':'🔴 above')}`,inline:true},
-            {name:'Record',value:`${data.wins}W / ${data.losses}L (${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%)`,inline:false},
+            {name:'Strike',value:`$${(data.strike||0).toFixed(2)}`,inline:true},
+            {name:'Close',value:`$${(data.price||0).toFixed(2)}`,inline:true},
+            {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
+            {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V110'},
+          footer:{text:'Tara V110  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
-      else if(type==='EXIT')embed={title:`${data.result==='WIN'?'💰':'✂️'} ${data.action}`,color:data.result==='WIN'?3404125:16478549,description:`**Action:** ${data.action}\n**BTC:** $${data.price.toFixed(2)} | **Strike:** $${data.strike.toFixed(2)}\n**Gap:** ${data.gap.toFixed(1)} bps | **Clock:** ${data.clock}\n**Regime:** ${data.regime}`,footer:{text:'Tara V110'},timestamp:new Date().toISOString()};
-      // ── STRUCTURED WHALE ALERT ──
+
+      else if(type==='EXIT')embed={
+        title:`${data.result==='WIN'?'CASHOUT':'CUT'}  ${data.action}`,
+        color:data.result==='WIN'?3404125:16478549,
+        fields:[
+          {name:'Price',value:`$${data.price.toFixed(2)}`,inline:true},
+          {name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},
+          {name:'Gap',value:`${data.gap.toFixed(1)} bps`,inline:true},
+          {name:'Clock',value:data.clock,inline:true},
+          {name:'Regime',value:data.regime||'—',inline:true},
+        ],
+        footer:{text:'Tara V110  |  exit'},
+        timestamp:new Date().toISOString(),
+      };
+
+      // Whale pressure alert — clinical, accurate, no hype
       else if(type==='WHALE'){
         const isBuy=data.netFlow>0;
         const netAbs=Math.abs(data.netFlow);
-        const exchangeLines=Object.entries(data.exchanges||{}).map(([ex,v])=>`${ex} ${v>0?'▲':'▼'} $${(Math.abs(v)/1000).toFixed(0)}K (${data.exchangeCounts?.[ex]||'?'} whales)`).join('\n');
+        const exLines=Object.entries(data.exchanges||{})
+          .map(([ex,v])=>`${ex}   ${v>0?'BUY':'SEL'}  $${(Math.abs(v)/1000).toFixed(0)}K  (${data.exchangeCounts?.[ex]||'?'} prints)`)
+          .join('\n');
+        const reliabilityNote=data.spotAligned
+          ? 'Spot and futures aligned — elevated reliability.'
+          : data.exchangeCount===1
+          ? 'Single exchange — treat as unconfirmed.'
+          : 'Futures only — possible hedging or basis trade.';
         embed={
-          title:`🐋 WHALE ALERT — Big money is ${isBuy?'BUYING':'SELLING'}`,
+          title:`TARA — WHALE PRESSURE: ${isBuy?'BUY':'SELL'}`,
           color:isBuy?3404125:16478549,
-          description:`**$${(data.totalVol/1000).toFixed(0)}K** in whale trades (≥$100K each) in the last 60 seconds across **${data.exchangeCount||1} exchange(s)** — **${data.tradeCount||'?'} trades total.**\n\nNet flow: **$${isBuy?'+':''}${(data.netFlow/1000).toFixed(0)}K** (${isBuy?'buyers loading':'sellers dumping'})\n\n${exchangeLines}\n\nBTC at **$${(data.price||0).toFixed(0)}** · window close in **${data.clock||'—'}**\n\n${data.exchangeCount===1?'⚠️ Single-exchange whale activity — unconfirmed, could be noise.':'✅ Multi-exchange confirmation — higher conviction.'}`,
-          fields:[
-            {name:'Total Buy',value:`$${(data.totalBuy/1000).toFixed(0)}K`,inline:true},
-            {name:'Total Sell',value:`$${(data.totalSell/1000).toFixed(0)}K`,inline:true},
-            {name:'Biggest',value:`$${(data.biggest/1000).toFixed(0)}K`,inline:true},
-          ],
-          footer:{text:'whale watch · Coinbase+Binance+Bybit BTC-USD trades ≥$100K · unconfirmed · not financial advice'},
+          description:[
+            `$${(data.totalVol/1000).toFixed(0)}K  |  ${data.tradeCount||'?'} prints  |  ${data.exchangeCount||1} exchange${data.exchangeCount!==1?'s':''}`,
+            `Net  ${isBuy?'+':'-'}$${(netAbs/1000).toFixed(0)}K`,
+            ``,
+            `\`\`\``,
+            exLines||'—',
+            `\`\`\``,
+            `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
+            `${reliabilityNote}`,
+          ].join('\n'),
+          footer:{text:'Tara V110  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara Terminal V110',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V110',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -1375,7 +1405,7 @@ function TaraApp(){
       const originalEmbed=entry.embed||{title:entry.label,color:9807270};
       const updatedEmbed={
         ...originalEmbed,
-        description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'📝 **Note:** '+noteText,
+        description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
         footer:{text:`Tara V110 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
@@ -1498,7 +1528,7 @@ function TaraApp(){
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
 
   // News
-  useEffect(()=>{let news=[];if(orderBook.imbalance>1.5)news.push({title:`Maker Alert: BID wall near $${targetMargin.toFixed(0)}`,type:'info'});if(orderBook.imbalance<0.6)news.push({title:`Maker Alert: ASK pressure defending $${targetMargin.toFixed(0)}`,type:'info'});if(showWhaleAlerts&&whaleLog.length>0){const w=whaleLog[0];news.push({title:`🐋 WHALE: ${w.side} $${(w.usd/1000).toFixed(0)}K on ${w.src}`,type:'whale'});}if(news.length<3)news.push({title:'Engine: V110 · 251 trades trained · 61% WR base',type:'info'});setNewsEvents(news);},[orderBook.imbalance,globalFlow,targetMargin,windowType,showWhaleAlerts,whaleLog]);
+  useEffect(()=>{let news=[];if(orderBook.imbalance>1.5)news.push({title:`BID wall detected near $${targetMargin.toFixed(0)} — maker support`,type:'info'});if(orderBook.imbalance<0.6)news.push({title:`ASK pressure at $${targetMargin.toFixed(0)} — sellers defending`,type:'info'});if(showWhaleAlerts&&whaleLog.length>0){const w=whaleLog[0];const age=Math.round((Date.now()-w.time)/1000);if(age<120)news.push({title:`WHALE PRESSURE: ${w.side}  $${(w.usd/1000).toFixed(0)}K  ${w.src}  ${age}s ago`,type:'whale'});}if(news.length<3)news.push({title:`Engine V110 active  ·  251 trades trained  ·  ${analysis?.regime||'scanning'}`,type:'info'});setNewsEvents(news);},[orderBook.imbalance,globalFlow,targetMargin,windowType,showWhaleAlerts,whaleLog,analysis?.regime]);
 
   // ── MAIN ANALYSIS ──
   const analysis=useMemo(()=>{
@@ -1580,8 +1610,8 @@ function TaraApp(){
         } else {
           const avgRecent=recentHist.reduce((a,b)=>a+b,0)/(recentHist.length||1);
           if(isVeryLateLock)taraAdviceRef.current='NO CALL';
-          else if(avgRecent>=58&&!isEndgameLock)taraAdviceRef.current=`UP (FORMING)${isLateLockZone?' ⚠️ LATE':''}`;
-          else if(avgRecent<=42&&!isEndgameLock)taraAdviceRef.current=`DOWN (FORMING)${isLateLockZone?' ⚠️ LATE':''}`;
+          else if(avgRecent>=58&&!isEndgameLock)taraAdviceRef.current=`UP (FORMING)${isLateLockZone?' LATE':''}`;
+          else if(avgRecent<=42&&!isEndgameLock)taraAdviceRef.current=`DOWN (FORMING)${isLateLockZone?' LATE':''}`;
           else taraAdviceRef.current='SEARCHING...';
         }
       }
@@ -1631,6 +1661,24 @@ function TaraApp(){
       // V110 Smart Advisor — lock-state-aware
       const advisor=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps,activePrediction,regime,lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null});
 
+      // ── QUALITY GATE ─────────────────────────────────────────────────────
+      // Pre-entry score 0-100. Based on historical WR data across 251 trades.
+      // Score ≥75 = High Quality (trade), 55-74 = Moderate (be selective), <55 = Low (sit out)
+      const _regimeMem=regimeMemory[regime]||{wins:0,losses:0};
+      const _regimeTot=_regimeMem.wins+_regimeMem.losses;
+      const _regimeWR=_regimeTot>5?(_regimeMem.wins/_regimeTot)*100:60; // fallback 60% if insufficient data
+      const _sessWR={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[getMarketSessions().dominant]||57;
+      const _dirReliability=(eng.bullCount>0||lockedCallRef.current?.dir==='UP')?66:55; // UP=66%, DOWN=55% empirical
+      const _posteriorStrength=Math.min(40,Math.max(0,(Math.abs(finalPosterior-50)-15)*1.6)); // 0-40 pts
+      const _clockPenalty=isVeryLateLock?-20:isLateLockZone?-8:0;
+      const _regimeScore=Math.min(30,(_regimeWR-50)*0.6); // 0-30 pts: 80% regime = 18pts, 50% = 0pts
+      const _sessScore=Math.min(15,(_sessWR-50)*0.6);     // 0-15 pts
+      const _dirScore=Math.min(10,(_dirReliability-50)*0.4); // 0-10 pts
+      const rawQuality=_posteriorStrength+_regimeScore+_sessScore+_dirScore+_clockPenalty;
+      const qualityScore=Math.max(0,Math.min(100,rawQuality+5)); // +5 baseline, clamped 0-100
+      const qualityLabel=qualityScore>=75?'HIGH':qualityScore>=55?'MODERATE':'LOW';
+      const qualityColor=qualityScore>=75?'emerald':qualityScore>=55?'amber':'rose';
+
       // Projections
       const getHP=(msAgo)=>{const t=Date.now()-msAgo;const m=priceMemoryRef.current;if(!m||m.length===0)return currentPrice;let c=m[0];for(let i=m.length-1;i>=0;i--){if(m[i].time<=t){c=m[i];break;}}return c.p;};
       let trendBps=isNaN(drift1m)?0:drift1m;
@@ -1647,7 +1695,7 @@ function TaraApp(){
       const mtfOpposed=_thisLock&&_otherLock&&_otherLock.dir!==_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
       return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
         lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null,
-        bullCount:Number(bullCount),bearCount:Number(bearCount),consecutiveNeeded:Number(CONSECUTIVE_NEEDED)};
+        bullCount:Number(bullCount),bearCount:Number(bearCount),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),qualityScore:Number(qualityScore),qualityLabel:String(qualityLabel),qualityColor:String(qualityColor)};
     }catch(err){return{prediction:'ERROR',rawProbAbove:50,projections:[],reasoning:[err.stack||String(err)],textColor:'text-rose-500',advisor:{label:'MATH CRASH',reason:String(err),color:'rose',animate:false,hasAction:false},regime:'ERROR'};}
   },[currentPrice,liveHistory,targetMargin,timeState.minsRemaining,timeState.secsRemaining,timeState.currentHour,orderBook,forceRender,betAmount,maxPayout,currentOffer,globalFlow,userPosition,windowType,isMounted,showRugPullAlerts,positionStatus,velocityRef,bloomberg,useLocalTime,regimeMemory,regimeWeights,strikeConfirmed]);
 
@@ -1691,34 +1739,52 @@ function TaraApp(){
     });
   },[analysis?.prediction]);
 
-  // ── WHALE AUTO-BROADCAST — fires when streak ≥3 (structured whale alert) ──
-  const lastWhaleBroadcastRef=useRef({dir:null,count:0});
+  // ── WHALE AUTO-BROADCAST ─────────────────────────────────────────────────
+  // Only fires when: streak ≥4 AND net delta >$500K AND 5-min cooldown passed
+  // Also checks spot/futures alignment for accuracy flag
+  const lastWhaleBroadcastRef=useRef({time:0,dir:null});
   useEffect(()=>{
     if(!showWhaleAlerts||!discordWebhook)return;
     const fs=flowSignal;
-    if(fs.streakCount<3)return;
-    const lw=lastWhaleBroadcastRef.current;
-    if(lw.dir===fs.streakDir&&lw.count===fs.streakCount)return; // already broadcast this streak state
-    lastWhaleBroadcastRef.current={dir:fs.streakDir,count:fs.streakCount};
-    // Compute exchange breakdown from tapeRef
+    // Strict thresholds to prevent spam and noise
+    if(fs.streakCount<4)return;              // need 4+ consecutive prints
+    if(Math.abs(fs.netDelta90s)<500000)return; // need $500K+ net delta
+    const now=Date.now();
+    const cooldown=5*60*1000; // 5 minutes between whale broadcasts
+    if(now-lastWhaleBroadcastRef.current.time<cooldown)return;
+    if(lastWhaleBroadcastRef.current.dir===fs.streakDir&&now-lastWhaleBroadcastRef.current.time<cooldown*2)return;
+    lastWhaleBroadcastRef.current={time:now,dir:fs.streakDir};
+
+    // Spot alignment check: is Coinbase spot flowing same way as futures?
     const tape=tapeRef.current;
+    const spotNet=tape.coinbase.buys-tape.coinbase.sells;
+    const futuresNet=(tape.binanceFutures.buys-tape.binanceFutures.sells)+(tape.bybit.buys-tape.bybit.sells);
+    const spotAligned=spotNet!==0&&Math.sign(spotNet)===Math.sign(futuresNet);
+
+    // Exchange breakdown (only exchanges with >$100K activity)
+    const exchanges={};
+    const exchangeCounts={};
     const bnNet=tape.binanceFutures.buys-tape.binanceFutures.sells;
     const byNet=tape.bybit.buys-tape.bybit.sells;
     const cbNet=tape.coinbase.buys-tape.coinbase.sells;
-    const exchanges={};
-    const exchangeCounts={};
-    if(Math.abs(bnNet)>50000){exchanges['Binance']=bnNet;exchangeCounts['Binance']=Math.round(Math.abs(bnNet)/200000)||1;}
-    if(Math.abs(byNet)>50000){exchanges['Bybit']=byNet;exchangeCounts['Bybit']=Math.round(Math.abs(byNet)/200000)||1;}
-    if(Math.abs(cbNet)>50000){exchanges['Coinbase']=cbNet;exchangeCounts['Coinbase']=Math.round(Math.abs(cbNet)/200000)||1;}
+    if(Math.abs(bnNet)>100000){exchanges['Binance']=bnNet;exchangeCounts['Binance']=Math.max(1,Math.round(Math.abs(bnNet)/200000));}
+    if(Math.abs(byNet)>100000){exchanges['Bybit']=byNet;exchangeCounts['Bybit']=Math.max(1,Math.round(Math.abs(byNet)/200000));}
+    if(Math.abs(cbNet)>100000){exchanges['Coinbase']=cbNet;exchangeCounts['Coinbase']=Math.max(1,Math.round(Math.abs(cbNet)/200000));}
     const exCount=Object.keys(exchanges).length||1;
+
     const recentPrints=whaleLog.slice(0,fs.streakCount);
     const totalBuy=recentPrints.filter(w=>w.side==='BUY').reduce((a,w)=>a+w.usd,0);
     const totalSell=recentPrints.filter(w=>w.side==='SELL').reduce((a,w)=>a+w.usd,0);
     const biggest=Math.max(...recentPrints.map(w=>w.usd),0);
+
     broadcastToDiscord('WHALE',{
-      netFlow:fs.netDelta90s,totalVol:fs.streakUSD,
-      tradeCount:fs.streakCount,exchangeCount:exCount,
-      exchanges,exchangeCounts,totalBuy,totalSell,biggest,
+      netFlow:fs.netDelta90s,
+      totalVol:fs.streakUSD,
+      tradeCount:fs.streakCount,
+      exchangeCount:exCount,
+      exchanges,exchangeCounts,
+      totalBuy,totalSell,biggest,
+      spotAligned,
       price:currentPrice,
       clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`
     });
@@ -1815,7 +1881,7 @@ function TaraApp(){
     }
   };
 
-  const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'🚨 STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast`;setChatLog([...log,{role:'tara',text:r}]);},400);};
+  const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast`;setChatLog([...log,{role:'tara',text:r}]);},400);};
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
@@ -1873,7 +1939,7 @@ function TaraApp(){
             <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
             <button onClick={()=>setShowGuide(true)} className="p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors" title="How Tara Works">?</button>
             {/* Hidden on mobile — accessible via mobile tab nav or sm+ */}
-            <button onClick={()=>setShowWhaleLog(!showWhaleLog)} className={`hidden sm:flex p-1.5 rounded-lg border text-xs transition-colors ${showWhaleLog?'bg-purple-500/20 border-purple-500/40 text-purple-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-purple-400'}`}>🐋</button>
+            <button onClick={()=>setShowWhaleLog(!showWhaleLog)} className={`hidden sm:flex p-1.5 rounded-lg border text-xs transition-colors ${showWhaleLog?'bg-purple-500/20 border-purple-500/40 text-purple-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-purple-400'}`}>FLOW</button>
             <button onClick={()=>setShowSettings(true)} className="hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors"><IC.Link className="w-3.5 h-3.5"/></button>
             <button onClick={()=>setShowAnalytics(true)} className="hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Analytics"><IC.BarChart className="w-3.5 h-3.5"/></button>
             <button onClick={()=>setShowHelp(true)} className="hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors"><IC.Help className="w-3.5 h-3.5"/></button>
@@ -2005,7 +2071,7 @@ function TaraApp(){
             </button>
           ))}
           {/* Mobile-only quick access row for hidden header buttons */}
-          <button onClick={()=>setShowWhaleLog(!showWhaleLog)} className={`flex items-center justify-center px-2 py-1.5 rounded-lg text-xs transition-all ${showWhaleLog?'bg-purple-500/20 text-purple-400 border border-purple-500/30':'text-[#E8E9E4]/30 hover:text-purple-400'}`} title="Whale Log">🐋</button>
+          <button onClick={()=>setShowWhaleLog(!showWhaleLog)} className={`flex items-center justify-center px-2 py-1.5 rounded-lg text-xs transition-all ${showWhaleLog?'bg-purple-500/20 text-purple-400 border border-purple-500/30':'text-[#E8E9E4]/30 hover:text-purple-400'}`} title="Whale Log">FLOW</button>
           <button onClick={()=>setShowSettings(true)} className="flex items-center justify-center px-2 py-1.5 rounded-lg text-xs text-[#E8E9E4]/30 hover:text-indigo-400 transition-all" title="Discord"><IC.Link className="w-3.5 h-3.5"/></button>
         </div>
 
@@ -2038,7 +2104,7 @@ function TaraApp(){
         {/* ── WINDOW RECAP TOAST ── */}
         {windowRecap&&(
           <div className={`shrink-0 rounded-xl border-2 px-4 py-3 flex items-center gap-3 animate-pulse-once transition-all ${windowRecap.won?'bg-emerald-500/10 border-emerald-500/40':'bg-rose-500/10 border-rose-500/40'}`}>
-            <span className="text-2xl">{windowRecap.won?'✅':'❌'}</span>
+            <span className="text-2xl">{windowRecap.won?'W':'L'}</span>
             <div className="flex-1 min-w-0">
               <div className={`text-sm font-serif font-bold ${windowRecap.won?'text-emerald-400':'text-rose-400'}`}>
                 {windowRecap.won?'WIN':'LOSS'} · {windowRecap.dir} · {windowRecap.regime}
@@ -2105,17 +2171,17 @@ function TaraApp(){
                     {analysis.lockInfo&&<span className="text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs px-2 py-1">🔒 {Math.floor((Date.now()-analysis.lockInfo.lockedAt)/1000)}s @ {analysis.lockInfo.lockedPosterior.toFixed(0)}%{analysis.lockInfo.isLateLock?' ⚠️':''}</span>}
                     {/* Late-lock zone warning — no lock yet but window is old */}
                     {!analysis.lockInfo&&analysis.isLateLockZone&&(
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400" title="Late in window — lock reliability reduced">⚠️ LATE WINDOW</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400" title="Late in window — lock reliability reduced">LATE WINDOW</span>
                     )}
                     {analysis.isVeryLateLock&&!analysis.lockInfo&&(
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-zinc-500/15 border border-zinc-500/30 text-zinc-400">⛔ NO CALL ZONE</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-zinc-500/15 border border-zinc-500/30 text-zinc-400">NO CALL ZONE</span>
                     )}
                     {/* Multi-timeframe confluence badge */}
                     {analysis.mtfAligned&&(
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 animate-pulse" title={`Both 5m and 15m locked ${analysis.lockInfo?.dir} — stronger conviction`}>🔗 DUAL LOCK</span>
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 animate-pulse" title={`Both 5m and 15m locked ${analysis.lockInfo?.dir} — stronger conviction`}>DUAL LOCK</span>
                     )}
                     {analysis.mtfOpposed&&(
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400" title="5m and 15m are pointing in opposite directions — conflicting signal, trade carefully">⚡ CONFLICT</span>
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400" title="5m and 15m are pointing in opposite directions — conflicting signal, trade carefully">CONFLICT</span>
                     )}
                   </div>
                   <h2 className={`prediction-heading text-3xl sm:text-4xl md:text-5xl font-serif font-bold leading-none tracking-tight ${analysis.textColor} drop-shadow-lg`}>{analysis.prediction}</h2>
@@ -2150,6 +2216,28 @@ function TaraApp(){
                     </div>
                   )}
                 </div>
+
+                {/* Quality Gate — shown whenever a lock is active */}
+                {analysis?.lockInfo&&(
+                  <div className={`mb-2 p-2.5 rounded-lg border ${analysis.qualityColor==='emerald'?'bg-emerald-500/5 border-emerald-500/25':analysis.qualityColor==='amber'?'bg-amber-500/5 border-amber-500/20':'bg-rose-500/5 border-rose-500/20'}`}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/30 font-bold">Quality Gate</span>
+                      <span className={`text-xs font-bold uppercase tracking-wider ${analysis.qualityColor==='emerald'?'text-emerald-400':analysis.qualityColor==='amber'?'text-amber-400':'text-rose-400'}`}>{analysis.qualityLabel} — {analysis.qualityScore?.toFixed(0)}/100</span>
+                    </div>
+                    {/* Score bar */}
+                    <div className="h-1 bg-[#E8E9E4]/10 rounded-full overflow-hidden mb-1.5">
+                      <div className={`h-full rounded-full transition-all duration-700 ${analysis.qualityColor==='emerald'?'bg-emerald-500':analysis.qualityColor==='amber'?'bg-amber-500':'bg-rose-500'}`} style={{width:`${analysis.qualityScore||0}%`}}/>
+                    </div>
+                    <div className={`text-[10px] ${analysis.qualityColor==='emerald'?'text-emerald-400/70':analysis.qualityColor==='amber'?'text-amber-400/70':'text-rose-400/70'}`}>
+                      {analysis.qualityScore>=75
+                        ?`High-confidence setup. ${analysis.regime} + ${getMarketSessions().dominant} historically reliable.`
+                        :analysis.qualityScore>=55
+                        ?`Moderate setup. Trade smaller or wait for stronger signal.`
+                        :`Low quality — ${analysis.regime} in ${getMarketSessions().dominant} has weak historical WR. Consider sitting out.`
+                      }
+                    </div>
+                  </div>
+                )}
 
                 {/* Pre-entry checklist — shown when not yet in trade */}
                 {!userPosition&&analysis?.lockInfo&&(
@@ -2309,11 +2397,11 @@ function TaraApp(){
             {/* Header */}
             <div className="p-3 bg-[#181A19] border-b border-[#E8E9E4]/10 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-2">
-                <span className="text-purple-400 text-sm">⚡</span>
-                <span className="text-xs font-bold uppercase tracking-wide text-purple-400">Flow Intelligence</span>
-                <span className="text-[10px] text-[#E8E9E4]/30">Futures tape · $100K+ trades</span>
+                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></div>
+                <span className="text-xs font-bold uppercase tracking-widest text-[#E8E9E4]/70">Flow Intelligence</span>
+                <span className="text-[10px] text-[#E8E9E4]/25 font-mono">futures tape · $100K+</span>
               </div>
-              <button onClick={()=>setShowWhaleLog(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button>
+              <button onClick={()=>setShowWhaleLog(false)} className="opacity-40 hover:opacity-100 transition-opacity"><IC.X className="w-4 h-4"/></button>
             </div>
 
             <div className="overflow-y-auto flex-1 p-3 space-y-3">
@@ -2341,7 +2429,7 @@ function TaraApp(){
                     <div className="h-1.5 bg-[#E8E9E4]/10 rounded-full overflow-hidden mb-2">
                       <div className={`h-full ${barColor} rounded-full transition-all duration-500`} style={{width:`${fs.score}%`}}/>
                     </div>
-                    {isNote&&<div className="text-[10px] text-amber-400 mt-1">⚡ Spot/futures diverging — likely basis trade, not directional flow</div>}
+                    {isNote&&<div className="text-[10px] text-amber-400 mt-1">Spot/futures diverging — likely basis trade, not directional</div>}
                     <div className="text-[10px] text-[#E8E9E4]/30 mt-1">{fs.trend} · 90s delta: {fs.netDelta90s>=0?'+':''}{(fs.netDelta90s/1000).toFixed(0)}K</div>
                   </div>
                 );
@@ -2380,12 +2468,12 @@ function TaraApp(){
                 const fr=bloomberg?.fundingRate||0;
                 const fs=flowSignal;
                 const isBuyFlow=fs.netDelta30s>0;
-                let oiMsg='',oiColor='text-[#E8E9E4]/40',oiIcon='📊';
+                let oiMsg='',oiColor='text-[#E8E9E4]/40',oiIcon=' ';
                 if(Math.abs(oi)>0.15){
-                  if(oi>0&&isBuyFlow){oiMsg='OI rising + buy flow → New longs opening. Conviction. More likely to follow through.';oiColor='text-emerald-400';oiIcon='🟢';}
-                  else if(oi<0&&isBuyFlow){oiMsg='OI falling + buy flow → Shorts covering, not fresh longs. Rally may be temporary.';oiColor='text-amber-400';oiIcon='🟡';}
-                  else if(oi>0&&!isBuyFlow){oiMsg='OI rising + sell flow → New shorts opening. Conviction sell.';oiColor='text-rose-400';oiIcon='🔴';}
-                  else if(oi<0&&!isBuyFlow){oiMsg='OI falling + sell flow → Longs exiting. Bearish unwind in progress.';oiColor='text-amber-400';oiIcon='🟡';}
+                  if(oi>0&&isBuyFlow){oiMsg='OI rising + buy flow → New longs opening. Conviction. More likely to follow through.';oiColor='text-emerald-400';oiIcon='+';}
+                  else if(oi<0&&isBuyFlow){oiMsg='OI falling + buy flow → Shorts covering, not fresh longs. Rally may be temporary.';oiColor='text-amber-400';oiIcon='~';}
+                  else if(oi>0&&!isBuyFlow){oiMsg='OI rising + sell flow → New shorts opening. Conviction sell.';oiColor='text-rose-400';oiIcon='-';}
+                  else if(oi<0&&!isBuyFlow){oiMsg='OI falling + sell flow → Longs exiting. Bearish unwind in progress.';oiColor='text-amber-400';oiIcon='~';}
                 } else {
                   oiMsg='OI stable — no major position building. Flow less likely to drive sustained move.';
                 }
@@ -2395,7 +2483,7 @@ function TaraApp(){
                   <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/8">
                     <div className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-1.5 font-bold">Open Interest Context</div>
                     <div className="flex items-center gap-2 mb-1">
-                      <span>{oiIcon}</span>
+                      <span className='font-mono text-[10px]'>{oiIcon}</span>
                       <span className={`text-xs font-bold ${oiColor}`}>OI {oi>=0?'+':''}{oi.toFixed(2)}% (5m)</span>
                     </div>
                     <div className={`text-xs ${oiColor} leading-relaxed`}>{oiMsg}</div>
@@ -2847,6 +2935,58 @@ function TaraApp(){
                     );
                   })}
                 </div>
+              </section>
+
+              {/* ── TRADE LOG — Day by Day ── */}
+              <section>
+                <h3 className="text-xs font-bold uppercase tracking-wide text-indigo-400 mb-3">Trade Log — by Day</h3>
+                {(()=>{
+                  // Group trades by calendar date
+                  const byDay={};
+                  [...tradeLog].filter(t=>t.result).reverse().forEach(t=>{
+                    const d=new Date(t.id/1);
+                    const isValidDate=!isNaN(d.getTime())&&d.getFullYear()>2020;
+                    const key=isValidDate?d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}):'Unknown date';
+                    if(!byDay[key])byDay[key]=[];
+                    byDay[key].push(t);
+                  });
+                  const days=Object.entries(byDay).slice(0,14); // show last 14 days
+                  if(days.length===0)return<div className="text-xs text-[#E8E9E4]/30 italic">No completed trades yet.</div>;
+                  return days.map(([day,trades])=>{
+                    const wins=trades.filter(t=>t.result==='WIN').length;
+                    const wr=Math.round(wins/trades.length*100);
+                    return(
+                      <div key={day} className="mb-3">
+                        {/* Day header */}
+                        <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-[#E8E9E4]/8">
+                          <span className="text-[10px] font-bold uppercase tracking-wide text-[#E8E9E4]/50">{day}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-emerald-400 font-mono">{wins}W</span>
+                            <span className="text-[9px] text-rose-400 font-mono">{trades.length-wins}L</span>
+                            <span className={`text-[9px] font-bold ${wr>=65?'text-emerald-400':wr>=50?'text-amber-400':'text-rose-400'}`}>{wr}%</span>
+                          </div>
+                        </div>
+                        {/* Trades for that day */}
+                        <div className="space-y-1">
+                          {trades.map((t,i)=>{
+                            const d=new Date(t.id/1);
+                            const timeStr=isNaN(d.getTime())?'—':d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+                            return(
+                              <div key={i} className={`flex items-center gap-2 text-[10px] px-2 py-1 rounded border ${t.result==='WIN'?'bg-emerald-500/5 border-emerald-500/15':'bg-rose-500/5 border-rose-500/15'}`}>
+                                <span className="font-mono text-[#E8E9E4]/30 shrink-0 w-14">{timeStr}</span>
+                                <span className={`font-bold w-8 shrink-0 ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
+                                <span className="text-[#E8E9E4]/40 shrink-0">{t.windowType||'15m'}</span>
+                                <span className="text-[#E8E9E4]/30 flex-1 truncate">{t.regime||'—'}</span>
+                                <span className="text-[#E8E9E4]/25 shrink-0">{t.session||'—'}</span>
+                                <span className={`font-bold shrink-0 ${t.result==='WIN'?'text-emerald-400':'text-rose-400'}`}>{t.result}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
               </section>
 
               {/* Training Tips */}
