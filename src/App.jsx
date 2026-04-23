@@ -1050,6 +1050,149 @@ class ErrorBoundary extends React.Component{
 // ═══════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════
+
+// ── FlowPanel — extracted from TaraApp to avoid esbuild IIFE+JSX parse issues ──
+function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,bloomberg,currentPrice,timeState}){
+  if(!showWhaleLog)return null;
+  const fs=flowSignal;
+  const scoreColor=fs.score>=75?'text-emerald-400':fs.score>=50?'text-amber-400':fs.score>=25?'text-[#E8E9E4]/60':'text-[#E8E9E4]/30';
+  const barColor=fs.score>=75?'bg-emerald-500':fs.score>=50?'bg-amber-500':fs.score>=25?'bg-indigo-500':'bg-zinc-600';
+  const isBuyFlow=fs.netDelta30s>0||fs.streakDir==='BUY';
+  const isNote=fs.divergence;
+  const hasStreak=fs.streakCount>=2;
+  const isBuy=fs.streakDir==='BUY';
+  const oi=bloomberg?.oiChange5m||0;
+  const fr=bloomberg?.fundingRate||0;
+  const frSign=fr>0?'Longs paying shorts':'Shorts paying longs';
+  const frColor=fr>0?'text-emerald-400':'text-rose-400';
+  const ls=bloomberg?.longShortRatio||1;
+  const tape=tapeRef.current;
+  const spotNet=tape.coinbase.buys-tape.coinbase.sells;
+  const futNet=(tape.binanceFutures.buys-tape.binanceFutures.sells)+(tape.bybit.buys-tape.bybit.sells);
+  const hasMeanDiv=Math.abs(tape.cbFlow)>0.15&&Math.abs((tape.bnFlow+tape.byFlow)*0.5)>0.15&&Math.sign(tape.cbFlow)!==Math.sign((tape.bnFlow+tape.byFlow)*0.5);
+  const hasSpot=Math.abs(spotNet)>50000;
+  const spotAligned=hasSpot&&Math.sign(spotNet)===Math.sign(futNet);
+  let oiMsg='OI stable — no major position building.';
+  let oiColor='text-[#E8E9E4]/40';
+  if(Math.abs(oi)>0.15){
+    if(oi>0&&isBuyFlow){oiMsg='OI rising + buy flow — New longs opening. Conviction. Likely to follow through.';oiColor='text-emerald-400';}
+    else if(oi<0&&isBuyFlow){oiMsg='OI falling + buy flow — Shorts covering, not fresh longs. Rally may be temporary.';oiColor='text-amber-400';}
+    else if(oi>0&&!isBuyFlow){oiMsg='OI rising + sell flow — New shorts opening. Conviction sell.';oiColor='text-rose-400';}
+    else if(oi<0&&!isBuyFlow){oiMsg='OI falling + sell flow — Longs exiting. Bearish unwind.';oiColor='text-amber-400';}
+  }
+  return(
+    <div className="fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0E100F] border border-l border-b border-[#E8E9E4]/15 rounded-bl-xl shadow-2xl" style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
+      <div className="p-3 bg-[#181A19] border-b border-[#E8E9E4]/10 flex justify-between items-center shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></div>
+          <span className="text-xs font-bold uppercase tracking-widest text-[#E8E9E4]/70">Flow Intelligence</span>
+          <span className="text-[10px] text-[#E8E9E4]/25 font-mono">futures tape · $100K+</span>
+        </div>
+        <button onClick={()=>setShowWhaleLog(false)} className="opacity-40 hover:opacity-100 transition-opacity"><span className="text-[#E8E9E4]/60 text-sm font-bold">✕</span></button>
+      </div>
+      <div className="overflow-y-auto flex-1 p-3 space-y-3">
+
+        {/* Flow Score */}
+        <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/10">
+          <div className="flex justify-between items-start mb-2">
+            <div>
+              <div className={`text-lg font-bold font-serif ${scoreColor}`}>{fs.score.toFixed(0)}<span className="text-xs font-sans ml-1 opacity-60">&#47;100</span></div>
+              <div className={`text-xs font-bold uppercase tracking-widest ${scoreColor}`}>{fs.label}</div>
+            </div>
+            <div className="text-right">
+              <div className={`text-xs font-bold ${isBuyFlow?'text-emerald-400':'text-rose-400'}`}>{fs.netDelta30s>0?'NET BUY':'NET SELL'} (30s)</div>
+              <div className={`text-xs font-mono ${isBuyFlow?'text-emerald-300':'text-rose-300'}`}>{fs.netDelta30s>=0?'+':''}{(fs.netDelta30s*0.001).toFixed(0)}K</div>
+            </div>
+          </div>
+          <div className="h-1.5 bg-[#E8E9E4]/10 rounded-full overflow-hidden mb-2">
+            <div className={`h-full ${barColor} rounded-full transition-all duration-500`} style={{width:fs.score+'%'}}/>
+          </div>
+          {isNote&&<div className="text-[10px] text-amber-400 mt-1">Spot-futures diverging — likely basis trade, not directional</div>}
+          {hasSpot&&<div className={`text-[10px] mt-1 font-bold ${spotAligned?'text-emerald-400':'text-amber-400'}`}>Spot {spotAligned?'ALIGNED':'OPPOSED'} · {spotAligned?'Higher reliability':'Lower reliability — possible hedging'}</div>}
+          {!hasSpot&&<div className="text-[10px] text-[#E8E9E4]/25 mt-1">Spot (Coinbase): no significant activity</div>}
+          <div className="text-[10px] text-[#E8E9E4]/30 mt-1">{fs.trend} · 90s delta: {fs.netDelta90s>=0?'+':''}{(fs.netDelta90s*0.001).toFixed(0)}K</div>
+        </div>
+
+        {/* Whale Streak */}
+        <div className={`p-3 rounded-xl border ${hasStreak?(isBuy?'bg-emerald-500/5 border-emerald-500/30':'bg-rose-500/5 border-rose-500/30'):'bg-[#181A19] border-[#E8E9E4]/8'}`}>
+          <div className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-1.5 font-bold">Whale Streak</div>
+          {hasStreak?(
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`text-base font-bold font-serif ${isBuy?'text-emerald-400':'text-rose-400'}`}>{fs.streakCount}x</span>
+                <span className={`text-sm font-bold ${isBuy?'text-emerald-400':'text-rose-400'}`}>{fs.streakDir}</span>
+                <span className="text-xs text-[#E8E9E4]/40">in {fs.streakDuration}s</span>
+              </div>
+              <div className="text-xs text-[#E8E9E4]/60">${(fs.streakUSD*0.001).toFixed(0)}K total · {isBuy?'Accumulation pressure':'Distribution pressure'}</div>
+              {fs.streakCount>=4&&<div className={`text-[10px] mt-1 font-bold ${isBuy?'text-emerald-400':'text-rose-400'}`}>High conviction streak — watch for price follow-through</div>}
+              {fs.streakCount>=2&&fs.streakCount<4&&<div className="text-[10px] mt-1 text-[#E8E9E4]/40">Wait for more prints before treating as directional</div>}
+            </div>
+          ):(
+            <div className="text-xs text-[#E8E9E4]/30 italic">No streak — random prints, not directional</div>
+          )}
+        </div>
+
+        {/* OI Context */}
+        <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/8">
+          <div className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-1.5 font-bold">Open Interest Context</div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`text-xs font-bold ${oiColor}`}>OI {oi>=0?'+':''}{oi.toFixed(2)}% (5m)</span>
+          </div>
+          <div className={`text-xs ${oiColor} leading-relaxed`}>{oiMsg}</div>
+          <div className={`text-[10px] mt-2 ${frColor}`}>Funding: {(fr*100).toFixed(4)}% · {frSign} · {fr>0.01?'Heavily long-biased':fr<-0.01?'Heavily short-biased':'Neutral'}</div>
+        </div>
+
+        {/* Spot-Futures Divergence */}
+        {hasMeanDiv&&(
+          <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/25">
+            <div className="text-[10px] uppercase tracking-widest text-amber-400 mb-1.5 font-bold">Spot-Futures Divergence</div>
+            <div className="text-xs text-amber-300 mb-1">Spot (Coinbase): <strong>{tape.cbFlow>0?'BUYING':'SELLING'}</strong> · Futures: <strong>{((tape.bnFlow+tape.byFlow)*0.5)>0?'BUYING':'SELLING'}</strong></div>
+            <div className="text-[10px] text-[#E8E9E4]/50 leading-relaxed">Opposite flows between spot and futures typically indicate basis traders — not directional conviction.</div>
+          </div>
+        )}
+
+        {/* Long-Short Ratio */}
+        {bloomberg?.longShortRatio&&(
+          <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/8">
+            <div className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-2 font-bold">Market Positioning (Binance)</div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="flex-1 h-2 bg-[#E8E9E4]/10 rounded-full overflow-hidden">
+                <div className="h-full bg-emerald-500 rounded-full transition-all" style={{width:Math.min(100,(ls*100)/(ls+1))+'%'}}/>
+              </div>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-emerald-400">Long {((ls*100)/(ls+1)).toFixed(0)}%</span>
+              <span className="text-rose-400">Short {(100/(ls+1)).toFixed(0)}%</span>
+            </div>
+            {ls>1.5&&<div className="text-[10px] text-rose-400 mt-1">Crowd is heavily long — contrarian warning.</div>}
+            {ls<0.7&&<div className="text-[10px] text-emerald-400 mt-1">Crowd is heavily short — short squeeze risk elevated.</div>}
+          </div>
+        )}
+
+        {/* Raw Prints */}
+        <details className="group">
+          <summary className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/25 cursor-pointer hover:text-[#E8E9E4]/50 font-bold list-none flex items-center gap-1">
+            <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
+            Raw prints ({whaleLog.length}) — futures $100K+, not directional on their own
+          </summary>
+          <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+            {whaleLog.length===0?<div className="text-xs text-[#E8E9E4]/30 italic">No prints yet</div>:whaleLog.slice(0,20).map((w,i)=>{
+              const d=new Date(w.time);
+              return(<div key={i} className={`flex items-center gap-2 text-xs p-1.5 rounded bg-[#111312] border ${w.side==='BUY'?'border-emerald-500/15':'border-rose-500/15'}`}>
+                <span className="text-[#E8E9E4]/25 font-mono shrink-0">{d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+                <span className={`font-bold text-[10px] ${w.side==='BUY'?'text-emerald-500':'text-rose-500'}`}>{w.side}</span>
+                <span className="text-[#E8E9E4]/50">${(w.usd*0.001).toFixed(0)}K</span>
+                <span className="text-[#E8E9E4]/25 text-[10px] ml-auto">{w.src}</span>
+              </div>);
+            })}
+          </div>
+        </details>
+
+      </div>
+    </div>
+  );
+}
+
 // Flow button component — extracted to avoid nested template literals in JSX (esbuild safe)
 const FlowBtn=({flowSignal,active,onClick,cls})=>{
   const isStrong=flowSignal.score>=75;
@@ -2389,294 +2532,9 @@ function TaraApp(){
                 <div className="flex flex-col gap-1.5 border-t border-[#E8E9E4]/10 pt-3">
                   <span className="text-xs uppercase tracking-wide text-[#E8E9E4]/30 text-center">-30% Stop Guard Sync</span>
                   <div className="flex gap-2">
-                    <button onClick={()=>handleManualSync('UP')} className={`flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all ${userPosition==='UP'?'bg-emerald-600 text-white border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.4)]':'border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10'}`}>Entered UP</button>
-                    <button onClick={()=>handleManualSync('DOWN')} className={`flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all ${userPosition==='DOWN'?'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(225,29,72,0.4)]':'border-rose-500/30 text-rose-500 hover:bg-rose-500/10'}`}>Entered DOWN</button>
-                  </div>
-                </div>
+                    <button onClick={()=>handleManualSync('UP')} className={`flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all ${userPosition==='UP'?'bg-emerald-600 text-white border-emerald-400 shadow-[0_0_15px_rgba(16,1      {/* ── FLOW INTELLIGENCE PANEL ── */}
+      <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState}/>order-[#E8E9E4]/10">
 
-                {/* Streak warning banner */}
-                {streakData.strongWarn&&(
-                  <div className="mb-2 p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/30 flex items-center gap-2">
-                    <span className="text-rose-400 text-lg">🔥</span>
-                    <div><div className="text-xs font-bold text-rose-400 uppercase tracking-wide">{streakData.streak} losses in a row — consider sitting out</div><div className="text-[10px] text-[#E8E9E4]/50">Cold streaks happen. Protecting capital matters more than catching up.</div></div>
-                  </div>
-                )}
-                {streakData.warning&&!streakData.strongWarn&&(
-                  <div className="mb-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center gap-2">
-                    <span className="text-amber-400 text-sm">⚠️</span>
-                    <div className="text-[10px] text-amber-400">{streakData.streak} consecutive losses — tighten criteria before next entry</div>
-                  </div>
-                )}
-                {/* ADVISOR BOX — Enhanced */}
-                <div className={`w-full p-4 rounded-xl border-2 transition-all ${advisorStyle} ${advisor.animate?'animate-pulse shadow-lg':''} mt-auto`}>
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <IC.Bell className={`w-3.5 h-3.5 ${advisorStyle.split(' ')[0]}`}/>
-                    <span className="text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/70">Tara Advisor</span>
-                    {userPosition&&<span className={`ml-auto text-xs uppercase tracking-wide font-bold px-1.5 py-0.5 rounded ${userPosition==='UP'?'bg-emerald-500/20 text-emerald-400':'bg-rose-500/20 text-rose-400'}`}>IN TRADE: {userPosition}</span>}
-                  </div>
-                  <div className={`text-sm sm:text-base font-serif font-bold mb-1 uppercase leading-tight ${advisorStyle.split(' ')[0]}`}>{advisor.label}</div>
-                  <p className="text-xs text-[#E8E9E4]/80 leading-snug">{advisor.reason}</p>
-                  {advisor.hasAction&&(
-                    <button onClick={()=>executeAction(advisor.actionTarget,advisor.actionLabel)} className={`w-full mt-2 py-2 rounded-lg text-xs font-bold uppercase tracking-wide border transition-all hover:brightness-125 ${advisorStyle}`}>
-                      {advisor.actionLabel||'EXECUTE'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ── POSTERIORS + PROJECTIONS ── */}
-          <div className={`flex flex-col gap-3 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
-            {/* Posteriors */}
-            <div className="flex gap-3">
-              <div className="flex-1 bg-[#181A19] p-2.5 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md">
-                <div className="text-xs text-[#E8E9E4]/40 font-bold uppercase mb-1">POSTERIOR UP</div>
-                <div className="text-3xl sm:text-4xl font-serif text-indigo-300">{analysis?`${Number(analysis.rawProbAbove||0).toFixed(1)}%`:'--%'}</div>
-                {analysis?.volRatio>1.5&&<div className="text-xs text-indigo-400/70 mt-0.5">Vol surge: {analysis.volRatio.toFixed(1)}×</div>}
-              </div>
-              <div className="flex-1 bg-[#181A19] p-2.5 rounded-xl border border-[#E8E9E4]/10 text-center shadow-md">
-                <div className="text-xs text-[#E8E9E4]/40 font-bold uppercase mb-1">POSTERIOR DN</div>
-                <div className="text-3xl sm:text-4xl font-serif text-rose-300">{analysis?`${(100-Number(analysis.rawProbAbove||0)).toFixed(1)}%`:'--%'}</div>
-                {analysis?.bb&&<div className="text-xs text-rose-400/70 mt-0.5">BB %B: {(analysis.bb.pctB*100).toFixed(0)}%</div>}
-              </div>
-            </div>
-
-            {/* Projections */}
-            {analysis&&(
-              <div className="bg-[#181A19] p-2 sm:p-3 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-[220px]">
-                <h2 className="text-xs sm:text-xs font-bold text-[#E8E9E4]/70 uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5"><IC.TrendUp className="w-3.5 h-3.5 text-purple-400"/>T-Target Projections</h2>
-                <div className="flex gap-1.5 mb-2 shrink-0">
-                  {(analysis.projections||[]).map((proj,idx)=>(
-                    <button key={idx} onClick={()=>setActiveProjectionTab(proj.id)} className={`flex-1 rounded-lg p-1.5 text-center border transition-colors ${activeProjectionTab===proj.id?'bg-indigo-500/20 border-indigo-500/40 text-indigo-300':'bg-[#111312] border-[#E8E9E4]/5 text-[#E8E9E4]/40 hover:bg-[#E8E9E4]/5'}`}>
-                      <div className="text-xs font-bold uppercase mb-1">{proj.time}</div>
-                      <div className="text-xs font-serif">${Number(proj.price||0).toLocaleString(undefined,{maximumFractionDigits:0})}</div>
-                    </button>
-                  ))}
-                </div>
-                <div className="bg-[#111312] rounded-lg border border-[#E8E9E4]/5 p-2 flex-1 overflow-y-auto" style={{scrollbarWidth:'thin'}}>
-                  {(analysis.projections||[]).filter(p=>p.id===activeProjectionTab).map(proj=>(
-                    <div key={proj.id} className="text-xs text-[#E8E9E4]/70">
-                      <div className="flex justify-between items-center mb-1 border-b border-[#E8E9E4]/10 pb-1"><span className="font-bold text-indigo-400">TREND PATH</span><span className="text-[#E8E9E4]/40 bg-[#181A19] px-1.5 py-0.5 rounded">CONF: {proj.conf.toFixed(0)}%</span></div>
-                      {(proj.timeline||[]).map((t,i)=>(
-                        <div key={i} className="flex justify-between items-center py-1 px-2 rounded hover:bg-[#181A19] transition-colors">
-                          <span className="font-mono text-[#E8E9E4]/50">{t.timeStr}</span>
-                          <span className="font-serif font-bold text-[#E8E9E4]/90">${t.price.toFixed(2)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ── LIVE WIRE + ENGINE LOGS ── */}
-          <div className={`flex flex-col gap-3 lg:col-span-1 md:col-span-2 ${mobileTab==='logs'?'flex':mobileTab!=='logs'&&mobileTab!=='signal'?'hidden':'hidden lg:flex'}`}>
-            <div className="bg-[#181A19] p-2.5 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col min-h-[100px]">
-              <div className="flex items-center gap-1.5 mb-1.5 border-b border-[#E8E9E4]/10 pb-1"><IC.Globe className="w-3.5 h-3.5 text-blue-400"/><h2 className="text-xs font-bold text-[#E8E9E4]/70 uppercase tracking-wide">Live Wire</h2></div>
-              <div className="space-y-1 overflow-y-auto flex-1 max-h-32 lg:max-h-none" style={{scrollbarWidth:'thin'}}>
-                {newsEvents.map((n,i)=><div key={i} className={`border-l-2 pl-1.5 py-0.5 ${n.type==='whale'?'border-purple-500':n.type==='rugpull'?'border-rose-500':'border-indigo-500/40'}`}><span className={`text-xs leading-tight ${n.type==='whale'?'text-purple-300':n.type==='rugpull'?'text-rose-400 font-bold':'text-[#E8E9E4]/80'}`}>{n.title}</span></div>)}
-              </div>
-            </div>
-            {analysis&&(
-              <div className="bg-[#181A19] p-2.5 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col flex-1 min-h-[140px]">
-                <div className="flex items-center gap-1.5 mb-1.5 border-b border-[#E8E9E4]/10 pb-1"><IC.Terminal className="w-3.5 h-3.5 text-amber-400"/><h2 className="text-xs font-bold text-[#E8E9E4]/70 uppercase tracking-wide">Engine Logs (V110)</h2></div>
-                <div className="space-y-1 overflow-y-auto flex-1 font-mono max-h-48 lg:max-h-none" style={{scrollbarWidth:'thin'}}>
-                  {(analysis.reasoning||[]).map((r,i)=>(
-                    <div key={i} className={`p-1.5 rounded text-xs flex items-start gap-1 uppercase ${r.includes('CAP')||r.includes('GRAVITY')||r.includes('MEMORY')?'text-rose-400 border border-rose-500/20 bg-rose-500/5':r.includes('ALIGNED')||r.includes('STRUCTURE')?'text-emerald-400 border border-emerald-500/20 bg-emerald-500/5':'text-[#E8E9E4]/60 border border-[#E8E9E4]/5'}`}>
-                      <span className="text-emerald-500 shrink-0">›</span><span className="leading-snug">{r}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── CHART — TradingView ── */}
-        <div className="bg-[#181A19] rounded-xl border border-[#E8E9E4]/10 shadow-lg overflow-hidden" style={{minHeight:'480px',overflow:'hidden'}}>
-          <div className="flex justify-between items-center px-3 py-2 border-b border-[#E8E9E4]/10">
-            <h2 className="text-xs font-bold text-[#E8E9E4]/70 uppercase tracking-[0.2em] flex items-center gap-2">
-              <IC.Activity className="w-4 h-4 text-indigo-400"/>TARA LIVE CHART
-              <span className="text-[10px] text-[#E8E9E4]/30 font-normal normal-case tracking-normal">· TradingView · COINBASE:BTCUSD</span>
-            </h2>
-            <div className="flex items-center gap-2 text-xs text-[#E8E9E4]/40">
-              {analysis?.isRugPull&&showRugPullAlerts&&<span className="text-rose-400 font-bold animate-pulse">🚨 RUG PULL</span>}
-            </div>
-          </div>
-          <div style={{padding:'8px',boxSizing:'border-box'}}>
-            <TradingViewChart
-              resolution={chartRes}
-              onResolutionChange={setChartRes}
-              windowType={windowType}
-            />
-          </div>
-        </div>
-      </main>
-
-      {/* ── MODALS & FLOATING UI ── */}
-
-      {/* ── FLOW INTELLIGENCE PANEL — dropdown anchored top-right under FLOW button ── */}
-      {showWhaleLog&&(
-        <div className="fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0E100F] border border-l border-b border-[#E8E9E4]/15 rounded-bl-xl shadow-2xl" style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}} onClick={e=>e.stopPropagation()}>
-            {/* Header */}
-            <div className="p-3 bg-[#181A19] border-b border-[#E8E9E4]/10 flex justify-between items-center shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></div>
-                <span className="text-xs font-bold uppercase tracking-widest text-[#E8E9E4]/70">Flow Intelligence</span>
-                <span className="text-[10px] text-[#E8E9E4]/25 font-mono">futures tape · $100K+</span>
-              </div>
-              <button onClick={()=>setShowWhaleLog(false)} className="opacity-40 hover:opacity-100 transition-opacity"><IC.X className="w-4 h-4"/></button>
-            </div>
-
-            <div className="overflow-y-auto flex-1 p-3 space-y-3">
-
-              {/* ── FLOW SIGNAL SCORE ── */}
-              {(()=>{
-                const fs=flowSignal;
-                const scoreColor=fs.score>=75?'text-emerald-400':fs.score>=50?'text-amber-400':fs.score>=25?'text-[#E8E9E4]/60':'text-[#E8E9E4]/30';
-                const barColor=fs.score>=75?'bg-emerald-500':fs.score>=50?'bg-amber-500':fs.score>=25?'bg-indigo-500':'bg-zinc-600';
-                const isBuyFlow=fs.netDelta30s>0||fs.streakDir==='BUY';
-                const isNote=fs.divergence;
-                return(
-                  <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/10">
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <div className={`text-lg font-bold font-serif ${scoreColor}`}>{fs.score.toFixed(0)}<span className="text-xs font-sans ml-1 opacity-60">&#47;100</span></div>
-                        <div className={`text-xs font-bold uppercase tracking-widest ${scoreColor}`}>{fs.label}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className={`text-xs font-bold ${isBuyFlow?'text-emerald-400':'text-rose-400'}`}>{fs.netDelta30s>0?'NET BUY':'NET SELL'} (30s)</div>
-                        <div className={`text-xs font-mono ${isBuyFlow?'text-emerald-300':'text-rose-300'}`}>{fs.netDelta30s>=0?'+':''}{(fs.netDelta30s/1000).toFixed(0)}K</div>
-                      </div>
-                    </div>
-                    {/* Score bar */}
-                    <div className="h-1.5 bg-[#E8E9E4]/10 rounded-full overflow-hidden mb-2">
-                      <div className={`h-full ${barColor} rounded-full transition-all duration-500`} style={{width:`${fs.score}%`}}/>
-                    </div>
-                    {isNote&&<div className="text-[10px] text-amber-400 mt-1">Spot-futures diverging — likely basis trade, not directional</div>}
-                    <div className="text-[10px] text-[#E8E9E4]/30 mt-1">{fs.trend} · 90s delta: {fs.netDelta90s>=0?'+':''}{(fs.netDelta90s/1000).toFixed(0)}K</div>
-                  </div>
-                );
-              })()}
-
-              {/* ── WHALE STREAK ── */}
-              {(()=>{
-                const fs=flowSignal;
-                const hasStreak=fs.streakCount>=2;
-                const isBuy=fs.streakDir==='BUY';
-                return(
-                  <div className={`p-3 rounded-xl border ${hasStreak?(isBuy?'bg-emerald-500/5 border-emerald-500/30':'bg-rose-500/5 border-rose-500/30'):'bg-[#181A19] border-[#E8E9E4]/8'}`}>
-                    <div className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-1.5 font-bold">Whale Streak</div>
-                    {hasStreak?(
-                      <>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`text-base font-bold font-serif ${isBuy?'text-emerald-400':'text-rose-400'}`}>{fs.streakCount}×</span>
-                          <span className={`text-sm font-bold ${isBuy?'text-emerald-400':'text-rose-400'}`}>{fs.streakDir}</span>
-                          <span className="text-xs text-[#E8E9E4]/40">in {fs.streakDuration}s</span>
-                        </div>
-                        <div className="text-xs text-[#E8E9E4]/60">${(fs.streakUSD/1000).toFixed(0)}K total · {isBuy?'Accumulation pressure':'Distribution pressure'}</div>
-                        {fs.streakCount>=4&&<div className={`text-[10px] mt-1 font-bold ${isBuy?'text-emerald-400':'text-rose-400'}`}>🔥 High conviction streak — watch for price follow-through</div>}
-                        {fs.streakCount>=2&&fs.streakCount<4&&<div className="text-[10px] mt-1 text-[#E8E9E4]/40">Wait for more prints before treating as directional</div>}
-                      </>
-                    ):(
-                      <div className="text-xs text-[#E8E9E4]/30 italic">No streak — random prints, not directional</div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* ── OI CONTEXT ── */}
-              {(()=>{
-                const oi=bloomberg?.oiChange5m||0;
-                const ls=bloomberg?.longShortRatio||1;
-                const fr=bloomberg?.fundingRate||0;
-                const fs=flowSignal;
-                const isBuyFlow=fs.netDelta30s>0;
-                let oiMsg='',oiColor='text-[#E8E9E4]/40',oiIcon=' ';
-                if(Math.abs(oi)>0.15){
-                  if(oi>0&&isBuyFlow){oiMsg='OI rising + buy flow — New longs opening. Conviction. Likely to follow through.';oiColor='text-emerald-400';oiIcon='+';}
-                  else if(oi<0&&isBuyFlow){oiMsg='OI falling + buy flow → Shorts covering, not fresh longs. Rally may be temporary.';oiColor='text-amber-400';oiIcon='~';}
-                  else if(oi>0&&!isBuyFlow){oiMsg='OI rising + sell flow → New shorts opening. Conviction sell.';oiColor='text-rose-400';oiIcon='-';}
-                  else if(oi<0&&!isBuyFlow){oiMsg='OI falling + sell flow → Longs exiting. Bearish unwind in progress.';oiColor='text-amber-400';oiIcon='~';}
-                } else {
-                  oiMsg='OI stable — no major position building. Flow less likely to drive sustained move.';
-                }
-                const frSign=fr>0?'Longs paying shorts':'Shorts paying longs';
-                const frColor=fr>0?'text-emerald-400':'text-rose-400';
-                return(
-                  <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/8">
-                    <div className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-1.5 font-bold">Open Interest Context</div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className='font-mono text-[10px]'>{oiIcon}</span>
-                      <span className={`text-xs font-bold ${oiColor}`}>OI {oi>=0?'+':''}{oi.toFixed(2)}% (5m)</span>
-                    </div>
-                    <div className={`text-xs ${oiColor} leading-relaxed`}>{oiMsg}</div>
-                    <div className={`text-[10px] mt-2 ${frColor}`}>Funding: {(fr*100).toFixed(4)}% · {frSign} · {fr>0.01?'Heavily long-biased market':fr<-0.01?'Heavily short-biased market':'Neutral'}</div>
-                    {Math.abs(bloomberg?.basisBps||0)>5&&<div className="text-[10px] text-amber-400 mt-1">Basis: {(bloomberg?.basisBps||0).toFixed(1)} bps — elevated spread suggests basis trading activity</div>}
-                  </div>
-                );
-              })()}
-
-              {/* ── SPOT vs FUTURES DIVERGENCE ── */}
-              {(()=>{
-                const div=tapeRef.current.divergence;
-                const cbF=tapeRef.current.cbFlow;
-                const futF=(tapeRef.current.bnFlow+tapeRef.current.byFlow)/2;
-                const hasMeaningfulDiv=Math.abs(cbF)>0.15&&Math.abs(futF)>0.15&&Math.sign(cbF)!==Math.sign(futF);
-                if(!hasMeaningfulDiv)return null;
-                const spotDir=cbF>0?'BUYING':'SELLING';
-                const futDir=futF>0?'BUYING':'SELLING';
-                return(
-                  <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/25">
-                    <div className="text-[10px] uppercase tracking-widest text-amber-400 mb-1.5 font-bold">Spot-Futures Divergence</div>
-                    <div className="text-xs text-amber-300 mb-1">Spot (Coinbase):  <strong>{spotDir}</strong> · Futures (Binance): <strong>{futDir}</strong></div>
-                    <div className="text-[10px] text-[#E8E9E4]/50 leading-relaxed">Opposite flows between spot and futures typically indicate basis traders — not directional conviction. Treat futures whale prints as less reliable until spot confirms.</div>
-                  </div>
-                );
-              })()}
-
-              {/* ── LONG-SHORT RATIO ── */}
-              {bloomberg?.longShortRatio&&(
-                <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/8">
-                  <div className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-2 font-bold">Market Positioning (Binance)</div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="flex-1 h-2 bg-[#E8E9E4]/10 rounded-full overflow-hidden">
-                      <div className="h-full bg-emerald-500 rounded-full transition-all" style={{width:`${Math.min(100,(bloomberg.longShortRatio/(bloomberg.longShortRatio+1))*100)}%`}}/>
-                    </div>
-                  </div>
-                  <div className="flex justify-between text-[10px]">
-                    <span className="text-emerald-400">Long {(bloomberg.longShortRatio/(bloomberg.longShortRatio+1)*100).toFixed(0)}%</span>
-                    <span className="text-rose-400">Short {(1/(bloomberg.longShortRatio+1)*100).toFixed(0)}%</span>
-                  </div>
-                  {bloomberg.longShortRatio>1.5&&<div className="text-[10px] text-rose-400 mt-1">Crowd is heavily long — contrarian warning. Longs get squeezed harder.</div>}
-                  {bloomberg.longShortRatio<0.7&&<div className="text-[10px] text-emerald-400 mt-1">Crowd is heavily short — short squeeze risk elevated.</div>}
-                </div>
-              )}
-
-              {/* ── RAW PRINTS (collapsed, for transparency) ── */}
-              <details className="group">
-                <summary className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/25 cursor-pointer hover:text-[#E8E9E4]/50 font-bold list-none flex items-center gap-1">
-                  <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
-                  Raw prints ({whaleLog.length}) — futures $100K+, not directional on their own
-                </summary>
-                <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                  {whaleLog.length===0?<div className="text-xs text-[#E8E9E4]/30 italic">No prints yet</div>:whaleLog.slice(0,20).map((w,i)=>{
-                    const d=new Date(w.time);
-                    return(<div key={i} className={`flex items-center gap-2 text-xs p-1.5 rounded bg-[#111312] border ${w.side==='BUY'?'border-emerald-500/15':'border-rose-500/15'}`}>
-                      <span className="text-[#E8E9E4]/25 font-mono shrink-0">{d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
-                      <span className={`font-bold text-[10px] ${w.side==='BUY'?'text-emerald-500':'text-rose-500'}`}>{w.side}</span>
-                      <span className="text-[#E8E9E4]/50">${(w.usd/1000).toFixed(0)}K</span>
-                      <span className="text-[#E8E9E4]/25 text-[10px] ml-auto">{w.src}</span>
-                    </div>);
-                  })}
-                </div>
-              </details>
-            </div>
-          </div>
-        </div>
-      )}
       {/* Settings */}
       {showSettings&&(
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
@@ -2868,7 +2726,7 @@ function TaraApp(){
                     })}
                   </div>
                 )}
-                <p className="text-xs text-[#E8E9E4]/30 mt-2">Green = well-calibrated. Red = raw posterior is over/underestimating actual win rate. Tara applies calibration automatically after 3+ samples per bucket.</p>
+                <p className="text-xs text-[#E8E9E4]/30 mt-2">Green = well-calibrated. Red = raw posterior is over- or under-estimating actual win rate. Tara applies calibration automatically after 3+ samples per bucket.</p>
               </section>
 
               {/* Session Performance */}
@@ -2905,7 +2763,7 @@ function TaraApp(){
               <section>
                 <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                   <h3 className="text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/60">Trade Log ({tradeLog.length} total)</h3>
-                  <p className="text-[10px] text-[#E8E9E4]/30">Tap a trade to edit · Fix any wrong WIN/LOSS</p>
+                  <p className="text-[10px] text-[#E8E9E4]/30">Tap a trade to edit · Fix any wrong WIN or LOSS</p>
                 </div>
 
                 {/* Edit panel — shows when a trade is selected */}
@@ -3168,7 +3026,7 @@ function TaraApp(){
                   </div>
                   <div className="bg-[#111312] rounded-lg p-3 border border-zinc-500/15">
                     <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">NO CALL — WINDOW CLOSED — LOCK RELEASED</span><span className="text-[10px] text-rose-400 uppercase">Sit out</span></div>
-                    <p className="text-xs leading-relaxed text-[#E8E9E4]/60"><strong className="text-white">NO CALL:</strong> Never reached threshold before endgame. Skip this round.<br/><strong className="text-white">WINDOW CLOSED:</strong> Last 90s/45s with no lock. Too late to enter safely.<br/><strong className="text-white">LOCK RELEASED:</strong> Price moved 55+ bps wrong direction, Tara released. Respect it immediately.</p>
+                    <p className="text-xs leading-relaxed text-[#E8E9E4]/60"><strong className="text-white">NO CALL:</strong> Never reached threshold before endgame. Skip this round.<br/><strong className="text-white">WINDOW CLOSED:</strong> Last 90s (15m) or 45s (5m) with no lock. Too late to enter safely.<br/><strong className="text-white">LOCK RELEASED:</strong> Price moved 55+ bps wrong direction, Tara released. Respect it immediately.</p>
                   </div>
                 </div>
               </section>
@@ -3209,10 +3067,10 @@ function TaraApp(){
                 <h3 className="text-amber-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-amber-500/20 pb-1">🧠 How Tara Learns After Every Trade</h3>
                 <div className="space-y-2 text-xs leading-relaxed text-[#E8E9E4]/60">
                   <div className="flex gap-3"><span className="text-indigo-400 font-bold shrink-0">1.</span><p><strong className="text-white">Lock logging:</strong> When a lock fires, all 6 raw signal scores + posterior + regime + time + session are saved to a trade log.</p></div>
-                  <div className="flex gap-3"><span className="text-indigo-400 font-bold shrink-0">2.</span><p><strong className="text-white">Result resolution:</strong> At window close (or manual cashout/cut), WIN or LOSS is attached to the trade record.</p></div>
+                  <div className="flex gap-3"><span className="text-indigo-400 font-bold shrink-0">2.</span><p><strong className="text-white">Result resolution:</strong> At window close (or manual cashout or cut), WIN or LOSS is attached to the trade record.</p></div>
                   <div className="flex gap-3"><span className="text-indigo-400 font-bold shrink-0">3.</span><p><strong className="text-white">Gradient descent:</strong> Signals that contributed correctly get their weight increased. Signals that were misleading get reduced. Learning rate: 0.8.</p></div>
                   <div className="flex gap-3"><span className="text-indigo-400 font-bold shrink-0">4.</span><p><strong className="text-white">Calibration:</strong> After 3+ trades per posterior bucket, she corrects overconfidence. If she said 80% but only won 60% of those, the displayed confidence adjusts to reflect reality.</p></div>
-                  <div className="flex gap-3"><span className="text-indigo-400 font-bold shrink-0">5.</span><p><strong className="text-white">Session & hourly tracking:</strong> Tracks win rates by ASIA/EU/US session and by hour. Check the Training panel (📊 button) to find your best windows.</p></div>
+                  <div className="flex gap-3"><span className="text-indigo-400 font-bold shrink-0">5.</span><p><strong className="text-white">Session & hourly tracking:</strong> Tracks win rates by ASIA, EU, US session and by hour. Check the Training panel (📊 button) to find your best windows.</p></div>
                   <div className="flex gap-3"><span className="text-indigo-400 font-bold shrink-0">6.</span><p><strong className="text-white">Convergence:</strong> Weights stabilize meaningfully after ~80–100 trades. Export the CSV from Training panel and run Python logistic regression to get mathematically optimal weights.</p></div>
                 </div>
               </section>
@@ -3250,7 +3108,7 @@ function TaraApp(){
                   <p>💰 <strong className="text-white">Use Kelly criterion.</strong> The % shown under the posteriors is the mathematically optimal fraction of bankroll to risk. If Kelly says 8%, don't bet 40%.</p>
                   <p>✂️ <strong className="text-white">Never fight CUT LOSSES — NOW.</strong> It requires 3 simultaneous bearish signals. When all three fire together, the trade is structurally broken.</p>
                   <p>💎 <strong className="text-white">Always hit SCALP PROFIT near end of window.</strong> This is the most chronically ignored signal and chronically correct. Time decay in the final 90 seconds is ruthless.</p>
-                  <p>📈 <strong className="text-white">Sync your position with the Entered UP/DOWN buttons.</strong> This activates the 30% stop guard and gives Tara accurate P&L context for advisor calls.</p>
+                  <p>📈 <strong className="text-white">Sync your position with the Entered UP or DOWN buttons.</strong> This activates the 30% stop guard and gives Tara accurate P&L context for advisor calls.</p>
                   <p>🏦 <strong className="text-white">HIGH VOL CHOP regime = avoid.</strong> Tara raises thresholds in choppy markets but even a LOCKED signal in CHOP has lower reliability. Session timing matters most here.</p>
                 </div>
               </section>
@@ -3262,8 +3120,8 @@ function TaraApp(){
                   <p>Paste your Discord webhook URL in Settings (🔗 button). Tara will auto-broadcast:</p>
                   <ul className="mt-2 space-y-1 list-disc pl-4">
                     <li>Lock commits (with posterior, regime, gap, clock remaining)</li>
-                    <li>Round closures (WIN/LOSS, closing price, regime recorded)</li>
-                    <li>Manual /broadcast command in chat sends a live signal embed</li>
+                    <li>Round closures (WIN or LOSS, closing price, regime recorded)</li>
+                    <li>Manual broadcast command in chat sends a live signal embed</li>
                   </ul>
                 </div>
               </section>
@@ -3283,7 +3141,7 @@ function TaraApp(){
             <div className="p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80">
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">V110 Prediction Engine</h3><p className="leading-relaxed">Predictions now use a <strong>6-signal weighted composite</strong> instead of simple addition: (1) Gap Gravity, (2) Momentum Composite with alignment detection, (3) Candle Structure — consecutive candles + volume confirmation, (4) Flow Imbalance, (5) Technical Composite — RSI divergence, VWAP, Bollinger Bands, price channel, (6) Funding Momentum. Signals are weighted by reliability, preventing single-factor dominance.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">Smart Advisor (In-Trade)</h3><p className="leading-relaxed">The advisor now runs a <strong>10-state priority machine</strong> with time-remaining awareness. Every message shows how many minutes are left and specific price context. It distinguishes between "cut now" (late window, losing) and "hold" (time to recover). Profit recommendations include specific exit triggers relative to peak offer.</p></section>
-              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">Canvas Chart (No CDN)</h3><p className="leading-relaxed">Chart is now built entirely in canvas — no external library needed. Always renders. Dual API fallback: Coinbase first, Binance if blocked. Supports full EMA/BB overlays, strike line, live price sync, crosshair hover, and volume bars. Resize-aware.</p></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">Canvas Chart (No CDN)</h3><p className="leading-relaxed">Chart is built entirely in canvas — no external library needed. Always renders. Dual API fallback: Coinbase first, Binance if blocked. Supports full EMA/BB overlays, strike line, live price sync, crosshair hover, and volume bars. Resize-aware.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">New Signals</h3><ul className="list-disc pl-4 space-y-1"><li><strong>Candle Structure:</strong> 3+ consecutive candles in same direction = momentum confirmation. Volume surge compounds the signal.</li><li><strong>Price Channel:</strong> Near top of 20-candle range with upward drift = resistance signal, and vice versa.</li><li><strong>RSI Divergence:</strong> Price moving up but RSI flat = hidden weakness. Price down but RSI flat = hidden strength.</li><li><strong>Funding Momentum:</strong> Direction of funding rate change, not just the level.</li></ul></section>
             </div>
           </div>
