@@ -1661,24 +1661,6 @@ function TaraApp(){
       // V110 Smart Advisor — lock-state-aware
       const advisor=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps,activePrediction,regime,lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null});
 
-      // ── QUALITY GATE ─────────────────────────────────────────────────────
-      // Pre-entry score 0-100. Based on historical WR data across 251 trades.
-      // Score ≥75 = High Quality (trade), 55-74 = Moderate (be selective), <55 = Low (sit out)
-      const _regimeMem=regimeMemory[regime]||{wins:0,losses:0};
-      const _regimeTot=_regimeMem.wins+_regimeMem.losses;
-      const _regimeWR=_regimeTot>5?(_regimeMem.wins/_regimeTot)*100:60; // fallback 60% if insufficient data
-      const _sessWR={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[getMarketSessions().dominant]||57;
-      const _dirReliability=(eng.bullCount>0||lockedCallRef.current?.dir==='UP')?66:55; // UP=66%, DOWN=55% empirical
-      const _posteriorStrength=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6)); // 0-40 pts. Uses eng.posterior = calibrated+dir+time-decayed value
-      const _clockPenalty=isVeryLateLock?-20:isLateLockZone?-8:0;
-      const _regimeScore=Math.min(30,(_regimeWR-50)*0.6); // 0-30 pts: 80% regime = 18pts, 50% = 0pts
-      const _sessScore=Math.min(15,(_sessWR-50)*0.6);     // 0-15 pts
-      const _dirScore=Math.min(10,(_dirReliability-50)*0.4); // 0-10 pts
-      const rawQuality=_posteriorStrength+_regimeScore+_sessScore+_dirScore+_clockPenalty;
-      const qualityScore=Math.max(0,Math.min(100,rawQuality+5)); // +5 baseline, clamped 0-100
-      const qualityLabel=qualityScore>=75?'HIGH':qualityScore>=55?'MODERATE':'LOW';
-      const qualityColor=qualityScore>=75?'emerald':qualityScore>=55?'amber':'rose';
-
       // Projections
       const getHP=(msAgo)=>{const t=Date.now()-msAgo;const m=priceMemoryRef.current;if(!m||m.length===0)return currentPrice;let c=m[0];for(let i=m.length-1;i>=0;i--){if(m[i].time<=t){c=m[i];break;}}return c.p;};
       let trendBps=isNaN(drift1m)?0:drift1m;
@@ -1695,9 +1677,32 @@ function TaraApp(){
       const mtfOpposed=_thisLock&&_otherLock&&_otherLock.dir!==_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
       return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
         lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null,
-        bullCount:Number(bullCount),bearCount:Number(bearCount),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),qualityScore:Number(qualityScore),qualityLabel:String(qualityLabel),qualityColor:String(qualityColor)};
+        bullCount:Number(bullCount),bearCount:Number(bearCount),consecutiveNeeded:Number(CONSECUTIVE_NEEDED)};
     }catch(err){return{prediction:'ERROR',rawProbAbove:50,projections:[],reasoning:[err.stack||String(err)],textColor:'text-rose-500',advisor:{label:'MATH CRASH',reason:String(err),color:'rose',animate:false,hasAction:false},regime:'ERROR'};}
   },[currentPrice,liveHistory,targetMargin,timeState.minsRemaining,timeState.secsRemaining,timeState.currentHour,orderBook,forceRender,betAmount,maxPayout,currentOffer,globalFlow,userPosition,windowType,isMounted,showRugPullAlerts,positionStatus,velocityRef,bloomberg,useLocalTime,regimeMemory,regimeWeights,strikeConfirmed]);
+
+  // ── QUALITY GATE useMemo — separate from analysis to avoid TDZ ──────────
+  const qualityGate=useMemo(()=>{
+    if(!analysis)return{score:0,label:'LOW',color:'rose'};
+    const regime=analysis.regime||'RANGE/CHOP';
+    const _regimeMem=regimeMemory[regime]||{wins:0,losses:0};
+    const _regimeTot=_regimeMem.wins+_regimeMem.losses;
+    const _regimeWR=_regimeTot>5?(_regimeMem.wins/_regimeTot)*100:60;
+    const _sessWR={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[getMarketSessions().dominant]||57;
+    const _posterior=analysis.rawProbAbove||50;
+    const _isUP=analysis.lockInfo?.dir==='UP';
+    const _dirReliability=_isUP?66:55;
+    const _posteriorStrength=Math.min(40,Math.max(0,(Math.abs(_posterior-50)-15)*1.6));
+    const _clockPenalty=analysis.isVeryLateLock?-20:analysis.isLateLockZone?-8:0;
+    const _regimeScore=Math.min(30,(_regimeWR-50)*0.6);
+    const _sessScore=Math.min(15,(_sessWR-50)*0.6);
+    const _dirScore=Math.min(10,(_dirReliability-50)*0.4);
+    const raw=_posteriorStrength+_regimeScore+_sessScore+_dirScore+_clockPenalty;
+    const score=Math.max(0,Math.min(100,raw+5));
+    const label=score>=75?'HIGH':score>=55?'MODERATE':'LOW';
+    const color=score>=75?'emerald':score>=55?'amber':'rose';
+    return{score,label,color};
+  },[analysis,regimeMemory]);
 
   // ── LOCK BROADCAST EFFECT — Two-stage: SIGNAL fires when FORMING, LOCK fires on commit ──
   const lastBroadcastLockRef=useRef(null);
@@ -2219,19 +2224,19 @@ function TaraApp(){
 
                 {/* Quality Gate — shown whenever a lock is active */}
                 {analysis?.lockInfo&&(
-                  <div className={`mb-2 p-2.5 rounded-lg border ${analysis.qualityColor==='emerald'?'bg-emerald-500/5 border-emerald-500/25':analysis.qualityColor==='amber'?'bg-amber-500/5 border-amber-500/20':'bg-rose-500/5 border-rose-500/20'}`}>
+                  <div className={`mb-2 p-2.5 rounded-lg border ${qualityGate.color==='emerald'?'bg-emerald-500/5 border-emerald-500/25':qualityGate.color==='amber'?'bg-amber-500/5 border-amber-500/20':'bg-rose-500/5 border-rose-500/20'}`}>
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/30 font-bold">Quality Gate</span>
-                      <span className={`text-xs font-bold uppercase tracking-wider ${analysis.qualityColor==='emerald'?'text-emerald-400':analysis.qualityColor==='amber'?'text-amber-400':'text-rose-400'}`}>{analysis.qualityLabel} — {analysis.qualityScore?.toFixed(0)}/100</span>
+                      <span className={`text-xs font-bold uppercase tracking-wider ${qualityGate.color==='emerald'?'text-emerald-400':qualityGate.color==='amber'?'text-amber-400':'text-rose-400'}`}>{qualityGate.label} — {qualityGate.score?.toFixed(0)}/100</span>
                     </div>
                     {/* Score bar */}
                     <div className="h-1 bg-[#E8E9E4]/10 rounded-full overflow-hidden mb-1.5">
-                      <div className={`h-full rounded-full transition-all duration-700 ${analysis.qualityColor==='emerald'?'bg-emerald-500':analysis.qualityColor==='amber'?'bg-amber-500':'bg-rose-500'}`} style={{width:`${analysis.qualityScore||0}%`}}/>
+                      <div className={`h-full rounded-full transition-all duration-700 ${qualityGate.color==='emerald'?'bg-emerald-500':qualityGate.color==='amber'?'bg-amber-500':'bg-rose-500'}`} style={{width:`${qualityGate.score||0}%`}}/>
                     </div>
-                    <div className={`text-[10px] ${analysis.qualityColor==='emerald'?'text-emerald-400/70':analysis.qualityColor==='amber'?'text-amber-400/70':'text-rose-400/70'}`}>
-                      {analysis.qualityScore>=75
-                        ?`High-confidence setup. ${analysis.regime} + ${getMarketSessions().dominant} historically reliable.`
-                        :analysis.qualityScore>=55
+                    <div className={`text-[10px] ${qualityGate.color==='emerald'?'text-emerald-400/70':qualityGate.color==='amber'?'text-amber-400/70':'text-rose-400/70'}`}>
+                      {qualityGate.score>=75
+                        ?`High-confidence setup. ${qualityGate.score>=75?analysis.regime:'check conditions'} + ${getMarketSessions().dominant} historically reliable.`
+                        :qualityGate.score>=55
                         ?`Moderate setup. Trade smaller or wait for stronger signal.`
                         :`Low quality — ${analysis.regime} in ${getMarketSessions().dominant} has weak historical WR. Consider sitting out.`
                       }
