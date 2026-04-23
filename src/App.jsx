@@ -3,25 +3,26 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 // ═══════════════════════════════════════
 // ICONS
 // ═══════════════════════════════════════
+const _NS='http:'+'/'+'/www.w3.org/2000/svg';
 const IC={
-Clock:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
-Crosshair:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>,
-Zap:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
-Terminal:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
-Alert:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
-Activity:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
-Bell:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>,
-TrendUp:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>,
-Globe:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>,
-Msg:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>,
-X:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
-Info:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>,
-Vol2:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>,
-VolX:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>,
-Help:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
-Link:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
-ChevronDown:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><polyline points="6 9 12 15 18 9"/></svg>,
-BarChart:({className})=><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className||"w-4 h-4"}><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
+  Clock:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('polyline',{points:'12 6 12 12 16 14'})),
+  Crosshair:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('line',{x1:'22',y1:'12',x2:'18',y2:'12'}),React.createElement('line',{x1:'6',y1:'12',x2:'2',y2:'12'}),React.createElement('line',{x1:'12',y1:'6',x2:'12',y2:'2'}),React.createElement('line',{x1:'12',y1:'22',x2:'12',y2:'18'})),
+  Zap:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polygon',{points:'13 2 3 14 12 14 11 22 21 10 12 10 13 2'})),
+  Terminal:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'4 17 10 11 4 5'}),React.createElement('line',{x1:'12',y1:'19',x2:'20',y2:'19'})),
+  Alert:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'}),React.createElement('line',{x1:'12',y1:'9',x2:'12',y2:'13'}),React.createElement('line',{x1:'12',y1:'17',x2:'12.01',y2:'17'})),
+  Activity:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'22 12 18 12 15 21 9 3 6 12 2 12'})),
+  Bell:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9'}),React.createElement('path',{d:'M13.73 21a2 2 0 0 1-3.46 0'})),
+  TrendUp:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'23 6 13.5 15.5 8.5 10.5 1 18'}),React.createElement('polyline',{points:'17 6 23 6 23 12'})),
+  Globe:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('line',{x1:'2',y1:'12',x2:'22',y2:'12'}),React.createElement('path',{d:'M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'})),
+  Msg:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'})),
+  X:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('line',{x1:'18',y1:'6',x2:'6',y2:'18'}),React.createElement('line',{x1:'6',y1:'6',x2:'18',y2:'18'})),
+  Info:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('line',{x1:'12',y1:'16',x2:'12',y2:'12'}),React.createElement('line',{x1:'12',y1:'8',x2:'12.01',y2:'8'})),
+  Vol2:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polygon',{points:'11 5 6 9 2 9 2 15 6 15 11 19 11 5'}),React.createElement('path',{d:'M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07'})),
+  VolX:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polygon',{points:'11 5 6 9 2 9 2 15 6 15 11 19 11 5'}),React.createElement('line',{x1:'23',y1:'9',x2:'17',y2:'15'}),React.createElement('line',{x1:'17',y1:'9',x2:'23',y2:'15'})),
+  Help:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('path',{d:'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3'}),React.createElement('line',{x1:'12',y1:'17',x2:'12.01',y2:'17'})),
+  Link:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'}),React.createElement('path',{d:'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'})),
+  ChevronDown:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'6 9 12 15 18 9'})),
+  BarChart:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('line',{x1:'18',y1:'20',x2:'18',y2:'10'}),React.createElement('line',{x1:'12',y1:'20',x2:'12',y2:'4'}),React.createElement('line',{x1:'6',y1:'20',x2:'6',y2:'14'})),
 };
 
 // ═══════════════════════════════════════
@@ -47,7 +48,7 @@ const sigmoid=(x,steep=0.035)=>1/(1+Math.exp(-steep*x));
 // ═══════════════════════════════════════
 
 // Default signal weights — trained on 268-trade dataset
-// 163W/105L=60.8% · UP 65% · DOWN 55.6% · SS 68% · TD 87.5% · EU 69.7%
+// 163W-105L=60.8% · UP 65% · DOWN 55.6% · SS 68% · TD 87.5% · EU 69.7%
 // DOWN in SHORT SQUEEZE: 50% — regime-gated suppression active
 const DEFAULT_WEIGHTS={gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13};
 
@@ -55,11 +56,11 @@ const DEFAULT_WEIGHTS={gap:52.69,momentum:49.99,structure:21.54,flow:55.00,techn
 // Initialized from global defaults, diverge over time based on what works in each regime
 const DEFAULT_REGIME_WEIGHTS={
   'SHORT SQUEEZE': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
-  'RANGE/CHOP':    {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
+  'RANGE-CHOP':    {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
   'HIGH VOL CHOP': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
   'TRENDING DOWN': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
 };
-const REGIME_WEIGHT_KEYS={'SHORT SQUEEZE':'taraV110RW_SS_V110','RANGE/CHOP':'taraV110RW_RC_V110','HIGH VOL CHOP':'taraV110RW_HVC_V110','TRENDING DOWN':'taraV110RW_TD_V110'};
+const REGIME_WEIGHT_KEYS={'SHORT SQUEEZE':'taraV110RW_SS_V110','RANGE-CHOP':'taraV110RW_RC_V110','HIGH VOL CHOP':'taraV110RW_HVC_V110','TRENDING DOWN':'taraV110RW_TD_V110'};
 const loadRegimeWeights=()=>{
   const out={};
   Object.entries(REGIME_WEIGHT_KEYS).forEach(([rg,key])=>{
@@ -81,17 +82,17 @@ const loadWeights=()=>{try{const s=localStorage.getItem('taraWeightsV110');if(s)
 const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringify(w));}catch(e){}};
 
 // Load trade log
-// Pre-seeded: 22 trades, 16W/6L (72.7% WR) · SHORT SQUEEZE 12W/1L (92%) · EU 14W/4L (78%)
-// HIGH VOL CHOP 1W/2L (33%) — avoid · RANGE/CHOP 2W/3L (40%) — avoid
+// removed
+// removed
 // Best hours: 4 (100%) and 5 (100%)
 const SEED_TRADES=[
-  // 268 trades (15m) · 163W/105L=60.8% · SS 68% · TD 87.5% · DOWN gate active · V110
-  {id:1776403212237,dir:'UP',posterior:71.0,regime:'RANGE/CHOP',clockAtLock:587,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.83,momentum:0.0,structure:0.0,flow:20.23,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776403812231,dir:'UP',posterior:82.0,regime:'RANGE/CHOP',clockAtLock:887,hour:1,session:'ASIA',windowType:'15m',signals:{gap:35.2,momentum:-5.39,structure:0.0,flow:-17.15,technical:-8.0,regime:0.0},result:'LOSS'},
-  {id:1776407423234,dir:'DOWN',posterior:27.6,regime:'RANGE/CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:-0.28,momentum:-2.75,structure:0.0,flow:-20.59,technical:0.0,regime:0.0},result:'LOSS'},
+  // 268 trades (15m) · 163W-105L=60.8% · SS 68% · TD 87.5% · DOWN gate active · V110
+  {id:1776403212237,dir:'UP',posterior:71.0,regime:'RANGE-CHOP',clockAtLock:587,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.83,momentum:0.0,structure:0.0,flow:20.23,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776403812231,dir:'UP',posterior:82.0,regime:'RANGE-CHOP',clockAtLock:887,hour:1,session:'ASIA',windowType:'15m',signals:{gap:35.2,momentum:-5.39,structure:0.0,flow:-17.15,technical:-8.0,regime:0.0},result:'LOSS'},
+  {id:1776407423234,dir:'DOWN',posterior:27.6,regime:'RANGE-CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:-0.28,momentum:-2.75,structure:0.0,flow:-20.59,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776408300285,dir:'UP',posterior:94.1,regime:'SHORT SQUEEZE',clockAtLock:899,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.59,momentum:-0.95,structure:9.0,flow:12.46,technical:10.0,regime:15.33},result:'WIN'},
-  {id:1776409504121,dir:'UP',posterior:99.0,regime:'RANGE/CHOP',clockAtLock:595,hour:3,session:'EU',windowType:'15m',signals:{gap:35.03,momentum:6.76,structure:15.0,flow:9.29,technical:3.0,regime:0.0},result:'WIN'},
-  {id:1776410109313,dir:'UP',posterior:73.1,regime:'RANGE/CHOP',clockAtLock:890,hour:3,session:'EU',windowType:'15m',signals:{gap:1.27,momentum:-3.68,structure:15.0,flow:8.73,technical:3.0,regime:0.0},result:'LOSS'},
+  {id:1776409504121,dir:'UP',posterior:99.0,regime:'RANGE-CHOP',clockAtLock:595,hour:3,session:'EU',windowType:'15m',signals:{gap:35.03,momentum:6.76,structure:15.0,flow:9.29,technical:3.0,regime:0.0},result:'WIN'},
+  {id:1776410109313,dir:'UP',posterior:73.1,regime:'RANGE-CHOP',clockAtLock:890,hour:3,session:'EU',windowType:'15m',signals:{gap:1.27,momentum:-3.68,structure:15.0,flow:8.73,technical:3.0,regime:0.0},result:'LOSS'},
   {id:1776410445361,dir:'UP',posterior:82.9,regime:'SHORT SQUEEZE',clockAtLock:554,hour:3,session:'EU',windowType:'15m',signals:{gap:-0.42,momentum:3.89,structure:0.0,flow:20.65,technical:-5.0,regime:15.56},result:'LOSS'},
   {id:1776411059805,dir:'UP',posterior:79.9,regime:'SHORT SQUEEZE',clockAtLock:840,hour:3,session:'EU',windowType:'15m',signals:{gap:-0.44,momentum:1.15,structure:0.0,flow:20.41,technical:-5.0,regime:15.38},result:'WIN'},
   {id:1776411899818,dir:'UP',posterior:94.8,regime:'SHORT SQUEEZE',clockAtLock:900,hour:3,session:'EU',windowType:'15m',signals:{gap:0.46,momentum:7.52,structure:0.0,flow:20.64,technical:3.0,regime:15.55},result:'WIN'},
@@ -124,90 +125,90 @@ const SEED_TRADES=[
   {id:1776448864028,dir:'DOWN',posterior:8.9,regime:'HIGH VOL CHOP',clockAtLock:836,hour:14,session:'US',windowType:'15m',signals:{gap:-0.61,momentum:-9.88,structure:0.0,flow:-12.94,technical:2.0,regime:0.0},result:'WIN'},
   {id:1776452033072,dir:'DOWN',posterior:16.0,regime:'HIGH VOL CHOP',clockAtLock:367,hour:14,session:'US',windowType:'15m',signals:{gap:-26.13,momentum:-9.65,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776452812288,dir:'DOWN',posterior:7.9,regime:'HIGH VOL CHOP',clockAtLock:487,hour:15,session:'US',windowType:'15m',signals:{gap:-3.13,momentum:-18.94,structure:0.0,flow:0.0,technical:-3.0,regime:0.0},result:'LOSS'},
-  {id:1776460757203,dir:'DOWN',posterior:8.8,regime:'RANGE/CHOP',clockAtLock:642,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:-21.82,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776461919967,dir:'DOWN',posterior:7.1,regime:'RANGE/CHOP',clockAtLock:380,hour:17,session:'US',windowType:'15m',signals:{gap:-4.14,momentum:-2.21,structure:0.0,flow:-23.2,technical:2.0,regime:0.0},result:'WIN'},
-  {id:1776463239452,dir:'DOWN',posterior:6.4,regime:'RANGE/CHOP',clockAtLock:860,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:-0.57,momentum:-8.75,structure:0.0,flow:-22.84,technical:2.0,regime:0.0},result:'WIN'},
+  {id:1776460757203,dir:'DOWN',posterior:8.8,regime:'RANGE-CHOP',clockAtLock:642,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:-21.82,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776461919967,dir:'DOWN',posterior:7.1,regime:'RANGE-CHOP',clockAtLock:380,hour:17,session:'US',windowType:'15m',signals:{gap:-4.14,momentum:-2.21,structure:0.0,flow:-23.2,technical:2.0,regime:0.0},result:'WIN'},
+  {id:1776463239452,dir:'DOWN',posterior:6.4,regime:'RANGE-CHOP',clockAtLock:860,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:-0.57,momentum:-8.75,structure:0.0,flow:-22.84,technical:2.0,regime:0.0},result:'WIN'},
   {id:1776464102445,dir:'DOWN',posterior:7.7,regime:'TRENDING DOWN',clockAtLock:897,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:-0.6,momentum:-12.76,structure:0.0,flow:-14.41,technical:2.0,regime:0.0},result:'WIN'},
   {id:1776468632061,dir:'UP',posterior:94.0,regime:'SHORT SQUEEZE',clockAtLock:868,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776469543660,dir:'DOWN',posterior:8.3,regime:'RANGE/CHOP',clockAtLock:857,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776469543660,dir:'DOWN',posterior:8.3,regime:'RANGE-CHOP',clockAtLock:857,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776470307745,dir:'UP',posterior:91.5,regime:'SHORT SQUEEZE',clockAtLock:93,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776470411063,dir:'DOWN',posterior:16.3,regime:'TRENDING DOWN',clockAtLock:889,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776471435490,dir:'UP',posterior:90.1,regime:'SHORT SQUEEZE',clockAtLock:765,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776473754856,dir:'DOWN',posterior:7.2,regime:'SHORT SQUEEZE',clockAtLock:245,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776474078453,dir:'DOWN',posterior:6.1,regime:'RANGE/CHOP',clockAtLock:822,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776474078453,dir:'DOWN',posterior:6.1,regime:'RANGE-CHOP',clockAtLock:822,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776474925320,dir:'UP',posterior:92.3,regime:'SHORT SQUEEZE',clockAtLock:875,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776475830221,dir:'DOWN',posterior:8.0,regime:'RANGE/CHOP',clockAtLock:870,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776475830221,dir:'DOWN',posterior:8.0,regime:'RANGE-CHOP',clockAtLock:870,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776476723095,dir:'DOWN',posterior:8.9,regime:'TRENDING DOWN',clockAtLock:877,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776477614063,dir:'DOWN',posterior:8.8,regime:'RANGE/CHOP',clockAtLock:886,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776478663077,dir:'UP',posterior:86.5,regime:'RANGE/CHOP',clockAtLock:737,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776477614063,dir:'DOWN',posterior:8.8,regime:'RANGE-CHOP',clockAtLock:886,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776478663077,dir:'UP',posterior:86.5,regime:'RANGE-CHOP',clockAtLock:737,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776479465721,dir:'DOWN',posterior:8.0,regime:'TRENDING DOWN',clockAtLock:835,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776480331504,dir:'DOWN',posterior:8.2,regime:'RANGE/CHOP',clockAtLock:869,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776481238592,dir:'UP',posterior:87.4,regime:'RANGE/CHOP',clockAtLock:862,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776482921288,dir:'DOWN',posterior:7.8,regime:'RANGE/CHOP',clockAtLock:79,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776483034127,dir:'DOWN',posterior:7.8,regime:'RANGE/CHOP',clockAtLock:866,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776483928752,dir:'DOWN',posterior:6.8,regime:'RANGE/CHOP',clockAtLock:872,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776484836942,dir:'DOWN',posterior:6.2,regime:'RANGE/CHOP',clockAtLock:863,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776485800712,dir:'DOWN',posterior:9.0,regime:'RANGE/CHOP',clockAtLock:800,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776487006113,dir:'UP',posterior:88.0,regime:'RANGE/CHOP',clockAtLock:494,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776488505617,dir:'UP',posterior:87.0,regime:'RANGE/CHOP',clockAtLock:794,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776491546638,dir:'DOWN',posterior:8.0,regime:'RANGE/CHOP',clockAtLock:453,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776480331504,dir:'DOWN',posterior:8.2,regime:'RANGE-CHOP',clockAtLock:869,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776481238592,dir:'UP',posterior:87.4,regime:'RANGE-CHOP',clockAtLock:862,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776482921288,dir:'DOWN',posterior:7.8,regime:'RANGE-CHOP',clockAtLock:79,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776483034127,dir:'DOWN',posterior:7.8,regime:'RANGE-CHOP',clockAtLock:866,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776483928752,dir:'DOWN',posterior:6.8,regime:'RANGE-CHOP',clockAtLock:872,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776484836942,dir:'DOWN',posterior:6.2,regime:'RANGE-CHOP',clockAtLock:863,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776485800712,dir:'DOWN',posterior:9.0,regime:'RANGE-CHOP',clockAtLock:800,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776487006113,dir:'UP',posterior:88.0,regime:'RANGE-CHOP',clockAtLock:494,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776488505617,dir:'UP',posterior:87.0,regime:'RANGE-CHOP',clockAtLock:794,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776491546638,dir:'DOWN',posterior:8.0,regime:'RANGE-CHOP',clockAtLock:453,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776492046109,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:854,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776492939519,dir:'DOWN',posterior:7.5,regime:'RANGE/CHOP',clockAtLock:860,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776493868609,dir:'DOWN',posterior:8.6,regime:'RANGE/CHOP',clockAtLock:831,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776492939519,dir:'DOWN',posterior:7.5,regime:'RANGE-CHOP',clockAtLock:860,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776493868609,dir:'DOWN',posterior:8.6,regime:'RANGE-CHOP',clockAtLock:831,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776494723187,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:877,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776496514313,dir:'DOWN',posterior:7.0,regime:'RANGE/CHOP',clockAtLock:886,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776497424081,dir:'DOWN',posterior:7.3,regime:'RANGE/CHOP',clockAtLock:876,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776498380672,dir:'DOWN',posterior:8.4,regime:'RANGE/CHOP',clockAtLock:819,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776499643408,dir:'UP',posterior:48.8,regime:'RANGE/CHOP',clockAtLock:456,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776499679323,dir:'DOWN',posterior:7.2,regime:'RANGE/CHOP',clockAtLock:420,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776496514313,dir:'DOWN',posterior:7.0,regime:'RANGE-CHOP',clockAtLock:886,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776497424081,dir:'DOWN',posterior:7.3,regime:'RANGE-CHOP',clockAtLock:876,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776498380672,dir:'DOWN',posterior:8.4,regime:'RANGE-CHOP',clockAtLock:819,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776499643408,dir:'UP',posterior:48.8,regime:'RANGE-CHOP',clockAtLock:456,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776499679323,dir:'DOWN',posterior:7.2,regime:'RANGE-CHOP',clockAtLock:420,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776500162466,dir:'DOWN',posterior:6.3,regime:'TRENDING DOWN',clockAtLock:837,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776501024034,dir:'DOWN',posterior:8.4,regime:'RANGE/CHOP',clockAtLock:876,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776501024034,dir:'DOWN',posterior:8.4,regime:'RANGE-CHOP',clockAtLock:876,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776501925556,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:874,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776502873527,dir:'DOWN',posterior:8.9,regime:'TRENDING DOWN',clockAtLock:826,hour:5,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776527703240,dir:'UP',posterior:87.3,regime:'SHORT SQUEEZE',clockAtLock:297,hour:11,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776528066026,dir:'DOWN',posterior:6.4,regime:'TRENDING DOWN',clockAtLock:834,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776529693677,dir:'DOWN',posterior:8.4,regime:'RANGE/CHOP',clockAtLock:106,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776529846994,dir:'UP',posterior:70.9,regime:'RANGE/CHOP',clockAtLock:853,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776530945797,dir:'DOWN',posterior:7.6,regime:'RANGE/CHOP',clockAtLock:654,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776529693677,dir:'DOWN',posterior:8.4,regime:'RANGE-CHOP',clockAtLock:106,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776529846994,dir:'UP',posterior:70.9,regime:'RANGE-CHOP',clockAtLock:853,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776530945797,dir:'DOWN',posterior:7.6,regime:'RANGE-CHOP',clockAtLock:654,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776531631012,dir:'DOWN',posterior:7.8,regime:'TRENDING DOWN',clockAtLock:869,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776532525158,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:875,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776533419341,dir:'DOWN',posterior:6.7,regime:'RANGE/CHOP',clockAtLock:880,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776534333979,dir:'DOWN',posterior:8.3,regime:'RANGE/CHOP',clockAtLock:866,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776533419341,dir:'DOWN',posterior:6.7,regime:'RANGE-CHOP',clockAtLock:880,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776534333979,dir:'DOWN',posterior:8.3,regime:'RANGE-CHOP',clockAtLock:866,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776535306569,dir:'DOWN',posterior:8.9,regime:'TRENDING DOWN',clockAtLock:793,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776536579778,dir:'DOWN',posterior:8.9,regime:'RANGE/CHOP',clockAtLock:420,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776539467826,dir:'UP',posterior:71.4,regime:'RANGE/CHOP',clockAtLock:232,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776539734398,dir:'UP',posterior:71.9,regime:'RANGE/CHOP',clockAtLock:865,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776541546226,dir:'DOWN',posterior:7.9,regime:'RANGE/CHOP',clockAtLock:854,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776536579778,dir:'DOWN',posterior:8.9,regime:'RANGE-CHOP',clockAtLock:420,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776539467826,dir:'UP',posterior:71.4,regime:'RANGE-CHOP',clockAtLock:232,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776539734398,dir:'UP',posterior:71.9,regime:'RANGE-CHOP',clockAtLock:865,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776541546226,dir:'DOWN',posterior:7.9,regime:'RANGE-CHOP',clockAtLock:854,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776542431078,dir:'UP',posterior:72.4,regime:'SHORT SQUEEZE',clockAtLock:869,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776542538165,dir:'DOWN',posterior:8.6,regime:'RANGE/CHOP',clockAtLock:762,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776543439980,dir:'DOWN',posterior:7.7,regime:'RANGE/CHOP',clockAtLock:760,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776542538165,dir:'DOWN',posterior:8.6,regime:'RANGE-CHOP',clockAtLock:762,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776543439980,dir:'DOWN',posterior:7.7,regime:'RANGE-CHOP',clockAtLock:760,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776543528194,dir:'UP',posterior:7.7,regime:'SHORT SQUEEZE',clockAtLock:672,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776544214709,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:885,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776579801306,dir:'DOWN',posterior:8.4,regime:'SHORT SQUEEZE',clockAtLock:399,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776580464051,dir:'UP',posterior:73.7,regime:'SHORT SQUEEZE',clockAtLock:636,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776581152679,dir:'DOWN',posterior:8.4,regime:'RANGE/CHOP',clockAtLock:847,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776581152679,dir:'DOWN',posterior:8.4,regime:'RANGE-CHOP',clockAtLock:847,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776582037665,dir:'UP',posterior:72.7,regime:'SHORT SQUEEZE',clockAtLock:862,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776583130083,dir:'DOWN',posterior:6.2,regime:'RANGE/CHOP',clockAtLock:670,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776583975044,dir:'DOWN',posterior:8.0,regime:'RANGE/CHOP',clockAtLock:725,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776584788013,dir:'UP',posterior:72.8,regime:'RANGE/CHOP',clockAtLock:812,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776629486095,dir:'DOWN',posterior:70.7,regime:'RANGE/CHOP',clockAtLock:214,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776629798992,dir:'DOWN',posterior:8.4,regime:'RANGE/CHOP',clockAtLock:801,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776630619898,dir:'DOWN',posterior:6.9,regime:'RANGE/CHOP',clockAtLock:880,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776631532649,dir:'UP',posterior:73.1,regime:'RANGE/CHOP',clockAtLock:867,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776583130083,dir:'DOWN',posterior:6.2,regime:'RANGE-CHOP',clockAtLock:670,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776583975044,dir:'DOWN',posterior:8.0,regime:'RANGE-CHOP',clockAtLock:725,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776584788013,dir:'UP',posterior:72.8,regime:'RANGE-CHOP',clockAtLock:812,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776629486095,dir:'DOWN',posterior:70.7,regime:'RANGE-CHOP',clockAtLock:214,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776629798992,dir:'DOWN',posterior:8.4,regime:'RANGE-CHOP',clockAtLock:801,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776630619898,dir:'DOWN',posterior:6.9,regime:'RANGE-CHOP',clockAtLock:880,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776631532649,dir:'UP',posterior:73.1,regime:'RANGE-CHOP',clockAtLock:867,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776632491747,dir:'UP',posterior:73.1,regime:'SHORT SQUEEZE',clockAtLock:808,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776633334163,dir:'DOWN',posterior:6.5,regime:'RANGE/CHOP',clockAtLock:866,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776633334163,dir:'DOWN',posterior:6.5,regime:'RANGE-CHOP',clockAtLock:866,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776655252536,dir:'UP',posterior:86.8,regime:'SHORT SQUEEZE',clockAtLock:547,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776656007171,dir:'UP',posterior:76.2,regime:'RANGE/CHOP',clockAtLock:692,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776656007171,dir:'UP',posterior:76.2,regime:'RANGE-CHOP',clockAtLock:692,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776656724672,dir:'UP',posterior:76.7,regime:'SHORT SQUEEZE',clockAtLock:875,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776657938757,dir:'DOWN',posterior:6.0,regime:'TRENDING DOWN',clockAtLock:561,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776658546067,dir:'DOWN',posterior:6.6,regime:'RANGE/CHOP',clockAtLock:854,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776659446065,dir:'DOWN',posterior:7.5,regime:'RANGE/CHOP',clockAtLock:854,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776665958684,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:642,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776658546067,dir:'DOWN',posterior:6.6,regime:'RANGE-CHOP',clockAtLock:854,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776659446065,dir:'DOWN',posterior:7.5,regime:'RANGE-CHOP',clockAtLock:854,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776665958684,dir:'UP',posterior:89.2,regime:'RANGE-CHOP',clockAtLock:642,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776666728537,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:771,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776667552798,dir:'DOWN',posterior:7.9,regime:'RANGE/CHOP',clockAtLock:847,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776668460542,dir:'UP',posterior:67.7,regime:'RANGE/CHOP',clockAtLock:840,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776669369715,dir:'DOWN',posterior:7.7,regime:'RANGE/CHOP',clockAtLock:831,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776670284972,dir:'DOWN',posterior:31.4,regime:'RANGE/CHOP',clockAtLock:815,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776667552798,dir:'DOWN',posterior:7.9,regime:'RANGE-CHOP',clockAtLock:847,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776668460542,dir:'UP',posterior:67.7,regime:'RANGE-CHOP',clockAtLock:840,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776669369715,dir:'DOWN',posterior:7.7,regime:'RANGE-CHOP',clockAtLock:831,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776670284972,dir:'DOWN',posterior:31.4,regime:'RANGE-CHOP',clockAtLock:815,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776671211750,dir:'DOWN',posterior:7.3,regime:'SHORT SQUEEZE',clockAtLock:789,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776672080674,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:819,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776672935569,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:864,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
@@ -220,41 +221,41 @@ const SEED_TRADES=[
   {id:1776712530621,dir:'DOWN',posterior:6.4,regime:'HIGH VOL CHOP',clockAtLock:870,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776713442075,dir:'DOWN',posterior:8.9,regime:'HIGH VOL CHOP',clockAtLock:858,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776714346358,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:854,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776715264080,dir:'DOWN',posterior:6.0,regime:'RANGE/CHOP',clockAtLock:836,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776715264080,dir:'DOWN',posterior:6.0,regime:'RANGE-CHOP',clockAtLock:836,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776716132991,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:867,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776717021935,dir:'DOWN',posterior:6.4,regime:'RANGE/CHOP',clockAtLock:878,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776717915688,dir:'DOWN',posterior:6.9,regime:'RANGE/CHOP',clockAtLock:885,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776717021935,dir:'DOWN',posterior:6.4,regime:'RANGE-CHOP',clockAtLock:878,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776717915688,dir:'DOWN',posterior:6.9,regime:'RANGE-CHOP',clockAtLock:885,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776718824483,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:875,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776719923236,dir:'UP',posterior:7.9,regime:'TRENDING DOWN',clockAtLock:677,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776720664046,dir:'DOWN',posterior:6.9,regime:'TRENDING DOWN',clockAtLock:836,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776721672456,dir:'DOWN',posterior:8.5,regime:'RANGE/CHOP',clockAtLock:728,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776739718264,dir:'DOWN',posterior:8.3,regime:'RANGE/CHOP',clockAtLock:682,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776740422182,dir:'DOWN',posterior:7.2,regime:'RANGE/CHOP',clockAtLock:878,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776741357491,dir:'DOWN',posterior:7.2,regime:'RANGE/CHOP',clockAtLock:843,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776742403016,dir:'DOWN',posterior:6.8,regime:'RANGE/CHOP',clockAtLock:697,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776743119467,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:881,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776721672456,dir:'DOWN',posterior:8.5,regime:'RANGE-CHOP',clockAtLock:728,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776739718264,dir:'DOWN',posterior:8.3,regime:'RANGE-CHOP',clockAtLock:682,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776740422182,dir:'DOWN',posterior:7.2,regime:'RANGE-CHOP',clockAtLock:878,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776741357491,dir:'DOWN',posterior:7.2,regime:'RANGE-CHOP',clockAtLock:843,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776742403016,dir:'DOWN',posterior:6.8,regime:'RANGE-CHOP',clockAtLock:697,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776743119467,dir:'UP',posterior:89.2,regime:'RANGE-CHOP',clockAtLock:881,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776744034938,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:865,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776744937240,dir:'DOWN',posterior:6.2,regime:'RANGE/CHOP',clockAtLock:863,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776745823975,dir:'DOWN',posterior:7.7,regime:'RANGE/CHOP',clockAtLock:876,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776744937240,dir:'DOWN',posterior:6.2,regime:'RANGE-CHOP',clockAtLock:863,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776745823975,dir:'DOWN',posterior:7.7,regime:'RANGE-CHOP',clockAtLock:876,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776746727488,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:873,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776747631426,dir:'UP',posterior:74.3,regime:'SHORT SQUEEZE',clockAtLock:869,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776748555699,dir:'DOWN',posterior:6.1,regime:'RANGE/CHOP',clockAtLock:845,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776748636631,dir:'DOWN',posterior:6.7,regime:'RANGE/CHOP',clockAtLock:763,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776749424129,dir:'DOWN',posterior:8.8,regime:'RANGE/CHOP',clockAtLock:876,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776750330449,dir:'DOWN',posterior:8.4,regime:'RANGE/CHOP',clockAtLock:869,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776751307104,dir:'DOWN',posterior:7.7,regime:'RANGE/CHOP',clockAtLock:793,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776752168512,dir:'UP',posterior:72.4,regime:'RANGE/CHOP',clockAtLock:832,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776748555699,dir:'DOWN',posterior:6.1,regime:'RANGE-CHOP',clockAtLock:845,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776748636631,dir:'DOWN',posterior:6.7,regime:'RANGE-CHOP',clockAtLock:763,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776749424129,dir:'DOWN',posterior:8.8,regime:'RANGE-CHOP',clockAtLock:876,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776750330449,dir:'DOWN',posterior:8.4,regime:'RANGE-CHOP',clockAtLock:869,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776751307104,dir:'DOWN',posterior:7.7,regime:'RANGE-CHOP',clockAtLock:793,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776752168512,dir:'UP',posterior:72.4,regime:'RANGE-CHOP',clockAtLock:832,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776753042111,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:858,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776754165301,dir:'UP',posterior:73.4,regime:'SHORT SQUEEZE',clockAtLock:635,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776754830274,dir:'DOWN',posterior:6.0,regime:'TRENDING DOWN',clockAtLock:870,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776755728173,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:872,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776756633505,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:867,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776757547585,dir:'DOWN',posterior:8.6,regime:'RANGE/CHOP',clockAtLock:853,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776757547585,dir:'DOWN',posterior:8.6,regime:'RANGE-CHOP',clockAtLock:853,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776758428829,dir:'UP',posterior:75.5,regime:'SHORT SQUEEZE',clockAtLock:872,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776759333181,dir:'DOWN',posterior:31.8,regime:'RANGE/CHOP',clockAtLock:867,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776760246540,dir:'DOWN',posterior:30.6,regime:'RANGE/CHOP',clockAtLock:854,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776759333181,dir:'DOWN',posterior:31.8,regime:'RANGE-CHOP',clockAtLock:867,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776760246540,dir:'DOWN',posterior:30.6,regime:'RANGE-CHOP',clockAtLock:854,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776761211456,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:788,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776762019804,dir:'UP',posterior:75.1,regime:'RANGE/CHOP',clockAtLock:880,hour:5,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776762019804,dir:'UP',posterior:75.1,regime:'RANGE-CHOP',clockAtLock:880,hour:5,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776762930253,dir:'UP',posterior:75.2,regime:'SHORT SQUEEZE',clockAtLock:869,hour:5,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776763857323,dir:'DOWN',posterior:8.7,regime:'SHORT SQUEEZE',clockAtLock:842,hour:5,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776793971910,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:428,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
@@ -276,30 +277,30 @@ const SEED_TRADES=[
   {id:1776811544897,dir:'DOWN',posterior:6.4,regime:'HIGH VOL CHOP',clockAtLock:855,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776812421573,dir:'DOWN',posterior:8.0,regime:'HIGH VOL CHOP',clockAtLock:878,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776812669613,dir:'UP',posterior:89.0,regime:'SHORT SQUEEZE',clockAtLock:630,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776817255207,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:545,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776818015399,dir:'UP',posterior:51.7,regime:'RANGE/CHOP',clockAtLock:685,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776819717365,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:782,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776817255207,dir:'UP',posterior:89.2,regime:'RANGE-CHOP',clockAtLock:545,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776818015399,dir:'UP',posterior:51.7,regime:'RANGE-CHOP',clockAtLock:685,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776819717365,dir:'UP',posterior:89.2,regime:'RANGE-CHOP',clockAtLock:782,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776820540264,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:859,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776821442251,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:857,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776822321971,dir:'DOWN',posterior:8.0,regime:'RANGE/CHOP',clockAtLock:878,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776823241483,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:858,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776830055338,dir:'UP',posterior:88.1,regime:'RANGE/CHOP',clockAtLock:344,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776822321971,dir:'DOWN',posterior:8.0,regime:'RANGE-CHOP',clockAtLock:878,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776823241483,dir:'UP',posterior:89.2,regime:'RANGE-CHOP',clockAtLock:858,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776830055338,dir:'UP',posterior:88.1,regime:'RANGE-CHOP',clockAtLock:344,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776830482304,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:818,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776831345036,dir:'DOWN',posterior:6.2,regime:'RANGE/CHOP',clockAtLock:855,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776832239920,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:860,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776831345036,dir:'DOWN',posterior:6.2,regime:'RANGE-CHOP',clockAtLock:855,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776832239920,dir:'UP',posterior:89.2,regime:'RANGE-CHOP',clockAtLock:860,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776833117685,dir:'DOWN',posterior:9.0,regime:'HIGH VOL CHOP',clockAtLock:883,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776834230092,dir:'DOWN',posterior:6.0,regime:'RANGE/CHOP',clockAtLock:670,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776834230092,dir:'DOWN',posterior:6.0,regime:'RANGE-CHOP',clockAtLock:670,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776835568287,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:232,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776835845995,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:854,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776836722893,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:878,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776837624794,dir:'DOWN',posterior:8.8,regime:'HIGH VOL CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776838527897,dir:'DOWN',posterior:8.1,regime:'SHORT SQUEEZE',clockAtLock:873,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776839461939,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:838,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776841020326,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:180,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776839461939,dir:'UP',posterior:89.2,regime:'RANGE-CHOP',clockAtLock:838,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776841020326,dir:'UP',posterior:89.2,regime:'RANGE-CHOP',clockAtLock:180,hour:2,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776841233662,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:867,hour:3,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776844834897,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:854,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776845214521,dir:'UP',posterior:72.1,regime:'RANGE/CHOP',clockAtLock:871,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776846638505,dir:'DOWN',posterior:7.4,regime:'RANGE/CHOP',clockAtLock:863,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776845214521,dir:'UP',posterior:72.1,regime:'RANGE-CHOP',clockAtLock:871,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776846638505,dir:'DOWN',posterior:7.4,regime:'RANGE-CHOP',clockAtLock:863,hour:4,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776872563359,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:372,hour:11,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776873655731,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:874,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776874591342,dir:'DOWN',posterior:8.3,regime:'HIGH VOL CHOP',clockAtLock:869,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
@@ -311,30 +312,30 @@ const SEED_TRADES=[
   {id:1776880022710,dir:'DOWN',posterior:7.9,regime:'HIGH VOL CHOP',clockAtLock:882,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776881481982,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:857,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776881746892,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:871,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776882636853,dir:'DOWN',posterior:8.0,regime:'RANGE/CHOP',clockAtLock:867,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776883539183,dir:'DOWN',posterior:7.8,regime:'RANGE/CHOP',clockAtLock:875,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776884441480,dir:'DOWN',posterior:8.2,regime:'RANGE/CHOP',clockAtLock:878,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776882636853,dir:'DOWN',posterior:8.0,regime:'RANGE-CHOP',clockAtLock:867,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776883539183,dir:'DOWN',posterior:7.8,regime:'RANGE-CHOP',clockAtLock:875,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776884441480,dir:'DOWN',posterior:8.2,regime:'RANGE-CHOP',clockAtLock:878,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776885344433,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:862,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776886273615,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:874,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776887333863,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:856,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776888111515,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:870,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776902442088,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:857,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776888111515,dir:'UP',posterior:89.2,regime:'RANGE-CHOP',clockAtLock:870,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776902442088,dir:'UP',posterior:89.2,regime:'RANGE-CHOP',clockAtLock:857,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776903490478,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:866,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776904252931,dir:'UP',posterior:73.4,regime:'RANGE/CHOP',clockAtLock:872,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776905206060,dir:'DOWN',posterior:7.8,regime:'RANGE/CHOP',clockAtLock:868,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776904252931,dir:'UP',posterior:73.4,regime:'RANGE-CHOP',clockAtLock:872,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776905206060,dir:'DOWN',posterior:7.8,regime:'RANGE-CHOP',clockAtLock:868,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776912209685,dir:'DOWN',posterior:8.5,regime:'HIGH VOL CHOP',clockAtLock:396,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776912349727,dir:'DOWN',posterior:8.3,regime:'HIGH VOL CHOP',clockAtLock:856,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776913383966,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:869,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776914151082,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:852,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776915023460,dir:'UP',posterior:89.2,regime:'HIGH VOL CHOP',clockAtLock:870,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776915916328,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:862,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776916830499,dir:'DOWN',posterior:7.6,regime:'RANGE/CHOP',clockAtLock:871,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776917725101,dir:'UP',posterior:89.2,regime:'RANGE/CHOP',clockAtLock:858,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776916830499,dir:'DOWN',posterior:7.6,regime:'RANGE-CHOP',clockAtLock:871,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776917725101,dir:'UP',posterior:89.2,regime:'RANGE-CHOP',clockAtLock:858,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776918625268,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:866,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776919528719,dir:'DOWN',posterior:7.4,regime:'RANGE/CHOP',clockAtLock:876,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776919528719,dir:'DOWN',posterior:7.4,regime:'RANGE-CHOP',clockAtLock:876,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776920420182,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:865,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776921319507,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:872,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776921593724,dir:'DOWN',posterior:8.1,regime:'RANGE/CHOP',clockAtLock:863,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776921593724,dir:'DOWN',posterior:8.1,regime:'RANGE-CHOP',clockAtLock:863,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776922224406,dir:'DOWN',posterior:6.8,regime:'TRENDING DOWN',clockAtLock:858,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776923124184,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:867,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776942852526,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:854,hour:7,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
@@ -344,14 +345,14 @@ const SEED_TRADES=[
   {id:1776945689540,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:875,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776946529627,dir:'DOWN',posterior:7.4,regime:'TRENDING DOWN',clockAtLock:858,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776947452773,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:869,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776947491814,dir:'UP',posterior:72.4,regime:'RANGE/CHOP',clockAtLock:843,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776948329656,dir:'DOWN',posterior:8.1,regime:'RANGE/CHOP',clockAtLock:867,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776947491814,dir:'UP',posterior:72.4,regime:'RANGE-CHOP',clockAtLock:843,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776948329656,dir:'DOWN',posterior:8.1,regime:'RANGE-CHOP',clockAtLock:867,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776949241159,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:872,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776950438032,dir:'UP',posterior:75.3,regime:'RANGE/CHOP',clockAtLock:856,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776951097787,dir:'UP',posterior:73.1,regime:'RANGE/CHOP',clockAtLock:863,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776950438032,dir:'UP',posterior:75.3,regime:'RANGE-CHOP',clockAtLock:856,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776951097787,dir:'UP',posterior:73.1,regime:'RANGE-CHOP',clockAtLock:863,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1776952003637,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:874,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776952837830,dir:'UP',posterior:74.2,regime:'RANGE/CHOP',clockAtLock:869,hour:10,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776954032101,dir:'UP',posterior:76.1,regime:'RANGE/CHOP',clockAtLock:851,hour:10,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776952837830,dir:'UP',posterior:74.2,regime:'RANGE-CHOP',clockAtLock:869,hour:10,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776954032101,dir:'UP',posterior:76.1,regime:'RANGE-CHOP',clockAtLock:851,hour:10,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776969042798,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:866,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776969929050,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:873,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
 ];
@@ -393,7 +394,7 @@ const updateWeights=(weights,tradeLog,result)=>{
 // Per-regime weight updater — same logic but targets the regime-specific set
 const updateRegimeWeights=(regimeWeightsObj,trade,result)=>{
   if(!trade||!trade.signals||!trade.posterior)return regimeWeightsObj;
-  const rg=trade.regime||'RANGE/CHOP';
+  const rg=trade.regime||'RANGE-CHOP';
   if(!regimeWeightsObj[rg])return regimeWeightsObj;
   const weights=regimeWeightsObj[rg];
   const won=result==='WIN';
@@ -816,7 +817,7 @@ const computeAdvisor=(params)=>{
   // Direction reliability: UP 66% (331 trades), DOWN 57% — gap narrowed with better DOWN gating
   const dirReliability=isUP?1.0:0.86;
   // Regime reliability from data: SS 67%, TD 86%, HVC 59%, RC 56%
-  const _rg=regime||'RANGE/CHOP';
+  const _rg=regime||'RANGE-CHOP';
   const regimeReliability=_rg==='TRENDING DOWN'?1.28:_rg==='SHORT SQUEEZE'?1.0:_rg==='HIGH VOL CHOP'?0.88:0.84;
   // Comeback score: how likely is Tara's model to be right when adverse?
   // High score = hold, low score = cut
@@ -874,7 +875,7 @@ const computeAdvisor=(params)=>{
 const computeV99Posterior=(params)=>{
   const{currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,calibration}=params;
   // Use regime-specific weights when current regime is identifiable, else use global adaptive weights
-  const _regime=params.currentRegime||'RANGE/CHOP';
+  const _regime=params.currentRegime||'RANGE-CHOP';
   const _regimeW=(params.regimeWeights&&params.regimeWeights[_regime])||null;
   const W=_regimeW||adaptiveWeights||DEFAULT_WEIGHTS;
   const reasoning=[];let totalScore=0;
@@ -969,7 +970,7 @@ const computeV99Posterior=(params)=>{
   const funding=bloomberg?.fundingRate||0;
   const fundingPrev=bloomberg?.fundingRatePrev||0;
   const delta=globalFlow.deltaUSD||0;
-  let regime='RANGE/CHOP';
+  let regime='RANGE-CHOP';
   let regimeBonus=0;
   let upThreshold=68,downThreshold=32;
   const isHighVol=atrBps>35;
@@ -1284,9 +1285,9 @@ function TaraApp(){
     'HIGH VOL CHOP': {wins:24,losses:21},  // 53% WR (n=45) — UP/DOWN both weak, require CONVICTION
     'SHORT SQUEEZE': {wins:66,losses:31},  // 68% WR (n=97) — primary regime, trust calls
     'LONG SQUEEZE':  {wins:0,losses:0},
-    'RANGE/CHOP':    {wins:59,losses:51},  // 53.6% WR (n=110) — near coin flip, BE SELECTIVE
+    'RANGE-CHOP':    {wins:59,losses:51},  // 53.6% WR (n=110) — near coin flip, BE SELECTIVE
   });
-  const lastRegimeRef=useRef('RANGE/CHOP');
+  const lastRegimeRef=useRef('RANGE-CHOP');
   const windowSignalDirRef=useRef(null); // tracks first FORMING direction this window — lock must match
   // ── TARA SELF-TRAINING STATE ──
   const[adaptiveWeights,setAdaptiveWeights]=useState(()=>loadWeights());
@@ -1680,7 +1681,7 @@ function TaraApp(){
           }
           // If no position was entered, no scoring and no broadcast
           if(active){
-            setRegimeMemory(prev=>{const u={...prev};const r=lastRegimeRef.current||'RANGE/CHOP';if(!u[r])u[r]={wins:0,losses:0};if(won)u[r].wins++;else u[r].losses++;return u;});
+            setRegimeMemory(prev=>{const u={...prev};const r=lastRegimeRef.current||'RANGE-CHOP';if(!u[r])u[r]={wins:0,losses:0};if(won)u[r].wins++;else u[r].losses++;return u;});
             // Broadcast result of the trade user was actually in
             if(manuallyClosedRef.current===null){
               recordPnL(won,pendingTradeRef.current);
@@ -1732,7 +1733,7 @@ function TaraApp(){
       const isEarlyWindow=is15m?((intervalSeconds-clockSeconds)<300):((intervalSeconds-clockSeconds)<90);
 
       // V110 weighted posterior (adaptive)
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE/CHOP',calibration});
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb}=eng;
       lastRegimeRef.current=regime;
 
@@ -1752,12 +1753,12 @@ function TaraApp(){
       const LOCK_THRESHOLD_DN=(is15m?30:32)-_sessThreshAdj;
 
       // ── IMPROVEMENT 2: Regime-gated consecutive requirement ──────────────
-      // RANGE/CHOP is 56% WR (near coin flip) — needs one extra confirmation sample
+      // RANGE-CHOP is 56% WR (near coin flip) — needs one extra confirmation sample
       // TRENDING DOWN is 86% WR — can fire faster (2 samples)
       // ── IMPROVEMENT 3: Session multiplier on consecutive requirement ─────
       // US session 59% WR — needs one extra sample to reduce false locks
-      const _regime=lastRegimeRef.current||'RANGE/CHOP';
-      const _regimeConsecAdj=_regime==='RANGE/CHOP'?1:_regime==='HIGH VOL CHOP'?1:_regime==='TRENDING DOWN'?-1:0;
+      const _regime=lastRegimeRef.current||'RANGE-CHOP';
+      const _regimeConsecAdj=_regime==='RANGE-CHOP'?1:_regime==='HIGH VOL CHOP'?1:_regime==='TRENDING DOWN'?-1:0;
       const _sessConsecAdj=_sess==='US'?1:_sess==='OFF-HOURS'?1:0;
       const CONSECUTIVE_NEEDED=Math.max(1,(is15m?3:2)+_regimeConsecAdj+_sessConsecAdj);
 
@@ -1780,7 +1781,7 @@ function TaraApp(){
 
       // ── DOWN REGIME GATE ──────────────────────────────────────────────────
       // Data: DOWN in SHORT SQUEEZE = 50% WR (coin flip), DOWN in HVC = 48.4% WR (below coin flip)
-      // Only trust DOWN in TRENDING DOWN (93%) and RANGE/CHOP (51%, still weak)
+      // Only trust DOWN in TRENDING DOWN (93%) and RANGE-CHOP (51%, still weak)
       // In SHORT SQUEEZE: DOWN requires 2× the normal consecutive samples AND stricter threshold
       const _downGated=regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP';
       const _downTDOnly=regime==='TRENDING DOWN'; // most reliable DOWN regime
@@ -1790,8 +1791,8 @@ function TaraApp(){
       const CONSECUTIVE_NEEDED_DN=_downGated
         ? Math.max(2,CONSECUTIVE_NEEDED+1) // 1 extra for gated regimes — was +2, too slow
         : CONSECUTIVE_NEEDED;
-      // UP gate: HIGH VOL CHOP and RANGE/CHOP UP calls need one extra sample too (55-59% WR)
-      const _upGated=regime==='HIGH VOL CHOP'||regime==='RANGE/CHOP';
+      // UP gate: HIGH VOL CHOP and RANGE-CHOP UP calls need one extra sample too (55-59% WR)
+      const _upGated=regime==='HIGH VOL CHOP'||regime==='RANGE-CHOP';
       const CONSECUTIVE_NEEDED_UP=_upGated
         ? Math.max(2,CONSECUTIVE_NEEDED+1) // extra confirmation in weak UP regimes
         : CONSECUTIVE_NEEDED;
@@ -1933,7 +1934,7 @@ function TaraApp(){
   const _computeQuality=(ana,regMem)=>{
     if(!ana)return{score:0,label:'LOW',color:'rose'};
     try{
-      const rg=ana.regime||'RANGE/CHOP';
+      const rg=ana.regime||'RANGE-CHOP';
       const rm=regMem[rg]||{wins:0,losses:0};
       const rt=rm.wins+rm.losses;
       const rWR=rt>5?(rm.wins/rt)*100:60;
@@ -2477,14 +2478,23 @@ function TaraApp(){
                     {analysis.kellyPct>0&&<span className={'text-amber-400/80'}>Kelly: {analysis.kellyPct.toFixed(1)}%</span>}
                   </div>
                   {/* Lock price vs current */}
-                  {analysis.lockInfo&&currentPrice&&(
-                    <div className={'text-xs text-[#E8E9E4]/40 mt-1'}>
-                      Locked at {analysis.lockInfo.lockPrice.toFixed(0)} — Now {currentPrice.toFixed(0)}
-                      <span className={`ml-2 font-bold ${analysis.lockInfo.dir==='DOWN'?(currentPrice<analysis.lockInfo.lockPrice?'text-emerald-400':'text-rose-400'):(currentPrice>analysis.lockInfo.lockPrice?'text-emerald-400':'text-rose-400')}`}>
-                        {analysis.lockInfo.dir==='DOWN'?(currentPrice<analysis.lockInfo.lockPrice?'▼ IN PROFIT':'▲ ADVERSE'):(currentPrice>analysis.lockInfo.lockPrice?'▲ IN PROFIT':'▼ ADVERSE')}
-                      </span>
-                    </div>
-                  )}
+                  {(()=>{
+                    if(!analysis.lockInfo||!currentPrice)return null;
+                    const lp=analysis.lockInfo.lockPrice;
+                    const dir=analysis.lockInfo.dir;
+                    const winning=(dir==='DOWN'&&currentPrice<lp)||(dir==='UP'&&currentPrice>lp);
+                    const statusTxt=winning?'IN PROFIT':'ADVERSE';
+                    const statusCls=winning?'text-emerald-400':'text-rose-400';
+                    const arrow=winning?'▲':'▼';
+                    return(
+                      <div style={{fontSize:'12px',opacity:0.4,marginTop:'4px'}}>
+                        Locked at {lp.toFixed(0)} — Now {currentPrice.toFixed(0)}
+                        <span style={{marginLeft:'8px',fontWeight:'bold'}} className={statusCls}>
+                          {arrow} {statusTxt}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Quality Gate — shown whenever a lock is active */}
