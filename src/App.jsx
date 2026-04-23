@@ -1050,6 +1050,30 @@ class ErrorBoundary extends React.Component{
 // ═══════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════
+// Flow button component — extracted to avoid nested template literals in JSX (esbuild safe)
+const FlowBtn=({flowSignal,active,onClick,cls})=>{
+  const isStrong=flowSignal.score>=75;
+  const isEmerging=flowSignal.score>=50&&flowSignal.score<75;
+  const scoreStr=isStrong?(flowSignal.label+' '+Math.round(flowSignal.score)+'/100'):'Flow Intelligence';
+  const colorCls=active
+    ?'bg-purple-500/20 border-purple-500/40 text-purple-400'
+    :isStrong
+    ?'bg-rose-500/15 border-rose-500/40 text-rose-400 animate-pulse'
+    :isEmerging
+    ?'bg-amber-500/10 border-amber-500/30 text-amber-400'
+    :'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-purple-400';
+  const baseCls=cls==='hidden sm:flex'
+    ?'hidden sm:flex items-center gap-1 p-1.5 rounded-lg border text-xs transition-all '
+    :'flex items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all ';
+  return(
+    <button onClick={onClick} className={baseCls+colorCls} title={scoreStr}>
+      FLOW
+      {isStrong&&<span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse ml-0.5"/>}
+      {!isStrong&&isEmerging&&<span className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-0.5"/>}
+    </button>
+  );
+};
+
 function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
   const[showCandles,setShowCandles]=useState(true);
@@ -2042,7 +2066,7 @@ function TaraApp(){
             <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
             <button onClick={()=>setShowGuide(true)} className="p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors" title="How Tara Works">?</button>
             {/* Hidden on mobile — accessible via mobile tab nav or sm+ */}
-            {(()=>{const fs=flowSignal;const isStrong=fs.score>=75;const isEmerging=fs.score>=50&&fs.score<75;return(<button onClick={()=>setShowWhaleLog(!showWhaleLog)} className={`hidden sm:flex items-center gap-1 p-1.5 rounded-lg border text-xs transition-all ${showWhaleLog?'bg-purple-500/20 border-purple-500/40 text-purple-400':isStrong?'bg-rose-500/15 border-rose-500/40 text-rose-400 animate-pulse':isEmerging?'bg-amber-500/10 border-amber-500/30 text-amber-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-purple-400'}`} title={isStrong?`FLOW: ${fs.label} ${fs.score.toFixed(0)}/100`:'Flow Intelligence'}>FLOW{isStrong&&<span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse ml-0.5"/>}{isEmerging&&<span className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-0.5"/>}</button>);})()}
+            <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="hidden sm:flex"/>
             <button onClick={()=>setShowSettings(true)} className="hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors"><IC.Link className="w-3.5 h-3.5"/></button>
             <button onClick={()=>setShowAnalytics(true)} className="hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Analytics"><IC.BarChart className="w-3.5 h-3.5"/></button>
             <button onClick={()=>setShowHelp(true)} className="hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors"><IC.Help className="w-3.5 h-3.5"/></button>
@@ -2174,7 +2198,7 @@ function TaraApp(){
             </button>
           ))}
           {/* Mobile-only quick access row for hidden header buttons */}
-          {(()=>{const fs=flowSignal;const isStrong=fs.score>=75;return(<button onClick={()=>setShowWhaleLog(!showWhaleLog)} className={`flex items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all ${showWhaleLog?'bg-purple-500/20 text-purple-400 border border-purple-500/30':isStrong?'bg-rose-500/15 text-rose-400 border border-rose-500/30 animate-pulse':'text-[#E8E9E4]/30 hover:text-purple-400'}`} title="Flow Intelligence">FLOW{isStrong&&<span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"/>}</button>);})()}
+          <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="flex"/>
           <button onClick={()=>setShowSettings(true)} className="flex items-center justify-center px-2 py-1.5 rounded-lg text-xs text-[#E8E9E4]/30 hover:text-indigo-400 transition-all" title="Discord"><IC.Link className="w-3.5 h-3.5"/></button>
         </div>
 
