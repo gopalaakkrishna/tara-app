@@ -5,24 +5,24 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 // ═══════════════════════════════════════
 const _NS='http:'+'/'+'/www.w3.org/2000/svg';
 const IC={
-  Clock:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('polyline',{points:'12 6 12 12 16 14'})),
-  Crosshair:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('line',{x1:'22',y1:'12',x2:'18',y2:'12'}),React.createElement('line',{x1:'6',y1:'12',x2:'2',y2:'12'}),React.createElement('line',{x1:'12',y1:'6',x2:'12',y2:'2'}),React.createElement('line',{x1:'12',y1:'22',x2:'12',y2:'18'})),
-  Zap:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polygon',{points:'13 2 3 14 12 14 11 22 21 10 12 10 13 2'})),
-  Terminal:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'4 17 10 11 4 5'}),React.createElement('line',{x1:'12',y1:'19',x2:'20',y2:'19'})),
-  Alert:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'}),React.createElement('line',{x1:'12',y1:'9',x2:'12',y2:'13'}),React.createElement('line',{x1:'12',y1:'17',x2:'12.01',y2:'17'})),
-  Activity:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'22 12 18 12 15 21 9 3 6 12 2 12'})),
-  Bell:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9'}),React.createElement('path',{d:'M13.73 21a2 2 0 0 1-3.46 0'})),
-  TrendUp:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'23 6 13.5 15.5 8.5 10.5 1 18'}),React.createElement('polyline',{points:'17 6 23 6 23 12'})),
-  Globe:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('line',{x1:'2',y1:'12',x2:'22',y2:'12'}),React.createElement('path',{d:'M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'})),
-  Msg:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'})),
-  X:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('line',{x1:'18',y1:'6',x2:'6',y2:'18'}),React.createElement('line',{x1:'6',y1:'6',x2:'18',y2:'18'})),
-  Info:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('line',{x1:'12',y1:'16',x2:'12',y2:'12'}),React.createElement('line',{x1:'12',y1:'8',x2:'12.01',y2:'8'})),
-  Vol2:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polygon',{points:'11 5 6 9 2 9 2 15 6 15 11 19 11 5'}),React.createElement('path',{d:'M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07'})),
-  VolX:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polygon',{points:'11 5 6 9 2 9 2 15 6 15 11 19 11 5'}),React.createElement('line',{x1:'23',y1:'9',x2:'17',y2:'15'}),React.createElement('line',{x1:'17',y1:'9',x2:'23',y2:'15'})),
-  Help:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('path',{d:'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3'}),React.createElement('line',{x1:'12',y1:'17',x2:'12.01',y2:'17'})),
-  Link:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'}),React.createElement('path',{d:'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'})),
-  ChevronDown:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'6 9 12 15 18 9'})),
-  BarChart:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('line',{x1:'18',y1:'20',x2:'18',y2:'10'}),React.createElement('line',{x1:'12',y1:'20',x2:'12',y2:'4'}),React.createElement('line',{x1:'6',y1:'20',x2:'6',y2:'14'})),
+  Clock:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('polyline',{points:'12 6 12 12 16 14'})),
+  Crosshair:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('line',{x1:'22',y1:'12',x2:'18',y2:'12'}),React.createElement('line',{x1:'6',y1:'12',x2:'2',y2:'12'}),React.createElement('line',{x1:'12',y1:'6',x2:'12',y2:'2'}),React.createElement('line',{x1:'12',y1:'22',x2:'12',y2:'18'})),
+  Zap:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polygon',{points:'13 2 3 14 12 14 11 22 21 10 12 10 13 2'})),
+  Terminal:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'4 17 10 11 4 5'}),React.createElement('line',{x1:'12',y1:'19',x2:'20',y2:'19'})),
+  Alert:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'}),React.createElement('line',{x1:'12',y1:'9',x2:'12',y2:'13'}),React.createElement('line',{x1:'12',y1:'17',x2:'12.01',y2:'17'})),
+  Activity:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'22 12 18 12 15 21 9 3 6 12 2 12'})),
+  Bell:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9'}),React.createElement('path',{d:'M13.73 21a2 2 0 0 1-3.46 0'})),
+  TrendUp:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'23 6 13.5 15.5 8.5 10.5 1 18'}),React.createElement('polyline',{points:'17 6 23 6 23 12'})),
+  Globe:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('line',{x1:'2',y1:'12',x2:'22',y2:'12'}),React.createElement('path',{d:'M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'})),
+  Msg:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'})),
+  X:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('line',{x1:'18',y1:'6',x2:'6',y2:'18'}),React.createElement('line',{x1:'6',y1:'6',x2:'18',y2:'18'})),
+  Info:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('line',{x1:'12',y1:'16',x2:'12',y2:'12'}),React.createElement('line',{x1:'12',y1:'8',x2:'12.01',y2:'8'})),
+  Vol2:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polygon',{points:'11 5 6 9 2 9 2 15 6 15 11 19 11 5'}),React.createElement('path',{d:'M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07'})),
+  VolX:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polygon',{points:'11 5 6 9 2 9 2 15 6 15 11 19 11 5'}),React.createElement('line',{x1:'23',y1:'9',x2:'17',y2:'15'}),React.createElement('line',{x1:'17',y1:'9',x2:'23',y2:'15'})),
+  Help:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('path',{d:'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3'}),React.createElement('line',{x1:'12',y1:'17',x2:'12.01',y2:'17'})),
+  Link:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('path',{d:'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'}),React.createElement('path',{d:'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'})),
+  ChevronDown:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('polyline',{points:'6 9 12 15 18 9'})),
+  BarChart:({className})=>React.createElement('svg',{xmlns:_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('line',{x1:'18',y1:'20',x2:'18',y2:'10'}),React.createElement('line',{x1:'12',y1:'20',x2:'12',y2:'4'}),React.createElement('line',{x1:'6',y1:'20',x2:'6',y2:'14'})),
 };
 
 // ═══════════════════════════════════════
@@ -717,16 +717,16 @@ const TradingViewChart=({resolution,onResolutionChange})=>{
     <div style={{userSelect:'none',width:'100%'}}>
       {/* Resolution toolbar */}
       <div className="flex items-center justify-between px-3 pb-2 flex-wrap gap-2">
-        <div className={'flex items-center gap-0.5 bg-[#111312] rounded-lg border border-[#E8E9E4]/5 overflow-hidden'}>
+        <div className={'flex items-center gap-0.5 bg-[#111312] rounded-lg border border-[#E8E9E4]/[5] overflow-hidden'}>
           {['1m','3m','5m','15m','30m','1h'].map(r=>(
             <button key={r}
               onClick={()=>onResolutionChange&&onResolutionChange(r)}
-              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${resolution===r?'bg-indigo-500/20 text-indigo-400':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70'}`}>
+              className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors ${resolution===r?'bg-indigo-500/20 text-indigo-400':'text-[#E8E9E4]/[40] hover:text-[#E8E9E4]/[70]'}`}>
               {r}
             </button>
           ))}
         </div>
-        <span className={'text-xs text-[#E8E9E4]/25 hidden sm:inline font-mono'}>COINBASE:BTCUSD · TradingView</span>
+        <span className={'text-xs text-[#E8E9E4]/[25] hidden sm:inline font-mono'}>COINBASE:BTCUSD · TradingView</span>
       </div>
 
       {/* iframe — key={resolution} forces clean remount on interval change */}
@@ -1056,7 +1056,7 @@ class ErrorBoundary extends React.Component{
 function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,bloomberg,currentPrice,timeState}){
   if(!showWhaleLog)return null;
   const fs=flowSignal;
-  const scoreColor=fs.score>=75?'text-emerald-400':fs.score>=50?'text-amber-400':fs.score>=25?'text-[#E8E9E4]/60':'text-[#E8E9E4]/30';
+  const scoreColor=fs.score>=75?'text-emerald-400':fs.score>=50?'text-amber-400':fs.score>=25?'text-[#E8E9E4]/[60]':'text-[#E8E9E4]/[30]';
   const barColor=fs.score>=75?'bg-emerald-500':fs.score>=50?'bg-amber-500':fs.score>=25?'bg-indigo-500':'bg-zinc-600';
   const isBuyFlow=fs.netDelta30s>0||fs.streakDir==='BUY';
   const isNote=fs.divergence;
@@ -1074,7 +1074,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
   const hasSpot=Math.abs(spotNet)>50000;
   const spotAligned=hasSpot&&Math.sign(spotNet)===Math.sign(futNet);
   let oiMsg='OI stable — no major position building.';
-  let oiColor='text-[#E8E9E4]/40';
+  let oiColor='text-[#E8E9E4]/[40]';
   if(Math.abs(oi)>0.15){
     if(oi>0&&isBuyFlow){oiMsg='OI rising + buy flow — New longs opening. Conviction. Likely to follow through.';oiColor='text-emerald-400';}
     else if(oi<0&&isBuyFlow){oiMsg='OI falling + buy flow — Shorts covering, not fresh longs. Rally may be temporary.';oiColor='text-amber-400';}
@@ -1082,19 +1082,19 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
     else if(oi<0&&!isBuyFlow){oiMsg='OI falling + sell flow — Longs exiting. Bearish unwind.';oiColor='text-amber-400';}
   }
   return(
-    <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0E100F] border border-l border-b border-[#E8E9E4]/15 rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
-      <div className={'p-3 bg-[#181A19] border-b border-[#E8E9E4]/10 flex justify-between items-center shrink-0'}>
+    <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0E100F] border border-l border-b border-[#E8E9E4]/[15] rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
+      <div className={'p-3 bg-[#181A19] border-b border-[#E8E9E4]/[10] flex justify-between items-center shrink-0'}>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></div>
-          <span className={'text-xs font-bold uppercase tracking-widest text-[#E8E9E4]/70'}>Flow Intelligence</span>
-          <span className={'text-[10px] text-[#E8E9E4]/25 font-mono'}>futures tape · $100K+</span>
+          <span className={'text-xs font-bold uppercase tracking-widest text-[#E8E9E4]/[70]'}>Flow Intelligence</span>
+          <span className={'text-[10px] text-[#E8E9E4]/[25] font-mono'}>futures tape · $100K+</span>
         </div>
-        <button onClick={()=>setShowWhaleLog(false)} className="opacity-40 hover:opacity-100 transition-opacity"><span className={'text-[#E8E9E4]/60 text-sm font-bold'}>✕</span></button>
+        <button onClick={()=>setShowWhaleLog(false)} className="opacity-40 hover:opacity-100 transition-opacity"><span className={'text-[#E8E9E4]/[60] text-sm font-bold'}>✕</span></button>
       </div>
       <div className="overflow-y-auto flex-1 p-3 space-y-3">
 
         {/* Flow Score */}
-        <div className={'p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/10'}>
+        <div className={'p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/[10]'}>
           <div className="flex justify-between items-start mb-2">
             <div>
               <div className={`text-lg font-bold font-serif ${scoreColor}`}>{fs.score.toFixed(0)}<span className="text-xs font-sans ml-1 opacity-60">&#47;100</span></div>
@@ -1105,37 +1105,37 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
               <div className={`text-xs font-mono ${isBuyFlow?'text-emerald-300':'text-rose-300'}`}>{fs.netDelta30s>=0?'+':''}{(fs.netDelta30s*0.001).toFixed(0)}K</div>
             </div>
           </div>
-          <div className={'h-1.5 bg-[#E8E9E4]/10 rounded-full overflow-hidden mb-2'}>
+          <div className={'h-1.5 bg-[#E8E9E4]/[10] rounded-full overflow-hidden mb-2'}>
             <div className={`h-full ${barColor} rounded-full transition-all duration-500`} style={{width:fs.score+'%'}}/>
           </div>
           {isNote&&<div className="text-[10px] text-amber-400 mt-1">Spot-futures diverging — likely basis trade, not directional</div>}
           {hasSpot&&<div className={`text-[10px] mt-1 font-bold ${spotAligned?'text-emerald-400':'text-amber-400'}`}>Spot {spotAligned?'ALIGNED':'OPPOSED'} · {spotAligned?'Higher reliability':'Lower reliability — possible hedging'}</div>}
-          {!hasSpot&&<div className={'text-[10px] text-[#E8E9E4]/25 mt-1'}>Spot (Coinbase): no significant activity</div>}
-          <div className={'text-[10px] text-[#E8E9E4]/30 mt-1'}>{fs.trend} · 90s delta: {fs.netDelta90s>=0?'+':''}{(fs.netDelta90s*0.001).toFixed(0)}K</div>
+          {!hasSpot&&<div className={'text-[10px] text-[#E8E9E4]/[25] mt-1'}>Spot (Coinbase): no significant activity</div>}
+          <div className={'text-[10px] text-[#E8E9E4]/[30] mt-1'}>{fs.trend} · 90s delta: {fs.netDelta90s>=0?'+':''}{(fs.netDelta90s*0.001).toFixed(0)}K</div>
         </div>
 
         {/* Whale Streak */}
-        <div className={`p-3 rounded-xl border ${hasStreak?(isBuy?'bg-emerald-500/5 border-emerald-500/30':'bg-rose-500/5 border-rose-500/30'):'bg-[#181A19] border-[#E8E9E4]/8'}`}>
-          <div className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-1.5 font-bold'}>Whale Streak</div>
+        <div className={`p-3 rounded-xl border ${hasStreak?(isBuy?'bg-emerald-500/5 border-emerald-500/30':'bg-rose-500/5 border-rose-500/30'):'bg-[#181A19] border-[#E8E9E4]/[8]'}`}>
+          <div className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/[40] mb-1.5 font-bold'}>Whale Streak</div>
           {hasStreak?(
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <span className={`text-base font-bold font-serif ${isBuy?'text-emerald-400':'text-rose-400'}`}>{fs.streakCount}x</span>
                 <span className={`text-sm font-bold ${isBuy?'text-emerald-400':'text-rose-400'}`}>{fs.streakDir}</span>
-                <span className={'text-xs text-[#E8E9E4]/40'}>in {fs.streakDuration}s</span>
+                <span className={'text-xs text-[#E8E9E4]/[40]'}>in {fs.streakDuration}s</span>
               </div>
-              <div className={'text-xs text-[#E8E9E4]/60'}>${(fs.streakUSD*0.001).toFixed(0)}K total · {isBuy?'Accumulation pressure':'Distribution pressure'}</div>
+              <div className={'text-xs text-[#E8E9E4]/[60]'}>${(fs.streakUSD*0.001).toFixed(0)}K total · {isBuy?'Accumulation pressure':'Distribution pressure'}</div>
               {fs.streakCount>=4&&<div className={`text-[10px] mt-1 font-bold ${isBuy?'text-emerald-400':'text-rose-400'}`}>High conviction streak — watch for price follow-through</div>}
-              {fs.streakCount>=2&&fs.streakCount<4&&<div className={'text-[10px] mt-1 text-[#E8E9E4]/40'}>Wait for more prints before treating as directional</div>}
+              {fs.streakCount>=2&&fs.streakCount<4&&<div className={'text-[10px] mt-1 text-[#E8E9E4]/[40]'}>Wait for more prints before treating as directional</div>}
             </div>
           ):(
-            <div className={'text-xs text-[#E8E9E4]/30 italic'}>No streak — random prints, not directional</div>
+            <div className={'text-xs text-[#E8E9E4]/[30] italic'}>No streak — random prints, not directional</div>
           )}
         </div>
 
         {/* OI Context */}
-        <div className={'p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/8'}>
-          <div className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-1.5 font-bold'}>Open Interest Context</div>
+        <div className={'p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/[8]'}>
+          <div className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/[40] mb-1.5 font-bold'}>Open Interest Context</div>
           <div className="flex items-center gap-2 mb-1">
             <span className={`text-xs font-bold ${oiColor}`}>OI {oi>=0?'+':''}{oi.toFixed(2)}% (5m)</span>
           </div>
@@ -1148,16 +1148,16 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
           <div className={'p-3 rounded-xl bg-amber-500/5 border border-amber-500/25'}>
             <div className="text-[10px] uppercase tracking-widest text-amber-400 mb-1.5 font-bold">Spot-Futures Divergence</div>
             <div className="text-xs text-amber-300 mb-1">Spot (Coinbase): <strong>{tape.cbFlow>0?'BUYING':'SELLING'}</strong> · Futures: <strong>{((tape.bnFlow+tape.byFlow)*0.5)>0?'BUYING':'SELLING'}</strong></div>
-            <div className={'text-[10px] text-[#E8E9E4]/50 leading-relaxed'}>Opposite flows between spot and futures typically indicate basis traders — not directional conviction.</div>
+            <div className={'text-[10px] text-[#E8E9E4]/[50] leading-relaxed'}>Opposite flows between spot and futures typically indicate basis traders — not directional conviction.</div>
           </div>
         )}
 
         {/* Long-Short Ratio */}
         {bloomberg?.longShortRatio&&(
-          <div className={'p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/8'}>
-            <div className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-2 font-bold'}>Market Positioning (Binance)</div>
+          <div className={'p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/[8]'}>
+            <div className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/[40] mb-2 font-bold'}>Market Positioning (Binance)</div>
             <div className="flex items-center gap-2 mb-1">
-              <div className={'flex-1 h-2 bg-[#E8E9E4]/10 rounded-full overflow-hidden'}>
+              <div className={'flex-1 h-2 bg-[#E8E9E4]/[10] rounded-full overflow-hidden'}>
                 <div className="h-full bg-emerald-500 rounded-full transition-all" style={{width:Math.min(100,(ls*100)/(ls+1))+'%'}}/>
               </div>
             </div>
@@ -1172,18 +1172,18 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
 
         {/* Raw Prints */}
         <details className="group">
-          <summary className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/25 cursor-pointer hover:text-[#E8E9E4]/50 font-bold list-none flex items-center gap-1'}>
+          <summary className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/[25] cursor-pointer hover:text-[#E8E9E4]/[50] font-bold list-none flex items-center gap-1'}>
             <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
             Raw prints ({whaleLog.length}) — futures $100K+, not directional on their own
           </summary>
           <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-            {whaleLog.length===0?<div className={'text-xs text-[#E8E9E4]/30 italic'}>No prints yet</div>:whaleLog.slice(0,20).map((w,i)=>{
+            {whaleLog.length===0?<div className={'text-xs text-[#E8E9E4]/[30] italic'}>No prints yet</div>:whaleLog.slice(0,20).map((w,i)=>{
               const d=new Date(w.time);
               return(<div key={i} className={`flex items-center gap-2 text-xs p-1.5 rounded bg-[#111312] border ${w.side==='BUY'?'border-emerald-500/15':'border-rose-500/15'}`}>
-                <span className={'text-[#E8E9E4]/25 font-mono shrink-0'}>{d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+                <span className={'text-[#E8E9E4]/[25] font-mono shrink-0'}>{d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
                 <span className={`font-bold text-[10px] ${w.side==='BUY'?'text-emerald-500':'text-rose-500'}`}>{w.side}</span>
-                <span className={'text-[#E8E9E4]/50'}>${(w.usd*0.001).toFixed(0)}K</span>
-                <span className={'text-[#E8E9E4]/25 text-[10px] ml-auto'}>{w.src}</span>
+                <span className={'text-[#E8E9E4]/[50]'}>${(w.usd*0.001).toFixed(0)}K</span>
+                <span className={'text-[#E8E9E4]/[25] text-[10px] ml-auto'}>{w.src}</span>
               </div>);
             })}
           </div>
@@ -1205,7 +1205,7 @@ const FlowBtn=({flowSignal,active,onClick,cls})=>{
     ?'bg-rose-500/15 border-rose-500/40 text-rose-400 animate-pulse'
     :isEmerging
     ?'bg-amber-500/10 border-amber-500/30 text-amber-400'
-    :'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-purple-400';
+    :'border-[#E8E9E4]/[10] text-[#E8E9E4]/[40] hover:text-purple-400';
   const baseCls=cls==='hidden sm:flex'
     ?'hidden sm:flex items-center gap-1 p-1.5 rounded-lg border text-xs transition-all '
     :'flex items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all ';
@@ -1253,8 +1253,8 @@ function QualityGateCard({qualityGate,regime,session}){
 function SyncButtons({userPosition,handleManualSync}){
   const upActive=userPosition==='UP';
   const dnActive=userPosition==='DOWN';
-  const upCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(upActive?'bg-emerald-600 text-white border-emerald-400':'border-[#E8E9E4]/10');
-  const dnCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(dnActive?'bg-rose-600 text-white border-rose-400':'border-[#E8E9E4]/10');
+  const upCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(upActive?'bg-emerald-600 text-white border-emerald-400':'border-[#E8E9E4]/[10]');
+  const dnCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(dnActive?'bg-rose-600 text-white border-rose-400':'border-[#E8E9E4]/[10]');
   return(
     <div className="flex gap-2">
       <button onClick={()=>handleManualSync('UP')} className={upCls}
@@ -2202,7 +2202,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V110...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/[50] font-serif text-xl animate-pulse'}>Initializing Tara V110...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -2212,10 +2212,10 @@ function TaraApp(){
   const advisorStyle=advisorColorMap[advisor.color]||advisorColorMap.zinc;
 
   return(
-    <div className={'min-h-screen bg-[#111312] text-[#E8E9E4] font-sans flex flex-col selection:bg-[#E8E9E4]/20'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
+    <div className={'min-h-screen bg-[#111312] text-[#E8E9E4] font-sans flex flex-col selection:bg-[#E8E9E4]/[20]'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
       
       {/* ── STICKY HEADER ── */}
-      <header className={'sticky top-0 z-40 bg-[#111312]/95 backdrop-blur-md border-b border-[#E8E9E4]/10 px-2 sm:px-4 py-2 shrink-0'}>
+      <header className={'sticky top-0 z-40 bg-[#111312]/[95] backdrop-blur-md border-b border-[#E8E9E4]/[10] px-2 sm:px-4 py-2 shrink-0'}>
         <div className="max-w-[1600px] mx-auto flex items-center gap-1 sm:gap-2">
           
           {/* Logo — text only on mobile, badge on sm+ */}
@@ -2228,7 +2228,7 @@ function TaraApp(){
 
           {/* Live Price — shrinks gracefully, never truncates on sm+ */}
           <div className={`flex items-center gap-0.5 font-serif font-bold shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
-            <IC.Zap className={`w-3 h-3 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#E8E9E4]/40'}`}/>
+            <IC.Zap className={`w-3 h-3 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#E8E9E4]/[40]'}`}/>
             {/* Mobile: no decimals to save space. sm+: full price */}
             <span className="text-sm sm:hidden">${currentPrice?Math.round(currentPrice).toLocaleString():'---'}</span>
             <span className="hidden sm:inline text-xl">${currentPrice?currentPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'---'}</span>
@@ -2241,25 +2241,25 @@ function TaraApp(){
           <div className="flex-1"/>
 
           {/* Window toggle */}
-          <div className={'flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0'}>
-            <button onClick={()=>handleWindowToggle('5m')} className={`px-2.5 sm:px-5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='5m'?'bg-indigo-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>5m</button>
-            <button onClick={()=>handleWindowToggle('15m')} className={`px-2.5 sm:px-5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='15m'?'bg-emerald-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>15m</button>
+          <div className={'flex bg-[#181A19] border border-[#E8E9E4]/[20] rounded-lg p-0.5 shrink-0'}>
+            <button onClick={()=>handleWindowToggle('5m')} className={`px-2.5 sm:px-5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='5m'?'bg-indigo-500 text-white shadow-md':'text-[#E8E9E4]/[40] hover:text-[#E8E9E4]/[80]'}`}>5m</button>
+            <button onClick={()=>handleWindowToggle('15m')} className={`px-2.5 sm:px-5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='15m'?'bg-emerald-500 text-white shadow-md':'text-[#E8E9E4]/[40] hover:text-[#E8E9E4]/[80]'}`}>15m</button>
           </div>
 
           {/* Right controls — on mobile show only 3 most critical: sound, ?, whale */}
           <div className="flex items-center gap-1 shrink-0">
             <div className="hidden xl:flex flex-col items-end cursor-pointer mr-1" onClick={()=>setUseLocalTime(!useLocalTime)}>
-              <span className={'text-xs text-[#E8E9E4]/40 uppercase'}>{useLocalTime?'LOCAL':'EST'}</span>
-              <span className={'text-sm font-mono text-[#E8E9E4]/80'}>{timeState.currentTime||'--:--:--'}</span>
+              <span className={'text-xs text-[#E8E9E4]/[40] uppercase'}>{useLocalTime?'LOCAL':'EST'}</span>
+              <span className={'text-sm font-mono text-[#E8E9E4]/[80]'}>{timeState.currentTime||'--:--:--'}</span>
             </div>
             {/* Always visible */}
-            <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
+            <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/[10] text-[#E8E9E4]/[40]'}`}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
             <button onClick={()=>setShowGuide(true)} className={'p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors'} title="How Tara Works">?</button>
             {/* Hidden on mobile — accessible via mobile tab nav or sm+ */}
             <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="hidden sm:flex"/>
-            <button onClick={()=>setShowSettings(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors'}><IC.Link className="w-3.5 h-3.5"/></button>
-            <button onClick={()=>setShowAnalytics(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors'} title="Analytics"><IC.BarChart className="w-3.5 h-3.5"/></button>
-            <button onClick={()=>setShowHelp(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors'}><IC.Help className="w-3.5 h-3.5"/></button>
+            <button onClick={()=>setShowSettings(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/[10] text-[#E8E9E4]/[40] hover:text-indigo-400 transition-colors'}><IC.Link className="w-3.5 h-3.5"/></button>
+            <button onClick={()=>setShowAnalytics(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/[10] text-[#E8E9E4]/[40] hover:text-indigo-400 transition-colors'} title="Analytics"><IC.BarChart className="w-3.5 h-3.5"/></button>
+            <button onClick={()=>setShowHelp(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/[10] text-[#E8E9E4]/[40] hover:text-white transition-colors'}><IC.Help className="w-3.5 h-3.5"/></button>
           </div>
         </div>
       </header>
@@ -2268,14 +2268,14 @@ function TaraApp(){
       <main className="flex-1 w-full max-w-[1600px] mx-auto px-2 sm:px-3 lg:px-4 py-2 sm:py-3 flex flex-col gap-3 min-h-0">
         
         {/* STATS BAR */}
-        <div className={'bg-[#181A19] rounded-xl border border-[#E8E9E4]/10 shadow-md relative overflow-hidden shrink-0'}>
+        <div className={'bg-[#181A19] rounded-xl border border-[#E8E9E4]/[10] shadow-md relative overflow-hidden shrink-0'}>
           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
           <div className="p-2 sm:p-3 grid grid-cols-2 lg:grid-cols-none lg:flex lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-auto">
             
             {/* Strike — auto or manual */}
             <div className="flex flex-col min-w-0 w-full lg:min-w-[130px] lg:w-auto col-span-1">
               <div className="flex items-center justify-between mb-1 gap-2">
-                <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide'}>Strike</div>
+                <div className={'text-xs text-[#E8E9E4]/[40] uppercase tracking-wide'}>Strike</div>
                 <span
                   onClick={()=>{isManualStrikeRef.current=false;hasSetInitialMargin.current=false;setWindowOpenStrike(currentPriceRef.current||currentPrice);}}
                   title={strikeMode==='auto'?'Live spot price at window open · click to re-capture':'Manual override · click to restore live'}
@@ -2289,7 +2289,7 @@ function TaraApp(){
                   onChange={e=>{const v=Number(e.target.value);setTargetMargin(v);isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(false);}}
                   onKeyDown={e=>{if(e.key==='Enter'&&targetMargin>0){isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);e.target.blur();}}}
                   onBlur={()=>{/* do not auto-confirm on blur — user must press OK or Enter */}}
-                  className={'bg-transparent text-white font-serif text-base sm:text-lg w-full focus:outline-none border-b border-[#E8E9E4]/10 focus:border-indigo-400'}
+                  className={'bg-transparent text-white font-serif text-base sm:text-lg w-full focus:outline-none border-b border-[#E8E9E4]/[10] focus:border-indigo-400'}
                   placeholder="Auto-set"
                 />
                 {targetMargin>0&&strikeMode==='manual'&&(
@@ -2299,18 +2299,18 @@ function TaraApp(){
                 )}
               </div>
             </div>
-            <div className={'w-px h-8 bg-[#E8E9E4]/10 hidden lg:block'}></div>
+            <div className={'w-px h-8 bg-[#E8E9E4]/[10] hidden lg:block'}></div>
 
             {/* Bet/Win */}
             <div className="flex flex-col min-w-0 w-full lg:min-w-[140px] lg:w-auto">
-              <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide mb-1'}>Bet  Max Win</div>
+              <div className={'text-xs text-[#E8E9E4]/[40] uppercase tracking-wide mb-1'}>Bet  Max Win</div>
               <div className="flex items-center gap-1 text-sm sm:text-base font-serif">
-                $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className={'bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-16 text-center outline-none text-white'}/>
-                <span className={'text-[#E8E9E4]/30'}>&#47;</span>
-                $<input type="number" value={maxPayout===0?'':maxPayout} onChange={e=>setMaxPayout(Number(e.target.value))} className={'bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-16 text-center outline-none text-white'}/>
+                $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className={'bg-transparent border-b border-[#E8E9E4]/[20] focus:border-indigo-400 w-16 text-center outline-none text-white'}/>
+                <span className={'text-[#E8E9E4]/[30]'}>&#47;</span>
+                $<input type="number" value={maxPayout===0?'':maxPayout} onChange={e=>setMaxPayout(Number(e.target.value))} className={'bg-transparent border-b border-[#E8E9E4]/[20] focus:border-indigo-400 w-16 text-center outline-none text-white'}/>
               </div>
             </div>
-            <div className={'w-px h-8 bg-[#E8E9E4]/10 hidden lg:block'}></div>
+            <div className={'w-px h-8 bg-[#E8E9E4]/[10] hidden lg:block'}></div>
 
             {/* Live Offer */}
             <div className="flex flex-col min-w-0">
@@ -2328,40 +2328,40 @@ function TaraApp(){
                 </div>
               )}
             </div>
-            <div className={'w-px h-8 bg-[#E8E9E4]/10 hidden lg:block lg:ml-auto'}></div>
+            <div className={'w-px h-8 bg-[#E8E9E4]/[10] hidden lg:block lg:ml-auto'}></div>
 
             {/* Position / Score */}
             <div className="col-span-2 lg:col-span-none lg:ml-auto flex flex-col">
               {positionStatus?(
                 <div className={'bg-[#111312] border border-amber-500/20 rounded-lg p-1.5'}>
-                  <div className="flex justify-between text-xs mb-1"><span className={'text-[#E8E9E4]/40 uppercase'}>POSITION</span><span className={positionStatus.side==='UP'?'text-emerald-400 font-bold':'text-rose-400 font-bold'}>{positionStatus.side} @ ${(positionStatus.entry||0).toFixed(0)}</span></div>
+                  <div className="flex justify-between text-xs mb-1"><span className={'text-[#E8E9E4]/[40] uppercase'}>POSITION</span><span className={positionStatus.side==='UP'?'text-emerald-400 font-bold':'text-rose-400 font-bold'}>{positionStatus.side} @ ${(positionStatus.entry||0).toFixed(0)}</span></div>
                   <div className="flex justify-between items-center">
                     <span className={`text-lg font-serif font-bold ${positionStatus.pnlPct>0?'text-emerald-400':'text-rose-400'}`}>{positionStatus.pnlPct>0?'+':''}{positionStatus.pnlPct.toFixed(1)}%</span>
-                    <span className={`text-xs font-bold uppercase ${positionStatus.isStopHit?'text-rose-500 animate-pulse':'text-[#E8E9E4]/30'}`}>{positionStatus.isStopHit?'STOP HIT':'SAFE'}</span>
+                    <span className={`text-xs font-bold uppercase ${positionStatus.isStopHit?'text-rose-500 animate-pulse':'text-[#E8E9E4]/[30]'}`}>{positionStatus.isStopHit?'STOP HIT':'SAFE'}</span>
                   </div>
                 </div>
               ):(
                 <div>
-                  <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide mb-1 flex items-center gap-1'}><IC.Terminal className="w-4 h-4"/> {windowType.toUpperCase()} SCORE</div>
+                  <div className={'text-xs text-[#E8E9E4]/[40] uppercase tracking-wide mb-1 flex items-center gap-1'}><IC.Terminal className="w-4 h-4"/> {windowType.toUpperCase()} SCORE</div>
                   <div className="flex items-center gap-3">
                     <div className="flex flex-col items-center"><div className="flex items-center gap-1 text-xs text-emerald-400"><button onClick={()=>updateScore(windowType,'wins',-1)} className={'hover:bg-emerald-500/20 rounded px-0.5'}>-</button>W<button onClick={()=>updateScore(windowType,'wins',1)} className={'hover:bg-emerald-500/20 rounded px-0.5'}>+</button></div><span className="text-2xl sm:text-3xl font-serif text-emerald-400 font-bold">{Number(scorecards[windowType]?.wins||0)}</span></div>
-                    <div className={'h-6 w-px bg-[#E8E9E4]/10'}></div>
+                    <div className={'h-6 w-px bg-[#E8E9E4]/[10]'}></div>
                     <div className="flex flex-col items-center"><div className="flex items-center gap-1 text-xs text-rose-400"><button onClick={()=>updateScore(windowType,'losses',-1)} className={'hover:bg-rose-500/20 rounded px-0.5'}>-</button>L<button onClick={()=>updateScore(windowType,'losses',1)} className={'hover:bg-rose-500/20 rounded px-0.5'}>+</button></div><span className="text-2xl sm:text-3xl font-serif text-rose-400 font-bold">{Number(scorecards[windowType]?.losses||0)}</span></div>
-                    <div className={'text-xs text-[#E8E9E4]/30'}>{(Number(scorecards[windowType]?.wins||0)/(Math.max(1,Number(scorecards[windowType]?.wins||0)+Number(scorecards[windowType]?.losses||0)))*100).toFixed(0)}%</div>
+                    <div className={'text-xs text-[#E8E9E4]/[30]'}>{(Number(scorecards[windowType]?.wins||0)/(Math.max(1,Number(scorecards[windowType]?.wins||0)+Number(scorecards[windowType]?.losses||0)))*100).toFixed(0)}%</div>
                   </div>
                   {/* Session + Lifetime P&L */}
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     {sessionPnL!==0&&(
                       <div className="flex items-center gap-1">
-                        <span className={'text-[9px] text-[#E8E9E4]/30 uppercase'}>Session</span>
+                        <span className={'text-[9px] text-[#E8E9E4]/[30] uppercase'}>Session</span>
                         <span className={`text-[11px] font-mono font-bold ${sessionPnL>0?'text-emerald-400':'text-rose-400'}`}>{sessionPnL>0?'+':''}{sessionPnL>=0?'$'+sessionPnL.toFixed(2):'-$'+Math.abs(sessionPnL).toFixed(2)}</span>
                       </div>
                     )}
                     {lifetimePnL!==0&&(
                       <div className="flex items-center gap-1">
-                        <span className={'text-[9px] text-[#E8E9E4]/30 uppercase'}>All-time</span>
+                        <span className={'text-[9px] text-[#E8E9E4]/[30] uppercase'}>All-time</span>
                         <span className={`text-[11px] font-mono font-bold ${lifetimePnL>0?'text-emerald-300':'text-rose-300'}`}>{lifetimePnL>0?'+':''}{lifetimePnL>=0?'$'+lifetimePnL.toFixed(2):'-$'+Math.abs(lifetimePnL).toFixed(2)}</span>
-                        <button onClick={()=>{if(confirm('Reset lifetime P&L to zero?')){setLifetimePnL(0);try{localStorage.removeItem('taraV110PnL');}catch(e){}}}} className={'text-[8px] text-[#E8E9E4]/20 hover:text-rose-400 ml-0.5'} title="Reset lifetime P&L">✕</button>
+                        <button onClick={()=>{if(confirm('Reset lifetime P&L to zero?')){setLifetimePnL(0);try{localStorage.removeItem('taraV110PnL');}catch(e){}}}} className={'text-[8px] text-[#E8E9E4]/[20] hover:text-rose-400 ml-0.5'} title="Reset lifetime P&L">✕</button>
                       </div>
                     )}
                   </div>
@@ -2372,7 +2372,7 @@ function TaraApp(){
 
           {/* DOM bar */}
           <div className="px-3 pb-2 hidden sm:block">
-            <div className={'flex justify-between text-xs text-[#E8E9E4]/30 uppercase tracking-wide mb-1'}><span>Depth of Market</span><span>{buyPct.toFixed(0)}% BID / {sellPct.toFixed(0)}% ASK</span></div>
+            <div className={'flex justify-between text-xs text-[#E8E9E4]/[30] uppercase tracking-wide mb-1'}><span>Depth of Market</span><span>{buyPct.toFixed(0)}% BID / {sellPct.toFixed(0)}% ASK</span></div>
             <div className="w-full h-1 bg-[#111312] rounded-full overflow-hidden flex">
               <div style={{width:`${buyPct}%`}} className={'h-full bg-emerald-500/70 transition-all duration-300'}></div>
               <div style={{width:`${sellPct}%`}} className={'h-full bg-rose-500/70 transition-all duration-300'}></div>
@@ -2381,15 +2381,15 @@ function TaraApp(){
         </div>
 
         {/* MOBILE TAB NAV */}
-        <div className={'flex lg:hidden bg-[#181A19] border border-[#E8E9E4]/10 rounded-xl p-1 gap-1 shrink-0'}>
+        <div className={'flex lg:hidden bg-[#181A19] border border-[#E8E9E4]/[10] rounded-xl p-1 gap-1 shrink-0'}>
           {[{id:'signal',label:'Signal',icon:<IC.Zap className="w-4 h-4"/>},{id:'chart',label:'Chart',icon:<IC.Activity className="w-4 h-4"/>},{id:'logs',label:'Analytics',icon:<IC.BarChart className="w-4 h-4"/>}].map(tab=>(
-            <button key={tab.id} onClick={()=>setMobileTab(tab.id)} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${mobileTab===tab.id?'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70'}`}>
+            <button key={tab.id} onClick={()=>setMobileTab(tab.id)} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${mobileTab===tab.id?'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30':'text-[#E8E9E4]/[40] hover:text-[#E8E9E4]/[70]'}`}>
               {tab.icon}{tab.label}
             </button>
           ))}
           {/* Mobile-only quick access row for hidden header buttons */}
           <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="flex"/>
-          <button onClick={()=>setShowSettings(true)} className={'flex items-center justify-center px-2 py-1.5 rounded-lg text-xs text-[#E8E9E4]/30 hover:text-indigo-400 transition-all'} title="Discord"><IC.Link className="w-3.5 h-3.5"/></button>
+          <button onClick={()=>setShowSettings(true)} className={'flex items-center justify-center px-2 py-1.5 rounded-lg text-xs text-[#E8E9E4]/[30] hover:text-indigo-400 transition-all'} title="Discord"><IC.Link className="w-3.5 h-3.5"/></button>
         </div>
 
         {/* ── PENDING STRIKE CONFIRMATION BANNER — always visible ── */}
@@ -2400,7 +2400,7 @@ function TaraApp(){
               <div>
                 <div className="text-xs font-bold uppercase tracking-wide text-indigo-400 mb-0.5">New window — confirm strike price</div>
                 <div className="text-2xl sm:text-3xl font-serif font-bold text-white">${pendingStrike.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-                <div className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Live price captured at window open · tap OK to confirm or Edit to change</div>
+                <div className={'text-xs text-[#E8E9E4]/[40] mt-0.5'}>Live price captured at window open · tap OK to confirm or Edit to change</div>
               </div>
             </div>
             <div className="flex gap-2 w-full sm:w-auto shrink-0">
@@ -2411,7 +2411,7 @@ function TaraApp(){
               </button>
               <button
                 onClick={()=>{setPendingStrike(null);setStrikeMode('manual');isManualStrikeRef.current=true;}}
-                className={'flex-1 sm:flex-none px-4 py-2.5 border border-[#E8E9E4]/20 text-[#E8E9E4]/50 hover:text-white hover:border-[#E8E9E4]/40 rounded-lg text-sm font-bold uppercase tracking-wide transition-colors'}>
+                className={'flex-1 sm:flex-none px-4 py-2.5 border border-[#E8E9E4]/[20] text-[#E8E9E4]/[50] hover:text-white hover:border-[#E8E9E4]/[40] rounded-lg text-sm font-bold uppercase tracking-wide transition-colors'}>
                 Edit
               </button>
             </div>
@@ -2426,13 +2426,13 @@ function TaraApp(){
               <div className={`text-sm font-serif font-bold ${windowRecap.won?'text-emerald-400':'text-rose-400'}`}>
                 {windowRecap.won?'WIN':'LOSS'} · {windowRecap.dir} · {windowRecap.regime}
               </div>
-              <div className={'text-xs text-[#E8E9E4]/50 mt-0.5'}>
+              <div className={'text-xs text-[#E8E9E4]/[50] mt-0.5'}>
                 Strike <span className="text-white">${(windowRecap.strike||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
                 {' → '}Close <span className="text-white">${(windowRecap.closePrice||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
                 {' · '}<span className={windowRecap.gapBps>=0?'text-emerald-400':'text-rose-400'}>{windowRecap.gapBps>=0?'+':''}{windowRecap.gapBps.toFixed(1)} bps</span>
               </div>
             </div>
-            <button onClick={()=>setWindowRecap(null)} className={'text-[#E8E9E4]/30 hover:text-white text-lg leading-none'}>×</button>
+            <button onClick={()=>setWindowRecap(null)} className={'text-[#E8E9E4]/[30] hover:text-white text-lg leading-none'}>×</button>
           </div>
         )}
 
@@ -2440,12 +2440,12 @@ function TaraApp(){
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 shrink-0">
           
           {/* ── PREDICTION CARD ── */}
-          <div className={`bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
+          <div className={`bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/[10] shadow-md flex flex-col relative ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-transparent opacity-30 rounded-t-xl"></div>
             <div className="flex justify-between items-center mb-3 shrink-0">
-              <div onClick={()=>setUseLocalTime(!useLocalTime)} className={'flex items-center gap-1.5 bg-[#111312] border border-[#E8E9E4]/10 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide cursor-pointer hover:border-indigo-500/30 transition-colors'}>
+              <div onClick={()=>setUseLocalTime(!useLocalTime)} className={'flex items-center gap-1.5 bg-[#111312] border border-[#E8E9E4]/[10] px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide cursor-pointer hover:border-indigo-500/30 transition-colors'}>
                 <IC.Clock className="w-4 h-4"/>
-                <span className={'text-[#E8E9E4]/60 hidden sm:inline'}>{timeState.startWindow}–{timeState.nextWindow} {useLocalTime?'LOCAL':'EST'}</span>
+                <span className={'text-[#E8E9E4]/[60] hidden sm:inline'}>{timeState.startWindow}–{timeState.nextWindow} {useLocalTime?'LOCAL':'EST'}</span>
                 <span className="text-white font-bold text-sm">{timeState.minsRemaining}m {timeState.secsRemaining}s</span>
                 {analysis?.isPostDecay&&<span className="text-amber-400">⚡</span>}
               </div>
@@ -2473,16 +2473,16 @@ function TaraApp(){
               <div className="flex-1 flex flex-col items-center justify-center gap-2">
                 <div className={'text-xs uppercase tracking-widest text-indigo-400/70 font-bold animate-pulse'}>Enter strike price</div>
                 <div className="text-2xl font-serif text-white">${targetMargin.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-                <div className={'text-xs text-[#E8E9E4]/30'}>Press OK or Enter to confirm · Tara will scan after</div>
+                <div className={'text-xs text-[#E8E9E4]/[30]'}>Press OK or Enter to confirm · Tara will scan after</div>
               </div>
             ):isLoading||!analysis?(
-              <div className={'flex-1 flex items-center justify-center text-[#E8E9E4]/30 font-serif animate-pulse'}>Connecting...</div>
+              <div className={'flex-1 flex items-center justify-center text-[#E8E9E4]/[30] font-serif animate-pulse'}>Connecting...</div>
             ):(
               <div className="flex flex-col flex-1 gap-3">
                 {/* Prediction */}
                 <div className="flex flex-col items-center text-center pt-1">
                   <div className="flex items-center gap-2 mb-1 flex-wrap justify-center">
-                    <span className={'text-xs text-[#E8E9E4]/40 uppercase tracking-[0.2em] font-bold'}>Prediction</span>
+                    <span className={'text-xs text-[#E8E9E4]/[40] uppercase tracking-[0.2em] font-bold'}>Prediction</span>
                     {analysis.regime&&<span className={'text-xs text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded text-xs'}>{analysis.regime}</span>}
                     {/* Lock badge */}
                     {analysis.lockInfo&&<span className={'text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-xs px-2 py-1'}>🔒 {Math.floor((Date.now()-analysis.lockInfo.lockedAt)/1000)}s @ {analysis.lockInfo.lockedPosterior.toFixed(0)}%{analysis.lockInfo.isLateLock?' ⚠️':''}</span>}
@@ -2506,7 +2506,7 @@ function TaraApp(){
                   {/* Confidence forming progress — show when NOT locked */}
                   {!analysis.lockInfo&&(analysis.prediction.includes('FORMING')||analysis.prediction==='SEARCHING...')&&(
                     <div className="mt-2 w-full px-4">
-                      <div className={'flex justify-between text-xs text-[#E8E9E4]/30 uppercase mb-1'}>
+                      <div className={'flex justify-between text-xs text-[#E8E9E4]/[30] uppercase mb-1'}>
                         <span>Confirming signal...</span>
                         <span>{analysis.prediction.includes('UP')?analysis.bullCount:analysis.bearCount} of {analysis.consecutiveNeeded} samples</span>
                       </div>
@@ -2519,7 +2519,7 @@ function TaraApp(){
 
                   <div className="flex items-center gap-4 mt-2 text-xs">
                     <span className="text-indigo-300">UP: {Number(analysis.rawProbAbove||0).toFixed(1)}%</span>
-                    <span className={'text-[#E8E9E4]/20'}>|</span>
+                    <span className={'text-[#E8E9E4]/[20]'}>|</span>
                     <span className="text-rose-300">DN: {(100-Number(analysis.rawProbAbove||0)).toFixed(1)}%</span>
                     {analysis.kellyPct>0&&<span className={'text-amber-400/80'}>Kelly: {analysis.kellyPct.toFixed(1)}%</span>}
                   </div>
@@ -2548,8 +2548,8 @@ function TaraApp(){
 
                 {/* Pre-entry checklist — shown when not yet in trade */}
                 {!userPosition&&analysis?.lockInfo&&(
-                  <div className={'mb-2 p-2.5 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
-                    <div className={'text-[10px] uppercase tracking-wide text-[#E8E9E4]/30 font-bold mb-1.5'}>Entry checklist</div>
+                  <div className={'mb-2 p-2.5 rounded-lg bg-[#111312] border border-[#E8E9E4]/[8]'}>
+                    <div className={'text-[10px] uppercase tracking-wide text-[#E8E9E4]/[30] font-bold mb-1.5'}>Entry checklist</div>
                     <div className="space-y-1">
                       {[
                         {ok:targetMargin>0,label:'Strike confirmed'},
@@ -2559,15 +2559,15 @@ function TaraApp(){
                       ].map((item,i)=>(
                         <div key={i} className="flex items-center gap-1.5 text-[10px]">
                           <span className={item.ok?'text-emerald-400':'text-amber-400'}>{item.ok?'✓':'⚠'}</span>
-                          <span className={item.ok?'text-[#E8E9E4]/60':'text-amber-400/80'}>{item.label}</span>
+                          <span className={item.ok?'text-[#E8E9E4]/[60]':'text-amber-400/80'}>{item.label}</span>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
                 {/* Sync buttons */}
-                <div className={'flex flex-col gap-1.5 border-t border-[#E8E9E4]/10 pt-3'}>
-                  <span className={'text-xs uppercase tracking-wide text-[#E8E9E4]/30 text-center'}>-30% Stop Guard Sync</span>
+                <div className={'flex flex-col gap-1.5 border-t border-[#E8E9E4]/[10] pt-3'}>
+                  <span className={'text-xs uppercase tracking-wide text-[#E8E9E4]/[30] text-center'}>-30% Stop Guard Sync</span>
                   <SyncButtons userPosition={userPosition} handleManualSync={handleManualSync}/>
 
                 </div>
@@ -2583,33 +2583,33 @@ function TaraApp(){
       {/* Settings */}
       {showSettings&&(
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto'} style={{scrollbarWidth:'thin'}}>
+          <div className={'bg-[#181A19] border border-[#E8E9E4]/[20] rounded-2xl w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto'} style={{scrollbarWidth:'thin'}}>
             <div className="p-4 sm:p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Link className="w-5 h-5 text-indigo-400"/>Discord Integration</h2>
-                <button onClick={()=>{setShowSettings(false);setDiscordEditingId(null);setDiscordEditText('');setDiscordStatusMsg('');}} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
+                <button onClick={()=>{setShowSettings(false);setDiscordEditingId(null);setDiscordEditText('');setDiscordStatusMsg('');}} className={'text-[#E8E9E4]/[50] hover:text-white'}><IC.X className="w-5 h-5"/></button>
               </div>
 
-              <p className={'text-xs text-[#E8E9E4]/60 mb-3 leading-relaxed'}>Tara broadcasts lock signals, round closures, and entries to your Discord channel.</p>
-              <input type="password" value={discordWebhook} onChange={e=>setDiscordWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." className={'w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-400 text-white font-mono mb-3'}/>
+              <p className={'text-xs text-[#E8E9E4]/[60] mb-3 leading-relaxed'}>Tara broadcasts lock signals, round closures, and entries to your Discord channel.</p>
+              <input type="password" value={discordWebhook} onChange={e=>setDiscordWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." className={'w-full bg-[#111312] border border-[#E8E9E4]/[20] rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-400 text-white font-mono mb-3'}/>
 
               {/* Bot name + avatar */}
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <div>
-                  <label className={'text-[10px] text-[#E8E9E4]/40 uppercase tracking-wide mb-1 block'}>Bot Display Name</label>
-                  <input type="text" value={discordUsername} onChange={e=>setDiscordUsername(e.target.value)} placeholder="Tara Terminal V110" className={'w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
+                  <label className={'text-[10px] text-[#E8E9E4]/[40] uppercase tracking-wide mb-1 block'}>Bot Display Name</label>
+                  <input type="text" value={discordUsername} onChange={e=>setDiscordUsername(e.target.value)} placeholder="Tara Terminal V110" className={'w-full bg-[#111312] border border-[#E8E9E4]/[20] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
                 </div>
                 <div>
-                  <label className={'text-[10px] text-[#E8E9E4]/40 uppercase tracking-wide mb-1 block'}>Avatar Image URL</label>
-                  <input type="url" value={discordAvatar} onChange={e=>setDiscordAvatar(e.target.value)} placeholder="https://i.imgur.com/..." className={'w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
+                  <label className={'text-[10px] text-[#E8E9E4]/[40] uppercase tracking-wide mb-1 block'}>Avatar Image URL</label>
+                  <input type="url" value={discordAvatar} onChange={e=>setDiscordAvatar(e.target.value)} placeholder="https://i.imgur.com/..." className={'w-full bg-[#111312] border border-[#E8E9E4]/[20] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
                 </div>
               </div>
               {discordAvatar&&(
-                <div className={'flex items-center gap-2 mb-3 p-2 bg-[#111312] rounded-lg border border-[#E8E9E4]/8'}>
-                  <img src={discordAvatar} alt="Bot avatar preview" className={'w-8 h-8 rounded-full object-cover border border-[#E8E9E4]/20'} onError={e=>e.target.style.display='none'}/>
+                <div className={'flex items-center gap-2 mb-3 p-2 bg-[#111312] rounded-lg border border-[#E8E9E4]/[8]'}>
+                  <img src={discordAvatar} alt="Bot avatar preview" className={'w-8 h-8 rounded-full object-cover border border-[#E8E9E4]/[20]'} onError={e=>e.target.style.display='none'}/>
                   <div>
                     <div className="text-xs font-bold text-white">{discordUsername||'Tara Terminal V110'}</div>
-                    <div className={'text-[10px] text-[#E8E9E4]/40'}>Preview of how bot appears in Discord</div>
+                    <div className={'text-[10px] text-[#E8E9E4]/[40]'}>Preview of how bot appears in Discord</div>
                   </div>
                 </div>
               )}
@@ -2624,23 +2624,23 @@ function TaraApp(){
 
               {discordStatusMsg&&<div className={'mb-3 text-xs text-center text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg py-2'}>{discordStatusMsg}</div>}
 
-              <div className={'border-t border-[#E8E9E4]/10 pt-4'}>
+              <div className={'border-t border-[#E8E9E4]/[10] pt-4'}>
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className={'text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/60'}>Sent Messages ({discordLog.length})</h3>
-                  <p className={'text-[10px] text-[#E8E9E4]/30'}>Edit or delete within 15 min</p>
+                  <h3 className={'text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/[60]'}>Sent Messages ({discordLog.length})</h3>
+                  <p className={'text-[10px] text-[#E8E9E4]/[30]'}>Edit or delete within 15 min</p>
                 </div>
 
                 {discordLog.length===0?(
-                  <div className={'text-xs text-[#E8E9E4]/30 italic text-center py-6'}>No messages sent yet this session</div>
+                  <div className={'text-xs text-[#E8E9E4]/[30] italic text-center py-6'}>No messages sent yet this session</div>
                 ):(
                   <div className="space-y-2">
                     {discordLog.map(entry=>(
-                      <div key={entry.id} className={'bg-[#111312] rounded-lg border border-[#E8E9E4]/8 overflow-hidden'}>
+                      <div key={entry.id} className={'bg-[#111312] rounded-lg border border-[#E8E9E4]/[8] overflow-hidden'}>
                         <div className="flex items-center gap-2 p-2.5">
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entry.type==='LOCK'?'bg-indigo-400':entry.type==='CLOSE'?'bg-emerald-400':'bg-amber-400'}`}/>
                           <div className="flex-1 min-w-0">
                             <div className="text-xs text-white truncate">{entry.label}</div>
-                            <div className={'text-[10px] text-[#E8E9E4]/30'}>{entry.ts}{entry.edited&&' · edited'}</div>
+                            <div className={'text-[10px] text-[#E8E9E4]/[30]'}>{entry.ts}{entry.edited&&' · edited'}</div>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             <button onClick={()=>{setDiscordEditingId(discordEditingId===entry.id?null:entry.id);setDiscordEditText(entry.label);}}
@@ -2653,7 +2653,7 @@ function TaraApp(){
                           </div>
                         </div>
                         {discordEditingId===entry.id&&(
-                          <div className={'border-t border-[#E8E9E4]/8 p-2.5'}>
+                          <div className={'border-t border-[#E8E9E4]/[8] p-2.5'}>
                             <textarea value={discordEditText} onChange={e=>setDiscordEditText(e.target.value)} rows={2}
                               className={'w-full bg-[#181A19] border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-400 resize-none mb-2'}
                               placeholder="Add a note to this message (e.g. 'Closed early, took profits at $75,200')"/>
@@ -2665,7 +2665,7 @@ function TaraApp(){
                                 setTimeout(()=>setDiscordStatusMsg(''),3000);
                               }} className={'flex-1 py-1.5 rounded-lg text-xs font-bold bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors'}>Add Note</button>
                               <button onClick={()=>{setDiscordEditingId(null);setDiscordEditText('');}}
-                                className={'px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors'}>Cancel</button>
+                                className={'px-3 py-1.5 rounded-lg text-xs font-bold border border-[#E8E9E4]/[10] text-[#E8E9E4]/[40] hover:text-white transition-colors'}>Cancel</button>
                             </div>
                           </div>
                         )}
@@ -2673,7 +2673,7 @@ function TaraApp(){
                     ))}
                   </div>
                 )}
-                <p className={'text-[10px] text-[#E8E9E4]/20 mt-3 text-center leading-relaxed'}>Log resets on page refresh. Discord allows edits or deletes within 15 minutes of sending.</p>
+                <p className={'text-[10px] text-[#E8E9E4]/[20] mt-3 text-center leading-relaxed'}>Log resets on page refresh. Discord allows edits or deletes within 15 minutes of sending.</p>
               </div>
             </div>
           </div>
@@ -2683,17 +2683,17 @@ function TaraApp(){
       {/* Chat */}
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
-          <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V110</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
-            <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
+          <div className={'bg-[#181A19] border border-[#E8E9E4]/[20] shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/[10]'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V110</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/[50]'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
                   <span className={`text-xs uppercase opacity-30 mb-1 ${msg.role==='user'?'mr-1':'ml-1'}`}>{msg.role}</span>
-                  <div className={`text-xs p-2 rounded-lg max-w-[88%] leading-relaxed whitespace-pre-wrap ${msg.role==='user'?'bg-indigo-500/20 text-indigo-100 border border-indigo-500/30 rounded-tr-none':'bg-[#2A2D2C] text-[#E8E9E4] border border-[#E8E9E4]/10 rounded-tl-none'}`}>{msg.text}</div>
+                  <div className={`text-xs p-2 rounded-lg max-w-[88%] leading-relaxed whitespace-pre-wrap ${msg.role==='user'?'bg-indigo-500/20 text-indigo-100 border border-indigo-500/30 rounded-tr-none':'bg-[#2A2D2C] text-[#E8E9E4] border border-[#E8E9E4]/[10] rounded-tl-none'}`}>{msg.text}</div>
                 </div>
               ))}
             </div>
-            <div className={'p-2.5 bg-[#111312] border-t border-[#E8E9E4]/10'}><input type="text" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={handleChatSubmit} placeholder={`Ask about ${windowType} window...`} className={'w-full bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/></div>
+            <div className={'p-2.5 bg-[#111312] border-t border-[#E8E9E4]/[10]'}><input type="text" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={handleChatSubmit} placeholder={`Ask about ${windowType} window...`} className={'w-full bg-[#181A19] border border-[#E8E9E4]/[20] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/></div>
           </div>
         )}
         {!isChatOpen&&<button onClick={()=>setIsChatOpen(true)} className={'bg-indigo-500 hover:bg-indigo-400 text-white p-3 rounded-full shadow-lg border border-indigo-400/50 transition-transform hover:scale-105'}><IC.Msg className="w-5 h-5"/></button>}
@@ -2703,11 +2703,11 @@ function TaraApp(){
       {/* ── ANALYTICS / TRAINING DASHBOARD ── */}
       {showAnalytics&&(
         <div className={'fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-3xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
-            <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
+          <div className={'bg-[#181A19] border border-[#E8E9E4]/[20] rounded-2xl w-full max-w-3xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
+            <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/[10] p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base font-serif text-white flex items-center gap-2"><IC.BarChart className="w-5 h-5 text-indigo-400"/>Tara Training Engine</h2>
-                <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>{tradeLog.length} trades logged · Weights auto-updating every window</p>
+                <p className={'text-xs text-[#E8E9E4]/[40] mt-0.5'}>{tradeLog.length} trades logged · Weights auto-updating every window</p>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={()=>{
@@ -2717,32 +2717,32 @@ function TaraApp(){
                   const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='tara_training_data.csv';a.click();
                 }} className={'px-3 py-1 text-xs font-bold uppercase tracking-wide rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/30 transition-colors'}>Export CSV</button>
                 <button onClick={()=>{if(confirm('Reset all training data and weights? Cannot undo.')){setAdaptiveWeights({...DEFAULT_WEIGHTS});setTradeLog([]);saveWeights({...DEFAULT_WEIGHTS});saveTradeLog([]);pendingTradeRef.current=null;}}} className={'px-3 py-1 text-xs font-bold uppercase tracking-wide rounded-lg bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:bg-rose-500/30 transition-colors'}>Reset</button>
-                <button onClick={()=>{setShowAnalytics(false);setSelectedTradeId(null);}} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
+                <button onClick={()=>{setShowAnalytics(false);setSelectedTradeId(null);}} className={'text-[#E8E9E4]/[50] hover:text-white'}><IC.X className="w-5 h-5"/></button>
               </div>
             </div>
             <div className="p-4 space-y-5">
 
               {/* Adaptive Weights */}
               <section>
-                <h3 className="text-xs font-bold uppercase tracking-wide text-indigo-400 mb-3">Adaptive Signal Weights · <span className={'text-[#E8E9E4]/40 normal-case font-normal'}>{lastRegimeRef.current||'Global'} active</span></h3>
+                <h3 className="text-xs font-bold uppercase tracking-wide text-indigo-400 mb-3">Adaptive Signal Weights · <span className={'text-[#E8E9E4]/[40] normal-case font-normal'}>{lastRegimeRef.current||'Global'} active</span></h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {Object.entries(adaptiveWeights).map(([key,val])=>{
                     const def=DEFAULT_WEIGHTS[key]||20;const pct=(val/55)*100;
                     const acc=signalAccuracy[key];const wrPct=acc?.total>=3?((acc.right/acc.total)*100).toFixed(0):null;
                     const delta=val-def;
-                    return(<div key={key} className={'bg-[#111312] rounded-lg p-2.5 border border-[#E8E9E4]/5'}>
+                    return(<div key={key} className={'bg-[#111312] rounded-lg p-2.5 border border-[#E8E9E4]/[5]'}>
                       <div className="flex justify-between items-center mb-1.5">
-                        <span className={'text-xs font-bold uppercase text-[#E8E9E4]/70'}>{key}</span>
+                        <span className={'text-xs font-bold uppercase text-[#E8E9E4]/[70]'}>{key}</span>
                         <div className="flex items-center gap-1.5">
                           {wrPct&&<span className={'text-xs text-indigo-400/80'}>{wrPct}% acc</span>}
-                          <span className={`text-xs font-mono font-bold ${delta>0?'text-emerald-400':delta<0?'text-rose-400':'text-[#E8E9E4]/50'}`}>{val.toFixed(1)}</span>
-                          <span className={`text-xs ${delta>0?'text-emerald-400':delta<0?'text-rose-400':'text-[#E8E9E4]/30'}`}>{delta>0?'+':''}{delta.toFixed(1)}</span>
+                          <span className={`text-xs font-mono font-bold ${delta>0?'text-emerald-400':delta<0?'text-rose-400':'text-[#E8E9E4]/[50]'}`}>{val.toFixed(1)}</span>
+                          <span className={`text-xs ${delta>0?'text-emerald-400':delta<0?'text-rose-400':'text-[#E8E9E4]/[30]'}`}>{delta>0?'+':''}{delta.toFixed(1)}</span>
                         </div>
                       </div>
                       <div className="w-full h-1.5 bg-[#181A19] rounded-full overflow-hidden">
                         <div className={`h-full rounded-full transition-all duration-500 ${delta>2?'bg-emerald-500':delta<-2?'bg-rose-500':'bg-indigo-500'}`} style={{width:`${Math.min(100,pct)}%`}}/>
                       </div>
-                      <div className={'flex justify-between mt-0.5 text-xs text-[#E8E9E4]/20'}>
+                      <div className={'flex justify-between mt-0.5 text-xs text-[#E8E9E4]/[20]'}>
                         <span>default: {def}</span>
                         <span>{acc?.total||0} samples</span>
                       </div>
@@ -2755,23 +2755,23 @@ function TaraApp(){
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-amber-400 mb-3">Probability Calibration (posterior accuracy)</h3>
                 {tradeLog.filter(t=>t.result).length<10?(
-                  <div className={'text-xs text-[#E8E9E4]/40 italic text-center py-4 bg-[#111312] rounded-lg border border-[#E8E9E4]/5'}>Need 10+ resolved trades to calibrate. Currently: {tradeLog.filter(t=>t.result).length}</div>
+                  <div className={'text-xs text-[#E8E9E4]/[40] italic text-center py-4 bg-[#111312] rounded-lg border border-[#E8E9E4]/[5]'}>Need 10+ resolved trades to calibrate. Currently: {tradeLog.filter(t=>t.result).length}</div>
                 ):(
                   <div className="grid grid-cols-5 sm:grid-cols-10 gap-1">
                     {[0,10,20,30,40,50,60,70,80,90].map(b=>{
                       const calVal=calibration[b];const isNull=calVal==null;
                       const diff=isNull?0:calVal-b;
-                      return(<div key={b} className={'bg-[#111312] rounded-lg p-1.5 border border-[#E8E9E4]/5 text-center'}>
-                        <div className={'text-xs text-[#E8E9E4]/30 mb-1'}>{b}-{b+10}%</div>
-                        <div className={`text-xs font-bold font-mono ${isNull?'text-[#E8E9E4]/20':Math.abs(diff)<5?'text-emerald-400':Math.abs(diff)<15?'text-amber-400':'text-rose-400'}`}>
+                      return(<div key={b} className={'bg-[#111312] rounded-lg p-1.5 border border-[#E8E9E4]/[5] text-center'}>
+                        <div className={'text-xs text-[#E8E9E4]/[30] mb-1'}>{b}-{b+10}%</div>
+                        <div className={`text-xs font-bold font-mono ${isNull?'text-[#E8E9E4]/[20]':Math.abs(diff)<5?'text-emerald-400':Math.abs(diff)<15?'text-amber-400':'text-rose-400'}`}>
                           {isNull?'—':`${calVal.toFixed(0)}%`}
                         </div>
-                        {!isNull&&<div className={`text-xs ${diff>0?'text-emerald-400':diff<0?'text-rose-400':'text-[#E8E9E4]/30'}`}>{diff>0?'+':''}{diff.toFixed(0)}</div>}
+                        {!isNull&&<div className={`text-xs ${diff>0?'text-emerald-400':diff<0?'text-rose-400':'text-[#E8E9E4]/[30]'}`}>{diff>0?'+':''}{diff.toFixed(0)}</div>}
                       </div>);
                     })}
                   </div>
                 )}
-                <p className={'text-xs text-[#E8E9E4]/30 mt-2'}>Green = well-calibrated. Red = raw posterior is over- or under-estimating actual win rate. Tara applies calibration automatically after 3+ samples per bucket.</p>
+                <p className={'text-xs text-[#E8E9E4]/[30] mt-2'}>Green = well-calibrated. Red = raw posterior is over- or under-estimating actual win rate. Tara applies calibration automatically after 3+ samples per bucket.</p>
               </section>
 
               {/* Session Performance */}
@@ -2780,10 +2780,10 @@ function TaraApp(){
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {Object.entries(sessionPerf).map(([sess,data])=>{
                     const total=data.wins+data.losses;const wr=total>0?((data.wins/total)*100):0;
-                    return(<div key={sess} className={'bg-[#111312] rounded-lg p-2.5 border border-[#E8E9E4]/5 text-center'}>
-                      <div className={'text-xs font-bold text-[#E8E9E4]/70 mb-1'}>{sess}</div>
+                    return(<div key={sess} className={'bg-[#111312] rounded-lg p-2.5 border border-[#E8E9E4]/[5] text-center'}>
+                      <div className={'text-xs font-bold text-[#E8E9E4]/[70] mb-1'}>{sess}</div>
                       <div className={`text-lg font-serif font-bold ${wr>=60?'text-emerald-400':wr>=45?'text-amber-400':'text-rose-400'}`}>{total>0?`${wr.toFixed(0)}%`:'—'}</div>
-                      <div className={'text-xs text-[#E8E9E4]/30'}>{data.wins}W  {data.losses}L</div>
+                      <div className={'text-xs text-[#E8E9E4]/[30]'}>{data.wins}W  {data.losses}L</div>
                     </div>);
                   })}
                 </div>
@@ -2792,13 +2792,13 @@ function TaraApp(){
               {/* Hourly Heatmap */}
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-purple-400 mb-3">Performance by Hour (local)</h3>
-                {Object.keys(hourlyPerf).length<3?<div className={'text-xs text-[#E8E9E4]/40 italic text-center py-4 bg-[#111312] rounded-lg border border-[#E8E9E4]/5'}>Need more trades to build hourly map.</div>:(
+                {Object.keys(hourlyPerf).length<3?<div className={'text-xs text-[#E8E9E4]/[40] italic text-center py-4 bg-[#111312] rounded-lg border border-[#E8E9E4]/[5]'}>Need more trades to build hourly map.</div>:(
                 <div className="grid grid-cols-6 sm:grid-cols-12 gap-1">
                   {Array.from({length:24},(_,h)=>{
                     const d=hourlyPerf[h];const total=d?(d.wins+d.losses):0;const wr=total>0?((d.wins/total)*100):null;
                     return(<div key={h} className="rounded p-1 text-center" style={{background:wr==null?'rgba(232,233,228,0.03)':wr>=65?'rgba(52,211,153,0.2)':wr>=45?'rgba(251,191,36,0.15)':'rgba(251,113,133,0.2)'}}>
-                      <div className={'text-xs text-[#E8E9E4]/30'}>{h}h</div>
-                      <div className={`text-xs font-bold ${wr==null?'text-[#E8E9E4]/20':wr>=65?'text-emerald-400':wr>=45?'text-amber-400':'text-rose-400'}`}>{wr!=null?`${wr.toFixed(0)}%`:'·'}</div>
+                      <div className={'text-xs text-[#E8E9E4]/[30]'}>{h}h</div>
+                      <div className={`text-xs font-bold ${wr==null?'text-[#E8E9E4]/[20]':wr>=65?'text-emerald-400':wr>=45?'text-amber-400':'text-rose-400'}`}>{wr!=null?`${wr.toFixed(0)}%`:'·'}</div>
                     </div>);
                   })}
                 </div>)}
@@ -2807,8 +2807,8 @@ function TaraApp(){
               {/* Recent Trade Log — Editable */}
               <section>
                 <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                  <h3 className={'text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/60'}>Trade Log ({tradeLog.length} total)</h3>
-                  <p className={'text-[10px] text-[#E8E9E4]/30'}>Tap a trade to edit · Fix any wrong WIN or LOSS</p>
+                  <h3 className={'text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/[60]'}>Trade Log ({tradeLog.length} total)</h3>
+                  <p className={'text-[10px] text-[#E8E9E4]/[30]'}>Tap a trade to edit · Fix any wrong WIN or LOSS</p>
                 </div>
 
                 {/* Edit panel — shows when a trade is selected */}
@@ -2839,14 +2839,14 @@ function TaraApp(){
                       <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className={`font-bold text-sm ${selected.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{selected.dir}</span>
-                          <span className={'text-xs text-[#E8E9E4]/50'}>{new Date(selected.id).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
-                          <span className={'text-xs text-[#E8E9E4]/40 hidden sm:inline'}>{selected.posterior?.toFixed(0)}% · {selected.regime}</span>
+                          <span className={'text-xs text-[#E8E9E4]/[50]'}>{new Date(selected.id).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
+                          <span className={'text-xs text-[#E8E9E4]/[40] hidden sm:inline'}>{selected.posterior?.toFixed(0)}% · {selected.regime}</span>
                           {selected.manuallyEdited&&<span className={'text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded'}>edited</span>}
                         </div>
-                        <button onClick={()=>setSelectedTradeId(null)} className={'text-[#E8E9E4]/40 hover:text-white p-1 ml-auto'}><IC.X className="w-4 h-4"/></button>
+                        <button onClick={()=>setSelectedTradeId(null)} className={'text-[#E8E9E4]/[40] hover:text-white p-1 ml-auto'}><IC.X className="w-4 h-4"/></button>
                       </div>
-                      <div className={'text-xs text-[#E8E9E4]/50 mb-3'}>
-                        Logged as: <span className={`font-bold ${selected.result==='WIN'?'text-emerald-400':selected.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/30'}`}>{selected.result||'PENDING'}</span>
+                      <div className={'text-xs text-[#E8E9E4]/[50] mb-3'}>
+                        Logged as: <span className={`font-bold ${selected.result==='WIN'?'text-emerald-400':selected.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/[30]'}`}>{selected.result||'PENDING'}</span>
                         {selected.earlyExit&&' · early exit'}{selected.forceExit&&' · force exit'}
                       </div>
                       <div className="flex gap-2">
@@ -2863,7 +2863,7 @@ function TaraApp(){
                           Delete
                         </button>
                       </div>
-                      <p className={'text-[10px] text-[#E8E9E4]/30 mt-2 text-center'}>Updates scorecard and retrains signal weights</p>
+                      <p className={'text-[10px] text-[#E8E9E4]/[30] mt-2 text-center'}>Updates scorecard and retrains signal weights</p>
                     </div>
                   );
                 })()}
@@ -2871,7 +2871,7 @@ function TaraApp(){
                 {/* Trade rows */}
                 <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1" style={{scrollbarWidth:'thin'}}>
                   {tradeLog.length===0?(
-                    <div className={'text-xs text-[#E8E9E4]/30 italic text-center py-6'}>No trades yet — trades log automatically when Tara locks and the window closes.</div>
+                    <div className={'text-xs text-[#E8E9E4]/[30] italic text-center py-6'}>No trades yet — trades log automatically when Tara locks and the window closes.</div>
                   ):tradeLog.slice(-30).reverse().map((t,i)=>{
                     const d=new Date(t.id);
                     const isSel=selectedTradeId===t.id;
@@ -2881,15 +2881,15 @@ function TaraApp(){
                           isSel?'border-indigo-500/60 bg-indigo-500/10 ring-1 ring-indigo-500/30'
                           :t.result==='WIN'?'border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40'
                           :t.result==='LOSS'?'border-rose-500/20 bg-rose-500/5 hover:border-rose-500/40'
-                          :'border-[#E8E9E4]/5 hover:border-[#E8E9E4]/15'}`}>
-                        <div className={`w-2 h-2 rounded-full shrink-0 ${isSel?'bg-indigo-400':t.result==='WIN'?'bg-emerald-500':t.result==='LOSS'?'bg-rose-500':'bg-[#E8E9E4]/20'}`}/>
-                        <span className={'text-[#E8E9E4]/40 font-mono shrink-0 text-[10px] hidden sm:inline'}>{d.toLocaleDateString('en-US',{month:'short',day:'numeric'})} </span>
-                        <span className={'text-[#E8E9E4]/40 font-mono shrink-0 text-[10px]'}>{d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
+                          :'border-[#E8E9E4]/[5] hover:border-[#E8E9E4]/[15]'}`}>
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${isSel?'bg-indigo-400':t.result==='WIN'?'bg-emerald-500':t.result==='LOSS'?'bg-rose-500':'bg-[#E8E9E4]/[20]'}`}/>
+                        <span className={'text-[#E8E9E4]/[40] font-mono shrink-0 text-[10px] hidden sm:inline'}>{d.toLocaleDateString('en-US',{month:'short',day:'numeric'})} </span>
+                        <span className={'text-[#E8E9E4]/[40] font-mono shrink-0 text-[10px]'}>{d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
                         <span className={`font-bold shrink-0 ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
-                        <span className={'text-[#E8E9E4]/40 text-[10px] shrink-0'}>{t.posterior?.toFixed(0)}%</span>
-                        <span className={'text-[#E8E9E4]/25 text-[10px] truncate hidden md:block'}>{t.regime}</span>
-                        <span className={'text-[#E8E9E4]/25 text-[10px] ml-auto shrink-0'}>{t.session}</span>
-                        <span className={`font-bold shrink-0 min-w-[36px] text-right ${t.result==='WIN'?'text-emerald-400':t.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/25'}`}>{t.result||'—'}</span>
+                        <span className={'text-[#E8E9E4]/[40] text-[10px] shrink-0'}>{t.posterior?.toFixed(0)}%</span>
+                        <span className={'text-[#E8E9E4]/[25] text-[10px] truncate hidden md:block'}>{t.regime}</span>
+                        <span className={'text-[#E8E9E4]/[25] text-[10px] ml-auto shrink-0'}>{t.session}</span>
+                        <span className={`font-bold shrink-0 min-w-[36px] text-right ${t.result==='WIN'?'text-emerald-400':t.result==='LOSS'?'text-rose-400':'text-[#E8E9E4]/[25]'}`}>{t.result||'—'}</span>
                         {t.manuallyEdited&&<span className={'text-amber-400/60 shrink-0 text-[10px]'}>✎</span>}
                       </button>
                     );
@@ -2903,9 +2903,9 @@ function TaraApp(){
                 {/* Window tab selector */}
                 <div className="flex gap-1 mb-3">
                   {['15m','5m'].map(wt=>(
-                    <button key={wt} onClick={()=>{}} className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${windowType===wt?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/30'}`}>{wt}</button>
+                    <button key={wt} onClick={()=>{}} className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${windowType===wt?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/[10] text-[#E8E9E4]/[30]'}`}>{wt}</button>
                   ))}
-                  <span className={'text-[9px] text-[#E8E9E4]/25 ml-2 self-center'}>Showing trades from your active window</span>
+                  <span className={'text-[9px] text-[#E8E9E4]/[25] ml-2 self-center'}>Showing trades from your active window</span>
                 </div>
                 <div className="grid grid-cols-8 sm:grid-cols-12 gap-1">
                   {Array.from({length:24},(_,h)=>{
@@ -2913,26 +2913,26 @@ function TaraApp(){
                     const wins=trades.filter(t=>t.result==='WIN').length;
                     const wr=trades.length>=2?(wins/trades.length)*100:null;
                     const intensity=wr===null?0:wr>=75?4:wr>=60?3:wr>=50?2:wr>=40?1:0;
-                    const colors=['bg-[#E8E9E4]/5','bg-rose-500/30','bg-amber-500/30','bg-emerald-500/30','bg-emerald-500/60'];
+                    const colors=['bg-[#E8E9E4]/[5]','bg-rose-500/30','bg-amber-500/30','bg-emerald-500/30','bg-emerald-500/60'];
                     const labels=['No data','<50%','50–60%','60–75%','≥75%'];
                     return(
                       <div key={h} className={`${colors[intensity]} rounded p-1.5 text-center cursor-default`} title={`Hour ${h}:00 UTC · ${trades.length} trades${wr!==null?' · '+wr.toFixed(0)+'% WR':' — need ≥2 trades'}`}>
-                        <div className={'text-[9px] text-[#E8E9E4]/40 font-mono'}>{String(h).padStart(2,'0')}</div>
+                        <div className={'text-[9px] text-[#E8E9E4]/[40] font-mono'}>{String(h).padStart(2,'0')}</div>
                         {wr!==null?(
                           <div className={`text-[10px] font-bold ${wr>=60?'text-emerald-300':wr>=50?'text-amber-300':'text-rose-300'}`}>{wr.toFixed(0)}%</div>
                         ):(
-                          <div className={'text-[10px] text-[#E8E9E4]/20'}>—</div>
+                          <div className={'text-[10px] text-[#E8E9E4]/[20]'}>—</div>
                         )}
-                        {trades.length>0&&<div className={'text-[8px] text-[#E8E9E4]/25'}>{trades.length}t</div>}
+                        {trades.length>0&&<div className={'text-[8px] text-[#E8E9E4]/[25]'}>{trades.length}t</div>}
                       </div>
                     );
                   })}
                 </div>
                 <div className="flex items-center gap-3 mt-2 flex-wrap">
-                  {[['bg-rose-500/30','<50%'],['bg-amber-500/30','50–60%'],['bg-emerald-500/30','60–75%'],['bg-emerald-500/60','≥75%'],['bg-[#E8E9E4]/5','No data']].map(([c,l])=>(
+                  {[['bg-rose-500/30','<50%'],['bg-amber-500/30','50–60%'],['bg-emerald-500/30','60–75%'],['bg-emerald-500/60','≥75%'],['bg-[#E8E9E4]/[5]','No data']].map(([c,l])=>(
                     <div key={l} className="flex items-center gap-1">
                       <div className={`w-3 h-3 rounded ${c}`}></div>
-                      <span className={'text-[9px] text-[#E8E9E4]/40'}>{l}</span>
+                      <span className={'text-[9px] text-[#E8E9E4]/[40]'}>{l}</span>
                     </div>
                   ))}
                 </div>
@@ -2947,16 +2947,16 @@ function TaraApp(){
                     const rgWins=rgTrades.filter(t=>t.result==='WIN').length;
                     const isActive=lastRegimeRef.current===rg;
                     return(
-                      <div key={rg} className={`p-2.5 rounded-lg border ${isActive?'border-indigo-500/40 bg-indigo-500/5':'border-[#E8E9E4]/8 bg-[#111312]'}`}>
+                      <div key={rg} className={`p-2.5 rounded-lg border ${isActive?'border-indigo-500/40 bg-indigo-500/5':'border-[#E8E9E4]/[8] bg-[#111312]'}`}>
                         <div className="flex justify-between items-center mb-2">
-                          <span className={`text-xs font-bold uppercase ${isActive?'text-indigo-400':'text-[#E8E9E4]/50'}`}>{rg}{isActive&&' ◀ active'}</span>
-                          <span className={'text-[10px] text-[#E8E9E4]/30'}>{rgTrades.length} trades · {rgTrades.length>0?(rgWins/rgTrades.length*100).toFixed(0)+'% WR':'no data'}</span>
+                          <span className={`text-xs font-bold uppercase ${isActive?'text-indigo-400':'text-[#E8E9E4]/[50]'}`}>{rg}{isActive&&' ◀ active'}</span>
+                          <span className={'text-[10px] text-[#E8E9E4]/[30]'}>{rgTrades.length} trades · {rgTrades.length>0?(rgWins/rgTrades.length*100).toFixed(0)+'% WR':'no data'}</span>
                         </div>
                         <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
                           {Object.entries(w).map(([k,v])=>(
                             <div key={k} className="text-center">
-                              <div className={'text-[9px] text-[#E8E9E4]/30 uppercase'}>{k.slice(0,3)}</div>
-                              <div className={'text-[11px] font-mono font-bold text-[#E8E9E4]/70'}>{v.toFixed(1)}</div>
+                              <div className={'text-[9px] text-[#E8E9E4]/[30] uppercase'}>{k.slice(0,3)}</div>
+                              <div className={'text-[11px] font-mono font-bold text-[#E8E9E4]/[70]'}>{v.toFixed(1)}</div>
                             </div>
                           ))}
                         </div>
@@ -2980,15 +2980,15 @@ function TaraApp(){
                     byDay[key].push(t);
                   });
                   const days=Object.entries(byDay).slice(0,14); // show last 14 days
-                  if(days.length===0)return<div className={'text-xs text-[#E8E9E4]/30 italic'}>No completed trades yet.</div>;
+                  if(days.length===0)return<div className={'text-xs text-[#E8E9E4]/[30] italic'}>No completed trades yet.</div>;
                   return days.map(([day,trades])=>{
                     const wins=trades.filter(t=>t.result==='WIN').length;
                     const wr=Math.round(wins/trades.length*100);
                     return(
                       <div key={day} className="mb-3">
                         {/* Day header */}
-                        <div className={'flex items-center justify-between mb-1.5 pb-1 border-b border-[#E8E9E4]/8'}>
-                          <span className={'text-[10px] font-bold uppercase tracking-wide text-[#E8E9E4]/50'}>{day}</span>
+                        <div className={'flex items-center justify-between mb-1.5 pb-1 border-b border-[#E8E9E4]/[8]'}>
+                          <span className={'text-[10px] font-bold uppercase tracking-wide text-[#E8E9E4]/[50]'}>{day}</span>
                           <div className="flex items-center gap-2">
                             <span className="text-[9px] text-emerald-400 font-mono">{wins}W</span>
                             <span className="text-[9px] text-rose-400 font-mono">{trades.length-wins}L</span>
@@ -3002,11 +3002,11 @@ function TaraApp(){
                             const timeStr=isNaN(d.getTime())?'—':d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
                             return(
                               <div key={i} className={`flex items-center gap-2 text-[10px] px-2 py-1 rounded border ${t.result==='WIN'?'bg-emerald-500/5 border-emerald-500/15':'bg-rose-500/5 border-rose-500/15'}`}>
-                                <span className={'font-mono text-[#E8E9E4]/30 shrink-0 w-14'}>{timeStr}</span>
+                                <span className={'font-mono text-[#E8E9E4]/[30] shrink-0 w-14'}>{timeStr}</span>
                                 <span className={`font-bold w-8 shrink-0 ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
-                                <span className={'text-[#E8E9E4]/40 shrink-0'}>{t.windowType||'15m'}</span>
-                                <span className={'text-[#E8E9E4]/30 flex-1 truncate'}>{t.regime||'—'}</span>
-                                <span className={'text-[#E8E9E4]/25 shrink-0'}>{t.session||'—'}</span>
+                                <span className={'text-[#E8E9E4]/[40] shrink-0'}>{t.windowType||'15m'}</span>
+                                <span className={'text-[#E8E9E4]/[30] flex-1 truncate'}>{t.regime||'—'}</span>
+                                <span className={'text-[#E8E9E4]/[25] shrink-0'}>{t.session||'—'}</span>
                                 <span className={`font-bold shrink-0 ${t.result==='WIN'?'text-emerald-400':'text-rose-400'}`}>{t.result}</span>
                               </div>
                             );
@@ -3021,7 +3021,7 @@ function TaraApp(){
               {/* Training Tips */}
               <section className={'bg-indigo-500/5 border border-indigo-500/15 rounded-xl p-3'}>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-indigo-400 mb-2">How to Train Tara Faster</h3>
-                <div className={'text-xs text-[#E8E9E4]/60 space-y-1 leading-relaxed'}>
+                <div className={'text-xs text-[#E8E9E4]/[60] space-y-1 leading-relaxed'}>
                   <p>• <strong className="text-indigo-300">Every window auto-updates weights.</strong> The more she trades, the more accurate her signal weights become.</p>
                   <p>• <strong className="text-indigo-300">Export CSV</strong> and run external regression (Python sklearn) on 500+ trades to get optimal weights, then paste them back.</p>
                   <p>• <strong className="text-indigo-300">Best regime to focus on:</strong> Look at session performance — if US session is 70%+ WR, run exclusively during US hours.</p>
@@ -3037,41 +3037,41 @@ function TaraApp(){
       {/* ── HOW TARA WORKS GUIDE ── */}
       {showGuide&&(
         <div className={'fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
-            <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
+          <div className={'bg-[#181A19] border border-[#E8E9E4]/[20] rounded-2xl w-full max-w-2xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
+            <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/[10] p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
                   <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V110 Works
                 </h2>
-                <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
+                <p className={'text-xs text-[#E8E9E4]/[40] mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
-              <button onClick={()=>setShowGuide(false)} className={'text-[#E8E9E4]/50 hover:text-white p-1'}><IC.X className="w-5 h-5"/></button>
+              <button onClick={()=>setShowGuide(false)} className={'text-[#E8E9E4]/[50] hover:text-white p-1'}><IC.X className="w-5 h-5"/></button>
             </div>
-            <div className={'p-4 sm:p-6 space-y-6 text-sm text-[#E8E9E4]/80'}>
+            <div className={'p-4 sm:p-6 space-y-6 text-sm text-[#E8E9E4]/[80]'}>
 
               {/* PREDICTIONS */}
               <section>
                 <h3 className={'text-indigo-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-indigo-500/20 pb-1'}>📊 Prediction States — What Each One Means</h3>
                 <div className="space-y-3">
-                  <div className={'bg-[#111312] rounded-lg p-3 border border-[#E8E9E4]/5'}>
-                    <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">SCANNING...</span><span className={'text-[10px] text-[#E8E9E4]/30 uppercase'}>Do nothing</span></div>
-                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/60'}>Tara's composite score is between 42–58% — a coin flip zone. No structural edge exists right now. Do not enter. Most tools show a number at all times to look busy — Tara shows nothing when there's genuinely nothing to show.</p>
+                  <div className={'bg-[#111312] rounded-lg p-3 border border-[#E8E9E4]/[5]'}>
+                    <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">SCANNING...</span><span className={'text-[10px] text-[#E8E9E4]/[30] uppercase'}>Do nothing</span></div>
+                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/[60]'}>Tara's composite score is between 42–58% — a coin flip zone. No structural edge exists right now. Do not enter. Most tools show a number at all times to look busy — Tara shows nothing when there's genuinely nothing to show.</p>
                   </div>
                   <div className={'bg-[#111312] rounded-lg p-3 border border-amber-500/15'}>
-                    <div className="flex items-center gap-2 mb-1"><span className="text-amber-400 font-bold text-xs">UP (FORMING) or DOWN (FORMING)</span><span className={'text-[10px] text-[#E8E9E4]/30 uppercase'}>Get ready</span></div>
-                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/60'}>Posterior has crossed 58%+ or below 42% — there's a lean — but not enough consecutive readings yet to commit. The forming progress bar shows how close she is to locking. You can enter here for more time in the trade, but it's higher risk than waiting for the lock.</p>
+                    <div className="flex items-center gap-2 mb-1"><span className="text-amber-400 font-bold text-xs">UP (FORMING) or DOWN (FORMING)</span><span className={'text-[10px] text-[#E8E9E4]/[30] uppercase'}>Get ready</span></div>
+                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/[60]'}>Posterior has crossed 58%+ or below 42% — there's a lean — but not enough consecutive readings yet to commit. The forming progress bar shows how close she is to locking. You can enter here for more time in the trade, but it's higher risk than waiting for the lock.</p>
                   </div>
                   <div className={'bg-[#111312] rounded-lg p-3 border border-emerald-500/20'}>
-                    <div className="flex items-center gap-2 mb-1"><span className="text-emerald-400 font-bold text-xs">UP — LOCKED 🔒</span><span className={'text-[10px] text-[#E8E9E4]/30 uppercase'}>Entry signal — act now</span></div>
-                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/60'}>3 consecutive readings (15m) or 2 consecutive (5m) all above 68% threshold. Tara has committed for the window. She will NOT change this prediction — the posterior can drop to 55% and she stays locked UP. The only releases are a 55+ bps adverse gap or catastrophic rug pull. This is the <strong className="text-white">only state to enter on.</strong></p>
+                    <div className="flex items-center gap-2 mb-1"><span className="text-emerald-400 font-bold text-xs">UP — LOCKED 🔒</span><span className={'text-[10px] text-[#E8E9E4]/[30] uppercase'}>Entry signal — act now</span></div>
+                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/[60]'}>3 consecutive readings (15m) or 2 consecutive (5m) all above 68% threshold. Tara has committed for the window. She will NOT change this prediction — the posterior can drop to 55% and she stays locked UP. The only releases are a 55+ bps adverse gap or catastrophic rug pull. This is the <strong className="text-white">only state to enter on.</strong></p>
                   </div>
                   <div className={'bg-[#111312] rounded-lg p-3 border border-rose-500/20'}>
-                    <div className="flex items-center gap-2 mb-1"><span className="text-rose-400 font-bold text-xs">DOWN — LOCKED 🔒</span><span className={'text-[10px] text-[#E8E9E4]/30 uppercase'}>Entry signal — act now</span></div>
-                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/60'}>Same as UP — LOCKED but bearish. Posterior consistently below 32% for N consecutive samples. If you missed the entry window and it's late, the advisor will say WINDOW CLOSING — don't chase it.</p>
+                    <div className="flex items-center gap-2 mb-1"><span className="text-rose-400 font-bold text-xs">DOWN — LOCKED 🔒</span><span className={'text-[10px] text-[#E8E9E4]/[30] uppercase'}>Entry signal — act now</span></div>
+                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/[60]'}>Same as UP — LOCKED but bearish. Posterior consistently below 32% for N consecutive samples. If you missed the entry window and it's late, the advisor will say WINDOW CLOSING — don't chase it.</p>
                   </div>
                   <div className={'bg-[#111312] rounded-lg p-3 border border-zinc-500/15'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">NO CALL — WINDOW CLOSED — LOCK RELEASED</span><span className="text-[10px] text-rose-400 uppercase">Sit out</span></div>
-                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/60'}><strong className="text-white">NO CALL:</strong> Never reached threshold before endgame. Skip this round.<br/><strong className="text-white">WINDOW CLOSED:</strong> Last 90s (15m) or 45s (5m) with no lock. Too late to enter safely.<br/><strong className="text-white">LOCK RELEASED:</strong> Price moved 55+ bps wrong direction, Tara released. Respect it immediately.</p>
+                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/[60]'}><strong className="text-white">NO CALL:</strong> Never reached threshold before endgame. Skip this round.<br/><strong className="text-white">WINDOW CLOSED:</strong> Last 90s (15m) or 45s (5m) with no lock. Too late to enter safely.<br/><strong className="text-white">LOCK RELEASED:</strong> Price moved 55+ bps wrong direction, Tara released. Respect it immediately.</p>
                   </div>
                 </div>
               </section>
@@ -3079,7 +3079,7 @@ function TaraApp(){
               {/* STRIKE PRICE */}
               <section>
                 <h3 className={'text-emerald-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-emerald-500/20 pb-1'}>🎯 Strike Price — Auto vs Manual</h3>
-                <div className={'bg-[#111312] rounded-lg p-3 border border-[#E8E9E4]/5 space-y-2 text-xs leading-relaxed text-[#E8E9E4]/60'}>
+                <div className={'bg-[#111312] rounded-lg p-3 border border-[#E8E9E4]/[5] space-y-2 text-xs leading-relaxed text-[#E8E9E4]/[60]'}>
                   <p>The strike is automatically set to the <strong className="text-white">opening price of each window candle</strong> — fetched directly from Coinbase at the start of every 5m or 15m period. This matches what the binary options platform uses as the strike.</p>
                   <p>The <strong className="text-emerald-400">AUTO</strong> badge means Tara is tracking window opens automatically. Click it to reset to auto after a manual override.</p>
                   <p>Type any price in the Strike input to switch to <strong className="text-amber-400">MANUAL</strong> mode — useful if your platform uses a slightly different strike. Manual mode resets to auto at each new window.</p>
@@ -3098,19 +3098,19 @@ function TaraApp(){
                     {name:'Technical (W:25)',desc:'RSI divergence, VWAP position, Bollinger Band squeeze, price channel. Prevents chasing overbought tops.'},
                     {name:'Funding & Regime (W:15)',desc:'Detects SHORT SQUEEZE (retail short + whales buying), LONG SQUEEZE, TRENDING, CHOP. Adjusts thresholds per regime.'},
                   ].map((s,i)=>(
-                    <div key={i} className={'bg-[#111312] rounded-lg p-2.5 border border-[#E8E9E4]/5'}>
+                    <div key={i} className={'bg-[#111312] rounded-lg p-2.5 border border-[#E8E9E4]/[5]'}>
                       <div className="text-indigo-300 font-bold mb-1">{s.name}</div>
-                      <div className={'text-[#E8E9E4]/50 leading-relaxed'}>{s.desc}</div>
+                      <div className={'text-[#E8E9E4]/[50] leading-relaxed'}>{s.desc}</div>
                     </div>
                   ))}
                 </div>
-                <p className={'text-xs text-[#E8E9E4]/40 mt-2 leading-relaxed'}>Weights are not fixed — they adapt automatically after every trade using gradient descent. Signals that contributed to correct predictions grow; signals that contributed to losses shrink.</p>
+                <p className={'text-xs text-[#E8E9E4]/[40] mt-2 leading-relaxed'}>Weights are not fixed — they adapt automatically after every trade using gradient descent. Signals that contributed to correct predictions grow; signals that contributed to losses shrink.</p>
               </section>
 
               {/* LEARNING */}
               <section>
                 <h3 className={'text-amber-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-amber-500/20 pb-1'}>🧠 How Tara Learns After Every Trade</h3>
-                <div className={'space-y-2 text-xs leading-relaxed text-[#E8E9E4]/60'}>
+                <div className={'space-y-2 text-xs leading-relaxed text-[#E8E9E4]/[60]'}>
                   <div className="flex gap-3"><span className="text-indigo-400 font-bold shrink-0">1.</span><p><strong className="text-white">Lock logging:</strong> When a lock fires, all 6 raw signal scores + posterior + regime + time + session are saved to a trade log.</p></div>
                   <div className="flex gap-3"><span className="text-indigo-400 font-bold shrink-0">2.</span><p><strong className="text-white">Result resolution:</strong> At window close (or manual cashout or cut), WIN or LOSS is attached to the trade record.</p></div>
                   <div className="flex gap-3"><span className="text-indigo-400 font-bold shrink-0">3.</span><p><strong className="text-white">Gradient descent:</strong> Signals that contributed correctly get their weight increased. Signals that were misleading get reduced. Learning rate: 0.8.</p></div>
@@ -3135,9 +3135,9 @@ function TaraApp(){
                     {label:'HOLD STRONG',color:'text-emerald-400',desc:'Winning + momentum aligned. Do nothing. This is the hardest discipline in trading.'},
                     {label:'RECOVERY IN PROGRESS',color:'text-amber-400',desc:'Losing but momentum just flipped toward you. Give it room — don\'t panic exit at the worst moment.'},
                   ].map((a,i)=>(
-                    <div key={i} className={'flex gap-3 bg-[#111312] rounded-lg p-2 border border-[#E8E9E4]/5'}>
+                    <div key={i} className={'flex gap-3 bg-[#111312] rounded-lg p-2 border border-[#E8E9E4]/[5]'}>
                       <span className={`${a.color} font-bold shrink-0 min-w-[140px] text-[10px] uppercase`}>{a.label}</span>
-                      <span className={'text-[#E8E9E4]/50 text-[11px] leading-snug'}>{a.desc}</span>
+                      <span className={'text-[#E8E9E4]/[50] text-[11px] leading-snug'}>{a.desc}</span>
                     </div>
                   ))}
                 </div>
@@ -3145,8 +3145,8 @@ function TaraApp(){
 
               {/* BEST PRACTICES */}
               <section>
-                <h3 className={'text-white font-bold uppercase tracking-wide mb-3 text-xs border-b border-[#E8E9E4]/10 pb-1'}>✅ Best Practices for Maximum Edge</h3>
-                <div className={'space-y-2 text-xs leading-relaxed text-[#E8E9E4]/60'}>
+                <h3 className={'text-white font-bold uppercase tracking-wide mb-3 text-xs border-b border-[#E8E9E4]/[10] pb-1'}>✅ Best Practices for Maximum Edge</h3>
+                <div className={'space-y-2 text-xs leading-relaxed text-[#E8E9E4]/[60]'}>
                   <p>🔒 <strong className="text-white">Only enter on LOCKED signals.</strong> Skip FORMING, skip SCANNING. The win rate difference between LOCKED and FORMING entries is significant.</p>
                   <p>⏰ <strong className="text-white">Enter immediately when the advisor fires ENTRY SIGNAL.</strong> The lock has been held for N consecutive samples — extra waiting only reduces your time in the trade.</p>
                   <p>📊 <strong className="text-white">Check the Training panel regularly.</strong> If ASIA session shows 40% WR but US shows 72%, only trade during US hours. This alone can dramatically improve your score.</p>
@@ -3161,7 +3161,7 @@ function TaraApp(){
               {/* STRIKE + DISCORD */}
               <section>
                 <h3 className={'text-indigo-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-indigo-500/20 pb-1'}>🔗 Discord Integration</h3>
-                <div className={'bg-[#111312] rounded-lg p-3 border border-[#E8E9E4]/5 text-xs leading-relaxed text-[#E8E9E4]/60'}>
+                <div className={'bg-[#111312] rounded-lg p-3 border border-[#E8E9E4]/[5] text-xs leading-relaxed text-[#E8E9E4]/[60]'}>
                   <p>Paste your Discord webhook URL in Settings (🔗 button). Tara will auto-broadcast:</p>
                   <ul className="mt-2 space-y-1 list-disc pl-4">
                     <li>Lock commits (with posterior, regime, gap, clock remaining)</li>
@@ -3178,12 +3178,12 @@ function TaraApp(){
 
       {showHelp&&(
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
-          <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
-            <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
+          <div className={'bg-[#181A19] border border-[#E8E9E4]/[20] rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
+            <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/[10] p-4 flex justify-between items-center'}>
               <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V110 — What's New</h2>
-              <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
+              <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/[50] hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
-            <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+            <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/[80]'}>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">V110 Prediction Engine</h3><p className="leading-relaxed">Predictions now use a <strong>6-signal weighted composite</strong> instead of simple addition: (1) Gap Gravity, (2) Momentum Composite with alignment detection, (3) Candle Structure — consecutive candles + volume confirmation, (4) Flow Imbalance, (5) Technical Composite — RSI divergence, VWAP, Bollinger Bands, price channel, (6) Funding Momentum. Signals are weighted by reliability, preventing single-factor dominance.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">Smart Advisor (In-Trade)</h3><p className="leading-relaxed">The advisor now runs a <strong>10-state priority machine</strong> with time-remaining awareness. Every message shows how many minutes are left and specific price context. It distinguishes between "cut now" (late window, losing) and "hold" (time to recover). Profit recommendations include specific exit triggers relative to peak offer.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">Canvas Chart (No CDN)</h3><p className="leading-relaxed">Chart is built entirely in canvas — no external library needed. Always renders. Dual API fallback: Coinbase first, Binance if blocked. Supports full EMA/BB overlays, strike line, live price sync, crosshair hover, and volume bars. Resize-aware.</p></section>
