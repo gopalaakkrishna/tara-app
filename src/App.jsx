@@ -2479,7 +2479,7 @@ function TaraApp(){
                   {/* Lock price vs current */}
                   {analysis.lockInfo&&currentPrice&&(
                     <div className="text-xs text-[#E8E9E4]/40 mt-1">
-                      Locked @ ${analysis.lockInfo.lockPrice.toFixed(0)} → Now ${currentPrice.toFixed(0)}
+                      Locked at {analysis.lockInfo.lockPrice.toFixed(0)} — Now {currentPrice.toFixed(0)}
                       <span className={`ml-2 font-bold ${analysis.lockInfo.dir==='DOWN'?(currentPrice<analysis.lockInfo.lockPrice?'text-emerald-400':'text-rose-400'):(currentPrice>analysis.lockInfo.lockPrice?'text-emerald-400':'text-rose-400')}`}>
                         {analysis.lockInfo.dir==='DOWN'?(currentPrice<analysis.lockInfo.lockPrice?'▼ IN PROFIT':'▲ ADVERSE'):(currentPrice>analysis.lockInfo.lockPrice?'▲ IN PROFIT':'▼ ADVERSE')}
                       </span>
