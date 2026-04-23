@@ -2113,10 +2113,10 @@ function TaraApp(){
 
             {/* Bet/Win */}
             <div className="flex flex-col min-w-0 w-full lg:min-w-[140px] lg:w-auto">
-              <div className="text-xs text-[#E8E9E4]/40 uppercase tracking-wide mb-1">Bet / Max Win</div>
+              <div className="text-xs text-[#E8E9E4]/40 uppercase tracking-wide mb-1">Bet  Max Win</div>
               <div className="flex items-center gap-1 text-sm sm:text-base font-serif">
                 $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-16 text-center outline-none text-white"/>
-                <span className="text-[#E8E9E4]/30">/</span>
+                <span className="text-[#E8E9E4]/30">&#47;</span>
                 $<input type="number" value={maxPayout===0?'':maxPayout} onChange={e=>setMaxPayout(Number(e.target.value))} className="bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-16 text-center outline-none text-white"/>
               </div>
             </div>
@@ -2543,7 +2543,7 @@ function TaraApp(){
                   <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/10">
                     <div className="flex justify-between items-start mb-2">
                       <div>
-                        <div className={`text-lg font-bold font-serif ${scoreColor}`}>{fs.score.toFixed(0)}<span className="text-xs font-sans ml-1 opacity-60">/100</span></div>
+                        <div className={`text-lg font-bold font-serif ${scoreColor}`}>{fs.score.toFixed(0)}<span className="text-xs font-sans ml-1 opacity-60">&#47;100</span></div>
                         <div className={`text-xs font-bold uppercase tracking-widest ${scoreColor}`}>{fs.label}</div>
                       </div>
                       <div className="text-right">
@@ -2555,7 +2555,7 @@ function TaraApp(){
                     <div className="h-1.5 bg-[#E8E9E4]/10 rounded-full overflow-hidden mb-2">
                       <div className={`h-full ${barColor} rounded-full transition-all duration-500`} style={{width:`${fs.score}%`}}/>
                     </div>
-                    {isNote&&<div className="text-[10px] text-amber-400 mt-1">Spot/futures diverging — likely basis trade, not directional</div>}
+                    {isNote&&<div className="text-[10px] text-amber-400 mt-1">Spot-futures diverging — likely basis trade, not directional</div>}
                     <div className="text-[10px] text-[#E8E9E4]/30 mt-1">{fs.trend} · 90s delta: {fs.netDelta90s>=0?'+':''}{(fs.netDelta90s/1000).toFixed(0)}K</div>
                   </div>
                 );
@@ -2596,7 +2596,7 @@ function TaraApp(){
                 const isBuyFlow=fs.netDelta30s>0;
                 let oiMsg='',oiColor='text-[#E8E9E4]/40',oiIcon=' ';
                 if(Math.abs(oi)>0.15){
-                  if(oi>0&&isBuyFlow){oiMsg='OI rising + buy flow → New longs opening. Conviction. More likely to follow through.';oiColor='text-emerald-400';oiIcon='+';}
+                  if(oi>0&&isBuyFlow){oiMsg='OI rising + buy flow — New longs opening. Conviction. Likely to follow through.';oiColor='text-emerald-400';oiIcon='+';}
                   else if(oi<0&&isBuyFlow){oiMsg='OI falling + buy flow → Shorts covering, not fresh longs. Rally may be temporary.';oiColor='text-amber-400';oiIcon='~';}
                   else if(oi>0&&!isBuyFlow){oiMsg='OI rising + sell flow → New shorts opening. Conviction sell.';oiColor='text-rose-400';oiIcon='-';}
                   else if(oi<0&&!isBuyFlow){oiMsg='OI falling + sell flow → Longs exiting. Bearish unwind in progress.';oiColor='text-amber-400';oiIcon='~';}
@@ -2630,14 +2630,14 @@ function TaraApp(){
                 const futDir=futF>0?'BUYING':'SELLING';
                 return(
                   <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/25">
-                    <div className="text-[10px] uppercase tracking-widest text-amber-400 mb-1.5 font-bold">⚡ Spot/Futures Divergence</div>
-                    <div className="text-xs text-amber-300 mb-1">Spot (Coinbase): <strong>{spotDir}</strong> · Futures (Binance): <strong>{futDir}</strong></div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-400 mb-1.5 font-bold">Spot-Futures Divergence</div>
+                    <div className="text-xs text-amber-300 mb-1">Spot (Coinbase):  <strong>{spotDir}</strong> · Futures (Binance): <strong>{futDir}</strong></div>
                     <div className="text-[10px] text-[#E8E9E4]/50 leading-relaxed">Opposite flows between spot and futures typically indicate basis traders — not directional conviction. Treat futures whale prints as less reliable until spot confirms.</div>
                   </div>
                 );
               })()}
 
-              {/* ── LONG/SHORT RATIO ── */}
+              {/* ── LONG-SHORT RATIO ── */}
               {bloomberg?.longShortRatio&&(
                 <div className="p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/8">
                   <div className="text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 mb-2 font-bold">Market Positioning (Binance)</div>
@@ -2724,7 +2724,7 @@ function TaraApp(){
               <div className="border-t border-[#E8E9E4]/10 pt-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs font-bold uppercase tracking-wide text-[#E8E9E4]/60">Sent Messages ({discordLog.length})</h3>
-                  <p className="text-[10px] text-[#E8E9E4]/30">Edit/delete within 15 min</p>
+                  <p className="text-[10px] text-[#E8E9E4]/30">Edit or delete within 15 min</p>
                 </div>
 
                 {discordLog.length===0?(
@@ -2770,7 +2770,7 @@ function TaraApp(){
                     ))}
                   </div>
                 )}
-                <p className="text-[10px] text-[#E8E9E4]/20 mt-3 text-center leading-relaxed">Log resets on page refresh. Discord allows edits/deletes within 15 minutes of sending.</p>
+                <p className="text-[10px] text-[#E8E9E4]/20 mt-3 text-center leading-relaxed">Log resets on page refresh. Discord allows edits or deletes within 15 minutes of sending.</p>
               </div>
             </div>
           </div>
@@ -2781,7 +2781,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className="bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96">
-            <div className="bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10"><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat w/ Tara V110</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className="bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10"><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V110</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50" style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -2880,7 +2880,7 @@ function TaraApp(){
                     return(<div key={sess} className="bg-[#111312] rounded-lg p-2.5 border border-[#E8E9E4]/5 text-center">
                       <div className="text-xs font-bold text-[#E8E9E4]/70 mb-1">{sess}</div>
                       <div className={`text-lg font-serif font-bold ${wr>=60?'text-emerald-400':wr>=45?'text-amber-400':'text-rose-400'}`}>{total>0?`${wr.toFixed(0)}%`:'—'}</div>
-                      <div className="text-xs text-[#E8E9E4]/30">{data.wins}W / {data.losses}L</div>
+                      <div className="text-xs text-[#E8E9E4]/30">{data.wins}W  {data.losses}L</div>
                     </div>);
                   })}
                 </div>
@@ -3155,7 +3155,7 @@ function TaraApp(){
                     <p className="text-xs leading-relaxed text-[#E8E9E4]/60">Tara's composite score is between 42–58% — a coin flip zone. No structural edge exists right now. Do not enter. Most tools show a number at all times to look busy — Tara shows nothing when there's genuinely nothing to show.</p>
                   </div>
                   <div className="bg-[#111312] rounded-lg p-3 border border-amber-500/15">
-                    <div className="flex items-center gap-2 mb-1"><span className="text-amber-400 font-bold text-xs">UP (FORMING) / DOWN (FORMING)</span><span className="text-[10px] text-[#E8E9E4]/30 uppercase">Get ready</span></div>
+                    <div className="flex items-center gap-2 mb-1"><span className="text-amber-400 font-bold text-xs">UP (FORMING) or DOWN (FORMING)</span><span className="text-[10px] text-[#E8E9E4]/30 uppercase">Get ready</span></div>
                     <p className="text-xs leading-relaxed text-[#E8E9E4]/60">Posterior has crossed 58%+ or below 42% — there's a lean — but not enough consecutive readings yet to commit. The forming progress bar shows how close she is to locking. You can enter here for more time in the trade, but it's higher risk than waiting for the lock.</p>
                   </div>
                   <div className="bg-[#111312] rounded-lg p-3 border border-emerald-500/20">
@@ -3167,7 +3167,7 @@ function TaraApp(){
                     <p className="text-xs leading-relaxed text-[#E8E9E4]/60">Same as UP — LOCKED but bearish. Posterior consistently below 32% for N consecutive samples. If you missed the entry window and it's late, the advisor will say WINDOW CLOSING — don't chase it.</p>
                   </div>
                   <div className="bg-[#111312] rounded-lg p-3 border border-zinc-500/15">
-                    <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">NO CALL / WINDOW CLOSED / LOCK RELEASED</span><span className="text-[10px] text-rose-400 uppercase">Sit out</span></div>
+                    <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">NO CALL — WINDOW CLOSED — LOCK RELEASED</span><span className="text-[10px] text-rose-400 uppercase">Sit out</span></div>
                     <p className="text-xs leading-relaxed text-[#E8E9E4]/60"><strong className="text-white">NO CALL:</strong> Never reached threshold before endgame. Skip this round.<br/><strong className="text-white">WINDOW CLOSED:</strong> Last 90s/45s with no lock. Too late to enter safely.<br/><strong className="text-white">LOCK RELEASED:</strong> Price moved 55+ bps wrong direction, Tara released. Respect it immediately.</p>
                   </div>
                 </div>
