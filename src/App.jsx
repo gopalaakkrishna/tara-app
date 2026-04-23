@@ -1528,7 +1528,7 @@ function TaraApp(){
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
 
   // News
-  useEffect(()=>{let news=[];if(orderBook.imbalance>1.5)news.push({title:`BID wall detected near $${targetMargin.toFixed(0)} — maker support`,type:'info'});if(orderBook.imbalance<0.6)news.push({title:`ASK pressure at $${targetMargin.toFixed(0)} — sellers defending`,type:'info'});if(showWhaleAlerts&&whaleLog.length>0){const w=whaleLog[0];const age=Math.round((Date.now()-w.time)/1000);if(age<120)news.push({title:`WHALE PRESSURE: ${w.side}  $${(w.usd/1000).toFixed(0)}K  ${w.src}  ${age}s ago`,type:'whale'});}if(news.length<3)news.push({title:`Engine V110 active  ·  251 trades trained  ·  ${analysis?.regime||'scanning'}`,type:'info'});setNewsEvents(news);},[orderBook.imbalance,globalFlow,targetMargin,windowType,showWhaleAlerts,whaleLog,analysis?.regime]);
+  useEffect(()=>{let news=[];if(orderBook.imbalance>1.5)news.push({title:`BID wall detected near $${targetMargin.toFixed(0)} — maker support`,type:'info'});if(orderBook.imbalance<0.6)news.push({title:`ASK pressure at $${targetMargin.toFixed(0)} — sellers defending`,type:'info'});if(showWhaleAlerts&&whaleLog.length>0){const w=whaleLog[0];const age=Math.round((Date.now()-w.time)/1000);if(age<120)news.push({title:`WHALE PRESSURE: ${w.side}  $${(w.usd/1000).toFixed(0)}K  ${w.src}  ${age}s ago`,type:'whale'});}if(news.length<3)news.push({title:`Engine V110 active  ·  251 trades trained  ·  ${lastRegimeRef.current||'scanning'}`,type:'info'});setNewsEvents(news);},[orderBook.imbalance,globalFlow,targetMargin,windowType,showWhaleAlerts,whaleLog]);
 
   // ── MAIN ANALYSIS ──
   const analysis=useMemo(()=>{
@@ -1659,7 +1659,7 @@ function TaraApp(){
       if((isUP||isDN)&&betAmount>0&&maxPayout>betAmount){const b=(maxPayout-betAmount)/betAmount;const p=currentOdds/100;const k=((p*b)-(1-p))/b;kellyPct=Math.max(0,(k/2)*100);}
 
       // V110 Smart Advisor — lock-state-aware
-      const advisor=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps,activePrediction,regime,lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null});
+      const _advisorResult=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps,activePrediction,regime,lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null});
 
       // Projections
       const getHP=(msAgo)=>{const t=Date.now()-msAgo;const m=priceMemoryRef.current;if(!m||m.length===0)return currentPrice;let c=m[0];for(let i=m.length-1;i>=0;i--){if(m[i].time<=t){c=m[i];break;}}return c.p;};
@@ -1675,34 +1675,30 @@ function TaraApp(){
       const _thisLock=lockedCallRef.current;
       const mtfAligned=_thisLock&&_otherLock&&_otherLock.dir===_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
       const mtfOpposed=_thisLock&&_otherLock&&_otherLock.dir!==_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
-      return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
+      return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor:_advisorResult,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
         lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null,
         bullCount:Number(bullCount),bearCount:Number(bearCount)};
     }catch(err){return{prediction:'ERROR',rawProbAbove:50,projections:[],reasoning:[err.stack||String(err)],textColor:'text-rose-500',advisor:{label:'MATH CRASH',reason:String(err),color:'rose',animate:false,hasAction:false},regime:'ERROR'};}
   },[currentPrice,liveHistory,targetMargin,timeState.minsRemaining,timeState.secsRemaining,timeState.currentHour,orderBook,forceRender,betAmount,maxPayout,currentOffer,globalFlow,userPosition,windowType,isMounted,showRugPullAlerts,positionStatus,velocityRef,bloomberg,useLocalTime,regimeMemory,regimeWeights,strikeConfirmed]);
 
-  // ── QUALITY GATE useMemo — separate from analysis to avoid TDZ ──────────
-  const qualityGate=useMemo(()=>{
-    if(!analysis)return{score:0,label:'LOW',color:'rose'};
-    const regime=analysis.regime||'RANGE/CHOP';
-    const _regimeMem=regimeMemory[regime]||{wins:0,losses:0};
-    const _regimeTot=_regimeMem.wins+_regimeMem.losses;
-    const _regimeWR=_regimeTot>5?(_regimeMem.wins/_regimeTot)*100:60;
-    const _sessWR={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[getMarketSessions().dominant]||57;
-    const _posterior=analysis.rawProbAbove||50;
-    const _isUP=analysis.lockInfo?.dir==='UP';
-    const _dirReliability=_isUP?66:55;
-    const _posteriorStrength=Math.min(40,Math.max(0,(Math.abs(_posterior-50)-15)*1.6));
-    const _clockPenalty=analysis.isVeryLateLock?-20:analysis.isLateLockZone?-8:0;
-    const _regimeScore=Math.min(30,(_regimeWR-50)*0.6);
-    const _sessScore=Math.min(15,(_sessWR-50)*0.6);
-    const _dirScore=Math.min(10,(_dirReliability-50)*0.4);
-    const raw=_posteriorStrength+_regimeScore+_sessScore+_dirScore+_clockPenalty;
-    const score=Math.max(0,Math.min(100,raw+5));
-    const label=score>=75?'HIGH':score>=55?'MODERATE':'LOW';
-    const color=score>=75?'emerald':score>=55?'amber':'rose';
-    return{score,label,color};
-  },[analysis,regimeMemory]);
+  // ── QUALITY GATE — plain function call, no useMemo to avoid any TDZ risk ──
+  const _computeQuality=(ana,regMem)=>{
+    if(!ana)return{score:0,label:'LOW',color:'rose'};
+    try{
+      const rg=ana.regime||'RANGE/CHOP';
+      const rm=regMem[rg]||{wins:0,losses:0};
+      const rt=rm.wins+rm.losses;
+      const rWR=rt>5?(rm.wins/rt)*100:60;
+      const sWR={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[getMarketSessions().dominant]||57;
+      const pt=ana.rawProbAbove||50;
+      const ps=Math.min(40,Math.max(0,(Math.abs(pt-50)-15)*1.6));
+      const cp=ana.isVeryLateLock?-20:ana.isLateLockZone?-8:0;
+      const raw=ps+Math.min(30,(rWR-50)*0.6)+Math.min(15,(sWR-50)*0.6)+(ana.lockInfo?.dir==='UP'?4:0)+cp;
+      const score=Math.max(0,Math.min(100,raw+5));
+      return{score,label:score>=75?'HIGH':score>=55?'MODERATE':'LOW',color:score>=75?'emerald':score>=55?'amber':'rose'};
+    }catch(e){return{score:0,label:'LOW',color:'rose'};}
+  };
+  const qualityGate=_computeQuality(analysis,regimeMemory);
 
   // ── LOCK BROADCAST EFFECT — Two-stage: SIGNAL fires when FORMING, LOCK fires on commit ──
   const lastBroadcastLockRef=useRef(null);
