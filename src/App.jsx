@@ -2532,8 +2532,18 @@ function TaraApp(){
                 <div className="flex flex-col gap-1.5 border-t border-[#E8E9E4]/10 pt-3">
                   <span className="text-xs uppercase tracking-wide text-[#E8E9E4]/30 text-center">-30% Stop Guard Sync</span>
                   <div className="flex gap-2">
-                    <button onClick={()=>handleManualSync('UP')} className={`flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all ${userPosition==='UP'?'bg-emerald-600 text-white border-emerald-400 shadow-[0_0_15px_rgba(16,1      {/* ── FLOW INTELLIGENCE PANEL ── */}
-      <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState}/>order-[#E8E9E4]/10">
+                    <button onClick={()=>handleManualSync('UP')} className={`flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all ${userPosition==='UP'?'bg-emerald-600 text-white border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]':'border-[#E8E9E4]/10'}`} style={userPosition==='UP'?{boxShadow:'0 0 15px rgba(16,185,129,0.3)'}:{}}>ENTERED UP</button>
+                    <button onClick={()=>handleManualSync('DOWN')} className={`flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all ${userPosition==='DOWN'?'bg-rose-600 text-white border-rose-400':'border-[#E8E9E4]/10'}`}>ENTERED DOWN</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── FLOW INTELLIGENCE PANEL ── */}
+      <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState}/>
 
       {/* Settings */}
       {showSettings&&(
