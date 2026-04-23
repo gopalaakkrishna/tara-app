@@ -1218,6 +1218,52 @@ const FlowBtn=({flowSignal,active,onClick,cls})=>{
   );
 };
 
+
+// QualityGateCard — extracted to avoid esbuild IIFE+template-literal slash bug
+function QualityGateCard({qualityGate,regime,session}){
+  if(!qualityGate)return null;
+  const c=qualityGate.color;
+  const bgStyle={
+    emerald:{background:'rgba(16,185,129,0.05)',border:'1px solid rgba(16,185,129,0.25)'},
+    amber:{background:'rgba(245,158,11,0.05)',border:'1px solid rgba(245,158,11,0.20)'},
+    rose:{background:'rgba(239,68,68,0.05)',border:'1px solid rgba(239,68,68,0.20)'},
+  }[c]||{};
+  const txtCls=c==='emerald'?'text-emerald-400':c==='amber'?'text-amber-400':'text-rose-400';
+  const barCls=c==='emerald'?'bg-emerald-500':c==='amber'?'bg-amber-500':'bg-rose-500';
+  const msg=qualityGate.score>=75
+    ?('High-confidence setup. '+(regime||'')+(session?' in '+session:'')+' historically reliable.')
+    :qualityGate.score>=55
+    ?'Moderate setup. Trade smaller or wait for stronger signal.'
+    :('Low quality — '+(regime||'')+' in '+(session||'')+' has weak historical WR. Consider sitting out.');
+  return(
+    <div className="mb-2 p-2.5 rounded-lg" style={bgStyle}>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] uppercase tracking-widest font-bold" style={{color:'rgba(232,233,228,0.3)'}}>Quality Gate</span>
+        <span className={`text-xs font-bold uppercase tracking-wider ${txtCls}`}>{qualityGate.label} — {qualityGate.score?.toFixed(0)}&#47;100</span>
+      </div>
+      <div className="h-1 rounded-full overflow-hidden mb-1.5" style={{background:'rgba(232,233,228,0.1)'}}>
+        <div className={`h-full rounded-full transition-all duration-700 ${barCls}`} style={{width:(qualityGate.score||0)+'%'}}/>
+      </div>
+      <div className={`text-[10px] ${txtCls}`} style={{opacity:0.7}}>{msg}</div>
+    </div>
+  );
+}
+
+// SyncButtons — extracted to avoid esbuild IIFE+shadow class slash bug
+function SyncButtons({userPosition,handleManualSync}){
+  const upActive=userPosition==='UP';
+  const dnActive=userPosition==='DOWN';
+  const upCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(upActive?'bg-emerald-600 text-white border-emerald-400':'border-[#E8E9E4]/10');
+  const dnCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(dnActive?'bg-rose-600 text-white border-rose-400':'border-[#E8E9E4]/10');
+  return(
+    <div className="flex gap-2">
+      <button onClick={()=>handleManualSync('UP')} className={upCls}
+        style={upActive?{boxShadow:'0 0 15px rgba(16,185,129,0.3)'}:{}}>ENTERED UP</button>
+      <button onClick={()=>handleManualSync('DOWN')} className={dnCls}>ENTERED DOWN</button>
+    </div>
+  );
+}
+
 function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
   const[showCandles,setShowCandles]=useState(true);
@@ -2462,7 +2508,7 @@ function TaraApp(){
                     <div className="mt-2 w-full px-4">
                       <div className={'flex justify-between text-xs text-[#E8E9E4]/30 uppercase mb-1'}>
                         <span>Confirming signal...</span>
-                        <span>{analysis.prediction.includes('UP')?analysis.bullCount:analysis.bearCount}/{analysis.consecutiveNeeded} samples</span>
+                        <span>{analysis.prediction.includes('UP')?analysis.bullCount:analysis.bearCount} of {analysis.consecutiveNeeded} samples</span>
                       </div>
                       <div className="w-full h-1 bg-[#111312] rounded-full overflow-hidden">
                         <div className={`h-full rounded-full transition-all duration-500 ${analysis.prediction.includes('UP')?'bg-emerald-500/60':'bg-rose-500/60'}`}
@@ -2498,30 +2544,7 @@ function TaraApp(){
                 </div>
 
                 {/* Quality Gate — shown whenever a lock is active */}
-                {analysis?.lockInfo&&(()=>{
-                  const qc=qualityGate.color;
-                  const qBg=qc==='emerald'?'bg-emerald-500/5 border-emerald-500/25':qc==='amber'?'bg-amber-500/5 border-amber-500/20':'bg-rose-500/5 border-rose-500/20';
-                  const qTxt=qc==='emerald'?'text-emerald-400':qc==='amber'?'text-amber-400':'text-rose-400';
-                  const qBar=qc==='emerald'?'bg-emerald-500':qc==='amber'?'bg-amber-500':'bg-rose-500';
-                  const qSub=qc==='emerald'?'text-emerald-400 opacity-70':qc==='amber'?'text-amber-400 opacity-70':'text-rose-400 opacity-70';
-                  const qMsg=qualityGate.score>=75
-                    ?'High-confidence setup. '+analysis.regime+' in '+getMarketSessions().dominant+' historically reliable.'
-                    :qualityGate.score>=55
-                    ?'Moderate setup. Trade smaller or wait for stronger signal.'
-                    :'Low quality — '+analysis.regime+' in '+getMarketSessions().dominant+' has weak historical WR. Consider sitting out.';
-                  return(
-                  <div className={`mb-2 p-2.5 rounded-lg border ${qBg}`}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/30 font-bold'}>Quality Gate</span>
-                      <span className={`text-xs font-bold uppercase tracking-wider ${qTxt}`}>{qualityGate.label} — {qualityGate.score?.toFixed(0)}&#47;100</span>
-                    </div>
-                    <div className={'h-1 bg-[#E8E9E4]/10 rounded-full overflow-hidden mb-1.5'}>
-                      <div className={`h-full rounded-full transition-all duration-700 ${qBar}`} style={{width:(qualityGate.score||0)+'%'}}/>
-                    </div>
-                    <div className={`text-[10px] ${qSub}`}>{qMsg}</div>
-                  </div>
-                  );
-                })()}
+                {analysis?.lockInfo&&<QualityGateCard qualityGate={qualityGate} regime={analysis.regime} session={getMarketSessions().dominant}/>}
 
                 {/* Pre-entry checklist — shown when not yet in trade */}
                 {!userPosition&&analysis?.lockInfo&&(
@@ -2545,10 +2568,8 @@ function TaraApp(){
                 {/* Sync buttons */}
                 <div className={'flex flex-col gap-1.5 border-t border-[#E8E9E4]/10 pt-3'}>
                   <span className={'text-xs uppercase tracking-wide text-[#E8E9E4]/30 text-center'}>-30% Stop Guard Sync</span>
-                  <div className="flex gap-2">
-                    <button onClick={()=>handleManualSync('UP')} className={`flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all ${userPosition==='UP'?'bg-emerald-600 text-white border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]':'border-[#E8E9E4]/10'}`} style={userPosition==='UP'?{boxShadow:'0 0 15px rgba(16,185,129,0.3)'}:{}}>ENTERED UP</button>
-                    <button onClick={()=>handleManualSync('DOWN')} className={`flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all ${userPosition==='DOWN'?'bg-rose-600 text-white border-rose-400':'border-[#E8E9E4]/10'}`}>ENTERED DOWN</button>
-                  </div>
+                  <SyncButtons userPosition={userPosition} handleManualSync={handleManualSync}/>
+
                 </div>
               </div>
             </div>
