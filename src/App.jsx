@@ -86,7 +86,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // removed
 // Best hours: 4 (100%) and 5 (100%)
 const SEED_TRADES=[
-  // 284 trades (15m) baked from training CSV · V110
+  // 268 trades (15m) · 163W-105L=60.8% · SS 68% · TD 87.5% · DOWN gate active · V110
   {id:1776403212237,dir:'UP',posterior:71.0,regime:'RANGE-CHOP',clockAtLock:587,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.83,momentum:0.0,structure:0.0,flow:20.23,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776403812231,dir:'UP',posterior:82.0,regime:'RANGE-CHOP',clockAtLock:887,hour:1,session:'ASIA',windowType:'15m',signals:{gap:35.2,momentum:-5.39,structure:0.0,flow:-17.15,technical:-8.0,regime:0.0},result:'LOSS'},
   {id:1776407423234,dir:'DOWN',posterior:27.6,regime:'RANGE-CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:-0.28,momentum:-2.75,structure:0.0,flow:-20.59,technical:0.0,regime:0.0},result:'LOSS'},
@@ -338,39 +338,23 @@ const SEED_TRADES=[
   {id:1776921593724,dir:'DOWN',posterior:8.1,regime:'RANGE-CHOP',clockAtLock:863,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776922224406,dir:'DOWN',posterior:6.8,regime:'TRENDING DOWN',clockAtLock:858,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776923124184,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:867,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776942852526,dir:'UP',posterior:14.9,regime:'SHORT SQUEEZE',clockAtLock:47,hour:7,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776942917328,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:882,hour:7,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776943842274,dir:'UP',posterior:81.6,regime:'SHORT SQUEEZE',clockAtLock:857,hour:7,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776944749802,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:850,hour:7,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776945689540,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:810,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776946529627,dir:'DOWN',posterior:20.9,regime:'TRENDING DOWN',clockAtLock:870,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776947452773,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:847,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776947491814,dir:'UP',posterior:82.1,regime:'RANGE-CHOP',clockAtLock:808,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776948329656,dir:'DOWN',posterior:31.7,regime:'RANGE-CHOP',clockAtLock:870,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776949241159,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:858,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776950438032,dir:'UP',posterior:86.7,regime:'RANGE-CHOP',clockAtLock:562,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776951097787,dir:'UP',posterior:80.7,regime:'RANGE-CHOP',clockAtLock:802,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776952003637,dir:'UP',posterior:80.0,regime:'SHORT SQUEEZE',clockAtLock:796,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776952837830,dir:'UP',posterior:82.1,regime:'RANGE-CHOP',clockAtLock:862,hour:10,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776954032101,dir:'UP',posterior:82.1,regime:'RANGE-CHOP',clockAtLock:568,hour:10,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776969042798,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:858,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776969929050,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:871,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776971193614,dir:'UP',posterior:82.1,regime:'HIGH VOL CHOP',clockAtLock:507,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776995046023,dir:'DOWN',posterior:30.2,regime:'TRENDING DOWN',clockAtLock:54,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776995222248,dir:'UP',posterior:85.7,regime:'RANGE-CHOP',clockAtLock:778,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1776996122301,dir:'UP',posterior:85.7,regime:'SHORT SQUEEZE',clockAtLock:778,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776996914845,dir:'UP',posterior:82.1,regime:'RANGE-CHOP',clockAtLock:885,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1776997836702,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:863,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777000905945,dir:'DOWN',posterior:29.5,regime:'RANGE-CHOP',clockAtLock:494,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777001592340,dir:'DOWN',posterior:55.5,regime:'RANGE-CHOP',clockAtLock:708,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777002749272,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:451,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777003314661,dir:'DOWN',posterior:82.1,regime:'RANGE-CHOP',clockAtLock:786,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777004163956,dir:'UP',posterior:80.2,regime:'SHORT SQUEEZE',clockAtLock:836,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777005092981,dir:'UP',posterior:80.2,regime:'SHORT SQUEEZE',clockAtLock:807,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777005930166,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:870,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777006841549,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:859,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777007994356,dir:'DOWN',posterior:69.0,regime:'SHORT SQUEEZE',clockAtLock:606,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777008630866,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:869,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'}
+  {id:1776942852526,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:854,hour:7,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776942917328,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:868,hour:7,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776943842274,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:871,hour:7,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776944749802,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:862,hour:7,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776945689540,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:875,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776946529627,dir:'DOWN',posterior:7.4,regime:'TRENDING DOWN',clockAtLock:858,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776947452773,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:869,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776947491814,dir:'UP',posterior:72.4,regime:'RANGE-CHOP',clockAtLock:843,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776948329656,dir:'DOWN',posterior:8.1,regime:'RANGE-CHOP',clockAtLock:867,hour:8,session:'EU',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776949241159,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:872,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776950438032,dir:'UP',posterior:75.3,regime:'RANGE-CHOP',clockAtLock:856,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776951097787,dir:'UP',posterior:73.1,regime:'RANGE-CHOP',clockAtLock:863,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776952003637,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:874,hour:9,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776952837830,dir:'UP',posterior:74.2,regime:'RANGE-CHOP',clockAtLock:869,hour:10,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1776954032101,dir:'UP',posterior:76.1,regime:'RANGE-CHOP',clockAtLock:851,hour:10,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776969042798,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:866,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1776969929050,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:873,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
@@ -1340,7 +1324,7 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:341,losses:225},'5m':{wins:31,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:347,losses:230},'5m':{wins:31,losses:25}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -1854,8 +1838,6 @@ function TaraApp(){
         ? Math.max(2,CONSECUTIVE_NEEDED+1) // 1 extra for gated regimes — was +2, too slow
         : CONSECUTIVE_NEEDED;
       // UP gate: HIGH VOL CHOP and RANGE-CHOP UP calls need one extra sample too (55-59% WR)
-      // UP gate: HVC + RC are weak regimes for UP (55-59% WR) — need extra confirmation
-      // SHORT SQUEEZE UP fires at base (68% WR) — trustworthy, no extra needed
       const _upGated=regime==='HIGH VOL CHOP'||regime==='RANGE-CHOP';
       const CONSECUTIVE_NEEDED_UP=_upGated
         ? Math.max(2,CONSECUTIVE_NEEDED+1) // extra confirmation in weak UP regimes
@@ -1885,7 +1867,7 @@ function TaraApp(){
           const _quality=Math.max(0,Math.min(100,_qScore+5));
           if(_quality<40){
             // Quality too low — Tara sits out rather than making a weak call
-            taraAdviceRef.current='SEARCHING...'; // quality too low — keep searching, no forced call
+            taraAdviceRef.current='LOW QUALITY — SITTING OUT';
           } else {
           // ── Direction flip guard: if FORMING DOWN already fired, don't lock UP ──
           const dirAllowed=!committedDir||committedDir==='UP';
@@ -1907,7 +1889,7 @@ function TaraApp(){
           const _qScore2=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6))+Math.min(30,(_rWR2-50)*0.6)+Math.min(15,(_sessQ2-50)*0.6)+(isLateLockZone?-8:0)+(isVeryLateLock?-20:0);
           const _quality2=Math.max(0,Math.min(100,_qScore2+5));
           if(_quality2<40){
-            taraAdviceRef.current='SEARCHING...'; // quality too low — keep searching, no forced call
+            taraAdviceRef.current='LOW QUALITY — SITTING OUT';
           } else {
           // ── Direction flip guard: if FORMING UP already fired, don't lock DOWN ──
           const dirAllowed=!committedDir||committedDir==='DOWN';
@@ -2045,8 +2027,6 @@ function TaraApp(){
     // One SIGNAL broadcast per direction per window — use window start time as key
     const formingKey=`${dir}-${timeState.startWindow||timeState.nextWindow}`;
     if(lastFormingBroadcastRef.current===formingKey)return;
-    // Only broadcast FORMING if quality gate is sufficient — no misleading weak signals
-    if((qualityGate?.score||0)<40)return;
     lastFormingBroadcastRef.current=formingKey;
     broadcastToDiscord('SIGNAL',{
       dir,price:currentPrice,strike:targetMargin,
