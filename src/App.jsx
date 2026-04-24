@@ -904,6 +904,29 @@ const computeV99Posterior=(params)=>{
   const rsi=calcRSI(closes,14)||50;
   const atr=calcATR(liveHistory,14)||10;
   const atrBps=atr>0?(atr/currentPrice)*10000:15;
+  // ── V113: VELOCITY REGIME CLASSIFIER ──────────────────────────────────────
+  // Combines ATR + 1m drift + tick velocity to classify market speed.
+  // Used downstream to scale thresholds, sample requirements, and momentum gates.
+  // Categories: SLOW (sleepy), NORMAL (normal flow), FAST (active), EXTREME (news/spike)
+  const _v1s=Math.abs(velocityRef?.current?.v1s||0);
+  const _v5s=Math.abs(velocityRef?.current?.v5s||0);
+  const _drift1mAbs=Math.abs(((liveHistory[0]?.c||currentPrice)-(liveHistory[1]?.c||currentPrice))/(currentPrice||1)*10000);
+  // Score is composite: ATR (background vol) + tick velocity (real-time speed)
+  const _velScore=(atrBps*0.6)+(_v1s*4)+(_v5s*1.5)+(_drift1mAbs*0.8);
+  let velocityRegime='NORMAL';
+  if(_velScore<12)velocityRegime='SLOW';
+  else if(_velScore<28)velocityRegime='NORMAL';
+  else if(_velScore<55)velocityRegime='FAST';
+  else velocityRegime='EXTREME';
+  // Scaling factors used downstream — multipliers for thresholds, sample counts, etc
+  const velocityScalars={
+    SLOW:    {samples:1.4, threshTighten:6, momentumTol:0.3, lockHold:1.3, decayRate:0.85},
+    NORMAL:  {samples:1.0, threshTighten:0, momentumTol:0.5, lockHold:1.0, decayRate:1.0},
+    FAST:    {samples:0.7, threshTighten:-3,momentumTol:1.2, lockHold:0.8, decayRate:1.25},
+    EXTREME: {samples:0.5, threshTighten:-6,momentumTol:2.5, lockHold:0.6, decayRate:1.6}
+  };
+  const _velAdj=velocityScalars[velocityRegime];
+  reasoning.push(`[VEL] ${velocityRegime} regime (score: ${_velScore.toFixed(1)} | ATR: ${atrBps.toFixed(1)}bps)`);
   const vwap=calcVWAP(liveHistory);
   const bb=calcBB([...closes].reverse(),20);
   const realGapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
@@ -1003,6 +1026,12 @@ const computeV99Posterior=(params)=>{
   else if(isCleanUp){regime='TRENDING UP';upThreshold=64;downThreshold=25;}
   else if(isCleanDn){regime='TRENDING DOWN';upThreshold=75;downThreshold=36;}
   else if(isHighVol){regime='HIGH VOL CHOP';upThreshold=75;downThreshold=25;reasoning.push(`[REGIME] High vol — strict thresholds`);}
+  // V113: Velocity-adaptive threshold adjustment
+  // Slow markets: tighten thresholds (require more conviction — chop is dangerous)
+  // Fast markets: loosen thresholds (real moves don't wait for indecision)
+  upThreshold=Math.max(55,Math.min(85,upThreshold+_velAdj.threshTighten));
+  downThreshold=Math.max(15,Math.min(45,downThreshold-_velAdj.threshTighten));
+  if(velocityRegime!=='NORMAL')reasoning.push(`[VEL-ADJ] ${velocityRegime} → UP@${upThreshold} DN@${downThreshold}`);
   if(fundingAccel>0.0001)regimeBonus-=5;
   if(fundingAccel<-0.0001)regimeBonus+=5;
   const regimeClamped=Math.max(-W.regime,Math.min(W.regime,regimeBonus));
@@ -1054,7 +1083,7 @@ const computeV99Posterior=(params)=>{
   // Rug pull check
   const isRugPull=tickSlope<-5&&aggrFlow<-0.6;
 
-  return{posterior:finalPosterior,rawPosterior:posterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight};
+  return{posterior:finalPosterior,rawPosterior:posterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj};
 };
 
 // ═══════════════════════════════════════
@@ -1365,6 +1394,18 @@ function PredictionContent(props){
           <span className={'text-xs text-[#E8E9E4]/40 uppercase tracking-[0.2em] font-bold'}>Prediction</span>
           {analysis.regime&&(
             <span className={'text-xs text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded'}>{analysis.regime}</span>
+          )}
+          {analysis.velocityRegime&&analysis.velocityRegime!=='NORMAL'&&(
+            (()=>{
+              const v=analysis.velocityRegime;
+              const cfg={
+                SLOW:    {label:'🐢 SLOW',    cls:'text-blue-300 bg-blue-500/10 border-blue-500/30'},
+                FAST:    {label:'⚡ FAST',    cls:'text-amber-300 bg-amber-500/10 border-amber-500/30'},
+                EXTREME: {label:'🔥 EXTREME', cls:'text-rose-300 bg-rose-500/15 border-rose-500/40 animate-pulse'},
+              }[v];
+              if(!cfg)return null;
+              return(<span className={'text-xs uppercase tracking-wide px-2 py-1 rounded border font-bold '+cfg.cls} title={`Market velocity: ${v}. Tara is adapting thresholds, sample requirements, and momentum tolerance accordingly.`}>{cfg.label}</span>);
+            })()
           )}
           {analysis.lockInfo&&(
             <span className={'text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 px-2 py-1'}>
@@ -2332,7 +2373,7 @@ function TaraApp(){
 
       // V110 weighted posterior (adaptive)
       const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration});
-      const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb}=eng;
+      const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
       // ══════════════════════════════════════════════════════
@@ -2358,7 +2399,10 @@ function TaraApp(){
       const _regime=lastRegimeRef.current||'RANGE-CHOP';
       const _regimeConsecAdj=_regime==='RANGE-CHOP'?1:_regime==='HIGH VOL CHOP'?1:_regime==='TRENDING DOWN'?-1:0;
       const _sessConsecAdj=_sess==='US'?1:_sess==='OFF-HOURS'?1:0;
-      const CONSECUTIVE_NEEDED=Math.max(1,(is15m?3:2)+_regimeConsecAdj+_sessConsecAdj);
+      // V113: Velocity-adaptive consecutive samples — slow markets need more confirmation, fast need less
+      const _velSampleAdj=velocityScalars?.samples||1.0;
+      const _baseConsec=(is15m?3:2)+_regimeConsecAdj+_sessConsecAdj;
+      const CONSECUTIVE_NEEDED=Math.max(1,Math.round(_baseConsec*_velSampleAdj));
 
       // ── IMPROVEMENT 4: Late lock penalty ─────────────────────────────────
       // Very late locks (>820s elapsed in 15m = last 80s) get suppressed
@@ -2435,9 +2479,11 @@ function TaraApp(){
           if(!dirAllowed){
             taraAdviceRef.current='SEARCHING...';
           } else {
-            // V112: Momentum confirmation — lock only if recent price action agrees
+            // V113: Momentum confirmation with velocity-adaptive tolerance
+            // SLOW markets: strict (-0.3) | NORMAL: -0.5 | FAST: -1.2 | EXTREME: -2.5
             const recent=(velocityRef?.current?.v5s||0);
-            const momentumOK=recent>=-0.5; // require non-bearish 5s momentum for UP
+            const _momTol=velocityScalars?.momentumTol||0.5;
+            const momentumOK=recent>=-_momTol; // looser tolerance in fast markets
             if(!momentumOK){
               taraAdviceRef.current='UP - WAITING FOR MOMENTUM';
             } else {
@@ -2474,9 +2520,10 @@ function TaraApp(){
           if(!dirAllowed){
             taraAdviceRef.current='SEARCHING...';
           } else {
-            // V112: Momentum confirmation — lock DOWN only if not bullish on short-term
+            // V113: Momentum confirmation with velocity-adaptive tolerance
             const recent=(velocityRef?.current?.v5s||0);
-            const momentumOK=recent<=0.5; // require non-bullish 5s momentum for DOWN
+            const _momTol=velocityScalars?.momentumTol||0.5;
+            const momentumOK=recent<=_momTol; // looser tolerance in fast markets
             if(!momentumOK){
               taraAdviceRef.current='DOWN - WAITING FOR MOMENTUM';
             } else {
@@ -2556,7 +2603,7 @@ function TaraApp(){
       const _thisLock=lockedCallRef.current;
       const mtfAligned=_thisLock&&_otherLock&&_otherLock.dir===_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
       const mtfOpposed=_thisLock&&_otherLock&&_otherLock.dir!==_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
-      return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor:_advisorResult,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
+      return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),velocityRegime:String(velocityRegime||'NORMAL'),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor:_advisorResult,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
         lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null,
         bullCount:Number(bullCount),bearCount:Number(bearCount)};
     }catch(err){return{prediction:'ERROR',rawProbAbove:50,projections:[],reasoning:[err.stack||String(err)],textColor:'text-rose-500',advisor:{label:'MATH CRASH',reason:String(err),color:'rose',animate:false,hasAction:false},regime:'ERROR'};}
