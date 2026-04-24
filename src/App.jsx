@@ -462,6 +462,40 @@ const buildCalibration=(tradeLog)=>{
   return cal;
 };
 
+// V114: Self-calibration audit - measures how well-calibrated Tara's confidence is
+const buildCalibrationAudit=(tradeLog)=>{
+  const recent=tradeLog.filter(t=>t.result&&t.posterior!=null).slice(-100);
+  if(recent.length<10)return{n:recent.length,note:'Need 10+ trades for audit'};
+  const buckets={
+    '50-60':{n:0,wins:0,target:0.55},
+    '60-70':{n:0,wins:0,target:0.65},
+    '70-80':{n:0,wins:0,target:0.75},
+    '80-90':{n:0,wins:0,target:0.85},
+    '90+':  {n:0,wins:0,target:0.93},
+  };
+  recent.forEach(t=>{
+    const conf=t.dir==='UP'?t.posterior:(100-t.posterior);
+    let key='50-60';
+    if(conf>=90)key='90+';
+    else if(conf>=80)key='80-90';
+    else if(conf>=70)key='70-80';
+    else if(conf>=60)key='60-70';
+    if(buckets[key]){
+      buckets[key].n++;
+      if(t.result==='WIN')buckets[key].wins++;
+    }
+  });
+  const issues=[];
+  Object.entries(buckets).forEach(([k,b])=>{
+    if(b.n<3)return;
+    const actual=b.wins/b.n;
+    const diff=actual-b.target;
+    if(diff<-0.10)issues.push(`${k}% confidence is overconfident (${(actual*100).toFixed(0)}% actual vs ${(b.target*100).toFixed(0)}% expected)`);
+    else if(diff>0.10)issues.push(`${k}% confidence is underconfident (${(actual*100).toFixed(0)}% actual vs ${(b.target*100).toFixed(0)}% expected)`);
+  });
+  return{n:recent.length,buckets,issues};
+};
+
 // Apply calibration correction to raw posterior
 const calibratePosterior=(raw,calibration)=>{
   if(!calibration)return raw;
@@ -515,7 +549,96 @@ const buildHourlyPerf=(tradeLog)=>{
 // ═══════════════════════════════════════
 // MARKET SESSIONS
 // ═══════════════════════════════════════
-const getMarketSessions=()=>{const now=new Date();const utcH=now.getUTCHours();const asia=utcH>=0&&utcH<9;const eu=utcH>=7&&utcH<16;const us=utcH>=13&&utcH<22;const sessions=[];if(asia)sessions.push({name:'ASIA',flag:'🌏',color:'text-amber-400'});if(eu)sessions.push({name:'EU',flag:'🌍',color:'text-blue-400'});if(us)sessions.push({name:'US',flag:'🌎',color:'text-emerald-400'});const dominant=sessions.length>0?sessions[sessions.length-1].name:'OFF-HOURS';return{sessions,dominant,utcH};};
+const getMarketSessions=()=>{
+  const now=new Date();
+  const utcH=now.getUTCHours();
+  const dayUTC=now.getUTCDay(); // 0=Sun, 6=Sat
+  const dayName=['SUN','MON','TUE','WED','THU','FRI','SAT'][dayUTC];
+  const asia=utcH>=0&&utcH<9;
+  const eu=utcH>=7&&utcH<16;
+  const us=utcH>=13&&utcH<22;
+  const sessions=[];
+  if(asia)sessions.push({name:'ASIA',flag:'🌏',color:'text-amber-400'});
+  if(eu)sessions.push({name:'EU',flag:'🌍',color:'text-blue-400'});
+  if(us)sessions.push({name:'US',flag:'🌎',color:'text-emerald-400'});
+  const dominant=sessions.length>0?sessions[sessions.length-1].name:'OFF-HOURS';
+  // V114: Day×Session quality multipliers (range -10 to +5; subtracted from quality threshold or added)
+  // Higher = better historically (lower bar to lock); Lower = worse (higher bar)
+  // Based on training data + market structure: Sun thin liquidity, Mon Asia gappy, Wed US best, Fri close fakeouts
+  const dsKey=dayName+'-'+dominant;
+  const dsMap={
+    'SUN-ASIA':-8,'SUN-EU':-6,'SUN-US':-10,           // Sunday is the worst day across the board
+    'MON-ASIA':-4,'MON-EU':2,'MON-US':-2,             // Mon Asia gappy from weekend; Mon EU OK
+    'TUE-ASIA':2,'TUE-EU':4,'TUE-US':3,               // Tuesday consistently good
+    'WED-ASIA':3,'WED-EU':4,'WED-US':5,               // Wednesday US is the cleanest signal day
+    'THU-ASIA':2,'THU-EU':3,'THU-US':2,
+    'FRI-ASIA':1,'FRI-EU':1,'FRI-US':-5,              // Fri US close = fake breakouts before close
+    'SAT-ASIA':-5,'SAT-EU':-4,'SAT-US':-6,            // Saturday thin
+  };
+
+// ── V114: MACRO EVENT CALENDAR ─────────────────────────────────────────────
+// Hardcoded recurring high-impact events. These are the ones that historically
+// move BTC 1-3% in seconds. Times are UTC. Tara enters BLACKOUT (no new locks)
+// 30 min before, OBSERVE-ONLY during, ENHANCED for 15 min after.
+const MACRO_EVENTS=[
+  // ── US CPI & PPI ── 8:30 AM EST = 13:30 UTC (winter), 12:30 UTC (summer DST)
+  // Released 2nd Tuesday/Wednesday of month, ~10am ET. Use 13:30 UTC as proxy.
+  {name:'CPI/PPI',dayOfMonth:[10,11,12,13,14,15],hourUTC:13,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
+  // ── NFP ── First Friday of month, 8:30 AM EST = 13:30 UTC
+  {name:'NFP',dayOfWeek:5,weekOfMonth:1,hourUTC:13,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
+  // ── FOMC Rate Decision ── 8 times/year, 2:00 PM EST = 19:00 UTC, Wed
+  // Treat 1st-3rd Wed as a window — actual FOMC Wed is highlighted
+  {name:'FOMC',dayOfWeek:3,hourUTC:19,minUTC:0,impact:'EXTREME',preMin:45,postMin:30,monthsOnly:[1,3,5,6,7,9,11,12]},
+  // ── PCE ── Last Friday of month, 8:30 AM EST = 13:30 UTC
+  {name:'PCE',dayOfWeek:5,weekOfMonth:-1,hourUTC:13,minUTC:30,impact:'HIGH',preMin:30,postMin:15},
+  // ── Powell speeches ── irregular but Wed 19:30 UTC during FOMC weeks
+  // (covered by FOMC entry above)
+  // ── Retail Sales ── Mid-month, 8:30 AM EST = 13:30 UTC
+  {name:'RETAIL SALES',dayOfMonth:[14,15,16,17,18],hourUTC:13,minUTC:30,impact:'HIGH',preMin:20,postMin:10},
+  // ── GDP ── Quarterly, late month, 8:30 AM EST = 13:30 UTC
+  {name:'GDP',dayOfMonth:[25,26,27,28,29,30],hourUTC:13,minUTC:30,impact:'HIGH',preMin:20,postMin:10,monthsOnly:[1,4,7,10]},
+  // ── Weekly: Initial Jobless Claims ── Every Thursday 8:30 AM EST = 13:30 UTC
+  {name:'JOBLESS CLAIMS',dayOfWeek:4,hourUTC:13,minUTC:30,impact:'MEDIUM',preMin:10,postMin:5},
+  // ── Daily: BTC futures settlement ── Friday 4 PM EST = 21:00 UTC
+  {name:'BTC FUTURES SETTLE',dayOfWeek:5,hourUTC:21,minUTC:0,impact:'HIGH',preMin:15,postMin:10},
+];
+
+// Returns: {state:'CLEAR'|'BLACKOUT'|'OBSERVE'|'ENHANCED', event:{...}|null, minutesUntil:N|null}
+const getMacroEventState=(now=new Date())=>{
+  const dayUTC=now.getUTCDay();
+  const dateUTC=now.getUTCDate();
+  const monthUTC=now.getUTCMonth()+1; // 1-12
+  const hUTC=now.getUTCHours();
+  const mUTC=now.getUTCMinutes();
+  const nowMins=hUTC*60+mUTC;
+  // Calculate week of month
+  const weekOfMonth=Math.ceil(dateUTC/7);
+  // Calculate if this is the LAST week of month
+  const lastDayOfMonth=new Date(now.getUTCFullYear(),now.getUTCMonth()+1,0).getUTCDate();
+  const isLastWeek=(lastDayOfMonth-dateUTC)<7;
+  for(const ev of MACRO_EVENTS){
+    // Filter by day of week
+    if(ev.dayOfWeek!=null&&ev.dayOfWeek!==dayUTC)continue;
+    // Filter by week of month
+    if(ev.weekOfMonth===1&&weekOfMonth!==1)continue;
+    if(ev.weekOfMonth===-1&&!isLastWeek)continue;
+    // Filter by day of month
+    if(ev.dayOfMonth&&!ev.dayOfMonth.includes(dateUTC))continue;
+    // Filter by months
+    if(ev.monthsOnly&&!ev.monthsOnly.includes(monthUTC))continue;
+    const evMins=ev.hourUTC*60+ev.minUTC;
+    const diffMins=evMins-nowMins;
+    if(diffMins>0&&diffMins<=ev.preMin)return{state:'BLACKOUT',event:ev,minutesUntil:diffMins};
+    if(diffMins<=0&&Math.abs(diffMins)<=2)return{state:'OBSERVE',event:ev,minutesUntil:diffMins};
+    if(diffMins<0&&Math.abs(diffMins)<=ev.postMin)return{state:'ENHANCED',event:ev,minutesUntil:diffMins};
+  }
+  return{state:'CLEAR',event:null,minutesUntil:null};
+};
+
+  const dsAdj=dsMap[dsKey]||0;
+  const dsRating=dsAdj>=4?'A':dsAdj>=2?'B':dsAdj>=0?'C':dsAdj>=-4?'D':'F';
+  return{sessions,dominant,utcH,dayUTC,dayName,dsAdj,dsRating,dsKey};
+};
 
 // ═══════════════════════════════════════
 // HOOKS
@@ -978,6 +1101,20 @@ const computeV99Posterior=(params)=>{
   if(consecutive.red>=3)structScore-=consecutive.red*3;
   if(volRatio>1.5&&consecutive.green>=2)structScore+=8;
   if(volRatio>1.5&&consecutive.red>=2)structScore-=8;
+  // V114: Volume Profile signal — ghost markets vs conviction
+  if(volRatio>2.0){
+    // High conviction volume — boost signal in direction of price
+    if(drift1m>3)structScore+=6;
+    else if(drift1m<-3)structScore-=6;
+    reasoning.push(`[VOL] High conviction vol (${volRatio.toFixed(1)}x) — signal boosted`);
+  } else if(volRatio<0.5){
+    // Ghost market — fade any signal (low follow-through expected)
+    structScore*=0.6;
+    reasoning.push(`[VOL] Ghost market (${volRatio.toFixed(1)}x) — signal damped`);
+  }
+  // Volume-Price divergence detection (price up but volume down = trap)
+  if(drift1m>5&&volRatio<0.7){structScore-=10;reasoning.push(`[VOL-DIV] Price up but volume DOWN — possible UP trap`);}
+  if(drift1m<-5&&volRatio<0.7){structScore+=10;reasoning.push(`[VOL-DIV] Price down but volume DOWN — possible DOWN trap`);}
   const structClamped=Math.max(-W.structure,Math.min(W.structure,structScore));
   rawSignalScores.structure=structClamped;
   totalScore+=structClamped;
@@ -1020,7 +1157,61 @@ const computeV99Posterior=(params)=>{
   const whalesBuying=delta>500000,whalesSelling=delta<-500000;
   const isCleanUp=drift1m>5&&whalesBuying&&atrBps<30;
   const isCleanDn=drift1m<-5&&whalesSelling&&atrBps<30;
+  // V114: Cross-Exchange Lead-Lag — Binance often leads Coinbase by 1-3s on big moves
+  // If futures price diverges from spot by significant amount, signal direction
+  const _binancePrice=globalFlow?.binancePrice||0;
+  const _bybitPrice=globalFlow?.bybitPrice||0;
+  if(_binancePrice>0&&currentPrice>0){
+    const _bnDivBps=((_binancePrice-currentPrice)/currentPrice)*10000;
+    if(Math.abs(_bnDivBps)>3){
+      // Futures divergence — coinbase will follow
+      const ledAdj=Math.sign(_bnDivBps)*Math.min(8,Math.abs(_bnDivBps)*0.7);
+      totalScore+=ledAdj;
+      reasoning.push(`[LEAD] Binance ${_bnDivBps>0?'+':''}${_bnDivBps.toFixed(1)}bps vs Coinbase`);
+    }
+  }
+  // V114: Order Book Imbalance (depth-of-market pressure)
+  // bloomberg.liqLongUSD = sum of asks within 2% (sell wall total)
+  // bloomberg.liqShortUSD = sum of bids within 2% (buy wall total)
+  if(liqLongUSD>0&&liqShortUSD>0){
+    const obImbal=(liqShortUSD-liqLongUSD)/(liqShortUSD+liqLongUSD); // -1 to +1
+    if(Math.abs(obImbal)>0.25){
+      const obAdj=obImbal*8; // up to ±8 points
+      totalScore+=obAdj;
+      reasoning.push(`[OB] Depth imbalance ${(obImbal*100).toFixed(0)}% ${obImbal>0?'BIDS heavier':'ASKS heavier'}`);
+    }
+  }
+  // V114: Liquidation Cluster Awareness
+  // Price gets pulled toward large liquidation walls (liquidity vacuum)
+  const liqLongWall=bloomberg?.liqLongWall||0;   // ASKS — short liqs above (UP magnet)
+  const liqShortWall=bloomberg?.liqShortWall||0; // BIDS — long liqs below (DOWN magnet)
+  const liqLongUSD=bloomberg?.liqLongUSD||0;
+  const liqShortUSD=bloomberg?.liqShortUSD||0;
+  let liqAdj=0;
+  if(liqLongWall>0&&liqLongUSD>500000){
+    // Big short liq cluster above price → magnet pulls UP
+    const distBps=((liqLongWall-currentPrice)/currentPrice)*10000;
+    if(distBps>0&&distBps<60){liqAdj+=Math.min(8,liqLongUSD/200000);reasoning.push(`[LIQ] Short liq cluster $${(liqLongUSD/1000).toFixed(0)}K @ +${distBps.toFixed(0)}bps — UP pull`);}
+  }
+  if(liqShortWall>0&&liqShortUSD>500000){
+    const distBps=((currentPrice-liqShortWall)/currentPrice)*10000;
+    if(distBps>0&&distBps<60){liqAdj-=Math.min(8,liqShortUSD/200000);reasoning.push(`[LIQ] Long liq cluster $${(liqShortUSD/1000).toFixed(0)}K @ -${distBps.toFixed(0)}bps — DOWN pull`);}
+  }
+  totalScore+=liqAdj;
   const fundingAccel=(funding-fundingPrev);
+  // V114: Funding Extremes Contrarian Signal
+  // Very crowded longs (funding >0.05%) often precede DOWN moves
+  // Very crowded shorts (funding <-0.02%) often precede UP moves
+  const fundingPct=funding*100;
+  let fundingExtremeAdj=0;
+  if(fundingPct>0.05){
+    fundingExtremeAdj=-12; // shift posterior toward DOWN
+    reasoning.push(`[FUND-EXT] Crowded longs (${fundingPct.toFixed(3)}%) — DOWN bias`);
+  } else if(fundingPct<-0.02){
+    fundingExtremeAdj=+12; // shift posterior toward UP
+    reasoning.push(`[FUND-EXT] Crowded shorts (${fundingPct.toFixed(3)}%) — UP bias`);
+  }
+  totalScore+=fundingExtremeAdj;
   if(retailShorting&&whalesBuying){regime='SHORT SQUEEZE';regimeBonus=W.regime;upThreshold=60;downThreshold=20;}
   else if(retailLonging&&whalesSelling){regime='LONG SQUEEZE';regimeBonus=-W.regime;upThreshold=80;downThreshold=40;}
   else if(isCleanUp){regime='TRENDING UP';upThreshold=64;downThreshold=25;}
@@ -1390,6 +1581,22 @@ function PredictionContent(props){
   return(
     <div className="flex flex-col flex-1 gap-3">
       <div className="flex flex-col items-center text-center pt-1">
+        {/* V114: Macro event banner - shows when in BLACKOUT/OBSERVE/ENHANCED state */}
+        {(()=>{
+          if(typeof getMacroEventState!=='function')return null;
+          const ms=getMacroEventState();
+          if(ms.state==='CLEAR')return null;
+          const cfg={
+            BLACKOUT:{cls:'bg-rose-500/15 border-rose-500/40 text-rose-300',icon:'🔴',label:'BLACKOUT'},
+            OBSERVE: {cls:'bg-amber-500/20 border-amber-500/50 text-amber-300 animate-pulse',icon:'⚠️',label:'OBSERVE ONLY'},
+            ENHANCED:{cls:'bg-emerald-500/15 border-emerald-500/40 text-emerald-300',icon:'⚡',label:'POST-EVENT'},
+          }[ms.state];
+          if(!cfg)return null;
+          const detail=ms.minutesUntil>0?`in ${ms.minutesUntil}m`:`${Math.abs(ms.minutesUntil||0)}m ago`;
+          return(<div className={'mb-2 px-2 py-1.5 rounded border text-[10px] font-bold uppercase tracking-wider w-full text-center '+cfg.cls}>
+            {cfg.icon} {cfg.label} · {ms.event.name} {detail}
+          </div>);
+        })()}
         <div className="flex items-center gap-2 mb-1 flex-wrap justify-center">
           <span className={'text-xs text-[#E8E9E4]/40 uppercase tracking-[0.2em] font-bold'}>Prediction</span>
           {analysis.regime&&(
@@ -1468,7 +1675,18 @@ function PredictionContent(props){
           <span className={'text-[#E8E9E4]/20'}>|</span>
           <span className="text-rose-300">DN: {(100-Number(analysis.rawProbAbove||0)).toFixed(1)}%</span>
           {analysis.kellyPct>0&&(
-            <span className={'text-amber-400/80'}>Kelly: {analysis.kellyPct.toFixed(1)}%</span>
+            <span className={'text-amber-400/80'} title="Kelly Criterion: theoretical optimal bet size">Kelly: {analysis.kellyPct.toFixed(1)}%</span>
+          )}
+          {analysis.kellyPct>0&&qualityGate?.score>=60&&(
+            (()=>{
+              // V114: Quality-scaled Kelly fraction
+              // Q60-70: ¼ Kelly, Q70-80: ½, Q80-90: ⅔, Q90+: ¾
+              const q=qualityGate.score;
+              const frac=q>=90?0.75:q>=80?0.66:q>=70?0.5:0.25;
+              const fracLabel=q>=90?'¾':q>=80?'⅔':q>=70?'½':'¼';
+              const recPct=(analysis.kellyPct*frac).toFixed(1);
+              return(<span className={'text-emerald-400/80'} title={`Quality ${q.toFixed(0)} → use ${fracLabel} Kelly`}>Bet: {recPct}%</span>);
+            })()
           )}
         </div>
 
@@ -1847,6 +2065,44 @@ function MobileTabBar({mobileTab,setMobileTab}){
 }
 
 
+
+// ── V114: useNewsSentiment - detects directional keywords in recent news headlines
+const useNewsSentiment=()=>{
+  const[sentiment,setSentiment]=React.useState({score:0,bullish:0,bearish:0,extreme:0,topHeadline:null});
+  React.useEffect(()=>{
+    const fetchNews=async()=>{
+      try{
+        const r=await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=BTC,Trading,Regulation');
+        const d=await r.json();
+        if(!d?.Data)return;
+        const items=d.Data.slice(0,20);
+        // Keyword scoring
+        const bullishKW=['surge','rally','approve','approval','etf approve','breakout','soar','spike up','all-time high','ath','adoption','inflows','accumulate','buy pressure','squeeze short','liquidat short'];
+        const bearishKW=['crash','dump','sell-off','plunge','reject','denied','hack','exploit','liquidat long','outflow','sec sue','sec charge','ban','fud','correction'];
+        const extremeKW=['trump','biden','sec','fomc','cpi','fed rate','powell','breaking','urgent','massive'];
+        let bull=0,bear=0,extreme=0,topHeadline=null;
+        let topScore=0;
+        items.forEach(n=>{
+          const t=(n.title||'').toLowerCase();
+          const ageMin=(Date.now()-(n.published_on*1000))/60000;
+          if(ageMin>360)return; // ignore >6h old news
+          const decay=Math.max(0.3,1-(ageMin/360));
+          let itemScore=0;
+          bullishKW.forEach(kw=>{if(t.includes(kw)){bull+=decay;itemScore+=decay;}});
+          bearishKW.forEach(kw=>{if(t.includes(kw)){bear+=decay;itemScore-=decay;}});
+          extremeKW.forEach(kw=>{if(t.includes(kw))extreme+=decay*0.5;});
+          if(Math.abs(itemScore)>topScore){topScore=Math.abs(itemScore);topHeadline=n.title;}
+        });
+        setSentiment({score:bull-bear,bullish:bull,bearish:bear,extreme,topHeadline});
+      }catch(e){/* silent */}
+    };
+    fetchNews();
+    const iv=setInterval(fetchNews,90000);
+    return()=>clearInterval(iv);
+  },[]);
+  return sentiment;
+};
+
 function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
   const[showCandles,setShowCandles]=useState(true);
@@ -1868,6 +2124,7 @@ function TaraApp(){
   const[useLocalTime,setUseLocalTime]=useState(true);
   // V112: Premium Mode — only A+ setups, ~80% target WR, fewer trades
   const[premiumMode,setPremiumMode]=useState(()=>{try{return localStorage.getItem('taraPremiumMode')==='true';}catch(e){return false;}});
+  const newsSentiment=useNewsSentiment(); // V114
   useEffect(()=>{try{localStorage.setItem('taraPremiumMode',String(premiumMode));}catch(e){}},[premiumMode]);
   const[mobileTab,setMobileTab]=useState('signal'); // signal | chart | logs
   const[resolution,setResolution]=useState('1m'); // chart timeframe: 1m | 5m | 15m | 1h
@@ -2418,6 +2675,16 @@ function TaraApp(){
 
       // Count consecutive bullish/bearish samples from recent history
       const recentHist=posteriorHistoryRef.current.slice(-6);
+      // V114: Time-decay-weighted average — recent samples count more
+      // weights: oldest sample 0.4× ... newest 1.6× (via decayRate from velocityScalars)
+      const _decayRate=velocityScalars?.decayRate||1.0;
+      let _avgWeighted=0,_wsum=0;
+      recentHist.forEach((p,i)=>{
+        const w=Math.pow(_decayRate,i); // i=0 is oldest, larger i = more weight
+        _avgWeighted+=p*w;
+        _wsum+=w;
+      });
+      const avgWeighted=_wsum>0?_avgWeighted/_wsum:50;
       const bullCount=recentHist.filter(p=>p>=LOCK_THRESHOLD_UP).length;
       const bearCount=recentHist.filter(p=>p<=LOCK_THRESHOLD_DN).length;
 
@@ -2459,9 +2726,17 @@ function TaraApp(){
           const _rt=_rm.wins+_rm.losses;
           const _rWR=_rt>5?(_rm.wins/_rt)*100:60;
           const _sessQ={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[_sess]||57;
-          const _qScore=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6))+Math.min(30,(_rWR-50)*0.6)+Math.min(15,(_sessQ-50)*0.6)+(isLateLockZone?-8:0)+(isVeryLateLock?-20:0);
+          const _dsAdj=getMarketSessions().dsAdj||0; // V114: day×session quality bonus/penalty
+          const _streakAdj=streakData?.warning?(streakData.strongWarn?-15:-8):(streakData?.type==='hot'&&streakData?.streak>=4?+4:0); // V114: cold streak penalty / hot streak bonus
+          const _qScore=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6))+Math.min(30,(_rWR-50)*0.6)+Math.min(15,(_sessQ-50)*0.6)+(isLateLockZone?-8:0)+(isVeryLateLock?-20:0)+_dsAdj+_streakAdj+(newsSentiment?(newsSentiment.score>2?+5:newsSentiment.score<-2?(-8):0):0); // V114: news sentiment adj for UP
           const _quality=Math.max(0,Math.min(100,_qScore+5));
-          if(_quality<50){
+          // V114: Macro event check — BLACKOUT and OBSERVE = no new locks
+          const _macroUP=getMacroEventState();
+          if(_macroUP.state==='BLACKOUT'){
+            taraAdviceRef.current=`MACRO BLACKOUT (${_macroUP.event.name} in ${_macroUP.minutesUntil}m)`;
+          } else if(_macroUP.state==='OBSERVE'){
+            taraAdviceRef.current=`OBSERVING ${_macroUP.event.name}`;
+          } else if(_quality<50){
             // V112: Quality bumped to 50 — no more borderline calls
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
           } else if(premiumMode&&_quality<70){
@@ -2479,11 +2754,18 @@ function TaraApp(){
           if(!dirAllowed){
             taraAdviceRef.current='SEARCHING...';
           } else {
+            // V114: MTF Confluence gate (Premium Mode) — refuse to lock against the other timeframe
+            const _otherTFup=windowType==='5m'?'15m':'5m';
+            const _otherLockUp=mtfLocksRef.current[_otherTFup];
+            const _mtfFreshUp=_otherLockUp&&(Date.now()-_otherLockUp.lockedAt)<20*60*1000;
+            const _mtfOpposedUp=_mtfFreshUp&&_otherLockUp.dir==='DOWN';
+            if(premiumMode&&_mtfOpposedUp){
+              taraAdviceRef.current='MTF CONFLICT — '+_otherTFup+' is DOWN';
+            } else {
             // V113: Momentum confirmation with velocity-adaptive tolerance
-            // SLOW markets: strict (-0.3) | NORMAL: -0.5 | FAST: -1.2 | EXTREME: -2.5
             const recent=(velocityRef?.current?.v5s||0);
             const _momTol=velocityScalars?.momentumTol||0.5;
-            const momentumOK=recent>=-_momTol; // looser tolerance in fast markets
+            const momentumOK=recent>=-_momTol;
             if(!momentumOK){
               taraAdviceRef.current='UP - WAITING FOR MOMENTUM';
             } else {
@@ -2492,6 +2774,7 @@ function TaraApp(){
               biasCountRef.current={UP:0,DOWN:0};
             }
           }
+          } // close MTF gate else
           } // close quality gate else
 
         } else if(bearCount>=CONSECUTIVE_NEEDED_DN&&posterior<=LOCK_THRESHOLD_DN_EFFECTIVE&&!isEndgameLock){
@@ -2500,9 +2783,16 @@ function TaraApp(){
           const _rt2=_rm2.wins+_rm2.losses;
           const _rWR2=_rt2>5?(_rm2.wins/_rt2)*100:60;
           const _sessQ2={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[_sess]||57;
-          const _qScore2=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6))+Math.min(30,(_rWR2-50)*0.6)+Math.min(15,(_sessQ2-50)*0.6)+(isLateLockZone?-8:0)+(isVeryLateLock?-20:0);
+          const _dsAdj2=getMarketSessions().dsAdj||0;
+          const _streakAdj2=streakData?.warning?(streakData.strongWarn?-15:-8):(streakData?.type==='hot'&&streakData?.streak>=4?+4:0);
+          const _qScore2=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6))+Math.min(30,(_rWR2-50)*0.6)+Math.min(15,(_sessQ2-50)*0.6)+(isLateLockZone?-8:0)+(isVeryLateLock?-20:0)+_dsAdj2+_streakAdj2+(newsSentiment?(newsSentiment.score<-2?+5:newsSentiment.score>2?(-8):0):0); // V114: news sentiment adj for DOWN (inverted)
           const _quality2=Math.max(0,Math.min(100,_qScore2+5));
-          if(_quality2<50){
+          const _macroDN=getMacroEventState();
+          if(_macroDN.state==='BLACKOUT'){
+            taraAdviceRef.current=`MACRO BLACKOUT (${_macroDN.event.name} in ${_macroDN.minutesUntil}m)`;
+          } else if(_macroDN.state==='OBSERVE'){
+            taraAdviceRef.current=`OBSERVING ${_macroDN.event.name}`;
+          } else if(_quality2<50){
             // V112: DOWN quality bumped to 50 too
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
           } else if(premiumMode&&_quality2<70){
@@ -2520,10 +2810,18 @@ function TaraApp(){
           if(!dirAllowed){
             taraAdviceRef.current='SEARCHING...';
           } else {
+            // V114: MTF Confluence gate
+            const _otherTFdn=windowType==='5m'?'15m':'5m';
+            const _otherLockDn=mtfLocksRef.current[_otherTFdn];
+            const _mtfFreshDn=_otherLockDn&&(Date.now()-_otherLockDn.lockedAt)<20*60*1000;
+            const _mtfOpposedDn=_mtfFreshDn&&_otherLockDn.dir==='UP';
+            if(premiumMode&&_mtfOpposedDn){
+              taraAdviceRef.current='MTF CONFLICT — '+_otherTFdn+' is UP';
+            } else {
             // V113: Momentum confirmation with velocity-adaptive tolerance
             const recent=(velocityRef?.current?.v5s||0);
             const _momTol=velocityScalars?.momentumTol||0.5;
-            const momentumOK=recent<=_momTol; // looser tolerance in fast markets
+            const momentumOK=recent<=_momTol;
             if(!momentumOK){
               taraAdviceRef.current='DOWN - WAITING FOR MOMENTUM';
             } else {
@@ -2532,6 +2830,7 @@ function TaraApp(){
               biasCountRef.current={UP:0,DOWN:0};
             }
           }
+          } // close MTF gate else
           } // close quality gate else
 
         } else {
@@ -2683,7 +2982,7 @@ function TaraApp(){
     if(justHitEmerging||justHitStrong||streakJustHit||bigDelta){
       setShowWhaleLog(true);
       autoOpenedRef.current=true;
-      // V113: Auto-close after 12 seconds — enough time to see the activity but not stay in your face
+      // V114: Auto-close after 3 seconds — quick glance, then out of the way
       if(autoCloseTimerRef.current)clearTimeout(autoCloseTimerRef.current);
       autoCloseTimerRef.current=setTimeout(()=>{
         // Only auto-close if it was auto-opened (don't close manual opens)
@@ -2691,7 +2990,7 @@ function TaraApp(){
           setShowWhaleLog(false);
           autoOpenedRef.current=false;
         }
-      },12000);
+      },3000);
     }
     return()=>{if(autoCloseTimerRef.current)clearTimeout(autoCloseTimerRef.current);};
   },[flowSignal.score,flowSignal.streakCount,flowSignal.netDelta90s]);
