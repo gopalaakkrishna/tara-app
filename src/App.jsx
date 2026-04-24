@@ -1410,6 +1410,168 @@ function PredictionContent(props){
 }
 
 
+// ── V111: TradingViewChartCard with resolution selector ──
+function TradingViewChartCard({mobileTab,resolution,setResolution}){
+  return(
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
+      <div className="flex justify-between items-center mb-2 shrink-0">
+        <span className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold'}>Live Chart</span>
+        <div className="flex gap-1">
+          {['1m','5m','15m','1h'].map(r=>(
+            <button key={r} onClick={()=>setResolution(r)}
+              className={'px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wide '+(resolution===r?'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70 border border-transparent')}>
+              {r}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex-1 min-h-[300px]">
+        <TradingViewChart resolution={resolution} onResolutionChange={setResolution}/>
+      </div>
+    </div>
+  );
+}
+
+// ── V111: EngineLogCard - shows reasoning + projections ──
+function EngineLogCard({analysis,mobileTab}){
+  const reasoning=analysis?.reasoning||[];
+  const projections=analysis?.projections||[];
+  return(
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col gap-3 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
+      {/* Projections section */}
+      <div className="shrink-0">
+        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2'}>Projections</div>
+        <div className="grid grid-cols-3 gap-2">
+          {projections.map(p=>{
+            const isUp=p.price>=(analysis?.currentPrice||p.price);
+            const arrowCls=isUp?'text-emerald-400':'text-rose-400';
+            const arrow=isUp?'▲':'▼';
+            return(
+              <div key={p.id} className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
+                <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-0.5'}>{p.time}</div>
+                <div className="text-sm font-mono font-bold text-white">${Number(p.price||0).toFixed(0)}</div>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className={arrowCls+' text-xs'}>{arrow}</span>
+                  <span className={'text-[10px] text-[#E8E9E4]/50'}>{Number(p.conf||0).toFixed(0)}%</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {/* Engine log section */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2 shrink-0'}>Engine Log</div>
+        <div className="flex-1 overflow-y-auto space-y-1 text-[10px] font-mono">
+          {reasoning.length===0?(
+            <div className={'text-[#E8E9E4]/30 italic'}>Waiting for signals...</div>
+          ):reasoning.slice(0,30).map((r,i)=>{
+            const tag=(r.match(/^\[(\w+)\]/)||[])[1]||'';
+            const tagCls={GAP:'text-amber-400',MOMENTUM:'text-indigo-400',STRUCTURE:'text-purple-400',FLOW:'text-emerald-400',TECHNICAL:'text-cyan-400',REGIME:'text-rose-400',CAP:'text-orange-400',MEMORY:'text-pink-400',CAL:'text-blue-400'}[tag]||'text-[#E8E9E4]/40';
+            const text=r.replace(/^\[(\w+)\]\s*/,'');
+            return(
+              <div key={i} className="flex gap-1.5">
+                {tag&&<span className={tagCls+' font-bold shrink-0'}>[{tag}]</span>}
+                <span className={'text-[#E8E9E4]/60'}>{text}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── V111: LiveFeedsCard - whale tape + OI + funding ──
+function LiveFeedsCard({tapeRef,whaleLog,bloomberg,currentPrice}){
+  const tape=tapeRef?.current||{};
+  const cb=tape.coinbase||{buys:0,sells:0};
+  const bf=tape.binanceFutures||{buys:0,sells:0};
+  const by=tape.bybit||{buys:0,sells:0};
+  const totalBuys=cb.buys+bf.buys+by.buys;
+  const totalSells=cb.sells+bf.sells+by.sells;
+  const total=totalBuys+totalSells;
+  const buyPct=total>0?(totalBuys/total)*100:50;
+  const oi=bloomberg?.oiChange5m||0;
+  const fr=(bloomberg?.fundingRate||0)*100;
+  const ls=bloomberg?.longShortRatio||1;
+  return(
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md hidden lg:block'}>
+      <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-3'}>Live Feeds</div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Buy/Sell flow */}
+        <div className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
+          <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1'}>Buy / Sell Flow</div>
+          <div className="flex items-center gap-2">
+            <span className="text-emerald-400 text-sm font-bold">{buyPct.toFixed(0)}%</span>
+            <span className={'text-[#E8E9E4]/30 text-xs'}>buys</span>
+          </div>
+          <div className="h-1 bg-[#0E100F] rounded-full overflow-hidden mt-1">
+            <div className="h-full bg-emerald-500" style={{width:buyPct+'%'}}/>
+          </div>
+        </div>
+        {/* OI Change */}
+        <div className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
+          <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1'}>OI Change 5m</div>
+          <div className={'text-sm font-bold '+(oi>=0?'text-emerald-400':'text-rose-400')}>
+            {oi>=0?'+':''}{oi.toFixed(2)}%
+          </div>
+        </div>
+        {/* Funding */}
+        <div className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
+          <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1'}>Funding Rate</div>
+          <div className={'text-sm font-bold '+(fr>=0?'text-emerald-400':'text-rose-400')}>
+            {fr>=0?'+':''}{fr.toFixed(4)}%
+          </div>
+        </div>
+        {/* L/S Ratio */}
+        <div className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
+          <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1'}>L/S Ratio</div>
+          <div className={'text-sm font-bold '+(ls>=1?'text-emerald-400':'text-rose-400')}>{ls.toFixed(2)}</div>
+        </div>
+      </div>
+      {/* Recent whales */}
+      <div className="mt-3">
+        <div className={'text-[10px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1.5'}>Recent Whales ($100K+)</div>
+        <div className="max-h-32 overflow-y-auto space-y-0.5 text-[10px] font-mono">
+          {whaleLog.length===0?(
+            <div className={'text-[#E8E9E4]/30 italic'}>No prints yet</div>
+          ):whaleLog.slice(0,8).map((w,i)=>{
+            const sideCls=w.side==='BUY'?'text-emerald-400':'text-rose-400';
+            const t=new Date(w.time);
+            const ts=t.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+            return(
+              <div key={i} className="flex justify-between gap-2">
+                <span className={'text-[#E8E9E4]/40'}>{ts}</span>
+                <span className={'text-[#E8E9E4]/60'}>{w.src}</span>
+                <span className={sideCls+' font-bold'}>{w.side}</span>
+                <span className="text-white">${(w.usd/1000).toFixed(0)}K</span>
+                <span className={'text-[#E8E9E4]/40'}>@${w.price.toFixed(0)}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── V111: MobileTabBar - signal/chart/logs tab nav ──
+function MobileTabBar({mobileTab,setMobileTab}){
+  const tabs=[{id:'signal',label:'SIGNAL'},{id:'chart',label:'CHART'},{id:'logs',label:'LOGS'}];
+  return(
+    <div className="lg:hidden flex gap-1 mb-2 shrink-0">
+      {tabs.map(t=>(
+        <button key={t.id} onClick={()=>setMobileTab(t.id)}
+          className={'flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(mobileTab===t.id?'bg-indigo-500/15 text-indigo-300 border-indigo-500/40':'text-[#E8E9E4]/40 border-[#E8E9E4]/10')}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+
 function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
   const[showCandles,setShowCandles]=useState(true);
@@ -1430,6 +1592,7 @@ function TaraApp(){
   // streakData moved below tradeLog declaration
   const[useLocalTime,setUseLocalTime]=useState(true);
   const[mobileTab,setMobileTab]=useState('signal'); // signal | chart | logs
+  const[resolution,setResolution]=useState('1m'); // chart timeframe: 1m | 5m | 15m | 1h
   const[currentPrice,setCurrentPrice]=useState(null);
   const[tickDirection,setTickDirection]=useState(null);
   const currentPriceRef=useRef(null);
@@ -1518,7 +1681,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V110 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V111 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -1590,7 +1753,7 @@ function TaraApp(){
     try{const s=localStorage.getItem('taraV110Score');if(s){const p=JSON.parse(s);if(p?.['15m']?.wins!=null)setScorecards(p);}const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V110'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V111'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -1685,7 +1848,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V110  |  signal'},
+        footer:{text:'Tara V111  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -1701,7 +1864,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.record||'—',inline:true},
         ],
-        footer:{text:'Tara V110  |  lock'},
+        footer:{text:'Tara V111  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -1718,7 +1881,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V110  |  close'},
+          footer:{text:'Tara V111  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -1733,7 +1896,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V110  |  exit'},
+        footer:{text:'Tara V111  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -1762,12 +1925,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V110  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara V111  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V110',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V111',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -1786,7 +1949,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V110 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V111 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -2350,7 +2513,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V110...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V111...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -2584,6 +2747,9 @@ function TaraApp(){
           </div>
         )}
 
+        {/* ── V111: MOBILE TAB NAV ── */}
+        <MobileTabBar mobileTab={mobileTab} setMobileTab={setMobileTab}/>
+
         {/* ── MIDDLE ROW ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 shrink-0">
           
@@ -2619,7 +2785,16 @@ function TaraApp(){
 
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions}/>
           </div>
-      </div>
+
+          {/* ── V111: TRADINGVIEW CHART CARD (col 2) ── */}
+          <TradingViewChartCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution}/>
+
+          {/* ── V111: ENGINE LOG + PROJECTIONS CARD (col 3) ── */}
+          <EngineLogCard analysis={analysis} mobileTab={mobileTab}/>
+        </div>
+
+        {/* ── V111: LIVE FEEDS CARD ── */}
+        <LiveFeedsCard tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice}/>
 
       {/* ── FLOW INTELLIGENCE PANEL ── */}
       <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState}/>
@@ -2728,7 +2903,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V110</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V111</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -3085,7 +3260,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V110 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V111 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -3224,7 +3399,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V110 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V111 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
