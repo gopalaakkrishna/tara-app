@@ -1170,9 +1170,12 @@ const computeV99Posterior=(params)=>{
       reasoning.push(`[LEAD] Binance ${_bnDivBps>0?'+':''}${_bnDivBps.toFixed(1)}bps vs Coinbase`);
     }
   }
+  // V114: Liquidation & Order Book data (declared before use)
+  const liqLongWall=bloomberg?.liqLongWall||0;   // ASKS — short liqs above (UP magnet)
+  const liqShortWall=bloomberg?.liqShortWall||0; // BIDS — long liqs below (DOWN magnet)
+  const liqLongUSD=bloomberg?.liqLongUSD||0;
+  const liqShortUSD=bloomberg?.liqShortUSD||0;
   // V114: Order Book Imbalance (depth-of-market pressure)
-  // bloomberg.liqLongUSD = sum of asks within 2% (sell wall total)
-  // bloomberg.liqShortUSD = sum of bids within 2% (buy wall total)
   if(liqLongUSD>0&&liqShortUSD>0){
     const obImbal=(liqShortUSD-liqLongUSD)/(liqShortUSD+liqLongUSD); // -1 to +1
     if(Math.abs(obImbal)>0.25){
@@ -1181,12 +1184,7 @@ const computeV99Posterior=(params)=>{
       reasoning.push(`[OB] Depth imbalance ${(obImbal*100).toFixed(0)}% ${obImbal>0?'BIDS heavier':'ASKS heavier'}`);
     }
   }
-  // V114: Liquidation Cluster Awareness
-  // Price gets pulled toward large liquidation walls (liquidity vacuum)
-  const liqLongWall=bloomberg?.liqLongWall||0;   // ASKS — short liqs above (UP magnet)
-  const liqShortWall=bloomberg?.liqShortWall||0; // BIDS — long liqs below (DOWN magnet)
-  const liqLongUSD=bloomberg?.liqLongUSD||0;
-  const liqShortUSD=bloomberg?.liqShortUSD||0;
+  // V114: Liquidation Cluster Awareness — price gets pulled toward large walls
   let liqAdj=0;
   if(liqLongWall>0&&liqLongUSD>500000){
     // Big short liq cluster above price → magnet pulls UP
