@@ -1289,8 +1289,21 @@ function PredictionContent(props){
     strikeConfirmed,strikeMode,targetMargin,
     isLoading,analysis,currentPrice,
     qualityGate,userPosition,timeState,streakData,
-    handleManualSync,getMarketSessions,executeAction
+    handleManualSync,getMarketSessions,executeAction,
+    broadcastSignalManual,discordWebhook
   }=props;
+  // V113: Track local broadcast state (so button shows "Sent ✓" after click)
+  const[broadcasted,setBroadcasted]=React.useState({key:'',sent:false});
+  React.useEffect(()=>{
+    // Reset broadcast button when window changes or prediction changes meaningfully
+    const wKey=timeState?.startWindow||timeState?.nextWindow||0;
+    const dir=analysis?.prediction?.includes('UP')?'UP':analysis?.prediction?.includes('DOWN')?'DOWN':'';
+    const lockType=analysis?.lockInfo?'LOCK':'SIG';
+    const key=`${lockType}:${dir}:${wKey}`;
+    if(broadcasted.key!==key){
+      setBroadcasted({key,sent:false});
+    }
+  },[analysis?.lockInfo?.lockedAt,analysis?.prediction,timeState?.startWindow,timeState?.nextWindow]);
 
   // ── Mode 1: Strike entry pending ──
   if(!strikeConfirmed&&strikeMode==='manual'&&targetMargin>0){
@@ -1372,6 +1385,30 @@ function PredictionContent(props){
           )}
         </div>
         <h2 className={headingCls}>{analysis.prediction}</h2>
+
+        {/* V113: Manual Discord broadcast button - shows for UP/DOWN signals or locks (not SEARCHING) */}
+        {discordWebhook&&broadcastSignalManual&&(analysis.lockInfo||analysis.prediction.includes('FORMING'))&&!analysis.prediction.includes('SEARCHING')&&(
+          (()=>{
+            const wKey=timeState?.startWindow||timeState?.nextWindow||0;
+            const dir=analysis?.prediction?.includes('UP')?'UP':analysis?.prediction?.includes('DOWN')?'DOWN':'';
+            const lockType=analysis?.lockInfo?'LOCK':'SIG';
+            const key=`${lockType}:${dir}:${wKey}`;
+            const isSent=broadcasted.sent&&broadcasted.key===key;
+            const label=analysis.lockInfo?`Send ${dir} LOCK to Discord`:`Send ${dir} signal to Discord`;
+            return(
+              <button
+                onClick={()=>{
+                  if(isSent)return;
+                  broadcastSignalManual();
+                  setBroadcasted({key,sent:true});
+                }}
+                disabled={isSent}
+                className={'mt-2 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all '+(isSent?'border-emerald-500/30 bg-emerald-500/5 text-emerald-400/60 cursor-default':'border-indigo-500/40 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 active:scale-95')}>
+                {isSent?'✓ Sent to Discord':'📡 '+label}
+              </button>
+            );
+          })()
+        )}
 
         {showFormingProgress&&(
           <div className="mt-2 w-full px-4">
@@ -2383,13 +2420,13 @@ function TaraApp(){
           if(_quality<50){
             // V112: Quality bumped to 50 — no more borderline calls
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
-          } else if(premiumMode&&_quality<75){
+          } else if(premiumMode&&_quality<70){
             // V112 PREMIUM: only fire at A+ quality (≥75)
             taraAdviceRef.current='PREMIUM: WAITING FOR A+ SETUP';
           } else if(premiumMode&&_sess==='US'){
             // V112 PREMIUM: skip US session (your worst at 55% WR)
             taraAdviceRef.current='PREMIUM: SKIPPING US SESSION';
-          } else if(premiumMode&&regime==='RANGE-CHOP'&&_quality<85){
+          } else if(premiumMode&&regime==='RANGE-CHOP'&&_quality<80){
             // V112 PREMIUM: skip RANGE-CHOP unless exceptional (it's the weakest regime)
             taraAdviceRef.current='PREMIUM: SKIPPING WEAK RC';
           } else {
@@ -2422,14 +2459,14 @@ function TaraApp(){
           if(_quality2<50){
             // V112: DOWN quality bumped to 50 too
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
-          } else if(premiumMode&&_quality2<75){
+          } else if(premiumMode&&_quality2<70){
             taraAdviceRef.current='PREMIUM: WAITING FOR A+ SETUP';
           } else if(premiumMode&&_sess==='US'){
             taraAdviceRef.current='PREMIUM: SKIPPING US SESSION';
           } else if(premiumMode&&(regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP')){
             // V112 PREMIUM: never DOWN in SS or HVC (50% and 48% WR — coin flips)
             taraAdviceRef.current='PREMIUM: DOWN BLOCKED IN '+regime;
-          } else if(premiumMode&&regime==='RANGE-CHOP'&&_quality2<85){
+          } else if(premiumMode&&regime==='RANGE-CHOP'&&_quality2<80){
             taraAdviceRef.current='PREMIUM: SKIPPING WEAK RC';
           } else {
           // ── Direction flip guard: if FORMING UP already fired, don't lock DOWN ──
@@ -2557,12 +2594,8 @@ function TaraApp(){
     // ── STAGE 2: LOCK confirmed — broadcast the actionable call ──
     const wins=scorecards[windowType]?.wins||0,losses=scorecards[windowType]?.losses||0;
     const record=`${wins}W-${losses}L-${windowType}`;
-    broadcastToDiscord('LOCK',{
-      dir:lock.dir,price:currentPrice,strike:targetMargin,
-      gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin*10000):0,
-      clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,
-      regime:lastRegimeRef.current,posterior:analysis?.rawProbAbove||0,record
-    });
+    // V113: SUPPRESSED auto-broadcast for LOCK — user must click "Send to Discord"
+    // Sound alert still plays so user knows the lock fired
     playAlert(lock.dir==='UP'?'lock-up':'lock-down');
   },[analysis?.lockInfo?.lockedAt]);
 
@@ -2576,15 +2609,9 @@ function TaraApp(){
     // One SIGNAL broadcast per direction per window — use window start time as key
     const formingKey=`${timeState.startWindow||timeState.nextWindow}`; // 1 broadcast per window total
     if(lastFormingBroadcastRef.current===formingKey)return;
-    // Skip broadcast if quality gate is too low — no misleading weak signals
-    if((qualityGate?.score||0)<40&&(analysis?.rawProbAbove>30&&analysis?.rawProbAbove<70))return;
+    // V113: SUPPRESSED auto-broadcast for SIGNAL/FORMING — user must click "Send to Discord"
+    // Just mark as broadcasted to prevent repeats; actual broadcast is manual
     lastFormingBroadcastRef.current=formingKey;
-    broadcastToDiscord('SIGNAL',{
-      dir,price:currentPrice,strike:targetMargin,
-      gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin*10000):0,
-      clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,
-      regime:lastRegimeRef.current,posterior:analysis?.rawProbAbove||0
-    });
   },[analysis?.prediction]);
 
   // ── WHALE AUTO-BROADCAST ─────────────────────────────────────────────────
@@ -2594,19 +2621,32 @@ function TaraApp(){
   // ── FLOW INTELLIGENCE AUTO-OPEN ─────────────────────────────────────────
   // Auto-opens when whale streak ≥3 and user is in trade — so they don't miss it
   const prevStreakRef=useRef(0);
+  // V113: Track if flow was auto-opened (so we know to auto-close it)
+  const autoOpenedRef=useRef(false);
+  const autoCloseTimerRef=useRef(null);
   useEffect(()=>{
     const fs=flowSignal;
-    // V112: Auto-open earlier — catch concerning activity BEFORE it becomes extreme
-    // Triggers: score crosses 50 (EMERGING) OR streak hits 3+ OR netDelta90s exceeds $300K
+    // Auto-open triggers: score crosses EMERGING (50), STRONG (75), streak≥3, or $300K+ delta
     const prevScore=prevStreakRef.current||0;
-    const justHitEmerging=fs.score>=50&&prevScore<50;        // was 75 — too late
-    const justHitStrong=fs.score>=75&&prevScore<75;          // STRONG signals
-    const streakJustHit=fs.streakCount>=3&&(prevStreakRef.current||0)<3; // was 4 — too late
-    const bigDelta=Math.abs(fs.netDelta90s||0)>=300000;       // $300K net pressure auto-opens
+    const justHitEmerging=fs.score>=50&&prevScore<50;
+    const justHitStrong=fs.score>=75&&prevScore<75;
+    const streakJustHit=fs.streakCount>=3&&(prevStreakRef.current||0)<3;
+    const bigDelta=Math.abs(fs.netDelta90s||0)>=300000;
     prevStreakRef.current=fs.score;
     if(justHitEmerging||justHitStrong||streakJustHit||bigDelta){
       setShowWhaleLog(true);
+      autoOpenedRef.current=true;
+      // V113: Auto-close after 12 seconds — enough time to see the activity but not stay in your face
+      if(autoCloseTimerRef.current)clearTimeout(autoCloseTimerRef.current);
+      autoCloseTimerRef.current=setTimeout(()=>{
+        // Only auto-close if it was auto-opened (don't close manual opens)
+        if(autoOpenedRef.current){
+          setShowWhaleLog(false);
+          autoOpenedRef.current=false;
+        }
+      },12000);
     }
+    return()=>{if(autoCloseTimerRef.current)clearTimeout(autoCloseTimerRef.current);};
   },[flowSignal.score,flowSignal.streakCount,flowSignal.netDelta90s]);
 
   useEffect(()=>{
@@ -2745,6 +2785,31 @@ function TaraApp(){
       taraAdviceRef.current='CLOSED';
       setForceRender(p=>p+1);
     }
+  };
+
+  // V113: Manual Discord broadcast — user clicks OK button to send a signal/lock
+  const lastManualBroadcastRef=useRef({key:'',type:''});
+  const broadcastSignalManual=()=>{
+    if(!analysis)return;
+    const lock=analysis.lockInfo;
+    const isForming=analysis.prediction?.includes('FORMING');
+    const isSearching=analysis.prediction?.includes('SEARCHING');
+    if(isSearching)return; // nothing meaningful to broadcast
+    const dir=analysis.prediction?.includes('UP')?'UP':analysis.prediction?.includes('DOWN')?'DOWN':null;
+    if(!dir)return;
+    const winsW=scorecards[windowType]?.wins||0,lossesW=scorecards[windowType]?.losses||0;
+    const record=`${winsW}W-${lossesW}L-${windowType}`;
+    const gapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin*10000):0;
+    const clock=`${timeState.minsRemaining}m ${timeState.secsRemaining}s`;
+    const wKey=timeState.startWindow||timeState.nextWindow||0;
+    const type=lock?'LOCK':'SIGNAL';
+    const key=`${type}:${dir}:${wKey}`;
+    if(lastManualBroadcastRef.current.key===key)return; // already sent for this window
+    lastManualBroadcastRef.current={key,type};
+    broadcastToDiscord(type,{
+      dir,price:currentPrice,strike:targetMargin,gap:gapBps,clock,
+      regime:lastRegimeRef.current,posterior:analysis?.rawProbAbove||0,record
+    });
   };
 
   const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast`;setChatLog([...log,{role:'tara',text:r}]);},400);};
@@ -3025,7 +3090,7 @@ function TaraApp(){
               </button>
             </div>
 
-            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction}/>
+            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook}/>
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
