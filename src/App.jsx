@@ -50,7 +50,7 @@ const sigmoid=(x,steep=0.035)=>1/(1+Math.exp(-steep*x));
 // Default signal weights — trained on 268-trade dataset
 // 163W-105L=60.8% · UP 65% · DOWN 55.6% · SS 68% · TD 87.5% · EU 69.7%
 // DOWN in SHORT SQUEEZE: 50% — regime-gated suppression active
-const DEFAULT_WEIGHTS={gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13};
+const DEFAULT_WEIGHTS={gap:52.69,momentum:49.99,structure:21.54,flow:58.00,technical:26.71,regime:43.13}; // V112: flow boosted (most predictive), regime up
 
 // Per-regime weight sets — each regime gets its own gradient descent
 // Initialized from global defaults, diverge over time based on what works in each regime
@@ -86,7 +86,9 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // removed
 // Best hours: 4 (100%) and 5 (100%)
 const SEED_TRADES=[
-  // 268 trades (15m) · 163W-105L=60.8% · SS 68% · TD 87.5% · DOWN gate active · V110
+  // V112 BAKED TRAINING: 277 trades · 169W-108L=61.0% · UP 64.7% · DOWN 56.7%
+  // SS DOWN: 50% (6 trades) — gate active. TD DOWN: 93% (15 trades) — strong.
+  // RC: 55% — be cautious. EU best session: 70% WR.
   {id:1776403212237,dir:'UP',posterior:71.0,regime:'RANGE-CHOP',clockAtLock:587,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.83,momentum:0.0,structure:0.0,flow:20.23,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776403812231,dir:'UP',posterior:82.0,regime:'RANGE-CHOP',clockAtLock:887,hour:1,session:'ASIA',windowType:'15m',signals:{gap:35.2,momentum:-5.39,structure:0.0,flow:-17.15,technical:-8.0,regime:0.0},result:'LOSS'},
   {id:1776407423234,dir:'DOWN',posterior:27.6,regime:'RANGE-CHOP',clockAtLock:876,hour:2,session:'ASIA',windowType:'15m',signals:{gap:-0.28,momentum:-2.75,structure:0.0,flow:-20.59,technical:0.0,regime:0.0},result:'LOSS'},
@@ -355,6 +357,15 @@ const SEED_TRADES=[
   {id:1776954032101,dir:'UP',posterior:76.1,regime:'RANGE-CHOP',clockAtLock:851,hour:10,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776969042798,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:866,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776969929050,dir:'UP',posterior:89.2,regime:'SHORT SQUEEZE',clockAtLock:873,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777059203093,dir:'UP',posterior:63.5,regime:'RANGE-CHOP',clockAtLock:697,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777060184567,dir:'DOWN',posterior:14.3,regime:'RANGE-CHOP',clockAtLock:615,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777060911312,dir:'DOWN',posterior:16.2,regime:'RANGE-CHOP',clockAtLock:788,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777061989693,dir:'UP',posterior:86.7,regime:'SHORT SQUEEZE',clockAtLock:610,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777062667638,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:832,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777063544945,dir:'UP',posterior:82.1,regime:'SHORT SQUEEZE',clockAtLock:855,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777064617357,dir:'UP',posterior:85.8,regime:'SHORT SQUEEZE',clockAtLock:682,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777065492127,dir:'DOWN',posterior:16.5,regime:'RANGE-CHOP',clockAtLock:707,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777066453043,dir:'UP',posterior:87.4,regime:'SHORT SQUEEZE',clockAtLock:647,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'}
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
@@ -362,7 +373,7 @@ const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV110',JSON.stri
 const resetToLatestBaseline=()=>{try{
   // V111: Sync to baseline training data (matches across all devices)
   localStorage.setItem('taraTradeLogV110',JSON.stringify(SEED_TRADES));
-  localStorage.setItem('taraScoreV110',JSON.stringify({'15m':{wins:347,losses:231},'5m':{wins:31,losses:25}}));
+  localStorage.setItem('taraScoreV110',JSON.stringify({'15m':{wins:354,losses:254},'5m':{wins:31,losses:25}}));
   localStorage.removeItem('taraWeightsV110');
   Object.keys(localStorage).filter(k=>k.startsWith('taraV110RW_')).forEach(k=>localStorage.removeItem(k));
   return true;
@@ -1777,6 +1788,9 @@ function TaraApp(){
   const[kalshiYesPrice,setKalshiYesPrice]=useState(null); // live YES price from active Kalshi market
   // streakData moved below tradeLog declaration
   const[useLocalTime,setUseLocalTime]=useState(true);
+  // V112: Premium Mode — only A+ setups, ~80% target WR, fewer trades
+  const[premiumMode,setPremiumMode]=useState(()=>{try{return localStorage.getItem('taraPremiumMode')==='true';}catch(e){return false;}});
+  useEffect(()=>{try{localStorage.setItem('taraPremiumMode',String(premiumMode));}catch(e){}},[premiumMode]);
   const[mobileTab,setMobileTab]=useState('signal'); // signal | chart | logs
   const[resolution,setResolution]=useState('1m'); // chart timeframe: 1m | 5m | 15m | 1h
   const[currentPrice,setCurrentPrice]=useState(null);
@@ -1819,7 +1833,7 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:347,losses:231},'5m':{wins:31,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:354,losses:254},'5m':{wins:31,losses:25}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -2073,7 +2087,13 @@ function TaraApp(){
       }
 
       else if(type==='EXIT')embed={
-        title:`${data.result==='WIN'?'CASHOUT':'CUT'}  ${data.action}`,
+        title:(()=>{
+          // V112 fix: don't prepend CASHOUT/CUT if action already contains it (avoids "CUT CUT" or "CASHOUT CASHOUT")
+          const action=String(data.action||'').toUpperCase();
+          const prefix=data.result==='WIN'?'CASHOUT':'CUT';
+          if(action.includes('CASHOUT')||action.includes('CUT')||action.includes('EXIT'))return data.action||prefix;
+          return `${prefix}  ${data.action||''}`;
+        })(),
         color:data.result==='WIN'?3404125:16478549,
         fields:[
           {name:'Price',value:`$${data.price.toFixed(2)}`,inline:true},
@@ -2290,7 +2310,7 @@ function TaraApp(){
       // EU 65%, ASIA 64%, US 59%, OFF-HOURS 55%
       const _sess=getMarketSessions().dominant;
       const _sessThreshAdj=_sess==='EU'?-3:_sess==='ASIA'?-1:_sess==='US'?3:5;
-      const LOCK_THRESHOLD_UP=(is15m?70:68)+_sessThreshAdj;
+      const LOCK_THRESHOLD_UP=(is15m?72:70)+_sessThreshAdj; // V112: raised from 70 to require stronger UP conviction
       const LOCK_THRESHOLD_DN=(is15m?30:32)-_sessThreshAdj;
 
       // ── IMPROVEMENT 2: Regime-gated consecutive requirement ──────────────
@@ -2307,7 +2327,7 @@ function TaraApp(){
       // Very late locks (>820s elapsed in 15m = last 80s) get suppressed
       // Data shows losses lock avg 777s vs wins 744s — very late = higher risk
       const elapsedSeconds=(is15m?900:300)-clockSeconds;
-      const isVeryLateLock=is15m?(elapsedSeconds>820):(elapsedSeconds>260);
+      const isVeryLateLock=is15m?(elapsedSeconds>800):(elapsedSeconds>250); // V112: tighter — losses cluster in last 100s
       // Late lock warning zone (700-820s elapsed) — show indicator, allow but note
       const isLateLockZone=is15m?(elapsedSeconds>700&&elapsedSeconds<=820):(elapsedSeconds>220&&elapsedSeconds<=260);
 
@@ -2324,7 +2344,7 @@ function TaraApp(){
       // Data: DOWN in SHORT SQUEEZE = 50% WR (coin flip), DOWN in HVC = 48.4% WR (below coin flip)
       // Only trust DOWN in TRENDING DOWN (93%) and RANGE-CHOP (51%, still weak)
       // In SHORT SQUEEZE: DOWN requires 2× the normal consecutive samples AND stricter threshold
-      const _downGated=regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP';
+      const _downGated=regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP'||regime==='RANGE-CHOP'; // V112: RC DOWN only 53% — gate it
       const _downTDOnly=regime==='TRENDING DOWN'; // most reliable DOWN regime
       const LOCK_THRESHOLD_DN_EFFECTIVE=_downGated?(is15m?22:20):_downTDOnly?(is15m?28:26):(is15m?30:32)-_sessThreshAdj;
       // Rebalanced: DOWN was too hesitant (+2), UP was firing too fast in weak regimes
@@ -2360,18 +2380,34 @@ function TaraApp(){
           const _sessQ={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[_sess]||57;
           const _qScore=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6))+Math.min(30,(_rWR-50)*0.6)+Math.min(15,(_sessQ-50)*0.6)+(isLateLockZone?-8:0)+(isVeryLateLock?-20:0);
           const _quality=Math.max(0,Math.min(100,_qScore+5));
-          if(_quality<40){
-            // Quality too low — Tara sits out rather than making a weak call
+          if(_quality<50){
+            // V112: Quality bumped to 50 — no more borderline calls
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
+          } else if(premiumMode&&_quality<75){
+            // V112 PREMIUM: only fire at A+ quality (≥75)
+            taraAdviceRef.current='PREMIUM: WAITING FOR A+ SETUP';
+          } else if(premiumMode&&_sess==='US'){
+            // V112 PREMIUM: skip US session (your worst at 55% WR)
+            taraAdviceRef.current='PREMIUM: SKIPPING US SESSION';
+          } else if(premiumMode&&regime==='RANGE-CHOP'&&_quality<85){
+            // V112 PREMIUM: skip RANGE-CHOP unless exceptional (it's the weakest regime)
+            taraAdviceRef.current='PREMIUM: SKIPPING WEAK RC';
           } else {
           // ── Direction flip guard: if FORMING DOWN already fired, don't lock UP ──
           const dirAllowed=!committedDir||committedDir==='UP';
           if(!dirAllowed){
             taraAdviceRef.current='SEARCHING...';
           } else {
-            lockedCallRef.current={dir:'UP',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone};
-            taraAdviceRef.current='UP - LOCKED';
-            biasCountRef.current={UP:0,DOWN:0};
+            // V112: Momentum confirmation — lock only if recent price action agrees
+            const recent=(velocityRef?.current?.v5s||0);
+            const momentumOK=recent>=-0.5; // require non-bearish 5s momentum for UP
+            if(!momentumOK){
+              taraAdviceRef.current='UP - WAITING FOR MOMENTUM';
+            } else {
+              lockedCallRef.current={dir:'UP',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone};
+              taraAdviceRef.current='UP - LOCKED';
+              biasCountRef.current={UP:0,DOWN:0};
+            }
           }
           } // close quality gate else
 
@@ -2383,17 +2419,34 @@ function TaraApp(){
           const _sessQ2={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[_sess]||57;
           const _qScore2=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6))+Math.min(30,(_rWR2-50)*0.6)+Math.min(15,(_sessQ2-50)*0.6)+(isLateLockZone?-8:0)+(isVeryLateLock?-20:0);
           const _quality2=Math.max(0,Math.min(100,_qScore2+5));
-          if(_quality2<40){
+          if(_quality2<50){
+            // V112: DOWN quality bumped to 50 too
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
+          } else if(premiumMode&&_quality2<75){
+            taraAdviceRef.current='PREMIUM: WAITING FOR A+ SETUP';
+          } else if(premiumMode&&_sess==='US'){
+            taraAdviceRef.current='PREMIUM: SKIPPING US SESSION';
+          } else if(premiumMode&&(regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP')){
+            // V112 PREMIUM: never DOWN in SS or HVC (50% and 48% WR — coin flips)
+            taraAdviceRef.current='PREMIUM: DOWN BLOCKED IN '+regime;
+          } else if(premiumMode&&regime==='RANGE-CHOP'&&_quality2<85){
+            taraAdviceRef.current='PREMIUM: SKIPPING WEAK RC';
           } else {
           // ── Direction flip guard: if FORMING UP already fired, don't lock DOWN ──
           const dirAllowed=!committedDir||committedDir==='DOWN';
           if(!dirAllowed){
             taraAdviceRef.current='SEARCHING...';
           } else {
-            lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone};
-            taraAdviceRef.current='DOWN - LOCKED';
-            biasCountRef.current={UP:0,DOWN:0};
+            // V112: Momentum confirmation — lock DOWN only if not bullish on short-term
+            const recent=(velocityRef?.current?.v5s||0);
+            const momentumOK=recent<=0.5; // require non-bullish 5s momentum for DOWN
+            if(!momentumOK){
+              taraAdviceRef.current='DOWN - WAITING FOR MOMENTUM';
+            } else {
+              lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone};
+              taraAdviceRef.current='DOWN - LOCKED';
+              biasCountRef.current={UP:0,DOWN:0};
+            }
           }
           } // close quality gate else
 
@@ -2439,6 +2492,7 @@ function TaraApp(){
       else if(activePrediction.includes('UP (FORMING)'))textColor='text-emerald-600';
       else if(activePrediction.includes('DOWN (FORMING)'))textColor='text-rose-600';
       else if(activePrediction==='LOCK RELEASED')textColor='text-amber-400';
+      else if(activePrediction.startsWith('PREMIUM:'))textColor='text-amber-300'; // V112: Premium filtering active
 
       const isUP=activePrediction.includes('UP'),isDN=activePrediction.includes('DOWN');
       const currentOdds=(!isUP&&!isDN)?50:(isUP?posterior:(100-posterior));
@@ -2542,20 +2596,18 @@ function TaraApp(){
   const prevStreakRef=useRef(0);
   useEffect(()=>{
     const fs=flowSignal;
-    // Auto-open when: score hits STRONG (≥75) OR streak ≥4 — regardless of trade state
-    // Closes automatically only if user dismisses it; stays open if still strong
-    const prevScore=prevStreakRef.current;
-    const justHitStrong=fs.score>=75&&prevScore<75;
-    const streakJustHit=fs.streakCount>=4&&(prevStreakRef.current||0)<4;
+    // V112: Auto-open earlier — catch concerning activity BEFORE it becomes extreme
+    // Triggers: score crosses 50 (EMERGING) OR streak hits 3+ OR netDelta90s exceeds $300K
+    const prevScore=prevStreakRef.current||0;
+    const justHitEmerging=fs.score>=50&&prevScore<50;        // was 75 — too late
+    const justHitStrong=fs.score>=75&&prevScore<75;          // STRONG signals
+    const streakJustHit=fs.streakCount>=3&&(prevStreakRef.current||0)<3; // was 4 — too late
+    const bigDelta=Math.abs(fs.netDelta90s||0)>=300000;       // $300K net pressure auto-opens
     prevStreakRef.current=fs.score;
-    if(justHitStrong||streakJustHit){
+    if(justHitEmerging||justHitStrong||streakJustHit||bigDelta){
       setShowWhaleLog(true);
     }
-    // Auto-close when flow returns to NOISE and user hasn't manually interacted
-    if(fs.score<25&&fs.streakCount<2){
-      // Don't force-close — let user dismiss manually. Just dim the button.
-    }
-  },[flowSignal.score,flowSignal.streakCount]);
+  },[flowSignal.score,flowSignal.streakCount,flowSignal.netDelta90s]);
 
   useEffect(()=>{
     if(!showWhaleAlerts||!discordWebhook)return;
@@ -2752,6 +2804,10 @@ function TaraApp(){
             {/* Always visible */}
             <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
             <button onClick={()=>setShowGuide(true)} className={'p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors'} title="How Tara Works">?</button>
+            {/* V112: Premium Mode toggle — only fires A+ setups */}
+            <button onClick={()=>setPremiumMode(!premiumMode)} className={'px-2 py-1 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all '+(premiumMode?'bg-amber-500/20 border-amber-500/50 text-amber-300':'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-amber-400')} title={premiumMode?'Premium Mode ON — only A+ quality setups (≥75) · MTF aligned · skips US session · skips weak RC':'Premium Mode OFF — all valid locks fire'}>
+              {premiumMode?'★ PREMIUM':'PREMIUM'}
+            </button>
             {/* Hidden on mobile — accessible via mobile tab nav or sm+ */}
             <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="hidden sm:flex"/>
             <button onClick={()=>setShowSettings(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors'}><IC.Link className="w-3.5 h-3.5"/></button>
@@ -3030,7 +3086,7 @@ function TaraApp(){
               {/* V111: Sync to baseline training data */}
               <div className={'mb-3 p-3 rounded-lg bg-[#111312] border border-[#E8E9E4]/10'}>
                 <div className={'text-[11px] text-[#E8E9E4]/70 mb-2 leading-relaxed'}>
-                  <strong className={'text-emerald-400'}>Sync to Latest Training</strong> · Refreshes Tara to the latest baked baseline (347W-231L · 268 trades · regime memory). Use when switching devices.
+                  <strong className={'text-emerald-400'}>Sync to Latest Training</strong> · Refreshes Tara to the latest baked baseline (354W-254L · 277 trades · regime memory). Use when switching devices.
                 </div>
                 <button onClick={()=>{
                   if(window.confirm('Reset Tara to the latest baseline training data? Adaptive weights and trade history reset.')){
