@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 // ═══════════════════════════════════════
 // ICONS
 // ═══════════════════════════════════════
-const _NS='http:'+'/'+'/www.w3.org/2000/svg';
+const _SVG_NS='http:'+'/'+'/www.w3.org/2000/svg';
 const IC={
   Clock:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('polyline',{points:'12 6 12 12 16 14'})),
   Crosshair:({className})=>React.createElement('svg',{xmlns:_SVG_NS,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:'2',strokeLinecap:'round',strokeLinejoin:'round',className},React.createElement('circle',{cx:'12',cy:'12',r:'10'}),React.createElement('line',{x1:'22',y1:'12',x2:'18',y2:'12'}),React.createElement('line',{x1:'6',y1:'12',x2:'2',y2:'12'}),React.createElement('line',{x1:'12',y1:'6',x2:'12',y2:'2'}),React.createElement('line',{x1:'12',y1:'22',x2:'12',y2:'18'})),
