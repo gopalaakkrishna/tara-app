@@ -1498,7 +1498,7 @@ function ProjectionsCard({analysis,mobileTab}){
             {tabs.find(t=>t.id===activeTimeframe)?.label} forecast · From ${currentPrice.toLocaleString(undefined,{maximumFractionDigits:0})}
           </div>
           {/* Timeline list - all future timestamps */}
-          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1">
             {proj.timeline.map((point,i)=>{
               const pUp=point.price>=currentPrice;
               const pCls=pUp?'text-emerald-400':'text-rose-400';
@@ -1608,7 +1608,7 @@ function NewsFeedCard(){
         <span className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold'}>News Feed</span>
         <span className={'text-[9px] text-[#E8E9E4]/30 italic'}>{loading?'loading...':'auto-refresh 90s'}</span>
       </div>
-      <div className="max-h-48 overflow-y-auto space-y-1.5">
+      <div className="max-h-40 overflow-y-auto space-y-1.5">
         {loading?(
           <div className={'text-[10px] text-[#E8E9E4]/30 italic'}>Loading market news...</div>
         ):news.length===0?(
@@ -1649,11 +1649,11 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
   const ls=bloomberg?.longShortRatio||1;
 
   return(
-    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col gap-3 '+(mobileTab!=='logs'?'hidden md:flex':'')}>
-      {/* Engine Log */}
-      <div className="shrink-0">
-        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2'}>Engine Log</div>
-        <div className="max-h-40 overflow-y-auto space-y-1 text-[10px] font-mono">
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col gap-3 md:col-span-2 lg:col-span-1 '+(mobileTab!=='logs'?'hidden md:flex':'')}>
+      {/* Engine Log - flexible, fills available space */}
+      <div className="flex-1 min-h-[120px] flex flex-col">
+        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2 shrink-0'}>Engine Log</div>
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-1 text-[10px] font-mono">
           {reasoning.length===0?(
             <div className={'text-[#E8E9E4]/30 italic'}>Waiting for signals...</div>
           ):reasoning.slice(0,20).map((r,i)=>{
@@ -1692,7 +1692,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
         </div>
         {/* Recent whales */}
         <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1'}>Recent Whales ($100K+)</div>
-        <div className="max-h-32 overflow-y-auto space-y-0.5 text-[10px] font-mono">
+        <div className="max-h-28 overflow-y-auto space-y-0.5 text-[10px] font-mono">
           {whaleLog.length===0?(
             <div className={'text-[#E8E9E4]/30 italic'}>No prints yet</div>
           ):whaleLog.slice(0,8).map((w,i)=>{
@@ -1731,7 +1731,7 @@ function ChartBottomCard({mobileTab,resolution,setResolution}){
           })}
         </div>
       </div>
-      <div className="flex-1 min-h-[350px] sm:min-h-[420px]">
+      <div className="flex-1 min-h-[280px] sm:min-h-[360px] lg:min-h-[440px]">
         <TradingViewChart resolution={resolution} onResolutionChange={setResolution}/>
       </div>
     </div>
@@ -2937,7 +2937,7 @@ function TaraApp(){
         <MobileTabBar mobileTab={mobileTab} setMobileTab={setMobileTab}/>
 
         {/* ── MIDDLE ROW ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 shrink-0">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 shrink-0 auto-rows-fr">
           
           {/* ── PREDICTION CARD ── */}
           <div className={`bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative ${mobileTab!=='signal'?'hidden md:flex':''}`}>
