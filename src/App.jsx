@@ -1278,7 +1278,7 @@ function PredictionContent(props){
     strikeConfirmed,strikeMode,targetMargin,
     isLoading,analysis,currentPrice,
     qualityGate,userPosition,timeState,streakData,
-    handleManualSync,getMarketSessions
+    handleManualSync,getMarketSessions,executeAction
   }=props;
 
   // ── Mode 1: Strike entry pending ──
@@ -1415,13 +1415,13 @@ function PredictionContent(props){
       </div>
 
       {/* ── V111: TARA ADVISOR PANEL ── */}
-      <TaraAdvisorPanel advisor={analysis?.advisor}/>
+      <TaraAdvisorPanel advisor={analysis?.advisor} executeAction={executeAction}/>
     </div>
   );
 }
 
-// ── V111: TaraAdvisorPanel — shows current advisor recommendation ──
-function TaraAdvisorPanel({advisor}){
+// ── V111: TaraAdvisorPanel — shows current advisor recommendation with clickable action ──
+function TaraAdvisorPanel({advisor,executeAction}){
   if(!advisor||!advisor.label||advisor.label==='CONNECTING...')return null;
   const colorMap={
     emerald:'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
@@ -1431,6 +1431,7 @@ function TaraAdvisorPanel({advisor}){
   };
   const cls=colorMap[advisor.color]||colorMap.zinc;
   const animate=advisor.animate?'animate-pulse':'';
+  const canClick=advisor.hasAction&&advisor.actionLabel&&advisor.actionTarget&&executeAction;
   return(
     <div className={'mt-2 p-3 rounded-lg border '+cls+' '+animate}>
       <div className="flex items-center gap-1.5 mb-1.5">
@@ -1441,11 +1442,17 @@ function TaraAdvisorPanel({advisor}){
       {advisor.reason&&(
         <div className={'text-[11px] leading-snug opacity-80'}>{advisor.reason}</div>
       )}
-      {advisor.hasAction&&advisor.actionLabel&&(
-        <div className={'mt-2 text-[10px] uppercase tracking-wider font-bold opacity-90 px-2 py-1 rounded border border-current inline-block'}>
+      {canClick?(
+        <button
+          onClick={()=>executeAction(advisor.actionTarget,advisor.actionLabel)}
+          className={'mt-2 text-[10px] uppercase tracking-wider font-bold px-3 py-1.5 rounded border border-current hover:bg-current/10 active:scale-95 transition-all cursor-pointer'}>
+          → {advisor.actionLabel}
+        </button>
+      ):advisor.hasAction&&advisor.actionLabel?(
+        <div className={'mt-2 text-[10px] uppercase tracking-wider font-bold opacity-70 px-2 py-1 rounded border border-current inline-block'}>
           → {advisor.actionLabel}
         </div>
-      )}
+      ):null}
     </div>
   );
 }
@@ -2962,7 +2969,7 @@ function TaraApp(){
               </button>
             </div>
 
-            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions}/>
+            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction}/>
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
