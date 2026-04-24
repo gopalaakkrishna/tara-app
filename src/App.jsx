@@ -1470,7 +1470,7 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:347,losses:230},'5m':{wins:31,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:347,losses:231},'5m':{wins:31,losses:25}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -2171,8 +2171,10 @@ function TaraApp(){
     if(!isForming)return;
     const dir=analysis.prediction.includes('UP')?'UP':'DOWN';
     // One SIGNAL broadcast per direction per window — use window start time as key
-    const formingKey=`${dir}-${timeState.startWindow||timeState.nextWindow}`;
+    const formingKey=`${timeState.startWindow||timeState.nextWindow}`; // 1 broadcast per window total
     if(lastFormingBroadcastRef.current===formingKey)return;
+    // Skip broadcast if quality gate is too low — no misleading weak signals
+    if((qualityGate?.score||0)<40&&(analysis?.rawProbAbove>30&&analysis?.rawProbAbove<70))return;
     lastFormingBroadcastRef.current=formingKey;
     broadcastToDiscord('SIGNAL',{
       dir,price:currentPrice,strike:targetMargin,
