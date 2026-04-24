@@ -1413,6 +1413,39 @@ function PredictionContent(props){
         <span className={'text-xs uppercase tracking-wide text-[#E8E9E4]/30 text-center'}>-30% Stop Guard Sync</span>
         <SyncButtons userPosition={userPosition} handleManualSync={handleManualSync}/>
       </div>
+
+      {/* ── V111: TARA ADVISOR PANEL ── */}
+      <TaraAdvisorPanel advisor={analysis?.advisor}/>
+    </div>
+  );
+}
+
+// ── V111: TaraAdvisorPanel — shows current advisor recommendation ──
+function TaraAdvisorPanel({advisor}){
+  if(!advisor||!advisor.label||advisor.label==='CONNECTING...')return null;
+  const colorMap={
+    emerald:'border-emerald-500/40 bg-emerald-500/10 text-emerald-400',
+    rose:   'border-rose-500/40 bg-rose-500/10 text-rose-400',
+    amber:  'border-amber-500/40 bg-amber-500/10 text-amber-400',
+    zinc:   'border-zinc-500/30 bg-zinc-500/10 text-zinc-400',
+  };
+  const cls=colorMap[advisor.color]||colorMap.zinc;
+  const animate=advisor.animate?'animate-pulse':'';
+  return(
+    <div className={'mt-2 p-3 rounded-lg border '+cls+' '+animate}>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <IC.Bell className="w-3.5 h-3.5"/>
+        <span className={'text-[10px] uppercase tracking-widest font-bold opacity-70'}>Tara Advisor</span>
+      </div>
+      <div className="text-sm font-serif font-bold leading-tight mb-1">{advisor.label}</div>
+      {advisor.reason&&(
+        <div className={'text-[11px] leading-snug opacity-80'}>{advisor.reason}</div>
+      )}
+      {advisor.hasAction&&advisor.actionLabel&&(
+        <div className={'mt-2 text-[10px] uppercase tracking-wider font-bold opacity-90 px-2 py-1 rounded border border-current inline-block'}>
+          → {advisor.actionLabel}
+        </div>
+      )}
     </div>
   );
 }
@@ -1448,20 +1481,48 @@ function ProjectionsCard({analysis,mobileTab}){
           })}
         </div>
       </div>
-      {/* Projection display */}
-      {!proj?(
-        <div className={'flex-1 flex items-center justify-center text-[#E8E9E4]/30 text-xs italic'}>Computing...</div>
+      {/* Timeline display - shows future timestamps + predicted prices */}
+      {!proj||!proj.timeline||proj.timeline.length===0?(
+        <div className={'flex-1 flex items-center justify-center text-[#E8E9E4]/30 text-xs italic'}>Computing forecasts...</div>
       ):(
-        <div className="flex-1 flex flex-col justify-center items-center gap-3 text-center py-4">
-          <div className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 font-bold'}>Target in {tabs.find(t=>t.id===activeTimeframe)?.label}</div>
-          <div className="text-3xl sm:text-4xl font-serif font-bold text-white">${targetPrice.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
-          <div className="flex items-center gap-2">
-            <span className={arrowCls+' text-2xl'}>{arrow}</span>
-            <span className={arrowCls+' text-base font-bold'}>{conf.toFixed(0)}% confidence</span>
+        <div className="flex-1 flex flex-col gap-2 overflow-hidden">
+          {/* Header showing window context */}
+          <div className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 font-bold text-center pb-1 border-b border-[#E8E9E4]/10'}>
+            {tabs.find(t=>t.id===activeTimeframe)?.label} forecast · From ${currentPrice.toLocaleString(undefined,{maximumFractionDigits:0})}
           </div>
-          {currentPrice>0&&(
-            <div className={'text-[10px] text-[#E8E9E4]/40'}>From ${currentPrice.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
-          )}
+          {/* Timeline list - all future timestamps */}
+          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
+            {proj.timeline.map((point,i)=>{
+              const pUp=point.price>=currentPrice;
+              const pCls=pUp?'text-emerald-400':'text-rose-400';
+              const pArrow=pUp?'▲':'▼';
+              const deltaBps=currentPrice>0?((point.price-currentPrice)/currentPrice)*10000:0;
+              // Confidence decays with time - each step further out is less certain
+              const stepConf=Math.max(15,conf-(i*4));
+              // Visual confidence bar
+              const barWidth=Math.min(100,Math.max(15,stepConf));
+              const barCls=pUp?'bg-emerald-500/40':'bg-rose-500/40';
+              return(
+                <div key={i} className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={'text-[11px] font-mono font-bold text-[#E8E9E4]/70 shrink-0'}>{point.timeStr}</span>
+                      <span className={pCls+' text-xs shrink-0'}>{pArrow}</span>
+                      <span className="text-sm font-mono font-bold text-white truncate">${Number(point.price).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={pCls+' text-[10px] font-bold'}>{deltaBps>=0?'+':''}{deltaBps.toFixed(0)}bps</span>
+                      <span className={'text-[9px] text-[#E8E9E4]/40'}>{stepConf.toFixed(0)}%</span>
+                    </div>
+                  </div>
+                  {/* Confidence bar */}
+                  <div className="h-0.5 bg-[#0E100F] rounded-full overflow-hidden mt-1">
+                    <div className={'h-full '+barCls} style={{width:barWidth+'%'}}/>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
       {/* Quick view of all 3 timeframes */}
