@@ -359,6 +359,14 @@ const SEED_TRADES=[
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
 const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV110',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
+const resetToLatestBaseline=()=>{try{
+  // V111: Sync to baseline training data (matches across all devices)
+  localStorage.setItem('taraTradeLogV110',JSON.stringify(SEED_TRADES));
+  localStorage.setItem('taraScoreV110',JSON.stringify({'15m':{wins:347,losses:231},'5m':{wins:31,losses:25}}));
+  localStorage.removeItem('taraWeightsV110');
+  Object.keys(localStorage).filter(k=>k.startsWith('taraV110RW_')).forEach(k=>localStorage.removeItem(k));
+  return true;
+}catch(e){return false;}};
 
 // ── GRADIENT DESCENT WEIGHT UPDATE ──
 // After each trade, credit/blame each signal proportionally to its contribution
@@ -1410,80 +1418,156 @@ function PredictionContent(props){
 }
 
 
-// ── V111: TradingViewChartCard with resolution selector ──
-function TradingViewChartCard({mobileTab,resolution,setResolution}){
-  return(
-    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
-      <div className="flex justify-between items-center mb-2 shrink-0">
-        <span className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold'}>Live Chart</span>
-        <div className="flex gap-1">
-          {['1m','5m','15m','1h'].map(r=>(
-            <button key={r} onClick={()=>setResolution(r)}
-              className={'px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wide '+(resolution===r?'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70 border border-transparent')}>
-              {r}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="flex-1 min-h-[300px]">
-        <TradingViewChart resolution={resolution} onResolutionChange={setResolution}/>
-      </div>
-    </div>
-  );
-}
+// ══════════════════════════════════════════════════
+// V111 — IMPROVED LAYOUT COMPONENTS
+// ══════════════════════════════════════════════════
 
-// ── V111: EngineLogCard - shows reasoning + projections ──
-function EngineLogCard({analysis,mobileTab}){
-  const reasoning=analysis?.reasoning||[];
+// ── V111: ProjectionsCard with clickable timeframe tabs ──
+function ProjectionsCard({analysis,mobileTab}){
+  const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
+  const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
+  const currentPrice=analysis?.currentPrice||proj?.price||0;
+  const isUp=proj?(proj.price>=currentPrice):false;
+  const arrowCls=isUp?'text-emerald-400':'text-rose-400';
+  const arrow=isUp?'▲':'▼';
+  const targetPrice=proj?proj.price:0;
+  const conf=proj?Number(proj.conf||0):0;
+  const tabs=[{id:'5m',label:'5 MIN'},{id:'15m',label:'15 MIN'},{id:'1h',label:'1 HOUR'}];
+
   return(
-    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col gap-3 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
-      {/* Projections section */}
-      <div className="shrink-0">
-        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2'}>Projections</div>
-        <div className="grid grid-cols-3 gap-2">
-          {projections.map(p=>{
-            const isUp=p.price>=(analysis?.currentPrice||p.price);
-            const arrowCls=isUp?'text-emerald-400':'text-rose-400';
-            const arrow=isUp?'▲':'▼';
-            return(
-              <div key={p.id} className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
-                <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-0.5'}>{p.time}</div>
-                <div className="text-sm font-mono font-bold text-white">${Number(p.price||0).toFixed(0)}</div>
-                <div className="flex items-center gap-1 mt-0.5">
-                  <span className={arrowCls+' text-xs'}>{arrow}</span>
-                  <span className={'text-[10px] text-[#E8E9E4]/50'}>{Number(p.conf||0).toFixed(0)}%</span>
-                </div>
-              </div>
-            );
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col '+(mobileTab!=='projections'?'hidden md:flex':'')}>
+      <div className="flex items-center justify-between mb-3 shrink-0">
+        <span className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold'}>Projections</span>
+        {/* Tab nav */}
+        <div className="flex gap-1">
+          {tabs.map(t=>{
+            const active=activeTimeframe===t.id;
+            const cls='px-2 py-1 text-[10px] font-bold rounded uppercase tracking-wide transition-all '+(active?'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70 border border-transparent');
+            return(<button key={t.id} onClick={()=>setActiveTimeframe(t.id)} className={cls}>{t.label}</button>);
           })}
         </div>
       </div>
-      {/* Engine log section */}
-      <div className="flex-1 min-h-0 flex flex-col">
-        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2 shrink-0'}>Engine Log</div>
-        <div className="flex-1 overflow-y-auto space-y-1 text-[10px] font-mono">
-          {reasoning.length===0?(
-            <div className={'text-[#E8E9E4]/30 italic'}>Waiting for signals...</div>
-          ):reasoning.slice(0,30).map((r,i)=>{
-            const tag=(r.match(/^\[(\w+)\]/)||[])[1]||'';
-            const tagCls={GAP:'text-amber-400',MOMENTUM:'text-indigo-400',STRUCTURE:'text-purple-400',FLOW:'text-emerald-400',TECHNICAL:'text-cyan-400',REGIME:'text-rose-400',CAP:'text-orange-400',MEMORY:'text-pink-400',CAL:'text-blue-400'}[tag]||'text-[#E8E9E4]/40';
-            const text=r.replace(/^\[(\w+)\]\s*/,'');
-            return(
-              <div key={i} className="flex gap-1.5">
-                {tag&&<span className={tagCls+' font-bold shrink-0'}>[{tag}]</span>}
-                <span className={'text-[#E8E9E4]/60'}>{text}</span>
-              </div>
-            );
-          })}
+      {/* Projection display */}
+      {!proj?(
+        <div className={'flex-1 flex items-center justify-center text-[#E8E9E4]/30 text-xs italic'}>Computing...</div>
+      ):(
+        <div className="flex-1 flex flex-col justify-center items-center gap-3 text-center py-4">
+          <div className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 font-bold'}>Target in {tabs.find(t=>t.id===activeTimeframe)?.label}</div>
+          <div className="text-3xl sm:text-4xl font-serif font-bold text-white">${targetPrice.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+          <div className="flex items-center gap-2">
+            <span className={arrowCls+' text-2xl'}>{arrow}</span>
+            <span className={arrowCls+' text-base font-bold'}>{conf.toFixed(0)}% confidence</span>
+          </div>
+          {currentPrice>0&&(
+            <div className={'text-[10px] text-[#E8E9E4]/40'}>From ${currentPrice.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+          )}
         </div>
+      )}
+      {/* Quick view of all 3 timeframes */}
+      <div className="grid grid-cols-3 gap-2 mt-3 shrink-0 border-t border-[#E8E9E4]/10 pt-3">
+        {projections.map(p=>{
+          const pUp=p.price>=currentPrice;
+          const pCls=pUp?'text-emerald-400':'text-rose-400';
+          const pArrow=pUp?'▲':'▼';
+          const isActive=p.id===activeTimeframe;
+          return(
+            <button key={p.id} onClick={()=>setActiveTimeframe(p.id)}
+              className={'p-1.5 rounded-lg border text-left transition-all '+(isActive?'bg-[#111312] border-indigo-500/30':'border-transparent hover:bg-[#111312]/50')}>
+              <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold'}>{p.time}</div>
+              <div className="text-xs font-mono font-bold text-white">${Number(p.price||0).toFixed(0)}</div>
+              <div className="flex items-center gap-1">
+                <span className={pCls+' text-[10px]'}>{pArrow}</span>
+                <span className={'text-[9px] text-[#E8E9E4]/40'}>{Number(p.conf||0).toFixed(0)}%</span>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// ── V111: LiveFeedsCard - whale tape + OI + funding ──
-function LiveFeedsCard({tapeRef,whaleLog,bloomberg,currentPrice}){
+// ── V111: NewsFeedCard - external events affecting BTC price ──
+function NewsFeedCard(){
+  const[news,setNews]=React.useState([]);
+  const[loading,setLoading]=React.useState(true);
+  React.useEffect(()=>{
+    const fetchNews=async()=>{
+      try{
+        // CryptoCompare news API - free, CORS-friendly, returns BTC-relevant news
+        const r=await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=BTC,Trading,Regulation');
+        const d=await r.json();
+        if(d&&d.Data){
+          // Sort by published time, take top items
+          const items=d.Data.slice(0,15).map(n=>({
+            title:n.title,
+            source:n.source_info?.name||n.source||'News',
+            url:n.url,
+            time:n.published_on*1000,
+            categories:(n.categories||'').split('|').filter(Boolean)
+          }));
+          setNews(items);
+        }
+        setLoading(false);
+      }catch(e){
+        setLoading(false);
+      }
+    };
+    fetchNews();
+    const iv=setInterval(fetchNews,90000); // refresh every 90s
+    return()=>clearInterval(iv);
+  },[]);
+
+  const formatAge=(ts)=>{
+    const s=Math.floor((Date.now()-ts)/1000);
+    if(s<60)return s+'s ago';
+    if(s<3600)return Math.floor(s/60)+'m ago';
+    if(s<86400)return Math.floor(s/3600)+'h ago';
+    return Math.floor(s/86400)+'d ago';
+  };
+
+  // Detect potentially impactful keywords for highlighting
+  const isHot=(title)=>{
+    const hot=['trump','biden','sec','regulation','crash','surge','etf','approve','hack','exploit','liquidat','squeeze','rally','dump','breaking'];
+    const lower=title.toLowerCase();
+    return hot.some(kw=>lower.includes(kw));
+  };
+
+  return(
+    <div className="shrink-0">
+      <div className={'flex items-center justify-between mb-2'}>
+        <span className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold'}>News Feed</span>
+        <span className={'text-[9px] text-[#E8E9E4]/30 italic'}>{loading?'loading...':'auto-refresh 90s'}</span>
+      </div>
+      <div className="max-h-48 overflow-y-auto space-y-1.5">
+        {loading?(
+          <div className={'text-[10px] text-[#E8E9E4]/30 italic'}>Loading market news...</div>
+        ):news.length===0?(
+          <div className={'text-[10px] text-[#E8E9E4]/30 italic'}>No news available</div>
+        ):news.map((n,i)=>{
+          const hot=isHot(n.title);
+          const cls=hot?'p-1.5 rounded bg-amber-500/10 border border-amber-500/20':'p-1.5 rounded hover:bg-[#111312]/50 border border-transparent';
+          return(
+            <a key={i} href={n.url} target="_blank" rel="noopener noreferrer" className={'block '+cls}>
+              <div className={'text-[10px] leading-tight '+(hot?'text-amber-300 font-semibold':'text-[#E8E9E4]/70')}>
+                {hot&&'🔥 '}{n.title.slice(0,90)}{n.title.length>90?'...':''}
+              </div>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className={'text-[9px] text-[#E8E9E4]/40 uppercase'}>{n.source}</span>
+                <span className={'text-[9px] text-[#E8E9E4]/30'}>· {formatAge(n.time)}</span>
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── V111: RightPanel - Engine Log + Live Feeds + News (col 3) ──
+function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}){
+  const reasoning=analysis?.reasoning||[];
   const tape=tapeRef?.current||{};
   const cb=tape.coinbase||{buys:0,sells:0};
   const bf=tape.binanceFutures||{buys:0,sells:0};
@@ -1495,44 +1579,51 @@ function LiveFeedsCard({tapeRef,whaleLog,bloomberg,currentPrice}){
   const oi=bloomberg?.oiChange5m||0;
   const fr=(bloomberg?.fundingRate||0)*100;
   const ls=bloomberg?.longShortRatio||1;
+
   return(
-    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md hidden lg:block'}>
-      <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-3'}>Live Feeds</div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {/* Buy/Sell flow */}
-        <div className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
-          <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1'}>Buy / Sell Flow</div>
-          <div className="flex items-center gap-2">
-            <span className="text-emerald-400 text-sm font-bold">{buyPct.toFixed(0)}%</span>
-            <span className={'text-[#E8E9E4]/30 text-xs'}>buys</span>
-          </div>
-          <div className="h-1 bg-[#0E100F] rounded-full overflow-hidden mt-1">
-            <div className="h-full bg-emerald-500" style={{width:buyPct+'%'}}/>
-          </div>
-        </div>
-        {/* OI Change */}
-        <div className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
-          <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1'}>OI Change 5m</div>
-          <div className={'text-sm font-bold '+(oi>=0?'text-emerald-400':'text-rose-400')}>
-            {oi>=0?'+':''}{oi.toFixed(2)}%
-          </div>
-        </div>
-        {/* Funding */}
-        <div className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
-          <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1'}>Funding Rate</div>
-          <div className={'text-sm font-bold '+(fr>=0?'text-emerald-400':'text-rose-400')}>
-            {fr>=0?'+':''}{fr.toFixed(4)}%
-          </div>
-        </div>
-        {/* L/S Ratio */}
-        <div className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
-          <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1'}>L/S Ratio</div>
-          <div className={'text-sm font-bold '+(ls>=1?'text-emerald-400':'text-rose-400')}>{ls.toFixed(2)}</div>
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col gap-3 '+(mobileTab!=='logs'?'hidden md:flex':'')}>
+      {/* Engine Log */}
+      <div className="shrink-0">
+        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2'}>Engine Log</div>
+        <div className="max-h-40 overflow-y-auto space-y-1 text-[10px] font-mono">
+          {reasoning.length===0?(
+            <div className={'text-[#E8E9E4]/30 italic'}>Waiting for signals...</div>
+          ):reasoning.slice(0,20).map((r,i)=>{
+            const tag=(r.match(/^\[(\w+)\]/)||[])[1]||'';
+            const tagCls={GAP:'text-amber-400',MOMENTUM:'text-indigo-400',STRUCTURE:'text-purple-400',FLOW:'text-emerald-400',TECHNICAL:'text-cyan-400',REGIME:'text-rose-400',CAP:'text-orange-400',MEMORY:'text-pink-400',CAL:'text-blue-400',TIME:'text-yellow-400',ATR:'text-teal-400'}[tag]||'text-[#E8E9E4]/40';
+            const text=r.replace(/^\[(\w+)\]\s*/,'');
+            return(
+              <div key={i} className="flex gap-1.5">
+                {tag&&<span className={tagCls+' font-bold shrink-0'}>[{tag}]</span>}
+                <span className={'text-[#E8E9E4]/60 break-all'}>{text}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
-      {/* Recent whales */}
-      <div className="mt-3">
-        <div className={'text-[10px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1.5'}>Recent Whales ($100K+)</div>
+      {/* Live Feeds metrics */}
+      <div className="shrink-0 border-t border-[#E8E9E4]/10 pt-3">
+        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2'}>Live Feeds</div>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <div className={'p-1.5 rounded bg-[#111312]'}>
+            <div className={'text-[9px] uppercase text-[#E8E9E4]/40 font-bold'}>Buy Flow</div>
+            <div className="text-emerald-400 text-xs font-bold">{buyPct.toFixed(0)}%</div>
+          </div>
+          <div className={'p-1.5 rounded bg-[#111312]'}>
+            <div className={'text-[9px] uppercase text-[#E8E9E4]/40 font-bold'}>OI 5m</div>
+            <div className={'text-xs font-bold '+(oi>=0?'text-emerald-400':'text-rose-400')}>{oi>=0?'+':''}{oi.toFixed(2)}%</div>
+          </div>
+          <div className={'p-1.5 rounded bg-[#111312]'}>
+            <div className={'text-[9px] uppercase text-[#E8E9E4]/40 font-bold'}>Funding</div>
+            <div className={'text-xs font-bold '+(fr>=0?'text-emerald-400':'text-rose-400')}>{fr>=0?'+':''}{fr.toFixed(4)}%</div>
+          </div>
+          <div className={'p-1.5 rounded bg-[#111312]'}>
+            <div className={'text-[9px] uppercase text-[#E8E9E4]/40 font-bold'}>L/S</div>
+            <div className={'text-xs font-bold '+(ls>=1?'text-emerald-400':'text-rose-400')}>{ls.toFixed(2)}</div>
+          </div>
+        </div>
+        {/* Recent whales */}
+        <div className={'text-[9px] uppercase tracking-wide text-[#E8E9E4]/40 font-bold mb-1'}>Recent Whales ($100K+)</div>
         <div className="max-h-32 overflow-y-auto space-y-0.5 text-[10px] font-mono">
           {whaleLog.length===0?(
             <div className={'text-[#E8E9E4]/30 italic'}>No prints yet</div>
@@ -1541,32 +1632,59 @@ function LiveFeedsCard({tapeRef,whaleLog,bloomberg,currentPrice}){
             const t=new Date(w.time);
             const ts=t.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
             return(
-              <div key={i} className="flex justify-between gap-2">
-                <span className={'text-[#E8E9E4]/40'}>{ts}</span>
-                <span className={'text-[#E8E9E4]/60'}>{w.src}</span>
-                <span className={sideCls+' font-bold'}>{w.side}</span>
-                <span className="text-white">${(w.usd/1000).toFixed(0)}K</span>
-                <span className={'text-[#E8E9E4]/40'}>@${w.price.toFixed(0)}</span>
+              <div key={i} className="flex justify-between gap-1.5">
+                <span className={'text-[#E8E9E4]/40 shrink-0'}>{ts}</span>
+                <span className={sideCls+' font-bold shrink-0'}>{w.side}</span>
+                <span className="text-white shrink-0">${(w.usd/1000).toFixed(0)}K</span>
               </div>
             );
           })}
         </div>
       </div>
+      {/* News Feed */}
+      <div className="border-t border-[#E8E9E4]/10 pt-3">
+        <NewsFeedCard/>
+      </div>
     </div>
   );
 }
 
-// ── V111: MobileTabBar - signal/chart/logs tab nav ──
-function MobileTabBar({mobileTab,setMobileTab}){
-  const tabs=[{id:'signal',label:'SIGNAL'},{id:'chart',label:'CHART'},{id:'logs',label:'LOGS'}];
+// ── V111: ChartBottomCard - TradingView at bottom, full width ──
+function ChartBottomCard({mobileTab,resolution,setResolution}){
   return(
-    <div className="lg:hidden flex gap-1 mb-2 shrink-0">
-      {tabs.map(t=>(
-        <button key={t.id} onClick={()=>setMobileTab(t.id)}
-          className={'flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(mobileTab===t.id?'bg-indigo-500/15 text-indigo-300 border-indigo-500/40':'text-[#E8E9E4]/40 border-[#E8E9E4]/10')}>
-          {t.label}
-        </button>
-      ))}
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden md:flex':'')}>
+      <div className="flex justify-between items-center mb-2 shrink-0">
+        <span className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold'}>Live Chart</span>
+        <div className="flex gap-1">
+          {['1m','5m','15m','1h'].map(r=>{
+            const active=resolution===r;
+            const cls='px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wide '+(active?'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70 border border-transparent');
+            return(<button key={r} onClick={()=>setResolution(r)} className={cls}>{r}</button>);
+          })}
+        </div>
+      </div>
+      <div className="flex-1 min-h-[350px] sm:min-h-[420px]">
+        <TradingViewChart resolution={resolution} onResolutionChange={setResolution}/>
+      </div>
+    </div>
+  );
+}
+
+// ── V111: MobileTabBar - 4 tabs: signal/projections/logs/chart ──
+function MobileTabBar({mobileTab,setMobileTab}){
+  const tabs=[
+    {id:'signal',label:'SIGNAL'},
+    {id:'projections',label:'TARGETS'},
+    {id:'logs',label:'LOGS'},
+    {id:'chart',label:'CHART'},
+  ];
+  return(
+    <div className="md:hidden flex gap-1 mb-2 shrink-0">
+      {tabs.map(t=>{
+        const active=mobileTab===t.id;
+        const cls='flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'bg-indigo-500/15 text-indigo-300 border-indigo-500/40':'text-[#E8E9E4]/40 border-[#E8E9E4]/10');
+        return(<button key={t.id} onClick={()=>setMobileTab(t.id)} className={cls}>{t.label}</button>);
+      })}
     </div>
   );
 }
@@ -2533,7 +2651,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V110
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V111
             </span>
           </div>
 
@@ -2751,10 +2869,10 @@ function TaraApp(){
         <MobileTabBar mobileTab={mobileTab} setMobileTab={setMobileTab}/>
 
         {/* ── MIDDLE ROW ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 shrink-0">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 shrink-0">
           
           {/* ── PREDICTION CARD ── */}
-          <div className={`bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
+          <div className={`bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative ${mobileTab!=='signal'?'hidden md:flex':''}`}>
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-transparent opacity-30 rounded-t-xl"></div>
             <div className="flex justify-between items-center mb-3 shrink-0">
               <div onClick={()=>setUseLocalTime(!useLocalTime)} className={'flex items-center gap-1.5 bg-[#111312] border border-[#E8E9E4]/10 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide cursor-pointer hover:border-indigo-500/30 transition-colors'}>
@@ -2786,15 +2904,15 @@ function TaraApp(){
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions}/>
           </div>
 
-          {/* ── V111: TRADINGVIEW CHART CARD (col 2) ── */}
-          <TradingViewChartCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution}/>
+          {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab}/>
 
-          {/* ── V111: ENGINE LOG + PROJECTIONS CARD (col 3) ── */}
-          <EngineLogCard analysis={analysis} mobileTab={mobileTab}/>
+          {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
+          <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab}/>
         </div>
 
-        {/* ── V111: LIVE FEEDS CARD ── */}
-        <LiveFeedsCard tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice}/>
+        {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
+        <ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution}/>
 
       {/* ── FLOW INTELLIGENCE PANEL ── */}
       <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState}/>
@@ -2839,6 +2957,23 @@ function TaraApp(){
                   setDiscordStatusMsg('Test sent ✓');
                   setTimeout(()=>setDiscordStatusMsg(''),3000);
                 }} className={'px-4 py-2 border border-indigo-500/30 text-indigo-400 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-indigo-500/10 transition-colors'}>Test</button>
+              </div>
+
+              {/* V111: Sync to baseline training data */}
+              <div className={'mb-3 p-3 rounded-lg bg-[#111312] border border-[#E8E9E4]/10'}>
+                <div className={'text-[11px] text-[#E8E9E4]/70 mb-2 leading-relaxed'}>
+                  <strong className={'text-emerald-400'}>Sync to Latest Training</strong> · Refreshes Tara to the latest baked baseline (347W-231L · 268 trades · regime memory). Use when switching devices.
+                </div>
+                <button onClick={()=>{
+                  if(window.confirm('Reset Tara to the latest baseline training data? Adaptive weights and trade history reset.')){
+                    if(resetToLatestBaseline()){
+                      setDiscordStatusMsg('Synced to baseline. Reloading...');
+                      setTimeout(()=>window.location.reload(),1200);
+                    }
+                  }
+                }} className={'w-full px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-emerald-500/20'}>
+                  Sync to Latest Baseline
+                </button>
               </div>
 
               {discordStatusMsg&&<div className={'mb-3 text-xs text-center text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg py-2'}>{discordStatusMsg}</div>}
