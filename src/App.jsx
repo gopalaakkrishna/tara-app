@@ -1042,6 +1042,34 @@ const computeV99Posterior=(params)=>{
   else if(_velScore<28)velocityRegime='NORMAL';
   else if(_velScore<55)velocityRegime='FAST';
   else velocityRegime='EXTREME';
+
+  // ── V116: TRAJECTORY FORECAST ────────────────────────────────────────────
+  // Project where price will be at window-end using kinematics: x(t) = x₀ + v·t + ½a·t²
+  // Then convert to "implied posterior" — direction Tara expects price to land
+  const _v5sNum=velocityRef?.current?.v5s||0;     // $/sec recent
+  const _accelNum=velocityRef?.current?.accel||0; // $/sec² (v5s - v15s diff)
+  const _secsLeft=Math.max(0,(is15m?900:300)-(clockSeconds||0));
+  // Dampen far-out projections (uncertainty grows quadratically with time)
+  // Use sqrt scaling to reflect that velocity persistence decays (mean-reversion)
+  const _decayedTime=Math.sqrt(_secsLeft); // effective projection time
+  const _projectedDrift=(_v5sNum*_decayedTime)+(_accelNum*_decayedTime*_decayedTime*0.4);
+  const _projectedPrice=currentPrice+_projectedDrift;
+  const _projectedGapBps=targetMargin>0?((_projectedPrice-targetMargin)/targetMargin)*10000:0;
+  // If projection points strongly toward a direction relative to strike, boost confidence early
+  let trajectoryAdj=0;
+  if(targetMargin>0&&_secsLeft>60&&Math.abs(_projectedGapBps)>8){
+    // Projected to land >8bps above strike → UP bias (capped at +12)
+    if(_projectedGapBps>0)trajectoryAdj=Math.min(12,_projectedGapBps*0.4);
+    else trajectoryAdj=Math.max(-12,_projectedGapBps*0.4);
+    reasoning.push(`[TRAJ] Projected end @ $${_projectedPrice.toFixed(0)} (${_projectedGapBps>0?'+':''}${_projectedGapBps.toFixed(0)}bps to strike)`);
+  }
+  // Also: pure trajectory without strike (for early-window calls when strike not set yet)
+  if(targetMargin<=0&&Math.abs(_v5sNum)>0.3){
+    // No strike yet — use raw velocity sign as directional hint
+    const _trajHint=Math.min(8,Math.abs(_v5sNum)*5)*Math.sign(_v5sNum);
+    trajectoryAdj+=_trajHint;
+    reasoning.push(`[TRAJ-EARLY] Velocity ${_v5sNum.toFixed(2)}$/s — early ${_v5sNum>0?'UP':'DOWN'} hint`);
+  }
   // Scaling factors used downstream — multipliers for thresholds, sample counts, etc
   const velocityScalars={
     SLOW:    {samples:1.4, threshTighten:6, momentumTol:0.3, lockHold:1.3, decayRate:0.85},
@@ -1232,6 +1260,8 @@ const computeV99Posterior=(params)=>{
   const mem=regimeMemory?regimeMemory[regime]:null;
   if(mem&&(mem.wins+mem.losses)>=3){const wr=mem.wins/(mem.wins+mem.losses);if(wr<0.45){upThreshold+=6;downThreshold-=6;reasoning.push(`[MEMORY] Low WR (${(wr*100).toFixed(0)}%) in ${regime} — tightening`);}else if(wr>0.65){upThreshold-=4;downThreshold+=4;reasoning.push(`[MEMORY] High WR (${(wr*100).toFixed(0)}%) in ${regime} — loosening`);}}
 
+  // V116: Apply forward-looking trajectory adjustment
+  totalScore+=trajectoryAdj;
   // Convert to posterior
   const rawPosterior=50+totalScore*0.95;
   let posterior=Math.max(1,Math.min(99,rawPosterior));
@@ -1273,7 +1303,7 @@ const computeV99Posterior=(params)=>{
   // Rug pull check
   const isRugPull=tickSlope<-5&&aggrFlow<-0.6;
 
-  return{posterior:finalPosterior,rawPosterior:posterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj};
+  return{posterior:finalPosterior,rawPosterior:posterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj};
 };
 
 // ═══════════════════════════════════════
@@ -1600,6 +1630,16 @@ function PredictionContent(props){
           <span className={'text-xs text-[#E8E9E4]/40 uppercase tracking-[0.2em] font-bold'}>Prediction</span>
           {analysis.regime&&(
             <span className={'text-xs text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded'}>{analysis.regime}</span>
+          )}
+          {/* V116: Trajectory direction hint */}
+          {Math.abs(analysis.trajectoryAdj||0)>=5&&(
+            (()=>{
+              const adj=analysis.trajectoryAdj;
+              const isUp=adj>0;
+              return(<span className={'text-xs uppercase tracking-wide px-2 py-1 rounded border font-bold '+(isUp?'text-emerald-300 bg-emerald-500/10 border-emerald-500/30':'text-rose-300 bg-rose-500/10 border-rose-500/30')} title={`Forward trajectory bias: ${isUp?'UP':'DOWN'} ${Math.abs(adj).toFixed(1)} pts. Tara is reading where price is heading, not just where it is.`}>
+                {isUp?'↗':'↘'} TRAJ {isUp?'+':''}{adj.toFixed(0)}
+              </span>);
+            })()
           )}
           {analysis.velocityRegime&&analysis.velocityRegime!=='NORMAL'&&(
             (()=>{
@@ -2215,7 +2255,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V115 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V116 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -2287,7 +2327,7 @@ function TaraApp(){
     try{const s=localStorage.getItem('taraV110Score');if(s){const p=JSON.parse(s);if(p?.['15m']?.wins!=null)setScorecards(p);}const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V115'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V116'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -2382,7 +2422,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V115  |  signal'},
+        footer:{text:'Tara V116  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -2398,7 +2438,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.record||'—',inline:true},
         ],
-        footer:{text:'Tara V115  |  lock'},
+        footer:{text:'Tara V116  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -2415,7 +2455,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V115  |  close'},
+          footer:{text:'Tara V116  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -2436,7 +2476,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V115  |  exit'},
+        footer:{text:'Tara V116  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -2465,12 +2505,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V115  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara V116  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V115',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V116',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -2489,7 +2529,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V115 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V116 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -2658,7 +2698,10 @@ function TaraApp(){
       // V113: Velocity-adaptive consecutive samples — slow markets need more confirmation, fast need less
       const _velSampleAdj=velocityScalars?.samples||1.0;
       const _baseConsec=(is15m?3:2)+_regimeConsecAdj+_sessConsecAdj;
-      const CONSECUTIVE_NEEDED=Math.max(1,Math.round(_baseConsec*_velSampleAdj));
+      // V116: Strong trajectory? Lock faster. Reduces sample requirement when direction is clear.
+      const _trajStrength=Math.abs(eng.trajectoryAdj||0);
+      const _trajShortcut=_trajStrength>=8?-1:0; // strong trajectory → 1 fewer sample
+      const CONSECUTIVE_NEEDED=Math.max(1,Math.round(_baseConsec*_velSampleAdj)+_trajShortcut);
 
       // ── IMPROVEMENT 4: Late lock penalty ─────────────────────────────────
       // Very late locks (>820s elapsed in 15m = last 80s) get suppressed
@@ -2738,15 +2781,15 @@ function TaraApp(){
           } else if(_quality<50){
             // V112: Quality bumped to 50 — no more borderline calls
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
-          } else if(premiumMode&&_quality<70){
-            // V112 PREMIUM: only fire at A+ quality (≥75)
-            taraAdviceRef.current='PREMIUM: WAITING FOR A+ SETUP';
+          } else if(premiumMode&&_quality<65&&Math.abs(eng.trajectoryAdj||0)<6){
+            // V116 PREMIUM: 65+ quality OR strong trajectory bias
+            taraAdviceRef.current='PREMIUM: WAITING FOR SETUP';
           } else if(premiumMode&&_sess==='US'){
             // V112 PREMIUM: skip US session (your worst at 55% WR)
             taraAdviceRef.current='PREMIUM: SKIPPING US SESSION';
-          } else if(premiumMode&&regime==='RANGE-CHOP'&&_quality<80){
-            // V112 PREMIUM: skip RANGE-CHOP unless exceptional (it's the weakest regime)
-            taraAdviceRef.current='PREMIUM: SKIPPING WEAK RC';
+          } else if(premiumMode&&regime==='RANGE-CHOP'&&_quality<70&&Math.abs(eng.trajectoryAdj||0)<8){
+            // V116: in RC, allow lock if trajectory is strong (>8 bias)
+            taraAdviceRef.current='PREMIUM: WEAK RC — NO TRAJECTORY';
           } else {
           // ── Direction flip guard: if FORMING DOWN already fired, don't lock UP ──
           const dirAllowed=!committedDir||committedDir==='UP';
@@ -2761,10 +2804,13 @@ function TaraApp(){
             if(premiumMode&&_mtfOpposedUp){
               taraAdviceRef.current='MTF CONFLICT — '+_otherTFup+' is DOWN';
             } else {
-            // V113: Momentum confirmation with velocity-adaptive tolerance
+            // V113+V116: Momentum confirmation with velocity-adaptive tolerance
+            // If trajectory strongly favors UP (trajectoryAdj > 5), be more permissive
             const recent=(velocityRef?.current?.v5s||0);
             const _momTol=velocityScalars?.momentumTol||0.5;
-            const momentumOK=recent>=-_momTol;
+            const _trajFavorsUp=(eng.trajectoryAdj||0)>5;
+            const _effectiveMomTol=_trajFavorsUp?_momTol*2.5:_momTol; // wider tolerance when trajectory agrees
+            const momentumOK=recent>=-_effectiveMomTol;
             if(!momentumOK){
               taraAdviceRef.current='UP - WAITING FOR MOMENTUM';
             } else {
@@ -2794,15 +2840,15 @@ function TaraApp(){
           } else if(_quality2<50){
             // V112: DOWN quality bumped to 50 too
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
-          } else if(premiumMode&&_quality2<70){
-            taraAdviceRef.current='PREMIUM: WAITING FOR A+ SETUP';
+          } else if(premiumMode&&_quality2<65&&Math.abs(eng.trajectoryAdj||0)<6){
+            taraAdviceRef.current='PREMIUM: WAITING FOR SETUP';
           } else if(premiumMode&&_sess==='US'){
             taraAdviceRef.current='PREMIUM: SKIPPING US SESSION';
           } else if(premiumMode&&(regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP')){
             // V112 PREMIUM: never DOWN in SS or HVC (50% and 48% WR — coin flips)
             taraAdviceRef.current='PREMIUM: DOWN BLOCKED IN '+regime;
-          } else if(premiumMode&&regime==='RANGE-CHOP'&&_quality2<80){
-            taraAdviceRef.current='PREMIUM: SKIPPING WEAK RC';
+          } else if(premiumMode&&regime==='RANGE-CHOP'&&_quality2<70&&Math.abs(eng.trajectoryAdj||0)<8){
+            taraAdviceRef.current='PREMIUM: WEAK RC — NO TRAJECTORY';
           } else {
           // ── Direction flip guard: if FORMING UP already fired, don't lock DOWN ──
           const dirAllowed=!committedDir||committedDir==='DOWN';
@@ -2817,10 +2863,12 @@ function TaraApp(){
             if(premiumMode&&_mtfOpposedDn){
               taraAdviceRef.current='MTF CONFLICT — '+_otherTFdn+' is UP';
             } else {
-            // V113: Momentum confirmation with velocity-adaptive tolerance
+            // V113+V116: Trajectory-aware momentum confirmation
             const recent=(velocityRef?.current?.v5s||0);
             const _momTol=velocityScalars?.momentumTol||0.5;
-            const momentumOK=recent<=_momTol;
+            const _trajFavorsDn=(eng.trajectoryAdj||0)<-5;
+            const _effectiveMomTol=_trajFavorsDn?_momTol*2.5:_momTol;
+            const momentumOK=recent<=_effectiveMomTol;
             if(!momentumOK){
               taraAdviceRef.current='DOWN - WAITING FOR MOMENTUM';
             } else {
@@ -2901,7 +2949,7 @@ function TaraApp(){
       const _thisLock=lockedCallRef.current;
       const mtfAligned=_thisLock&&_otherLock&&_otherLock.dir===_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
       const mtfOpposed=_thisLock&&_otherLock&&_otherLock.dir!==_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
-      return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),velocityRegime:String(velocityRegime||'NORMAL'),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor:_advisorResult,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
+      return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),velocityRegime:String(velocityRegime||'NORMAL'),trajectoryAdj:Number(eng.trajectoryAdj||0),projectedPrice:Number(eng.projectedPrice||0),projectedGapBps:Number(eng.projectedGapBps||0),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor:_advisorResult,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
         lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null,
         bullCount:Number(bullCount),bearCount:Number(bearCount)};
     }catch(err){return{prediction:'ERROR',rawProbAbove:50,projections:[],reasoning:[err.stack||String(err)],textColor:'text-rose-500',advisor:{label:'MATH CRASH',reason:String(err),color:'rose',animate:false,hasAction:false},regime:'ERROR'};}
@@ -3161,7 +3209,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V115...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V116...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -3181,7 +3229,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V115
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V116
             </span>
           </div>
 
@@ -3496,7 +3544,7 @@ function TaraApp(){
               {/* V111: Sync to baseline training data */}
               <div className={'mb-3 p-3 rounded-lg bg-[#111312] border border-[#E8E9E4]/10'}>
                 <div className={'text-[11px] text-[#E8E9E4]/70 mb-2 leading-relaxed'}>
-                  <strong className={'text-emerald-400'}>Sync to Latest Training</strong> · Refreshes Tara to the latest baked baseline (354W-235L · 277 trades · regime memory · V115). Use when switching devices.
+                  <strong className={'text-emerald-400'}>Sync to Latest Training</strong> · Refreshes Tara to the latest baked baseline (354W-235L · 277 trades · regime memory · V116). Use when switching devices.
                 </div>
                 <button onClick={()=>{
                   if(window.confirm('Reset Tara to the latest baseline training data? Adaptive weights and trade history reset.')){
@@ -3572,7 +3620,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V115</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V116</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -3929,7 +3977,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V115 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V116 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -4068,7 +4116,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V115 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V116 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
