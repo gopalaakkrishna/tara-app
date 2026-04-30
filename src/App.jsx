@@ -1190,6 +1190,75 @@ const useGlobalTape=()=>{
   return{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal};
 };
 
+// V130: HPotter Future Grand Trend — multi-timeframe forecast
+// Translated from PineScript v5 (Apr 2022 by HPotter)
+// 
+// Algorithm:
+//   t[i] = 0.9 * t[i-length] + 0.1 * src[i] + (0.9*t[i-length] - 0.9*t[i-length*2])
+//   fcast = t[current] + (t[current] - t[current-forecast])  (linear extrapolation)
+//
+// Returns: { forecastDir: 'UP'|'DOWN'|'NEUTRAL', forecastBps: signed bps, valid: bool }
+// Returns valid=false if insufficient history
+const computeFGT=(candles,length=70,forecast=100)=>{
+  // Need at least length*2 + forecast bars for a meaningful computation
+  // Plus current bar. Be lenient: scale length down if needed.
+  if(!candles||candles.length<20)return{forecastDir:'NEUTRAL',forecastBps:0,valid:false,reason:'insufficient'};
+  // Adapt parameters to available data
+  // PineScript: oldest is highest index, newest is index 0 in our convention (Tara's liveHistory[0] is newest)
+  // We'll work with reversed array: oldest first
+  const bars=candles.slice().reverse(); // bars[0] = oldest, bars[N-1] = newest
+  const n=bars.length;
+  // Auto-scale length and forecast to available history
+  const _length=Math.min(length,Math.floor(n/3));
+  const _forecast=Math.min(forecast,Math.floor(n/2));
+  if(_length<5||_forecast<5)return{forecastDir:'NEUTRAL',forecastBps:0,valid:false,reason:'too-short'};
+  // Build t series
+  const t=new Array(n);
+  for(let i=0;i<n;i++){
+    const src=bars[i].c;
+    if(i<_length){
+      t[i]=src; // initialize with src (PineScript nz fallback)
+      continue;
+    }
+    const tLag=t[i-_length];
+    // Compute change in (0.9 * t[i-length]) over `length` bars
+    let changeTerm=0;
+    if(i>=_length*2){
+      const tLag2=t[i-_length*2];
+      changeTerm=0.9*tLag-0.9*tLag2;
+    }
+    t[i]=0.9*tLag+0.1*src+changeTerm;
+  }
+  // Forecast = t[last] + (t[last] - t[last - forecast])
+  const tLast=t[n-1];
+  const tBack=t[Math.max(0,n-1-_forecast)];
+  const fcast=tLast+(tLast-tBack); // linear extrapolation forward
+  const currentPrice=bars[n-1].c;
+  const forecastBps=((fcast-currentPrice)/currentPrice)*10000;
+  let forecastDir='NEUTRAL';
+  if(forecastBps>10)forecastDir='UP';
+  else if(forecastBps<-10)forecastDir='DOWN';
+  return{forecastDir,forecastBps:Math.round(forecastBps),fcast:Math.round(fcast),valid:true,length:_length,forecast:_forecast};
+};
+
+// V130: Aggregate finer-grained candles into a coarser timeframe
+// e.g. aggregate 5m candles into 15m by combining 3 at a time
+const aggregateCandles=(candles,factor)=>{
+  if(!candles||factor<=1)return candles;
+  // candles[0] = newest. Group from newest: every `factor` consecutive bars become one aggregated bar
+  const out=[];
+  for(let i=0;i+factor<=candles.length;i+=factor){
+    const group=candles.slice(i,i+factor);
+    const o=group[group.length-1].o; // first bar of period (oldest)
+    const c=group[0].c; // last bar of period (newest)
+    const h=Math.max(...group.map(b=>b.h));
+    const l=Math.min(...group.map(b=>b.l));
+    const v=group.reduce((s,b)=>s+(b.v||0),0);
+    out.push({time:group[0].time,o,h,l,c,v});
+  }
+  return out;
+};
+
 // V130: Volume Profile — find where most trading happened recently
 // VPOC (Volume Point of Control) acts as support/resistance.
 // If we're locked UP and a strong VPOC sits between price and strike → it's resistance.
@@ -1234,6 +1303,49 @@ const computeVolumeProfile=(history)=>{
 // V130: useDepthFlash — high-frequency order book polling at 2.5s
 // Bloomberg's 8s interval misses fast wall changes during volatility.
 // This hook only fetches the depth endpoint, which is the time-critical one.
+// V130: Fetch candles at 1m, 3m, 5m, 15m for HPotter FGT analysis
+// Returns { c1m: [...], c3m: [...], c5m: [...], c15m: [...] }
+const useMultiTFCandles=()=>{
+  const[tfCandles,setTfCandles]=useState({c1m:[],c3m:[],c5m:[],c15m:[]});
+  useEffect(()=>{
+    if(typeof window==='undefined')return;
+    let mounted=true;
+    const fetchInterval=async(label,gran)=>{
+      try{
+        // Coinbase first (more permissive CORS)
+        const r=await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`,{cache:'no-store'});
+        if(!r.ok)throw new Error('CB '+r.status);
+        const d=await r.json();
+        if(!Array.isArray(d))throw new Error('bad shape');
+        return d.slice(0,300).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
+      }catch(e){
+        // Fallback Binance
+        try{
+          const ivMap={60:'1m',180:'3m',300:'5m',900:'15m'};
+          const iv=ivMap[gran]||'1m';
+          const r2=await fetch(`https://api.binance.com/api/v3/uiKlines?symbol=BTCUSDT&interval=${iv}&limit=300`);
+          const d2=await r2.json();
+          if(!Array.isArray(d2))throw new Error('binance bad');
+          return d2.map(d=>({time:d[0]/1000,o:parseFloat(d[1]),h:parseFloat(d[2]),l:parseFloat(d[3]),c:parseFloat(d[4]),v:parseFloat(d[5])})).reverse();
+        }catch(e2){return[];}
+      }
+    };
+    const fetchAll=async()=>{
+      const[c1m,c3m,c5m,c15m]=await Promise.all([
+        fetchInterval('1m',60),
+        fetchInterval('3m',180),
+        fetchInterval('5m',300),
+        fetchInterval('15m',900),
+      ]);
+      if(mounted)setTfCandles({c1m,c3m,c5m,c15m});
+    };
+    fetchAll();
+    const iv=setInterval(fetchAll,30000); // refresh every 30s
+    return()=>{mounted=false;clearInterval(iv);};
+  },[]);
+  return tfCandles;
+};
+
 const useDepthFlash=()=>{
   const[depth,setDepth]=useState({obImbalanceLive:0,liqLongWallLive:0,liqShortWallLive:0,liqLongUSDLive:0,liqShortUSDLive:0,depthUpdateAge:0,depthLastUpdate:0});
   useEffect(()=>{
@@ -1484,7 +1596,7 @@ const computeAdvisor=(params)=>{
 // V99 PREDICTION ENGINE (Weighted Composite + Adaptive)
 // ═══════════════════════════════════════
 const computeV99Posterior=(params)=>{
-  const{currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,calibration,windowOpenPrice,depthFlash}=params;
+  const{currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,calibration,windowOpenPrice,depthFlash,tfCandles}=params;
   // Use regime-specific weights when current regime is identifiable, else use global adaptive weights
   const _regime=params.currentRegime||'RANGE-CHOP';
   const _regimeW=(params.regimeWeights&&params.regimeWeights[_regime])||null;
@@ -1571,6 +1683,55 @@ const computeV99Posterior=(params)=>{
       trajectoryDirHint='DOWN';
     }
     reasoning.push(`[TRAJ] Projected end @ $${_projectedPrice.toFixed(0)} (${_projectedGapBps>0?'+':''}${_projectedGapBps.toFixed(0)}bps to strike) → favors ${trajectoryDirHint}`);
+  }
+  // V130: HPotter Future Grand Trend on 1m/3m/5m/15m
+  // Uses the actual PineScript algorithm (length=70, forecast=100 by default)
+  // Each timeframe forecasts where price will be 100 bars ahead
+  // 4/4 align direction = strong, 3/4 = mild
+  let mtfAlignment=0; // -4 to +4
+  let mtfBonus=0;
+  let fgtResults={};
+  if(tfCandles&&targetMargin>0&&_secsLeft>30){
+    const tfList=[
+      {label:'1m',data:tfCandles.c1m,length:30,forecast:30},   // 1m bars: ~30min lookback, 30min forecast
+      {label:'3m',data:tfCandles.c3m,length:30,forecast:30},   // 3m bars: ~90min lookback, 90min forecast
+      {label:'5m',data:tfCandles.c5m,length:40,forecast:40},   // 5m bars: ~3hr lookback, 3hr forecast
+      {label:'15m',data:tfCandles.c15m,length:50,forecast:30}, // 15m bars: ~12hr lookback, 7hr forecast
+    ];
+    const tfSigns=[];
+    const tfArrows=[];
+    tfList.forEach(tf=>{
+      const fgt=computeFGT(tf.data,tf.length,tf.forecast);
+      fgtResults[tf.label]=fgt;
+      if(!fgt.valid){tfSigns.push(0);tfArrows.push('?');return;}
+      // Vote: forecast direction
+      if(fgt.forecastDir==='UP'){tfSigns.push(1);tfArrows.push('↑');}
+      else if(fgt.forecastDir==='DOWN'){tfSigns.push(-1);tfArrows.push('↓');}
+      else{tfSigns.push(0);tfArrows.push('→');}
+    });
+    mtfAlignment=tfSigns.reduce((s,v)=>s+v,0);
+    const absAlign=Math.abs(mtfAlignment);
+    // Score bonus: 4/4 = +12, 3/4 = +6, 2/4 mixed = no bonus
+    if(absAlign===4)mtfBonus=Math.sign(mtfAlignment)*12;
+    else if(absAlign===3)mtfBonus=Math.sign(mtfAlignment)*6;
+    if(mtfBonus!==0){
+      totalScore+=mtfBonus;
+      const dirLabel=mtfBonus>0?'UP':'DOWN';
+      reasoning.push(`[FGT] ${absAlign}/4 timeframes forecast ${dirLabel} (1m${tfArrows[0]} 3m${tfArrows[1]} 5m${tfArrows[2]} 15m${tfArrows[3]}) → ${mtfBonus>0?'+':''}${mtfBonus}`);
+      // Detailed forecast values
+      const detail=tfList.map((tf,i)=>{
+        const f=fgtResults[tf.label];
+        if(!f.valid)return `${tf.label}:?`;
+        return `${tf.label}:${f.forecastBps>0?'+':''}${f.forecastBps}bps`;
+      }).join(' ');
+      reasoning.push(`[FGT-DETAIL] ${detail}`);
+    } else if(absAlign<=1){
+      reasoning.push(`[FGT] Mixed across timeframes (${tfArrows.join(' ')}) — no consensus`);
+    } else {
+      reasoning.push(`[FGT] Weak signal (${absAlign}/4 ${tfArrows.join(' ')})`);
+    }
+  } else {
+    reasoning.push(`[FGT] Loading multi-timeframe data...`);
   }
   // V130: Trajectory STICKINESS — when multiple forward time points agree, raise floor on signal
   // Generate forward forecast at +1m, +3m, +5m, +10m and check unanimity
@@ -1893,7 +2054,7 @@ const computeV99Posterior=(params)=>{
   // Rug pull check
   const isRugPull=tickSlope<-5&&aggrFlow<-0.6;
 
-  return{posterior:finalPosterior,rawPosterior:posterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,windowExhaustionPenalty};
+  return{posterior:finalPosterior,rawPosterior:posterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty};
 };
 
 // ═══════════════════════════════════════
@@ -2238,6 +2399,31 @@ function PredictionContent(props){
               const isUp=adj>0;
               return(<span className={'text-xs uppercase tracking-wide px-2 py-1 rounded border font-bold '+(isUp?'text-emerald-300 bg-emerald-500/10 border-emerald-500/30':'text-rose-300 bg-rose-500/10 border-rose-500/30')} title={`Forward trajectory bias: ${isUp?'UP':'DOWN'} ${Math.abs(adj).toFixed(1)} pts. Tara is reading where price is heading, not just where it is.`}>
                 {isUp?'↗':'↘'} TRAJ {isUp?'+':''}{adj.toFixed(0)}
+              </span>);
+            })()
+          )}
+          {/* V130: HPotter FGT multi-timeframe badge */}
+          {analysis.mtfAlignment!==undefined&&Math.abs(analysis.mtfAlignment)>=2&&(
+            (()=>{
+              const mtf=analysis.mtfAlignment;
+              const count=Math.abs(mtf);
+              const isUp=mtf>0;
+              const fgt=analysis.fgtResults||{};
+              const arrows=['1m','3m','5m','15m'].map(tf=>{
+                const f=fgt[tf];
+                if(!f||!f.valid)return '?';
+                if(f.forecastDir==='UP')return '↑';
+                if(f.forecastDir==='DOWN')return '↓';
+                return '→';
+              }).join('');
+              const cls=isUp?'text-emerald-200 bg-emerald-500/15 border-emerald-500/40':'text-rose-200 bg-rose-500/15 border-rose-500/40';
+              const tooltipDetails=['1m','3m','5m','15m'].map(tf=>{
+                const f=fgt[tf];
+                if(!f||!f.valid)return `${tf}: loading`;
+                return `${tf}: ${f.forecastBps>0?'+':''}${f.forecastBps}bps → $${f.fcast}`;
+              }).join('\n');
+              return(<span className={'text-xs uppercase tracking-wide px-2 py-1 rounded border font-bold '+cls} title={`HPotter Future Grand Trend forecast across timeframes:\n${tooltipDetails}\n\n${count}/4 align ${isUp?'UP':'DOWN'}`}>
+                FGT {count}/4 {arrows}
               </span>);
             })()
           )}
@@ -3226,6 +3412,7 @@ function TaraApp(){
   const velocityRef=useVelocity(tickHistoryRef,currentPrice,targetMargin);
   const bloomberg=useBloomberg();
   const depthFlash=useDepthFlash(); // V130: 2.5s order book polling
+  const tfCandles=useMultiTFCandles(); // V130: HPotter FGT multi-timeframe data
   const{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal}=useGlobalTape();
   const marketSessions=useMemo(()=>getMarketSessions(),[timeState.currentHour]);
   const[klines,setKlines]=useState([]);
@@ -3639,7 +3826,7 @@ function TaraApp(){
       const isEarlyWindow=is15m?((intervalSeconds-clockSeconds)<300):((intervalSeconds-clockSeconds)<90);
 
       // V110 weighted posterior (adaptive)
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash});
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
@@ -3760,11 +3947,31 @@ function TaraApp(){
         }
         const committedDir=windowSignalDirRef.current; // null until first FORMING signal
 
+        // V130: DELIBERATION GATE — block locks during initial analysis phase
+        // Tara needs minimum read time on market before committing to lock
+        const _delibMin_lock=is15m?15:8;
+        const _delibMax_lock=is15m?45:20;
+        const _upConsLock=Object.values(eng.rawSignalScores||{}).filter(s=>s>3).length;
+        const _dnConsLock=Object.values(eng.rawSignalScores||{}).filter(s=>s<-3).length;
+        // V130: early-clear ALSO requires MTF agreement — no fast lock against trend
+        const _mtfAgreesUp=eng.mtfAlignment===undefined||eng.mtfAlignment>=2;
+        const _mtfAgreesDn=eng.mtfAlignment===undefined||eng.mtfAlignment<=-2;
+        const _earlyClearLock=(posterior>=70&&_upConsLock>=4&&_mtfAgreesUp)||(posterior<=30&&_dnConsLock>=4&&_mtfAgreesDn);
+        const _earlyClearMildLock=(posterior>=62&&_upConsLock>=3&&_mtfAgreesUp)||(posterior<=38&&_dnConsLock>=3&&_mtfAgreesDn);
+        const _lockBlocked=clockSeconds<_delibMin_lock||(clockSeconds<_delibMax_lock&&!_earlyClearLock&&!_earlyClearMildLock);
+        if(_lockBlocked){
+          // Inside deliberation: show DELIBERATING text but DO NOT lock
+          const _delibTimeLeftL=Math.max(0,(_earlyClearLock||_earlyClearMildLock?_delibMin_lock:_delibMax_lock)-clockSeconds);
+          taraAdviceRef.current=`DELIBERATING — analyzing market [${_delibTimeLeftL}s left]`;
+          reasoning.push(`[DELIB] Lock blocked — ${_delibTimeLeftL}s left in deliberation phase`);
+
         // V130: Late lock allowed if trajectory is very strong (legitimate late breakouts)
-        if(isVeryLateLock&&_trajStrength<10){
+        } else if(isVeryLateLock&&_trajStrength<10){
           taraAdviceRef.current=taraAdviceRef.current||'SEARCHING...';
 
-        } else if(bullCount>=CONSECUTIVE_NEEDED_UP&&!isEndgameLock){
+        } else if(bullCount>=CONSECUTIVE_NEEDED_UP&&!isEndgameLock&&!(eng.mtfAlignment!==undefined&&eng.mtfAlignment<=-3)){
+          // V130 extra logging: announce when MTF would've blocked
+          if(eng.mtfAlignment!==undefined&&eng.mtfAlignment<=-2&&eng.mtfAlignment>-3)reasoning.push(`[MTF-WARN] UP lock proceeding but ${Math.abs(eng.mtfAlignment)}/5 timeframes against UP`);
           // ── Quality gate: suppress lock if score too low ──
           const _rm=regimeMemory[regime]||{wins:0,losses:0};
           const _rt=_rm.wins+_rm.losses;
@@ -3806,8 +4013,16 @@ function TaraApp(){
           } else if(newsSentiment?.hasBreaking){
             taraAdviceRef.current='BREAKING NEWS — OBSERVE';
           } else if(_quality<45){
-            // V130: Non-Premium floor 45 (was 50) — let Tara call more setups when not Premium
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
+          } else if((eng.trajectoryAdj||0)<-8){
+            // V130: Block UP lock when trajectory strongly favors DOWN (>8 magnitude opposing)
+            taraAdviceRef.current='UP REJECTED — trajectory says DOWN';
+            reasoning.push(`[GATE] UP blocked: trajectory ${eng.trajectoryAdj.toFixed(0)} contradicts UP call`);
+          } else if(_isChoppyRegime&&_quality<62){
+            // V130: In choppy regimes (RC/SS/HVC), demand quality >=62 to lock UP
+            // Quality 60 + SHORT SQUEEZE = adverse-gap UP locks (real issue from screenshots)
+            taraAdviceRef.current='WEAK SETUP — '+regime+' needs stronger signal';
+            reasoning.push(`[GATE] UP blocked: quality ${_quality.toFixed(0)} < 62 in ${regime}`);
           } else if(premiumMode&&_quality<65&&Math.abs(eng.trajectoryAdj||0)<6){
             // V130 PREMIUM: 65+ quality OR strong trajectory bias
             taraAdviceRef.current='PREMIUM: WAITING FOR SETUP';
@@ -3849,7 +4064,8 @@ function TaraApp(){
           } // close MTF gate else
           } // close quality gate else
 
-        } else if((bearCount>=CONSECUTIVE_NEEDED_DN||(isRugPull&&posterior<=45))&&posterior<=LOCK_THRESHOLD_DN_EFFECTIVE&&!isEndgameLock){
+        } else if((bearCount>=CONSECUTIVE_NEEDED_DN||(isRugPull&&posterior<=45))&&posterior<=LOCK_THRESHOLD_DN_EFFECTIVE&&!isEndgameLock&&!(eng.mtfAlignment!==undefined&&eng.mtfAlignment>=3)){
+          if(eng.mtfAlignment!==undefined&&eng.mtfAlignment>=2&&eng.mtfAlignment<3)reasoning.push(`[MTF-WARN] DOWN lock proceeding but ${eng.mtfAlignment}/5 timeframes against DOWN`);
           // ── Quality gate for DOWN ──
           const _rm2=regimeMemory[regime]||{wins:0,losses:0};
           const _rt2=_rm2.wins+_rm2.losses;
@@ -3887,8 +4103,15 @@ function TaraApp(){
           } else if(newsSentiment?.hasBreaking){
             taraAdviceRef.current='BREAKING NEWS — OBSERVE';
           } else if(_quality2<45){
-            // V130: DOWN floor 45 too
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
+          } else if((eng.trajectoryAdj||0)>8){
+            // V130: Block DOWN when trajectory strongly favors UP
+            taraAdviceRef.current='DOWN REJECTED — trajectory says UP';
+            reasoning.push(`[GATE] DOWN blocked: trajectory ${eng.trajectoryAdj.toFixed(0)} contradicts DOWN`);
+          } else if(_isChoppyRegime2&&_quality2<62){
+            // V130: choppy regimes demand quality >=62 to lock DOWN
+            taraAdviceRef.current='WEAK SETUP — '+regime+' needs stronger signal';
+            reasoning.push(`[GATE] DOWN blocked: quality ${_quality2.toFixed(0)} < 62 in ${regime}`);
           } else if(premiumMode&&_quality2<65&&Math.abs(eng.trajectoryAdj||0)<6){
             taraAdviceRef.current='PREMIUM: WAITING FOR SETUP';
           } else if(premiumMode&&_sess==='US'){
