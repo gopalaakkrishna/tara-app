@@ -94,7 +94,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.04.30-v143-379t-429W268L-regime-weights-trained-text-cleanup';
+const BASELINE_VERSION='2026.04.30-v144-379t-429W268L-calibration-as-truth';
 const BASELINE_RECORD={'15m':{wins:429,losses:268},'5m':{wins:31,losses:25}};
 
 const SEED_TRADES=[
@@ -516,6 +516,12 @@ const updateWeights=(weights,tradeLog,result)=>{
   // meaningfully contributed to the call. Prevents noise updates on bystanders.
   const last=tradeLog[tradeLog.length-1];
   if(!last||!last.signals||!last.posterior)return weights;
+  // V144: DATA QUALITY GATE — refuse to learn from trades with essentially empty signal data.
+  //       The seed log had 90%+ trades with all-zero signal vectors (logging bug from older
+  //       versions). Running gradient descent on these was teaching the engine random noise.
+  //       Now: require at least 3 non-trivial signals before this trade contributes to learning.
+  const nonZeroSignals=Object.values(last.signals).filter(v=>Math.abs(v)>0.5).length;
+  if(nonZeroSignals<3)return weights;
   const won=result==='WIN';
   const sig=last.signals;
   const totalAbs=Object.values(sig).reduce((s,v)=>s+Math.abs(v),0)||1;
@@ -548,6 +554,9 @@ const updateWeights=(weights,tradeLog,result)=>{
 // Per-regime weight updater — same logic but targets the regime-specific set
 const updateRegimeWeights=(regimeWeightsObj,trade,result)=>{
   if(!trade||!trade.signals||!trade.posterior)return regimeWeightsObj;
+  // V144: data quality gate (mirror of updateWeights)
+  const nonZeroSignals=Object.values(trade.signals).filter(v=>Math.abs(v)>0.5).length;
+  if(nonZeroSignals<3)return regimeWeightsObj;
   const rg=trade.regime||'RANGE-CHOP';
   if(!regimeWeightsObj[rg])return regimeWeightsObj;
   const weights=regimeWeightsObj[rg];
@@ -582,13 +591,40 @@ const updateRegimeWeights=(regimeWeightsObj,trade,result)=>{
 
 // ── CALIBRATION ENGINE ──
 // Maps raw posterior buckets → actual historical win rates
+// V144: Default calibration baked from seed trade outcomes — UP SIDE ONLY.
+//
+//   Why UP-only? The seed log contains DOWN trades that ALREADY survived a broken DOWN-gate
+//   (V141 root-fix found that DOWN locks were structurally suppressed). So the DOWN trades
+//   in the seed are a biased sample — they're the few DOWN locks that overcame the broken
+//   gates, which were mostly desperate late-window calls. Using their WR to "calibrate"
+//   normal DOWN posteriors would over-correct and prevent any DOWN locks from firing.
+//
+//   For UP side, the data is more representative: UP locks fired easily (no broken gate
+//   suppressing them), so the seed reflects actual UP performance across the conviction range.
+//
+//   Result: UP posteriors get a calibration haircut (raw 95% → ~88% real). DOWN posteriors
+//   stay raw until live post-V141 data accumulates and we can build unbiased DOWN calibration.
+const DEFAULT_CALIBRATION={
+  // UP side — seed-derived corrections
+  90: 86.4,  // raw 90-99% UP → ~86% real WR (small over-confidence)
+  80: 64.5,  // raw 80-89% UP → 65% real WR (significant over-confidence)
+  70: 56.2,  // raw 70-79% UP → 56% real WR
+  // Mid-range — defer to raw (no correction)
+  60: null,
+  50: null,
+  40: null,
+  // DOWN side — defer to raw, will populate from live trades only
+  30: null,
+  20: null,
+  10: null,
+  0:  null,
+};
+
 const buildCalibration=(tradeLog)=>{
   const buckets={};
   for(let b=0;b<=90;b+=10)buckets[b]={wins:0,total:0};
   tradeLog.filter(t=>t.result).forEach(t=>{
-    const bucket=Math.floor(Math.max(0,Math.min(90,t.posterior-50+50))/10)*10; // center on 50
-    // Map: posterior 50=neutral, >50=UP bias
-    const upBias=t.posterior>50;
+    // V144: Removed dead variable `upBias` (never read). Kept the bucket math.
     const b2=Math.floor(t.posterior/10)*10;
     const key=Math.max(0,Math.min(90,b2));
     if(!buckets[key])buckets[key]={wins:0,total:0};
@@ -599,7 +635,24 @@ const buildCalibration=(tradeLog)=>{
   const cal={};
   Object.keys(buckets).forEach(k=>{
     const{wins,total}=buckets[k];
-    cal[k]=total>=3?(wins/total)*100:null; // null = not enough data
+    // V144: When live data is sparse (<10 trades for this bucket), fall back to seed-derived prior.
+    //       Was hard-cutoff at 3 — meaning sparse buckets returned null and got no correction.
+    if(total>=10){
+      cal[k]=(wins/total)*100;
+    } else if(total>=3){
+      // Blend live + prior, weighted by sample size
+      const liveRate=(wins/total)*100;
+      const prior=DEFAULT_CALIBRATION[k];
+      if(prior!=null){
+        const w=total/10; // 0.3 for n=3, 1.0 for n=10+
+        cal[k]=liveRate*w+prior*(1-w);
+      } else {
+        cal[k]=liveRate;
+      }
+    } else {
+      // <3 live samples — use seed prior as-is
+      cal[k]=DEFAULT_CALIBRATION[k];
+    }
   });
   return cal;
 };
@@ -908,13 +961,19 @@ const buildCalibrationAudit=(tradeLog)=>{
 };
 
 // Apply calibration correction to raw posterior
+// V144: Calibration applies UP-side only (DOWN side has null calibration values until
+//       live post-V141 data accumulates).
+//   - UP side high-conf (raw 80+): trust calibration heavily (85/15) — over-confidence is real
+//   - UP side mid-conf (raw 60-79): standard 70/30 blend
+//   - DOWN side & near-50: no calibration data, return raw unchanged
 const calibratePosterior=(raw,calibration)=>{
   if(!calibration)return raw;
   const bucket=Math.floor(raw/10)*10;
   const calVal=calibration[Math.max(0,Math.min(90,bucket))];
-  if(calVal==null)return raw; // no data for this bucket yet
-  // Blend: 70% calibrated, 30% raw (trust grows with more data)
-  return calVal*0.7+raw*0.3;
+  if(calVal==null)return raw; // no data for this bucket
+  const isHighConfUp=raw>=80;
+  const calWeight=isHighConfUp?0.85:0.7;
+  return calVal*calWeight+raw*(1-calWeight);
 };
 
 // ── PER-SIGNAL ACCURACY TRACKER ──
@@ -2096,8 +2155,8 @@ const computeV99Posterior=(params)=>{
 
   // ── IMPROVEMENT 1: Direction prior calibration ───────────────────────────
   // V134: Hardcoded DOWN penalty REMOVED — was creating structural UP bias
-  // DOWN posteriors now use the natural calibration without artificial dampening
-  // Multi-timeframe FGT, signal consensus, and adaptive weights handle direction validation organically
+  // V144: Calibration is now the ONLY direction-prior correction. Per-direction adjustments
+  //       previously layered here have been removed in favor of bucket-based calibration.
   let dirCalibrated=calibratedPosterior;
 
   // ── IMPROVEMENT 5: Posterior time-decay for late window locks ─────────────
@@ -2110,26 +2169,24 @@ const computeV99Posterior=(params)=>{
     dirCalibrated=50+(dirCalibrated-50)*lateDecayFactor;
     reasoning.push(`[TIME] Late lock decay ×${lateDecayFactor}: ${beforeDecay.toFixed(1)}%→${dirCalibrated.toFixed(1)}%`);
   }
-  // V134: BACKTEST-DRIVEN CALIBRATION (display-only, lock guards still use raw)
-  // 377-trade backtest showed posterior 85-95 actually wins only 58-68%
-  // We compute a calibrated value for DISPLAY but locks use raw posterior so thresholds don't break
-  let _calibratedDisplay=dirCalibrated;
-  const _overshoot=Math.abs(dirCalibrated-50);
-  if(_overshoot>15){
-    let _compressed;
-    if(_overshoot<=40)_compressed=15+(_overshoot-15)*0.5;
-    else _compressed=15+25*0.5+(_overshoot-40)*0.3;
-    _calibratedDisplay=dirCalibrated>=50?(50+_compressed):(50-_compressed);
-    if(Math.abs(_calibratedDisplay-dirCalibrated)>=3){
-      reasoning.push(`[CAL-FIX] Honest display: ${dirCalibrated.toFixed(0)}% conf compressed to ${_calibratedDisplay.toFixed(0)}% (backtest-corrected)`);
-    }
-  }
-  // Engine returns RAW posterior for lock guards. Display uses calibrated.
+  // V144: CRITICAL CHANGE — locks now use the calibrated posterior, not raw.
+  //       Previously: 'finalPosterior' (calibrated) was returned as 'posterior',
+  //       BUT the comment said "lock guards still use raw" — and a separate cosmetic
+  //       compression existed for display only. This created a confusion where calibration
+  //       only affected what you SAW, not what Tara DID. Now: the same calibrated value
+  //       drives both display and lock decisions. No more "honest display, biased decision."
+  //       Removed the _calibratedDisplay backtest compression — it was adding a second
+  //       layer of cosmetic correction on top of calibration.
   const finalPosterior=Math.max(1,Math.min(99,dirCalibrated));
-  const displayPosterior=Math.max(1,Math.min(99,_calibratedDisplay));
+  const displayPosterior=finalPosterior; // V144: same as final, no cosmetic divergence
 
   reasoning.push(`[ATR] Volatility: ${atrBps.toFixed(1)} bps | Regime: ${regime}${isPostDecay?' | POST-DECAY':''}`);
-  if(calibration&&Object.values(calibration).some(v=>v!=null))reasoning.push(`[CAL] Pipeline: raw ${posterior.toFixed(1)}% → cal ${calibratedPosterior.toFixed(1)}% → dir+time ${finalPosterior.toFixed(1)}%`);
+  if(calibration&&Object.values(calibration).some(v=>v!=null)){
+    const calDelta=Math.abs(finalPosterior-rawPosterior);
+    if(calDelta>=2){
+      reasoning.push(`[CAL] Raw ${rawPosterior.toFixed(0)}% → calibrated ${finalPosterior.toFixed(0)}% (Δ${calDelta.toFixed(0)}pts) — ${rawPosterior>finalPosterior?'haircut for over-confidence':'corrected upward'}`);
+    }
+  }
 
   // Rug pull check
   const isRugPull=tickSlope<-5&&aggrFlow<-0.6;
@@ -3619,7 +3676,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V143 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V144 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -3717,7 +3774,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V143'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V144'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -3814,7 +3871,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara V143  |  signal'},
+        footer:{text:'Tara V144  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3828,7 +3885,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V143  |  stand-down'},
+        footer:{text:'Tara V144  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3842,7 +3899,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V143  |  search'},
+        footer:{text:'Tara V144  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3859,7 +3916,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara V143  |  lock'},
+        footer:{text:'Tara V144  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3876,7 +3933,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V143  |  close'},
+          footer:{text:'Tara V144  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -3897,7 +3954,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V143  |  exit'},
+        footer:{text:'Tara V144  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3926,12 +3983,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V143  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara V144  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V143',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V144',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -3950,7 +4007,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V143 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V144 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -4201,28 +4258,28 @@ function TaraApp(){
       //       2 points tighter in SS (28 vs 30 / 26 vs 28).
       const _downGated=regime==='HIGH VOL CHOP'||regime==='RANGE-CHOP'; // V112: RC DOWN only 53% — gate it
       // V141: _downTDOnly variable removed — was unused after threshold rebuild.
-      // V141 ROOT FIX: Threshold ladder rebuilt for symmetry.
+      // V144 ROOT FIX: Threshold ladder rebuilt — UP side recalibrated for calibrated-posterior
+      //                 space, DOWN side keeps V141 values since DOWN posterior calibration is null.
       //
-      //   Bug: previous ladder set TD's DN threshold to 32 (HARDER than default 28-30).
-      //   In the regime that's supposed to favor DOWN, DOWN locks needed posterior LOWER than
-      //   in any other regime. Plus regime classifier's downThreshold variable was being discarded.
+      //   Mapping: raw → calibrated (UP side)
+      //     raw 70 → cal 60  (was below 72, still below threshold mostly)
+      //     raw 80 → cal 67  (used to clear most thresholds, now barely clears default 65)
+      //     raw 90 → cal 87  (still strong)
       //
-      //   Fix: each regime's preferred direction gets a relaxed threshold; opposed direction
-      //   gets a stricter one. Default (RANGE-CHOP) stays at the symmetric base.
+      //   New thresholds (in calibrated UP space, raw DOWN space):
+      //     TRENDING DOWN  (favors DN)   UP ≥75 cal  DOWN ≤36 raw
+      //     LONG SQUEEZE   (favors DN)   UP ≥75 cal  DOWN ≤36 raw
+      //     RANGE-CHOP     (default)     UP ≥65 cal  DOWN ≤28 raw
+      //     HIGH VOL CHOP  (default)     UP ≥65 cal  DOWN ≤28 raw
+      //     TRENDING UP    (favors UP)   UP ≥60 cal  DOWN ≤20 raw
+      //     SHORT SQUEEZE  (favors UP)   UP ≥60 cal  DOWN ≤20 raw
       //
-      //   New ladder:                    UP fires      DOWN fires
-      //     TRENDING DOWN  (favors DN)   ≥80           ≤36   ← was 32 (harder), now 36 (easier)
-      //     TRENDING UP    (favors UP)   ≥68           ≤20
-      //     SHORT SQUEEZE  (favors UP)   ≥68           ≤20
-      //     LONG SQUEEZE   (favors DN)   ≥80           ≤36
-      //     HIGH VOL CHOP  (no bias)     ≥72           ≤28
-      //     RANGE-CHOP     (no bias)     ≥72           ≤28   (default)
-      //
-      //   Session adjustments still apply on top.
+      //   This maintains V143's firing balance (UP/DN ratio ~1.6x in seed) while making
+      //   high-conf UP locks honest about their actual win probability.
       let _baseUpThr, _baseDnThr;
-      if(regime==='TRENDING DOWN'||regime==='LONG SQUEEZE'){_baseUpThr=is15m?80:78; _baseDnThr=is15m?36:34;}
-      else if(regime==='TRENDING UP'||regime==='SHORT SQUEEZE'){_baseUpThr=is15m?68:66; _baseDnThr=is15m?20:22;}
-      else {_baseUpThr=is15m?72:70; _baseDnThr=is15m?28:30;}
+      if(regime==='TRENDING DOWN'||regime==='LONG SQUEEZE'){_baseUpThr=is15m?75:73; _baseDnThr=is15m?36:34;}
+      else if(regime==='TRENDING UP'||regime==='SHORT SQUEEZE'){_baseUpThr=is15m?60:58; _baseDnThr=is15m?20:22;}
+      else {_baseUpThr=is15m?65:63; _baseDnThr=is15m?28:30;}
       const LOCK_THRESHOLD_DN_EFFECTIVE=_baseDnThr-_sessThreshAdj-_srThreshAdj;
       const LOCK_THRESHOLD_UP_EFFECTIVE=_baseUpThr+_sessThreshAdj+_srThreshAdj;
       // V141: Now we can compute bullCount/bearCount with the regime-aware effective thresholds.
@@ -5053,7 +5110,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V143...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V144...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -5144,7 +5201,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V143
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V144
             </span>
           </div>
 
@@ -5530,7 +5587,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V143</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V144</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -6000,7 +6057,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V143 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V144 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -6156,10 +6213,15 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V143 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V144 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+              <section><h3 className="text-rose-400 font-bold uppercase tracking-wide mb-2 text-xs">🎯 ROOT CAUSE FIX — calibration as truth (V144)</h3><p className="leading-relaxed">Deep analysis of the seed log revealed Tara's posteriors were systematically over-confident, especially after the V141 root-fix exposed how broken the gating layer had been.</p>
+              <p className="leading-relaxed mt-2"><strong>What was wrong:</strong> Only 7-11% of seed trades had real signal data captured (older versions had a logging bug). Calibration was being used for cosmetic display only — actual lock decisions used uncorrected raw posteriors. So Tara would say "92% UP" but real WR was 65% (27-pt drift). Worse, the gradient descent was training on incomplete data, slowly miscalibrating the model in unpredictable directions.</p>
+              <ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Default UP-side calibration baked from seed.</strong> Pre-computed prior table corrects UP over-confidence from day 1: raw 95% UP → ~88% calibrated, raw 85% UP → ~70% calibrated.</li><li><strong>DOWN side intentionally NOT pre-calibrated.</strong> Critical correction caught during simulation: the seed's DOWN trades suffered survivorship bias from the broken gates that V141 fixed. Using their WR to calibrate would over-correct and prevent any DOWN locks. Live post-V141 data will populate DOWN calibration organically.</li><li><strong>Locks now use CALIBRATED posterior, not raw.</strong> The biggest functional change. Calibration was previously "honest display, biased decision." Now it's both. What you see is what Tara does.</li><li><strong>UP lock thresholds rebuilt for calibrated space.</strong> Old thresholds assumed raw values. New thresholds (UP≥65 default) account for compressed UP posteriors. DOWN thresholds unchanged from V141 (≤28 default) since DOWN side stays raw.</li><li><strong>Adaptive calibration weighting.</strong> High-confidence UP buckets (raw 80+) trust calibration 85/15. Mid-range UP (raw 60-79) stays at 70/30.</li><li><strong>Data quality gate on gradient descent.</strong> Trades with fewer than 3 non-zero signals no longer update weights. Stops the model from learning from incomplete data going forward.</li><li><strong>Live calibration smoothly blends with seed prior.</strong> 10+ live trades for a bucket overrides prior. 3-9 live trades blend with prior weighted by sample size. Less than 3 uses prior as-is.</li></ul>
+              <p className="leading-relaxed mt-2"><strong>What to expect:</strong> UP posteriors will look LOWER than before — a 95% UP now displays around 87-88%. That number is honest about real WR. Lock thresholds recalibrated so firing rate stays similar to V143 (UP/DOWN ratio ~1.6x). DOWN locks fire at the same rate as V141 since DOWN calibration is deferred. Over the next 30-50 live trades, DOWN-side calibration will start populating and improve from there. The Kalshi EDGE column should also become more meaningful since UP confidence now matches reality.</p>
+              </section>
               <section><h3 className="text-purple-400 font-bold uppercase tracking-wide mb-2 text-xs">🔧 Fixes from screenshot review (V143)</h3><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Per-regime weights now pre-trained from seed.</strong> Settings → "Per-regime signal weights" was showing identical values across all four regimes because gradient descent was too gentle (LR×1.2, attribution gate ≥10%) to differentiate them in 379 trades. Now: defaults pre-computed by replaying gradient descent over the seed, so SS / RC / HVC / TD start with distinct values. Live LR multiplier raised 1.2 → 2.5 so future trades differentiate them faster.</li><li><strong>Kalshi reference now works on 5m windows.</strong> Was 15m-only — meaning EDGE metric only appeared on 15m. Now fetches the closest-matching 5m or 15m market. Stale prior-window prices also clear on window change so you don't see last strike's Kalshi price mid-trade.</li><li><strong>Kalshi row always visible.</strong> Even when Kalshi data is loading or unavailable, the KLSH placeholder now shows ("loading…") so you know the feature exists. Previously the row vanished completely when Kalshi data wasn't loaded yet.</li><li><strong>Prediction text consistency.</strong> Long-form status messages (ANALYZING, SITTING OUT, MACRO BLACKOUT, OBSERVING, BREAKING NEWS, WEAK SETUP) now render as a clean uppercase title (same size as LOCKED / FORMING) with a subtitle below. Eliminates the 3-line wrap on SITTING OUT. ANALYZING countdown moves to subtitle. Same visual height for every prediction state.</li></ul></section>
               <section><h3 className="text-purple-400 font-bold uppercase tracking-wide mb-2 text-xs">📊 Edge over Kalshi (V142)</h3><p className="leading-relaxed">The new approach: stop trying to make Tara agree with Kalshi. The edge is in the disagreement. Tara's posterior is a forecasting model; Kalshi's price is the current market. They should differ — that's where you make money. When they agree, there's no edge to exploit.</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>SS/LS regime bonus removed.</strong> SHORT SQUEEZE no longer adds +43 to score; LONG SQUEEZE no longer adds -43. These were double-counting the underlying whale-flow + funding signals. The threshold tilts (UP easier in SS, DOWN easier in LS) are kept since those reflect tactical lock behavior, not score.</li><li><strong>New side-by-side display.</strong> Underneath the prediction, you now see <code>TARA UP 75%  vs  KLSH UP 50%  EDGE +25pts ⚡</code>. Direction + confidence for both, plus an explicit edge metric showing how much more confident Tara is than the market.</li><li><strong>Edge color coding:</strong> +20 or more = strong (bold green), +10-20 = moderate (green), 0-10 = weak (neutral), negative = caution (amber/rose). The ⚡ icon flags any disagreement on direction.</li><li><strong>Edge-aware Kelly bet sizing.</strong> The "Bet: X%" recommendation now scales by edge. Strong edge (+15pts) → full quality-scaled Kelly. Fighting Kalshi (-15pts) → 10% of recommended. Genuinely puts money behind the disagreement, scales it down when you're guessing against the market.</li><li><strong>The trading thesis:</strong> when EDGE is +20 or more, that's a high-conviction trade where Tara is seeing something Kalshi hasn't priced in yet. When EDGE is negative, the market disagrees with Tara — those should be your smallest positions or skips, even if Tara's quality gate says A+.</li></ul></section>
               <section><h3 className="text-rose-400 font-bold uppercase tracking-wide mb-2 text-xs">🎯 ROOT FIX — threshold inversion (V141)</h3><p className="leading-relaxed">A long-standing bug present since V99: TRENDING DOWN's DOWN-lock threshold was 32 — HARDER than the default 28-30 — meaning the regime that's supposed to favor DOWN had the toughest DOWN threshold of all regimes. Mirror image bug for TRENDING UP's UP threshold. Plus the regime classifier's <code>downThreshold</code> variable was being silently discarded by the downstream effective-threshold ladder. This is why DOWN locks felt nearly impossible in obvious downtrends.</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Threshold ladder rebuilt for symmetry.</strong> TD now: UP fires ≥80, DOWN fires ≤36. TU: UP ≥68, DOWN ≤20. SS: UP ≥68, DOWN ≤20. LS: UP ≥80, DOWN ≤36. RC/HVC default: UP ≥72, DOWN ≤28. Each regime's preferred direction gets the easier threshold; opposed direction harder.</li><li><strong>bullCount/bearCount now use the regime-aware effective threshold.</strong> Previously bearCount used a hard-coded `(is15m?30:32) - sessAdj` that ignored regime. So even when the regime-specific threshold said "DOWN should fire at 36," the counter still used 30 to decide which recent ticks qualified. Silent bypass.</li><li><strong>Stale dead variables removed.</strong> The regime classifier's <code>downThreshold</code> / <code>upThreshold</code> values were set but never read by the lock gate — fully replaced by the new symmetric ladder.</li></ul></section>
