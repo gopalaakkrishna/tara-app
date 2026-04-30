@@ -54,11 +54,17 @@ const DEFAULT_WEIGHTS={gap:52.69,momentum:49.99,structure:21.54,flow:58.00,techn
 
 // Per-regime weight sets — each regime gets its own gradient descent
 // Initialized from global defaults, diverge over time based on what works in each regime
+// V143: Per-regime weight defaults pre-trained from 379 seed trades. Previously all four
+//       regimes started from identical DEFAULT_WEIGHTS — gradient descent was supposed to
+//       differentiate them over time but the attribution gate (>10%) + small learning rate
+//       produced ~1-3pt deltas after hundreds of trades. Pre-baking the seed-trained values
+//       gives users a differentiated starting point on first load. Subsequent live trades
+//       continue to update via gradient descent on top.
 const DEFAULT_REGIME_WEIGHTS={
-  'SHORT SQUEEZE': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
-  'RANGE-CHOP':    {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
-  'HIGH VOL CHOP': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
-  'TRENDING DOWN': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
+  'SHORT SQUEEZE': {gap:53.40,momentum:51.25,structure:22.26,flow:55.00,technical:27.16,regime:44.66},
+  'RANGE-CHOP':    {gap:52.95,momentum:50.16,structure:21.53,flow:55.00,technical:26.72,regime:41.13},
+  'HIGH VOL CHOP': {gap:53.26,momentum:50.25,structure:21.59,flow:54.94,technical:26.53,regime:41.13},
+  'TRENDING DOWN': {gap:53.07,momentum:50.54,structure:21.54,flow:55.00,technical:26.65,regime:41.13},
 };
 const REGIME_WEIGHT_KEYS={'SHORT SQUEEZE':'taraV110RW_SS_V110','RANGE-CHOP':'taraV110RW_RC_V110','HIGH VOL CHOP':'taraV110RW_HVC_V110','TRENDING DOWN':'taraV110RW_TD_V110'};
 const loadRegimeWeights=()=>{
@@ -88,7 +94,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.04.30-v142-379t-429W268L-edge-vs-kalshi';
+const BASELINE_VERSION='2026.04.30-v143-379t-429W268L-regime-weights-trained-text-cleanup';
 const BASELINE_RECORD={'15m':{wins:429,losses:268},'5m':{wins:31,losses:25}};
 
 const SEED_TRADES=[
@@ -558,7 +564,10 @@ const updateRegimeWeights=(regimeWeightsObj,trade,result)=>{
     // V134: attribution gate
     if(contribution<0.10)return;
     const aligned=Math.sign(sig[k])===tradeDirSign&&sig[k]!==0;
-    let delta=(LEARNING_RATE*1.2)*contribution*conviction;
+    let delta=(LEARNING_RATE*2.5)*contribution*conviction;
+    // V143: Per-regime LR multiplier raised 1.2 → 2.5. Previous setting produced
+    //       ~1-3pt regime weight differentiation after hundreds of trades. With 2.5x,
+    //       regimes meaningfully diverge after ~30-50 trades. Bounds (5-65) keep clamps intact.
     if(won&&aligned)newW[k]+=delta;
     else if(won&&!aligned)newW[k]-=delta*0.3;
     else if(!won&&aligned)newW[k]-=delta;
@@ -2566,7 +2575,54 @@ function PredictionContent(props){
             <span className={'text-xs font-bold px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400'} title="5m and 15m are pointing in opposite directions — conflicting signal, trade carefully">CONFLICT</span>
           )}
         </div>
-        <h2 className={headingCls}>{analysis.prediction}</h2>
+        {/* V143: Smart prediction text routing — split long status messages into a tight
+                  title + subtitle so the giant heading doesn't wrap to 3 lines. Short messages
+                  (UP - LOCKED, DOWN - LOCKED, UP (FORMING), SEARCHING...) render as the big heading. */}
+        {(()=>{
+          const p=analysis.prediction||'';
+          // Lock and FORMING and SEARCHING — short, render full as heading
+          const isShort=p.includes('LOCKED')||p.includes('FORMING')||p==='SEARCHING...'||p==='NO CALL'||p==='CLOSED'||p.includes('WAITING FOR MOMENTUM')||p.includes('REJECTED')||p.includes('LOCK RELEASED');
+          if(isShort){
+            return <h2 className={headingCls}>{p}</h2>;
+          }
+          // Long-form status — split into uppercase title + subtitle
+          let title='', subtitle='';
+          if(p.includes('ANALYZING')){
+            const m=p.match(/\[(\d+)s\]/);
+            const lean=p.match(/leaning (UP|DOWN)/);
+            title='ANALYZING';
+            subtitle=m?`Searching for signal · ${m[1]}s${lean?' · leaning '+lean[1]:''}`:'Searching for signal';
+          } else if(p.includes('SITTING OUT')){
+            title='SITTING OUT';
+            subtitle='Mixed signals · no edge this window';
+          } else if(p.includes('MACRO BLACKOUT')){
+            title='MACRO BLACKOUT';
+            const m=p.match(/\((.+)\)/);
+            subtitle=m?m[1]:'Awaiting macro event';
+          } else if(p.includes('OBSERVING')){
+            title='OBSERVING';
+            subtitle=p.replace('OBSERVING ','');
+          } else if(p.includes('BREAKING NEWS')){
+            title='BREAKING NEWS';
+            subtitle='Observing market reaction';
+          } else if(p.includes('WEAK SETUP')){
+            title='WEAK SETUP';
+            subtitle=p.replace('WEAK SETUP — ','');
+          } else if(p.includes('LOW QUALITY')){
+            title='LOW QUALITY';
+            subtitle='Sitting out';
+          } else {
+            // Fallback — render whatever it is, but cap text length
+            title=p.length<=20?p:p.split('—')[0]?.trim()||p.slice(0,18);
+            subtitle=p.includes('—')?p.split('—').slice(1).join('—').trim():'';
+          }
+          return(
+            <div className="flex flex-col items-center text-center">
+              <h2 className={headingCls}>{title}</h2>
+              {subtitle&&<div className={'mt-1 text-sm sm:text-base text-[#E8E9E4]/55 font-sans tracking-tight max-w-md'}>{subtitle}</div>}
+            </div>
+          );
+        })()}
 
         {/* V134: Plain-English summary line — always visible */}
         <div className="mt-2 px-3 py-2 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8 max-w-md w-full">
@@ -2660,7 +2716,7 @@ function PredictionContent(props){
                 <span className="text-[9px] uppercase text-[#E8E9E4]/40 tracking-wider">TARA</span>
                 <span className={taraDir==='UP'?'text-emerald-300':'text-rose-300'}>{taraDir} {taraConf.toFixed(0)}%</span>
               </div>
-              {kUp!=null&&(
+              {kUp!=null?(
                 <>
                   <span className="text-[#E8E9E4]/20">vs</span>
                   <div className="flex items-center gap-1.5" title="Kalshi market-implied probability (live YES price)">
@@ -2671,6 +2727,14 @@ function PredictionContent(props){
                     <span className="text-[9px] uppercase text-[#E8E9E4]/50 tracking-wider">EDGE</span>
                     <span className={edgeCls}>{edgeLabel}</span>
                     {!isAgree&&edge!=null&&<span className="text-[9px] text-amber-400/80">⚡</span>}
+                  </div>
+                </>
+              ):(
+                <>
+                  <span className="text-[#E8E9E4]/20">vs</span>
+                  <div className="flex items-center gap-1.5" title="Kalshi data not available — fetch may be loading or this strike isn't on Kalshi yet">
+                    <span className="text-[9px] uppercase text-purple-400/40 tracking-wider">KLSH</span>
+                    <span className="text-[#E8E9E4]/30 italic">loading…</span>
                   </div>
                 </>
               )}
@@ -3555,7 +3619,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V142 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V143 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -3653,7 +3717,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V142'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V143'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -3750,7 +3814,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara V142  |  signal'},
+        footer:{text:'Tara V143  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3764,7 +3828,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V142  |  stand-down'},
+        footer:{text:'Tara V143  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3778,7 +3842,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V142  |  search'},
+        footer:{text:'Tara V143  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3795,7 +3859,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara V142  |  lock'},
+        footer:{text:'Tara V143  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3812,7 +3876,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V142  |  close'},
+          footer:{text:'Tara V143  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -3833,7 +3897,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V142  |  exit'},
+        footer:{text:'Tara V143  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3862,12 +3926,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V142  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara V143  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V142',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V143',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -3886,7 +3950,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V142 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V143 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -3918,12 +3982,16 @@ function TaraApp(){
     });
   };
   // ── KALSHI LIVE MARKET REFERENCE ── polls every 30s for YES price on active BTC market
+  // V143: Fetches for both 5m and 15m markets. Previously 15m-only meant 5m windows had
+  //       zero Kalshi reference, so the EDGE metric never appeared. Also resets the price to
+  //       null on window change so a stale previous-strike price doesn't get displayed.
   useEffect(()=>{
+    setKalshiYesPrice(null); // reset on window change so we don't show stale prior-strike price
     const fetchKalshi=async()=>{
-      if(windowType!=='15m')return; // Kalshi 15m markets only
       try{
         const now=Date.now();
-        const iMs=15*60*1000;
+        const intervalMin=windowType==='5m'?5:15;
+        const iMs=intervalMin*60*1000;
         const nextMs=Math.ceil((now+500)/iMs)*iMs;
         const r=await fetch(
           'https://api.elections.kalshi.com/trade-api/v2/markets?limit=200&ticker_name_prefix=KXBTC&status=open',
@@ -3939,8 +4007,9 @@ function TaraApp(){
           const diff=Math.abs(closeMs-nextMs);
           if(diff<bestDiff){bestDiff=diff;best=m;}
         }
-        if(best&&bestDiff<10*60*1000){
-          // yes_ask or last_price — prefer yes_ask as live market price
+        // V143: tightened tolerance to half the window — was 10min hardcoded, no good for 5m
+        const tolMs=Math.floor(intervalMin*60*1000/2);
+        if(best&&bestDiff<tolMs){
           const yes=best.yes_ask??best.yes_bid??best.last_price??null;
           if(yes!=null)setKalshiYesPrice(Number(yes));
         }
@@ -3949,7 +4018,7 @@ function TaraApp(){
     fetchKalshi();
     const iv=setInterval(fetchKalshi,30000);
     return()=>clearInterval(iv);
-  },[windowType]);
+  },[windowType,timeState.nextWindow]);
   // Window rollover
   useEffect(()=>{if(timeState.nextWindow&&timeState.nextWindow!==lastWindowRef.current){if(currentPrice!==null){if(lastWindowRef.current!==''){
           let won=false,active=false;
@@ -4984,7 +5053,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V142...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V143...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -5075,7 +5144,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V142
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V143
             </span>
           </div>
 
@@ -5461,7 +5530,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V142</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V143</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -5931,7 +6000,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V142 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V143 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -6087,10 +6156,11 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V142 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V143 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+              <section><h3 className="text-purple-400 font-bold uppercase tracking-wide mb-2 text-xs">🔧 Fixes from screenshot review (V143)</h3><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Per-regime weights now pre-trained from seed.</strong> Settings → "Per-regime signal weights" was showing identical values across all four regimes because gradient descent was too gentle (LR×1.2, attribution gate ≥10%) to differentiate them in 379 trades. Now: defaults pre-computed by replaying gradient descent over the seed, so SS / RC / HVC / TD start with distinct values. Live LR multiplier raised 1.2 → 2.5 so future trades differentiate them faster.</li><li><strong>Kalshi reference now works on 5m windows.</strong> Was 15m-only — meaning EDGE metric only appeared on 15m. Now fetches the closest-matching 5m or 15m market. Stale prior-window prices also clear on window change so you don't see last strike's Kalshi price mid-trade.</li><li><strong>Kalshi row always visible.</strong> Even when Kalshi data is loading or unavailable, the KLSH placeholder now shows ("loading…") so you know the feature exists. Previously the row vanished completely when Kalshi data wasn't loaded yet.</li><li><strong>Prediction text consistency.</strong> Long-form status messages (ANALYZING, SITTING OUT, MACRO BLACKOUT, OBSERVING, BREAKING NEWS, WEAK SETUP) now render as a clean uppercase title (same size as LOCKED / FORMING) with a subtitle below. Eliminates the 3-line wrap on SITTING OUT. ANALYZING countdown moves to subtitle. Same visual height for every prediction state.</li></ul></section>
               <section><h3 className="text-purple-400 font-bold uppercase tracking-wide mb-2 text-xs">📊 Edge over Kalshi (V142)</h3><p className="leading-relaxed">The new approach: stop trying to make Tara agree with Kalshi. The edge is in the disagreement. Tara's posterior is a forecasting model; Kalshi's price is the current market. They should differ — that's where you make money. When they agree, there's no edge to exploit.</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>SS/LS regime bonus removed.</strong> SHORT SQUEEZE no longer adds +43 to score; LONG SQUEEZE no longer adds -43. These were double-counting the underlying whale-flow + funding signals. The threshold tilts (UP easier in SS, DOWN easier in LS) are kept since those reflect tactical lock behavior, not score.</li><li><strong>New side-by-side display.</strong> Underneath the prediction, you now see <code>TARA UP 75%  vs  KLSH UP 50%  EDGE +25pts ⚡</code>. Direction + confidence for both, plus an explicit edge metric showing how much more confident Tara is than the market.</li><li><strong>Edge color coding:</strong> +20 or more = strong (bold green), +10-20 = moderate (green), 0-10 = weak (neutral), negative = caution (amber/rose). The ⚡ icon flags any disagreement on direction.</li><li><strong>Edge-aware Kelly bet sizing.</strong> The "Bet: X%" recommendation now scales by edge. Strong edge (+15pts) → full quality-scaled Kelly. Fighting Kalshi (-15pts) → 10% of recommended. Genuinely puts money behind the disagreement, scales it down when you're guessing against the market.</li><li><strong>The trading thesis:</strong> when EDGE is +20 or more, that's a high-conviction trade where Tara is seeing something Kalshi hasn't priced in yet. When EDGE is negative, the market disagrees with Tara — those should be your smallest positions or skips, even if Tara's quality gate says A+.</li></ul></section>
               <section><h3 className="text-rose-400 font-bold uppercase tracking-wide mb-2 text-xs">🎯 ROOT FIX — threshold inversion (V141)</h3><p className="leading-relaxed">A long-standing bug present since V99: TRENDING DOWN's DOWN-lock threshold was 32 — HARDER than the default 28-30 — meaning the regime that's supposed to favor DOWN had the toughest DOWN threshold of all regimes. Mirror image bug for TRENDING UP's UP threshold. Plus the regime classifier's <code>downThreshold</code> variable was being silently discarded by the downstream effective-threshold ladder. This is why DOWN locks felt nearly impossible in obvious downtrends.</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Threshold ladder rebuilt for symmetry.</strong> TD now: UP fires ≥80, DOWN fires ≤36. TU: UP ≥68, DOWN ≤20. SS: UP ≥68, DOWN ≤20. LS: UP ≥80, DOWN ≤36. RC/HVC default: UP ≥72, DOWN ≤28. Each regime's preferred direction gets the easier threshold; opposed direction harder.</li><li><strong>bullCount/bearCount now use the regime-aware effective threshold.</strong> Previously bearCount used a hard-coded `(is15m?30:32) - sessAdj` that ignored regime. So even when the regime-specific threshold said "DOWN should fire at 36," the counter still used 30 to decide which recent ticks qualified. Silent bypass.</li><li><strong>Stale dead variables removed.</strong> The regime classifier's <code>downThreshold</code> / <code>upThreshold</code> values were set but never read by the lock gate — fully replaced by the new symmetric ladder.</li></ul></section>
               <section><h3 className="text-indigo-400 font-bold uppercase tracking-wide mb-2 text-xs">🔍 ANALYZING state added (V141)</h3><p className="leading-relaxed">Previously when posterior straddled the threshold without committing, Tara showed FORMING or SEARCHING indefinitely. Now there's an explicit bounded-search state.</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>5-60s search window at window open</strong> (15m: max 60s, 5m: max 30s). Shows "ANALYZING — searching for signal [Xs]" with a clear countdown.</li><li><strong>FGT shortcuts the search.</strong> 4/4 alignment ends search at the 5s minimum. 3/4 ends at 15s.</li><li><strong>Subtle direction hint included.</strong> If posterior is mildly leaning UP/DOWN during search, badge shows "leaning UP" or "leaning DOWN" — gives you a feel for where Tara's probably going.</li><li><strong>Bypassed by EXTREME velocity and rug-pull.</strong> No search delay during catastrophic events.</li><li><strong>After search expires</strong> the state machine falls through to FORMING/SITTING OUT/SEARCHING based on what the data actually shows.</li></ul></section>
