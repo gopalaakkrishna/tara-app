@@ -88,7 +88,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.04.30-v138-379t-429W268L-symmetric-no-premium';
+const BASELINE_VERSION='2026.04.30-v140-379t-429W268L-delib-removed';
 const BASELINE_RECORD={'15m':{wins:429,losses:268},'5m':{wins:31,losses:25}};
 
 const SEED_TRADES=[
@@ -836,7 +836,7 @@ const buildSessionRegimeThresh=(tradeLog)=>{
   // Compute WR & threshold adjustment per bucket
   const adj={};
   Object.entries(buckets).forEach(([k,b])=>{
-    if(b.n<5)return; // need 5+ samples
+    if(b.n<10)return; // V139: was 5+, raised to 10+ to reduce small-sample noise
     const rate=b.wins/b.n;
     // WR > 70% → -3 threshold (easier to lock here, you're winning)
     // WR < 50% → +5 threshold (harder to lock, you're losing)
@@ -967,20 +967,23 @@ const getMarketSessions=()=>{
   // V114: Day×Session quality multipliers (range -10 to +5; subtracted from quality threshold or added)
   // Higher = better historically (lower bar to lock); Lower = worse (higher bar)
   // Based on training data + market structure: Sun thin liquidity, Mon Asia gappy, Wed US best, Fri close fakeouts
+  // V139: Magnitudes halved (was -10..+5, now -5..+3). Per-bucket sample sizes are ~10-30 trades —
+  //       too noisy for the previous swing range. Direction held, magnitude dampened.
   const dsKey=dayName+'-'+dominant;
   const dsMap={
-    'SUN-ASIA':-8,'SUN-EU':-6,'SUN-US':-10,           // Sunday is the worst day across the board
-    'MON-ASIA':-4,'MON-EU':2,'MON-US':-2,             // Mon Asia gappy from weekend; Mon EU OK
-    'TUE-ASIA':2,'TUE-EU':4,'TUE-US':3,               // Tuesday consistently good
-    'WED-ASIA':3,'WED-EU':4,'WED-US':5,               // Wednesday US is the cleanest signal day
-    'THU-ASIA':2,'THU-EU':3,'THU-US':2,
-    'FRI-ASIA':1,'FRI-EU':1,'FRI-US':-5,              // Fri US close = fake breakouts before close
-    'SAT-ASIA':-5,'SAT-EU':-4,'SAT-US':-6,            // Saturday thin
+    'SUN-ASIA':-4,'SUN-EU':-3,'SUN-US':-5,            // Sunday is the worst day across the board
+    'MON-ASIA':-2,'MON-EU':1,'MON-US':-1,             // Mon Asia gappy from weekend; Mon EU OK
+    'TUE-ASIA':1,'TUE-EU':2,'TUE-US':2,               // Tuesday consistently good
+    'WED-ASIA':2,'WED-EU':2,'WED-US':3,               // Wednesday US is the cleanest signal day
+    'THU-ASIA':1,'THU-EU':2,'THU-US':1,
+    'FRI-ASIA':1,'FRI-EU':1,'FRI-US':-3,              // Fri US close = fake breakouts before close
+    'SAT-ASIA':-3,'SAT-EU':-2,'SAT-US':-3,            // Saturday thin
   };
 
 
   const dsAdj=dsMap[dsKey]||0;
-  const dsRating=dsAdj>=4?'A':dsAdj>=2?'B':dsAdj>=0?'C':dsAdj>=-4?'D':'F';
+  // V139: rating thresholds adjusted to the halved scale
+  const dsRating=dsAdj>=2?'A':dsAdj>=1?'B':dsAdj>=0?'C':dsAdj>=-2?'D':'F';
   return{sessions,dominant,utcH,dayUTC,dayName,dsAdj,dsRating,dsKey};
 };
 
@@ -2103,8 +2106,11 @@ const computeV99Posterior=(params)=>{
 
   // Rug pull check
   const isRugPull=tickSlope<-5&&aggrFlow<-0.6;
+  // V140: Symmetric upward spike — mirror of rug-pull. Releases DOWN locks faster than waiting
+  //       for the gap to hit -30 bps. Same magnitude thresholds, opposite signs.
+  const isMoonshot=tickSlope>5&&aggrFlow>0.6;
 
-  return{posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty};
+  return{posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isMoonshot,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty};
 };
 
 // ═══════════════════════════════════════
@@ -3403,7 +3409,7 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:423,losses:266},'5m':{wins:31,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:429,losses:268},'5m':{wins:31,losses:25}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -3473,7 +3479,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V138 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V140 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -3571,7 +3577,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V138'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V140'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -3668,7 +3674,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara V138  |  signal'},
+        footer:{text:'Tara V140  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3682,7 +3688,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V138  |  stand-down'},
+        footer:{text:'Tara V140  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3696,7 +3702,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V138  |  search'},
+        footer:{text:'Tara V140  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3713,7 +3719,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara V138  |  lock'},
+        footer:{text:'Tara V140  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3730,7 +3736,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V138  |  close'},
+          footer:{text:'Tara V140  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -3751,7 +3757,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V138  |  exit'},
+        footer:{text:'Tara V140  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3780,12 +3786,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V138  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara V140  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V138',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V140',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -3804,7 +3810,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V138 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V140 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -4058,15 +4064,19 @@ function TaraApp(){
       // V134: UP gate skipped only when UP trajectory (positive trajectoryAdj) — was symmetric
       // Strong DOWN trajectory should NOT speed up UP locks
       // V135: Threshold lowered 8 → 7 to match new ±12 trajectory cap and gate consistency
+      // V139: FGT 4/4 UP also bypasses the +1 sample penalty. Parallel to trajectory bypass.
       const _trajFavorsUp=eng.trajectoryAdj>=7;
-      const CONSECUTIVE_NEEDED_UP=_upGated&&!_trajFavorsUp
+      const _fgtFavorsUp=(eng.mtfAlignment||0)>=4;
+      const CONSECUTIVE_NEEDED_UP=_upGated&&!_trajFavorsUp&&!_fgtFavorsUp
         ? Math.max(2,CONSECUTIVE_NEEDED+1)
         : CONSECUTIVE_NEEDED;
       // V134: ADD symmetric DOWN gate skip when DOWN trajectory is strong
       // (mirror of UP behavior — don't slow legitimate DOWN moves)
       // V135: Threshold lowered -8 → -7 for symmetry with UP side
+      // V139: FGT 4/4 DOWN also enables the fast-track in choppy regimes.
       const _trajFavorsDn=eng.trajectoryAdj<=-7;
-      const _dnFastTrack=_trajFavorsDn&&(regime==='RANGE-CHOP'||regime==='HIGH VOL CHOP');
+      const _fgtFavorsDn=(eng.mtfAlignment||0)<=-4;
+      const _dnFastTrack=(_trajFavorsDn||_fgtFavorsDn)&&(regime==='RANGE-CHOP'||regime==='HIGH VOL CHOP');
       const CONSECUTIVE_NEEDED_DN_EFFECTIVE=_dnFastTrack
         ? Math.max(1,CONSECUTIVE_NEEDED-1) // give DOWN same shortcut UP gets
         : CONSECUTIVE_NEEDED_DN;
@@ -4099,34 +4109,16 @@ function TaraApp(){
         }
         const committedDir=windowSignalDirRef.current; // null until first FORMING signal
 
-        // V134: DELIBERATION GATE — block locks during initial analysis phase
-        // Tara needs minimum read time on market before committing to lock
-        const _delibMin_lock=is15m?15:8;
-        const _delibMax_lock=is15m?45:20;
-        const _upConsLock=Object.values(eng.rawSignalScores||{}).filter(s=>s>3).length;
-        const _dnConsLock=Object.values(eng.rawSignalScores||{}).filter(s=>s<-3).length;
-        // V134: early-clear ALSO requires MTF agreement — no fast lock against trend
-        const _mtfAgreesUp=eng.mtfAlignment===undefined||eng.mtfAlignment>=2;
-        const _mtfAgreesDn=eng.mtfAlignment===undefined||eng.mtfAlignment<=-2;
-        // V134 DECONFLICT: EXTREME velocity / rug pull bypasses deliberation entirely
-        // V134 DECONFLICT: EXTREME velocity / rug pull bypasses deliberation entirely
-        // V136: FGT 4/4 alignment also bypasses deliberation — this is the primary signal,
-        //       waiting 30-45s while 4/4 timeframes scream the same direction wastes setup time.
-        //       Posterior must at least lean the FGT direction (not contradict).
-        const _fgt44Up=(eng.mtfAlignment||0)>=4&&posterior>=45;
-        const _fgt44Dn=(eng.mtfAlignment||0)<=-4&&posterior<=55;
-        const _bypassDelib=eng.velocityRegime==='EXTREME'||(eng.isRugPull&&posterior<=45)||_fgt44Up||_fgt44Dn;
-        const _earlyClearLock=_bypassDelib||(posterior>=70&&_upConsLock>=4&&_mtfAgreesUp)||(posterior<=30&&_dnConsLock>=4&&_mtfAgreesDn);
-        const _earlyClearMildLock=_bypassDelib||(posterior>=62&&_upConsLock>=3&&_mtfAgreesUp)||(posterior<=38&&_dnConsLock>=3&&_mtfAgreesDn);
-        const _lockBlocked=clockSeconds<_delibMin_lock||(clockSeconds<_delibMax_lock&&!_earlyClearLock&&!_earlyClearMildLock);
-        if(_lockBlocked){
-          // Inside deliberation: show DELIBERATING text but DO NOT lock
-          const _delibTimeLeftL=Math.max(0,(_earlyClearLock||_earlyClearMildLock?_delibMin_lock:_delibMax_lock)-clockSeconds);
-          taraAdviceRef.current=`DELIBERATING — analyzing market [${_delibTimeLeftL}s left]`;
-          reasoning.push(`[DELIB] Lock blocked — ${_delibTimeLeftL}s left in deliberation phase`);
-
+        // V140: DELIBERATION GATE REMOVED — was inverted (used `clockSeconds<X` where clockSeconds
+        //       is time REMAINING, so it fired near the END of the window instead of the start, where
+        //       the endgame freeze at clockSeconds<90 already blocks). Effectively dead code since V134
+        //       — locks have been firing freely from second 1 (subject to all other gates) and we never
+        //       missed the protection. Removing for clarity.
         // V134: Late lock allowed if trajectory is very strong (legitimate late breakouts)
-        } else if(isVeryLateLock&&_trajStrength<10){
+        // V139: FGT 4/4 alignment also bypasses this. With FGT promoted to primary signal in V136,
+        //       a 4/4 alignment in the late window is exactly the kind of high-conviction setup we want
+        //       to lock — even if the kinematic trajectory is ambivalent.
+        if(isVeryLateLock&&_trajStrength<10&&_fgtAlignAbs<4){
           taraAdviceRef.current=taraAdviceRef.current||'SEARCHING...';
 
         } else if(bullCount>=CONSECUTIVE_NEEDED_UP&&!isEndgameLock&&!(eng.mtfAlignment!==undefined&&eng.mtfAlignment<=-3)){
@@ -4148,7 +4140,7 @@ function TaraApp(){
           const _veryLateFomoUp=isVeryLateLock&&_isChoppyRegime&&posterior>=78&&(!_signalsUnanimous||_trajContradicts);
           const _lateFomoPenalty=_veryLateFomoUp?-25:_lateFomoUp?-15:0;
           if(_lateFomoPenalty<0)reasoning.push(`[LATE-FOMO] Late UP in ${regime}, ${_upSignalsAgreeing}/6 signals agreeing — penalty ${_lateFomoPenalty}`);
-          const _qScore=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6))+Math.min(30,(_rWR-50)*0.6)+Math.min(15,(_sessQ-50)*0.6)+(isLateLockZone?-8:0)+(isVeryLateLock?-20:0)+_dsAdj+_streakAdj+_lateFomoPenalty+_dirBiasUp+(eng.windowDriftBps>25?-Math.min(12,eng.windowExhaustionPenalty||0):0)+(eng.realGapBps<-25?-Math.min(20,Math.abs(eng.realGapBps)*0.4):0)+(newsSentiment?(newsSentiment.score>2?+5:newsSentiment.score<-2?(-8):0):0)+(()=>{
+          const _qScore=Math.min(40,Math.max(0,(Math.abs(posterior-50)-10)*1.6))+Math.min(30,(_rWR-50)*0.6)+Math.min(15,(_sessQ-50)*0.6)+_dsAdj+_streakAdj+_lateFomoPenalty+_dirBiasUp+(eng.windowDriftBps>25?-Math.min(12,eng.windowExhaustionPenalty||0):0)+(eng.realGapBps<-25?-Math.min(20,Math.abs(eng.realGapBps)*0.4):0)+(newsSentiment?(newsSentiment.score>2?+5:newsSentiment.score<-2?(-8):0):0)+(()=>{
             // V134: Sentiment-Trajectory interaction
             const tAdj=eng.trajectoryAdj||0;
             const sScore=newsSentiment?.score||0;
@@ -4180,16 +4172,19 @@ function TaraApp(){
             taraAdviceRef.current='BREAKING NEWS — OBSERVE';
           } else if(_quality<45){
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
-          } else if((eng.trajectoryAdj||0)<=-7){
+          } else if((eng.trajectoryAdj||0)<=-7&&(eng.mtfAlignment||0)<4){
             // V135: Boundary fix — was `< -8`, missed trajectoryAdj exactly -8 (rare but possible).
             //       Threshold tightened -8 → -7 to match the symmetric DOWN side and respect the new ±12 cap.
+            // V139: FGT 4/4 UP overrides this rejection. When all four timeframes scream UP,
+            //       a backward-looking trajectory shouldn't be allowed to block the lock.
             taraAdviceRef.current='UP REJECTED — trajectory says DOWN';
             reasoning.push(`[GATE] UP blocked: trajectory ${eng.trajectoryAdj.toFixed(0)} contradicts UP call`);
-          } else if(_isChoppyRegime&&_quality<62){
-            // V134: In choppy regimes (RC/SS/HVC), demand quality >=62 to lock UP
-            // Quality 60 + SHORT SQUEEZE = adverse-gap UP locks (real issue from screenshots)
+          } else if(_isChoppyRegime&&_quality<55){
+            // V134: In choppy regimes (RC/SS/HVC), demand quality floor for UP locks
+            // V139: floor lowered 62 → 55. FGT 4/4 alignment now contributes +18 quality (V136),
+            //       so the old 62 floor was over-blocking marginal-quality + strong-FGT setups.
             taraAdviceRef.current='WEAK SETUP — '+regime+' needs stronger signal';
-            reasoning.push(`[GATE] UP blocked: quality ${_quality.toFixed(0)} < 62 in ${regime}`);
+            reasoning.push(`[GATE] UP blocked: quality ${_quality.toFixed(0)} < 55 in ${regime}`);
           } else {
           // ── Direction flip guard: if FORMING DOWN already fired, don't lock UP ──
           // V138: Premium Mode and the MTF Confluence gate it carried have been removed.
@@ -4240,7 +4235,7 @@ function TaraApp(){
           const _veryLateFomoDn=isVeryLateLock&&_isChoppyRegime2&&posterior<=22&&(!_signalsUnanimous2||_trajContradicts2);
           const _lateFomoPenalty2=_veryLateFomoDn?-25:_lateFomoDn?-15:0;
           if(_lateFomoPenalty2<0)reasoning.push(`[LATE-FOMO] Late DOWN in ${regime}, ${_dnSignalsAgreeing}/6 signals agreeing — penalty ${_lateFomoPenalty2}`);
-          const _qScore2=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6))+Math.min(30,(_rWR2-50)*0.6)+Math.min(15,(_sessQ2-50)*0.6)+(isLateLockZone?-8:0)+(isVeryLateLock?-20:0)+_dsAdj2+_streakAdj2+_lateFomoPenalty2+_dirBiasDn+(eng.windowDriftBps<-25?-Math.min(12,eng.windowExhaustionPenalty||0):0)+(eng.realGapBps>25?-Math.min(20,Math.abs(eng.realGapBps)*0.4):0)+(newsSentiment?(newsSentiment.score<-2?+5:newsSentiment.score>2?(-8):0):0)+(()=>{
+          const _qScore2=Math.min(40,Math.max(0,(Math.abs(posterior-50)-10)*1.6))+Math.min(30,(_rWR2-50)*0.6)+Math.min(15,(_sessQ2-50)*0.6)+_dsAdj2+_streakAdj2+_lateFomoPenalty2+_dirBiasDn+(eng.windowDriftBps<-25?-Math.min(12,eng.windowExhaustionPenalty||0):0)+(eng.realGapBps>25?-Math.min(20,Math.abs(eng.realGapBps)*0.4):0)+(newsSentiment?(newsSentiment.score<-2?+5:newsSentiment.score>2?(-8):0):0)+(()=>{
             const tAdj=eng.trajectoryAdj||0;
             const sScore=newsSentiment?.score||0;
             // Both agree bearish: bonus
@@ -4265,14 +4260,16 @@ function TaraApp(){
             taraAdviceRef.current='BREAKING NEWS — OBSERVE';
           } else if(_quality2<45){
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
-          } else if((eng.trajectoryAdj||0)>=7){
+          } else if((eng.trajectoryAdj||0)>=7&&(eng.mtfAlignment||0)>-4){
             // V135: Boundary fix mirroring UP side — was `> 8`, tightened to `>= 7`.
+            // V139: FGT 4/4 DOWN overrides this rejection (mtfAlignment <= -4).
             taraAdviceRef.current='DOWN REJECTED — trajectory says UP';
             reasoning.push(`[GATE] DOWN blocked: trajectory ${eng.trajectoryAdj.toFixed(0)} contradicts DOWN`);
-          } else if(_isChoppyRegime2&&_quality2<62){
-            // V134: choppy regimes demand quality >=62 to lock DOWN
+          } else if(_isChoppyRegime2&&_quality2<55){
+            // V134: choppy regimes demand quality floor for DOWN locks
+            // V139: floor lowered 62 → 55 to match UP side.
             taraAdviceRef.current='WEAK SETUP — '+regime+' needs stronger signal';
-            reasoning.push(`[GATE] DOWN blocked: quality ${_quality2.toFixed(0)} < 62 in ${regime}`);
+            reasoning.push(`[GATE] DOWN blocked: quality ${_quality2.toFixed(0)} < 55 in ${regime}`);
           } else {
           // ── Direction flip guard: if FORMING UP already fired, don't lock DOWN ──
           // V138: Removed the SS/HVC DOWN-block that required rug-pull / 25+bps adverse / FGT-3of4
@@ -4301,20 +4298,9 @@ function TaraApp(){
           } // close quality gate else
 
         } else {
-          // V134: SMART DELIBERATION — 15s baseline, extends if Tara needs more data
-          // Min 15s (15m) / 8s (5m): gives Tara time to read market structure
-          // Max 45s (15m) / 20s (5m): hard ceiling, commit by then
-          // EARLY-EXIT: if signals strongly agree (4+ consensus + decisive posterior),
-          //   exit at min duration — don't make her wait when picture is already clear
-          const _delibMin=is15m?15:8;
-          const _delibMax=is15m?45:20;
-          const _upConsEarly=Object.values(eng.rawSignalScores||{}).filter(s=>s>3).length;
-          const _dnConsEarly=Object.values(eng.rawSignalScores||{}).filter(s=>s<-3).length;
-          const _earlyClear=(avgRecent>=70&&_upConsEarly>=4)||(avgRecent<=30&&_dnConsEarly>=4);
-          const _earlyClearMild=(avgRecent>=62&&_upConsEarly>=3)||(avgRecent<=38&&_dnConsEarly>=3);
-          // In deliberation while: under min OR (under max AND not yet clear enough)
-          const _inDeliberation=clockSeconds<_delibMin||(clockSeconds<_delibMax&&!_earlyClear&&!_earlyClearMild);
-          const _delibTimeLeft=Math.max(0,(_earlyClear||_earlyClearMild?_delibMin:_delibMax)-clockSeconds);
+          // V140: SMART DELIBERATION REMOVED — same inverted-variable issue as the lock-side gate.
+          //       Was using `clockSeconds<_delibMin` which fires near end of window (clockSeconds = remaining).
+          //       Removed to clean up the misleading "DELIBERATING — Xs left" display.
           // V134: SIT-OUT requires multiple confirmations of "no edge"
           // Not just weak signals — also weak FGT alignment AND no significant gap to strike
           const _upConsensus=Object.values(eng.rawSignalScores||{}).filter(s=>s>3).length;
@@ -4348,8 +4334,6 @@ function TaraApp(){
             // Don't set state here — fall through to FORMING/SEARCHING below
           } else if(isVeryLateLock){
             taraAdviceRef.current='NO CALL';
-          } else if(_inDeliberation){
-            taraAdviceRef.current=`DELIBERATING — analyzing market [${_delibTimeLeft}s left]`;
           } else if(_shouldSitOut){
             taraAdviceRef.current='SITTING OUT — Mixed signals, no edge';
             reasoning.push(`[SIT-OUT] Mid-window posterior ${avgRecent.toFixed(0)}, consensus UP:${_upConsensus} DN:${_dnConsensus} — no edge`);
@@ -4382,6 +4366,9 @@ function TaraApp(){
         //       adverse to recognize a broken call while still being above tick noise.
         const deepWrong=(lock.dir==='UP'&&gapBps<-30)||(lock.dir==='DOWN'&&gapBps>30);
         const catastrophicRugpull=(isRugPull&&showRugPullAlerts&&lock.dir==='UP')||(isRugPull&&lock.dir==='UP'&&posterior<10);
+        // V140: Mirror — catastrophic upward spike releases DOWN locks immediately.
+        //       Faster than waiting for deepWrong (gap > 30 bps adverse). Symmetric to rug-pull.
+        const catastrophicSpike=(eng.isMoonshot&&lock.dir==='DOWN')||(eng.isMoonshot&&lock.dir==='DOWN'&&posterior>90);
         // V134: SIGNAL REGIME CHANGE DETECTION
         // If 3+ signals flip from agreeing to opposing the lock direction → release
         // Sharper than waiting for 20pt posterior collapse
@@ -4428,12 +4415,14 @@ function TaraApp(){
           (lock.dir==='UP'&&_lockedInBullishRg&&!_nowInBullishRg&&_trajLeansDn)||
           (lock.dir==='DOWN'&&_lockedInBearishRg&&!_nowInBearishRg&&_trajLeansUp)
         );
-        if(deepWrong||catastrophicRugpull||decayCollapse||signalRegimeChange||trajFlipAgainst||fgtFlipAgainst||regimeRevalidation){
+        if(deepWrong||catastrophicRugpull||catastrophicSpike||decayCollapse||signalRegimeChange||trajFlipAgainst||fgtFlipAgainst||regimeRevalidation){
           lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};
           // V134: reset window-direction commitment so flip to opposite direction is allowed
           windowSignalDirRef.current=null;
           taraAdviceRef.current='LOCK RELEASED';
-          if(signalRegimeChange)reasoning.push(`[LOCK] Released — signal regime flipped (${flippedSignals.join(',')} now against ${lock.dir})`);
+          if(catastrophicRugpull)reasoning.push(`[LOCK] Released — catastrophic rug pull (UP lock)`);
+          else if(catastrophicSpike)reasoning.push(`[LOCK] Released — catastrophic upward spike (DOWN lock)`);
+          else if(signalRegimeChange)reasoning.push(`[LOCK] Released — signal regime flipped (${flippedSignals.join(',')} now against ${lock.dir})`);
           else if(decayCollapse)reasoning.push(`[LOCK] Released — posterior decayed ${postDelta.toFixed(0)} pts since lock`);
           else if(trajFlipAgainst)reasoning.push(`[LOCK] Released — trajectory flipped against ${lock.dir} (${eng.trajectoryAdj.toFixed(0)})`);
           else if(fgtFlipAgainst)reasoning.push(`[LOCK] Released — FGT now ${eng.mtfAlignment>0?'UP':'DOWN'} ${Math.abs(eng.mtfAlignment)}/4 against ${lock.dir}`);
@@ -4871,7 +4860,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V138...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V140...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -4962,7 +4951,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V138
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V140
             </span>
           </div>
 
@@ -5348,7 +5337,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V138</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V140</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -5818,7 +5807,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V138 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V140 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -5974,10 +5963,12 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V138 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V140 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">🧹 Cleanups + symmetry (V140)</h3><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Deliberation gate removed.</strong> Was using <code>clockSeconds&lt;X</code> where clockSeconds is time REMAINING — fired near end of window instead of start. Effectively dead code since V134 (the endgame freeze at &lt;90s already covered the same zone). Locks have always been firing freely from second 1 subject to other gates. Cleaning up the misleading "DELIBERATING — Xs left" display along with it.</li><li><strong>Posterior-strength deadband 15 → 10.</strong> Quality contribution from posterior was zero in the 35-65 range. Now starts contributing at posterior ≥60 / ≤40, giving moderate-posterior FGT 4/4 setups more quality headroom.</li><li><strong>Catastrophic spike detector added for DOWN locks.</strong> Mirror of catastrophic rug-pull. UP locks already had a fast-trigger release on rug-pulls; DOWN locks now have the equivalent on sudden upward shocks (<code>tickSlope &gt; 5 + aggrFlow &gt; 0.6</code>). Symmetric protection.</li></ul></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">🔍 Block audit — over-restrictive gates removed (V139)</h3><p className="leading-relaxed">A complete sweep of every gate, block, veto, and quality penalty in the engine. Removed redundant penalties, FGT-gated rejections so the primary signal can override, and dampened day-of-week noise.</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Choppy quality floor 62 → 55.</strong> FGT 4/4 contributes +18 to quality already; the old 62 floor was over-blocking marginal-quality + strong-FGT setups in choppy regimes.</li><li><strong>Trajectory rejection FGT-aware.</strong> Was a hard block at ±7. Now overridden when FGT 4/4 agrees with the proposed direction. Backward-looking trajectory shouldn't block locks when all four timeframes scream the same direction.</li><li><strong>Very-late-lock NO CALL gate FGT-aware.</strong> After 800s elapsed in a 15m window, locks were blocked unless trajectory ≥10. Now FGT 4/4 also bypasses — exactly the high-conviction late setup we want to take.</li><li><strong>Removed redundant late-window quality penalties.</strong> The <code>isLateLockZone ? -8</code> and <code>isVeryLateLock ? -20</code> penalties stacked with the more-precise late-FOMO penalty. Three penalties on the same condition. Kept late-FOMO, dropped the others.</li><li><strong>Day×Session magnitudes halved.</strong> Was -10..+5 (e.g. SUN-US: -10), now -5..+3. Per-bucket sample sizes are too small for the previous swing range. Direction held, magnitude dampened.</li><li><strong>Adaptive session×regime threshold requires 10+ samples.</strong> Was 5+. Reduces noise from buckets with few trades.</li><li><strong>Choppy-regime extra-sample requirement FGT-aware.</strong> The +1 sample penalty in HVC/RC was bypassed when trajectory ≥7. Now FGT 4/4 alignment also bypasses it on both sides.</li></ul></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">⚖ Full directional symmetry (V138)</h3><p className="leading-relaxed">V137 made the SS/HVC DOWN block FGT-aware but it was still asymmetric — UP had no equivalent gate. V138 removes the DOWN block entirely. Score math (regime bonus, FGT contribution, signal alignment) is now the only directional filter.</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>SS/HVC DOWN block fully removed.</strong> DOWN now locks on the same terms UP does — quality gate, posterior threshold, FGT veto if 3/4+ UP, consecutive samples, momentum confirmation.</li><li><strong>SHORT SQUEEZE removed from <code>_downGated</code>.</strong> DOWN's lock threshold in SS now matches UP's threshold there. Was 28 vs UP's 30 — small but a real asymmetry.</li><li><strong>Premium Mode removed entirely.</strong> The toggle button, US session skip, weak RC skip, MTF Confluence cross-window veto, quality floor 65, all gone. The asymmetric DOWN block lived in here too.</li><li><strong>What stays:</strong> all symmetric gates — macro blackouts, quality floor (45 normal / 62 choppy), trajectory rejection (±7), FGT veto (3/4+ against), deliberation, consecutive samples, endgame freeze, momentum confirmation, direction-flip whipsaw guard, lock release conditions, stop-guard sync, sit-out logic. These all apply equally to UP and DOWN.</li><li><strong>Result:</strong> the only structural directional bias left is the natural regime score bonus (+43 in TU/SS, -43 in TD). FGT contribution (±30 for 4/4) is strong enough to fight that on its own when timeframes align.</li></ul></section>
               <section><h3 className="text-rose-400 font-bold uppercase tracking-wide mb-2 text-xs">🚨 Asymmetric DOWN block partially fixed (V137)</h3><p className="leading-relaxed">A V112-era hard-coded gate was preventing DOWN locks in SHORT SQUEEZE and HIGH VOL CHOP regimes — with no equivalent block on UP. This created the "Tara never locks DOWN, just hesitates and then locks UP" pattern.</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Non-Premium gate:</strong> DOWN-in-SS/HVC was blocked unless rug-pull or 25+ bps already adverse. Now also overrideable by FGT 3/4+ DOWN alignment.</li><li><strong>Premium Mode gate:</strong> Was unconditionally "DOWN BLOCKED IN [regime]". Now also overrideable by FGT 3/4+ DOWN. Display message updated to clarify what's blocking.</li><li><strong>Why this matters:</strong> The original block assumed DOWN-in-SS was a coinflip (50% WR). That data was from before V135 (SS price-action veto narrowed false-SS classifications) and V136 (FGT became the primary signal). FGT 3/4+ DOWN is stronger evidence than the regime label, so it should override.</li><li><strong>UI: Lock release now visible when in position.</strong> Previously the prediction stayed at "UP - LOCKED" even after Tara internally released the lock. Now shows "UP - LOCK RELEASED" so you can see when she's pulled out, even if you confirmed entry.</li></ul></section>
               <section><h3 className="text-purple-400 font-bold uppercase tracking-wide mb-2 text-xs">★ FGT IS NOW THE PRIMARY SIGNAL (V136)</h3><p className="leading-relaxed">Based on observed 70-80% accuracy on 4/4 multi-timeframe alignment, FGT (HPotter Future Grand Trend) has been promoted from a small contributing signal to the dominant directional voice in the engine. Calibration math: at 75% empirical accuracy, FGT 4/4 alignment alone justifies posterior ~78%. The previous +12 score contribution capped FGT at posterior ~61% — basically engine baseline.</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Score weight bump:</strong> 4/4 alignment ±12 → ±30, 3/4 ±6 → ±18, 2/4 0 → ±8. FGT 4/4 alone now pushes posterior to ~78% in its direction (was ~61%).</li><li><strong>4/4 fast-track:</strong> FGT 4/4 + posterior leaning the same direction now bypasses the deliberation gate AND drops sample requirement to 1. Locks fire immediately when the engine catches up to FGT.</li><li><strong>3/4 quick-track:</strong> FGT 3/4 alignment drops sample requirement by 1 (parallel to existing trajectory shortcut).</li><li><strong>Quality gate FGT contribution:</strong> 4/4 = +18 quality, 3/4 = +10, 2/4 = +4. Stacks with the existing 6-signal consensus boost.</li><li><strong>Plain-English summary led by FGT:</strong> When 4/4 or 3/4 aligns, the "What Tara sees" line opens with "FGT 4/4 → DIRECTION" instead of regime-and-flow language. The badge in the prediction card also enlarges and pulses on 4/4 alignment.</li><li><strong>Earlier release on FGT flip:</strong> Lock release threshold tightened from 3/4 against to 2/4 against. If FGT was driving the lock and 2 timeframes flip away, Tara releases.</li><li><strong>Faster sit-out exit:</strong> FGT 2/4 alignment is now enough to break Tara out of a sticky sit-out (was 3/4).</li></ul></section>
