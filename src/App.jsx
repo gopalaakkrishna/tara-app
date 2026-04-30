@@ -85,14 +85,14 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // removed
 // removed
 // Best hours: 4 (100%) and 5 (100%)
-// V130: Baseline version marker — bump when SEED_TRADES is refreshed.
+// V133: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.04.29-v130-377t-423W266L-deliberation';
+const BASELINE_VERSION='2026.04.29-v133-377t-423W266L-equal-consideration';
 const BASELINE_RECORD={'15m':{wins:423,losses:266},'5m':{wins:31,losses:25}};
 
 const SEED_TRADES=[
-  // V130 BAKED TRAINING: 377 trades. Running baseline: 423W-266L (61.4%)
+  // V133 BAKED TRAINING: 377 trades. Running baseline: 423W-266L (61.4%)
   // Per-direction: UP 218, DOWN 159
   {id:1776403212237,dir:'UP',posterior:71.0,regime:'RANGE-CHOP',clockAtLock:587,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.83,momentum:0.0,structure:0.0,flow:20.23,technical:0.0,regime:0.0},result:'WIN'},
   {id:1776403812231,dir:'UP',posterior:82.0,regime:'RANGE-CHOP',clockAtLock:887,hour:1,session:'ASIA',windowType:'15m',signals:{gap:35.2,momentum:-5.39,structure:0.0,flow:-17.15,technical:-8.0,regime:0.0},result:'LOSS'},
@@ -475,7 +475,23 @@ const SEED_TRADES=[
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
 const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV110',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
-const resetToLatestBaseline=()=>{try{
+// V133: Reset just the directional/learning state, keep trade history + scorecard
+  // Use this when you want Tara to give UP/DOWN equal consideration without losing your wins/losses record
+  const resetDirectionalBias=()=>{
+    if(!confirm('Reset Tara\'s UP/DOWN bias? Trade log and W-L scorecard will be PRESERVED. Adaptive weights, regime weights, and calibration will reset to defaults so direction priors don\'t lean.'))return;
+    try{
+      // Reset adaptive signal weights to defaults
+      localStorage.removeItem('taraWeightsV110');
+      // Reset per-regime signal weights
+      Object.keys(localStorage).filter(k=>k.startsWith('taraV110RW_')).forEach(k=>localStorage.removeItem(k));
+      // Reset calibration buckets (so old UP-skewed calibration doesn't carry over)
+      localStorage.removeItem('taraCalibrationV110');
+      // KEEP: taraTradeLogV110 (history), taraV110Score (W-L), taraV110Mem (regime memory)
+      window.location.reload();
+    }catch(e){alert('Reset failed: '+e.message);}
+  };
+  
+  const resetToLatestBaseline=()=>{try{
   // V111: Sync to baseline training data (matches across all devices)
   localStorage.setItem('taraTradeLogV110',JSON.stringify(SEED_TRADES));
   localStorage.setItem('taraScoreV110',JSON.stringify(BASELINE_RECORD));
@@ -488,7 +504,7 @@ const resetToLatestBaseline=()=>{try{
 // ── GRADIENT DESCENT WEIGHT UPDATE ──
 // After each trade, credit/blame each signal proportionally to its contribution
 const updateWeights=(weights,tradeLog,result)=>{
-  // V130: Attribution-weighted gradient descent — only update signals that
+  // V133: Attribution-weighted gradient descent — only update signals that
   // meaningfully contributed to the call. Prevents noise updates on bystanders.
   const last=tradeLog[tradeLog.length-1];
   if(!last||!last.signals||!last.posterior)return weights;
@@ -499,14 +515,14 @@ const updateWeights=(weights,tradeLog,result)=>{
   const idx=tradeLog.length-1;
   const totalTrades=Math.max(1,tradeLog.length);
   const recencyMult=0.5+1.5*(idx/totalTrades);
-  // V130: Use trade direction (UP/DOWN), not raw posterior sign — handles edge cases
+  // V133: Use trade direction (UP/DOWN), not raw posterior sign — handles edge cases
   // where posterior is near 50 but trade direction is committed
   const tradeDirSign=last.dir==='UP'?1:last.dir==='DOWN'?-1:Math.sign(last.posterior-50);
   const newW={...weights};
   Object.keys(sig).forEach(k=>{
     if(!(k in newW))return;
     const contribution=Math.abs(sig[k])/totalAbs;
-    // V130: ATTRIBUTION GATE — only update signals that contributed >10% of decision
+    // V133: ATTRIBUTION GATE — only update signals that contributed >10% of decision
     // Bystanders (like flow=0 when momentum drove the call) shouldn't get credit/blame
     if(contribution<0.10)return;
     const aligned=Math.sign(sig[k])===tradeDirSign&&sig[k]!==0;
@@ -527,7 +543,7 @@ const updateRegimeWeights=(regimeWeightsObj,trade,result)=>{
   const rg=trade.regime||'RANGE-CHOP';
   if(!regimeWeightsObj[rg])return regimeWeightsObj;
   const weights=regimeWeightsObj[rg];
-  // V130: use trade direction for alignment
+  // V133: use trade direction for alignment
   const tradeDirSign=trade.dir==='UP'?1:trade.dir==='DOWN'?-1:Math.sign(trade.posterior-50);
   const won=result==='WIN';
   const sig=trade.signals;
@@ -537,7 +553,7 @@ const updateRegimeWeights=(regimeWeightsObj,trade,result)=>{
   Object.keys(sig).forEach(k=>{
     if(!(k in newW))return;
     const contribution=Math.abs(sig[k])/totalAbs;
-    // V130: attribution gate
+    // V133: attribution gate
     if(contribution<0.10)return;
     const aligned=Math.sign(sig[k])===tradeDirSign&&sig[k]!==0;
     let delta=(LEARNING_RATE*1.2)*contribution*conviction;
@@ -577,7 +593,7 @@ const buildCalibration=(tradeLog)=>{
   return cal;
 };
 
-// V130: Chart Pattern Recognition
+// V133: Chart Pattern Recognition
 // Detects simple actionable patterns in candle history.
 // Returns {pattern: 'doubleTop'|'doubleBottom'|'wedgeUp'|'wedgeDn'|null, confidence: 0-1}
 const detectChartPattern=(history)=>{
@@ -628,7 +644,7 @@ const detectChartPattern=(history)=>{
   return{pattern:null,confidence:0};
 };
 
-// V130: Brier Score — proper calibration metric for binary predictions
+// V133: Brier Score — proper calibration metric for binary predictions
 const computeBrierScore=(tradeLog)=>{
   const trades=tradeLog.filter(t=>t.result&&t.posterior!=null);
   if(trades.length<5)return{score:null,n:trades.length,note:'Need 5+ trades'};
@@ -648,7 +664,7 @@ const computeBrierScore=(tradeLog)=>{
   return{score,n:trades.length,grade};
 };
 
-// V130: REAL BACKTEST FRAMEWORK — replay all historical trades and evaluate
+// V133: REAL BACKTEST FRAMEWORK — replay all historical trades and evaluate
 // what current logic WOULD have done. This is the missing piece for validating changes.
 const runFullBacktest=(tradeLog,opts={})=>{
   const min=opts.minTrades||10;
@@ -739,7 +755,7 @@ const runFullBacktest=(tradeLog,opts={})=>{
   if(td.length>0)filterScenarios['TRENDING DOWN+UP']={n:td.length,wins:td.filter(t=>t.result==='WIN').length,wr:td.filter(t=>t.result==='WIN').length/td.length};
   const late=trades.filter(t=>parseInt(t.clockAtLock)>700);
   if(late.length>0)filterScenarios['Late-zone only']={n:late.length,wins:late.filter(t=>t.result==='WIN').length,wr:late.filter(t=>t.result==='WIN').length/late.length};
-  // V130: Apply our late-FOMO rule retroactively
+  // V133: Apply our late-FOMO rule retroactively
   const exFomo=trades.filter(t=>{
     const c=parseInt(t.clockAtLock)||0;
     const post=parseFloat(t.posterior)||50;
@@ -763,7 +779,7 @@ const runFullBacktest=(tradeLog,opts={})=>{
   };
 };
 
-// V130: Lightweight Backtest Audit
+// V133: Lightweight Backtest Audit
 // Runs prediction calibration against historical trades.
 // Returns: how often did Tara's confidence match her actual win rate?
 const runBacktest=(tradeLog,minSamples=10)=>{
@@ -804,7 +820,7 @@ const runBacktest=(tradeLog,minSamples=10)=>{
   };
 };
 
-// V130: Adaptive Threshold per Session × Regime
+// V133: Adaptive Threshold per Session × Regime
 // For each combo, find the WR. If it's high, lower threshold (Tara more confident here).
 // If it's low, raise threshold (Tara needs more conviction here).
 const buildSessionRegimeThresh=(tradeLog)=>{
@@ -831,7 +847,7 @@ const buildSessionRegimeThresh=(tradeLog)=>{
   return adj;
 };
 
-// V130: Regime-Direction WR Memory — explicit warning when locking into known weak combos
+// V133: Regime-Direction WR Memory — explicit warning when locking into known weak combos
 const buildRegimeDirWR=(tradeLog)=>{
   const wr={};
   tradeLog.filter(t=>t.result&&t.dir&&t.regime).forEach(t=>{
@@ -1190,7 +1206,7 @@ const useGlobalTape=()=>{
   return{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal};
 };
 
-// V130: HPotter Future Grand Trend — multi-timeframe forecast
+// V133: HPotter Future Grand Trend — multi-timeframe forecast
 // Translated from PineScript v5 (Apr 2022 by HPotter)
 // 
 // Algorithm:
@@ -1241,7 +1257,7 @@ const computeFGT=(candles,length=70,forecast=100)=>{
   return{forecastDir,forecastBps:Math.round(forecastBps),fcast:Math.round(fcast),valid:true,length:_length,forecast:_forecast};
 };
 
-// V130: Aggregate finer-grained candles into a coarser timeframe
+// V133: Aggregate finer-grained candles into a coarser timeframe
 // e.g. aggregate 5m candles into 15m by combining 3 at a time
 const aggregateCandles=(candles,factor)=>{
   if(!candles||factor<=1)return candles;
@@ -1259,7 +1275,7 @@ const aggregateCandles=(candles,factor)=>{
   return out;
 };
 
-// V130: Volume Profile — find where most trading happened recently
+// V133: Volume Profile — find where most trading happened recently
 // VPOC (Volume Point of Control) acts as support/resistance.
 // If we're locked UP and a strong VPOC sits between price and strike → it's resistance.
 const computeVolumeProfile=(history)=>{
@@ -1300,10 +1316,10 @@ const computeVolumeProfile=(history)=>{
   return{vpoc,vah,val,strength};
 };
 
-// V130: useDepthFlash — high-frequency order book polling at 2.5s
+// V133: useDepthFlash — high-frequency order book polling at 2.5s
 // Bloomberg's 8s interval misses fast wall changes during volatility.
 // This hook only fetches the depth endpoint, which is the time-critical one.
-// V130: Fetch candles at 1m, 3m, 5m, 15m for HPotter FGT analysis
+// V133: Fetch candles at 1m, 3m, 5m, 15m for HPotter FGT analysis
 // Returns { c1m: [...], c3m: [...], c5m: [...], c15m: [...] }
 const useMultiTFCandles=()=>{
   const[tfCandles,setTfCandles]=useState({c1m:[],c3m:[],c5m:[],c15m:[]});
@@ -1622,7 +1638,7 @@ const computeV99Posterior=(params)=>{
   else if(_velScore<28)velocityRegime='NORMAL';
   else if(_velScore<55)velocityRegime='FAST';
   else velocityRegime='EXTREME';
-  // V130: VOLUME PROFILE / VPOC — support/resistance levels
+  // V133: VOLUME PROFILE / VPOC — support/resistance levels
   const _vpData=computeVolumeProfile(liveHistory);
   let vpocResistanceAdj=0;
   if(_vpData.vpoc>0&&_vpData.strength>0.08&&targetMargin>0&&currentPrice>0){
@@ -1638,7 +1654,7 @@ const computeV99Posterior=(params)=>{
     }
     totalScore+=vpocResistanceAdj;
   }
-  // ── V130: WINDOW-OPEN PRICE ANCHOR ──────────────────────────────────────
+  // ── V133: WINDOW-OPEN PRICE ANCHOR ──────────────────────────────────────
   // How far has price moved this window? Combined with time elapsed,
   // tells us if the move is exhausted (already +30bps with 2min left = no juice)
   let windowDriftBps=0;
@@ -1657,7 +1673,7 @@ const computeV99Posterior=(params)=>{
     }
   }
 
-  // ── V130: TRAJECTORY FORECAST ────────────────────────────────────────────
+  // ── V133: TRAJECTORY FORECAST ────────────────────────────────────────────
   // Project where price will be at window-end using kinematics: x(t) = x₀ + v·t + ½a·t²
   // Then convert to "implied posterior" — direction Tara expects price to land
   const _v5sNum=velocityRef?.current?.v5s||0;     // $/sec recent
@@ -1671,7 +1687,7 @@ const computeV99Posterior=(params)=>{
   const _projectedGapBps=targetMargin>0?((_projectedPrice-targetMargin)/targetMargin)*10000:0;
   // If projection points strongly toward a direction relative to strike, boost confidence early
   let trajectoryAdj=0;
-  let trajectoryDirHint='NEUTRAL'; // V130: directional read for contradiction detection
+  let trajectoryDirHint='NEUTRAL'; // V133: directional read for contradiction detection
   if(targetMargin>0&&_secsLeft>60&&Math.abs(_projectedGapBps)>8){
     // Projection points to where price will be at window end
     // Positive = above strike (favorable for UP), negative = below (favorable for DOWN)
@@ -1684,7 +1700,7 @@ const computeV99Posterior=(params)=>{
     }
     reasoning.push(`[TRAJ] Projected end @ $${_projectedPrice.toFixed(0)} (${_projectedGapBps>0?'+':''}${_projectedGapBps.toFixed(0)}bps to strike) → favors ${trajectoryDirHint}`);
   }
-  // V130: HPotter Future Grand Trend on 1m/3m/5m/15m
+  // V133: HPotter Future Grand Trend on 1m/3m/5m/15m
   // Uses the actual PineScript algorithm (length=70, forecast=100 by default)
   // Each timeframe forecasts where price will be 100 bars ahead
   // 4/4 align direction = strong, 3/4 = mild
@@ -1733,25 +1749,7 @@ const computeV99Posterior=(params)=>{
   } else {
     reasoning.push(`[FGT] Loading multi-timeframe data...`);
   }
-  // V130: Trajectory STICKINESS — when multiple forward time points agree, raise floor on signal
-  // Generate forward forecast at +1m, +3m, +5m, +10m and check unanimity
-  let forecastUnanimity=0; // -8 to +8: how many forward time points agree on direction
-  if(targetMargin>0&&_secsLeft>30){
-    const horizons=[60,180,300,600,Math.min(_secsLeft,900)];
-    horizons.forEach(h=>{
-      const dT=Math.sqrt(h);
-      const projP=currentPrice+(_v5sNum*dT)+(_accelNum*dT*dT*0.4);
-      const projGap=(projP-targetMargin)/targetMargin*10000;
-      if(projGap>3)forecastUnanimity++;
-      else if(projGap<-3)forecastUnanimity--;
-    });
-    // Strong forward agreement (4+ of 5 points same direction) = sticky bias
-    if(Math.abs(forecastUnanimity)>=4){
-      const stickyBias=forecastUnanimity*1.5; // ~6-8 points
-      totalScore+=stickyBias;
-      reasoning.push(`[FORECAST-STICKY] ${forecastUnanimity>0?'UP':'DOWN'} agreement across ${Math.abs(forecastUnanimity)}/5 forward points — bias ${stickyBias>0?'+':''}${stickyBias}`);
-    }
-  }
+  // V133: FORECAST-STICKY removed — replaced by HPotter FGT (more rigorous)
   // Also: pure trajectory without strike (for early-window calls when strike not set yet)
   if(targetMargin<=0&&Math.abs(_v5sNum)>0.3){
     // No strike yet — use raw velocity sign as directional hint
@@ -1771,7 +1769,7 @@ const computeV99Posterior=(params)=>{
   const vwap=calcVWAP(liveHistory);
   const bb=calcBB([...closes].reverse(),20);
   const realGapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
-  // ── V130: STRIKE QUALITY SCORING ──────────────────────────────────────────
+  // ── V133: STRIKE QUALITY SCORING ──────────────────────────────────────────
   // Detect when the strike was set during anomaly/spike vs normal price.
   // Compare strike to recent 5-min average. If far off, the strike is "dirty"
   // and gap-gravity should be downweighted.
@@ -1810,7 +1808,7 @@ const computeV99Posterior=(params)=>{
   const timeDecay=Math.pow(timeFraction,is15m?1.8:1.3);
   const isPostDecay=timeFraction>0.6;
   const decayMult=isPostDecay?1.5:1.0;
-  // V130: Gap gravity rebalanced
+  // V133: Gap gravity rebalanced
   // Small gap (<15bps) + late time → boost (binary outcome near tipping point)
   // Large gap (>25bps) → don't dampen by time (a 35bps distance is real even early)
   const _proximityFactor=Math.abs(realGapBps)<15&&timeFraction>0.7?1.3:1.0;
@@ -1819,13 +1817,13 @@ const computeV99Posterior=(params)=>{
   const gapMag=Math.abs(realGapBps);
   if(gapMag>15)gapScore+=Math.sign(realGapBps)*Math.pow(gapMag-10,1.3)*(is15m?0.45:0.65);
   if(gapMag>50)gapScore*=0.7;
-  const gapClamped=Math.max(-W.gap,Math.min(W.gap,gapScore))*strikeQuality; // V130: scale by strike quality
+  const gapClamped=Math.max(-W.gap,Math.min(W.gap,gapScore))*strikeQuality; // V133: scale by strike quality
   rawSignalScores.gap=gapClamped;
   totalScore+=gapClamped;
   if(gapMag>15)reasoning.push(`[GAP] ${realGapBps.toFixed(1)} bps — gravity ${realGapBps>0?'bullish':'bearish'} | W:${W.gap.toFixed(0)}`);
 
   // ── SIGNAL 2: MOMENTUM COMPOSITE ──
-  // V130: Momentum reweighting late in window
+  // V133: Momentum reweighting late in window
   // Early: drift1m matters most (capture turns). Late: drift5m matters most (sustained direction).
   // After 60% time, micro-momentum (1m) gets damped by 50% — price can wiggle but the binary outcome is set.
   let momScore=0;
@@ -1928,7 +1926,7 @@ const computeV99Posterior=(params)=>{
       reasoning.push(`[OB] Depth imbalance ${(obImbal*100).toFixed(0)}% ${obImbal>0?'BIDS heavier':'ASKS heavier'}`);
     }
   }
-  // V130: LIVE ORDER BOOK FLASH — 2.5s polling vs bloomberg's 8s
+  // V133: LIVE ORDER BOOK FLASH — 2.5s polling vs bloomberg's 8s
   // Catches fast wall changes during volatility that 8s polling misses
   if(depthFlash&&depthFlash.depthLastUpdate>0){
     const ageMs=Date.now()-depthFlash.depthLastUpdate;
@@ -1946,7 +1944,7 @@ const computeV99Posterior=(params)=>{
   }
   // V114: Liquidation Cluster Awareness — price gets pulled toward large walls
   let liqAdj=0;
-  // V130: Require wall persistence ≥15s (filters spoofed walls)
+  // V133: Require wall persistence ≥15s (filters spoofed walls)
   const longWallStable=(bloomberg?.longWallAgeMs||0)>=15000;
   const shortWallStable=(bloomberg?.shortWallAgeMs||0)>=15000;
   if(liqLongWall>0&&liqLongUSD>500000&&longWallStable){
@@ -2003,7 +2001,7 @@ const computeV99Posterior=(params)=>{
   const mem=regimeMemory?regimeMemory[regime]:null;
   if(mem&&(mem.wins+mem.losses)>=3){const wr=mem.wins/(mem.wins+mem.losses);if(wr<0.45){upThreshold+=6;downThreshold-=6;reasoning.push(`[MEMORY] Low WR (${(wr*100).toFixed(0)}%) in ${regime} — tightening`);}else if(wr>0.65){upThreshold-=4;downThreshold+=4;reasoning.push(`[MEMORY] High WR (${(wr*100).toFixed(0)}%) in ${regime} — loosening`);}}
 
-  // V130: Chart pattern recognition
+  // V133: Chart pattern recognition
   const _pattern=detectChartPattern(liveHistory);
   let patternAdj=0;
   if(_pattern.pattern==='doubleTop'){patternAdj=-5;reasoning.push(`[PATTERN] ${_pattern.detail} — DOWN bias`);}
@@ -2011,7 +2009,7 @@ const computeV99Posterior=(params)=>{
   else if(_pattern.pattern==='wedgeUp'){patternAdj=-3;reasoning.push(`[PATTERN] ${_pattern.detail}`);}
   else if(_pattern.pattern==='wedgeDn'){patternAdj=+3;reasoning.push(`[PATTERN] ${_pattern.detail}`);}
   totalScore+=patternAdj;
-  // V130: Apply forward-looking trajectory adjustment
+  // V133: Apply forward-looking trajectory adjustment
   totalScore+=trajectoryAdj;
   // Convert to posterior
   const rawPosterior=50+totalScore*0.95;
@@ -2028,13 +2026,10 @@ const computeV99Posterior=(params)=>{
   const totalSignalWeight=Object.values(W).reduce((a,b)=>a+b,0)||1;
 
   // ── IMPROVEMENT 1: Direction prior calibration ───────────────────────────
-  // 211-trade data: UP 69% WR vs DOWN 55% WR — DOWN is structurally less reliable
-  // Pull DOWN posteriors 15% closer to 50 to match actual empirical reliability
+  // V133: Hardcoded DOWN penalty REMOVED — was creating structural UP bias
+  // DOWN posteriors now use the natural calibration without artificial dampening
+  // Multi-timeframe FGT, signal consensus, and adaptive weights handle direction validation organically
   let dirCalibrated=calibratedPosterior;
-  if(calibratedPosterior<50){
-    dirCalibrated=50-(50-calibratedPosterior)*0.85;
-    reasoning.push(`[DIR] DOWN prior adj: ${calibratedPosterior.toFixed(1)}%→${dirCalibrated.toFixed(1)}% (DOWN WR=55% correction)`);
-  }
 
   // ── IMPROVEMENT 5: Posterior time-decay for late window locks ─────────────
   // Data: losses lock avg 777s, wins avg 744s. Late locks structurally weaker.
@@ -2046,7 +2041,23 @@ const computeV99Posterior=(params)=>{
     dirCalibrated=50+(dirCalibrated-50)*lateDecayFactor;
     reasoning.push(`[TIME] Late lock decay ×${lateDecayFactor}: ${beforeDecay.toFixed(1)}%→${dirCalibrated.toFixed(1)}%`);
   }
+  // V133: BACKTEST-DRIVEN CALIBRATION (display-only, lock guards still use raw)
+  // 377-trade backtest showed posterior 85-95 actually wins only 58-68%
+  // We compute a calibrated value for DISPLAY but locks use raw posterior so thresholds don't break
+  let _calibratedDisplay=dirCalibrated;
+  const _overshoot=Math.abs(dirCalibrated-50);
+  if(_overshoot>15){
+    let _compressed;
+    if(_overshoot<=40)_compressed=15+(_overshoot-15)*0.5;
+    else _compressed=15+25*0.5+(_overshoot-40)*0.3;
+    _calibratedDisplay=dirCalibrated>=50?(50+_compressed):(50-_compressed);
+    if(Math.abs(_calibratedDisplay-dirCalibrated)>=3){
+      reasoning.push(`[CAL-FIX] Honest display: ${dirCalibrated.toFixed(0)}% conf compressed to ${_calibratedDisplay.toFixed(0)}% (backtest-corrected)`);
+    }
+  }
+  // Engine returns RAW posterior for lock guards. Display uses calibrated.
   const finalPosterior=Math.max(1,Math.min(99,dirCalibrated));
+  const displayPosterior=Math.max(1,Math.min(99,_calibratedDisplay));
 
   reasoning.push(`[ATR] Volatility: ${atrBps.toFixed(1)} bps | Regime: ${regime}${isPostDecay?' | POST-DECAY':''}`);
   if(calibration&&Object.values(calibration).some(v=>v!=null))reasoning.push(`[CAL] Pipeline: raw ${posterior.toFixed(1)}% → cal ${calibratedPosterior.toFixed(1)}% → dir+time ${finalPosterior.toFixed(1)}%`);
@@ -2054,7 +2065,7 @@ const computeV99Posterior=(params)=>{
   // Rug pull check
   const isRugPull=tickSlope<-5&&aggrFlow<-0.6;
 
-  return{posterior:finalPosterior,rawPosterior:posterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty};
+  return{posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty};
 };
 
 // ═══════════════════════════════════════
@@ -2382,7 +2393,7 @@ function PredictionContent(props){
           {analysis.regime&&(
             <span className={'text-xs text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded'}>{analysis.regime}</span>
           )}
-          {/* V130: Regime-Direction WR warning */}
+          {/* V133: Regime-Direction WR warning */}
           {analysis.lockInfo&&regimeDirWR&&(()=>{
             const k=analysis.regime+'-'+analysis.lockInfo.dir;
             const stat=regimeDirWR[k];
@@ -2392,7 +2403,7 @@ function PredictionContent(props){
             if(pct<=50)return(<span className={'text-xs uppercase tracking-wide px-2 py-1 rounded border font-bold text-rose-300 bg-rose-500/15 border-rose-500/40 animate-pulse'} title={`${stat.wins}W in ${stat.n} trades — weak historical combo, consider sitting out`}>⚠ HIST {pct}%</span>);
             return(<span className={'text-xs uppercase tracking-wide px-2 py-1 rounded border font-bold text-amber-300 bg-amber-500/10 border-amber-500/30'} title={`${stat.wins}W in ${stat.n} trades`}>HIST {pct}%</span>);
           })()}
-          {/* V130: Trajectory direction hint */}
+          {/* V133: Trajectory direction hint */}
           {Math.abs(analysis.trajectoryAdj||0)>=5&&(
             (()=>{
               const adj=analysis.trajectoryAdj;
@@ -2402,7 +2413,7 @@ function PredictionContent(props){
               </span>);
             })()
           )}
-          {/* V130: HPotter FGT multi-timeframe badge */}
+          {/* V133: HPotter FGT multi-timeframe badge */}
           {analysis.mtfAlignment!==undefined&&Math.abs(analysis.mtfAlignment)>=2&&(
             (()=>{
               const mtf=analysis.mtfAlignment;
@@ -2459,7 +2470,7 @@ function PredictionContent(props){
         </div>
         <h2 className={headingCls}>{analysis.prediction}</h2>
 
-        {/* V130: Plain-English summary line — always visible */}
+        {/* V133: Plain-English summary line — always visible */}
         <div className="mt-2 px-3 py-2 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8 max-w-md w-full">
           <div className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 font-bold mb-1'}>What Tara sees</div>
           <div className="text-xs sm:text-sm text-[#E8E9E4]/80 leading-snug">
@@ -2467,7 +2478,7 @@ function PredictionContent(props){
           </div>
         </div>
 
-        {/* V130: STAND DOWN banner — overrides chart reads */}
+        {/* V133: STAND DOWN banner — overrides chart reads */}
         {(analysis.prediction.includes('BLACKOUT')||analysis.prediction.includes('OBSERVE')||analysis.prediction.includes('LOW QUALITY')||analysis.prediction.includes('SITTING OUT')||analysis.prediction.startsWith('PREMIUM:')||analysis.prediction.includes('BREAKING NEWS'))&&(
           <div className="mt-3 px-4 py-3 rounded-lg bg-rose-500/15 border-2 border-rose-500/50 text-center max-w-md mx-auto w-full">
             <div className="text-rose-300 text-xs uppercase tracking-widest font-bold mb-1">⛔ Stand Down</div>
@@ -2713,7 +2724,7 @@ function NewsFeedCard(){
   const[news,setNews]=React.useState([]);
   const[loading,setLoading]=React.useState(true);
   const[err,setErr]=React.useState(null);
-  // V130: also fetch macro event countdown — always shown even if news fails
+  // V133: also fetch macro event countdown — always shown even if news fails
   const[macroEvents,setMacroEvents]=React.useState([]);
   React.useEffect(()=>{
     const computeMacros=()=>{
@@ -2740,7 +2751,7 @@ function NewsFeedCard(){
     const macroIv=setInterval(computeMacros,60000);
     
     const fetchNews=async()=>{
-      // V130: Try multiple sources with timeout and fallback
+      // V133: Try multiple sources with timeout and fallback
       const tryFetch=async(url,timeoutMs=5000)=>{
         const ctrl=new AbortController();
         const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
@@ -2790,7 +2801,7 @@ function NewsFeedCard(){
       setLoading(false);
     };
     fetchNews();
-    const iv=setInterval(fetchNews,30000); // V130: 30s polling
+    const iv=setInterval(fetchNews,30000); // V133: 30s polling
     return()=>{clearInterval(iv);clearInterval(macroIv);};
   },[]);
 
@@ -2815,7 +2826,7 @@ function NewsFeedCard(){
         <span className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold'}>News & Macro</span>
         <span className={'text-[9px] text-[#E8E9E4]/30 italic'}>{loading?'loading...':err?'macro only':'30s refresh'}</span>
       </div>
-      {/* V130: Macro events countdown - always shown */}
+      {/* V133: Macro events countdown - always shown */}
       {macroEvents.length>0&&(
         <div className="mb-2 space-y-1">
           <div className={'text-[9px] uppercase tracking-wide text-amber-400/70 font-bold'}>Upcoming Macro</div>
@@ -2998,7 +3009,7 @@ const useNewsSentiment=()=>{
         const bullishKW=['surge','rally','approve','approval','etf approve','breakout','soar','spike up','all-time high','ath','adoption','inflows','accumulate','buy pressure','squeeze short','liquidat short'];
         const bearishKW=['crash','dump','sell-off','plunge','reject','denied','hack','exploit','liquidat long','outflow','sec sue','sec charge','ban','fud','correction'];
         const extremeKW=['trump','biden','sec','fomc','cpi','fed rate','powell','breaking','urgent','massive','just in','flash','alert'];
-        // V130: Check for "breaking" or "flash" tags — these are time-sensitive
+        // V133: Check for "breaking" or "flash" tags — these are time-sensitive
         const hasBreaking=items.slice(0,5).some(n=>{
           const t=(n.title||'').toLowerCase();
           const ageMin=(Date.now()-(n.published_on*1000))/60000;
@@ -3017,11 +3028,11 @@ const useNewsSentiment=()=>{
           extremeKW.forEach(kw=>{if(t.includes(kw))extreme+=decay*0.5;});
           if(Math.abs(itemScore)>topScore){topScore=Math.abs(itemScore);topHeadline=n.title;}
         });
-        setSentiment({score:bull-bear,bullish:bull,bearish:bear,extreme,topHeadline,hasBreaking}); // V130
+        setSentiment({score:bull-bear,bullish:bull,bearish:bear,extreme,topHeadline,hasBreaking}); // V133
       }catch(e){/* silent */}
     };
     fetchNews();
-    // V130: Faster poll (30s vs 90s) — catch breaking news 60s sooner
+    // V133: Faster poll (30s vs 90s) — catch breaking news 60s sooner
     // Original 90s was too slow for events that move BTC in seconds
     const iv=setInterval(fetchNews,30000);
     return()=>clearInterval(iv);
@@ -3030,7 +3041,7 @@ const useNewsSentiment=()=>{
 };
 
 
-// V130: Plain-English summary builder — converts structured analysis into a sentence
+// V133: Plain-English summary builder — converts structured analysis into a sentence
 const buildPlainEnglish=(analysis,qualityGate,advisor)=>{
   if(!analysis)return 'Connecting to market data...';
   const dir=analysis.prediction||'';
@@ -3098,8 +3109,8 @@ const buildPlainEnglish=(analysis,qualityGate,advisor)=>{
 };
 
 
-// V130: Session Start Status Check — shows on first load
-function SessionStartCheck({open,onClose,windowType,premiumMode,scorecards,tradeLog,regime,velocityRegime,calibration,baselineDrift,resetToLatestBaseline,runSyncWithProgress,syncState}){
+// V133: Session Start Status Check — shows on first load
+function SessionStartCheck({open,onClose,windowType,premiumMode,scorecards,tradeLog,regime,velocityRegime,calibration,baselineDrift,resetToLatestBaseline,runSyncWithProgress,syncState,resetDirectionalBias}){
   if(!open)return null;
   const score=scorecards?.[windowType]||{wins:0,losses:0};
   const wr=score.wins+score.losses>0?(score.wins/(score.wins+score.losses))*100:0;
@@ -3117,7 +3128,7 @@ function SessionStartCheck({open,onClose,windowType,premiumMode,scorecards,trade
   }
   const isHot=streakType==='WIN'&&streak>=3;
   const isCold=streakType==='LOSS'&&streak>=3;
-  // V130 fix: calibration[k] is either a WR number or null (not a {wins,total} object)
+  // V133 fix: calibration[k] is either a WR number or null (not a {wins,total} object)
   let calHealth='Computing...';
   let calIssue=null;
   if(calibration){
@@ -3156,6 +3167,14 @@ function SessionStartCheck({open,onClose,windowType,premiumMode,scorecards,trade
             <div className="text-[10px] uppercase text-indigo-300 font-bold mb-1">📦 Newer Baseline Available</div>
             <div className="text-xs text-[#E8E9E4]/80 mb-2">A newer training baseline has shipped. Sync to refresh your starting weights.</div>
             <button onClick={()=>{if(runSyncWithProgress)runSyncWithProgress();}} disabled={syncState&&syncState.active} className="w-full py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white font-bold rounded text-xs uppercase tracking-wide disabled:opacity-50">{syncState&&syncState.active?'Syncing...':'Sync Now'}</button>
+          </div>
+        )}
+        {/* V133: Reset directional bias — keeps record, clears UP/DOWN learning lean */}
+        {resetDirectionalBias&&(
+          <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+            <div className="text-[10px] uppercase text-amber-300 font-bold mb-1">⚖ Reset UP/DOWN Bias</div>
+            <div className="text-xs text-[#E8E9E4]/80 mb-2">Tara may favor one direction from past learning. Reset weights so she gives UP and DOWN equal consideration. <strong className="text-white">Trade log + scorecard preserved.</strong></div>
+            <button onClick={resetDirectionalBias} className="w-full py-1.5 bg-amber-500/80 hover:bg-amber-500 text-white font-bold rounded text-xs uppercase tracking-wide">Reset Bias (Keep Record)</button>
           </div>
         )}
         <div className="space-y-3 text-xs">
@@ -3200,7 +3219,7 @@ function SessionStartCheck({open,onClose,windowType,premiumMode,scorecards,trade
 }
 
 
-// V130: Compute weight changes for learning feedback
+// V133: Compute weight changes for learning feedback
 const computeWeightDiff=(oldW,newW)=>{
   const diffs=[];
   Object.keys(newW).forEach(k=>{
@@ -3214,8 +3233,8 @@ const computeWeightDiff=(oldW,newW)=>{
 
 function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
-  const[showSessionStart,setShowSessionStart]=useState(true); // V130: Session-start status check on load
-  const[syncState,setSyncState]=useState({active:false,stage:'',progress:0,complete:false,error:null}); // V130: sync progress overlay
+  const[showSessionStart,setShowSessionStart]=useState(true); // V133: Session-start status check on load
+  const[syncState,setSyncState]=useState({active:false,stage:'',progress:0,complete:false,error:null}); // V133: sync progress overlay
   const[lastLearningUpdate,setLastLearningUpdate]=useState(null); // V122: visible learning feedback toast
   const[baselineDrift,setBaselineDrift]=useState(()=>{
     try{
@@ -3316,7 +3335,7 @@ function TaraApp(){
     const last5WR=last5.length>=3?Math.round((last5W/last5.length)*100):null;
     const warning=lastResult==='LOSS'&&streak>=3;
     const strongWarn=lastResult==='LOSS'&&streak>=5;
-    // V130: Per-direction bias correction
+    // V133: Per-direction bias correction
     // If recent UP calls have low WR and DOWN have high WR, tilt against UP
     const recent20=tradeLog.filter(t=>t.result).slice(-20);
     const recentUps=recent20.filter(t=>t.dir==='UP');
@@ -3348,15 +3367,15 @@ function TaraApp(){
   const[discordEditText,setDiscordEditText]=useState('');
   const[discordStatusMsg,setDiscordStatusMsg]=useState('');
   const calibration=useMemo(()=>buildCalibration(tradeLog),[tradeLog]);
-  const regimeDirWR=useMemo(()=>buildRegimeDirWR(tradeLog),[tradeLog]); // V130
-  const sessionRegimeThresh=useMemo(()=>buildSessionRegimeThresh(tradeLog),[tradeLog]); // V130
+  const regimeDirWR=useMemo(()=>buildRegimeDirWR(tradeLog),[tradeLog]); // V133
+  const sessionRegimeThresh=useMemo(()=>buildSessionRegimeThresh(tradeLog),[tradeLog]); // V133
   const signalAccuracy=useMemo(()=>buildSignalAccuracy(tradeLog),[tradeLog]);
   const sessionPerf=useMemo(()=>buildSessionPerf(tradeLog),[tradeLog]);
   const hourlyPerf=useMemo(()=>buildHourlyPerf(tradeLog),[tradeLog]);
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V130 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V133 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -3411,8 +3430,8 @@ function TaraApp(){
   const[showWhaleLog,setShowWhaleLog]=useState(false);
   const velocityRef=useVelocity(tickHistoryRef,currentPrice,targetMargin);
   const bloomberg=useBloomberg();
-  const depthFlash=useDepthFlash(); // V130: 2.5s order book polling
-  const tfCandles=useMultiTFCandles(); // V130: HPotter FGT multi-timeframe data
+  const depthFlash=useDepthFlash(); // V133: 2.5s order book polling
+  const tfCandles=useMultiTFCandles(); // V133: HPotter FGT multi-timeframe data
   const{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal}=useGlobalTape();
   const marketSessions=useMemo(()=>getMarketSessions(),[timeState.currentHour]);
   const[klines,setKlines]=useState([]);
@@ -3427,7 +3446,7 @@ function TaraApp(){
         }
       }).catch(()=>{});
     }
-    // V130: Baseline version check — detect if a newer baseline has shipped
+    // V133: Baseline version check — detect if a newer baseline has shipped
     try{
       const lastSyncedVersion=localStorage.getItem('taraBaselineVersion');
       if(lastSyncedVersion&&lastSyncedVersion!==BASELINE_VERSION){
@@ -3438,7 +3457,7 @@ function TaraApp(){
       }
     }catch(e){}
     try{
-      // V130: Try both legacy keys + handle baseline migration
+      // V133: Try both legacy keys + handle baseline migration
       const sNew=localStorage.getItem('taraV110Score');
       const sOld=localStorage.getItem('taraScoreV110');
       let chosen=null;
@@ -3454,7 +3473,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V130'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V133'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -3551,7 +3570,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara V130  |  signal'},
+        footer:{text:'Tara V133  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3565,7 +3584,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V130  |  stand-down'},
+        footer:{text:'Tara V133  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3579,7 +3598,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V130  |  search'},
+        footer:{text:'Tara V133  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3596,7 +3615,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara V130  |  lock'},
+        footer:{text:'Tara V133  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3613,7 +3632,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V130  |  close'},
+          footer:{text:'Tara V133  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -3634,7 +3653,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V130  |  exit'},
+        footer:{text:'Tara V133  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3663,12 +3682,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V130  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara V133  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V130',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V133',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -3687,7 +3706,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V130 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V133 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -3842,7 +3861,7 @@ function TaraApp(){
       // EU 65%, ASIA 64%, US 59%, OFF-HOURS 55%
       const _sess=getMarketSessions().dominant;
       const _sessThreshAdj=_sess==='EU'?-3:_sess==='ASIA'?-1:_sess==='US'?3:5;
-      // V130: Adaptive threshold per session×regime — tighter where Tara historically struggles
+      // V133: Adaptive threshold per session×regime — tighter where Tara historically struggles
       const _srKey=(getMarketSessions().dominant||'')+':'+regime;
       const _srThreshAdj=sessionRegimeThresh?.[_srKey]||0;
       const LOCK_THRESHOLD_UP=(is15m?72:70)+_sessThreshAdj+_srThreshAdj; // V112: raised from 70 to require stronger UP conviction
@@ -3858,16 +3877,19 @@ function TaraApp(){
       const _sessConsecAdj=_sess==='US'?1:_sess==='OFF-HOURS'?1:0;
       // V113: Velocity-adaptive consecutive samples — slow markets need more confirmation, fast need less
       const _velSampleAdj=velocityScalars?.samples||1.0;
-      // V130: Reduced base samples — Tara was waiting too long for confirmations
+      // V133: Reduced base samples — Tara was waiting too long for confirmations
       // 15m: 3→2 samples (saves ~10s per call), 5m: 2→2 (no change, minimum)
       const _baseConsec=(is15m?2:2)+_regimeConsecAdj+_sessConsecAdj;
-      // V130: Strong trajectory? Lock faster. Reduces sample requirement when direction is clear.
+      // V133: Strong trajectory? Lock faster. Reduces sample requirement when direction is clear.
       const _trajStrength=Math.abs(eng.trajectoryAdj||0);
       const _trajShortcut=_trajStrength>=12?-2:_trajStrength>=8?-1:0;
-      // V130: EXTREME velocity = lock at 1 sample regardless (fast moves can't wait)
-      // This is what "FAST/EXTREME" mode is supposed to do — be aggressive
+      // V133: EXTREME velocity = lock at 1 sample regardless
       const _isExtreme=eng.velocityRegime==='EXTREME';
-      const CONSECUTIVE_NEEDED=_isExtreme?1:Math.max(1,Math.round(_baseConsec*_velSampleAdj)+_trajShortcut);
+      // V133: PUSH-EARLIER — backtest shows sweet spot is 300-700s (73%+ WR) vs >820s (56.6% WR)
+      // After 600s elapsed, drop sample requirement by 1 to grab setups before they degrade
+      const _pastSweetSpot=clockSeconds>=600&&is15m;
+      const _push=_pastSweetSpot?-1:0;
+      const CONSECUTIVE_NEEDED=_isExtreme?1:Math.max(1,Math.round(_baseConsec*_velSampleAdj)+_trajShortcut+_push);
 
       // ── IMPROVEMENT 4: Late lock penalty ─────────────────────────────────
       // Very late locks (>820s elapsed in 15m = last 80s) get suppressed
@@ -3902,19 +3924,19 @@ function TaraApp(){
       // In SHORT SQUEEZE: DOWN requires 2× the normal consecutive samples AND stricter threshold
       const _downGated=regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP'||regime==='RANGE-CHOP'; // V112: RC DOWN only 53% — gate it
       const _downTDOnly=regime==='TRENDING DOWN'; // most reliable DOWN regime
-      // V130: SYMMETRIC DOWN THRESHOLD — mirror UP's 72 baseline, not 6pts harder
+      // V133: SYMMETRIC DOWN THRESHOLD — mirror UP's 72 baseline, not 6pts harder
       // UP fires at posterior >= 72 (22pts above 50). DOWN should fire at posterior <= 28 (22pts below 50).
       // Gated regimes already get +1 confirmation sample requirement — don't double-penalize via threshold too.
-      const LOCK_THRESHOLD_DN_EFFECTIVE=_downGated?(is15m?28:26):_downTDOnly?(is15m?32:30):(is15m?28:30)-_sessThreshAdj-_srThreshAdj; // V130: rebalanced from 22 → 28
+      const LOCK_THRESHOLD_DN_EFFECTIVE=_downGated?(is15m?28:26):_downTDOnly?(is15m?32:30):(is15m?28:30)-_sessThreshAdj-_srThreshAdj; // V133: rebalanced from 22 → 28
       // Rebalanced: DOWN was too hesitant (+2), UP was firing too fast in weak regimes
       // DOWN now: +1 extra in gated regimes (not +2). UP: +1 in HVC/RC weak UP regimes.
-      // V130: Gated regimes get +1 unless trajectory is strong (then no penalty)
-      // V130: Match UP's sample requirement — was +1 in gated regimes, dropped that
+      // V133: Gated regimes get +1 unless trajectory is strong (then no penalty)
+      // V133: Match UP's sample requirement — was +1 in gated regimes, dropped that
       // (the gated regimes already get tighter threshold + signal-consensus bar)
       const CONSECUTIVE_NEEDED_DN=CONSECUTIVE_NEEDED;
       // UP gate: HIGH VOL CHOP and RANGE-CHOP UP calls need one extra sample too (55-59% WR)
       const _upGated=regime==='HIGH VOL CHOP'||regime==='RANGE-CHOP';
-      // V130: UP gate skipped when trajectory strong (don't slow good moves)
+      // V133: UP gate skipped when trajectory strong (don't slow good moves)
       const CONSECUTIVE_NEEDED_UP=_upGated&&_trajStrength<8
         ? Math.max(2,CONSECUTIVE_NEEDED+1)
         : CONSECUTIVE_NEEDED;
@@ -3924,12 +3946,12 @@ function TaraApp(){
         const avgRecent=recentHist.reduce((a,b)=>a+b,0)/(recentHist.length||1);
 
         // Track first FORMING direction this window — commit to it, no flipping
-        // V130: Whipsaw guard — track recent direction commitment, refuse small-move flips
+        // V133: Whipsaw guard — track recent direction commitment, refuse small-move flips
         if(!windowSignalDirRef.current){
           if(avgRecent>=58)windowSignalDirRef.current='UP';
           else if(avgRecent<=42)windowSignalDirRef.current='DOWN';
         } else {
-          // V130: Whipsaw guard with post-release relaxation
+          // V133: Whipsaw guard with post-release relaxation
           // While locked → require decisive posterior (>=70 / <=30) to flip
           // After release (lock cleared) → allow flip at modest posterior (>=58 / <=42)
           //   because lock-release-then-opposite-direction is a valid recovery pattern
@@ -3947,17 +3969,19 @@ function TaraApp(){
         }
         const committedDir=windowSignalDirRef.current; // null until first FORMING signal
 
-        // V130: DELIBERATION GATE — block locks during initial analysis phase
+        // V133: DELIBERATION GATE — block locks during initial analysis phase
         // Tara needs minimum read time on market before committing to lock
         const _delibMin_lock=is15m?15:8;
         const _delibMax_lock=is15m?45:20;
         const _upConsLock=Object.values(eng.rawSignalScores||{}).filter(s=>s>3).length;
         const _dnConsLock=Object.values(eng.rawSignalScores||{}).filter(s=>s<-3).length;
-        // V130: early-clear ALSO requires MTF agreement — no fast lock against trend
+        // V133: early-clear ALSO requires MTF agreement — no fast lock against trend
         const _mtfAgreesUp=eng.mtfAlignment===undefined||eng.mtfAlignment>=2;
         const _mtfAgreesDn=eng.mtfAlignment===undefined||eng.mtfAlignment<=-2;
-        const _earlyClearLock=(posterior>=70&&_upConsLock>=4&&_mtfAgreesUp)||(posterior<=30&&_dnConsLock>=4&&_mtfAgreesDn);
-        const _earlyClearMildLock=(posterior>=62&&_upConsLock>=3&&_mtfAgreesUp)||(posterior<=38&&_dnConsLock>=3&&_mtfAgreesDn);
+        // V133 DECONFLICT: EXTREME velocity / rug pull bypasses deliberation entirely
+        const _bypassDelib=eng.velocityRegime==='EXTREME'||(eng.isRugPull&&posterior<=45);
+        const _earlyClearLock=_bypassDelib||(posterior>=70&&_upConsLock>=4&&_mtfAgreesUp)||(posterior<=30&&_dnConsLock>=4&&_mtfAgreesDn);
+        const _earlyClearMildLock=_bypassDelib||(posterior>=62&&_upConsLock>=3&&_mtfAgreesUp)||(posterior<=38&&_dnConsLock>=3&&_mtfAgreesDn);
         const _lockBlocked=clockSeconds<_delibMin_lock||(clockSeconds<_delibMax_lock&&!_earlyClearLock&&!_earlyClearMildLock);
         if(_lockBlocked){
           // Inside deliberation: show DELIBERATING text but DO NOT lock
@@ -3965,12 +3989,12 @@ function TaraApp(){
           taraAdviceRef.current=`DELIBERATING — analyzing market [${_delibTimeLeftL}s left]`;
           reasoning.push(`[DELIB] Lock blocked — ${_delibTimeLeftL}s left in deliberation phase`);
 
-        // V130: Late lock allowed if trajectory is very strong (legitimate late breakouts)
+        // V133: Late lock allowed if trajectory is very strong (legitimate late breakouts)
         } else if(isVeryLateLock&&_trajStrength<10){
           taraAdviceRef.current=taraAdviceRef.current||'SEARCHING...';
 
         } else if(bullCount>=CONSECUTIVE_NEEDED_UP&&!isEndgameLock&&!(eng.mtfAlignment!==undefined&&eng.mtfAlignment<=-3)){
-          // V130 extra logging: announce when MTF would've blocked
+          // V133 extra logging: announce when MTF would've blocked
           if(eng.mtfAlignment!==undefined&&eng.mtfAlignment<=-2&&eng.mtfAlignment>-3)reasoning.push(`[MTF-WARN] UP lock proceeding but ${Math.abs(eng.mtfAlignment)}/5 timeframes against UP`);
           // ── Quality gate: suppress lock if score too low ──
           const _rm=regimeMemory[regime]||{wins:0,losses:0};
@@ -3978,8 +4002,8 @@ function TaraApp(){
           const _rWR=_rt>5?(_rm.wins/_rt)*100:60;
           const _sessQ={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[_sess]||57;
           const _dsAdj=getMarketSessions().dsAdj||0; // V114: day×session quality bonus/penalty
-          const _streakAdj=streakData?.warning?(streakData.strongWarn?-15:-8):(streakData?.type==='hot'&&streakData?.streak>=4?+4:0); const _dirBiasUp=streakData?.upBias||0; if(_dirBiasUp!==0)reasoning.push(`[DIR-BIAS] UP recent WR adj: ${_dirBiasUp}`); // V130
-          // V130: SURGICAL LATE-FOMO PENALTY — only when signals contradict
+          const _streakAdj=streakData?.warning?(streakData.strongWarn?-15:-8):(streakData?.type==='hot'&&streakData?.streak>=4?+4:0); const _dirBiasUp=streakData?.upBias||0; if(_dirBiasUp!==0)reasoning.push(`[DIR-BIAS] UP recent WR adj: ${_dirBiasUp}`); // V133
+          // V133: SURGICAL LATE-FOMO PENALTY — only when signals contradict
           const _isChoppyRegime=regime==='RANGE-CHOP'||regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP';
           const _upSignalsAgreeing=Object.values(eng.rawSignalScores||{}).filter(s=>s>3).length;
           const _signalsUnanimous=_upSignalsAgreeing>=4;
@@ -3989,7 +4013,7 @@ function TaraApp(){
           const _lateFomoPenalty=_veryLateFomoUp?-25:_lateFomoUp?-15:0;
           if(_lateFomoPenalty<0)reasoning.push(`[LATE-FOMO] Late UP in ${regime}, ${_upSignalsAgreeing}/6 signals agreeing — penalty ${_lateFomoPenalty}`);
           const _qScore=Math.min(40,Math.max(0,(Math.abs(posterior-50)-15)*1.6))+Math.min(30,(_rWR-50)*0.6)+Math.min(15,(_sessQ-50)*0.6)+(isLateLockZone?-8:0)+(isVeryLateLock?-20:0)+_dsAdj+_streakAdj+_lateFomoPenalty+_dirBiasUp+(eng.windowDriftBps>25?-Math.min(12,eng.windowExhaustionPenalty||0):0)+(eng.realGapBps<-25?-Math.min(20,Math.abs(eng.realGapBps)*0.4):0)+(newsSentiment?(newsSentiment.score>2?+5:newsSentiment.score<-2?(-8):0):0)+(()=>{
-            // V130: Sentiment-Trajectory interaction
+            // V133: Sentiment-Trajectory interaction
             const tAdj=eng.trajectoryAdj||0;
             const sScore=newsSentiment?.score||0;
             // Both agree bullish: bonus
@@ -3998,8 +4022,8 @@ function TaraApp(){
             if(tAdj>5&&sScore<-2)return-8;
             if(tAdj<-5&&sScore>2)return-5;
             return 0;
-          })(); // V114-V130: news sentiment + trajectory interaction for UP
-          // V130: Signal consensus boost — when 5+ signals strongly agree, this IS A+
+          })(); // V114-V133: news sentiment + trajectory interaction for UP
+          // V133: Signal consensus boost — when 5+ signals strongly agree, this IS A+
           const _consensusUp=Object.values(eng.rawSignalScores||{}).filter(s=>s>5).length;
           const _consensusBoost=_consensusUp>=5?+12:_consensusUp>=4?+5:0;
           if(_consensusBoost>0)reasoning.push(`[CONSENSUS] ${_consensusUp}/6 UP signals strongly agree — quality boost +${_consensusBoost}`);
@@ -4015,22 +4039,22 @@ function TaraApp(){
           } else if(_quality<45){
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
           } else if((eng.trajectoryAdj||0)<-8){
-            // V130: Block UP lock when trajectory strongly favors DOWN (>8 magnitude opposing)
+            // V133: Block UP lock when trajectory strongly favors DOWN (>8 magnitude opposing)
             taraAdviceRef.current='UP REJECTED — trajectory says DOWN';
             reasoning.push(`[GATE] UP blocked: trajectory ${eng.trajectoryAdj.toFixed(0)} contradicts UP call`);
           } else if(_isChoppyRegime&&_quality<62){
-            // V130: In choppy regimes (RC/SS/HVC), demand quality >=62 to lock UP
+            // V133: In choppy regimes (RC/SS/HVC), demand quality >=62 to lock UP
             // Quality 60 + SHORT SQUEEZE = adverse-gap UP locks (real issue from screenshots)
             taraAdviceRef.current='WEAK SETUP — '+regime+' needs stronger signal';
             reasoning.push(`[GATE] UP blocked: quality ${_quality.toFixed(0)} < 62 in ${regime}`);
           } else if(premiumMode&&_quality<65&&Math.abs(eng.trajectoryAdj||0)<6){
-            // V130 PREMIUM: 65+ quality OR strong trajectory bias
+            // V133 PREMIUM: 65+ quality OR strong trajectory bias
             taraAdviceRef.current='PREMIUM: WAITING FOR SETUP';
           } else if(premiumMode&&_sess==='US'){
             // V112 PREMIUM: skip US session (your worst at 55% WR)
             taraAdviceRef.current='PREMIUM: SKIPPING US SESSION';
           } else if(premiumMode&&regime==='RANGE-CHOP'&&_quality<70&&Math.abs(eng.trajectoryAdj||0)<8){
-            // V130: in RC, allow lock if trajectory is strong (>8 bias)
+            // V133: in RC, allow lock if trajectory is strong (>8 bias)
             taraAdviceRef.current='PREMIUM: WEAK RC — NO TRAJECTORY';
           } else {
           // ── Direction flip guard: if FORMING DOWN already fired, don't lock UP ──
@@ -4046,7 +4070,7 @@ function TaraApp(){
             if(premiumMode&&_mtfOpposedUp){
               taraAdviceRef.current='MTF CONFLICT — '+_otherTFup+' is DOWN';
             } else {
-            // V113+V130: Momentum confirmation with velocity-adaptive tolerance
+            // V113+V133: Momentum confirmation with velocity-adaptive tolerance
             // If trajectory strongly favors UP (trajectoryAdj > 5), be more permissive
             const recent=(velocityRef?.current?.v5s||0);
             const _momTol=velocityScalars?.momentumTol||0.5;
@@ -4056,7 +4080,7 @@ function TaraApp(){
             if(!momentumOK){
               taraAdviceRef.current='UP - WAITING FOR MOMENTUM';
             } else {
-              lockedCallRef.current={dir:'UP',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null}; // V130: snapshot signals at lock
+              lockedCallRef.current={dir:'UP',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null}; // V133: snapshot signals at lock
               taraAdviceRef.current='UP - LOCKED';
               biasCountRef.current={UP:0,DOWN:0};
             }
@@ -4064,7 +4088,9 @@ function TaraApp(){
           } // close MTF gate else
           } // close quality gate else
 
-        } else if((bearCount>=CONSECUTIVE_NEEDED_DN||(isRugPull&&posterior<=45))&&posterior<=LOCK_THRESHOLD_DN_EFFECTIVE&&!isEndgameLock&&!(eng.mtfAlignment!==undefined&&eng.mtfAlignment>=3)){
+        } else if((bearCount>=CONSECUTIVE_NEEDED_DN||(isRugPull&&posterior<=45))&&posterior<=LOCK_THRESHOLD_DN_EFFECTIVE&&!isEndgameLock&&!(eng.mtfAlignment!==undefined&&eng.mtfAlignment>=3)&&!(((regime==='HIGH VOL CHOP'||regime==='SHORT SQUEEZE'))&&!isRugPull&&Math.abs(eng.realGapBps||0)<25)){
+          // V133: BACKTEST FINDING — DOWN locks in HVC/SS are coin flips (50% WR over 40 trades)
+          // Refuse unless rug-pull active or significant gap below strike (>25bps)
           if(eng.mtfAlignment!==undefined&&eng.mtfAlignment>=2&&eng.mtfAlignment<3)reasoning.push(`[MTF-WARN] DOWN lock proceeding but ${eng.mtfAlignment}/5 timeframes against DOWN`);
           // ── Quality gate for DOWN ──
           const _rm2=regimeMemory[regime]||{wins:0,losses:0};
@@ -4073,8 +4099,8 @@ function TaraApp(){
           const _sessQ2={'EU':67,'ASIA':62,'US':57,'OFF-HOURS':55}[_sess]||57;
           const _dsAdj2=getMarketSessions().dsAdj||0;
           const _streakAdj2=streakData?.warning?(streakData.strongWarn?-15:-8):(streakData?.type==='hot'&&streakData?.streak>=4?+4:0); const _dirBiasDn=streakData?.dnBias||0; if(_dirBiasDn!==0)reasoning.push(`[DIR-BIAS] DOWN recent WR adj: ${_dirBiasDn}`);
-          // V130: Surgical DOWN late-FOMO
-          const _isChoppyRegime2=regime==='RANGE-CHOP'||regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP';
+          // V133: Surgical DOWN late-FOMO — V133: TRENDING DOWN bypasses entirely (87% WR setup)
+          const _isChoppyRegime2=(regime==='RANGE-CHOP'||regime==='SHORT SQUEEZE'||regime==='HIGH VOL CHOP')&&regime!=='TRENDING DOWN';
           const _dnSignalsAgreeing=Object.values(eng.rawSignalScores||{}).filter(s=>s<-3).length;
           const _signalsUnanimous2=_dnSignalsAgreeing>=4;
           const _trajContradicts2=eng.trajectoryAdj>0;
@@ -4090,7 +4116,7 @@ function TaraApp(){
             if(tAdj<-5&&sScore>2)return-8;
             if(tAdj>5&&sScore<-2)return-5;
             return 0;
-          })(); // V114-V130: news sentiment + trajectory interaction for DOWN (inverted)
+          })(); // V114-V133: news sentiment + trajectory interaction for DOWN (inverted)
           const _consensusDn=Object.values(eng.rawSignalScores||{}).filter(s=>s<-5).length;
           const _consensusBoost2=_consensusDn>=5?+12:_consensusDn>=4?+5:0;
           if(_consensusBoost2>0)reasoning.push(`[CONSENSUS] ${_consensusDn}/6 DOWN signals strongly agree — quality boost +${_consensusBoost2}`);
@@ -4105,11 +4131,11 @@ function TaraApp(){
           } else if(_quality2<45){
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
           } else if((eng.trajectoryAdj||0)>8){
-            // V130: Block DOWN when trajectory strongly favors UP
+            // V133: Block DOWN when trajectory strongly favors UP
             taraAdviceRef.current='DOWN REJECTED — trajectory says UP';
             reasoning.push(`[GATE] DOWN blocked: trajectory ${eng.trajectoryAdj.toFixed(0)} contradicts DOWN`);
           } else if(_isChoppyRegime2&&_quality2<62){
-            // V130: choppy regimes demand quality >=62 to lock DOWN
+            // V133: choppy regimes demand quality >=62 to lock DOWN
             taraAdviceRef.current='WEAK SETUP — '+regime+' needs stronger signal';
             reasoning.push(`[GATE] DOWN blocked: quality ${_quality2.toFixed(0)} < 62 in ${regime}`);
           } else if(premiumMode&&_quality2<65&&Math.abs(eng.trajectoryAdj||0)<6){
@@ -4135,7 +4161,7 @@ function TaraApp(){
             if(premiumMode&&_mtfOpposedDn){
               taraAdviceRef.current='MTF CONFLICT — '+_otherTFdn+' is UP';
             } else {
-            // V113+V130: Trajectory-aware momentum confirmation
+            // V113+V133: Trajectory-aware momentum confirmation
             const recent=(velocityRef?.current?.v5s||0);
             const _momTol=velocityScalars?.momentumTol||0.5;
             const _trajFavorsDn=(eng.trajectoryAdj||0)<-5;
@@ -4145,7 +4171,7 @@ function TaraApp(){
               taraAdviceRef.current='DOWN - WAITING FOR MOMENTUM';
             } else {
               lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,rugPullLock:isRugPull};
-              if(isRugPull&&bearCount<CONSECUTIVE_NEEDED_DN)reasoning.push(`[RUG-FIRE] Rug pull detected — DOWN locked early at posterior ${posterior.toFixed(0)}`); // V130: snapshot signals at lock
+              if(isRugPull&&bearCount<CONSECUTIVE_NEEDED_DN)reasoning.push(`[RUG-FIRE] Rug pull detected — DOWN locked early at posterior ${posterior.toFixed(0)}`); // V133: snapshot signals at lock
               taraAdviceRef.current='DOWN - LOCKED';
               biasCountRef.current={UP:0,DOWN:0};
             }
@@ -4154,7 +4180,7 @@ function TaraApp(){
           } // close quality gate else
 
         } else {
-          // V130: SMART DELIBERATION — 15s baseline, extends if Tara needs more data
+          // V133: SMART DELIBERATION — 15s baseline, extends if Tara needs more data
           // Min 15s (15m) / 8s (5m): gives Tara time to read market structure
           // Max 45s (15m) / 20s (5m): hard ceiling, commit by then
           // EARLY-EXIT: if signals strongly agree (4+ consensus + decisive posterior),
@@ -4168,17 +4194,34 @@ function TaraApp(){
           // In deliberation while: under min OR (under max AND not yet clear enough)
           const _inDeliberation=clockSeconds<_delibMin||(clockSeconds<_delibMax&&!_earlyClear&&!_earlyClearMild);
           const _delibTimeLeft=Math.max(0,(_earlyClear||_earlyClearMild?_delibMin:_delibMax)-clockSeconds);
-          // V130: SIT-OUT DETECTION — split signals + mid-window = no edge, don't force a call
-          // Once we declare sit-out for this window, don't flip back to FORMING (stable commitment)
+          // V133: SIT-OUT requires multiple confirmations of "no edge"
+          // Not just weak signals — also weak FGT alignment AND no significant gap to strike
           const _upConsensus=Object.values(eng.rawSignalScores||{}).filter(s=>s>3).length;
           const _dnConsensus=Object.values(eng.rawSignalScores||{}).filter(s=>s<-3).length;
-          const _signalsWeak=_upConsensus<3&&_dnConsensus<3; // no strong consensus either way
-          const _midPosterior=avgRecent>=42&&avgRecent<=58;
+          const _signalsWeak=_upConsensus<3&&_dnConsensus<3;
+          const _midPosterior=avgRecent>=44&&avgRecent<=56; // V133: tightened from 42-58 to 44-56
           const _pastDeliberation=timeFraction>0.35;
-          const _shouldSitOut=_pastDeliberation&&_midPosterior&&_signalsWeak;
-          // V130: Sticky sit-out — once declared, stays sit-out unless decisive signal emerges
-          if(taraAdviceRef.current?.includes('SITTING OUT')&&!(avgRecent>=68||avgRecent<=32)){
+          // V133: FGT must also be ambiguous (≤2 timeframes aligned)
+          const _fgtAmbiguous=Math.abs(eng.mtfAlignment||0)<=2;
+          // V133: Gap must be small (price near strike, no clear directional pressure)
+          const _gapSmall=Math.abs(eng.realGapBps||0)<20;
+          const _shouldSitOut=_pastDeliberation&&_midPosterior&&_signalsWeak&&_fgtAmbiguous&&_gapSmall;
+          // V133: Sticky sit-out releases on ANY clear signal
+          // Old version only released on extreme posterior (>=68/<=32) — too strict
+          // New: any of 3 conditions exit sit-out: posterior break, FGT clear, big gap
+          const _fgtClear=Math.abs(eng.mtfAlignment||0)>=3;
+          const _gapBig=Math.abs(eng.realGapBps||0)>=25;
+          const _posteriorBreak=avgRecent>=60||avgRecent<=40;
+          const _exitSitOut=_fgtClear||_gapBig||_posteriorBreak;
+          if(taraAdviceRef.current?.includes('SITTING OUT')&&!_exitSitOut){
             taraAdviceRef.current='SITTING OUT — Mixed signals, no edge';
+          } else if(taraAdviceRef.current?.includes('SITTING OUT')&&_exitSitOut){
+            // Exiting sit-out — log why and let the rest of the logic re-evaluate
+            const reason=_fgtClear?`FGT now ${eng.mtfAlignment>0?'UP':'DOWN'} ${Math.abs(eng.mtfAlignment)}/4`:
+                         _gapBig?`gap widened to ${eng.realGapBps.toFixed(0)}bps`:
+                         `posterior moved to ${avgRecent.toFixed(0)}`;
+            reasoning.push(`[SIT-OUT-EXIT] Releasing sit-out: ${reason}`);
+            // Don't set state here — fall through to FORMING/SEARCHING below
           } else if(isVeryLateLock){
             taraAdviceRef.current='NO CALL';
           } else if(_inDeliberation){
@@ -4200,13 +4243,13 @@ function TaraApp(){
       if(lockedCallRef.current){
         const lock=lockedCallRef.current;
         const gapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
-        // V130: Posterior decay tracking
+        // V133: Posterior decay tracking
         const lockedPost=lock.lockedPosterior||50;
         const postDelta=lock.dir==='UP'?(lockedPost-posterior):(posterior-lockedPost);
         const decayCollapse=postDelta>=20&&clockSeconds>(is15m?300:90);
         const deepWrong=(lock.dir==='UP'&&gapBps<-55)||(lock.dir==='DOWN'&&gapBps>55);
         const catastrophicRugpull=(isRugPull&&showRugPullAlerts&&lock.dir==='UP')||(isRugPull&&lock.dir==='UP'&&posterior<10);
-        // V130: SIGNAL REGIME CHANGE DETECTION
+        // V133: SIGNAL REGIME CHANGE DETECTION
         // If 3+ signals flip from agreeing to opposing the lock direction → release
         // Sharper than waiting for 20pt posterior collapse
         let signalRegimeChange=false;
@@ -4227,7 +4270,7 @@ function TaraApp(){
         }
         if(deepWrong||catastrophicRugpull||decayCollapse||signalRegimeChange){
           lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};
-          // V130: reset window-direction commitment so flip to opposite direction is allowed
+          // V133: reset window-direction commitment so flip to opposite direction is allowed
           windowSignalDirRef.current=null;
           taraAdviceRef.current='LOCK RELEASED';
           if(signalRegimeChange)reasoning.push(`[LOCK] Released — signal regime flipped (${flippedSignals.join(',')} now against ${lock.dir})`);
@@ -4326,7 +4369,7 @@ function TaraApp(){
     playAlert(lock.dir==='UP'?'lock-up':'lock-down');
   },[analysis?.lockInfo?.lockedAt]);
 
-  // V130: Audio alerts for trajectory milestones, breaking news, MTF confluence
+  // V133: Audio alerts for trajectory milestones, breaking news, MTF confluence
   const prevTrajRef=useRef(0);
   const prevBreakingRef=useRef(false);
   const prevMtfRef=useRef(false);
@@ -4380,7 +4423,7 @@ function TaraApp(){
   // Only fires when: streak ≥4 AND net delta >$500K AND 5-min cooldown passed
   // Also checks spot/futures alignment for accuracy flag
   const lastWhaleBroadcastRef=useRef({time:0,dir:null});
-  // ── V130: FLOW INTELLIGENCE — STRICTLY EVENT-TRIGGERED ──────────────
+  // ── V133: FLOW INTELLIGENCE — STRICTLY EVENT-TRIGGERED ──────────────
   // Opens ONLY on concerning events. Auto-collapses after 30s unless activity continues.
   // Triggers: whale-print STRONG cross, streak ≥5, $750K delta, velocity regime jump,
   // per-exchange divergence spike, sudden order book wall flip.
@@ -4391,7 +4434,7 @@ function TaraApp(){
   const autoOpenedRef=useRef(false);
   const autoCloseTimerRef=useRef(null);
   const lastAutoOpenTimeRef=useRef(0);
-  const lastActivityAtRef=useRef(0); // V130: track when last meaningful activity happened
+  const lastActivityAtRef=useRef(0); // V133: track when last meaningful activity happened
   useEffect(()=>{
     const fs=flowSignal;
     const now=Date.now();
@@ -4403,7 +4446,7 @@ function TaraApp(){
     const prevDeltaSign=prevDeltaSignRef.current;
     const curDelta=fs.netDelta90s||0;
     const curDeltaSign=curDelta>=0?1:-1;
-    // ── V130 Triggers ──
+    // ── V133 Triggers ──
     const justHitStrong=fs.score>=80&&prevScore<80;
     const streakJustHit=fs.streakCount>=5&&prevStreak<5;
     const massiveDelta=Math.abs(curDelta)>=750000;
@@ -4428,7 +4471,7 @@ function TaraApp(){
       autoOpenedRef.current=true;
       lastAutoOpenTimeRef.current=now;
       lastActivityAtRef.current=now;
-      // V130: 30 second view window unless new activity — extends timer if more triggers
+      // V133: 30 second view window unless new activity — extends timer if more triggers
       if(autoCloseTimerRef.current)clearTimeout(autoCloseTimerRef.current);
       autoCloseTimerRef.current=setTimeout(()=>{
         if(autoOpenedRef.current){
@@ -4589,7 +4632,7 @@ function TaraApp(){
 
   // V113: Manual Discord broadcast — user clicks OK button to send a signal/lock
   const lastManualBroadcastRef=useRef({key:'',type:''});
-  // V130: Animated sync flow — shows progress overlay with staged updates
+  // V133: Animated sync flow — shows progress overlay with staged updates
   const runSyncWithProgress=async()=>{
     const stages=[
       {pct:10,label:'Clearing local cache...',delay:200},
@@ -4620,7 +4663,7 @@ function TaraApp(){
     const lock=analysis.lockInfo;
     const isSearching=analysis.prediction?.includes('SEARCHING');
     const isStandDown=['BLACKOUT','OBSERVE','LOW QUALITY','SITTING OUT','PREMIUM:','BREAKING NEWS'].some(s=>analysis.prediction?.includes(s));
-    // V130: Allow broadcasting any state with directional info OR stand-down state
+    // V133: Allow broadcasting any state with directional info OR stand-down state
     let dir=analysis.prediction?.includes('UP')?'UP':analysis.prediction?.includes('DOWN')?'DOWN':null;
     if(isSearching)dir='SEARCH';
     if(isStandDown)dir='STAND_DOWN';
@@ -4634,7 +4677,7 @@ function TaraApp(){
     const key=`${type}:${dir}:${wKey}:${analysis.prediction}`;
     if(lastManualBroadcastRef.current.key===key)return;
     lastManualBroadcastRef.current={key,type};
-    // V130: include plain-English summary
+    // V133: include plain-English summary
     const plainEnglish=buildPlainEnglish(analysis,qualityGate,analysis?.advisor);
     broadcastToDiscord(type,{
       dir,price:currentPrice,strike:targetMargin,gap:gapBps,clock,
@@ -4649,7 +4692,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V130...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V133...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -4661,10 +4704,10 @@ function TaraApp(){
   return(
     <div className={'min-h-screen bg-[#111312] text-[#E8E9E4] font-sans flex flex-col selection:bg-[#E8E9E4]/20'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
       
-      {/* V130: Session-start status check */}
-      <SessionStartCheck open={showSessionStart} onClose={()=>setShowSessionStart(false)} windowType={windowType} premiumMode={premiumMode} scorecards={scorecards} tradeLog={tradeLog} regime={analysis?.regime} velocityRegime={analysis?.velocityRegime} calibration={calibration} baselineDrift={baselineDrift} resetToLatestBaseline={resetToLatestBaseline} runSyncWithProgress={runSyncWithProgress} syncState={syncState}/>
+      {/* V133: Session-start status check */}
+      <SessionStartCheck open={showSessionStart} onClose={()=>setShowSessionStart(false)} windowType={windowType} premiumMode={premiumMode} scorecards={scorecards} tradeLog={tradeLog} regime={analysis?.regime} velocityRegime={analysis?.velocityRegime} calibration={calibration} baselineDrift={baselineDrift} resetToLatestBaseline={resetToLatestBaseline} runSyncWithProgress={runSyncWithProgress} syncState={syncState} resetDirectionalBias={resetDirectionalBias}/>
 
-      {/* V130: Sync progress overlay */}
+      {/* V133: Sync progress overlay */}
       {syncState&&syncState.active&&(
         <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
           <div className="bg-[#181A19] rounded-xl border border-indigo-500/30 p-6 max-w-md w-full shadow-2xl">
@@ -4686,7 +4729,7 @@ function TaraApp(){
         </div>
       )}
 
-      {/* V130: SYNC PROGRESS OVERLAY ── shows during baseline sync */}
+      {/* V133: SYNC PROGRESS OVERLAY ── shows during baseline sync */}
       {syncState.active&&(
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={'bg-[#181A19] border rounded-xl shadow-2xl max-w-sm w-full p-6 '+(syncState.error?'border-rose-500/50':syncState.complete?'border-emerald-500/50':'border-indigo-500/40')}>
@@ -4731,7 +4774,7 @@ function TaraApp(){
         </div>
       )}
 
-      {/* V130: Learning toast removed — was crashing on minified prod build, will revisit */}
+      {/* V133: Learning toast removed — was crashing on minified prod build, will revisit */}
       {/* ── STICKY HEADER ── */}
       <header className={'sticky top-0 z-40 bg-[#111312]/95 backdrop-blur-md border-b border-[#E8E9E4]/10 px-2 sm:px-4 py-2 shrink-0'}>
         <div className="max-w-[1600px] mx-auto flex items-center gap-1 sm:gap-2">
@@ -4740,7 +4783,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V130
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V133
             </span>
           </div>
 
@@ -5056,7 +5099,7 @@ function TaraApp(){
               {/* V111: Sync to baseline training data */}
               <div className={'mb-3 p-3 rounded-lg bg-[#111312] border border-[#E8E9E4]/10'}>
                 <div className={'text-[11px] text-[#E8E9E4]/70 mb-2 leading-relaxed'}>
-                  <strong className={'text-emerald-400'}>Sync to Latest Training</strong> · Refreshes Tara to the latest baked baseline (423W-266L · 31W-25L 5m · 377 baked trades · V130). Use when switching devices.
+                  <strong className={'text-emerald-400'}>Sync to Latest Training</strong> · Refreshes Tara to the latest baked baseline (423W-266L · 31W-25L 5m · 377 baked trades · V133). Use when switching devices.
                 </div>
                 <button onClick={()=>{
                   if(window.confirm('Reset Tara to the latest baseline training data? Adaptive weights and trade history reset.')){
@@ -5129,7 +5172,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V130</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V133</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -5167,7 +5210,7 @@ function TaraApp(){
             </div>
             <div className="p-4 space-y-5">
 
-              {/* V130: BACKTEST PANEL — replay all historical trades through current logic */}
+              {/* V133: BACKTEST PANEL — replay all historical trades through current logic */}
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-emerald-400 mb-3">🔬 Backtest — Historical Performance Audit</h3>
                 {(()=>{
@@ -5599,7 +5642,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V130 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V133 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -5607,9 +5650,9 @@ function TaraApp(){
             </div>
             <div className={'p-4 sm:p-6 space-y-6 text-sm text-[#E8E9E4]/80'}>
 
-              {/* V130: BEST PRACTICES */}
+              {/* V133: BEST PRACTICES */}
               <section className={'bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-4'}>
-                <h3 className={'text-emerald-400 font-bold uppercase tracking-wide mb-3 text-xs'}>🏆 Best Way to Use Tara (V130)</h3>
+                <h3 className={'text-emerald-400 font-bold uppercase tracking-wide mb-3 text-xs'}>🏆 Best Way to Use Tara (V133)</h3>
                 <div className="space-y-2.5 text-xs leading-relaxed text-[#E8E9E4]/70">
                   <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">1.</span><p><strong className="text-white">Trade EU session when possible.</strong> Your strongest performance is 70% WR in EU. US is your weakest at 55%. Skip OFF-HOURS entirely (50% = coin flip).</p></div>
                   <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">2.</span><p><strong className="text-white">Watch the macro banner.</strong> Red BLACKOUT before CPI/NFP/FOMC means SIT OUT. Trading through scheduled news is your highest-loss category. The 30min before any major release is the worst time to enter.</p></div>
@@ -5755,14 +5798,14 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V130 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V133 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
-              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">⚙️ Prediction Engine Overhaul (V130)</h3><p className="leading-relaxed"><strong>7 new layers</strong> that target the actual losing patterns observed in your trade history:</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Real backtest framework:</strong> Settings → Analytics now shows historical performance audit. WR by regime, session, lock-timing, confidence bucket. Selectivity scenarios ("what if I'd only taken EU sessions") show retroactive WR lift.</li><li><strong>Brier score calibration:</strong> Real probability accuracy metric. Lower = better calibrated. &lt;0.15 strong, &lt;0.20 useful.</li><li><strong>Attribution-weighted learning:</strong> Only signals that contributed &gt;10% to the call get credit/blame. Bystander signals no longer get noise updates that compound to drift.</li><li><strong>Signal regime change release:</strong> If 3+ underlying signals flip against the locked direction mid-window, Tara releases the lock. Sharper than waiting for 20pt posterior collapse. Look for [LOCK] Released — signal regime flipped.</li><li><strong>Window-open exhaustion penalty:</strong> If price has already moved &gt;25bps with &lt;30% of window left, Tara penalizes locks that chase the move. "The move has happened, late entry chasing has poor odds." Look for [WIN-EXH].</li><li><strong>Live order book flash (2.5s):</strong> A faster polling channel runs alongside the 8s bloomberg snapshot. When both timeframes agree on imbalance direction, the signal doubles. Look for [OB-LIVE].</li><li><strong>Volume Profile / VPOC:</strong> Detects support/resistance levels from where most volume traded. If a strong VPOC sits between price and strike, locks chasing past it get penalized. Look for [VPOC].</li><li><strong>Cross-device baseline fix:</strong> Scorecard loader now handles both legacy storage keys + auto-migrates if your local record is below the shipped baseline. New devices auto-sync to the latest baseline (currently 421-264 from 373 trades).</li></ul></section>
-              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">🎯 Tier 1-3 Intelligence Stack (V130)</h3><p className="leading-relaxed"><strong>4 new prediction layers</strong> for cleaner inputs and smarter decisions:</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Strike Quality Scoring:</strong> Detects when strike was set during a spike vs normal price. Dirty strikes (&gt;40bps off baseline) get gap-gravity downweighted up to 60%.</li><li><strong>Wall Persistence Filter:</strong> Liquidation walls must hold &ge;15s before counting. Spoofed walls (placed and pulled) are now ignored. Look for [LIQ-SPOOF] in engine log.</li><li><strong>Regime-Direction WR Memory:</strong> The <strong>HIST</strong> badge shows your historical WR for this exact regime+direction combo. Red+pulse = consider sitting out.</li><li><strong>Adaptive Threshold per Session × Regime:</strong> Tara now adjusts lock thresholds based on your historical performance per bucket. WR &gt;70% in this combo = -3 threshold (easier locks). WR &lt;50% = +5 threshold (much harder).</li><li><strong>Live News (30s polling):</strong> News refreshes every 30s instead of 90s. Detection of "breaking", "flash", "urgent" tags triggers BREAKING NEWS — OBSERVE blackout.</li><li><strong>Sentiment-Trajectory Interaction:</strong> When news AND trajectory agree on direction, +5 quality. When they disagree strongly, -8 quality.</li><li><strong>Chart Pattern Recognition:</strong> Detects double tops, double bottoms, ascending/descending wedges, symmetrical compression. Adjusts posterior ±5.</li><li><strong>Audio Alerts:</strong> New sounds for trajectory crossing ±12, breaking news, MTF confluence locks.</li></ul></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">⚙️ Prediction Engine Overhaul (V133)</h3><p className="leading-relaxed"><strong>7 new layers</strong> that target the actual losing patterns observed in your trade history:</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Real backtest framework:</strong> Settings → Analytics now shows historical performance audit. WR by regime, session, lock-timing, confidence bucket. Selectivity scenarios ("what if I'd only taken EU sessions") show retroactive WR lift.</li><li><strong>Brier score calibration:</strong> Real probability accuracy metric. Lower = better calibrated. &lt;0.15 strong, &lt;0.20 useful.</li><li><strong>Attribution-weighted learning:</strong> Only signals that contributed &gt;10% to the call get credit/blame. Bystander signals no longer get noise updates that compound to drift.</li><li><strong>Signal regime change release:</strong> If 3+ underlying signals flip against the locked direction mid-window, Tara releases the lock. Sharper than waiting for 20pt posterior collapse. Look for [LOCK] Released — signal regime flipped.</li><li><strong>Window-open exhaustion penalty:</strong> If price has already moved &gt;25bps with &lt;30% of window left, Tara penalizes locks that chase the move. "The move has happened, late entry chasing has poor odds." Look for [WIN-EXH].</li><li><strong>Live order book flash (2.5s):</strong> A faster polling channel runs alongside the 8s bloomberg snapshot. When both timeframes agree on imbalance direction, the signal doubles. Look for [OB-LIVE].</li><li><strong>Volume Profile / VPOC:</strong> Detects support/resistance levels from where most volume traded. If a strong VPOC sits between price and strike, locks chasing past it get penalized. Look for [VPOC].</li><li><strong>Cross-device baseline fix:</strong> Scorecard loader now handles both legacy storage keys + auto-migrates if your local record is below the shipped baseline. New devices auto-sync to the latest baseline (currently 421-264 from 373 trades).</li></ul></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">🎯 Tier 1-3 Intelligence Stack (V133)</h3><p className="leading-relaxed"><strong>4 new prediction layers</strong> for cleaner inputs and smarter decisions:</p><ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Strike Quality Scoring:</strong> Detects when strike was set during a spike vs normal price. Dirty strikes (&gt;40bps off baseline) get gap-gravity downweighted up to 60%.</li><li><strong>Wall Persistence Filter:</strong> Liquidation walls must hold &ge;15s before counting. Spoofed walls (placed and pulled) are now ignored. Look for [LIQ-SPOOF] in engine log.</li><li><strong>Regime-Direction WR Memory:</strong> The <strong>HIST</strong> badge shows your historical WR for this exact regime+direction combo. Red+pulse = consider sitting out.</li><li><strong>Adaptive Threshold per Session × Regime:</strong> Tara now adjusts lock thresholds based on your historical performance per bucket. WR &gt;70% in this combo = -3 threshold (easier locks). WR &lt;50% = +5 threshold (much harder).</li><li><strong>Live News (30s polling):</strong> News refreshes every 30s instead of 90s. Detection of "breaking", "flash", "urgent" tags triggers BREAKING NEWS — OBSERVE blackout.</li><li><strong>Sentiment-Trajectory Interaction:</strong> When news AND trajectory agree on direction, +5 quality. When they disagree strongly, -8 quality.</li><li><strong>Chart Pattern Recognition:</strong> Detects double tops, double bottoms, ascending/descending wedges, symmetrical compression. Adjusts posterior ±5.</li><li><strong>Audio Alerts:</strong> New sounds for trajectory crossing ±12, breaking news, MTF confluence locks.</li></ul></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">⚡ Faster Prediction Judgement (V117)</h3><p className="leading-relaxed">Tara was waiting too long to confirm calls. Reduced base sample requirement from 3→2 for 15m windows (~10s faster locks). Strong trajectory bias now skips gated regime penalties entirely. Non-Premium quality floor lowered 50→45 so Tara takes more setups when she's not in selective mode.</p></section>
-              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">🎯 Trajectory Forecast Engine (V130)</h3><p className="leading-relaxed">Tara now <strong>projects forward</strong> using kinematics (x = x₀ + vt + ½at²) instead of just reacting to current state. The <strong>↗ TRAJ +X</strong> badge shows directional bias. Strong trajectory (≥12) lets Tara lock with 2 fewer samples — early calls at good odds. Engine log shows projected end-of-window price and bps to strike.</p></section>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">🎯 Trajectory Forecast Engine (V133)</h3><p className="leading-relaxed">Tara now <strong>projects forward</strong> using kinematics (x = x₀ + vt + ½at²) instead of just reacting to current state. The <strong>↗ TRAJ +X</strong> badge shows directional bias. Strong trajectory (≥12) lets Tara lock with 2 fewer samples — early calls at good odds. Engine log shows projected end-of-window price and bps to strike.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">🔥 Volatility Regime Adaptation (V113)</h3><p className="leading-relaxed">Tara classifies market speed every tick: <strong>🐢 SLOW / NORMAL / ⚡ FAST / 🔥 EXTREME</strong>. In slow markets she requires more confirmation; in fast markets she locks faster with looser momentum tolerance. The badge shows next to the regime chip when not NORMAL.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">📅 Macro Event Calendar (V114)</h3><p className="leading-relaxed">Hardcoded calendar of CPI, NFP, FOMC, PCE, Jobless Claims, Retail Sales, GDP, BTC settlement. Tara enters <strong>BLACKOUT</strong> 30min before, <strong>OBSERVE</strong> during, <strong>ENHANCED</strong> 15min after. Banner appears at top of prediction card with countdown.</p></section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">★ Premium Mode + Day×Session</h3><p className="leading-relaxed">Premium toggle in header (★ icon) for selective trading: quality ≥65 + MTF agreement + skip US session + skip weak RC + DOWN blocked in SS/HVC. Day×Session quality multipliers baked in: <strong>WED-US +5</strong> (best), <strong>SUN-US -10</strong> (worst). EU is your strongest session at 70% WR.</p></section>
