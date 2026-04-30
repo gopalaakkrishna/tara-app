@@ -3107,24 +3107,28 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
           <h2 className="text-lg font-serif text-white">📋 Session Start Check</h2>
           <button onClick={onClose} className="text-[#E8E9E4]/40 hover:text-white text-xl leading-none">×</button>
         </div>
-        {baselineDrift&&(
-          <div className="mb-3 p-3 rounded-lg bg-indigo-500/10 border-2 border-indigo-500/40">
-            <div className="text-[10px] uppercase text-indigo-300 font-bold mb-1">📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V145'}</div>
-            <div className="text-xs text-[#E8E9E4]/80 mb-3">A new engine version has shipped. Choose how to start your trading session:</div>
-            <div className="grid grid-cols-1 gap-2">
-              <button onClick={()=>{if(runSyncWithProgress)runSyncWithProgress();}} disabled={syncState&&syncState.active} className="w-full py-2 px-3 bg-indigo-500 hover:bg-indigo-400 text-white rounded text-xs uppercase tracking-wide disabled:opacity-50 text-left">
-                <div className="font-bold">{syncState&&syncState.active?'Syncing...':'⬇ Sync to Baseline'}</div>
-                <div className="text-[10px] text-indigo-200/80 normal-case font-normal mt-0.5">Use the latest training data ({BASELINE_RECORD['15m'].wins}W-{BASELINE_RECORD['15m'].losses}L · {(100*BASELINE_RECORD['15m'].wins/(BASELINE_RECORD['15m'].wins+BASELINE_RECORD['15m'].losses)).toFixed(1)}% WR on 15m). Recommended for most users.</div>
-              </button>
-              {resetFreshStart&&(
-                <button onClick={resetFreshStart} className="w-full py-2 px-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-200 rounded text-xs uppercase tracking-wide text-left">
-                  <div className="font-bold">↻ Fresh Start</div>
-                  <div className="text-[10px] text-rose-300/70 normal-case font-normal mt-0.5">Wipe all training data, weights, and scorecard. Tara learns from your own trades only with V144 calibration prior baked in.</div>
-                </button>
-              )}
-            </div>
+        {/* V145: Always show sync + fresh-start options. Heading copy adapts to whether
+                  the user is on a stale version (drift) or already current. */}
+        <div className="mb-3 p-3 rounded-lg bg-indigo-500/10 border-2 border-indigo-500/40">
+          <div className="text-[10px] uppercase text-indigo-300 font-bold mb-1">
+            {baselineDrift?(<>📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V145'}</>):(<>📦 Training Baseline</>)}
           </div>
-        )}
+          <div className="text-xs text-[#E8E9E4]/80 mb-3">
+            {baselineDrift?'A new engine version has shipped. Choose how to start your trading session:':'Manage Tara\'s training data. Sync brings in the baseline trades + scorecard. Fresh start wipes everything for clean self-training.'}
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            <button onClick={()=>{if(runSyncWithProgress)runSyncWithProgress();}} disabled={syncState&&syncState.active} className="w-full py-2 px-3 bg-indigo-500 hover:bg-indigo-400 text-white rounded text-xs uppercase tracking-wide disabled:opacity-50 text-left">
+              <div className="font-bold">{syncState&&syncState.active?'Syncing...':'⬇ Sync to Baseline'}</div>
+              <div className="text-[10px] text-indigo-200/80 normal-case font-normal mt-0.5">Load baked training data ({BASELINE_RECORD['15m'].wins}W-{BASELINE_RECORD['15m'].losses}L · {(100*BASELINE_RECORD['15m'].wins/(BASELINE_RECORD['15m'].wins+BASELINE_RECORD['15m'].losses)).toFixed(1)}% WR on 15m). Replaces your current trade log.</div>
+            </button>
+            {resetFreshStart&&(
+              <button onClick={resetFreshStart} className="w-full py-2 px-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-200 rounded text-xs uppercase tracking-wide text-left">
+                <div className="font-bold">↻ Fresh Start</div>
+                <div className="text-[10px] text-rose-300/70 normal-case font-normal mt-0.5">Wipe all training data, weights, and scorecard. Tara learns from your own trades only with V144 calibration prior baked in.</div>
+              </button>
+            )}
+          </div>
+        </div>
         {/* V134: Reset directional bias — keeps record, clears UP/DOWN learning lean */}
         {resetDirectionalBias&&(
           <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
