@@ -94,8 +94,8 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.04.30-v144-379t-429W268L-calibration-as-truth';
-const BASELINE_RECORD={'15m':{wins:429,losses:268},'5m':{wins:31,losses:25}};
+const BASELINE_VERSION='2026.04.30-v145-431W268L-telemetry-and-version-flow';
+const BASELINE_RECORD={'15m':{wins:431,losses:268},'5m':{wins:33,losses:25}};
 
 const SEED_TRADES=[
 // V138-data: BAKED TRAINING — 379 trades. Running baseline: 429W-268L (15m)
@@ -495,6 +495,25 @@ const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV110',JSON.stri
       // Reset calibration buckets (so old UP-skewed calibration doesn't carry over)
       localStorage.removeItem('taraCalibrationV110');
       // KEEP: taraTradeLogV110 (history), taraV110Score (W-L), taraV110Mem (regime memory)
+      window.location.reload();
+    }catch(e){alert('Reset failed: '+e.message);}
+  };
+
+  // V145: Full fresh-start reset. Wipes everything — trade log, scorecard, weights, calibration.
+  //       Tara starts from zero with the V144 calibration prior baked in. Useful when bumping
+  //       to a new version with significant engine changes, when the user wants to retrain from
+  //       scratch with their own data, or after recovering from corrupted localStorage.
+  const resetFreshStart=()=>{
+    if(!confirm('FRESH START: wipe all training data, weights, calibration, AND scorecard? Tara will start from V144 prior with no learning history. This is irreversible — only do this when you want to retrain from your own trades.'))return;
+    try{
+      localStorage.removeItem('taraTradeLogV110');     // trade history
+      localStorage.removeItem('taraV110Score');        // W-L scorecard
+      localStorage.removeItem('taraScoreV110');        // alt scorecard key
+      localStorage.removeItem('taraWeightsV110');      // adaptive signal weights
+      localStorage.removeItem('taraCalibrationV110');  // calibration buckets
+      localStorage.removeItem('taraV110Mem');          // regime memory
+      Object.keys(localStorage).filter(k=>k.startsWith('taraV110RW_')).forEach(k=>localStorage.removeItem(k));
+      localStorage.setItem('taraBaselineVersion',BASELINE_VERSION); // mark as on-current-version
       window.location.reload();
     }catch(e){alert('Reset failed: '+e.message);}
   };
@@ -3407,7 +3426,7 @@ const buildPlainEnglish=(analysis,qualityGate,advisor)=>{
 
 
 // V134: Session Start Status Check — shows on first load
-function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,velocityRegime,calibration,baselineDrift,resetToLatestBaseline,runSyncWithProgress,syncState,resetDirectionalBias}){
+function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,velocityRegime,calibration,baselineDrift,resetToLatestBaseline,runSyncWithProgress,syncState,resetDirectionalBias,resetFreshStart}){
   if(!open)return null;
   const score=scorecards?.[windowType]||{wins:0,losses:0};
   const wr=score.wins+score.losses>0?(score.wins/(score.wins+score.losses))*100:0;
@@ -3460,10 +3479,21 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
           <button onClick={onClose} className="text-[#E8E9E4]/40 hover:text-white text-xl leading-none">×</button>
         </div>
         {baselineDrift&&(
-          <div className="mb-3 p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/30">
-            <div className="text-[10px] uppercase text-indigo-300 font-bold mb-1">📦 Newer Baseline Available</div>
-            <div className="text-xs text-[#E8E9E4]/80 mb-2">A newer training baseline has shipped. Sync to refresh your starting weights.</div>
-            <button onClick={()=>{if(runSyncWithProgress)runSyncWithProgress();}} disabled={syncState&&syncState.active} className="w-full py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white font-bold rounded text-xs uppercase tracking-wide disabled:opacity-50">{syncState&&syncState.active?'Syncing...':'Sync Now'}</button>
+          <div className="mb-3 p-3 rounded-lg bg-indigo-500/10 border-2 border-indigo-500/40">
+            <div className="text-[10px] uppercase text-indigo-300 font-bold mb-1">📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V145'}</div>
+            <div className="text-xs text-[#E8E9E4]/80 mb-3">A new engine version has shipped. Choose how to start your trading session:</div>
+            <div className="grid grid-cols-1 gap-2">
+              <button onClick={()=>{if(runSyncWithProgress)runSyncWithProgress();}} disabled={syncState&&syncState.active} className="w-full py-2 px-3 bg-indigo-500 hover:bg-indigo-400 text-white rounded text-xs uppercase tracking-wide disabled:opacity-50 text-left">
+                <div className="font-bold">{syncState&&syncState.active?'Syncing...':'⬇ Sync to Baseline'}</div>
+                <div className="text-[10px] text-indigo-200/80 normal-case font-normal mt-0.5">Use the latest training data ({BASELINE_RECORD['15m'].wins}W-{BASELINE_RECORD['15m'].losses}L · {(100*BASELINE_RECORD['15m'].wins/(BASELINE_RECORD['15m'].wins+BASELINE_RECORD['15m'].losses)).toFixed(1)}% WR on 15m). Recommended for most users.</div>
+              </button>
+              {resetFreshStart&&(
+                <button onClick={resetFreshStart} className="w-full py-2 px-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-200 rounded text-xs uppercase tracking-wide text-left">
+                  <div className="font-bold">↻ Fresh Start</div>
+                  <div className="text-[10px] text-rose-300/70 normal-case font-normal mt-0.5">Wipe all training data, weights, and scorecard. Tara learns from your own trades only with V144 calibration prior baked in.</div>
+                </button>
+              )}
+            </div>
           </div>
         )}
         {/* V134: Reset directional bias — keeps record, clears UP/DOWN learning lean */}
@@ -3606,7 +3636,7 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:429,losses:268},'5m':{wins:31,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:431,losses:268},'5m':{wins:33,losses:25}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -3676,7 +3706,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V144 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V145 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -3774,7 +3804,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V144'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V145'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -3871,7 +3901,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara V144  |  signal'},
+        footer:{text:'Tara V145  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3885,7 +3915,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V144  |  stand-down'},
+        footer:{text:'Tara V145  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3899,7 +3929,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V144  |  search'},
+        footer:{text:'Tara V145  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3916,7 +3946,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara V144  |  lock'},
+        footer:{text:'Tara V145  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3933,7 +3963,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V144  |  close'},
+          footer:{text:'Tara V145  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -3954,7 +3984,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V144  |  exit'},
+        footer:{text:'Tara V145  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3983,12 +4013,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V144  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara V145  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V144',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V145',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -4007,7 +4037,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V144 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V145 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -4114,7 +4144,10 @@ function TaraApp(){
             // Resolve training trade
             if(pendingTradeRef.current&&pendingTradeRef.current.result===null){
               const result=won?'WIN':'LOSS';
-              const resolvedTrade={...pendingTradeRef.current,result,closingPrice:currentPrice,strikePrice:targetMargin};
+              const resolvedTrade={...pendingTradeRef.current,result,closingPrice:currentPrice,strikePrice:targetMargin,
+                /* V145 closing telemetry */ closingGapBps:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0,
+                kalshiAtClose:kalshiYesPrice!=null?Number(kalshiYesPrice):null,
+                resolvedTimestampISO:new Date().toISOString()};
               const newLog=[...tradeLogRef.current,resolvedTrade];
               saveTradeLog(newLog);setTradeLog(newLog);
               (()=>{const _newW=updateWeights(adaptiveWeights,newLog,result);const _diffs=computeWeightDiff(adaptiveWeights,_newW);setAdaptiveWeights(_newW);if(_diffs.length>0)setLastLearningUpdate({result,diffs:_diffs,at:Date.now()});})();
@@ -4977,7 +5010,10 @@ function TaraApp(){
       hasReversedRef.current=true;
       if(pendingTradeRef.current&&pendingTradeRef.current.result===null){
         // Score and log the exited trade as LOSS immediately
-        const exitLog={...pendingTradeRef.current,result:'LOSS',closingPrice:currentPrice,strikePrice:targetMargin,reversed:true};
+        const exitLog={...pendingTradeRef.current,result:'LOSS',closingPrice:currentPrice,strikePrice:targetMargin,reversed:true,
+          closingGapBps:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0,
+          kalshiAtClose:kalshiYesPrice!=null?Number(kalshiYesPrice):null,
+          resolvedTimestampISO:new Date().toISOString()};
         const newLog1=[...tradeLogRef.current,exitLog];
         saveTradeLog(newLog1);setTradeLog(newLog1);
         (()=>{const _newW=updateWeights(adaptiveWeights,newLog1,'LOSS');const _diffs=computeWeightDiff(adaptiveWeights,_newW);setAdaptiveWeights(_newW);if(_diffs.length>0)setLastLearningUpdate({result:'LOSS',diffs:_diffs,at:Date.now()});})();
@@ -5003,16 +5039,30 @@ function TaraApp(){
     if(currentPrice){
       setPositionEntry({price:currentPrice,side:dir,time:Date.now()});
       const gapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
-      // Create trade log entry when user confirms entry
+      // V145: Expanded trade telemetry. Previously only stored {id, dir, posterior, regime,
+      //       clockAtLock, hour, session, windowType, signals, result, betAmt, maxPay}.
+      //       Missing: entry price (you can't analyze gap behavior without it), strike at lock
+      //       (only resolution-time strike was kept), Kalshi context (so we can verify edge),
+      //       FGT alignment (the primary signal!), raw vs calibrated posterior split.
       const eng=lockedCallRef.current;
       pendingTradeRef.current={
         id:Date.now(),dir,
-        posterior:eng?.lockedPosterior||analysis?.rawProbAbove||50,
+        posterior:eng?.lockedPosterior||analysis?.rawProbAbove||50, // calibrated posterior at lock
+        rawPosterior:analysis?.rawPosterior||analysis?.rawProbAbove||50, // V145: pre-calibration posterior
         regime:lastRegimeRef.current,
         clockAtLock:timeState.minsRemaining*60+timeState.secsRemaining,
         hour:new Date().getHours(),session:getMarketSessions().dominant,windowType,
         signals:analysis?.rawSignalScores||{},result:null,
-        betAmt:betAmount||0,maxPay:maxPayout||0  // captured at entry for P&L calc
+        betAmt:betAmount||0,maxPay:maxPayout||0,
+        // V145 NEW FIELDS
+        entryPrice:currentPrice||0,                              // BTC price when we entered
+        strikeAtLock:targetMargin||0,                            // strike at the moment of lock
+        gapAtEntry:gapBps,                                       // bps gap to strike at entry
+        kalshiAtLock:kalshiYesPrice!=null?Number(kalshiYesPrice):null, // Kalshi YES price (UP %) at lock
+        fgtAlignment:analysis?.mtfAlignment||0,                  // -4 to +4 multi-timeframe FGT
+        windowOpenPrice:windowOpenPriceRef.current||0,           // BTC at window start
+        qualityScore:qualityGate?.score||null,                   // Tara's quality gate score
+        timestampISO:new Date().toISOString(),                   // wall-clock for date analysis
       };
       // Broadcast the new entry after the reversal loss
       broadcastToDiscord('LOCK',{dir,price:currentPrice,strike:targetMargin,gap:gapBps,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,regime:lastRegimeRef.current,posterior:analysis?.rawProbAbove||0});
@@ -5031,7 +5081,10 @@ function TaraApp(){
         if(result==='WIN')updateScore(windowType,'wins',1);
         else updateScore(windowType,'losses',1);
         if(pendingTradeRef.current&&pendingTradeRef.current.result===null){
-          const resolvedTrade={...pendingTradeRef.current,result,closingPrice:currentPrice,strikePrice:targetMargin,earlyExit:true};
+          const resolvedTrade={...pendingTradeRef.current,result,closingPrice:currentPrice,strikePrice:targetMargin,earlyExit:true,
+            closingGapBps:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0,
+            kalshiAtClose:kalshiYesPrice!=null?Number(kalshiYesPrice):null,
+            resolvedTimestampISO:new Date().toISOString()};
           const newLog=[...tradeLogRef.current,resolvedTrade];
           saveTradeLog(newLog);setTradeLog(newLog);
           (()=>{const _newW=updateWeights(adaptiveWeights,newLog,result);const _diffs=computeWeightDiff(adaptiveWeights,_newW);setAdaptiveWeights(_newW);if(_diffs.length>0)setLastLearningUpdate({result,diffs:_diffs,at:Date.now()});})();
@@ -5110,7 +5163,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V144...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V145...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -5123,7 +5176,7 @@ function TaraApp(){
     <div className={'min-h-screen bg-[#111312] text-[#E8E9E4] font-sans flex flex-col selection:bg-[#E8E9E4]/20'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
       
       {/* V134: Session-start status check */}
-      <SessionStartCheck open={showSessionStart} onClose={()=>setShowSessionStart(false)} windowType={windowType} scorecards={scorecards} tradeLog={tradeLog} regime={analysis?.regime} velocityRegime={analysis?.velocityRegime} calibration={calibration} baselineDrift={baselineDrift} resetToLatestBaseline={resetToLatestBaseline} runSyncWithProgress={runSyncWithProgress} syncState={syncState} resetDirectionalBias={resetDirectionalBias}/>
+      <SessionStartCheck open={showSessionStart} onClose={()=>setShowSessionStart(false)} windowType={windowType} scorecards={scorecards} tradeLog={tradeLog} regime={analysis?.regime} velocityRegime={analysis?.velocityRegime} calibration={calibration} baselineDrift={baselineDrift} resetToLatestBaseline={resetToLatestBaseline} runSyncWithProgress={runSyncWithProgress} syncState={syncState} resetDirectionalBias={resetDirectionalBias} resetFreshStart={resetFreshStart}/>
 
       {/* V134: Sync progress overlay */}
       {syncState&&syncState.active&&(
@@ -5201,7 +5254,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V144
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V145
             </span>
           </div>
 
@@ -5442,7 +5495,10 @@ function TaraApp(){
                   manuallyClosedRef.current=result;
                   if(result==='WIN')updateScore(windowType,'wins',1);else updateScore(windowType,'losses',1);
                   if(pendingTradeRef.current&&pendingTradeRef.current.result===null){
-                    const resolvedTrade={...pendingTradeRef.current,result,closingPrice:currentPrice,strikePrice:targetMargin,forceExit:true};
+                    const resolvedTrade={...pendingTradeRef.current,result,closingPrice:currentPrice,strikePrice:targetMargin,forceExit:true,
+                      closingGapBps:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0,
+                      kalshiAtClose:kalshiYesPrice!=null?Number(kalshiYesPrice):null,
+                      resolvedTimestampISO:new Date().toISOString()};
                     const newLog=[...tradeLogRef.current,resolvedTrade];saveTradeLog(newLog);setTradeLog(newLog);
                     const newW=updateWeights(adaptiveWeights,newLog,result);const _diffs=computeWeightDiff(adaptiveWeights,newW);setAdaptiveWeights(newW);if(_diffs.length>0)setLastLearningUpdate({result,diffs:_diffs,at:Date.now()});setRegimeWeights(prev=>updateRegimeWeights(prev,resolvedTrade,result));pendingTradeRef.current=null;
                   }
@@ -5587,7 +5643,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V144</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V145</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -5982,6 +6038,115 @@ function TaraApp(){
                 </div>
               </section>
 
+              {/* V145: ── PERFORMANCE BY HOUR & DAY-OF-WEEK ── */}
+              <section>
+                <h3 className="text-xs font-bold uppercase tracking-wide text-indigo-400 mb-3">Performance Patterns</h3>
+                {(()=>{
+                  const completed=tradeLog.filter(t=>t.result);
+                  if(completed.length===0)return<div className={'text-xs text-[#E8E9E4]/30 italic'}>No completed trades yet.</div>;
+
+                  // Aggregate by hour of day (0-23)
+                  const byHour={};
+                  // Aggregate by day-of-week (Mon-Sun)
+                  const byDOW={};
+                  // Aggregate by session
+                  const bySession={};
+
+                  completed.forEach(t=>{
+                    // Use timestampISO if present (V145+), else fall back to id (timestamp)
+                    let d;
+                    if(t.timestampISO){d=new Date(t.timestampISO);}
+                    else{d=new Date(t.id/1);}
+                    const isValid=!isNaN(d.getTime())&&d.getFullYear()>2020;
+                    const h=isValid?d.getHours():(t.hour||0);
+                    const dow=isValid?d.getDay():null; // 0=Sun, 1=Mon ...
+                    if(!byHour[h])byHour[h]={W:0,L:0};
+                    byHour[h][t.result==='WIN'?'W':'L']++;
+                    if(dow!=null){
+                      if(!byDOW[dow])byDOW[dow]={W:0,L:0};
+                      byDOW[dow][t.result==='WIN'?'W':'L']++;
+                    }
+                    const sess=t.session||'—';
+                    if(!bySession[sess])bySession[sess]={W:0,L:0};
+                    bySession[sess][t.result==='WIN'?'W':'L']++;
+                  });
+
+                  const dowLabels=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+                  const formatHour=h=>{const h12=h%12||12;return `${h12}${h<12?'a':'p'}`;};
+                  const cellCls=(wr,n)=>n<2?'bg-[#111312] text-[#E8E9E4]/25':wr>=65?'bg-emerald-500/15 text-emerald-300':wr>=55?'bg-amber-500/10 text-amber-300':wr>=45?'bg-[#111312] text-[#E8E9E4]/50':'bg-rose-500/10 text-rose-300';
+
+                  return(
+                    <div className="space-y-4">
+                      {/* By session (most actionable) */}
+                      <div>
+                        <div className={'text-[10px] uppercase text-[#E8E9E4]/40 font-bold mb-2'}>By Session</div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {['EU','ASIA','US','OFF-HOURS'].map(s=>{
+                            const v=bySession[s]||{W:0,L:0};
+                            const n=v.W+v.L;
+                            const wr=n>0?(100*v.W/n):0;
+                            return(
+                              <div key={s} className={`p-2 rounded border border-[#E8E9E4]/8 ${cellCls(wr,n)}`}>
+                                <div className="text-[10px] uppercase font-bold opacity-70">{s}</div>
+                                <div className="text-base font-mono font-bold mt-0.5">{n>0?wr.toFixed(0)+'%':'—'}</div>
+                                <div className="text-[9px] opacity-60">{v.W}W-{v.L}L · {n} trades</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* By day of week */}
+                      <div>
+                        <div className={'text-[10px] uppercase text-[#E8E9E4]/40 font-bold mb-2'}>By Day of Week</div>
+                        <div className="grid grid-cols-7 gap-1">
+                          {dowLabels.map((lbl,idx)=>{
+                            const v=byDOW[idx]||{W:0,L:0};
+                            const n=v.W+v.L;
+                            const wr=n>0?(100*v.W/n):0;
+                            return(
+                              <div key={lbl} className={`p-1.5 rounded text-center border border-[#E8E9E4]/8 ${cellCls(wr,n)}`}>
+                                <div className="text-[9px] uppercase opacity-70">{lbl}</div>
+                                <div className="text-xs font-mono font-bold mt-0.5">{n>0?wr.toFixed(0)+'%':'—'}</div>
+                                <div className="text-[8px] opacity-60">{n>0?`${v.W}-${v.L}`:'—'}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* By hour of day */}
+                      <div>
+                        <div className={'text-[10px] uppercase text-[#E8E9E4]/40 font-bold mb-2'}>By Hour of Day (local)</div>
+                        <div className="grid grid-cols-12 gap-1">
+                          {Array.from({length:24}).map((_,h)=>{
+                            const v=byHour[h]||{W:0,L:0};
+                            const n=v.W+v.L;
+                            const wr=n>0?(100*v.W/n):0;
+                            return(
+                              <div key={h} className={`p-1 rounded text-center border border-[#E8E9E4]/8 ${cellCls(wr,n)}`} title={n>0?`${formatHour(h)}: ${v.W}W-${v.L}L (${wr.toFixed(0)}%)`:`${formatHour(h)}: no data`}>
+                                <div className="text-[8px] opacity-70">{formatHour(h)}</div>
+                                <div className="text-[10px] font-mono font-bold">{n>0?wr.toFixed(0):'—'}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className={'text-[9px] text-[#E8E9E4]/30 mt-1 italic'}>Cells with &lt; 2 trades shown as dashes. Hover for detail.</div>
+                      </div>
+
+                      {/* Color legend */}
+                      <div className="flex items-center gap-3 text-[9px] text-[#E8E9E4]/40 pt-1 border-t border-[#E8E9E4]/8">
+                        <span className="font-bold uppercase">Legend</span>
+                        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-emerald-500/15"></div><span>≥65% WR</span></div>
+                        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-amber-500/10"></div><span>55-64%</span></div>
+                        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-[#111312] border border-[#E8E9E4]/15"></div><span>45-54%</span></div>
+                        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-rose-500/10"></div><span>&lt; 45%</span></div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </section>
+
               {/* ── TRADE LOG — Day by Day ── */}
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-indigo-400 mb-3">Trade Log — by Day</h3>
@@ -6016,14 +6181,31 @@ function TaraApp(){
                           {trades.map((t,i)=>{
                             const d=new Date(t.id/1);
                             const timeStr=isNaN(d.getTime())?'—':d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+                            // V145: if expanded telemetry present, show entry → close and Kalshi edge
+                            const hasV145=t.entryPrice!=null&&t.entryPrice>0&&t.closingPrice!=null;
+                            const moveBps=hasV145&&t.entryPrice>0?Math.round(((t.closingPrice-t.entryPrice)/t.entryPrice)*10000):null;
+                            const kalshiEdge=t.kalshiAtLock!=null&&t.posterior!=null?(t.dir==='UP'?(t.posterior-t.kalshiAtLock):((100-t.posterior)-(100-t.kalshiAtLock))):null;
                             return(
-                              <div key={i} className={`flex items-center gap-2 text-[10px] px-2 py-1 rounded border ${t.result==='WIN'?'bg-emerald-500/5 border-emerald-500/15':'bg-rose-500/5 border-rose-500/15'}`}>
-                                <span className={'font-mono text-[#E8E9E4]/30 shrink-0 w-14'}>{timeStr}</span>
-                                <span className={`font-bold w-8 shrink-0 ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
-                                <span className={'text-[#E8E9E4]/40 shrink-0'}>{t.windowType||'15m'}</span>
-                                <span className={'text-[#E8E9E4]/30 flex-1 truncate'}>{t.regime||'—'}</span>
-                                <span className={'text-[#E8E9E4]/25 shrink-0'}>{t.session||'—'}</span>
-                                <span className={`font-bold shrink-0 ${t.result==='WIN'?'text-emerald-400':'text-rose-400'}`}>{t.result}</span>
+                              <div key={i} className={`px-2 py-1 rounded border ${t.result==='WIN'?'bg-emerald-500/5 border-emerald-500/15':'bg-rose-500/5 border-rose-500/15'}`}>
+                                <div className="flex items-center gap-2 text-[10px]">
+                                  <span className={'font-mono text-[#E8E9E4]/30 shrink-0 w-14'}>{timeStr}</span>
+                                  <span className={`font-bold w-8 shrink-0 ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
+                                  <span className={'text-[#E8E9E4]/40 shrink-0'}>{t.windowType||'15m'}</span>
+                                  <span className={'text-[#E8E9E4]/30 flex-1 truncate'}>{t.regime||'—'}</span>
+                                  <span className={'text-[#E8E9E4]/25 shrink-0'}>{t.session||'—'}</span>
+                                  <span className={`font-bold shrink-0 ${t.result==='WIN'?'text-emerald-400':'text-rose-400'}`}>{t.result}</span>
+                                </div>
+                                {hasV145&&(
+                                  <div className="flex items-center gap-2 text-[9px] mt-1 pt-1 border-t border-[#E8E9E4]/6 text-[#E8E9E4]/40">
+                                    <span className="font-mono">@${Math.round(t.entryPrice).toLocaleString()}</span>
+                                    <span>→</span>
+                                    <span className="font-mono">${Math.round(t.closingPrice).toLocaleString()}</span>
+                                    {moveBps!=null&&<span className={`font-mono ${moveBps>=0?'text-emerald-400/60':'text-rose-400/60'}`}>{moveBps>=0?'+':''}{moveBps}bps</span>}
+                                    {t.posterior!=null&&<span className="ml-auto">Tara {t.posterior.toFixed(0)}%</span>}
+                                    {kalshiEdge!=null&&<span className={`${kalshiEdge>=15?'text-emerald-400':kalshiEdge>=0?'text-[#E8E9E4]/40':'text-amber-400'}`}>edge {kalshiEdge>=0?'+':''}{kalshiEdge.toFixed(0)}</span>}
+                                    {t.fgtAlignment!=null&&Math.abs(t.fgtAlignment)>=2&&<span className="text-purple-400/60">FGT {Math.abs(t.fgtAlignment)}/4 {t.fgtAlignment>0?'↑':'↓'}</span>}
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
@@ -6057,7 +6239,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V144 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V145 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -6213,10 +6395,20 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V144 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V145 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">📦 V145 — telemetry, version flow, performance patterns</h3>
+              <ul className="list-disc pl-4 space-y-1 mt-2">
+                <li><strong>Updated baseline scorecard:</strong> 431W-268L on 15m and 33W-25L on 5m. Older baseline numbers were carryovers; this is the current truth.</li>
+                <li><strong>Expanded trade telemetry.</strong> Each trade now logs: entry price, strike at lock, BTC price at window open, gap at entry, Kalshi YES price at lock and at close, FGT alignment at lock, raw vs calibrated posterior, quality gate score, and ISO timestamp. Closing telemetry adds closing gap and Kalshi at close. After a session you can audit exactly what Tara saw, what the market saw, and where the price ended up.</li>
+                <li><strong>Trade log rows now show the V145 telemetry inline</strong> — entry → close prices, bps move, Tara confidence, Kalshi edge, and FGT alignment for each row when data is present.</li>
+                <li><strong>Version-update flow in Session Start Check.</strong> When you load a new version, the modal shows two prominent options: "Sync to Baseline" (use the latest baked training data) or "Fresh Start" (wipe everything and retrain from your own trades with the V144 calibration prior). The reset bias option still exists below.</li>
+                <li><strong>Fresh Start button</strong> is also accessible from the version-bump banner. It clears trade log, scorecard, weights, calibration, regime memory, and per-regime weights — full clean slate.</li>
+                <li><strong>Performance Patterns section</strong> in the Training panel: heatmaps for performance by session (EU/ASIA/US/OFF-HOURS), by day of week (Sun-Sat), and by hour of day (24-hour grid). Color-coded so you can spot your strongest windows at a glance. Cells with fewer than 2 trades show as dashes to avoid noise.</li>
+              </ul>
+              </section>
               <section><h3 className="text-rose-400 font-bold uppercase tracking-wide mb-2 text-xs">🎯 ROOT CAUSE FIX — calibration as truth (V144)</h3><p className="leading-relaxed">Deep analysis of the seed log revealed Tara's posteriors were systematically over-confident, especially after the V141 root-fix exposed how broken the gating layer had been.</p>
               <p className="leading-relaxed mt-2"><strong>What was wrong:</strong> Only 7-11% of seed trades had real signal data captured (older versions had a logging bug). Calibration was being used for cosmetic display only — actual lock decisions used uncorrected raw posteriors. So Tara would say "92% UP" but real WR was 65% (27-pt drift). Worse, the gradient descent was training on incomplete data, slowly miscalibrating the model in unpredictable directions.</p>
               <ul className="list-disc pl-4 space-y-1 mt-2"><li><strong>Default UP-side calibration baked from seed.</strong> Pre-computed prior table corrects UP over-confidence from day 1: raw 95% UP → ~88% calibrated, raw 85% UP → ~70% calibrated.</li><li><strong>DOWN side intentionally NOT pre-calibrated.</strong> Critical correction caught during simulation: the seed's DOWN trades suffered survivorship bias from the broken gates that V141 fixed. Using their WR to calibrate would over-correct and prevent any DOWN locks. Live post-V141 data will populate DOWN calibration organically.</li><li><strong>Locks now use CALIBRATED posterior, not raw.</strong> The biggest functional change. Calibration was previously "honest display, biased decision." Now it's both. What you see is what Tara does.</li><li><strong>UP lock thresholds rebuilt for calibrated space.</strong> Old thresholds assumed raw values. New thresholds (UP≥65 default) account for compressed UP posteriors. DOWN thresholds unchanged from V141 (≤28 default) since DOWN side stays raw.</li><li><strong>Adaptive calibration weighting.</strong> High-confidence UP buckets (raw 80+) trust calibration 85/15. Mid-range UP (raw 60-79) stays at 70/30.</li><li><strong>Data quality gate on gradient descent.</strong> Trades with fewer than 3 non-zero signals no longer update weights. Stops the model from learning from incomplete data going forward.</li><li><strong>Live calibration smoothly blends with seed prior.</strong> 10+ live trades for a bucket overrides prior. 3-9 live trades blend with prior weighted by sample size. Less than 3 uses prior as-is.</li></ul>
