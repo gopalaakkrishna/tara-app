@@ -97,7 +97,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.04.30-v150-448W278L-29seed';
+const BASELINE_VERSION='2026.04.30-v151-severe-collapse-release';
 const BASELINE_RECORD={'15m':{wins:448,losses:278},'5m':{wins:33,losses:25}};
 
 const SEED_TRADES=[
@@ -3327,7 +3327,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                   the user is on a stale version (drift) or already current. */}
         <div className="mb-3 p-3 rounded-lg bg-indigo-500/10 border-2 border-indigo-500/40">
           <div className="text-[10px] uppercase text-indigo-300 font-bold mb-1">
-            {baselineDrift?(<>📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V150'}</>):(<>📦 Training Baseline</>)}
+            {baselineDrift?(<>📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V151'}</>):(<>📦 Training Baseline</>)}
           </div>
           <div className="text-xs text-[#E8E9E4]/80 mb-3">
             {baselineDrift?'A new engine version has shipped. Choose how to start your trading session:':'Manage Tara\'s training data. Sync brings in the baseline trades + scorecard. Fresh start wipes everything for clean self-training.'}
@@ -3555,7 +3555,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V150 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V151 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -3653,7 +3653,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V150'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V151'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -3750,7 +3750,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara V150  |  signal'},
+        footer:{text:'Tara V151  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3764,7 +3764,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V150  |  stand-down'},
+        footer:{text:'Tara V151  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3778,7 +3778,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V150  |  search'},
+        footer:{text:'Tara V151  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3795,7 +3795,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara V150  |  lock'},
+        footer:{text:'Tara V151  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3812,7 +3812,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V150  |  close'},
+          footer:{text:'Tara V151  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -3833,7 +3833,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V150  |  exit'},
+        footer:{text:'Tara V151  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3862,12 +3862,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V150  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara V151  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V150',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V151',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -3886,7 +3886,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V150 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V151 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -4518,13 +4518,20 @@ function TaraApp(){
         // V134: Posterior decay tracking
         const lockedPost=lock.lockedPosterior||50;
         const postDelta=lock.dir==='UP'?(lockedPost-posterior):(posterior-lockedPost);
-        // V135: Time gate inversion — was `clockSeconds > X` (more than X remaining = release allowed),
-        //       which DISABLED soft releases in the last 3 min and held broken locks through expiry.
-        //       New gate: 30s post-lock stability window; after that, releases stay enabled
-        //       all the way to endgame. Late-window broken locks need MORE sensitivity, not less.
+        // V151: Posterior decay release with severity-tiered post-lock-stability handling.
+        //
+        //   Two thresholds:
+        //     - SEVERE (postDelta >= 25): bypasses the 30s post-lock-stability window entirely.
+        //       A 25+ pt collapse in <30s isn't noise — it's the underlying score moving against
+        //       the lock fast. Holding through this is how Tara stayed in the V150 bad-lock case
+        //       (locked at 87%, dropped to 57% within seconds, was stuck waiting for the 30s
+        //       stability window to expire while gap turned adverse).
+        //     - SOFT (postDelta >= 15): still requires 30s stability — small drops near lock time
+        //       can be momentum-tick noise that recovers. Keeps prior V134/V135 behavior here.
         const _sinceLockMs=Date.now()-(lock.lockedAt||Date.now());
         const _postLockStable=_sinceLockMs>30000;
-        const decayCollapse=postDelta>=15&&_postLockStable; // 20→15 pts; engaged earlier too
+        const _severeCollapse=postDelta>=25;
+        const decayCollapse=_severeCollapse||(postDelta>=15&&_postLockStable);
         // V135: Deep-adverse threshold lowered 55 → 30 bps. 55 bps on $75K BTC is a $400 move —
         //       by the time you're that far wrong, the round is already lost. 30 bps is enough
         //       adverse to recognize a broken call while still being above tick noise.
@@ -4587,7 +4594,7 @@ function TaraApp(){
           if(catastrophicRugpull)reasoning.push(`[LOCK] Released — catastrophic rug pull (UP lock)`);
           else if(catastrophicSpike)reasoning.push(`[LOCK] Released — catastrophic upward spike (DOWN lock)`);
           else if(signalRegimeChange)reasoning.push(`[LOCK] Released — signal regime flipped (${flippedSignals.join(',')} now against ${lock.dir})`);
-          else if(decayCollapse)reasoning.push(`[LOCK] Released — posterior decayed ${postDelta.toFixed(0)} pts since lock`);
+          else if(decayCollapse)reasoning.push(`[LOCK] Released — posterior decayed ${postDelta.toFixed(0)} pts since lock${_severeCollapse&&!_postLockStable?' (severe — bypassed stability window)':''}`);
           else if(trajFlipAgainst)reasoning.push(`[LOCK] Released — trajectory flipped against ${lock.dir} (${eng.trajectoryAdj.toFixed(0)})`);
           else if(fgtFlipAgainst)reasoning.push(`[LOCK] Released — FGT now ${eng.mtfAlignment>0?'UP':'DOWN'} ${Math.abs(eng.mtfAlignment)}/4 against ${lock.dir}`);
           else if(regimeRevalidation)reasoning.push(`[LOCK] Released — ${lock.lockedRegime} regime gone, trajectory ${(eng.trajectoryAdj||0).toFixed(0)} now leans ${lock.dir==='UP'?'DOWN':'UP'}`);
@@ -5157,7 +5164,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V150...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V151...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -5248,7 +5255,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V150
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V151
             </span>
           </div>
 
@@ -5637,7 +5644,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V150</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V151</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -6233,7 +6240,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V150 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V151 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -6389,7 +6396,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V150 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V151 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
