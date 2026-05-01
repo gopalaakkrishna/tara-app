@@ -97,17 +97,39 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.04.30-v145-431W268L-telemetry-and-version-flow';
-const BASELINE_RECORD={'15m':{wins:431,losses:268},'5m':{wins:33,losses:25}};
+const BASELINE_VERSION='2026.04.30-v146-443W277L-23seed';
+const BASELINE_RECORD={'15m':{wins:443,losses:277},'5m':{wins:33,losses:25}};
 
 const SEED_TRADES=[
-// V145: BAKED TRAINING — replaced with 2-trade seed exported from user's V144 fresh-start session.
-// The previous 379-trade seed (V138) had 89-93% empty signal data and post-V141-broken-gate
-// survivorship bias on DOWN side. Replaced with clean 2-trade post-V144 export.
-// BASELINE_RECORD scorecard (431W-268L on 15m, 33W-25L on 5m) is preserved as the historical
-// reference number — not derived from this seed array. Live trades will populate from here.
-  {id:1777566934909,dir:'UP',posterior:87.0,regime:'SHORT SQUEEZE',clockAtLock:565,hour:12,session:'US',windowType:'15m',signals:{gap:0,momentum:0,structure:0,flow:0,technical:0,regime:0},result:'WIN'},
-  {id:1777567542886,dir:'DOWN',posterior:14.4,regime:'RANGE-CHOP',clockAtLock:857,hour:12,session:'US',windowType:'15m',signals:{gap:0,momentum:0,structure:0,flow:0,technical:0,regime:0},result:'WIN'},
+// V145.3: BAKED TRAINING — 23-trade seed exported from user's V144/V145 fresh-start session.
+// All signal columns are zero in this export (V145 telemetry capture didn't propagate to CSV
+// export path yet). The BASELINE_RECORD scorecard (443W-277L on 15m) is the historical
+// reference number — not derived from this seed array. Live trades populate the trade log
+// from here; gradient descent's V144 data quality gate will skip these for weight updates
+// since signal scores are zero.
+  {id:1777566934909,dir:'UP',posterior:87.0,regime:'SHORT SQUEEZE',clockAtLock:565,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777567542886,dir:'DOWN',posterior:14.4,regime:'RANGE-CHOP',clockAtLock:857,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777569944988,dir:'DOWN',posterior:9.6,regime:'RANGE-CHOP',clockAtLock:255,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777570318588,dir:'UP',posterior:84.2,regime:'RANGE-CHOP',clockAtLock:781,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777571191480,dir:'UP',posterior:81.2,regime:'RANGE-CHOP',clockAtLock:808,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777572566911,dir:'DOWN',posterior:11.0,regime:'RANGE-CHOP',clockAtLock:333,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777572972041,dir:'UP',posterior:81.0,regime:'RANGE-CHOP',clockAtLock:828,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777574092633,dir:'DOWN',posterior:13.8,regime:'RANGE-CHOP',clockAtLock:607,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777574821473,dir:'DOWN',posterior:22.9,regime:'TRENDING DOWN',clockAtLock:779,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777575640872,dir:'DOWN',posterior:14.3,regime:'TRENDING DOWN',clockAtLock:859,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777578796759,dir:'UP',posterior:33.2,regime:'RANGE-CHOP',clockAtLock:403,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777579501244,dir:'UP',posterior:7.3,regime:'TRENDING DOWN',clockAtLock:598,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777580143193,dir:'DOWN',posterior:14.5,regime:'TRENDING DOWN',clockAtLock:856,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777581244750,dir:'UP',posterior:80.2,regime:'SHORT SQUEEZE',clockAtLock:655,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777581993531,dir:'DOWN',posterior:36.4,regime:'RANGE-CHOP',clockAtLock:806,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777582954313,dir:'UP',posterior:80.2,regime:'RANGE-CHOP',clockAtLock:745,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777583827457,dir:'DOWN',posterior:10.5,regime:'RANGE-CHOP',clockAtLock:772,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777594989022,dir:'DOWN',posterior:8.8,regime:'RANGE-CHOP',clockAtLock:411,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777595464526,dir:'DOWN',posterior:26.7,regime:'TRENDING DOWN',clockAtLock:836,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777596372681,dir:'UP',posterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:827,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777597526067,dir:'UP',posterior:88.3,regime:'RANGE-CHOP',clockAtLock:574,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777598143425,dir:'UP',posterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:857,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777599113469,dir:'UP',posterior:84.7,regime:'SHORT SQUEEZE',clockAtLock:787,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
@@ -2079,7 +2101,8 @@ function PredictionContent(props){
     qualityGate,userPosition,timeState,streakData,
     handleManualSync,getMarketSessions,executeAction,
     broadcastSignalManual,discordWebhook,regimeDirWR,
-    kalshiYesPrice
+    kalshiYesPrice,
+    newsSentiment // V145: dual-source news scanner output (geoRisk, geoTopic, source)
   }=props;
   // V113: Track local broadcast state (so button shows "Sent ✓" after click)
   const[broadcasted,setBroadcasted]=React.useState({key:'',sent:false});
@@ -2443,6 +2466,21 @@ function PredictionContent(props){
                   </div>
                 </>
               )}
+              {/* V145: Geopolitics / macro risk pill — surfaces when news scanner detects elevated risk */}
+              {newsSentiment&&newsSentiment.geoRisk>=0.3&&(
+                (()=>{
+                  const r=newsSentiment.geoRisk;
+                  const cls=r>=0.7?'border-rose-500/40 bg-rose-500/10 text-rose-300':r>=0.5?'border-amber-500/40 bg-amber-500/10 text-amber-300':'border-amber-500/25 bg-amber-500/5 text-amber-300/80';
+                  const label=r>=0.7?'HIGH':r>=0.5?'ELEVATED':'WATCH';
+                  const tooltip=`Macro/geo news risk: ${(r*100).toFixed(0)}%${newsSentiment.geoTopic?'\n\nTop story: '+newsSentiment.geoTopic:''}${newsSentiment.geoSource?'\n\nSource: '+(newsSentiment.geoSource==='gdelt'?'GDELT global news':'Crypto news feed'):''}\n\nQuality gate haircut: ${r>=0.5?'-'+Math.round(8*r)+'pts':'monitoring only, no penalty yet'}`;
+                  return(
+                    <div className={'flex items-center gap-1 px-1.5 py-0.5 rounded border '+cls} title={tooltip}>
+                      <span className="text-[9px] uppercase tracking-wider opacity-70">GEO</span>
+                      <span className="font-bold">{label}</span>
+                    </div>
+                  );
+                })()
+              )}
               {analysis.kellyPct>0&&(
                 <span className={'text-amber-400/80'} title="Kelly Criterion: theoretical optimal bet size">Kelly: {analysis.kellyPct.toFixed(1)}%</span>
               )}
@@ -2582,6 +2620,8 @@ function ProjectionsCard({analysis,mobileTab}){
           {/* Header showing window context */}
           <div className={'text-[10px] uppercase tracking-widest text-[#E8E9E4]/40 font-bold text-center pb-1 border-b border-[#E8E9E4]/10'}>
             {tabs.find(t=>t.id===activeTimeframe)?.label} forecast · From ${currentPrice.toLocaleString(undefined,{maximumFractionDigits:0})}
+            {/* V145.2: show which model is producing the projection */}
+            {proj.fgtSrc&&<span className={'ml-2 text-[9px] '+(proj.fgtSrc.includes('HPotter')?'text-indigo-400/70':'text-[#E8E9E4]/30')}>· {proj.fgtSrc}</span>}
           </div>
           {/* Timeline list - all future timestamps */}
           <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1">
@@ -2918,47 +2958,153 @@ function MobileTabBar({mobileTab,setMobileTab}){
 
 
 
-// ── V114: useNewsSentiment - detects directional keywords in recent news headlines
+// ── V145: useNewsSentiment — dual-source scanner with geopolitics + macro coverage
+//
+// Sources:
+//   1. CryptoCompare (BTC/Trading/Regulation feed)   — same as V114, with expanded keyword sets
+//   2. GDELT 2.0 DOC API                             — global news, geopolitics, macro events
+//
+// Why both? CryptoCompare indexes crypto-focused stories well but misses non-crypto events that
+// move BTC indirectly (war, sanctions, banking crises, central bank surprises). GDELT covers
+// 30,000+ outlets in 65 languages with built-in tone scoring — perfect for catching the
+// "Iran strikes" or "FOMC surprise" headline 60-90s earlier than crypto-specific feeds do.
+//
+// Mode: LIGHT (per user choice).
+//   - Sentiment score still influences quality gate by ±5 to ±8 points (existing V114 logic).
+//   - When a geopolitical/macro shock is detected (extreme keywords + recency < 30 min),
+//     a small confidence haircut is applied via the `geoRisk` flag — but no full lockout.
+//     Trader can still take the lock; Tara just expresses lower confidence.
 const useNewsSentiment=()=>{
-  const[sentiment,setSentiment]=React.useState({score:0,bullish:0,bearish:0,extreme:0,topHeadline:null,hasBreaking:false});
+  const[sentiment,setSentiment]=React.useState({
+    score:0,bullish:0,bearish:0,extreme:0,
+    topHeadline:null,hasBreaking:false,
+    geoRisk:0,             // V145: 0-1 scale of geopolitical/macro risk (last 30 min)
+    geoTopic:null,         // V145: headline of the highest-risk story
+    geoSource:null,        // V145: 'crypto' or 'gdelt'
+  });
   React.useEffect(()=>{
-    const fetchNews=async()=>{
+    // ── KEYWORD BANKS ───────────────────────────────────────────────────
+    // Directional (BTC-specific) keywords — affect sentiment.score
+    const bullishKW=['surge','rally','approve','approval','etf approve','breakout','soar','spike up','all-time high','ath','adoption','inflows','accumulate','buy pressure','squeeze short','liquidat short','halving','institutional','spot etf'];
+    const bearishKW=['crash','dump','sell-off','plunge','reject','denied','hack','exploit','liquidat long','outflow','sec sue','sec charge','ban','fud','correction','contagion','insolvent','bankruptcy','rug pull'];
+    // Macro/policy keywords — these lift "extreme" but rarely directional on their own
+    const macroKW=['fomc','cpi','fed rate','powell','rate hike','rate cut','jobs report','nonfarm payroll','treasury','yield','inflation','recession','jpow','jerome powell','ecb','bank of japan','boj'];
+    // V145: Geopolitical keywords — events that historically move risk-on/risk-off including BTC
+    const geoKW=['iran','israel','russia','ukraine','china','taiwan','war','strike','missile','attack','invade','sanction','ceasefire','escalat','tariff','trade war','north korea','venezuela','opec','oil shock'];
+    // V145: Banking/financial-system shock keywords — these especially move BTC (often inverse first, then bid)
+    const bankingKW=['bank run','bank fail','svb','signature bank','first republic','credit suisse','contagion','liquidity crisis','margin call','flash crash'];
+    // V145: Trump/political action — frequent BTC mover, recency-sensitive
+    const politicalKW=['trump','biden','executive order','impeach','indictment','election','sec chair','gensler','atkins'];
+    // Time-sensitive markers
+    const breakingKW=['breaking','flash','urgent','just in','alert','live update'];
+
+    let cancelled=false;
+
+    // ── SOURCE 1: CryptoCompare (BTC-focused) ──────────────────────────
+    const fetchCryptoCompare=async()=>{
       try{
         const r=await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=BTC,Trading,Regulation');
         const d=await r.json();
-        if(!d?.Data)return;
-        const items=d.Data.slice(0,20);
-        // Keyword scoring
-        const bullishKW=['surge','rally','approve','approval','etf approve','breakout','soar','spike up','all-time high','ath','adoption','inflows','accumulate','buy pressure','squeeze short','liquidat short'];
-        const bearishKW=['crash','dump','sell-off','plunge','reject','denied','hack','exploit','liquidat long','outflow','sec sue','sec charge','ban','fud','correction'];
-        const extremeKW=['trump','biden','sec','fomc','cpi','fed rate','powell','breaking','urgent','massive','just in','flash','alert'];
-        // V134: Check for "breaking" or "flash" tags — these are time-sensitive
-        const hasBreaking=items.slice(0,5).some(n=>{
-          const t=(n.title||'').toLowerCase();
-          const ageMin=(Date.now()-(n.published_on*1000))/60000;
-          return ageMin<=10&&(t.includes('breaking')||t.includes('flash')||t.includes('just in')||t.includes('urgent'));
-        });
-        let bull=0,bear=0,extreme=0,topHeadline=null;
-        let topScore=0;
-        items.forEach(n=>{
-          const t=(n.title||'').toLowerCase();
-          const ageMin=(Date.now()-(n.published_on*1000))/60000;
-          if(ageMin>360)return; // ignore >6h old news
-          const decay=Math.max(0.3,1-(ageMin/360));
-          let itemScore=0;
-          bullishKW.forEach(kw=>{if(t.includes(kw)){bull+=decay;itemScore+=decay;}});
-          bearishKW.forEach(kw=>{if(t.includes(kw)){bear+=decay;itemScore-=decay;}});
-          extremeKW.forEach(kw=>{if(t.includes(kw))extreme+=decay*0.5;});
-          if(Math.abs(itemScore)>topScore){topScore=Math.abs(itemScore);topHeadline=n.title;}
-        });
-        setSentiment({score:bull-bear,bullish:bull,bearish:bear,extreme,topHeadline,hasBreaking}); // V134
-      }catch(e){/* silent */}
+        if(!d?.Data)return [];
+        return d.Data.slice(0,20).map(n=>({
+          title:n.title||'',
+          time:(n.published_on||0)*1000,
+          source:'crypto',
+        }));
+      }catch(e){return [];}
     };
-    fetchNews();
-    // V134: Faster poll (30s vs 90s) — catch breaking news 60s sooner
-    // Original 90s was too slow for events that move BTC in seconds
-    const iv=setInterval(fetchNews,30000);
-    return()=>clearInterval(iv);
+
+    // ── SOURCE 2: GDELT 2.0 (global news, geopolitics) ─────────────────
+    // Query: BTC OR (geopolitics + macro topics that move risk-on/risk-off)
+    // Last 60 minutes, max 25 records, ArtList mode, JSON output
+    const fetchGDELT=async()=>{
+      try{
+        const q=encodeURIComponent('(bitcoin OR btc OR crypto OR (federal reserve) OR (rate cut) OR (rate hike) OR cpi OR fomc OR sanctions OR (war risk) OR iran OR israel OR taiwan OR (banking crisis) OR (oil shock) OR (executive order)) sourcelang:eng');
+        const url=`https://api.gdeltproject.org/api/v2/doc/doc?query=${q}&mode=artlist&maxrecords=25&format=json&timespan=60min&sort=datedesc`;
+        const r=await fetch(url,{cache:'no-store'});
+        if(!r.ok)return [];
+        const d=await r.json();
+        if(!d?.articles)return [];
+        return d.articles.map(a=>({
+          title:a.title||'',
+          // GDELT seendate: YYYYMMDDHHMMSS
+          time:(()=>{
+            const sd=a.seendate||'';
+            if(sd.length<14)return Date.now()-3600000;
+            const yr=parseInt(sd.slice(0,4),10);
+            const mo=parseInt(sd.slice(4,6),10)-1;
+            const dy=parseInt(sd.slice(6,8),10);
+            const hr=parseInt(sd.slice(8,10),10);
+            const mn=parseInt(sd.slice(10,12),10);
+            const sc=parseInt(sd.slice(12,14),10);
+            return Date.UTC(yr,mo,dy,hr,mn,sc);
+          })(),
+          source:'gdelt',
+          tone:typeof a.tone==='number'?a.tone:null, // GDELT tone is -10..+10 typically
+        }));
+      }catch(e){return [];}
+    };
+
+    // ── COMBINE + SCORE ─────────────────────────────────────────────────
+    const fetchAll=async()=>{
+      const[cc,gd]=await Promise.all([fetchCryptoCompare(),fetchGDELT()]);
+      if(cancelled)return;
+      const items=[...cc,...gd];
+      if(items.length===0)return;
+
+      // Recency-decayed keyword scoring across all sources
+      let bull=0,bear=0,extreme=0,topHeadline=null,topScore=0;
+      let geoRisk=0,geoTopic=null,geoSource=null,geoTopScore=0;
+      let hasBreaking=false;
+
+      items.forEach(n=>{
+        const t=(n.title||'').toLowerCase();
+        if(!t)return;
+        const ageMin=(Date.now()-n.time)/60000;
+        if(ageMin>360||ageMin<0)return; // ignore >6h or future-dated
+
+        // Directional decay: 6h half-life-ish
+        const decay=Math.max(0.3,1-(ageMin/360));
+        // Geo/macro decay: tighter, last 30 min counts most
+        const geoDecay=ageMin<=30?Math.max(0.5,1-(ageMin/60)):Math.max(0.1,0.5-(ageMin-30)/300);
+
+        let itemScore=0;
+        bullishKW.forEach(kw=>{if(t.includes(kw)){bull+=decay;itemScore+=decay;}});
+        bearishKW.forEach(kw=>{if(t.includes(kw)){bear+=decay;itemScore-=decay;}});
+        macroKW.forEach(kw=>{if(t.includes(kw))extreme+=decay*0.5;});
+        // Track top directional headline for display
+        if(Math.abs(itemScore)>topScore){topScore=Math.abs(itemScore);topHeadline=n.title;}
+
+        // V145: Geo/macro/banking/political — accumulate into geoRisk score
+        let geoItemScore=0;
+        geoKW.forEach(kw=>{if(t.includes(kw))geoItemScore+=geoDecay;});
+        bankingKW.forEach(kw=>{if(t.includes(kw))geoItemScore+=geoDecay*1.5;});
+        politicalKW.forEach(kw=>{if(t.includes(kw))geoItemScore+=geoDecay*0.7;});
+        // Breaking-tag multiplier
+        const isBreaking=breakingKW.some(kw=>t.includes(kw))||ageMin<=10;
+        if(isBreaking&&geoItemScore>0)geoItemScore*=1.5;
+        if(isBreaking&&ageMin<=10)hasBreaking=true;
+
+        if(geoItemScore>geoTopScore){
+          geoTopScore=geoItemScore;
+          geoTopic=n.title;
+          geoSource=n.source;
+          geoRisk=Math.min(1,geoItemScore/3); // clamp 0-1
+        }
+      });
+
+      setSentiment({
+        score:bull-bear,bullish:bull,bearish:bear,extreme,
+        topHeadline,hasBreaking,
+        geoRisk,geoTopic,geoSource,
+      });
+    };
+
+    fetchAll();
+    // V145: Slightly slower than V134's 30s — GDELT can be sluggish, 45s is safer.
+    //       CryptoCompare side still updates frequently enough for breaking news.
+    const iv=setInterval(fetchAll,45000);
+    return()=>{cancelled=true;clearInterval(iv);};
   },[]);
   return sentiment;
 };
@@ -3111,7 +3257,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                   the user is on a stale version (drift) or already current. */}
         <div className="mb-3 p-3 rounded-lg bg-indigo-500/10 border-2 border-indigo-500/40">
           <div className="text-[10px] uppercase text-indigo-300 font-bold mb-1">
-            {baselineDrift?(<>📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V145'}</>):(<>📦 Training Baseline</>)}
+            {baselineDrift?(<>📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V146'}</>):(<>📦 Training Baseline</>)}
           </div>
           <div className="text-xs text-[#E8E9E4]/80 mb-3">
             {baselineDrift?'A new engine version has shipped. Choose how to start your trading session:':'Manage Tara\'s training data. Sync brings in the baseline trades + scorecard. Fresh start wipes everything for clean self-training.'}
@@ -3269,7 +3415,7 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:431,losses:268},'5m':{wins:33,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:443,losses:277},'5m':{wins:33,losses:25}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -3339,7 +3485,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V145 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V146 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -3437,7 +3583,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V145'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V146'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -3534,7 +3680,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara V145  |  signal'},
+        footer:{text:'Tara V146  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3548,7 +3694,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V145  |  stand-down'},
+        footer:{text:'Tara V146  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3562,7 +3708,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V145  |  search'},
+        footer:{text:'Tara V146  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3579,7 +3725,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara V145  |  lock'},
+        footer:{text:'Tara V146  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3596,7 +3742,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V145  |  close'},
+          footer:{text:'Tara V146  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -3617,7 +3763,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V145  |  exit'},
+        footer:{text:'Tara V146  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3646,12 +3792,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V145  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara V146  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V145',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V146',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -3670,7 +3816,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V145 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V146 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -4038,7 +4184,7 @@ function TaraApp(){
           const _veryLateFomoUp=isVeryLateLock&&_isChoppyRegime&&posterior>=78&&(!_signalsUnanimous||_trajContradicts);
           const _lateFomoPenalty=_veryLateFomoUp?-25:_lateFomoUp?-15:0;
           if(_lateFomoPenalty<0)reasoning.push(`[LATE-FOMO] Late UP in ${regime}, ${_upSignalsAgreeing}/6 signals agreeing — penalty ${_lateFomoPenalty}`);
-          const _qScore=Math.min(40,Math.max(0,(Math.abs(posterior-50)-10)*1.6))+Math.min(30,(_rWR-50)*0.6)+Math.min(15,(_sessQ-50)*0.6)+_dsAdj+_streakAdj+_lateFomoPenalty+_dirBiasUp+(eng.windowDriftBps>25?-Math.min(12,eng.windowExhaustionPenalty||0):0)+(eng.realGapBps<-25?-Math.min(20,Math.abs(eng.realGapBps)*0.4):0)+(newsSentiment?(newsSentiment.score>2?+5:newsSentiment.score<-2?(-8):0):0)+(()=>{
+          const _qScore=Math.min(40,Math.max(0,(Math.abs(posterior-50)-10)*1.6))+Math.min(30,(_rWR-50)*0.6)+Math.min(15,(_sessQ-50)*0.6)+_dsAdj+_streakAdj+_lateFomoPenalty+_dirBiasUp+(eng.windowDriftBps>25?-Math.min(12,eng.windowExhaustionPenalty||0):0)+(eng.realGapBps<-25?-Math.min(20,Math.abs(eng.realGapBps)*0.4):0)+(newsSentiment?(newsSentiment.score>2?+5:newsSentiment.score<-2?(-8):0):0)+(newsSentiment?.geoRisk>=0.5?-Math.round(8*newsSentiment.geoRisk):0)+(()=>{
             // V134: Sentiment-Trajectory interaction
             const tAdj=eng.trajectoryAdj||0;
             const sScore=newsSentiment?.score||0;
@@ -4059,6 +4205,14 @@ function TaraApp(){
           //       same trade clears the choppy-regime quality≥62 gate.
           const _fgtUpQuality=(eng.mtfAlignment||0)>=4?18:(eng.mtfAlignment||0)>=3?10:(eng.mtfAlignment||0)>=2?4:0;
           if(_fgtUpQuality>0)reasoning.push(`[FGT-Q] FGT ${eng.mtfAlignment}/4 UP — quality boost +${_fgtUpQuality}`);
+          // V145: Geopolitical / macro risk haircut. When dual-source news scanner picks up
+          //       elevated geo/macro keywords with breaking-news recency, apply small quality penalty.
+          //       Light mode — no full lockout.
+          if(newsSentiment?.geoRisk>=0.5){
+            const _geoCut=Math.round(8*newsSentiment.geoRisk);
+            const _topic=(newsSentiment.geoTopic||'').slice(0,80);
+            reasoning.push(`[GEO-RISK] News scanner flagged ${(newsSentiment.geoRisk*100).toFixed(0)}% risk — quality −${_geoCut}${_topic?' · '+_topic:''}`);
+          }
           const _quality=Math.max(0,Math.min(100,_qScore+5+_consensusBoost+_fgtUpQuality));
           // V114: Macro event check — BLACKOUT and OBSERVE = no new locks
           const _macroUP=getMacroEventState();
@@ -4133,7 +4287,7 @@ function TaraApp(){
           const _veryLateFomoDn=isVeryLateLock&&_isChoppyRegime2&&posterior<=22&&(!_signalsUnanimous2||_trajContradicts2);
           const _lateFomoPenalty2=_veryLateFomoDn?-25:_lateFomoDn?-15:0;
           if(_lateFomoPenalty2<0)reasoning.push(`[LATE-FOMO] Late DOWN in ${regime}, ${_dnSignalsAgreeing}/6 signals agreeing — penalty ${_lateFomoPenalty2}`);
-          const _qScore2=Math.min(40,Math.max(0,(Math.abs(posterior-50)-10)*1.6))+Math.min(30,(_rWR2-50)*0.6)+Math.min(15,(_sessQ2-50)*0.6)+_dsAdj2+_streakAdj2+_lateFomoPenalty2+_dirBiasDn+(eng.windowDriftBps<-25?-Math.min(12,eng.windowExhaustionPenalty||0):0)+(eng.realGapBps>25?-Math.min(20,Math.abs(eng.realGapBps)*0.4):0)+(newsSentiment?(newsSentiment.score<-2?+5:newsSentiment.score>2?(-8):0):0)+(()=>{
+          const _qScore2=Math.min(40,Math.max(0,(Math.abs(posterior-50)-10)*1.6))+Math.min(30,(_rWR2-50)*0.6)+Math.min(15,(_sessQ2-50)*0.6)+_dsAdj2+_streakAdj2+_lateFomoPenalty2+_dirBiasDn+(eng.windowDriftBps<-25?-Math.min(12,eng.windowExhaustionPenalty||0):0)+(eng.realGapBps>25?-Math.min(20,Math.abs(eng.realGapBps)*0.4):0)+(newsSentiment?(newsSentiment.score<-2?+5:newsSentiment.score>2?(-8):0):0)+(newsSentiment?.geoRisk>=0.5?-Math.round(8*newsSentiment.geoRisk):0)+(()=>{
             const tAdj=eng.trajectoryAdj||0;
             const sScore=newsSentiment?.score||0;
             // Both agree bearish: bonus
@@ -4148,6 +4302,12 @@ function TaraApp(){
           // V136: FGT QUALITY BOOST mirroring UP side
           const _fgtDnQuality=(eng.mtfAlignment||0)<=-4?18:(eng.mtfAlignment||0)<=-3?10:(eng.mtfAlignment||0)<=-2?4:0;
           if(_fgtDnQuality>0)reasoning.push(`[FGT-Q] FGT ${eng.mtfAlignment}/4 DOWN — quality boost +${_fgtDnQuality}`);
+          // V145: Geopolitical / macro risk haircut (mirror of UP-side).
+          if(newsSentiment?.geoRisk>=0.5){
+            const _geoCut2=Math.round(8*newsSentiment.geoRisk);
+            const _topic2=(newsSentiment.geoTopic||'').slice(0,80);
+            reasoning.push(`[GEO-RISK] News scanner flagged ${(newsSentiment.geoRisk*100).toFixed(0)}% risk — quality −${_geoCut2}${_topic2?' · '+_topic2:''}`);
+          }
           const _quality2=Math.max(0,Math.min(100,_qScore2+5+_consensusBoost2+_fgtDnQuality));
           const _macroDN=getMacroEventState();
           if(_macroDN.state==='BLACKOUT'){
@@ -4394,13 +4554,89 @@ function TaraApp(){
       // V110 Smart Advisor — lock-state-aware
       const _advisorResult=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps,activePrediction,regime,lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null});
 
-      // Projections
+      // V145.2: HPotter-based projections for 5m / 15m / 1h panels
+      //
+      //   The previous projection model used a flat linear extrapolation:
+      //     price = currentPrice * (1 + drift1m_bps_per_min * minutes_ahead)
+      //   That ignores Tara's actual primary signal (FGT) and produces straight-line forecasts
+      //   that disconnect from the engine's posterior call.
+      //
+      //   New model: blend HPotter Future Grand Trend with linear drift, weighted by
+      //   FGT validity and proximity to the FGT's forecast horizon.
+      //
+      //   Mapping:
+      //     5min panel  → 1m FGT (forecast horizon ~30 min)
+      //     15min panel → 1m FGT extended (~30 min) + 3m FGT bias
+      //     1hour panel → 3m FGT (forecast horizon ~90 min)
+      //
+      //   For each timestep t minutes ahead:
+      //     - Compute FGT-implied price by linear interpolation from now → FGT horizon
+      //     - Compute linear-drift price (legacy fallback)
+      //     - Blend: weight=0.7 FGT when FGT valid + within horizon, else 0
       const getHP=(msAgo)=>{const t=Date.now()-msAgo;const m=priceMemoryRef.current;if(!m||m.length===0)return currentPrice;let c=m[0];for(let i=m.length-1;i>=0;i--){if(m[i].time<=t){c=m[i];break;}}return c.p;};
       let trendBps=isNaN(drift1m)?0:drift1m;
       if(isUP&&trendBps<=0)trendBps=2;if(isDN&&trendBps>=0)trendBps=-2;
-      const genTimeline=(min,steps)=>{const out=[],iMs=min*60*1000,now=Date.now();let nT=Math.ceil(now/iMs)*iMs;if(nT-now<iMs*0.1)nT+=iMs;const tz=useLocalTime?undefined:{timeZone:'America/New_York'};for(let i=0;i<steps;i++){const sT=nT+(i*iMs);const diff=(sT-now)/60000;const p=currentPrice*(1+(trendBps/10000)*diff);const d=new Date(sT);let ts=`${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;try{ts=d.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'numeric',minute:'2-digit'});}catch(e){}out.push({timeStr:ts,timestamp:Math.floor(sT/1000),price:p});}return out;};
-      const t5=genTimeline(5,8),t15=genTimeline(15,8),t60=genTimeline(60,8);
-      const projections=[{id:'5m',time:'5 MIN',price:t5[0]?.price||currentPrice,conf:Math.min(95,posterior+5),timeline:t5},{id:'15m',time:'15 MIN',price:t15[0]?.price||currentPrice,conf:posterior,timeline:t15},{id:'1h',time:'1 HOUR',price:t60[0]?.price||currentPrice,conf:Math.max(10,posterior-15),timeline:t60}];
+
+      // Pull HPotter forecasts for the projection horizons
+      const fgt1m=eng.fgtResults?.['1m'];   // forecast ~30 min ahead
+      const fgt3m=eng.fgtResults?.['3m'];   // forecast ~90 min ahead
+      const fgt5m=eng.fgtResults?.['5m'];   // forecast ~200 min ahead — used for 1h panel as backup
+      // FGT.forecastBps is the projected % move (in bps) at the full forecast horizon.
+      // Forecast horizons in minutes:
+      const fgt1mHorizonMin=30;   // 1m bars * forecast=30
+      const fgt3mHorizonMin=90;   // 3m bars * forecast=30
+      const fgt5mHorizonMin=200;  // 5m bars * forecast=40
+
+      // Returns a price for `minAhead` minutes from now, blending HPotter + linear drift.
+      // primaryFgt: the timeframe to use as the main HPotter source.
+      // fallbackFgt: optional secondary source (used at horizons beyond primary).
+      const projectPrice=(minAhead,primaryFgt,primaryHorizon,fallbackFgt,fallbackHorizon)=>{
+        // Linear-drift baseline
+        const linearPrice=currentPrice*(1+(trendBps/10000)*minAhead);
+        // Decide which FGT to use
+        let fgt=null,horizon=null;
+        if(primaryFgt&&primaryFgt.valid&&minAhead<=primaryHorizon*1.1){
+          fgt=primaryFgt;horizon=primaryHorizon;
+        } else if(fallbackFgt&&fallbackFgt.valid){
+          fgt=fallbackFgt;horizon=fallbackHorizon;
+        }
+        if(!fgt||!fgt.valid){
+          // No FGT data — fall back to linear
+          return linearPrice;
+        }
+        // FGT-implied price at minAhead = currentPrice + (fcast - currentPrice) * (minAhead / horizon)
+        // This assumes the price moves linearly toward the HPotter target over the horizon.
+        const t=Math.min(1,minAhead/horizon);
+        const fgtPrice=currentPrice+(fgt.fcast-currentPrice)*t;
+        // Blend: trust FGT 70% when within its horizon, less so beyond
+        const fgtWeight=minAhead<=horizon?0.7:Math.max(0.3,0.7-((minAhead-horizon)/horizon)*0.4);
+        return fgtPrice*fgtWeight+linearPrice*(1-fgtWeight);
+      };
+
+      // Per-panel FGT routing
+      // 5-MIN PANEL: 8 timesteps × 5min = 40min total. 1m FGT (30min horizon) is primary.
+      // 15-MIN PANEL: 8 timesteps × 15min = 120min total. 1m FGT primary for first ~30min, 3m FGT (90min) for rest.
+      // 1-HOUR PANEL: 8 timesteps × 60min = 480min total. 3m FGT primary, 5m FGT (200min) as fallback.
+      const genTimeline=(min,steps,primaryFgt,primaryHorizon,fallbackFgt,fallbackHorizon)=>{
+        const out=[],iMs=min*60*1000,now=Date.now();
+        let nT=Math.ceil(now/iMs)*iMs;
+        if(nT-now<iMs*0.1)nT+=iMs;
+        const tz=useLocalTime?undefined:{timeZone:'America/New_York'};
+        for(let i=0;i<steps;i++){
+          const sT=nT+(i*iMs);
+          const minAhead=(sT-now)/60000;
+          const p=projectPrice(minAhead,primaryFgt,primaryHorizon,fallbackFgt,fallbackHorizon);
+          const d=new Date(sT);
+          let ts=`${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+          try{ts=d.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'numeric',minute:'2-digit'});}catch(e){}
+          out.push({timeStr:ts,timestamp:Math.floor(sT/1000),price:p});
+        }
+        return out;
+      };
+      const t5=genTimeline(5,8,fgt1m,fgt1mHorizonMin,fgt3m,fgt3mHorizonMin);
+      const t15=genTimeline(15,8,fgt1m,fgt1mHorizonMin,fgt3m,fgt3mHorizonMin);
+      const t60=genTimeline(60,8,fgt3m,fgt3mHorizonMin,fgt5m,fgt5mHorizonMin);
+      const projections=[{id:'5m',time:'5 MIN',price:t5[0]?.price||currentPrice,conf:Math.min(95,posterior+5),timeline:t5,fgtSrc:fgt1m?.valid?'1m HPotter':'linear'},{id:'15m',time:'15 MIN',price:t15[0]?.price||currentPrice,conf:posterior,timeline:t15,fgtSrc:fgt1m?.valid?'1m HPotter→3m':'linear'},{id:'1h',time:'1 HOUR',price:t60[0]?.price||currentPrice,conf:Math.max(10,posterior-15),timeline:t60,fgtSrc:fgt3m?.valid?'3m HPotter':'linear'}];
 
       // Multi-timeframe confluence: check if the OTHER timeframe has a recent lock in same direction
       const _otherTF=windowType==='15m'?'5m':'15m';
@@ -4693,6 +4929,8 @@ function TaraApp(){
         gapAtEntry:gapBps,                                       // bps gap to strike at entry
         kalshiAtLock:kalshiYesPrice!=null?Number(kalshiYesPrice):null, // Kalshi YES price (UP %) at lock
         fgtAlignment:analysis?.mtfAlignment||0,                  // -4 to +4 multi-timeframe FGT
+        geoRisk:newsSentiment?.geoRisk||0,                       // V145: geo/macro risk at lock (0-1)
+        geoTopic:newsSentiment?.geoTopic||null,                  // V145: top headline driving the risk
         windowOpenPrice:windowOpenPriceRef.current||0,           // BTC at window start
         qualityScore:qualityGate?.score||null,                   // Tara's quality gate score
         timestampISO:new Date().toISOString(),                   // wall-clock for date analysis
@@ -4796,7 +5034,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V145...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V146...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -4887,7 +5125,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V145
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V146
             </span>
           </div>
 
@@ -5142,7 +5380,7 @@ function TaraApp(){
               </button>
             </div>
 
-            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice}/>
+            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment}/>
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
@@ -5276,7 +5514,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V145</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V146</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -5872,7 +6110,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V145 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V146 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -6028,12 +6266,14 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V145 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V146 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">📦 V145 — telemetry, version flow, performance patterns</h3>
               <ul className="list-disc pl-4 space-y-1 mt-2">
+                <li><strong>Projections panel now uses HPotter (FGT).</strong> 5min / 15min / 1hour forecasts previously used a flat linear extrapolation of the 1-minute drift — straight lines disconnected from the engine's primary signal. Now the 5min and 15min panels source from the 1m HPotter forecast (30-min horizon), and the 1hour panel sources from the 3m HPotter (90-min horizon). Each panel shows which model is producing the forecast in the subtitle (e.g., "1m HPotter" or "3m HPotter→5m"). Falls back to linear when FGT data hasn't loaded yet.</li>
+                <li><strong>Geopolitics + macro news scanner.</strong> Tara now monitors GDELT (30,000+ outlets, 65 languages, real-time) alongside CryptoCompare. Detects war, sanctions, banking shocks, central bank surprises, political actions — events that move BTC indirectly but aren't picked up by crypto-only feeds. Light penalty mode: small confidence haircut (-4 to -8 quality points) when risk is elevated, but no full lockout. A new <strong>GEO</strong> pill appears next to the EDGE display when risk is detected, with the top story in tooltip.</li>
                 <li><strong>Updated baseline scorecard:</strong> 431W-268L on 15m and 33W-25L on 5m. Older baseline numbers were carryovers; this is the current truth.</li>
                 <li><strong>Expanded trade telemetry.</strong> Each trade now logs: entry price, strike at lock, BTC price at window open, gap at entry, Kalshi YES price at lock and at close, FGT alignment at lock, raw vs calibrated posterior, quality gate score, and ISO timestamp. Closing telemetry adds closing gap and Kalshi at close. After a session you can audit exactly what Tara saw, what the market saw, and where the price ended up.</li>
                 <li><strong>Trade log rows now show the V145 telemetry inline</strong> — entry → close prices, bps move, Tara confidence, Kalshi edge, and FGT alignment for each row when data is present.</li>
