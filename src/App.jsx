@@ -97,13 +97,13 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.04.30-v148-447W278L-28seed';
-const BASELINE_RECORD={'15m':{wins:447,losses:278},'5m':{wins:33,losses:25}};
+const BASELINE_VERSION='2026.04.30-v150-448W278L-29seed';
+const BASELINE_RECORD={'15m':{wins:448,losses:278},'5m':{wins:33,losses:25}};
 
 const SEED_TRADES=[
-// V148: BAKED TRAINING — 28-trade seed exported from user's V147 session.
-// All signal columns are zero in this export (CSV export path doesn't yet pull from
-// pendingTradeRef.signals). The BASELINE_RECORD scorecard (447W-278L on 15m) is the
+// V150: BAKED TRAINING — 29-trade seed exported from user's V149 session.
+// All signal columns are zero in this export (CSV export path doesn't pull from
+// pendingTradeRef.signals). The BASELINE_RECORD scorecard (448W-278L on 15m) is the
 // historical reference number — not derived from this seed array.
   {id:1777566934909,dir:'UP',posterior:87.0,regime:'SHORT SQUEEZE',clockAtLock:565,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1777567542886,dir:'DOWN',posterior:14.4,regime:'RANGE-CHOP',clockAtLock:857,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
@@ -133,6 +133,7 @@ const SEED_TRADES=[
   {id:1777602990319,dir:'DOWN',posterior:25.3,regime:'RANGE-CHOP',clockAtLock:510,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1777609464421,dir:'DOWN',posterior:68.6,regime:'RANGE-CHOP',clockAtLock:335,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1777610051195,dir:'UP',posterior:54.4,regime:'RANGE-CHOP',clockAtLock:648,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777611914191,dir:'UP',posterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:585,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
@@ -2638,13 +2639,16 @@ function ProjectionsCard({analysis,mobileTab}){
               // Visual confidence bar
               const barWidth=Math.min(100,Math.max(15,stepConf));
               const barCls=pUp?'bg-emerald-500/40':'bg-rose-500/40';
+              // V149: dim extrapolated rows (beyond model horizon)
+              const extraDim=point.extrapolated?'opacity-40':'';
               return(
-                <div key={i} className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8'}>
+                <div key={i} className={'p-2 rounded-lg bg-[#111312] border border-[#E8E9E4]/8 '+extraDim} title={point.extrapolated?'Beyond model forecast horizon — speculative':''}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={'text-[11px] font-mono font-bold text-[#E8E9E4]/70 shrink-0'}>{point.timeStr}</span>
                       <span className={pCls+' text-xs shrink-0'}>{pArrow}</span>
                       <span className="text-sm font-mono font-bold text-white truncate">${Number(point.price).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                      {point.extrapolated&&<span className={'text-[8px] uppercase tracking-wider text-amber-400/80 shrink-0'}>extrap</span>}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className={pCls+' text-[10px] font-bold'}>{deltaBps>=0?'+':''}{deltaBps.toFixed(0)}bps</span>
@@ -3323,7 +3327,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                   the user is on a stale version (drift) or already current. */}
         <div className="mb-3 p-3 rounded-lg bg-indigo-500/10 border-2 border-indigo-500/40">
           <div className="text-[10px] uppercase text-indigo-300 font-bold mb-1">
-            {baselineDrift?(<>📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V148'}</>):(<>📦 Training Baseline</>)}
+            {baselineDrift?(<>📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V150'}</>):(<>📦 Training Baseline</>)}
           </div>
           <div className="text-xs text-[#E8E9E4]/80 mb-3">
             {baselineDrift?'A new engine version has shipped. Choose how to start your trading session:':'Manage Tara\'s training data. Sync brings in the baseline trades + scorecard. Fresh start wipes everything for clean self-training.'}
@@ -3481,7 +3485,7 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:447,losses:278},'5m':{wins:33,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:448,losses:278},'5m':{wins:33,losses:25}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -3551,7 +3555,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V148 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V150 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -3649,7 +3653,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V148'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V150'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -3746,7 +3750,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara V148  |  signal'},
+        footer:{text:'Tara V150  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3760,7 +3764,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V148  |  stand-down'},
+        footer:{text:'Tara V150  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3774,7 +3778,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V148  |  search'},
+        footer:{text:'Tara V150  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3791,7 +3795,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara V148  |  lock'},
+        footer:{text:'Tara V150  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3808,7 +3812,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V148  |  close'},
+          footer:{text:'Tara V150  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -3829,7 +3833,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V148  |  exit'},
+        footer:{text:'Tara V150  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3858,12 +3862,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V148  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara V150  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V148',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V150',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -3882,7 +3886,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V148 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V150 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -4657,26 +4661,44 @@ function TaraApp(){
       //     - Compute FGT-implied price by linear interpolation from now → FGT horizon
       //     - Compute linear-drift price (legacy fallback)
       //     - Blend: weight=0.7 FGT when FGT valid + within horizon, else 0
+      // V149: Projection rebuild — three sanity layers added to fix the "BTC moons by morning" bug.
+      //
+      //   1. VOLATILITY CAP: Cap projected move magnitude at 1.5× recent ATR per hour. ATR-based
+      //      ceiling stops the linear-drift hockey-stick from running away. If projection wants to
+      //      go +977bps over 7 hours but ATR says BTC's typical 1h range is ±50bps, we cap.
+      //
+      //   2. CONFIDENCE PATH-FADE: Multiply projected move by (confidence/100)^1.5. When confidence
+      //      drops to 60%, the visible move shrinks to ~46% of raw HPotter target. This makes the
+      //      bar visualization match Tara's actual certainty — no more big bars on low-confidence rows.
+      //
+      //   3. PANEL HORIZON LIMITS: 1-hour panel previously projected 8 hours forward. 3m HPotter
+      //      forecast horizon is only 90 min. Now: 5m panel keeps 8 steps (fits within 1m HPotter's
+      //      30 min horizon), 15m panel cap at 6 steps (90 min, within 3m HPotter), 1-hour panel
+      //      cap at 3 steps (3 hours, with explicit "extrapolated" warning past horizon).
       const getHP=(msAgo)=>{const t=Date.now()-msAgo;const m=priceMemoryRef.current;if(!m||m.length===0)return currentPrice;let c=m[0];for(let i=m.length-1;i>=0;i--){if(m[i].time<=t){c=m[i];break;}}return c.p;};
       let trendBps=isNaN(drift1m)?0:drift1m;
       if(isUP&&trendBps<=0)trendBps=2;if(isDN&&trendBps>=0)trendBps=-2;
+
+      // ATR-based 1-hour volatility envelope. Typical BTC 1h move is ~ATR × √60 (Brownian scaling).
+      // V149: we use this to cap how far projections can drift from current price.
+      const _atrNow=eng.atrBps||15; // fallback 15bps
+      const oneHourEnvelopeBps=_atrNow*Math.sqrt(60); // ≈ 116bps typical 1h range when ATR=15
+      // Absolute cap multiplier — projection can't exceed 1.5× the typical 1h envelope per hour.
+      const VOL_CAP_MULT=1.5;
 
       // Pull HPotter forecasts for the projection horizons
       const fgt1m=eng.fgtResults?.['1m'];   // forecast ~30 min ahead
       const fgt3m=eng.fgtResults?.['3m'];   // forecast ~90 min ahead
       const fgt5m=eng.fgtResults?.['5m'];   // forecast ~200 min ahead — used for 1h panel as backup
-      // FGT.forecastBps is the projected % move (in bps) at the full forecast horizon.
-      // Forecast horizons in minutes:
-      const fgt1mHorizonMin=30;   // 1m bars * forecast=30
-      const fgt3mHorizonMin=90;   // 3m bars * forecast=30
-      const fgt5mHorizonMin=200;  // 5m bars * forecast=40
+      const fgt1mHorizonMin=30;
+      const fgt3mHorizonMin=90;
+      const fgt5mHorizonMin=200;
 
-      // Returns a price for `minAhead` minutes from now, blending HPotter + linear drift.
-      // primaryFgt: the timeframe to use as the main HPotter source.
-      // fallbackFgt: optional secondary source (used at horizons beyond primary).
-      const projectPrice=(minAhead,primaryFgt,primaryHorizon,fallbackFgt,fallbackHorizon)=>{
+      // Returns a price for `minAhead` minutes from now, blending HPotter + linear drift,
+      // capped by ATR-volatility envelope and faded by confidence.
+      const projectPrice=(minAhead,primaryFgt,primaryHorizon,fallbackFgt,fallbackHorizon,confidence)=>{
         // Linear-drift baseline
-        const linearPrice=currentPrice*(1+(trendBps/10000)*minAhead);
+        const linearPriceRaw=currentPrice*(1+(trendBps/10000)*minAhead);
         // Decide which FGT to use
         let fgt=null,horizon=null;
         if(primaryFgt&&primaryFgt.valid&&minAhead<=primaryHorizon*1.1){
@@ -4684,24 +4706,32 @@ function TaraApp(){
         } else if(fallbackFgt&&fallbackFgt.valid){
           fgt=fallbackFgt;horizon=fallbackHorizon;
         }
+        let projectedPrice;
         if(!fgt||!fgt.valid){
-          // No FGT data — fall back to linear
-          return linearPrice;
+          projectedPrice=linearPriceRaw;
+        } else {
+          const t=Math.min(1,minAhead/horizon);
+          const fgtPrice=currentPrice+(fgt.fcast-currentPrice)*t;
+          const fgtWeight=minAhead<=horizon?0.7:Math.max(0.3,0.7-((minAhead-horizon)/horizon)*0.4);
+          projectedPrice=fgtPrice*fgtWeight+linearPriceRaw*(1-fgtWeight);
         }
-        // FGT-implied price at minAhead = currentPrice + (fcast - currentPrice) * (minAhead / horizon)
-        // This assumes the price moves linearly toward the HPotter target over the horizon.
-        const t=Math.min(1,minAhead/horizon);
-        const fgtPrice=currentPrice+(fgt.fcast-currentPrice)*t;
-        // Blend: trust FGT 70% when within its horizon, less so beyond
-        const fgtWeight=minAhead<=horizon?0.7:Math.max(0.3,0.7-((minAhead-horizon)/horizon)*0.4);
-        return fgtPrice*fgtWeight+linearPrice*(1-fgtWeight);
+        // V149 LAYER 1 — VOLATILITY CAP
+        // Compute proposed move in bps
+        const proposedMoveBps=((projectedPrice-currentPrice)/currentPrice)*10000;
+        // Cap by typical 1h envelope, scaled by minutes-ahead. Sub-linear growth (sqrt) to reflect
+        // that volatility doesn't accumulate linearly.
+        const maxAbsMoveBps=VOL_CAP_MULT*oneHourEnvelopeBps*Math.sqrt(minAhead/60);
+        const clampedMoveBps=Math.max(-maxAbsMoveBps,Math.min(maxAbsMoveBps,proposedMoveBps));
+        // V149 LAYER 2 — CONFIDENCE PATH-FADE
+        // Pull projected move toward zero based on Tara's confidence.
+        // 90% conf → 0.85× weight, 70% conf → 0.59×, 60% conf → 0.46×, 50% conf → 0.35×.
+        const confFactor=Math.pow(Math.max(0.3,(confidence||50)/100),1.5);
+        const finalMoveBps=clampedMoveBps*confFactor;
+        return currentPrice*(1+finalMoveBps/10000);
       };
 
-      // Per-panel FGT routing
-      // 5-MIN PANEL: 8 timesteps × 5min = 40min total. 1m FGT (30min horizon) is primary.
-      // 15-MIN PANEL: 8 timesteps × 15min = 120min total. 1m FGT primary for first ~30min, 3m FGT (90min) for rest.
-      // 1-HOUR PANEL: 8 timesteps × 60min = 480min total. 3m FGT primary, 5m FGT (200min) as fallback.
-      const genTimeline=(min,steps,primaryFgt,primaryHorizon,fallbackFgt,fallbackHorizon)=>{
+      // Per-panel FGT routing + horizon limits
+      const genTimeline=(min,steps,primaryFgt,primaryHorizon,fallbackFgt,fallbackHorizon,baseConf)=>{
         const out=[],iMs=min*60*1000,now=Date.now();
         let nT=Math.ceil(now/iMs)*iMs;
         if(nT-now<iMs*0.1)nT+=iMs;
@@ -4709,18 +4739,29 @@ function TaraApp(){
         for(let i=0;i<steps;i++){
           const sT=nT+(i*iMs);
           const minAhead=(sT-now)/60000;
-          const p=projectPrice(minAhead,primaryFgt,primaryHorizon,fallbackFgt,fallbackHorizon);
+          // Per-row confidence decays with distance from now
+          const rowConf=Math.max(30,baseConf-i*4); // -4% per step
+          const p=projectPrice(minAhead,primaryFgt,primaryHorizon,fallbackFgt,fallbackHorizon,rowConf);
           const d=new Date(sT);
           let ts=`${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
           try{ts=d.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'numeric',minute:'2-digit'});}catch(e){}
-          out.push({timeStr:ts,timestamp:Math.floor(sT/1000),price:p});
+          // V149 LAYER 3: Mark rows beyond model horizon as 'extrapolated'
+          const extrapolated=minAhead>primaryHorizon&&(!fallbackFgt||!fallbackFgt.valid||minAhead>fallbackHorizon);
+          out.push({timeStr:ts,timestamp:Math.floor(sT/1000),price:p,extrapolated});
         }
         return out;
       };
-      const t5=genTimeline(5,8,fgt1m,fgt1mHorizonMin,fgt3m,fgt3mHorizonMin);
-      const t15=genTimeline(15,8,fgt1m,fgt1mHorizonMin,fgt3m,fgt3mHorizonMin);
-      const t60=genTimeline(60,8,fgt3m,fgt3mHorizonMin,fgt5m,fgt5mHorizonMin);
-      const projections=[{id:'5m',time:'5 MIN',price:t5[0]?.price||currentPrice,conf:Math.min(95,posterior+5),timeline:t5,fgtSrc:fgt1m?.valid?'1m HPotter':'linear'},{id:'15m',time:'15 MIN',price:t15[0]?.price||currentPrice,conf:posterior,timeline:t15,fgtSrc:fgt1m?.valid?'1m HPotter→3m':'linear'},{id:'1h',time:'1 HOUR',price:t60[0]?.price||currentPrice,conf:Math.max(10,posterior-15),timeline:t60,fgtSrc:fgt3m?.valid?'3m HPotter':'linear'}];
+      // V149: 5-MIN — 8 steps × 5min = 40 min total (well within 1m HPotter horizon)
+      // V149: 15-MIN — 6 steps × 15min = 90 min total (matches 3m HPotter horizon — was 8 steps = 120 min)
+      // V149: 1-HOUR — 3 steps × 60min = 180 min total (within 3m HPotter horizon — was 8 steps = 480 min!)
+      const t5=genTimeline(5,8,fgt1m,fgt1mHorizonMin,fgt3m,fgt3mHorizonMin,Math.min(95,posterior+5));
+      const t15=genTimeline(15,6,fgt1m,fgt1mHorizonMin,fgt3m,fgt3mHorizonMin,posterior);
+      const t60=genTimeline(60,3,fgt3m,fgt3mHorizonMin,fgt5m,fgt5mHorizonMin,Math.max(40,posterior-15));
+      const projections=[
+        {id:'5m',time:'5 MIN',price:t5[0]?.price||currentPrice,conf:Math.min(95,posterior+5),timeline:t5,fgtSrc:fgt1m?.valid?'1m HPotter':'linear'},
+        {id:'15m',time:'15 MIN',price:t15[0]?.price||currentPrice,conf:posterior,timeline:t15,fgtSrc:fgt1m?.valid?'1m HPotter→3m':'linear'},
+        {id:'1h',time:'1 HOUR',price:t60[0]?.price||currentPrice,conf:Math.max(40,posterior-15),timeline:t60,fgtSrc:fgt3m?.valid?'3m HPotter':'linear'},
+      ];
 
       // Multi-timeframe confluence: check if the OTHER timeframe has a recent lock in same direction
       const _otherTF=windowType==='15m'?'5m':'15m';
@@ -4731,6 +4772,11 @@ function TaraApp(){
       // V138: expose session info for UI badge
       const _sessInfo=getMarketSessions();
       return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),session:String(_sessInfo.dominant),sessionDayRating:String(_sessInfo.dsRating),sessionDayKey:String(_sessInfo.dsKey),sessionDayAdj:Number(_sessInfo.dsAdj),velocityRegime:String(velocityRegime||'NORMAL'),trajectoryAdj:Number(eng.trajectoryAdj||0),projectedPrice:Number(eng.projectedPrice||0),projectedGapBps:Number(eng.projectedGapBps||0),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor:_advisorResult,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
+        // V148.1: surface rawSignalScores and mtfAlignment to consumers (V147 Score Breakdown
+        //         panel was reading these but they weren't in the return — every bar showed 0).
+        rawSignalScores:eng.rawSignalScores||{},
+        mtfAlignment:eng.mtfAlignment,
+        fgtResults:eng.fgtResults||{},
         lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null,
         bullCount:Number(bullCount),bearCount:Number(bearCount)};
     }catch(err){return{prediction:'ERROR',rawProbAbove:50,projections:[],reasoning:[err.stack||String(err)],textColor:'text-rose-500',advisor:{label:'MATH CRASH',reason:String(err),color:'rose',animate:false,hasAction:false},regime:'ERROR'};}
@@ -4842,34 +4888,27 @@ function TaraApp(){
   useEffect(()=>{
     const fs=flowSignal;
     const now=Date.now();
-    // Cooldown: no re-open within 30s of last auto-open
+    // V148.1: Cooldown raised 30s → 60s. Was opening too frequently.
     const sinceLastOpen=now-lastAutoOpenTimeRef.current;
-    if(sinceLastOpen<30000)return;
-    const prevScore=prevScoreRef.current;
+    if(sinceLastOpen<60000)return;
     const prevStreak=prevStreakRef.current;
-    const prevDeltaSign=prevDeltaSignRef.current;
     const curDelta=fs.netDelta90s||0;
     const curDeltaSign=curDelta>=0?1:-1;
-    // ── V134 Triggers ──
-    const justHitStrong=fs.score>=80&&prevScore<80;
-    const streakJustHit=fs.streakCount>=5&&prevStreak<5;
-    const massiveDelta=Math.abs(curDelta)>=750000;
-    // Net delta sign FLIP with magnitude (real reversal, not flutter)
-    const deltaFlip=prevDeltaSign!==0&&curDeltaSign!==prevDeltaSign&&Math.abs(curDelta)>=300000;
-    // Velocity regime JUMP (NORMAL → FAST/EXTREME, or any → EXTREME)
-    const curVelRegime=analysis?.velocityRegime||'NORMAL';
-    const prevVelRegime=prevVelRegimeRef.current;
-    const velRegimeJump=(curVelRegime==='EXTREME'&&prevVelRegime!=='EXTREME')||
-                       (curVelRegime==='FAST'&&(prevVelRegime==='SLOW'||prevVelRegime==='NORMAL'));
-    // Per-exchange divergence spike (Binance leading Coinbase by >5bps)
-    const bnDivBps=Math.abs(fs.bnDivBps||0);
-    const exchangeDiverge=bnDivBps>=5;
-    // Update prev refs
+    // ── V148.1: Auto-open ONLY on concerning whale activity ──
+    //   Removed triggers (too noisy, fire on non-whale events):
+    //     - justHitStrong (flow score 80+) — opens on any strong tape, not specifically whale
+    //     - deltaFlip — flutters constantly in choppy markets
+    //     - velRegimeJump — velocity has nothing to do with whales
+    //     - exchangeDiverge — 5bps Binance/Bybit gap is normal microstructure
+    //   Remaining triggers — genuine whale events:
+    const massiveWhale=Math.abs(curDelta)>=1000000;        // V148.1: $750K → $1M (was firing too often)
+    const sustainedWhaleStreak=fs.streakCount>=7&&prevStreak<7;  // V148.1: 5 → 7 (need sustained pressure)
+    // Update prev refs (track all so future logic can still reference)
     prevScoreRef.current=fs.score;
     prevStreakRef.current=fs.streakCount;
     prevDeltaSignRef.current=curDeltaSign;
-    prevVelRegimeRef.current=curVelRegime;
-    const triggered=justHitStrong||streakJustHit||massiveDelta||deltaFlip||velRegimeJump||exchangeDiverge;
+    prevVelRegimeRef.current=analysis?.velocityRegime||'NORMAL';
+    const triggered=massiveWhale||sustainedWhaleStreak;
     if(triggered){
       setShowWhaleLog(true);
       autoOpenedRef.current=true;
@@ -5118,7 +5157,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V148...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V150...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -5209,7 +5248,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V148
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V150
             </span>
           </div>
 
@@ -5598,7 +5637,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V148</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V150</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -6194,7 +6233,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V148 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V150 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -6350,7 +6389,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V148 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V150 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
