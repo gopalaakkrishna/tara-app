@@ -99,7 +99,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.01-v2.2-451W282L-first-real-seed';
+const BASELINE_VERSION='2026.05.01-v2.4-452W283L-3trade-seed';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -120,16 +120,18 @@ const T2_COPPER_BORDER='rgba(201,125,74,0.30)';
 const T2_MONO_STYLE={fontVariantNumeric:'tabular-nums',letterSpacing:'-0.01em'};
 // Corner stamp component — small gold serial mark in upper-right of panels
 function T2Stamp({code}){return(<span style={{position:'absolute',top:'8px',right:'10px',fontSize:'8px',letterSpacing:'0.18em',color:T2_GOLD_DIM,fontWeight:500}}>{code}</span>);}
-const BASELINE_RECORD={'15m':{wins:451,losses:282},'5m':{wins:33,losses:25}};
+const BASELINE_RECORD={'15m':{wins:452,losses:283},'5m':{wins:33,losses:25}};
 
 const SEED_TRADES=[
-// V2.2: BAKED TRAINING — 1 trade with full V2.1 telemetry. First clean training row Tara has
-// ever had — real signal scores, entry/close prices, gap context, FGT alignment, rangeBps.
-// V152's logging architecture proven end-to-end: dir/outcomeDir disambiguation, range-position
-// signal value captured at lock time, gradient descent now has actual data quality to learn from.
+// V2.4: BAKED TRAINING — 3 trades with full V2.1 telemetry. Includes Tara's first DOWN LOSS
+// captured with full telemetry (trade #3): posterior 9.8 in RANGE-CHOP, FGT -3 conviction,
+// closingGapBps barely positive (+0.6) — near-miss. Quality 58 cleared the gate but the
+// outcome flipped against the call. Gradient descent now has UP/W, DOWN/W, DOWN/L examples.
 //
-// BASELINE_RECORD scorecard (451W-282L on 15m) is the historical reference number.
-  {id:1777623321860,timestampISO:'2026-05-01T08:15:21.860Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:878,hour:4,session:'EU',windowType:'15m',signals:{gap:0.22,momentum:5.76,structure:9.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77212.2,closingPrice:77420.0,strikeAtLock:77188.32,strikePrice:77188.32,gapAtEntry:3.1,closingGapBps:30.0,fgtAlignment:0.0,rangeBps:-0.3,qualityScore:56},
+// BASELINE_RECORD scorecard (452W-283L on 15m) is the historical reference number.
+  {id:1777623321860,timestampISO:'2026-05-01T08:15:21.860Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:878,hour:4,session:'EU',windowType:'15m',signals:{gap:0.22,momentum:5.76,structure:9.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77212.2,closingPrice:77420.0,strikeAtLock:77188.32,strikePrice:77188.32,gapAtEntry:3.1,closingGapBps:30.0,fgtAlignment:0,rangeBps:-0.3,qualityScore:56},
+  {id:1777625065746,timestampISO:'2026-05-01T08:44:25.746Z',dir:'DOWN',outcomeDir:'DOWN',posterior:25.0,rawPosterior:25.0,regime:'RANGE-CHOP',clockAtLock:34,hour:4,session:'EU',windowType:'15m',signals:{gap:-14.97,momentum:-1.81,structure:0.0,flow:-14.65,technical:10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77355.98,closingPrice:77351.35,strikeAtLock:77431.88,strikePrice:77431.88,gapAtEntry:-9.8,closingGapBps:-10.4,fgtAlignment:-3,rangeBps:0.0,qualityScore:13},
+  {id:1777625149938,timestampISO:'2026-05-01T08:45:49.938Z',dir:'DOWN',outcomeDir:'UP',posterior:9.8,rawPosterior:9.8,regime:'RANGE-CHOP',clockAtLock:850,hour:4,session:'EU',windowType:'15m',signals:{gap:-0.04,momentum:-0.0,structure:0.0,flow:-55.0,technical:10.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:77349.0,closingPrice:77358.39,strikeAtLock:77353.67,strikePrice:77353.67,gapAtEntry:-0.6,closingGapBps:0.6,fgtAlignment:-3,rangeBps:0.0,qualityScore:58},
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
@@ -1984,7 +1986,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
           <span className={'text-xs font-bold uppercase tracking-widest text-[#E8E9E4]/70'}>Flow Intelligence</span>
           <span className={'text-[10px] text-[#E8E9E4]/25 font-mono'}>futures tape · $100K+</span>
         </div>
-        <button onClick={()=>setShowWhaleLog(false)} className="opacity-40 hover:opacity-100 transition-opacity"><span className={'text-[#E8E9E4]/60 text-sm font-bold'}>✕</span></button>
+        <button onClick={()=>setShowWhaleLog(false)} className="opacity-70 hover:opacity-100 transition-opacity p-1 rounded hover:bg-[#E8E9E4]/5"><span className={'text-[#E8E9E4]/90 text-base font-bold'}>✕</span></button>
       </div>
       <div className="overflow-y-auto flex-1 p-3 space-y-3">
 
@@ -3008,8 +3010,8 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
         </div>
       </div>
       {/* Live Feeds metrics */}
-      <div className="shrink-0 border-t border-[#E8E9E4]/10 pt-3">
-        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2'}>Live Feeds</div>
+      <div className="shrink-0 pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
+        <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2'} style={{color:T2_GOLD}}>Live Feeds</div>
         <div className="grid grid-cols-2 gap-2 mb-2">
           <div className={'p-1.5 rounded bg-[#111312]'}>
             <div className={'text-[9px] uppercase text-[#E8E9E4]/40 font-bold'}>Buy Flow</div>
@@ -3048,7 +3050,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
         </div>
       </div>
       {/* News Feed */}
-      <div className="border-t border-[#E8E9E4]/10 pt-3">
+      <div className="pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
         <NewsFeedCard/>
       </div>
     </div>
@@ -3573,7 +3575,7 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:451,losses:282},'5m':{wins:33,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:452,losses:283},'5m':{wins:33,losses:25}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -5031,6 +5033,41 @@ function TaraApp(){
     return()=>{if(autoCloseTimerRef.current)clearTimeout(autoCloseTimerRef.current);};
   },[flowSignal.score,flowSignal.streakCount,flowSignal.netDelta90s,flowSignal.bnDivBps,analysis?.velocityRegime]);
 
+  // V2.2.2: Manual-open auto-close. When user manually clicks FLOW to open the panel,
+  //         start a 90s idle timer. Resets on real whale activity (score or streak rising).
+  //         Without this, the panel stayed open indefinitely after any manual click — visible
+  //         and obstructive long after the user had moved on.
+  const manualCloseTimerRef=useRef(null);
+  const lastFlowSignalActivityRef=useRef({score:0,streak:0});
+  useEffect(()=>{
+    if(!showWhaleLog){
+      // Panel closed — clear the idle timer
+      if(manualCloseTimerRef.current){clearTimeout(manualCloseTimerRef.current);manualCloseTimerRef.current=null;}
+      return;
+    }
+    // Only set the manual auto-close when this open was NOT triggered by autoOpen
+    if(autoOpenedRef.current)return;
+    // Initialize activity baseline
+    lastFlowSignalActivityRef.current={score:flowSignal.score||0,streak:flowSignal.streakCount||0};
+    if(manualCloseTimerRef.current)clearTimeout(manualCloseTimerRef.current);
+    manualCloseTimerRef.current=setTimeout(()=>{
+      // Re-check whether activity happened — if yes, extend; if no, close
+      const cur={score:flowSignal.score||0,streak:flowSignal.streakCount||0};
+      const last=lastFlowSignalActivityRef.current;
+      const meaningfulActivity=Math.abs(cur.score-last.score)>=15||cur.streak-last.streak>=3;
+      if(meaningfulActivity){
+        // Real activity in the panel — extend by another 60s
+        lastFlowSignalActivityRef.current=cur;
+        manualCloseTimerRef.current=setTimeout(()=>{
+          setShowWhaleLog(false);
+        },60000);
+      } else {
+        setShowWhaleLog(false);
+      }
+    },90000);
+    return()=>{if(manualCloseTimerRef.current)clearTimeout(manualCloseTimerRef.current);};
+  },[showWhaleLog,flowSignal.score,flowSignal.streakCount,setShowWhaleLog]);
+
   useEffect(()=>{
     if(!showWhaleAlerts||!discordWebhook)return;
     const fs=flowSignal;
@@ -5613,12 +5650,11 @@ function TaraApp(){
         {/* ── V111: MOBILE TAB NAV ── */}
         <MobileTabBar mobileTab={mobileTab} setMobileTab={setMobileTab}/>
 
-        {/* V2.1: Grid changed from equal 3-col to 1.5fr/1fr/1fr at lg+ — prediction card promoted as hero.
-                  Mobile (cols-1) and tablet (cols-2) behavior preserved.
-                  V2.1 (cont): auto-rows-fr removed. Cards size to their content; hero allowed to be
-                  taller than supporting cards. Asymmetric heights now read as deliberate hierarchy
-                  rather than empty stretched space at the bottom of supporting columns. */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1.5fr_1fr_1fr] gap-3 shrink-0 items-start">
+        {/* V2.1: Grid changed from equal 3-col to 1.25fr/1fr/1fr at lg+ — prediction card promoted as hero.
+                  V2.2.1: tightened from 1.5fr → 1.25fr (1.5 was overshooting visually). auto-rows-fr restored
+                  so supporting columns match hero height — the empty-space fix is now done at the
+                  card-content level (sections inside cards distribute), not at the grid level. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1.25fr_1fr_1fr] gap-3 shrink-0 auto-rows-fr">
           
           {/* ── PREDICTION CARD ── */}
           <div className={`bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative ${mobileTab!=='signal'?'hidden md:flex':''}`}>
@@ -5649,7 +5685,11 @@ function TaraApp(){
                   }
                 }
                 setUserPosition(null);setPositionEntry(null);taraAdviceRef.current='CLOSED';setForceRender(p=>p+1);
-              }} className={'bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 px-2 py-1 rounded-md text-xs font-bold uppercase tracking-wide flex items-center gap-1 transition-colors'}>
+              }} className={'px-2 py-1 rounded-md text-xs font-bold uppercase tracking-wide flex items-center gap-1 transition-colors'} style={{
+                background:T2_COPPER_BG,
+                color:T2_COPPER,
+                border:'1px solid '+T2_COPPER_BORDER,
+              }}>
                 <IC.Alert className="w-4 h-4"/>Force Exit
               </button>
             </div>
