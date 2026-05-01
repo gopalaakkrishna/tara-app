@@ -97,16 +97,14 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.04.30-v146-443W277L-23seed';
-const BASELINE_RECORD={'15m':{wins:443,losses:277},'5m':{wins:33,losses:25}};
+const BASELINE_VERSION='2026.04.30-v148-447W278L-28seed';
+const BASELINE_RECORD={'15m':{wins:447,losses:278},'5m':{wins:33,losses:25}};
 
 const SEED_TRADES=[
-// V145.3: BAKED TRAINING — 23-trade seed exported from user's V144/V145 fresh-start session.
-// All signal columns are zero in this export (V145 telemetry capture didn't propagate to CSV
-// export path yet). The BASELINE_RECORD scorecard (443W-277L on 15m) is the historical
-// reference number — not derived from this seed array. Live trades populate the trade log
-// from here; gradient descent's V144 data quality gate will skip these for weight updates
-// since signal scores are zero.
+// V148: BAKED TRAINING — 28-trade seed exported from user's V147 session.
+// All signal columns are zero in this export (CSV export path doesn't yet pull from
+// pendingTradeRef.signals). The BASELINE_RECORD scorecard (447W-278L on 15m) is the
+// historical reference number — not derived from this seed array.
   {id:1777566934909,dir:'UP',posterior:87.0,regime:'SHORT SQUEEZE',clockAtLock:565,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1777567542886,dir:'DOWN',posterior:14.4,regime:'RANGE-CHOP',clockAtLock:857,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1777569944988,dir:'DOWN',posterior:9.6,regime:'RANGE-CHOP',clockAtLock:255,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
@@ -130,6 +128,11 @@ const SEED_TRADES=[
   {id:1777597526067,dir:'UP',posterior:88.3,regime:'RANGE-CHOP',clockAtLock:574,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
   {id:1777598143425,dir:'UP',posterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:857,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
   {id:1777599113469,dir:'UP',posterior:84.7,regime:'SHORT SQUEEZE',clockAtLock:787,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777600394629,dir:'UP',posterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:406,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777601112512,dir:'UP',posterior:87.3,regime:'RANGE-CHOP',clockAtLock:588,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
+  {id:1777602990319,dir:'DOWN',posterior:25.3,regime:'RANGE-CHOP',clockAtLock:510,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777609464421,dir:'DOWN',posterior:68.6,regime:'RANGE-CHOP',clockAtLock:335,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+  {id:1777610051195,dir:'UP',posterior:54.4,regime:'RANGE-CHOP',clockAtLock:648,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
@@ -2849,8 +2852,71 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
 
   return(
     <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col gap-3 md:col-span-2 lg:col-span-1 '+(mobileTab!=='logs'?'hidden md:flex':'')}>
+      {/* V146.1 Fix B: Score Breakdown — per-signal contribution to current posterior */}
+      <div className="shrink-0">
+        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2'}>Score Breakdown</div>
+        {(()=>{
+          const sig=analysis?.rawSignalScores||{};
+          const mtf=analysis?.mtfAlignment;
+          const post=analysis?.rawProbAbove||50;
+          const dir=post>=50?'UP':'DOWN';
+          // Total directional pull from each signal
+          const entries=[
+            {k:'gap',label:'Gap',v:sig.gap||0},
+            {k:'mom',label:'Momentum',v:sig.momentum||0},
+            {k:'str',label:'Structure',v:sig.structure||0},
+            {k:'flow',label:'Flow',v:sig.flow||0},
+            {k:'tech',label:'Technical',v:sig.technical||0},
+            {k:'reg',label:'Regime',v:sig.regime||0},
+          ];
+          // FGT effective contribution: 4/4=±30, 3/4=±18, 2/4=±8 (V136 calibration)
+          const fgtAbs=Math.abs(mtf||0);
+          const fgtContribution=mtf!=null?(fgtAbs>=4?30:fgtAbs>=3?18:fgtAbs>=2?8:0)*Math.sign(mtf):0;
+          const totalAll=entries.reduce((s,e)=>s+e.v,0)+fgtContribution;
+          // Render rows
+          const maxAbs=Math.max(8,...entries.map(e=>Math.abs(e.v)),Math.abs(fgtContribution));
+          const colorFor=v=>v>0.5?'bg-emerald-400/70':v<-0.5?'bg-rose-400/70':'bg-[#E8E9E4]/15';
+          return(
+            <div className="space-y-1">
+              {entries.map(e=>(
+                <div key={e.k} className="flex items-center gap-2 text-[10px]">
+                  <span className={'text-[#E8E9E4]/50 w-16 shrink-0'}>{e.label}</span>
+                  <div className="flex-1 relative h-3 bg-[#111312] rounded-sm overflow-hidden">
+                    {/* center line at 50% */}
+                    <div className="absolute top-0 bottom-0 left-1/2 w-px bg-[#E8E9E4]/20"></div>
+                    {/* bar */}
+                    <div className={'absolute top-0 bottom-0 '+colorFor(e.v)} style={{
+                      left:e.v>=0?'50%':`calc(50% - ${(Math.abs(e.v)/maxAbs)*50}%)`,
+                      width:`${(Math.abs(e.v)/maxAbs)*50}%`,
+                    }}></div>
+                  </div>
+                  <span className={'font-mono text-[10px] w-10 shrink-0 text-right '+(e.v>0.5?'text-emerald-300':e.v<-0.5?'text-rose-300':'text-[#E8E9E4]/30')}>{e.v>=0?'+':''}{e.v.toFixed(0)}</span>
+                </div>
+              ))}
+              {/* FGT row — primary signal, bold */}
+              <div className="flex items-center gap-2 text-[10px] pt-1 border-t border-[#E8E9E4]/8">
+                <span className={'text-purple-300 w-16 shrink-0 font-bold'}>FGT {fgtAbs}/4</span>
+                <div className="flex-1 relative h-3 bg-[#111312] rounded-sm overflow-hidden">
+                  <div className="absolute top-0 bottom-0 left-1/2 w-px bg-[#E8E9E4]/20"></div>
+                  <div className={'absolute top-0 bottom-0 '+(fgtContribution>0?'bg-emerald-400':fgtContribution<0?'bg-rose-400':'bg-[#E8E9E4]/15')} style={{
+                    left:fgtContribution>=0?'50%':`calc(50% - ${(Math.abs(fgtContribution)/maxAbs)*50}%)`,
+                    width:`${(Math.abs(fgtContribution)/maxAbs)*50}%`,
+                  }}></div>
+                </div>
+                <span className={'font-mono text-[10px] w-10 shrink-0 text-right font-bold '+(fgtContribution>0?'text-emerald-300':fgtContribution<0?'text-rose-300':'text-[#E8E9E4]/30')}>{fgtContribution>=0?'+':''}{fgtContribution.toFixed(0)}</span>
+              </div>
+              {/* Total */}
+              <div className="flex items-center gap-2 text-[10px] pt-1 border-t border-[#E8E9E4]/15 mt-1">
+                <span className="text-[#E8E9E4]/60 w-16 shrink-0 font-bold uppercase">Total</span>
+                <span className={'flex-1 font-mono text-[#E8E9E4]/40'}>→ posterior {post.toFixed(0)}% {dir}</span>
+                <span className={'font-mono w-10 text-right font-bold '+(totalAll>0?'text-emerald-400':'text-rose-400')}>{totalAll>=0?'+':''}{totalAll.toFixed(0)}</span>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
       {/* Engine Log - flexible, fills available space */}
-      <div className="flex-1 min-h-[120px] flex flex-col">
+      <div className="flex-1 min-h-[120px] flex flex-col border-t border-[#E8E9E4]/10 pt-3">
         <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2 shrink-0'}>Engine Log</div>
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1 text-[10px] font-mono">
           {reasoning.length===0?(
@@ -3257,7 +3323,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                   the user is on a stale version (drift) or already current. */}
         <div className="mb-3 p-3 rounded-lg bg-indigo-500/10 border-2 border-indigo-500/40">
           <div className="text-[10px] uppercase text-indigo-300 font-bold mb-1">
-            {baselineDrift?(<>📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V146'}</>):(<>📦 Training Baseline</>)}
+            {baselineDrift?(<>📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V148'}</>):(<>📦 Training Baseline</>)}
           </div>
           <div className="text-xs text-[#E8E9E4]/80 mb-3">
             {baselineDrift?'A new engine version has shipped. Choose how to start your trading session:':'Manage Tara\'s training data. Sync brings in the baseline trades + scorecard. Fresh start wipes everything for clean self-training.'}
@@ -3415,7 +3481,7 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:443,losses:277},'5m':{wins:33,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:447,losses:278},'5m':{wins:33,losses:25}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -3485,7 +3551,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V146 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V148 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -3583,7 +3649,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V146'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V148'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -3680,7 +3746,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara V146  |  signal'},
+        footer:{text:'Tara V148  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3694,7 +3760,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V146  |  stand-down'},
+        footer:{text:'Tara V148  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3708,7 +3774,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V146  |  search'},
+        footer:{text:'Tara V148  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3725,7 +3791,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara V146  |  lock'},
+        footer:{text:'Tara V148  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3742,7 +3808,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V146  |  close'},
+          footer:{text:'Tara V148  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -3763,7 +3829,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V146  |  exit'},
+        footer:{text:'Tara V148  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3792,12 +3858,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V146  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara V148  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V146',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V148',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -3816,7 +3882,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V146 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara V148 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -4028,7 +4094,14 @@ function TaraApp(){
       const _consensusUpStrong=Object.values(eng.rawSignalScores||{}).filter(s=>s>5).length>=5;
       const _consensusDnStrong=Object.values(eng.rawSignalScores||{}).filter(s=>s<-5).length>=5;
       const _consensusOverride=(_consensusUpStrong||_consensusDnStrong)?-1:0;
-      const CONSECUTIVE_NEEDED=(_isExtreme||_isFgtFullAlign)?1:Math.max(1,Math.round(_baseConsec*_velSampleAdj)+_trajShortcut+_fgtShortcut+_push+_consensusOverride);
+      // V146.1 LOOSEN 2: Strong-conviction shortcut. When calibrated posterior is already 10+ points
+      //   beyond the regime threshold (e.g. UP threshold 62, posterior at 72+), the conviction is
+      //   high enough that waiting a 2nd sample (~3 sec) is unnecessary. Joins the existing FGT 4/4
+      //   and trajectory ±7 shortcuts. Doesn't loosen marginal locks — only fast-tracks obvious ones.
+      const _strongConvictionUp=posterior>=72; // ≥10 above default 62 threshold
+      const _strongConvictionDn=posterior<=22; // ≤10 below default 32 threshold
+      const _convictionShortcut=(_strongConvictionUp||_strongConvictionDn)?-1:0;
+      const CONSECUTIVE_NEEDED=(_isExtreme||_isFgtFullAlign)?1:Math.max(1,Math.round(_baseConsec*_velSampleAdj)+_trajShortcut+_fgtShortcut+_push+_consensusOverride+_convictionShortcut);
 
       // ── IMPROVEMENT 4: Late lock penalty ─────────────────────────────────
       // Very late locks (>820s elapsed in 15m = last 80s) get suppressed
@@ -4091,7 +4164,12 @@ function TaraApp(){
       let _baseUpThr, _baseDnThr;
       if(regime==='TRENDING DOWN'||regime==='LONG SQUEEZE'){_baseUpThr=is15m?75:73; _baseDnThr=is15m?36:34;}
       else if(regime==='TRENDING UP'||regime==='SHORT SQUEEZE'){_baseUpThr=is15m?60:58; _baseDnThr=is15m?20:22;}
-      else {_baseUpThr=is15m?65:63; _baseDnThr=is15m?28:30;}
+      else {_baseUpThr=is15m?62:60; _baseDnThr=is15m?32:34;}
+      // V146.1 LOOSEN: Default regime (RANGE-CHOP / HIGH VOL CHOP) thresholds loosened.
+      //   UP: 65 → 62  (calibrated 62 ≈ raw 75, still strong conviction)
+      //   DN: 28 → 32  (raw 32 ≈ posterior 32%, decisive bearish)
+      //   Trend regimes (TD / LS / TU / SS) unchanged — they have natural directional edge.
+      //   Effect: ~10-15% more locks fire in default-regime windows, mid-conviction setups.
       const LOCK_THRESHOLD_DN_EFFECTIVE=_baseDnThr-_sessThreshAdj-_srThreshAdj;
       const LOCK_THRESHOLD_UP_EFFECTIVE=_baseUpThr+_sessThreshAdj+_srThreshAdj;
       // V141: Now we can compute bullCount/bearCount with the regime-aware effective thresholds.
@@ -4165,7 +4243,12 @@ function TaraApp(){
         if(isVeryLateLock&&_trajStrength<10&&_fgtAlignAbs<4){
           taraAdviceRef.current=taraAdviceRef.current||'SEARCHING...';
 
-        } else if(bullCount>=CONSECUTIVE_NEEDED_UP&&!isEndgameLock&&!(eng.mtfAlignment!==undefined&&eng.mtfAlignment<=-3)){
+        } else if(bullCount>=CONSECUTIVE_NEEDED_UP&&posterior>=LOCK_THRESHOLD_UP_EFFECTIVE&&!isEndgameLock&&!(eng.mtfAlignment!==undefined&&eng.mtfAlignment<=-3)){
+          // V146.1 FIX A: Added `posterior>=LOCK_THRESHOLD_UP_EFFECTIVE` to mirror DOWN side's
+          //   existing check. Previously UP could fire when historical samples cleared the
+          //   threshold even if current posterior had since dropped back. DOWN required both
+          //   simultaneously. This created a small UP-favoring asymmetry in wobbling markets.
+          //   Now both directions require: samples-cleared AND current-posterior-still-confirming.
           // V134 extra logging: announce when MTF would've blocked
           if(eng.mtfAlignment!==undefined&&eng.mtfAlignment<=-2&&eng.mtfAlignment>-3)reasoning.push(`[MTF-WARN] UP lock proceeding but ${Math.abs(eng.mtfAlignment)}/5 timeframes against UP`);
           // ── Quality gate: suppress lock if score too low ──
@@ -4231,12 +4314,14 @@ function TaraApp(){
             //       a backward-looking trajectory shouldn't be allowed to block the lock.
             taraAdviceRef.current='UP REJECTED — trajectory says DOWN';
             reasoning.push(`[GATE] UP blocked: trajectory ${eng.trajectoryAdj.toFixed(0)} contradicts UP call`);
-          } else if(_isChoppyRegime&&_quality<55){
-            // V134: In choppy regimes (RC/SS/HVC), demand quality floor for UP locks
-            // V139: floor lowered 62 → 55. FGT 4/4 alignment now contributes +18 quality (V136),
-            //       so the old 62 floor was over-blocking marginal-quality + strong-FGT setups.
+          } else if(_isChoppyRegime&&_quality<50){
+            // V134: choppy regime quality floor
+            // V139: 62 → 55
+            // V146.1 LOOSEN 3: 55 → 50. With FGT now contributing +18 to quality (V136), strong-FGT
+            //       setups already clear ~73 quality on their own. Lowering to 50 mainly affects
+            //       non-FGT marginal setups in choppy regimes — modest expansion.
             taraAdviceRef.current='WEAK SETUP — '+regime+' needs stronger signal';
-            reasoning.push(`[GATE] UP blocked: quality ${_quality.toFixed(0)} < 55 in ${regime}`);
+            reasoning.push(`[GATE] UP blocked: quality ${_quality.toFixed(0)} < 50 in ${regime}`);
           } else {
           // ── Direction flip guard: if FORMING DOWN already fired, don't lock UP ──
           // V138: Premium Mode and the MTF Confluence gate it carried have been removed.
@@ -4323,11 +4408,10 @@ function TaraApp(){
             // V139: FGT 4/4 DOWN overrides this rejection (mtfAlignment <= -4).
             taraAdviceRef.current='DOWN REJECTED — trajectory says UP';
             reasoning.push(`[GATE] DOWN blocked: trajectory ${eng.trajectoryAdj.toFixed(0)} contradicts DOWN`);
-          } else if(_isChoppyRegime2&&_quality2<55){
-            // V134: choppy regimes demand quality floor for DOWN locks
-            // V139: floor lowered 62 → 55 to match UP side.
+          } else if(_isChoppyRegime2&&_quality2<50){
+            // V134/V139/V146.1: choppy quality floor 62 → 55 → 50 (mirror of UP side).
             taraAdviceRef.current='WEAK SETUP — '+regime+' needs stronger signal';
-            reasoning.push(`[GATE] DOWN blocked: quality ${_quality2.toFixed(0)} < 55 in ${regime}`);
+            reasoning.push(`[GATE] DOWN blocked: quality ${_quality2.toFixed(0)} < 50 in ${regime}`);
           } else {
           // ── Direction flip guard: if FORMING UP already fired, don't lock DOWN ──
           // V138: Removed the SS/HVC DOWN-block that required rug-pull / 25+bps adverse / FGT-3of4
@@ -5034,7 +5118,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V146...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V148...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -5125,7 +5209,7 @@ function TaraApp(){
           <div className="flex items-center gap-1 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
             <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V146
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V148
             </span>
           </div>
 
@@ -5514,7 +5598,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V146</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V148</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -6110,7 +6194,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V146 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V148 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -6266,10 +6350,19 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V146 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V148 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+              <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">⚖ V147 — symmetry fix + measured loosening</h3>
+              <ul className="list-disc pl-4 space-y-1 mt-2">
+                <li><strong>Fix A — symmetric firing condition.</strong> UP previously fired when historical samples cleared the threshold, even if current posterior had since dropped back. DOWN required both samples cleared AND current posterior still below threshold. UP now requires both, mirroring DOWN. Small UP-favoring asymmetry in wobbling markets removed.</li>
+                <li><strong>Fix B — Score Breakdown panel.</strong> New diagnostic above the Engine Log showing each signal's contribution to the current posterior (gap, momentum, structure, flow, technical, regime, FGT). Bars extend left or right from a center 50 line. Total contribution maps directly to posterior. Lets you see at a glance which signal is driving Tara's call this tick — useful for diagnosing UP/DOWN balance over time.</li>
+                <li><strong>Loosen 1 — default thresholds.</strong> RANGE-CHOP / HIGH VOL CHOP regime: UP threshold 65 → 62, DOWN 28 → 32. Trend regimes (TD/LS/TU/SS) unchanged. Effect: ~10-15% more locks in default-regime windows on mid-conviction setups.</li>
+                <li><strong>Loosen 2 — strong-conviction shortcut.</strong> When calibrated posterior is 10+ points beyond threshold (UP ≥72 or DN ≤22), drops sample requirement to 1. Joins existing FGT 4/4 and trajectory ±7 shortcuts. Locks fire ~3 seconds faster on obvious setups. Marginal locks unchanged.</li>
+                <li><strong>Loosen 3 — choppy quality floor.</strong> 55 → 50 in RC / SS / HVC. With FGT 4/4 contributing +18 quality (V136), strong-FGT setups already clear 73 quality on their own — this loosening mainly helps non-FGT marginal setups.</li>
+              </ul>
+              </section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">📦 V145 — telemetry, version flow, performance patterns</h3>
               <ul className="list-disc pl-4 space-y-1 mt-2">
                 <li><strong>Projections panel now uses HPotter (FGT).</strong> 5min / 15min / 1hour forecasts previously used a flat linear extrapolation of the 1-minute drift — straight lines disconnected from the engine's primary signal. Now the 5min and 15min panels source from the 1m HPotter forecast (30-min horizon), and the 1hour panel sources from the 3m HPotter (90-min horizon). Each panel shows which model is producing the forecast in the subtitle (e.g., "1m HPotter" or "3m HPotter→5m"). Falls back to linear when FGT data hasn't loaded yet.</li>
