@@ -99,18 +99,37 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.01-v2.0-mean-reversion-clean-restart';
-const BASELINE_RECORD={'15m':{wins:448,losses:278},'5m':{wins:33,losses:25}};
+const BASELINE_VERSION='2026.05.01-v2.2-451W282L-first-real-seed';
+
+// V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
+// Centralized so the visual language is consistent across all UI consumers.
+//   Gold (#E5C870)   — premium, hero accents, V2.0 badge, major-release markers, "what changed" eyebrows
+//   Copper (#C97D4A) — cautionary, friction, geo risk, quality issues, exhausted/contrarian signals
+//   Emerald  — wins, UP locks, profit (unchanged)
+//   Rose     — losses, DOWN locks, adverse (unchanged)
+//   These coexist — copper sits between green and red as a "watch but don't alarm" tier.
+const T2_GOLD='#E5C870';
+const T2_COPPER='#C97D4A';
+const T2_GOLD_GLOW='rgba(229,200,112,0.18)';
+const T2_GOLD_BORDER='rgba(229,200,112,0.35)';
+const T2_GOLD_DIM='rgba(229,200,112,0.45)';
+const T2_COPPER_BG='rgba(201,125,74,0.08)';
+const T2_COPPER_BORDER='rgba(201,125,74,0.30)';
+// Tabular-nums monospace style — used for all prices, posteriors, statistics
+// font-variant-numeric: tabular-nums keeps digits aligned column-wise (no wobble during ticks)
+const T2_MONO_STYLE={fontVariantNumeric:'tabular-nums',letterSpacing:'-0.01em'};
+// Corner stamp component — small gold serial mark in upper-right of panels
+function T2Stamp({code}){return(<span style={{position:'absolute',top:'8px',right:'10px',fontSize:'8px',letterSpacing:'0.18em',color:T2_GOLD_DIM,fontWeight:500}}>{code}</span>);}
+const BASELINE_RECORD={'15m':{wins:451,losses:282},'5m':{wins:33,losses:25}};
 
 const SEED_TRADES=[
-// V152: SEED INTENTIONALLY EMPTY — clean training restart.
-// Previous 29-trade seed exported with all-zero signal data (pre-V148.1 logging bug),
-// so gradient descent couldn't learn from it. After V152 the export captures real per-signal
-// contributions, FGT alignment, range position, and outcome details. Live trades from V152
-// onward populate trade log and train weights from a clean foundation.
+// V2.2: BAKED TRAINING — 1 trade with full V2.1 telemetry. First clean training row Tara has
+// ever had — real signal scores, entry/close prices, gap context, FGT alignment, rangeBps.
+// V152's logging architecture proven end-to-end: dir/outcomeDir disambiguation, range-position
+// signal value captured at lock time, gradient descent now has actual data quality to learn from.
 //
-// BASELINE_RECORD scorecard (448W-278L on 15m, 33-25 on 5m) is preserved as the historical
-// reference number — independent of the seed array.
+// BASELINE_RECORD scorecard (451W-282L on 15m) is the historical reference number.
+  {id:1777623321860,timestampISO:'2026-05-01T08:15:21.860Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:878,hour:4,session:'EU',windowType:'15m',signals:{gap:0.22,momentum:5.76,structure:9.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77212.2,closingPrice:77420.0,strikeAtLock:77188.32,strikePrice:77188.32,gapAtEntry:3.1,closingGapBps:30.0,fgtAlignment:0.0,rangeBps:-0.3,qualityScore:56},
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
@@ -2099,13 +2118,17 @@ const FlowBtn=({flowSignal,active,onClick,cls})=>{
 function QualityGateCard({qualityGate,regime,session}){
   if(!qualityGate)return null;
   const c=qualityGate.color;
+  // V2.1: amber tier (mid quality 50-74) recolored to copper for two-tone palette consistency.
+  // Emerald (high) and rose (low) preserved — those are success/failure direction, not friction.
   const bgStyle={
     emerald:{background:'rgba(16,185,129,0.05)',border:'1px solid rgba(16,185,129,0.25)'},
-    amber:{background:'rgba(245,158,11,0.05)',border:'1px solid rgba(245,158,11,0.20)'},
+    amber:{background:T2_COPPER_BG,border:'1px solid '+T2_COPPER_BORDER},
     rose:{background:'rgba(239,68,68,0.05)',border:'1px solid rgba(239,68,68,0.20)'},
   }[c]||{};
-  const txtCls=c==='emerald'?'text-emerald-400':c==='amber'?'text-amber-400':'text-rose-400';
-  const barCls=c==='emerald'?'bg-emerald-500':c==='amber'?'bg-amber-500':'bg-rose-500';
+  const txtStyle=c==='amber'?{color:T2_COPPER}:{};
+  const txtCls=c==='emerald'?'text-emerald-400':c==='amber'?'':'text-rose-400';
+  const barCls=c==='emerald'?'bg-emerald-500':c==='amber'?'':'bg-rose-500';
+  const barStyle=c==='amber'?{background:T2_COPPER}:{};
   const msg=qualityGate.score>=75
     ?('High-confidence setup. '+(regime||'')+(session?' in '+session:'')+' historically reliable.')
     :qualityGate.score>=55
@@ -2115,12 +2138,12 @@ function QualityGateCard({qualityGate,regime,session}){
     <div className="mb-2 p-2.5 rounded-lg" style={bgStyle}>
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-[10px] uppercase tracking-widest font-bold" style={{color:'rgba(232,233,228,0.3)'}}>Quality Gate</span>
-        <span className={`text-xs font-bold uppercase tracking-wider ${txtCls}`}>{qualityGate.label} — {qualityGate.score?.toFixed(0)}&#47;100</span>
+        <span className={`text-xs font-bold uppercase tracking-wider ${txtCls}`} style={txtStyle}>{qualityGate.label} — {qualityGate.score?.toFixed(0)}&#47;100</span>
       </div>
       <div className="h-1 rounded-full overflow-hidden mb-1.5" style={{background:'rgba(232,233,228,0.1)'}}>
-        <div className={`h-full rounded-full transition-all duration-700 ${barCls}`} style={{width:(qualityGate.score||0)+'%'}}/>
+        <div className={`h-full rounded-full transition-all duration-700 ${barCls}`} style={{width:(qualityGate.score||0)+'%',...barStyle}}/>
       </div>
-      <div className={`text-[10px] ${txtCls}`} style={{opacity:0.7}}>{msg}</div>
+      <div className={`text-[10px] ${txtCls}`} style={{opacity:0.7,...txtStyle}}>{msg}</div>
     </div>
   );
 }
@@ -2647,9 +2670,10 @@ function ProjectionsCard({analysis,mobileTab}){
   const tabs=[{id:'5m',label:'5 MIN'},{id:'15m',label:'15 MIN'},{id:'1h',label:'1 HOUR'}];
 
   return(
-    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col '+(mobileTab!=='projections'?'hidden md:flex':'')}>
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative '+(mobileTab!=='projections'?'hidden md:flex':'')}>
+      <T2Stamp code="PROJ · 042"/>
       <div className="flex items-center justify-between mb-3 shrink-0">
-        <span className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold'}>Projections</span>
+        <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
         {/* Tab nav */}
         <div className="flex gap-1">
           {tabs.map(t=>{
@@ -2898,10 +2922,11 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
   const ls=bloomberg?.longShortRatio||1;
 
   return(
-    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col gap-3 md:col-span-2 lg:col-span-1 '+(mobileTab!=='logs'?'hidden md:flex':'')}>
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col gap-3 md:col-span-2 lg:col-span-1 relative '+(mobileTab!=='logs'?'hidden md:flex':'')}>
+      <T2Stamp code="SCR · 008"/>
       {/* V146.1 Fix B: Score Breakdown — per-signal contribution to current posterior */}
       <div className="shrink-0">
-        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2'}>Score Breakdown</div>
+        <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2'} style={{color:T2_GOLD}}>Score Breakdown</div>
         {(()=>{
           const sig=analysis?.rawSignalScores||{};
           const mtf=analysis?.mtfAlignment;
@@ -2941,8 +2966,8 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
                   <span className={'font-mono text-[10px] w-10 shrink-0 text-right '+(e.v>0.5?'text-emerald-300':e.v<-0.5?'text-rose-300':'text-[#E8E9E4]/30')}>{e.v>=0?'+':''}{e.v.toFixed(0)}</span>
                 </div>
               ))}
-              {/* FGT row — primary signal, bold */}
-              <div className="flex items-center gap-2 text-[10px] pt-1 border-t border-[#E8E9E4]/8">
+              {/* FGT row — primary signal, separated with gold-tinted divider (V2.1) */}
+              <div className="flex items-center gap-2 text-[10px] pt-1.5 mt-0.5" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
                 <span className={'text-purple-300 w-16 shrink-0 font-bold'}>FGT {fgtAbs}/4</span>
                 <div className="flex-1 relative h-3 bg-[#111312] rounded-sm overflow-hidden">
                   <div className="absolute top-0 bottom-0 left-1/2 w-px bg-[#E8E9E4]/20"></div>
@@ -2951,21 +2976,21 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
                     width:`${(Math.abs(fgtContribution)/maxAbs)*50}%`,
                   }}></div>
                 </div>
-                <span className={'font-mono text-[10px] w-10 shrink-0 text-right font-bold '+(fgtContribution>0?'text-emerald-300':fgtContribution<0?'text-rose-300':'text-[#E8E9E4]/30')}>{fgtContribution>=0?'+':''}{fgtContribution.toFixed(0)}</span>
+                <span style={T2_MONO_STYLE} className={'text-[10px] w-10 shrink-0 text-right font-bold '+(fgtContribution>0?'text-emerald-300':fgtContribution<0?'text-rose-300':'text-[#E8E9E4]/30')}>{fgtContribution>=0?'+':''}{fgtContribution.toFixed(0)}</span>
               </div>
-              {/* Total */}
-              <div className="flex items-center gap-2 text-[10px] pt-1 border-t border-[#E8E9E4]/15 mt-1">
-                <span className="text-[#E8E9E4]/60 w-16 shrink-0 font-bold uppercase">Total</span>
-                <span className={'flex-1 font-mono text-[#E8E9E4]/40'}>→ posterior {post.toFixed(0)}% {dir}</span>
-                <span className={'font-mono w-10 text-right font-bold '+(totalAll>0?'text-emerald-400':'text-rose-400')}>{totalAll>=0?'+':''}{totalAll.toFixed(0)}</span>
+              {/* Total row with gold accent divider above (V2.1 — major boundary) */}
+              <div className="flex items-center gap-2 text-[10px] pt-1.5 mt-1" style={{borderTop:'1px solid '+T2_GOLD_BORDER}}>
+                <span className="w-16 shrink-0 font-bold uppercase tracking-[0.18em] text-[8px]" style={{color:T2_GOLD}}>Total</span>
+                <span style={T2_MONO_STYLE} className={'flex-1 text-[#E8E9E4]/40'}>→ posterior {post.toFixed(0)}% {dir}</span>
+                <span style={T2_MONO_STYLE} className={'w-10 text-right font-bold '+(totalAll>0?'text-emerald-400':'text-rose-400')}>{totalAll>=0?'+':''}{totalAll.toFixed(0)}</span>
               </div>
             </div>
           );
         })()}
       </div>
       {/* Engine Log - flexible, fills available space */}
-      <div className="flex-1 min-h-[120px] flex flex-col border-t border-[#E8E9E4]/10 pt-3">
-        <div className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold mb-2 shrink-0'}>Engine Log</div>
+      <div className="flex-1 min-h-[120px] flex flex-col pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
+        <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2 shrink-0'} style={{color:T2_GOLD}}>Engine Log</div>
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1 text-[10px] font-mono">
           {reasoning.length===0?(
             <div className={'text-[#E8E9E4]/30 italic'}>Waiting for signals...</div>
@@ -3377,12 +3402,12 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
           {baselineDrift?(
             <>
               <div className="flex items-baseline gap-2 mb-1.5">
-                <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Major Release</span>
+                <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>2.0</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>2.2</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
-                A new architecture for the secondary signals — mean reversion, momentum exhaustion, window-position weighting. FGT/HPotter remains primary. Choose how to start:
+                Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
             </>
           ):(
@@ -3548,7 +3573,7 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:448,losses:278},'5m':{wins:33,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:451,losses:282},'5m':{wins:33,losses:25}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -3618,7 +3643,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 2.0 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 2.2 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -3716,7 +3741,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 2.0'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 2.2'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -3813,7 +3838,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 2.0  |  signal'},
+        footer:{text:'Tara 2.2  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3827,7 +3852,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 2.0  |  stand-down'},
+        footer:{text:'Tara 2.2  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3841,7 +3866,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 2.0  |  search'},
+        footer:{text:'Tara 2.2  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3858,7 +3883,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 2.0  |  lock'},
+        footer:{text:'Tara 2.2  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3875,7 +3900,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 2.0  |  close'},
+          footer:{text:'Tara 2.2  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -3896,7 +3921,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 2.0  |  exit'},
+        footer:{text:'Tara 2.2  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3925,12 +3950,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara 2.0  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 2.2  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 2.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 2.2',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -3949,7 +3974,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 2.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 2.2 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -5229,7 +5254,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 2.0...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 2.2...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -5328,7 +5353,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              2.0
+              2.2
             </span>
           </div>
 
@@ -5371,6 +5396,47 @@ function TaraApp(){
           </div>
         </div>
       </header>
+
+      {/* V2.1: Top stat strip — sticky 3-stat indicator. Always visible: Posterior · Quality · FGT.
+              Provides a constant pulse-check without scanning multiple panels. */}
+      <div className="sticky top-[44px] sm:top-[52px] z-30 bg-[#0E100F]/95 backdrop-blur-md border-b border-[#E8E9E4]/8 px-2 sm:px-4 py-1.5 shrink-0">
+        <div className="max-w-[1600px] mx-auto flex items-center gap-3 sm:gap-5 text-[10px] sm:text-[11px]">
+          {(()=>{
+            const post=Number(analysis?.confidence)||50;
+            const dirLabel=analysis?.prediction?.includes('UP')?'UP':analysis?.prediction?.includes('DOWN')?'DOWN':'';
+            const postCls=dirLabel==='UP'?'text-emerald-300':dirLabel==='DOWN'?'text-rose-300':'text-[#E8E9E4]/60';
+            const qScore=qualityGate?.score;
+            const qCls=qScore==null?'text-[#E8E9E4]/30':qScore>=70?'text-emerald-300':qScore>=50?'text-white':'text-amber-300';
+            const fgt=Math.abs(analysis?.mtfAlignment||0);
+            const fgtSign=analysis?.mtfAlignment>0?'UP':analysis?.mtfAlignment<0?'DN':'';
+            const fgtCls=fgt>=4?(analysis.mtfAlignment>0?'text-emerald-300':'text-rose-300'):fgt>=2?'text-white':'text-[#E8E9E4]/40';
+            const geoRisk=newsSentiment?.geoRisk||0;
+            return(
+              <>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="uppercase font-bold tracking-[0.10em] text-[#E8E9E4]/40 text-[8px] sm:text-[9px]">Post</span>
+                  <span style={T2_MONO_STYLE} className={'font-medium '+postCls}>{post.toFixed(0)}%</span>
+                  {dirLabel&&<span className={'text-[8px] sm:text-[9px] '+postCls}>{dirLabel}</span>}
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="uppercase font-bold tracking-[0.10em] text-[#E8E9E4]/40 text-[8px] sm:text-[9px]">Quality</span>
+                  <span style={T2_MONO_STYLE} className={'font-medium '+qCls}>{qScore!=null?qScore.toFixed(0):'—'}<span className="opacity-40 hidden sm:inline">/100</span></span>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="uppercase font-bold tracking-[0.10em] text-[#E8E9E4]/40 text-[8px] sm:text-[9px]">FGT</span>
+                  <span style={T2_MONO_STYLE} className={'font-medium '+fgtCls}>{fgt}/4{fgtSign&&<span className="opacity-50 ml-0.5">{fgtSign}</span>}</span>
+                </div>
+                {geoRisk>=0.3&&(
+                  <div className="hidden sm:flex items-center gap-1 ml-auto" style={{color:T2_COPPER}}>
+                    <span className="inline-block w-1.5 h-1.5 rounded-full" style={{background:T2_COPPER}}></span>
+                    <span className="font-bold uppercase tracking-wider text-[9px]">Geo {geoRisk>=0.7?'high':geoRisk>=0.5?'elevated':'watch'}</span>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      </div>
 
       {/* ── MAIN CONTENT ── */}
       <main className="flex-1 w-full max-w-[1600px] mx-auto px-2 sm:px-3 lg:px-4 py-2 sm:py-3 flex flex-col gap-3 min-h-0">
@@ -5547,12 +5613,17 @@ function TaraApp(){
         {/* ── V111: MOBILE TAB NAV ── */}
         <MobileTabBar mobileTab={mobileTab} setMobileTab={setMobileTab}/>
 
-        {/* ── MIDDLE ROW ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 shrink-0 auto-rows-fr">
+        {/* V2.1: Grid changed from equal 3-col to 1.5fr/1fr/1fr at lg+ — prediction card promoted as hero.
+                  Mobile (cols-1) and tablet (cols-2) behavior preserved.
+                  V2.1 (cont): auto-rows-fr removed. Cards size to their content; hero allowed to be
+                  taller than supporting cards. Asymmetric heights now read as deliberate hierarchy
+                  rather than empty stretched space at the bottom of supporting columns. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1.5fr_1fr_1fr] gap-3 shrink-0 items-start">
           
           {/* ── PREDICTION CARD ── */}
           <div className={`bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative ${mobileTab!=='signal'?'hidden md:flex':''}`}>
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-transparent opacity-30 rounded-t-xl"></div>
+            <div className="absolute top-0 left-0 w-full h-px rounded-t-xl" style={{background:'linear-gradient(to right, transparent, '+T2_GOLD_BORDER+' 30%, '+T2_GOLD_BORDER+' 70%, transparent)'}}></div>
+            <T2Stamp code="PRED · 015"/>
             <div className="flex justify-between items-center mb-3 shrink-0">
               <div onClick={()=>setUseLocalTime(!useLocalTime)} className={'flex items-center gap-1.5 bg-[#111312] border border-[#E8E9E4]/10 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide cursor-pointer hover:border-indigo-500/30 transition-colors'}>
                 <IC.Clock className="w-4 h-4"/>
@@ -5717,7 +5788,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 2.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 2.2</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -6343,7 +6414,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 2.0 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 2.2 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -6499,10 +6570,31 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 2.0 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 2.2 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+              {/* V2.1: Visual refresh — Direction C palette and layout changes */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Visual Refresh</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>2.2</span></h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Direction C visual reset. Engine architecture from 2.0 unchanged — this is purely a coat of paint, but a deliberate one. Gold and copper now coexist as a two-tone palette for premium versus cautionary states.</p>
+              </section>
+              <section className="mb-4"><h3 className="font-bold uppercase tracking-wide mb-2 text-xs" style={{color:T2_GOLD}}>What Changed in 2.1</h3>
+              <ul className="list-disc pl-4 space-y-1 mt-2">
+                <li><strong>Two-tone gold/copper palette.</strong> Mid-tier quality gate (formerly amber) is now copper. Geo risk, range exhaustion, and other "watch but not alarmed" states use copper. Gold reserved for premium markers (badge, hero accents, major-section eyebrows). Wins/losses stay green/red.</li>
+                <li><strong>Hero promotion of the prediction card.</strong> At desktop widths the prediction column is now ~50% wider than supporting columns (1.5fr · 1fr · 1fr). The dominant question on screen — "what is Tara saying right now" — gets the visual real estate it deserves.</li>
+                <li><strong>Top stat strip.</strong> Sticky 3-stat indicator below the header: Posterior · Quality · FGT alignment. Plus a Geo pill when risk is elevated. Visible at all times so you can pulse-check Tara without scanning multiple panels. Compresses to single-letter labels on narrow viewports.</li>
+                <li><strong>Bottom status strip.</strong> Terminal-style context bar: Regime · Session · Velocity · Macro · Geo · Scorecard. Frees the cards from displaying context that doesn't change minute-to-minute. Wraps gracefully on mobile.</li>
+                <li><strong>Corner stamps on major panels.</strong> Each major panel — Prediction (PRED · 015), Score Breakdown (SCR · 008), Engine Log, Projections (PROJ · 042) — gets a small gold serial mark in the upper-right. Reads as deliberate, instrument-grade.</li>
+                <li><strong>Refined typography.</strong> Tabular-nums applied to all prices, posteriors, and statistics so digits don't wobble during ticks. Major panel headers shifted to gold tracking-[0.22em]. Score Breakdown FGT row and Total row separated with gold-tinted dividers.</li>
+                <li><strong>Responsive design preserved.</strong> Mobile keeps the existing 4-tab pattern. Tablet collapses to 2-column with hero spanning. Desktop wide gets the full Direction C composition.</li>
+              </ul>
+              <p className="mt-2 text-[#E8E9E4]/40 text-[11px] italic">No engine changes. If 2.1 feels wrong, downgrade to 2.0 by reverting the visual files only — the engine logic is identical.</p>
+              </section>
               {/* V2.0: Major release — gold marker distinguishes from incremental V147/V145/V144 entries */}
               <section className="mb-2 pb-3 border-b border-[#E8E9E4]/10">
                 <div className="flex items-baseline gap-2 mb-2">
@@ -6656,6 +6748,46 @@ function TaraApp(){
           .session-grid { grid-template-columns: repeat(2, 1fr) !important; }
         }
       `}</style>
+      {/* V2.1: Bottom status strip — terminal-style context bar. Frees the cards from
+              displaying context that doesn't change minute-to-minute. Wraps gracefully on mobile. */}
+      <div className="bg-[#0A0B0A] border-t border-[#E8E9E4]/8 px-3 sm:px-4 py-1.5 mt-2 -mx-2 sm:-mx-3 lg:-mx-4 -mb-2 sm:-mb-3 shrink-0">
+        <div className="max-w-[1600px] mx-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[8px] sm:text-[9px] tracking-[0.04em]">
+          {(()=>{
+            const regimeLabel=analysis?.regime||'—';
+            const sessionLabel=analysis?.session||'—';
+            const velLabel=analysis?.velocityRegime||'NORMAL';
+            const macroState=getMacroEventState?.()||{state:'CLEAR'};
+            const macroCls=macroState.state==='BLACKOUT'?'text-rose-300':macroState.state==='OBSERVE'?'text-amber-300':'text-emerald-300';
+            const geoRisk=newsSentiment?.geoRisk||0;
+            const geoLabel=geoRisk>=0.7?'HIGH':geoRisk>=0.5?'ELEVATED':geoRisk>=0.3?'WATCH':'CLEAR';
+            const geoColor=geoRisk>=0.5?T2_COPPER:geoRisk>=0.3?'rgba(201,125,74,0.6)':'rgba(110,231,183,0.7)';
+            const wins=scorecards[windowType]?.wins||0;
+            const losses=scorecards[windowType]?.losses||0;
+            const total=wins+losses;
+            const wr=total>0?(wins/total*100).toFixed(1):'—';
+            return(
+              <>
+                <span className="text-[#E8E9E4]/35 uppercase">Regime</span>
+                <span className="text-[#E8E9E4]/70">{regimeLabel}</span>
+                <span className="text-[#E8E9E4]/15">·</span>
+                <span className="text-[#E8E9E4]/35 uppercase">Session</span>
+                <span className="text-[#E8E9E4]/70">{sessionLabel}</span>
+                <span className="text-[#E8E9E4]/15">·</span>
+                <span className="text-[#E8E9E4]/35 uppercase">Vel</span>
+                <span className="text-[#E8E9E4]/70">{velLabel}</span>
+                <span className="text-[#E8E9E4]/15 hidden sm:inline">·</span>
+                <span className="text-[#E8E9E4]/35 uppercase hidden sm:inline">Macro</span>
+                <span className={'hidden sm:inline '+macroCls}>{macroState.state||'CLEAR'}</span>
+                <span className="text-[#E8E9E4]/15 hidden sm:inline">·</span>
+                <span className="text-[#E8E9E4]/35 uppercase hidden sm:inline">Geo</span>
+                <span className="hidden sm:inline" style={{color:geoColor}}>{geoLabel}{geoRisk>=0.3?` ${(geoRisk*100).toFixed(0)}%`:''}</span>
+                <span className="ml-auto text-[#E8E9E4]/45" style={T2_MONO_STYLE}>{windowType.toUpperCase()} · {wins}W-{losses}L · {wr}%</span>
+              </>
+            );
+          })()}
+        </div>
+      </div>
+
     </main>
     </div>
   );
