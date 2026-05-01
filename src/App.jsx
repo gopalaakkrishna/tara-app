@@ -50,7 +50,11 @@ const sigmoid=(x,steep=0.035)=>1/(1+Math.exp(-steep*x));
 // Default signal weights — trained on 268-trade dataset
 // 163W-105L=60.8% · UP 65% · DOWN 55.6% · SS 68% · TD 87.5% · EU 69.7%
 // DOWN in SHORT SQUEEZE: 50% — regime-gated suppression active
-const DEFAULT_WEIGHTS={gap:52.69,momentum:49.99,structure:21.54,flow:58.00,technical:26.71,regime:43.13}; // V112: flow boosted (most predictive), regime up
+// V152: Added rangePosition — mean-reversion / range-exhaustion signal.
+// Measures how far we've drifted from window-open price relative to ATR-scaled envelope.
+// Contributes contrarian to the recent direction when |range| > 1.0 in late window.
+// Default weight matches "regime" tier — moderate, gradient descent can grow it if predictive.
+const DEFAULT_WEIGHTS={gap:52.69,momentum:49.99,structure:21.54,flow:58.00,technical:26.71,regime:43.13,rangePosition:35.00};
 
 // Per-regime weight sets — each regime gets its own gradient descent
 // Initialized from global defaults, diverge over time based on what works in each regime
@@ -61,13 +65,11 @@ const DEFAULT_WEIGHTS={gap:52.69,momentum:49.99,structure:21.54,flow:58.00,techn
 //       gives users a differentiated starting point on first load. Subsequent live trades
 //       continue to update via gradient descent on top.
 const DEFAULT_REGIME_WEIGHTS={
-  // V145: Reset to flat DEFAULT_WEIGHTS. Previous values were pre-trained by replaying
-  //       gradient descent over the 379-trade V138 seed, which is no longer in the file.
-  //       Per-regime divergence will now occur from live trades only (LR×2.5, V143).
-  'SHORT SQUEEZE': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
-  'RANGE-CHOP':    {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
-  'HIGH VOL CHOP': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
-  'TRENDING DOWN': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13},
+  // V145/V152: Per-regime starting weights — flat across regimes. rangePosition added in V152.
+  'SHORT SQUEEZE': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13,rangePosition:35.00},
+  'RANGE-CHOP':    {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13,rangePosition:35.00},
+  'HIGH VOL CHOP': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13,rangePosition:35.00},
+  'TRENDING DOWN': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13,rangePosition:35.00},
 };
 const REGIME_WEIGHT_KEYS={'SHORT SQUEEZE':'taraV110RW_SS_V110','RANGE-CHOP':'taraV110RW_RC_V110','HIGH VOL CHOP':'taraV110RW_HVC_V110','TRENDING DOWN':'taraV110RW_TD_V110'};
 const loadRegimeWeights=()=>{
@@ -83,7 +85,7 @@ const saveRegimeWeights=(rwObj)=>{
     if(rwObj[rg])try{localStorage.setItem(key,JSON.stringify(rwObj[rg]));}catch(e){}
   });
 };
-const WEIGHT_BOUNDS={gap:[5,65],momentum:[5,58],structure:[2,38],flow:[2,55],technical:[5,48],regime:[2,45]}; // expanded — flow/gap were hitting ceilings // bounds expanded so flow/regime can keep growing
+const WEIGHT_BOUNDS={gap:[5,65],momentum:[5,58],structure:[2,38],flow:[2,55],technical:[5,48],regime:[2,45],rangePosition:[5,55]}; // V152: rangePosition added — bounds let gradient descent grow or shrink it
 const LEARNING_RATE=0.8; // how aggressively to update weights per trade
 
 // Load weights from localStorage or use defaults
@@ -97,43 +99,18 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.04.30-v151-severe-collapse-release';
+const BASELINE_VERSION='2026.05.01-v2.0-mean-reversion-clean-restart';
 const BASELINE_RECORD={'15m':{wins:448,losses:278},'5m':{wins:33,losses:25}};
 
 const SEED_TRADES=[
-// V150: BAKED TRAINING — 29-trade seed exported from user's V149 session.
-// All signal columns are zero in this export (CSV export path doesn't pull from
-// pendingTradeRef.signals). The BASELINE_RECORD scorecard (448W-278L on 15m) is the
-// historical reference number — not derived from this seed array.
-  {id:1777566934909,dir:'UP',posterior:87.0,regime:'SHORT SQUEEZE',clockAtLock:565,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777567542886,dir:'DOWN',posterior:14.4,regime:'RANGE-CHOP',clockAtLock:857,hour:12,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777569944988,dir:'DOWN',posterior:9.6,regime:'RANGE-CHOP',clockAtLock:255,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777570318588,dir:'UP',posterior:84.2,regime:'RANGE-CHOP',clockAtLock:781,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777571191480,dir:'UP',posterior:81.2,regime:'RANGE-CHOP',clockAtLock:808,hour:13,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777572566911,dir:'DOWN',posterior:11.0,regime:'RANGE-CHOP',clockAtLock:333,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777572972041,dir:'UP',posterior:81.0,regime:'RANGE-CHOP',clockAtLock:828,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777574092633,dir:'DOWN',posterior:13.8,regime:'RANGE-CHOP',clockAtLock:607,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777574821473,dir:'DOWN',posterior:22.9,regime:'TRENDING DOWN',clockAtLock:779,hour:14,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777575640872,dir:'DOWN',posterior:14.3,regime:'TRENDING DOWN',clockAtLock:859,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777578796759,dir:'UP',posterior:33.2,regime:'RANGE-CHOP',clockAtLock:403,hour:15,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777579501244,dir:'UP',posterior:7.3,regime:'TRENDING DOWN',clockAtLock:598,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777580143193,dir:'DOWN',posterior:14.5,regime:'TRENDING DOWN',clockAtLock:856,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777581244750,dir:'UP',posterior:80.2,regime:'SHORT SQUEEZE',clockAtLock:655,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777581993531,dir:'DOWN',posterior:36.4,regime:'RANGE-CHOP',clockAtLock:806,hour:16,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777582954313,dir:'UP',posterior:80.2,regime:'RANGE-CHOP',clockAtLock:745,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777583827457,dir:'DOWN',posterior:10.5,regime:'RANGE-CHOP',clockAtLock:772,hour:17,session:'US',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777594989022,dir:'DOWN',posterior:8.8,regime:'RANGE-CHOP',clockAtLock:411,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777595464526,dir:'DOWN',posterior:26.7,regime:'TRENDING DOWN',clockAtLock:836,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777596372681,dir:'UP',posterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:827,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777597526067,dir:'UP',posterior:88.3,regime:'RANGE-CHOP',clockAtLock:574,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777598143425,dir:'UP',posterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:857,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777599113469,dir:'UP',posterior:84.7,regime:'SHORT SQUEEZE',clockAtLock:787,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777600394629,dir:'UP',posterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:406,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777601112512,dir:'UP',posterior:87.3,regime:'RANGE-CHOP',clockAtLock:588,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'LOSS'},
-  {id:1777602990319,dir:'DOWN',posterior:25.3,regime:'RANGE-CHOP',clockAtLock:510,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777609464421,dir:'DOWN',posterior:68.6,regime:'RANGE-CHOP',clockAtLock:335,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777610051195,dir:'UP',posterior:54.4,regime:'RANGE-CHOP',clockAtLock:648,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
-  {id:1777611914191,dir:'UP',posterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:585,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:0.0,structure:0.0,flow:0.0,technical:0.0,regime:0.0},result:'WIN'},
+// V152: SEED INTENTIONALLY EMPTY — clean training restart.
+// Previous 29-trade seed exported with all-zero signal data (pre-V148.1 logging bug),
+// so gradient descent couldn't learn from it. After V152 the export captures real per-signal
+// contributions, FGT alignment, range position, and outcome details. Live trades from V152
+// onward populate trade log and train weights from a clean foundation.
+//
+// BASELINE_RECORD scorecard (448W-278L on 15m, 33-25 on 5m) is preserved as the historical
+// reference number — independent of the seed array.
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
@@ -1582,10 +1559,17 @@ const computeV99Posterior=(params)=>{
   const gapMag=Math.abs(realGapBps);
   if(gapMag>15)gapScore+=Math.sign(realGapBps)*Math.pow(gapMag-10,1.3)*(is15m?0.45:0.65);
   if(gapMag>50)gapScore*=0.7;
-  const gapClamped=Math.max(-W.gap,Math.min(W.gap,gapScore))*strikeQuality; // V134: scale by strike quality
+  // V152 WINDOW-POSITION TAPER: gap matters more as window progresses (terminal price = where you are);
+  // momentum matters more early (when there's still time for direction to play out).
+  //   timeFraction=0 (start): gap×0.7  momentum×1.0
+  //   timeFraction=0.5 (mid):  gap×1.0  momentum×0.7
+  //   timeFraction=1.0 (end):  gap×1.3  momentum×0.4
+  const _gapTaper=0.7+(timeFraction||0)*0.6;       // 0.7 → 1.3 across window
+  const _momentumTaper=1.0-(timeFraction||0)*0.6;  // 1.0 → 0.4 across window
+  const gapClamped=Math.max(-W.gap,Math.min(W.gap,gapScore*_gapTaper))*strikeQuality; // V134/V152
   rawSignalScores.gap=gapClamped;
   totalScore+=gapClamped;
-  if(gapMag>15)reasoning.push(`[GAP] ${realGapBps.toFixed(1)} bps — gravity ${realGapBps>0?'bullish':'bearish'} | W:${W.gap.toFixed(0)}`);
+  if(gapMag>15)reasoning.push(`[GAP] ${realGapBps.toFixed(1)} bps — gravity ${realGapBps>0?'bullish':'bearish'} | W:${W.gap.toFixed(0)}${_gapTaper!==1.0?` ×${_gapTaper.toFixed(2)}`:''}`);
 
   // ── SIGNAL 2: MOMENTUM COMPOSITE ──
   // V134: Momentum reweighting late in window
@@ -1595,12 +1579,28 @@ const computeV99Posterior=(params)=>{
   const _momLateDamp=timeFraction>0.6?0.5:1.0; // dampen 1m drift when late in window
   if(is15m){momScore=drift5m*0.7+drift1m*0.3*_momLateDamp;}
   else{momScore=(v30s||0)*(10000/currentPrice)*1.5+drift1m*1.0*_momLateDamp+drift5m*0.5;}
-  if(momentumAlign.aligned&&momentumAlign.strong)momScore*=1.5;
-  else if(momentumAlign.aligned)momScore*=1.2;
-  const momClamped=Math.max(-W.momentum,Math.min(W.momentum,momScore*0.8));
+  // V152 EXHAUSTION CHECK: when price has already moved >=1σ from window open AND we're 60%+
+  // through the window, the alignment signal flips from amplifier to dampener. Continuation is
+  // less likely than reversion in this state.
+  let _momExhausted=false;
+  if(windowOpenPrice>0&&atrBps>0&&(timeFraction||0)>=0.6){
+    const _moveBps=((currentPrice-windowOpenPrice)/windowOpenPrice)*10000;
+    const _elapsedMin=Math.max(0.5,(timeFraction||0)*(is15m?15:5));
+    const _atrEnvelope=atrBps*Math.sqrt(_elapsedMin);
+    const _rangeBps=_atrEnvelope>0?_moveBps/_atrEnvelope:0;
+    // Same direction as momentum and at edge of range → exhausted
+    if(Math.abs(_rangeBps)>=1.0&&Math.sign(_rangeBps)===Math.sign(momScore)){_momExhausted=true;}
+  }
+  if(momentumAlign.aligned&&momentumAlign.strong){
+    momScore*=_momExhausted?0.6:1.5; // V152: inverted multiplier when exhausted
+    if(_momExhausted)reasoning.push(`[MOM-EXH] aligned move overextended — dampener applied (×0.6)`);
+  } else if(momentumAlign.aligned){
+    momScore*=_momExhausted?0.7:1.2;
+  }
+  const momClamped=Math.max(-W.momentum,Math.min(W.momentum,momScore*0.8*_momentumTaper));
   rawSignalScores.momentum=momClamped;
   totalScore+=momClamped;
-  reasoning.push(`[MOMENTUM] ${drift1m.toFixed(1)} bps/1m | ${drift5m.toFixed(1)} bps/5m${momentumAlign.aligned?' ✦ ALIGNED':''} | W:${W.momentum.toFixed(0)}`);
+  reasoning.push(`[MOMENTUM] ${drift1m.toFixed(1)} bps/1m | ${drift5m.toFixed(1)} bps/5m${momentumAlign.aligned?' ✦ ALIGNED':''}${_momExhausted?' ⚠ EXHAUSTED':''} | W:${W.momentum.toFixed(0)}${_momentumTaper!==1.0?` ×${_momentumTaper.toFixed(2)}`:''}`);
 
   // ── SIGNAL 3: CANDLE STRUCTURE ──
   let structScore=0;
@@ -1793,6 +1793,46 @@ const computeV99Posterior=(params)=>{
   rawSignalScores.regime=regimeClamped;
   totalScore+=regimeClamped;
 
+  // ── V152 NEW SIGNAL: rangePosition — mean reversion / range exhaustion ──
+  //
+  //   Rationale: Tara's other six signals (gap, momentum, structure, flow, technical, regime)
+  //   are all backward-looking — "what did price just do?" When recent move is up, all six tend
+  //   to point UP, even if price is already at the top of the typical range. This produces
+  //   the "she follows the line" behavior. We need a signal that explicitly fights overextended
+  //   moves to balance the trend-followers.
+  //
+  //   Math:
+  //     rangeBps = (currentPrice − windowOpenPrice) / atrEnvelope
+  //     atrEnvelope = atrBps × √(elapsed_minutes)   — Brownian volatility scaling
+  //   When |rangeBps| ≥ 1.0 AND windowProgress ≥ 0.4 (40%+ through window), we're at the edge
+  //   of typical range and reversion is more likely than continuation.
+  //
+  //   Contribution: -W.rangePosition × tanh(rangeBps - 1.0)   (signed against direction of move)
+  //   So if price moved +1.5σ from open in late window, rangePosition pushes DOWN.
+  //   Modest magnitude — not designed to dominate, just balance trend-followers.
+  let rangeBonus=0;
+  let rangeBps=0;
+  if(windowOpenPrice>0&&atrBps>0){
+    const moveBps=((currentPrice-windowOpenPrice)/windowOpenPrice)*10000;
+    // ATR envelope scaled by elapsed window minutes (sqrt — Brownian motion)
+    const elapsedMin=Math.max(0.5,(timeFraction||0)*(is15m?15:5));
+    const atrEnvelope=atrBps*Math.sqrt(elapsedMin);
+    rangeBps=atrEnvelope>0?moveBps/atrEnvelope:0;
+    // Only fire when we're past 40% of window AND rangeBps magnitude > 1.0
+    if((timeFraction||0)>=0.4&&Math.abs(rangeBps)>=1.0){
+      // tanh produces a smooth ±1 saturation past |rangeBps|=2
+      const excess=Math.abs(rangeBps)-1.0;
+      const saturation=Math.tanh(excess*0.7);
+      // SIGN INVERSION: if price went UP (positive rangeBps), this signal pushes DOWN (negative)
+      const rangeDir=rangeBps>0?-1:1;
+      rangeBonus=W.rangePosition*saturation*rangeDir*0.6; // 0.6 dampener — modest by default
+      reasoning.push(`[RANGE-EXH] price ${rangeBps.toFixed(1)}σ from open at ${((timeFraction||0)*100).toFixed(0)}% through window — contrarian ${rangeBonus.toFixed(0)}`);
+    }
+  }
+  const rangeClamped=Math.max(-W.rangePosition,Math.min(W.rangePosition,rangeBonus));
+  rawSignalScores.rangePosition=rangeClamped;
+  totalScore+=rangeClamped;
+
   // Synaptic memory override
   const mem=regimeMemory?regimeMemory[regime]:null;
   if(mem&&(mem.wins+mem.losses)>=3){const wr=mem.wins/(mem.wins+mem.losses);if(wr<0.45){upThreshold+=6;downThreshold-=6;reasoning.push(`[MEMORY] Low WR (${(wr*100).toFixed(0)}%) in ${regime} — tightening`);}else if(wr>0.65){upThreshold-=4;downThreshold+=4;reasoning.push(`[MEMORY] High WR (${(wr*100).toFixed(0)}%) in ${regime} — loosening`);}}
@@ -1868,7 +1908,10 @@ const computeV99Posterior=(params)=>{
   //       for the gap to hit -30 bps. Same magnitude thresholds, opposite signs.
   const isMoonshot=tickSlope>5&&aggrFlow>0.6;
 
-  return{posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isMoonshot,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty};
+  return{posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isMoonshot,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty,
+    // V152: range-position telemetry — exposed so trade log can audit "was Tara at the edge of typical range?"
+    rangeBps,
+  };
 };
 
 // ═══════════════════════════════════════
@@ -2872,6 +2915,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
             {k:'flow',label:'Flow',v:sig.flow||0},
             {k:'tech',label:'Technical',v:sig.technical||0},
             {k:'reg',label:'Regime',v:sig.regime||0},
+            {k:'rng',label:'Range Pos',v:sig.rangePosition||0},
           ];
           // FGT effective contribution: 4/4=±30, 3/4=±18, 2/4=±8 (V136 calibration)
           const fgtAbs=Math.abs(mtf||0);
@@ -3323,19 +3367,38 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
           <h2 className="text-lg font-serif text-white">📋 Session Start Check</h2>
           <button onClick={onClose} className="text-[#E8E9E4]/40 hover:text-white text-xl leading-none">×</button>
         </div>
-        {/* V145: Always show sync + fresh-start options. Heading copy adapts to whether
-                  the user is on a stale version (drift) or already current. */}
-        <div className="mb-3 p-3 rounded-lg bg-indigo-500/10 border-2 border-indigo-500/40">
-          <div className="text-[10px] uppercase text-indigo-300 font-bold mb-1">
-            {baselineDrift?(<>📦 New Version Available — {(BASELINE_VERSION||'').match(/v\d+/i)?.[0]?.toUpperCase()||'V151'}</>):(<>📦 Training Baseline</>)}
-          </div>
-          <div className="text-xs text-[#E8E9E4]/80 mb-3">
-            {baselineDrift?'A new engine version has shipped. Choose how to start your trading session:':'Manage Tara\'s training data. Sync brings in the baseline trades + scorecard. Fresh start wipes everything for clean self-training.'}
-          </div>
+        {/* V2.0: Session Start banner promoted for major release. Gold accent matches header
+                  badge. baselineDrift state reads as a milestone announcement. */}
+        <div className={baselineDrift?'mb-3 p-4 rounded-lg border-2':'mb-3 p-3 rounded-lg bg-indigo-500/10 border-2 border-indigo-500/40'} style={baselineDrift?{
+          background:'linear-gradient(135deg, rgba(212,175,55,0.10), rgba(212,175,55,0.03) 60%, rgba(0,0,0,0.2))',
+          borderColor:'rgba(212,175,55,0.45)',
+          boxShadow:'inset 0 0 24px rgba(212,175,55,0.06)',
+        }:{}}>
+          {baselineDrift?(
+            <>
+              <div className="flex items-baseline gap-2 mb-1.5">
+                <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Major Release</span>
+                <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
+              </div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>2.0</span></div>
+              <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
+                A new architecture for the secondary signals — mean reversion, momentum exhaustion, window-position weighting. FGT/HPotter remains primary. Choose how to start:
+              </div>
+            </>
+          ):(
+            <>
+              <div className="text-[10px] uppercase text-indigo-300 font-bold mb-1">📦 Training Baseline</div>
+              <div className="text-xs text-[#E8E9E4]/80 mb-3">Manage Tara's training data. Sync brings in the baseline trades + scorecard. Fresh start wipes everything for clean self-training.</div>
+            </>
+          )}
           <div className="grid grid-cols-1 gap-2">
-            <button onClick={()=>{if(runSyncWithProgress)runSyncWithProgress();}} disabled={syncState&&syncState.active} className="w-full py-2 px-3 bg-indigo-500 hover:bg-indigo-400 text-white rounded text-xs uppercase tracking-wide disabled:opacity-50 text-left">
+            <button onClick={()=>{if(runSyncWithProgress)runSyncWithProgress();}} disabled={syncState&&syncState.active} className={baselineDrift?'w-full py-2.5 px-3 rounded text-xs uppercase tracking-wide font-bold disabled:opacity-50 text-left transition-colors':'w-full py-2 px-3 bg-indigo-500 hover:bg-indigo-400 text-white rounded text-xs uppercase tracking-wide disabled:opacity-50 text-left'} style={baselineDrift?{
+              background:'rgba(212,175,55,0.18)',
+              border:'1px solid rgba(212,175,55,0.45)',
+              color:'#E5C870',
+            }:{}}>
               <div className="font-bold">{syncState&&syncState.active?'Syncing...':'⬇ Sync to Baseline'}</div>
-              <div className="text-[10px] text-indigo-200/80 normal-case font-normal mt-0.5">Load baked training data ({BASELINE_RECORD['15m'].wins}W-{BASELINE_RECORD['15m'].losses}L · {(100*BASELINE_RECORD['15m'].wins/(BASELINE_RECORD['15m'].wins+BASELINE_RECORD['15m'].losses)).toFixed(1)}% WR on 15m). Replaces your current trade log.</div>
+              <div className={baselineDrift?'text-[10px] normal-case font-normal mt-0.5':'text-[10px] text-indigo-200/80 normal-case font-normal mt-0.5'} style={baselineDrift?{color:'rgba(229,200,112,0.7)'}:{}}>Load baked training data ({BASELINE_RECORD['15m'].wins}W-{BASELINE_RECORD['15m'].losses}L · {(100*BASELINE_RECORD['15m'].wins/(BASELINE_RECORD['15m'].wins+BASELINE_RECORD['15m'].losses)).toFixed(1)}% WR on 15m). Replaces your current trade log.</div>
             </button>
             {resetFreshStart&&(
               <button onClick={resetFreshStart} className="w-full py-2 px-3 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-200 rounded text-xs uppercase tracking-wide text-left">
@@ -3555,7 +3618,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara V151 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 2.0 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -3653,7 +3716,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara V151'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 2.0'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -3750,7 +3813,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara V151  |  signal'},
+        footer:{text:'Tara 2.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3764,7 +3827,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V151  |  stand-down'},
+        footer:{text:'Tara 2.0  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3778,7 +3841,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara V151  |  search'},
+        footer:{text:'Tara 2.0  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3795,7 +3858,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara V151  |  lock'},
+        footer:{text:'Tara 2.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3812,7 +3875,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara V151  |  close'},
+          footer:{text:'Tara 2.0  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -3833,7 +3896,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara V151  |  exit'},
+        footer:{text:'Tara 2.0  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -3862,12 +3925,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara V151  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 2.0  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara V151',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 2.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -3886,7 +3949,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara V151 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 2.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -4784,6 +4847,7 @@ function TaraApp(){
         rawSignalScores:eng.rawSignalScores||{},
         mtfAlignment:eng.mtfAlignment,
         fgtResults:eng.fgtResults||{},
+        rangeBps:Number(eng.rangeBps||0), // V152
         lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null,
         bullCount:Number(bullCount),bearCount:Number(bearCount)};
     }catch(err){return{prediction:'ERROR',rawProbAbove:50,projections:[],reasoning:[err.stack||String(err)],textColor:'text-rose-500',advisor:{label:'MATH CRASH',reason:String(err),color:'rose',animate:false,hasAction:false},regime:'ERROR'};}
@@ -5059,6 +5123,7 @@ function TaraApp(){
         gapAtEntry:gapBps,                                       // bps gap to strike at entry
         kalshiAtLock:kalshiYesPrice!=null?Number(kalshiYesPrice):null, // Kalshi YES price (UP %) at lock
         fgtAlignment:analysis?.mtfAlignment||0,                  // -4 to +4 multi-timeframe FGT
+        rangeBps:analysis?.rangeBps||0,                          // V152: range position at lock (σ from window open)
         geoRisk:newsSentiment?.geoRisk||0,                       // V145: geo/macro risk at lock (0-1)
         geoTopic:newsSentiment?.geoTopic||null,                  // V145: top headline driving the risk
         windowOpenPrice:windowOpenPriceRef.current||0,           // BTC at window start
@@ -5164,7 +5229,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara V151...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 2.0...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -5251,11 +5316,19 @@ function TaraApp(){
       <header className={'sticky top-0 z-40 bg-[#111312]/95 backdrop-blur-md border-b border-[#E8E9E4]/10 px-2 sm:px-4 py-2 shrink-0'}>
         <div className="max-w-[1600px] mx-auto flex items-center gap-1 sm:gap-2">
           
-          {/* Logo — text only on mobile, badge on sm+ */}
-          <div className="flex items-center gap-1 shrink-0">
+          {/* Logo — text only on mobile, 2.0 badge on sm+ */}
+          {/* V2.0: redesigned badge — gold accent, deliberate weight. Matches the studio's
+                   restrained-luxury aesthetic. The pulse dot stays — it's the live-state indicator. */}
+          <div className="flex items-center gap-1.5 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
-            <span className={'hidden sm:flex items-center gap-1 text-[10px] font-sans bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded-full border border-emerald-500/20'}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> V151
+            <span className={'hidden sm:flex items-center gap-1.5 text-[10px] font-sans font-bold tracking-wider px-2 py-0.5 rounded-md border'} style={{
+              background:'linear-gradient(135deg, rgba(212,175,55,0.15), rgba(212,175,55,0.05))',
+              borderColor:'rgba(212,175,55,0.35)',
+              color:'#E5C870',
+              boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
+            }}>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
+              2.0
             </span>
           </div>
 
@@ -5644,7 +5717,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara V151</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 2.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -5671,8 +5744,38 @@ function TaraApp(){
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={()=>{
-                  const csv=['id,dir,posterior,regime,clockAtLock,hour,session,windowType,gap,momentum,structure,flow,technical,regime_s,result'].concat(
-                    tradeLog.map(t=>`${t.id},${t.dir},${t.posterior?.toFixed(1)},${t.regime},${t.clockAtLock},${t.hour},${t.session},${t.windowType},${t.signals?.gap?.toFixed(2)||0},${t.signals?.momentum?.toFixed(2)||0},${t.signals?.structure?.toFixed(2)||0},${t.signals?.flow?.toFixed(2)||0},${t.signals?.technical?.toFixed(2)||0},${t.signals?.regime?.toFixed(2)||0},${t.result||'PENDING'}`)
+                  // V152: Expanded export — adds V145 telemetry + V152 rangePosition.
+                  // outcomeDir column = direction implied by close vs strike (does NOT use t.dir).
+                  // dir = the direction Tara LOCKED, distinct from the outcome.
+                  const headers='id,timestampISO,dir,outcomeDir,result,posterior,rawPosterior,regime,clockAtLock,hour,session,windowType,'+
+                                'gap,momentum,structure,flow,technical,regime_s,rangePosition,'+
+                                'entryPrice,closingPrice,strikeAtLock,strikePrice,gapAtEntry,closingGapBps,'+
+                                'kalshiAtLock,kalshiAtClose,fgtAlignment,rangeBps,qualityScore,'+
+                                'geoRisk,geoTopic,reversed,earlyExit,forceExit';
+                  const csv=[headers].concat(
+                    tradeLog.map(t=>{
+                      // V152: Compute outcomeDir from close vs strike (independent of t.dir).
+                      // This is the actual outcome direction, separate from Tara's call.
+                      let outcomeDir='';
+                      if(t.closingPrice!=null&&t.strikePrice!=null){
+                        outcomeDir=t.closingPrice>=t.strikePrice?'UP':'DOWN';
+                      }
+                      const safe=(v)=>v==null?'':String(v).replace(/[",\n]/g,' ');
+                      const num=(v,d=2)=>v==null||isNaN(v)?'':Number(v).toFixed(d);
+                      return [
+                        t.id,safe(t.timestampISO),t.dir||'',outcomeDir,t.result||'PENDING',
+                        num(t.posterior,1),num(t.rawPosterior,1),safe(t.regime),
+                        t.clockAtLock||0,t.hour||0,safe(t.session),safe(t.windowType),
+                        num(t.signals?.gap),num(t.signals?.momentum),num(t.signals?.structure),
+                        num(t.signals?.flow),num(t.signals?.technical),num(t.signals?.regime),num(t.signals?.rangePosition),
+                        num(t.entryPrice,2),num(t.closingPrice,2),num(t.strikeAtLock,2),num(t.strikePrice,2),
+                        num(t.gapAtEntry,1),num(t.closingGapBps,1),
+                        num(t.kalshiAtLock,1),num(t.kalshiAtClose,1),
+                        t.fgtAlignment||0,num(t.rangeBps,2),num(t.qualityScore,0),
+                        num(t.geoRisk,2),safe(t.geoTopic||'').slice(0,80),
+                        t.reversed?1:0,t.earlyExit?1:0,t.forceExit?1:0,
+                      ].join(',');
+                    })
                   ).join('\n');
                   const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);a.download='tara_training_data.csv';a.click();
                 }} className={'px-3 py-1 text-xs font-bold uppercase tracking-wide rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/30 transition-colors'}>Export CSV</button>
@@ -6240,7 +6343,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara V151 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 2.0 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -6396,10 +6499,31 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara V151 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 2.0 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+              {/* V2.0: Major release — gold marker distinguishes from incremental V147/V145/V144 entries */}
+              <section className="mb-2 pb-3 border-b border-[#E8E9E4]/10">
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:'#E5C870'}}>Major Release</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:'#E5C870'}}>2.0</span></h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">A new architecture for the secondary signals — directly addresses the "Tara follows the line" pattern by adding a signal that explicitly fights overextended moves, plus window-position-aware weighting that shifts emphasis from momentum (early window) to gap (late window).</p>
+              </section>
+              <section><h3 className="font-bold uppercase tracking-wide mb-2 text-xs" style={{color:'#E5C870'}}>What Changed</h3>
+              <ul className="list-disc pl-4 space-y-1 mt-2">
+                <li><strong>Architectural change to how secondary signals score.</strong> Previous behavior: gap, momentum, structure, flow, technical, and regime all answered "what direction did price recently move?" — when recent move was up, all six pointed UP, even at the top of the typical range. This produced the "Tara follows the line" pattern. V152 adds a 7th signal — <strong>rangePosition</strong> — that fights overextended moves.</li>
+                <li><strong>rangePosition signal.</strong> Computes price displacement from window-open in ATR-σ units. When |range| ≥ 1.0 AND we're 40%+ through the window, contributes contrarian to the direction of move. Default weight 35, gradient descent can grow or shrink. Visible in Score Breakdown panel as "Range Pos" row, and in engine log as <code>[RANGE-EXH]</code>.</li>
+                <li><strong>Momentum exhaustion.</strong> The 1.5× alignment bonus on momentum (when 1m/5m/15m all agree) inverts to 0.6× when range is overextended in late window. Strong continuation signal becomes a contrarian dampener.</li>
+                <li><strong>Window-position taper.</strong> Gap weight tapers UP through the window (×0.7 → ×1.3) — terminal price = where you ARE matters more late. Momentum weight tapers DOWN (×1.0 → ×0.4) — momentum mattered most early when there was still time for direction to play out.</li>
+                <li><strong>FGT/HPotter remains primary.</strong> Multi-timeframe FGT alignment still contributes ±30 / ±18 / ±8 and still drives lock decisions. Trajectory forecast unchanged. The architectural changes affect only the six (now seven) secondary signals.</li>
+                <li><strong>CSV export expanded.</strong> Now exports V145 telemetry (entry/close prices, gaps, Kalshi at lock and close, FGT alignment, geo risk) plus V152 rangeBps and rangePosition signal. New <code>outcomeDir</code> column shows actual outcome direction (close vs strike), separate from <code>dir</code> which records what Tara LOCKED. Disambiguates the dir/posterior anomalies seen in older logs.</li>
+                <li><strong>Clean training restart.</strong> SEED_TRADES is now empty. The 29-trade seed had all-zero signal data (pre-V148.1 logging bug), so gradient descent couldn't learn from it anyway. Fresh start with V144 calibration prior baked in. Live trades from V152 onward will be the first dataset Tara has ever had with real signal-direction-outcome triples. Scorecard 448W-278L preserved as historical reference.</li>
+              </ul>
+              <p className="mt-2 text-amber-300/70 text-[11px]"><strong>Expect noise for the first 20-30 trades.</strong> The new signal needs to find its weight via gradient descent. Some calls you would have won will become losses (when continuation actually continues) — that's the cost of fighting trend. Long-run goal: calls match what you visually read in the chart instead of just following the line.</p>
+              </section>
               <section><h3 className="text-emerald-400 font-bold uppercase tracking-wide mb-2 text-xs">⚖ V147 — symmetry fix + measured loosening</h3>
               <ul className="list-disc pl-4 space-y-1 mt-2">
                 <li><strong>Fix A — symmetric firing condition.</strong> UP previously fired when historical samples cleared the threshold, even if current posterior had since dropped back. DOWN required both samples cleared AND current posterior still below threshold. UP now requires both, mirroring DOWN. Small UP-favoring asymmetry in wobbling markets removed.</li>
