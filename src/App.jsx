@@ -99,7 +99,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.02-v4.2-tara-call-prominence-faster-lock';
+const BASELINE_VERSION='2026.05.02-v4.4-kalshi-events-endpoint';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -3416,18 +3416,16 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType}
         const bgClr=tc.call==='UP'?'rgba(52,211,153,0.08)':tc.call==='DOWN'?'rgba(244,114,182,0.08)':'rgba(229,200,112,0.05)';
         const callLabel=tc.call==='SIT_OUT'?'SIT OUT':tc.call;
         const arrow=tc.call==='UP'?'▲':tc.call==='DOWN'?'▼':'—';
-        // Phase label — same source as the prediction-card phase strip but for Tara's lifecycle
-        const phaseLabel=tc.phase||(isCall?(tc.locked?'LOCKED':'SIGNAL'):tc.call==='SIT_OUT'?'SIT OUT':'ANALYZING');
+        // V4.3: Phase derived from snapshot + sample state
+        const snap=tc.snapshot;
+        const phaseLabel=snap?(snap.call==='SIT_OUT'?'SAT OUT':'LOCKED'):isCall?'SIGNAL':tc.call==='SIT_OUT'?'WATCHING':'ANALYZING';
+        const phaseHint=snap?(snap.earlyLock?'committed early — clean conditions':'committed at endgame'):isCall?`building conviction — ${tc.samples||0}/${tc.needSamples||6} samples`:tc.call==='SIT_OUT'?'conditions don\'t justify a call':'gathering data';
+        const phaseProgressPct=snap?100:isCall&&tc.needSamples?Math.min(95,(tc.samples/tc.needSamples)*100):tc.call==='SIT_OUT'?60:15;
         return(
           <div className="mb-3 px-3 py-3 rounded-lg shrink-0" style={{background:bgClr,border:'1px solid '+borderClr,boxShadow:isCall?`inset 0 0 24px ${tc.call==='UP'?'rgba(52,211,153,0.06)':'rgba(244,114,182,0.06)'}`:'none'}}>
             <div className="flex items-baseline justify-between mb-2">
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-[10px] uppercase tracking-[0.22em] font-bold" style={{color:T2_GOLD}}>Tara's Call</span>
-                <span className="text-[9px] tracking-wider text-[#E8E9E4]/35 uppercase">· {phaseLabel}</span>
-              </div>
-              {wr!==null&&<span className="text-[9px] tracking-wider text-[#E8E9E4]/45 tabular-nums">{sc.wins}W · {sc.losses}L · {sc.sitouts||0} skip · {wr}%</span>}
-              {wr===null&&((sc.sitouts||0)>0)&&<span className="text-[9px] tracking-wider text-[#E8E9E4]/45 tabular-nums">{sc.sitouts} skip · no calls yet</span>}
-              {wr===null&&((sc.sitouts||0)===0)&&<span className="text-[9px] tracking-wider text-[#E8E9E4]/30 tabular-nums">no rounds yet</span>}
+              <span className="text-[10px] uppercase tracking-[0.22em] font-bold" style={{color:T2_GOLD}}>Tara's Call</span>
+              {snap&&snap.earlyLock&&<span className="text-[8px] tracking-[0.18em] uppercase text-emerald-400/70 font-bold">⚡ early lock</span>}
             </div>
             <div className="flex items-center justify-between gap-3 mb-1.5">
               <div className={`flex items-baseline gap-2 ${callColor}`}>
@@ -3436,22 +3434,81 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType}
                 {isCall&&<span className="text-lg tabular-nums opacity-75 self-baseline">{tc.confidence}%</span>}
               </div>
             </div>
-            <div className="text-[11px] text-[#E8E9E4]/65 leading-snug">{tc.reason||'Awaiting signal data...'}</div>
-            {/* Phase progress bar — visualizes where Tara is in her commitment process */}
-            {tc.phaseProgress!==undefined&&(
-              <div className="mt-2.5">
-                <div className="flex justify-between mb-1 text-[8px] tracking-[0.18em] text-[#E8E9E4]/40 uppercase">
-                  <span>{tc.phaseLeft||''}</span>
-                  <span>{tc.phaseRight||''}</span>
+            <div className="text-[11px] text-[#E8E9E4]/65 leading-snug mb-3">{tc.reason||'Awaiting signal data...'}</div>
+
+            {/* V4.3: vs General prediction — show how Tara compares to the engine's read */}
+            {analysis&&(()=>{
+              const genPred=analysis.prediction||'';
+              const genPost=analysis.posterior||50;
+              const genDir=genPred.includes('UP')?'UP':genPred.includes('DOWN')?'DOWN':null;
+              const genState=genPred.includes('LOCKED')?'LOCKED':genPred.includes('FORMING')?'FORMING':genPred.includes('SEARCHING')?'SEARCHING':genPred.includes('SITTING')?'SIT OUT':genPred.includes('REJECTED')?'REJECTED':'WATCHING';
+              const isOverride=tc.call==='SIT_OUT'&&genDir!=null;
+              const isAgree=isCall&&genDir===tc.call;
+              const isDisagree=isCall&&genDir&&genDir!==tc.call;
+              const tagLabel=isOverride?'TARA OVERRIDES — engine sees a call, Tara isn\'t convinced':isAgree?'TARA AGREES — same direction as engine':isDisagree?'TARA DISAGREES — engine and Tara split':'TARA OBSERVING — engine still searching';
+              const tagColor=isOverride?'text-amber-400/85':isAgree?'text-emerald-400/85':isDisagree?'text-rose-400/85':'text-[#E8E9E4]/45';
+              const genArrow=genDir==='UP'?'▲':genDir==='DOWN'?'▼':'—';
+              const genColor=genDir==='UP'?'text-emerald-400/65':genDir==='DOWN'?'text-rose-400/65':'text-[#E8E9E4]/45';
+              return(
+                <div className="mb-3 px-2.5 py-2 rounded-md bg-[#0E100F]/50 border border-[#E8E9E4]/8">
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="text-[8px] uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold">Engine general prediction</span>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className={`flex items-baseline gap-1.5 ${genColor}`}>
+                      <span className="text-sm">{genArrow}</span>
+                      <span className="text-sm font-bold tabular-nums">{genState}</span>
+                      {genDir&&<span className="text-[10px] tabular-nums opacity-70">{genPost.toFixed(0)}%</span>}
+                    </div>
+                    <span className={`text-[9px] tracking-wider uppercase font-bold ${tagColor} text-right`}>{tagLabel.split('—')[0].trim()}</span>
+                  </div>
+                  <div className="text-[9px] text-[#E8E9E4]/45 mt-1 italic">{tagLabel.split('—')[1]?.trim()||''}</div>
                 </div>
-                <div className="w-full h-0.5 bg-[#0E100F] rounded-full overflow-hidden">
-                  <div className="h-full transition-all duration-700" style={{
-                    width:Math.max(0,Math.min(100,tc.phaseProgress))+'%',
-                    background:tc.call==='UP'?'rgba(52,211,153,0.6)':tc.call==='DOWN'?'rgba(244,114,182,0.6)':T2_GOLD,
-                  }}/>
+              );
+            })()}
+
+            {/* V4.3: Phase strip — Tara's lifecycle on her own card. */}
+            <div className="mb-3">
+              <div className="flex justify-between items-baseline mb-1">
+                <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold">Phase · {phaseLabel}</span>
+                <span className="text-[9px] tracking-wider text-[#E8E9E4]/40">{phaseHint}</span>
+              </div>
+              <div className="relative h-1 bg-[#0E100F] rounded-full overflow-hidden">
+                <div className="absolute top-0 bottom-0 w-px bg-[#E8E9E4]/15" style={{left:'15%'}}></div>
+                <div className="absolute top-0 bottom-0 w-px bg-[#E8E9E4]/15" style={{left:'40%'}}></div>
+                <div className="absolute top-0 bottom-0 w-px bg-[#E8E9E4]/25" style={{left:'85%'}}></div>
+                <div className="absolute top-0 bottom-0 left-0 transition-all duration-700" style={{
+                  width:phaseProgressPct.toFixed(0)+'%',
+                  background:isCall?(tc.call==='UP'?'rgba(52,211,153,0.6)':'rgba(244,114,182,0.6)'):tc.call==='SIT_OUT'?'rgba(245,158,11,0.55)':T2_GOLD,
+                  opacity:0.9,
+                }}/>
+              </div>
+            </div>
+
+            {/* V4.3: Scorecard — visible, larger numbers, color-coded. */}
+            <div className="border-t border-[#E8E9E4]/8 pt-2.5">
+              <div className="flex justify-between items-baseline mb-1.5">
+                <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/45 font-bold">Tara's Record</span>
+                {wr!==null&&<span className="text-[10px] tabular-nums text-[#E8E9E4]/60">{wr}% win rate</span>}
+                {wr===null&&<span className="text-[10px] text-[#E8E9E4]/35">no calls yet</span>}
+              </div>
+              <div className="flex items-end gap-3">
+                <div className="flex flex-col items-center">
+                  <span className="text-2xl font-serif font-bold text-emerald-400 tabular-nums leading-none">{sc.wins||0}</span>
+                  <span className="text-[8px] uppercase tracking-wider text-emerald-400/60 mt-1">wins</span>
+                </div>
+                <div className="h-7 w-px bg-[#E8E9E4]/10"></div>
+                <div className="flex flex-col items-center">
+                  <span className="text-2xl font-serif font-bold text-rose-400 tabular-nums leading-none">{sc.losses||0}</span>
+                  <span className="text-[8px] uppercase tracking-wider text-rose-400/60 mt-1">losses</span>
+                </div>
+                <div className="h-7 w-px bg-[#E8E9E4]/10"></div>
+                <div className="flex flex-col items-center">
+                  <span className="text-2xl font-serif font-bold tabular-nums leading-none" style={{color:T2_GOLD}}>{sc.sitouts||0}</span>
+                  <span className="text-[8px] uppercase tracking-wider mt-1" style={{color:'rgba(229,200,112,0.6)'}}>sat out</span>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         );
       })()}
@@ -4944,7 +5001,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>4.2</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>4.4</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5236,7 +5293,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 4.2 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 4.4 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5345,7 +5402,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 4.2'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 4.4'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -5505,7 +5562,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 4.2  |  signal'},
+        footer:{text:'Tara 4.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5519,7 +5576,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 4.2  |  stand-down'},
+        footer:{text:'Tara 4.4  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5533,7 +5590,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 4.2  |  search'},
+        footer:{text:'Tara 4.4  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5550,7 +5607,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 4.2  |  lock'},
+        footer:{text:'Tara 4.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5567,7 +5624,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 4.2  |  close'},
+          footer:{text:'Tara 4.4  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5588,7 +5645,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 4.2  |  exit'},
+        footer:{text:'Tara 4.4  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5609,7 +5666,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 4.2  |  scanning'},
+        footer:{text:'Tara 4.4  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5629,7 +5686,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 4.2  |  signal'},
+        footer:{text:'Tara 4.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5649,7 +5706,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 4.2  |  lock'},
+        footer:{text:'Tara 4.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5666,7 +5723,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 4.2  |  sit-out'},
+        footer:{text:'Tara 4.4  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5688,7 +5745,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 4.2  |  result'},
+          footer:{text:'Tara 4.4  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5725,12 +5782,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 4.2  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 4.4  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 4.2',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 4.4',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -5749,7 +5806,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 4.2 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 4.4 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -5855,14 +5912,37 @@ function TaraApp(){
         //   come from origins Kalshi hasn't throttled. Route through corsproxy.io which
         //   caches responses (~10s) and uses different IPs — this is a known pattern for
         //   indie traders. Fall back to direct fetch if proxy itself fails.
+        // V4.4 KALSHI BREAKTHROUGH: Switch from /markets to /events?with_nested_markets=true.
+        //   Per docs review: /events scoped by min_close_ts returns just events closing soon,
+        //   not all 200 markets across the series. Different rate-limit bucket. Smaller payload.
+        //   Markets are nested by event — each 15m event has 2 markets (greater/less strike).
+        //   Field names also migrated: yes_bid_dollars (string like "0.5600"), floor_strike
+        //   (number, the actual strike value), cap_strike. Old yes_ask/yes_bid/last_price are
+        //   deprecated. floor_strike IS the strike — no ticker regex needed.
         // V4.2: Always KXBTC15M (this effect only runs on 15m windows now)
         const _seriesTicker='KXBTC15M';
-        const _kalshiUrl=`https://api.elections.kalshi.com/trade-api/v2/markets?limit=200&series_ticker=${_seriesTicker}&status=open`;
-        // Try proxy first
-        let result=await fetchWithRetry(`https://corsproxy.io/?url=${encodeURIComponent(_kalshiUrl)}`,2);
+        // min_close_ts: events with at least one market closing after (now - 5min). Captures
+        //   the active window plus a buffer for clock skew between us and Kalshi.
+        const _minCloseTs=Math.floor(Date.now()/1000)-300;
+        const _eventsUrl=`https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=${_seriesTicker}&with_nested_markets=true&status=open&limit=50&min_close_ts=${_minCloseTs}`;
+        // V4.3: Multi-proxy strategy. Direct first (some networks let it through), then
+        //   corsproxy.io, then allorigins.win. Different IPs, different rate-limit buckets.
+        let result=await fetchWithRetry(_eventsUrl,1); // direct, single try
         if(!result.ok){
-          // Fallback to direct
-          result=await fetchWithRetry(_kalshiUrl,2);
+          result=await fetchWithRetry(`https://corsproxy.io/?url=${encodeURIComponent(_eventsUrl)}`,1);
+        }
+        if(!result.ok){
+          // allorigins wraps response in {contents: "<json>"}, unwrap below
+          const allOriginsResult=await fetchWithRetry(`https://api.allorigins.win/get?url=${encodeURIComponent(_eventsUrl)}`,1);
+          if(allOriginsResult.ok&&allOriginsResult.data?.contents){
+            try{
+              result={ok:true,data:JSON.parse(allOriginsResult.data.contents)};
+            }catch(e){
+              result={ok:false,reason:'allorigins parse error'};
+            }
+          } else {
+            result=allOriginsResult;
+          }
         }
         if(!result.ok){
           // V3.2.1: All retries exhausted. Try last-successful cache before giving up.
@@ -5882,30 +5962,36 @@ function TaraApp(){
           return;
         }
         const d=result.data;
-        const markets=d.markets||d.data||[];
-        // V3.1.7: Aggressively try every plausible field name for strike. Kalshi API has
-        //         shifted field names a few times — try them all.
+        // /events response shape: {events: [{event_ticker, markets: [{...}], ...}]}
+        const events=d.events||[];
+        // Flatten nested markets, tagging each with its parent event_ticker for matching
+        const markets=[];
+        for(const ev of events){
+          const evMarkets=ev.markets||[];
+          for(const m of evMarkets){
+            markets.push({...m, _event_ticker:ev.event_ticker});
+          }
+        }
+        // V4.4: New extractStrike — floor_strike and cap_strike are now numbers per Kalshi's
+        //   migrated schema. Fall through to legacy fields + ticker regex if those are absent
+        //   (e.g. old cached responses or other series).
         const _extractStrike=(m)=>{
-          // Direct numeric fields, in order of likelihood
+          // Direct numeric fields, in order of likelihood for v2 schema
           const candidates=[
             m.floor_strike,m.cap_strike,m.strike_price,m.strike,
             m.expected_expiration_value,m.expiration_value,m.settlement_value,
-            m.price,m.level,m.threshold,m.value,
           ];
           for(const c of candidates){
             if(c==null)continue;
             const n=Number(c);
             if(isFinite(n)&&n>1000&&n<10000000)return n;
           }
-          // Ticker pattern matching — multiple known Kalshi conventions
+          // Ticker pattern matching — fallback for legacy schema or unusual events
           if(m.ticker){
-            // KXBTC-26MAY02H1715-T78250 (T<strike>)
             const t1=m.ticker.match(/-T(\d{4,7}(?:\.\d+)?)/);
             if(t1){const n=Number(t1[1]);if(n>1000&&n<10000000)return n;}
-            // KXBTCD-26MAY02H1715-78250 (trailing digits)
             const t2=m.ticker.match(/-(\d{4,7}(?:\.\d+)?)$/);
             if(t2){const n=Number(t2[1]);if(n>1000&&n<10000000)return n;}
-            // KXBTC-...78250B / 78250.5 (any 5+ digit number)
             const t3=m.ticker.match(/(\d{5,7}(?:\.\d+)?)/g);
             if(t3){
               for(const candidate of t3){
@@ -5914,8 +6000,8 @@ function TaraApp(){
               }
             }
           }
-          // Subtitle / title text — find dollar amounts
-          const titleText=(m.subtitle||m.title||m.yes_sub_title||m.no_sub_title||m.event_ticker||'')+' ';
+          // Subtitle text fallback
+          const titleText=(m.subtitle||m.title||m.yes_sub_title||m.no_sub_title||m.event_ticker||m._event_ticker||'')+' ';
           const tm=titleText.match(/\$?([\d,]+(?:\.\d+)?)/g);
           if(tm){
             for(const match of tm){
@@ -5935,21 +6021,31 @@ function TaraApp(){
           // Expose debug state for inspection in DevTools
           window.__taraKalshiDebug={
             ok:true,
+            endpoint:'events',
+            totalEvents:events.length,
             totalMarkets:markets.length,
             matchingClose:matchingClose.length,
             sampleFields:markets[0]?Object.keys(markets[0]):[],
             sampleTicker:markets[0]?.ticker||null,
-            sampleSubtitle:markets[0]?.subtitle||markets[0]?.yes_sub_title||null,
+            sampleEvent:markets[0]?._event_ticker||null,
+            sampleStrike:markets[0]?.floor_strike||markets[0]?.cap_strike||null,
+            sampleYesBid:markets[0]?.yes_bid_dollars||null,
           };
         }
         if(matchingClose.length===0){
-          setKalshiDebug({ok:true,reason:`${markets.length} markets · 0 matching close_time`,totalMarkets:markets.length,matchingClose:0,bestStrike:null,sampleFields:markets[0]?Object.keys(markets[0]).slice(0,8):[]});
+          setKalshiDebug({ok:true,reason:`${events.length} events · ${markets.length} markets · 0 matching close_time`,totalMarkets:markets.length,matchingClose:0,bestStrike:null,sampleFields:markets[0]?Object.keys(markets[0]).slice(0,8):[]});
           return;
         }
-        // Within matching-close, find strike closest to current spot
+        // V4.4: For 15m KXBTC events, each event has 2 markets — strike_type='greater' (above)
+        //   and strike_type='less' (below) — bracketed by floor_strike/cap_strike. We want the
+        //   "greater" market (will price be ABOVE strike) since that's the up/down direction
+        //   we trade. If no strike_type field, fall through to closest-strike-to-spot logic.
         const _curPrice=currentPriceRef.current||0;
         let best=null,bestStrikeDiff=Infinity,bestStrike=null;
-        for(const m of matchingClose){
+        // Prefer markets matching strike_type='greater' for our UP/DOWN semantics
+        const greaterMarkets=matchingClose.filter(m=>m.strike_type==='greater'||m.strike_type==='greater_or_equal');
+        const candidatePool=greaterMarkets.length>0?greaterMarkets:matchingClose;
+        for(const m of candidatePool){
           const _s=_extractStrike(m);
           if(_s==null||_s<1000||_s>10000000)continue;
           if(_curPrice>0){
@@ -5960,36 +6056,61 @@ function TaraApp(){
           }
         }
         if(!best){
-          best=matchingClose[0];
+          best=candidatePool[0];
           bestStrike=_extractStrike(best);
         }
         if(typeof window!=='undefined'){
           window.__taraKalshiDebug.bestStrike=bestStrike;
           window.__taraKalshiDebug.bestTicker=best?.ticker;
+          window.__taraKalshiDebug.bestStrikeType=best?.strike_type;
         }
         // V3.1.11: Mirror to React state for UI surface
         setKalshiDebug({
           ok:true,
-          reason:bestStrike?`extracted ${bestStrike} from ${best?.ticker||'unknown'}`:`${matchingClose.length} matching markets but no strike extractable`,
+          reason:bestStrike?`/events ok · ${events.length} events · matched ${best?.ticker||'unknown'} (${bestStrike})`:`${matchingClose.length} matching markets but no strike extractable`,
           totalMarkets:markets.length,
           matchingClose:matchingClose.length,
           bestStrike,
           bestTicker:best?.ticker||null,
           sampleFields:markets[0]?Object.keys(markets[0]).slice(0,8):[],
         });
-        const yes=best.yes_ask??best.yes_bid??best.last_price??null;
-        if(yes!=null)setKalshiYesPrice(Number(yes));
+        // V4.4: New YES price extraction. Kalshi migrated from yes_ask (cents integer) to
+        //   yes_ask_dollars (dollars string like "0.5600"). Convert to cents for UI consistency
+        //   since the rest of Tara's code expects cents (0-100 range).
+        const yesAskDollars=best.yes_ask_dollars??null;
+        const yesBidDollars=best.yes_bid_dollars??null;
+        const lastPriceDollars=best.last_price_dollars??null;
+        // Prefer mid of bid+ask if both present, else fall back individually, else last price
+        let yesCents=null;
+        if(yesAskDollars!=null&&yesBidDollars!=null){
+          const mid=(parseFloat(yesAskDollars)+parseFloat(yesBidDollars))/2;
+          if(isFinite(mid))yesCents=Math.round(mid*100);
+        } else if(yesAskDollars!=null){
+          const v=parseFloat(yesAskDollars);
+          if(isFinite(v))yesCents=Math.round(v*100);
+        } else if(yesBidDollars!=null){
+          const v=parseFloat(yesBidDollars);
+          if(isFinite(v))yesCents=Math.round(v*100);
+        } else if(lastPriceDollars!=null){
+          const v=parseFloat(lastPriceDollars);
+          if(isFinite(v))yesCents=Math.round(v*100);
+        } else {
+          // Final fallback to legacy fields
+          const yes=best.yes_ask??best.yes_bid??best.last_price??null;
+          if(yes!=null)yesCents=Number(yes);
+        }
+        if(yesCents!=null&&isFinite(yesCents))setKalshiYesPrice(yesCents);
         if(bestStrike!=null&&bestStrike>1000&&bestStrike<10000000){
           setKalshiStrike(bestStrike);
         }
-        const _activeMarket=best.ticker?{ticker:best.ticker,closeTime:best.close_time,strike:bestStrike}:null;
+        const _activeMarket=best.ticker?{ticker:best.ticker,closeTime:best.close_time,strike:bestStrike,strikeType:best.strike_type,event:best._event_ticker}:null;
         if(_activeMarket)setKalshiActiveMarket(_activeMarket);
         // V3.2.1: Cache this successful response so a future 503 can fall back to it
         if(bestStrike!=null&&bestStrike>1000&&bestStrike<10000000){
           lastKalshiSuccessRef.current={
             at:Date.now(),
             strike:bestStrike,
-            yesPrice:yes!=null?Number(yes):null,
+            yesPrice:yesCents!=null?yesCents:null,
             activeMarket:_activeMarket,
             debug:null,
           };
@@ -6038,9 +6159,9 @@ function TaraApp(){
         }
         try{
           pending.attempts++;
-          const _settleUrl=`https://api.elections.kalshi.com/trade-api/v2/markets?limit=200&series_ticker=KXBTC15M&status=settled`;
+          // V4.4: Use /events endpoint (smaller payload, different rate-limit bucket)
+          const _settleUrl=`https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=KXBTC15M&with_nested_markets=true&status=settled&limit=50`;
           // V3.2.3: Use CORS proxy first to avoid 503 throttling, fall back to direct
-          // V3.2.4: Removed Accept header to skip CORS preflight (likely root cause of 503)
           let r=await fetch(
             `https://corsproxy.io/?url=${encodeURIComponent(_settleUrl)}`,
             {signal:AbortSignal.timeout(8000)}
@@ -6050,27 +6171,50 @@ function TaraApp(){
           }
           if(!r.ok)continue;
           const d=await r.json();
-          const markets=d.markets||d.data||[];
-          // Match by close_time near our window close
+          // V4.4: Flatten nested markets from events response
+          const events=d.events||[];
+          const markets=[];
+          for(const ev of events){
+            const evMarkets=ev.markets||[];
+            for(const m of evMarkets){
+              markets.push({...m, _event_ticker:ev.event_ticker});
+            }
+          }
+          // Match by close_time near our window close — prefer 'greater' strike_type for UP/DOWN semantics
           const target=pending.windowCloseTime;
           let best=null,bestDiff=Infinity;
+          // First pass: only 'greater' strike_type markets
           for(const m of markets){
+            if(m.strike_type!=='greater'&&m.strike_type!=='greater_or_equal')continue;
             const closeMs=m.close_time?new Date(m.close_time).getTime():0;
             if(!closeMs)continue;
             const diff=Math.abs(closeMs-target);
             if(diff<bestDiff){bestDiff=diff;best=m;}
+          }
+          // Second pass: any market if no 'greater' found (legacy fallback)
+          if(!best){
+            for(const m of markets){
+              const closeMs=m.close_time?new Date(m.close_time).getTime():0;
+              if(!closeMs)continue;
+              const diff=Math.abs(closeMs-target);
+              if(diff<bestDiff){bestDiff=diff;best=m;}
+            }
           }
           // Must be within 90 seconds and have a result
           if(best&&bestDiff<90000&&best.result){
             // Kalshi result: 'yes' = market resolved YES (price closed >= strike → UP wins)
             //                'no'  = market resolved NO (price closed < strike → DOWN wins)
             const kalshiOutcomeDir=best.result==='yes'?'UP':best.result==='no'?'DOWN':null;
-            // V3.0: Extract Kalshi's settled price for the canonical closing price
+            // V4.4: Extract Kalshi's settled price using new field names. Prefer settlement_value_dollars.
             const _kalshiSettlement=(()=>{
+              if(best.settlement_value_dollars!=null){const v=parseFloat(best.settlement_value_dollars);if(isFinite(v))return v;}
               if(best.settlement_value!=null)return Number(best.settlement_value);
-              if(best.final_value!=null)return Number(best.final_value);
               if(best.expiration_value!=null)return Number(best.expiration_value);
+              if(best.final_value!=null)return Number(best.final_value);
               if(best.settled_price!=null)return Number(best.settled_price);
+              // Fall back to floor_strike — we know the strike, not the actual settled price,
+              // but it's better than nothing for trade resolution
+              if(best.floor_strike!=null)return Number(best.floor_strike);
               return null;
             })();
             if(kalshiOutcomeDir){
@@ -7121,6 +7265,23 @@ function TaraApp(){
     const _confBase=Math.min(95,Math.round(conviction*1.5+q*0.4));
     return{call:dir,reason:`${conviction.toFixed(0)}pt ${dir} lean · FGT ${fgtAbs.toFixed(1)}/4 · quality ${q}`,confidence:_confBase,direction:dir,conviction};
   })();
+  // V4.3: Attach lifecycle data so the Tara's Call card can render phase/samples/snapshot.
+  //   Refs read at render time — same data the lifecycle effect uses.
+  taraCall.samples=taraCallSampleRef.current?.count||0;
+  taraCall.snapshot=taraCallSnapshotRef.current||null;
+  // Compute needSamples for display (mirrors logic in the lifecycle effect below)
+  (()=>{
+    const _q=qualityGate?.score||0;
+    const _fgtAbs=Math.abs(analysis?.mtfAlignment||0);
+    const _regime=analysis?.regime||'';
+    const _cleanRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(_regime);
+    const _winType=analysis?.windowAmplitude?.label;
+    const _hostile=_winType==='DEAD'||_winType==='WHIPSAW';
+    if(_q>=75&&_fgtAbs>=2.5&&_cleanRegime&&!_hostile)taraCall.needSamples=2;
+    else if(_q>=65&&_fgtAbs>=1.8&&!_hostile)taraCall.needSamples=4;
+    else if(_hostile)taraCall.needSamples=8;
+    else taraCall.needSamples=6;
+  })();
 
   // V3.2.4: Snapshot Tara's Call when endgame freeze first fires. This pins Tara's
   //   call for this round. Subsequent posterior shifts within the freeze zone don't
@@ -7702,7 +7863,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 4.2...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 4.4...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -7803,7 +7964,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              4.2
+              4.4
             </span>
           </div>
 
@@ -8334,7 +8495,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 4.2</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 4.4</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -8960,7 +9121,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 4.2 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 4.4 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -9116,7 +9277,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 4.2 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 4.4 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
