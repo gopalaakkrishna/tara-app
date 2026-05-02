@@ -101,7 +101,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.02-v5.0-tara-decisive';
+const BASELINE_VERSION='2026.05.02-v5.1-tape-override-decision-timer';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -1313,10 +1313,10 @@ const computeAdvisor=(params)=>{
     }
     if(activePrediction?.includes('SITTING OUT'))return{label:'⛔ SITTING OUT',reason:`Signals are split, no clear edge this window. Better to skip than force a call. [${timeLabel}]`,color:'rose',animate:false,hasAction:false};
     if(activePrediction?.includes('ANALYZING')){
-      return{label:'🔍 ANALYZING',reason:`Scanning for direction. Tara locks fast when FGT aligns; takes more time on mixed signals. [${timeLabel}]`,color:'indigo',animate:true,hasAction:false};
+      return{label:'🔍 ANALYZING',reason:`Scanning for direction. Tara loosens her standards each minute — even mixed setups get a call eventually. [${timeLabel}]`,color:'indigo',animate:true,hasAction:false};
     }
-    if(activePrediction?.includes('UP (FORMING)'))return{label:'SIGNAL FORMING — UP',reason:`Bullish bias building (${posterior.toFixed(1)}%). See Tara's Call panel for commitment timing. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
-    if(activePrediction?.includes('DOWN (FORMING)'))return{label:'SIGNAL FORMING — DOWN',reason:`Bearish bias building (${(100-posterior).toFixed(1)}%). See Tara's Call panel for commitment timing. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
+    if(activePrediction?.includes('UP (FORMING)'))return{label:'SIGNAL FORMING — UP',reason:`Bullish bias building (${posterior.toFixed(1)}%). Tara commits when tape agrees or quality clears bar. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
+    if(activePrediction?.includes('DOWN (FORMING)'))return{label:'SIGNAL FORMING — DOWN',reason:`Bearish bias building (${(100-posterior).toFixed(1)}%). Tara commits when tape agrees or quality clears bar. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
 
     // No call yet / endgame no-call
     if(activePrediction==='NO CALL')return{label:'NO CALL THIS WINDOW',reason:`Lock threshold not reached before endgame. Sit out and wait for next window.`,color:'zinc',animate:false,hasAction:false};
@@ -3354,38 +3354,46 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,
         const bgClr=tc.call==='UP'?'rgba(52,211,153,0.08)':tc.call==='DOWN'?'rgba(244,114,182,0.08)':'rgba(229,200,112,0.05)';
         const callLabel=tc.call==='SIT_OUT'?'SIT OUT':tc.call;
         const arrow=tc.call==='UP'?'▲':tc.call==='DOWN'?'▼':'—';
-        // V4.6: Phase derived from snapshot + sample state, with proper countdown timer.
-        //   FORMING → 'locks in ~Xs' + sample-progress bar
-        //   LOCKED / SAT OUT / WATCHING → window time-remaining + window-elapsed bar
+        // V5.1: Phase derived from snapshot + sample state with decision-step countdown.
+        //   FORMING → 'locks in ~Xs' + sample-based bar fill
+        //   LOCKED / SAT OUT → window-close countdown + elapsed bar
+        //   WATCHING → 'decision check at Xm (in Ys)' + minute-marker bar
         const snap=tc.snapshot;
         const phaseLabel=snap?(snap.call==='SIT_OUT'?'SAT OUT':'LOCKED'):isCall?'FORMING':tc.call==='SIT_OUT'?'WATCHING':'ANALYZING';
         const samplesLeft=Math.max(0,(tc.needSamples||3)-(tc.samples||0));
-        // Window time-remaining label (passed via timeState)
+        // Window timing
         const _totalSec=windowType==='15m'?900:300;
         const _elapsed=timeState?Math.max(0,_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining)):0;
         const _remSec=Math.max(0,_totalSec-_elapsed);
         const _remMin=Math.floor(_remSec/60),_remRem=_remSec%60;
         const _remLabel=_remMin>0?`${_remMin}m ${String(_remRem).padStart(2,'0')}s left`:`${_remRem}s left`;
         const _elapsedFrac=Math.min(1,_elapsed/_totalSec);
+        // Decision-step countdown
+        const _elapsedMin=Math.floor(_elapsed/60);
+        const _secIntoMin=_elapsed%60;
+        const _secToNextMin=60-_secIntoMin;
+        const _nextDecisionMin=_elapsedMin+1;
+        const _totalMin=_totalSec/60;
+        // Minute markers for the bar
+        const _minMarkers=[];
+        for(let m=1;m<_totalMin;m++){
+          _minMarkers.push({pos:(m/_totalMin)*100,m,isPast:_elapsed>=m*60});
+        }
         // Countdown text + progress
         let countdownText,phaseHint='',phaseProgressPct;
         if(snap){
-          // Tara has committed (locked or sat out) — show window remaining
           countdownText=_remLabel;
           phaseHint=snap.earlyLock?'committed early':snap.call==='SIT_OUT'?'declined':'committed';
           phaseProgressPct=_elapsedFrac*100;
         } else if(isCall){
-          // FORMING — sample-based progress
           countdownText=samplesLeft===0?'committing this tick':`locks in ~${samplesLeft}s`;
           phaseHint=`${tc.samples||0}/${tc.needSamples||3} confirms`;
           phaseProgressPct=tc.needSamples?Math.min(95,(tc.samples/tc.needSamples)*100):50;
         } else if(tc.call==='SIT_OUT'){
-          // WATCHING — window elapsed, no commitment expected
-          countdownText=_remLabel;
-          phaseHint='no commitment';
+          countdownText=`check at ${_nextDecisionMin}m (in ${_secToNextMin}s)`;
+          phaseHint='gates loosening each minute';
           phaseProgressPct=_elapsedFrac*100;
         } else {
-          // ANALYZING — fill slowly with elapsed time
           countdownText='looking for direction';
           phaseProgressPct=Math.min(15,_elapsed*0.7);
         }
@@ -3435,25 +3443,42 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,
               );
             })()}
 
-            {/* V4.5: Phase strip with countdown timer — Tara's lifecycle on her card. */}
+            {/* V5.1: Phase strip with minute-marker decision-progress timeline. */}
             <div className="mb-3">
               <div className="flex justify-between items-baseline mb-1 gap-2">
                 <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold shrink-0">Phase · {phaseLabel}</span>
                 <div className="flex items-baseline gap-1.5 min-w-0 justify-end">
-                  <span className={`text-[10px] tabular-nums font-bold tracking-wide truncate ${isCall&&!snap?'text-[#E8E9E4]/85':'text-[#E8E9E4]/45'}`}>{countdownText}</span>
+                  <span className={`text-[10px] tabular-nums font-bold tracking-wide truncate ${isCall&&!snap?'text-[#E8E9E4]/85':snap?'text-[#E8E9E4]/85':'text-[#E8E9E4]/45'}`}>{countdownText}</span>
                   {phaseHint&&<span className="text-[8px] tracking-wider text-[#E8E9E4]/35 hidden sm:inline">· {phaseHint}</span>}
                 </div>
               </div>
-              <div className="relative h-1 bg-[#0E100F] rounded-full overflow-hidden">
-                <div className="absolute top-0 bottom-0 w-px bg-[#E8E9E4]/15" style={{left:'15%'}}></div>
-                <div className="absolute top-0 bottom-0 w-px bg-[#E8E9E4]/15" style={{left:'40%'}}></div>
-                <div className="absolute top-0 bottom-0 w-px bg-[#E8E9E4]/25" style={{left:'85%'}}></div>
+              <div className="relative h-1.5 bg-[#0E100F] rounded-full overflow-hidden">
+                {/* Minute tick markers */}
+                {_minMarkers.map((mk,i)=>(
+                  <div key={i} className="absolute top-0 bottom-0 w-px" style={{
+                    left:mk.pos+'%',
+                    background:mk.isPast?'rgba(229,200,112,0.4)':'rgba(232,233,228,0.15)',
+                  }}></div>
+                ))}
+                {/* Progress fill — elapsed-time based */}
                 <div className="absolute top-0 bottom-0 left-0 transition-all duration-700" style={{
-                  width:phaseProgressPct.toFixed(0)+'%',
-                  background:isCall?(tc.call==='UP'?'rgba(52,211,153,0.6)':'rgba(244,114,182,0.6)'):tc.call==='SIT_OUT'?'rgba(245,158,11,0.55)':T2_GOLD,
-                  opacity:0.9,
+                  width:(_elapsedFrac*100).toFixed(1)+'%',
+                  background:isCall?(tc.call==='UP'?'rgba(52,211,153,0.6)':'rgba(244,114,182,0.6)'):tc.call==='SIT_OUT'?'rgba(245,158,11,0.5)':T2_GOLD,
+                  opacity:0.85,
+                }}/>
+                {/* Position marker */}
+                <div className="absolute top-0 bottom-0 w-0.5 transition-all duration-700" style={{
+                  left:(_elapsedFrac*100).toFixed(1)+'%',
+                  background:isCall?(tc.call==='UP'?'rgba(52,211,153,0.9)':'rgba(244,114,182,0.9)'):snap?'rgba(245,158,11,0.7)':T2_GOLD,
+                  transform:'translateX(-50%)',
+                  boxShadow:'0 0 4px currentColor',
                 }}/>
               </div>
+              {_totalMin>=10&&(
+                <div className="flex justify-between mt-0.5 px-px text-[7px] text-[#E8E9E4]/30 tabular-nums">
+                  <span>0</span><span>5m</span><span>10m</span><span>15m</span>
+                </div>
+              )}
             </div>
 
             {/* V4.3: Scorecard — visible, larger numbers, color-coded. */}
@@ -4972,7 +4997,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.0</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.1</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5264,7 +5289,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.0 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.1 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5404,7 +5429,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.0'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.1'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -5558,7 +5583,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.0  |  signal'},
+        footer:{text:'Tara 5.1  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5572,7 +5597,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.0  |  stand-down'},
+        footer:{text:'Tara 5.1  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5586,7 +5611,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.0  |  search'},
+        footer:{text:'Tara 5.1  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5603,7 +5628,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.0  |  lock'},
+        footer:{text:'Tara 5.1  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5620,7 +5645,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.0  |  close'},
+          footer:{text:'Tara 5.1  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5641,7 +5666,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.0  |  exit'},
+        footer:{text:'Tara 5.1  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5662,7 +5687,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.0  |  scanning'},
+        footer:{text:'Tara 5.1  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5682,7 +5707,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.0  |  signal'},
+        footer:{text:'Tara 5.1  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5702,7 +5727,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.0  |  lock'},
+        footer:{text:'Tara 5.1  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5719,7 +5744,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.0  |  sit-out'},
+        footer:{text:'Tara 5.1  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5741,7 +5766,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.0  |  result'},
+          footer:{text:'Tara 5.1  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5778,12 +5803,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.0  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.1  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.1',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -5802,7 +5827,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.1 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -7239,59 +7264,69 @@ function TaraApp(){
     const winType=analysis.windowAmplitude?.label||'NORMAL';
     const vfLabel=analysis.volFlow?.label||'';
     const q=qualityGate?.score||0;
-    // V5.0 'TARA DECISIVE': philosophy shift. V3.2.4-V4.6 gates were defensive — five
-    //   independent SIT_OUT triggers, any one of which killed the call. User feedback: too
-    //   many sit-outs. New approach: loosen all gates, demote vol-flow divergence + regime
-    //   hostility from blocks to confidence haircuts, add time-decay so Tara gets MORE
-    //   willing to commit as the window progresses. Weak setups now show as 30-50% confidence
-    //   calls (user decides), only genuinely bad setups block.
-    // V5.0: Time-decay — each minute elapsed, quality bar drops 5pts (floor 25),
-    //   conviction bar drops 1pt (floor 4). Forces commitment on slow-developing windows.
+    // V5.1 'TARA DECISIVE++': loosened further per user feedback. The previous V5.0 quality
+    //   floor of 25 was still blocking calls when tape strongly agreed with direction.
+    //   New addition: TAPE-AGREEMENT OVERRIDE — when 30s tape is 70%+ same side as proposed
+    //   direction, drop quality threshold by 15 points. Tape going one way + price moving
+    //   that way = real signal even if FGT disagrees on longer timeframes.
     const _totalSec=windowType==='15m'?900:300;
     const _elapsed=_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
-    const _minutesIn=Math.floor(Math.max(0,_elapsed)/60);
-    const qThreshold=Math.max(25,35-_minutesIn*5);
-    const convThreshold=Math.max(4,7-_minutesIn);
-    // Gate 1: quality (V5.0: 50→35 base, time-decays to 25)
-    if(q<qThreshold)return{call:'SIT_OUT',reason:`Quality only ${q}/100 — below ${qThreshold} threshold`,confidence:0,direction:dir,conviction};
-    // Gate 2: conviction (V5.0: 12→7 base, time-decays to 4)
+    // V5.1: time decay accelerated to per-30s (was per-min). Halves time-to-decisive-window.
+    const _halfMinutesIn=Math.floor(Math.max(0,_elapsed)/30);
+    // V5.1: Base thresholds tightened. Quality 20 base → 10 floor, conviction 5 base → 3 floor.
+    let qThreshold=Math.max(10,20-_halfMinutesIn*2);
+    let convThreshold=Math.max(3,5-_halfMinutesIn);
+    // V5.1: Tape-agreement override
+    const tapeBuyPct=tapeWindows?.w30?.buyPct??50;
+    const tapeAgreesUP=tapeBuyPct>=70&&dir==='UP';
+    const tapeAgreesDOWN=tapeBuyPct<=30&&dir==='DOWN';
+    const tapeStronglyAgrees=tapeAgreesUP||tapeAgreesDOWN;
+    if(tapeStronglyAgrees){
+      qThreshold=Math.max(5,qThreshold-15);  // floor 5 even with override — never call on q<5
+      convThreshold=Math.max(2,convThreshold-2);
+    }
+    // Gate 1: quality
+    if(q<qThreshold){
+      const _baseReason=`Quality only ${q}/100 — below ${qThreshold} threshold`;
+      const _tapeNote=tapeStronglyAgrees?` (tape ${tapeBuyPct.toFixed(0)}% agrees but quality too low even with override)`:'';
+      return{call:'SIT_OUT',reason:_baseReason+_tapeNote,confidence:0,direction:dir,conviction};
+    }
+    // Gate 2: conviction
     if(conviction<convThreshold)return{call:'SIT_OUT',reason:`Posterior ${post.toFixed(0)} — too close to neutral (need ±${convThreshold} from 50)`,confidence:0,direction:dir,conviction};
-    // Gate 3: FGT support (V5.0: 1.5→0.8 base; q≥55 lets FGT≥0.5 through;
-    //   all trending/squeeze regimes fast-track regardless of FGT)
+    // Gate 3: FGT support — fast-tracked when tape agrees OR regime favors direction
     const isFastTrackRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(analysis.regime);
-    const fgtMin=q>=55?0.5:0.8;
-    if(fgtAbs<fgtMin&&!isFastTrackRegime){
+    const fgtMin=tapeStronglyAgrees?0.0:(q>=55?0.4:0.7);  // V5.1: tape agreement bypasses FGT
+    if(fgtAbs<fgtMin&&!isFastTrackRegime&&!tapeStronglyAgrees){
       return{call:'SIT_OUT',reason:`FGT only ${fgtAbs.toFixed(1)}/4 — multi-timeframe alignment too silent`,confidence:0,direction:dir,conviction};
     }
     // V5.0: Gates 4 + 5 are now SOFT — they apply confidence haircuts instead of blocking.
-    //   Hard block retained only when both quality AND conviction are weak — that's the
-    //   actually-bad-setup zone where divergence/regime hostility tips into 'don't trade'.
     let confidenceHaircut=0;
     let haircutReasons=[];
-    // Gate 4: regime hostility (V5.0: q<70→q<45 hard-block, otherwise -10 haircut)
+    // Gate 4: regime hostility — V5.1: hard-block only when q<35 AND no tape override
     if(winType==='DEAD'||winType==='WHIPSAW'){
-      if(q<45){
+      if(q<35&&!tapeStronglyAgrees){
         return{call:'SIT_OUT',reason:`${winType} window + quality ${q} — too risky to trade`,confidence:0,direction:dir,conviction};
       }
       confidenceHaircut+=10;
       haircutReasons.push(`${winType} window`);
     }
-    // Gate 5: vol-flow divergence (V5.0: soft haircut by default, hard block only when q+conv both weak)
+    // Gate 5: vol-flow divergence — V5.1: hard-block only when tape AND posterior both weak
     const isDivergent=
       (dir==='UP'&&(vfLabel==='BUY-DIVERGENT'||vfLabel==='BUY-FAILING'))||
       (dir==='DOWN'&&(vfLabel==='SELL-DIVERGENT'||vfLabel==='SELL-FAILING'));
     if(isDivergent){
-      if(q<50&&conviction<20){
-        return{call:'SIT_OUT',reason:`Tape (${vfLabel}) disagrees with ${dir} — and quality+conviction too weak to override`,confidence:0,direction:dir,conviction};
+      if(q<40&&conviction<15&&!tapeStronglyAgrees){
+        return{call:'SIT_OUT',reason:`Tape (${vfLabel}) disagrees with ${dir} — q+conv too weak to override`,confidence:0,direction:dir,conviction};
       }
       confidenceHaircut+=15;
       haircutReasons.push(`tape ${vfLabel}`);
     }
     // All gates passed — Tara calls
-    // Confidence: blend of posterior conviction and quality, then apply haircuts
     const _confBase=Math.min(95,Math.round(conviction*1.5+q*0.4));
-    const _confidence=Math.max(20,_confBase-confidenceHaircut);
-    const _reasonParts=[`${conviction.toFixed(0)}pt ${dir} lean`,`FGT ${fgtAbs.toFixed(1)}/4`,`quality ${q}`];
+    const _tapeBoost=tapeStronglyAgrees?10:0;  // V5.1: tape agreement adds +10 to confidence
+    const _confidence=Math.max(20,_confBase-confidenceHaircut+_tapeBoost);
+    const _reasonParts=[`${conviction.toFixed(0)}pt ${dir} lean`,`FGT ${fgtAbs.toFixed(1)}/4`,`q ${q}`];
+    if(tapeStronglyAgrees)_reasonParts.push(`tape ${tapeBuyPct.toFixed(0)}% agrees`);
     if(haircutReasons.length>0)_reasonParts.push(`-${confidenceHaircut} for ${haircutReasons.join(' + ')}`);
     return{call:dir,reason:_reasonParts.join(' · '),confidence:_confidence,direction:dir,conviction};
   })();
@@ -7911,7 +7946,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.0...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.1...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -8012,7 +8047,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.0
+              5.1
             </span>
           </div>
 
@@ -8368,11 +8403,11 @@ function TaraApp(){
               </button>
             </div>
 
-            {/* V4.6: Tara's lifecycle phase strip with proper countdown for ALL states.
-                - ANALYZING / SCANNING: progress fills as elapsed time, hint = 'looking for direction'
-                - FORMING: bar tracks samples-to-lock, hint = 'locks in ~Xs'
-                - LOCKED: bar fills toward window-close, hint = 'Xm Ys left'
-                - WATCHING / SIT_OUT: bar tracks window elapsed, hint = 'Xm Ys left' */}
+            {/* V5.1: Phase strip with MINUTE-MARKER decision-progress timeline.
+                User asked for 'count progress timer for a decision to be made in 1min,
+                2min, 3min etc — not a general timer of progress of the window.'
+                Bar now shows 1m markers; current position highlighted. Countdown shows
+                'decision in Xs' = time until next gate-relax + check moment. */}
             {(()=>{
               const totalSec=windowType==='15m'?900:300;
               const elapsed=totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
@@ -8382,43 +8417,50 @@ function TaraApp(){
               const isSitOut=taraCallSnapshotRef.current?.call==='SIT_OUT'||(tc?.call==='SIT_OUT'&&analysis?.isSystemLocked);
               const isCall=tc?.call==='UP'||tc?.call==='DOWN';
               const samplesLeft=Math.max(0,(tc?.needSamples||3)-(tc?.samples||0));
-              // Window time-remaining label: "Xm Ys" or "Xs"
+              // Window time-remaining
               const remSec=Math.max(0,totalSec-elapsed);
               const remMin=Math.floor(remSec/60),remRem=remSec%60;
               const remLabel=remMin>0?`${remMin}m ${String(remRem).padStart(2,'0')}s left`:`${remRem}s left`;
-              // Window-elapsed fraction (0-1)
+              // V5.1: Decision-step countdown. Gates relax every 60s — show seconds until next minute mark.
+              const elapsedMin=Math.floor(elapsed/60);
+              const secIntoMin=elapsed%60;
+              const secToNextMin=60-secIntoMin;
+              const nextDecisionMin=elapsedMin+1;
+              // Window elapsed fraction
               const elapsedFrac=Math.min(1,elapsed/totalSec);
-              let label='ANALYZING',accent=T2_GOLD,progressPct=10,countdownText='looking for direction';
+              const totalMin=totalSec/60;
+              // State-specific labels
+              let label='ANALYZING',accent=T2_GOLD,countdownText='looking for direction';
               if(isLocked){
                 label='LOCKED';
                 accent=tc?.call==='UP'?'rgba(52,211,153,0.7)':'rgba(244,114,182,0.7)';
-                progressPct=elapsedFrac*100;
                 countdownText=remLabel;
               } else if(isSitOut){
-                label='SIT OUT';
+                label='SAT OUT';
                 accent='rgba(245,158,11,0.5)';
-                progressPct=elapsedFrac*100;
                 countdownText=remLabel;
               } else if(isCall){
                 label='FORMING';
                 accent=tc.call==='UP'?'rgba(52,211,153,0.55)':'rgba(244,114,182,0.55)';
-                progressPct=tc?.needSamples?Math.min(95,((tc.samples||0)/tc.needSamples)*100):50;
                 countdownText=samplesLeft===0?'committing this tick':`locks in ~${samplesLeft}s`;
               } else if(tc?.call==='SIT_OUT'){
                 label='WATCHING';
                 accent='rgba(245,158,11,0.4)';
-                progressPct=elapsedFrac*100;
-                countdownText=remLabel;
-              } else if(elapsed>=20){
+                countdownText=`decision check at ${nextDecisionMin}m (in ${secToNextMin}s)`;
+              } else if(elapsed>=15){
                 label='SCANNING';
                 accent='rgba(229,200,112,0.5)';
-                progressPct=Math.min(40,15+elapsed/totalSec*25);
-                countdownText='no direction yet';
+                countdownText=`decision check at ${nextDecisionMin}m (in ${secToNextMin}s)`;
               } else {
                 label='ANALYZING';
                 accent=T2_GOLD;
-                progressPct=Math.min(15,elapsed*0.7);
                 countdownText='gathering data';
+              }
+              // Minute markers along the bar (skip 0, mark every minute up to total)
+              const minMarkers=[];
+              for(let m=1;m<totalMin;m++){
+                const isPast=elapsed>=m*60;
+                minMarkers.push({pos:(m/totalMin)*100,m,isPast});
               }
               return(
                 <div className="mb-3 px-1">
@@ -8426,16 +8468,34 @@ function TaraApp(){
                     <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold shrink-0">Tara · {label}</span>
                     <span className={`text-[10px] tabular-nums tracking-wide truncate ${(isCall&&!isLocked)||isLocked?'text-[#E8E9E4]/85 font-bold':'text-[#E8E9E4]/45'}`}>{countdownText}</span>
                   </div>
-                  <div className="relative h-1 bg-[#0E100F] rounded-full overflow-hidden">
-                    <div className="absolute top-0 bottom-0 w-px bg-[#E8E9E4]/15" style={{left:'15%'}}></div>
-                    <div className="absolute top-0 bottom-0 w-px bg-[#E8E9E4]/15" style={{left:'40%'}}></div>
-                    <div className="absolute top-0 bottom-0 w-px bg-[#E8E9E4]/25" style={{left:'85%'}}></div>
+                  <div className="relative h-1.5 bg-[#0E100F] rounded-full overflow-hidden">
+                    {/* Minute tick markers */}
+                    {minMarkers.map((mk,i)=>(
+                      <div key={i} className="absolute top-0 bottom-0 w-px" style={{
+                        left:mk.pos+'%',
+                        background:mk.isPast?'rgba(229,200,112,0.4)':'rgba(232,233,228,0.15)',
+                      }}></div>
+                    ))}
+                    {/* Progress fill — fills with elapsed time (always meaningful) */}
                     <div className="absolute top-0 bottom-0 left-0 transition-all duration-700" style={{
-                      width:progressPct.toFixed(0)+'%',
+                      width:(elapsedFrac*100).toFixed(1)+'%',
                       background:accent,
-                      opacity:0.9,
+                      opacity:0.85,
+                    }}></div>
+                    {/* Position marker — small dot at current elapsed time */}
+                    <div className="absolute top-0 bottom-0 w-0.5 transition-all duration-700" style={{
+                      left:(elapsedFrac*100).toFixed(1)+'%',
+                      background:isCall||isLocked?accent:T2_GOLD,
+                      transform:'translateX(-50%)',
+                      boxShadow:'0 0 4px '+(isCall||isLocked?accent:T2_GOLD),
                     }}></div>
                   </div>
+                  {/* Minute labels below — only show if window is 15m (cluttered on 5m) */}
+                  {totalMin>=10&&(
+                    <div className="flex justify-between mt-0.5 px-px text-[7px] text-[#E8E9E4]/30 tabular-nums">
+                      <span>0</span><span>5m</span><span>10m</span><span>15m</span>
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -8574,7 +8634,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.1</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -9200,7 +9260,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.0 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.1 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -9356,7 +9416,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.0 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.1 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
