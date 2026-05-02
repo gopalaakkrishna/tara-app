@@ -99,7 +99,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.02-v3.1.1-tape-above-chart';
+const BASELINE_VERSION='2026.05.02-v3.1.5-tape-floor-tz-est';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -120,70 +120,70 @@ const T2_COPPER_BORDER='rgba(201,125,74,0.30)';
 const T2_MONO_STYLE={fontVariantNumeric:'tabular-nums',letterSpacing:'-0.01em'};
 // Corner stamp component — small gold serial mark in upper-right of panels
 function T2Stamp({code}){return(<span style={{position:'absolute',top:'8px',right:'10px',fontSize:'8px',letterSpacing:'0.18em',color:T2_GOLD_DIM,fontWeight:500}}>{code}</span>);}
-const BASELINE_RECORD={'15m':{wins:485,losses:302},'5m':{wins:33,losses:25}};
+const BASELINE_RECORD={'15m':{wins:486,losses:302},'5m':{wins:33,losses:25}};
 
 const SEED_TRADES=[
-// V2.8.1: 55 trades — 53 trades from V2.8 audit + 2 new V2.7-era trades (both UP wins in SHORT SQUEEZE).
-// V2.8 architectural fixes (symmetric thresholds, FGT support gate, fast-track for FGT 3/4) shipped
-// in the live engine. Once validated against live data, gradient descent will calibrate weights
-// to the new firing distribution.
+// V3.1.2: 56 trades. Latest trade (08:03) is the first lock fired with V2.9 weighted FGT —
+// posterior 62, FGT 0.3 (continuous value confirms weighted voting active), UP win in
+// SHORT SQUEEZE. Confirms the 2.9 architecture is operational.
 //
 // BASELINE_RECORD scorecard preserves the live cumulative number — independent of seed.
-  {id:1777623321860,timestampISO:'2026-05-01T08:15:21.860Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:878,hour:4,session:'EU',windowType:'15m',signals:{gap:0.22,momentum:5.76,structure:9.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77212.2,closingPrice:77420.0,strikeAtLock:77188.32,strikePrice:77188.32,gapAtEntry:3.1,closingGapBps:30.0,fgtAlignment:0,rangeBps:-0.3,qualityScore:56},
-  {id:1777625065746,timestampISO:'2026-05-01T08:44:25.746Z',dir:'DOWN',outcomeDir:'DOWN',posterior:25.0,rawPosterior:25.0,regime:'RANGE-CHOP',clockAtLock:34,hour:4,session:'EU',windowType:'15m',signals:{gap:-14.97,momentum:-1.81,structure:0.0,flow:-14.65,technical:10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77355.98,closingPrice:77351.35,strikeAtLock:77431.88,strikePrice:77431.88,gapAtEntry:-9.8,closingGapBps:-10.4,fgtAlignment:-3,rangeBps:0.0,qualityScore:13},
-  {id:1777625149938,timestampISO:'2026-05-01T08:45:49.938Z',dir:'DOWN',outcomeDir:'UP',posterior:9.8,rawPosterior:9.8,regime:'RANGE-CHOP',clockAtLock:850,hour:4,session:'EU',windowType:'15m',signals:{gap:-0.04,momentum:0.0,structure:0.0,flow:-55.0,technical:10.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:77349.0,closingPrice:77358.39,strikeAtLock:77353.67,strikePrice:77353.67,gapAtEntry:-0.6,closingGapBps:0.6,fgtAlignment:-3,rangeBps:0.0,qualityScore:58},
-  {id:1777626839895,timestampISO:'2026-05-01T09:13:59.895Z',dir:'UP',outcomeDir:'DOWN',posterior:61.5,rawPosterior:61.5,regime:'RANGE-CHOP',clockAtLock:60,hour:5,session:'EU',windowType:'15m',signals:{gap:-7.77,momentum:0.0,structure:-9.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77318.65,closingPrice:77315.94,strikeAtLock:77360.41,strikePrice:77360.41,gapAtEntry:-5.4,closingGapBps:-5.7,fgtAlignment:-3,rangeBps:0.0,qualityScore:0},
-  {id:1777627444347,timestampISO:'2026-05-01T09:24:04.347Z',dir:'DOWN',outcomeDir:'UP',posterior:60.8,rawPosterior:60.8,regime:'SHORT SQUEEZE',clockAtLock:355,hour:5,session:'EU',windowType:'15m',signals:{gap:-0.76,momentum:-0.54,structure:-12.0,flow:47.0,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:77308.25,closingPrice:77332.42,strikeAtLock:77319.74,strikePrice:77319.74,gapAtEntry:-1.5,closingGapBps:1.6,fgtAlignment:-2,rangeBps:-0.02,qualityScore:26},
-  {id:1777627826877,timestampISO:'2026-05-01T09:30:26.877Z',dir:'DOWN',outcomeDir:'DOWN',posterior:9.8,rawPosterior:9.8,regime:'TRENDING DOWN',clockAtLock:873,hour:5,session:'EU',windowType:'15m',signals:{gap:-0.41,momentum:-6.7,structure:-12.0,flow:-55.0,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77291.99,closingPrice:77265.21,strikeAtLock:77336.66,strikePrice:77336.66,gapAtEntry:-5.8,closingGapBps:-9.2,fgtAlignment:0,rangeBps:-0.4,qualityScore:78},
-  {id:1777628737068,timestampISO:'2026-05-01T09:45:37.068Z',dir:'DOWN',outcomeDir:'DOWN',posterior:9.8,rawPosterior:9.8,regime:'RANGE-CHOP',clockAtLock:863,hour:5,session:'EU',windowType:'15m',signals:{gap:-0.25,momentum:-2.29,structure:0.0,flow:-54.31,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77242.69,closingPrice:77261.71,strikeAtLock:77269.11,strikePrice:77269.11,gapAtEntry:-3.4,closingGapBps:-1.0,fgtAlignment:-2,rangeBps:0.0,qualityScore:57},
-  {id:1777629651971,timestampISO:'2026-05-01T10:00:51.971Z',dir:'DOWN',outcomeDir:'DOWN',posterior:34.5,rawPosterior:22.4,regime:'TRENDING DOWN',clockAtLock:848,hour:6,session:'EU',windowType:'15m',signals:{gap:-0.21,momentum:0.13,structure:0.0,flow:-42.38,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77235.01,closingPrice:77151.72,strikeAtLock:77257.26,strikePrice:77257.26,gapAtEntry:-2.9,closingGapBps:-13.7,fgtAlignment:-1,rangeBps:-0.2,qualityScore:58},
-  {id:1777630526828,timestampISO:'2026-05-01T10:15:26.828Z',dir:'UP',outcomeDir:'UP',posterior:80.5,rawPosterior:64.8,regime:'RANGE-CHOP',clockAtLock:873,hour:6,session:'EU',windowType:'15m',signals:{gap:0.05,momentum:-0.78,structure:0.0,flow:51.02,technical:-15.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77162.79,closingPrice:77333.58,strikeAtLock:77156.79,strikePrice:77156.79,gapAtEntry:0.8,closingGapBps:22.9,fgtAlignment:0,rangeBps:0.12,qualityScore:22},
-  {id:1777631423940,timestampISO:'2026-05-01T10:30:23.940Z',dir:'DOWN',outcomeDir:'DOWN',posterior:47.5,rawPosterior:47.5,regime:'RANGE-CHOP',clockAtLock:876,hour:6,session:'EU',windowType:'15m',signals:{gap:-0.13,momentum:-4.17,structure:0.0,flow:-51.43,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77323.49,closingPrice:77223.6,strikeAtLock:77337.29,strikePrice:77337.29,gapAtEntry:-1.8,closingGapBps:-14.7,fgtAlignment:0,rangeBps:-0.1,qualityScore:18},
-  {id:1777632450103,timestampISO:'2026-05-01T10:47:30.103Z',dir:'DOWN',outcomeDir:'UP',posterior:22.7,rawPosterior:25.2,regime:'RANGE-CHOP',clockAtLock:750,hour:6,session:'EU',windowType:'15m',signals:{gap:-0.09,momentum:-1.75,structure:0.0,flow:-20.85,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:77231.07,closingPrice:77277.85,strikeAtLock:77238.15,strikePrice:77238.15,gapAtEntry:-0.9,closingGapBps:5.1,fgtAlignment:-2,rangeBps:0.03,qualityScore:34},
-  {id:1777633215405,timestampISO:'2026-05-01T11:00:15.405Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:884,hour:7,session:'EU',windowType:'15m',signals:{gap:0.18,momentum:7.87,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77291.99,closingPrice:77318.06,strikeAtLock:77271.46,strikePrice:77271.46,gapAtEntry:2.7,closingGapBps:6.0,fgtAlignment:0,rangeBps:0.15,qualityScore:56},
-  {id:1777654050998,timestampISO:'2026-05-01T16:47:30.998Z',dir:'DOWN',outcomeDir:'DOWN',posterior:24.4,rawPosterior:38.4,regime:'HIGH VOL CHOP',clockAtLock:749,hour:12,session:'US',windowType:'15m',signals:{gap:-0.68,momentum:-3.97,structure:-15.0,flow:-6.8,technical:18.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78216.73,closingPrice:78202.92,strikeAtLock:78272.34,strikePrice:78272.34,gapAtEntry:-7.1,closingGapBps:-8.9,fgtAlignment:-1,rangeBps:-0.1,qualityScore:11},
-  {id:1777654857038,timestampISO:'2026-05-01T17:00:57.038Z',dir:'UP',outcomeDir:'UP',posterior:80.4,rawPosterior:72.1,regime:'SHORT SQUEEZE',clockAtLock:843,hour:13,session:'US',windowType:'15m',signals:{gap:0.48,momentum:-1.23,structure:-10.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78275.58,closingPrice:78330.61,strikeAtLock:78225.0,strikePrice:78225.0,gapAtEntry:6.5,closingGapBps:13.5,fgtAlignment:-1,rangeBps:0.21,qualityScore:35},
-  {id:1777655727557,timestampISO:'2026-05-01T17:15:27.558Z',dir:'UP',outcomeDir:'DOWN',posterior:81.4,rawPosterior:80.8,regime:'SHORT SQUEEZE',clockAtLock:872,hour:13,session:'US',windowType:'15m',signals:{gap:0.04,momentum:11.51,structure:0.0,flow:39.86,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78289.26,closingPrice:78249.99,strikeAtLock:78284.99,strikePrice:78284.99,gapAtEntry:0.5,closingGapBps:-4.5,fgtAlignment:0,rangeBps:-0.17,qualityScore:49},
-  {id:1777656861754,timestampISO:'2026-05-01T17:34:21.754Z',dir:'UP',outcomeDir:'UP',posterior:88.3,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:638,hour:13,session:'US',windowType:'15m',signals:{gap:0.22,momentum:0.0,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78215.99,closingPrice:78443.01,strikeAtLock:78203.71,strikePrice:78203.71,gapAtEntry:1.6,closingGapBps:30.6,fgtAlignment:-1,rangeBps:-0.06,qualityScore:61},
-  {id:1777658869636,timestampISO:'2026-05-01T18:07:49.636Z',dir:'UP',outcomeDir:'DOWN',posterior:47.0,rawPosterior:47.0,regime:'TRENDING DOWN',clockAtLock:430,hour:14,session:'US',windowType:'15m',signals:{gap:-1.45,momentum:-4.98,structure:10.0,flow:-49.96,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78509.9,closingPrice:78521.55,strikeAtLock:78551.63,strikePrice:78551.63,gapAtEntry:-5.3,closingGapBps:-3.8,fgtAlignment:-3,rangeBps:0.0,qualityScore:33},
-  {id:1777659474015,timestampISO:'2026-05-01T18:17:54.015Z',dir:'DOWN',outcomeDir:'UP',posterior:13.8,rawPosterior:14.5,regime:'RANGE-CHOP',clockAtLock:726,hour:14,session:'US',windowType:'15m',signals:{gap:-0.06,momentum:-3.03,structure:0.0,flow:-34.92,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78528.02,closingPrice:78592.43,strikeAtLock:78532.23,strikePrice:78532.23,gapAtEntry:-0.5,closingGapBps:7.7,fgtAlignment:-2,rangeBps:0.0,qualityScore:45},
-  {id:1777660258139,timestampISO:'2026-05-01T18:30:58.139Z',dir:'DOWN',outcomeDir:'DOWN',posterior:20.5,rawPosterior:21.6,regime:'RANGE-CHOP',clockAtLock:842,hour:14,session:'US',windowType:'15m',signals:{gap:-0.05,momentum:1.17,structure:0.0,flow:-24.6,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78545.87,closingPrice:78433.58,strikeAtLock:78550.9,strikePrice:78550.9,gapAtEntry:-0.6,closingGapBps:-14.9,fgtAlignment:-3,rangeBps:0.0,qualityScore:33},
-  {id:1777661334368,timestampISO:'2026-05-01T18:48:54.368Z',dir:'UP',outcomeDir:'UP',posterior:48.4,rawPosterior:48.4,regime:'RANGE-CHOP',clockAtLock:666,hour:14,session:'US',windowType:'15m',signals:{gap:0.13,momentum:1.18,structure:0.0,flow:-26.79,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78439.99,closingPrice:78435.04,strikeAtLock:78431.64,strikePrice:78431.64,gapAtEntry:1.1,closingGapBps:0.4,fgtAlignment:-3,rangeBps:0.01,qualityScore:12},
-  {id:1777662190323,timestampISO:'2026-05-01T19:03:10.323Z',dir:'UP',outcomeDir:'UP',posterior:84.8,rawPosterior:84.8,regime:'SHORT SQUEEZE',clockAtLock:710,hour:15,session:'US',windowType:'15m',signals:{gap:0.78,momentum:10.28,structure:-10.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78478.36,closingPrice:78513.16,strikeAtLock:78422.21,strikePrice:78422.21,gapAtEntry:7.2,closingGapBps:11.6,fgtAlignment:-1,rangeBps:0.1,qualityScore:56},
-  {id:1777663030533,timestampISO:'2026-05-01T19:17:10.533Z',dir:'DOWN',outcomeDir:'DOWN',posterior:51.9,rawPosterior:51.9,regime:'TRENDING DOWN',clockAtLock:769,hour:15,session:'US',windowType:'15m',signals:{gap:-0.65,momentum:-5.91,structure:10.0,flow:-16.26,technical:10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78446.22,closingPrice:78429.07,strikeAtLock:78502.3,strikePrice:78502.3,gapAtEntry:-7.1,closingGapBps:-9.3,fgtAlignment:-1,rangeBps:-0.19,qualityScore:33},
-  {id:1777665881166,timestampISO:'2026-05-01T20:04:41.166Z',dir:'UP',outcomeDir:'DOWN',posterior:87.6,rawPosterior:87.5,regime:'SHORT SQUEEZE',clockAtLock:619,hour:16,session:'US',windowType:'15m',signals:{gap:-0.59,momentum:2.73,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78380.28,closingPrice:78300.0,strikeAtLock:78411.55,strikePrice:78411.55,gapAtEntry:-4.0,closingGapBps:-14.2,fgtAlignment:-1,rangeBps:0.0,qualityScore:60},
-  {id:1777666573330,timestampISO:'2026-05-01T20:16:13.330Z',dir:'DOWN',outcomeDir:'DOWN',posterior:19.8,rawPosterior:41.7,regime:'RANGE-CHOP',clockAtLock:827,hour:16,session:'US',windowType:'15m',signals:{gap:-0.24,momentum:-2.88,structure:0.0,flow:-4.55,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78269.99,closingPrice:78141.44,strikeAtLock:78293.82,strikePrice:78293.82,gapAtEntry:-3.0,closingGapBps:-19.5,fgtAlignment:-1,rangeBps:0.0,qualityScore:13},
-  {id:1777667585357,timestampISO:'2026-05-01T20:33:05.357Z',dir:'UP',outcomeDir:'DOWN',posterior:84.8,rawPosterior:84.8,regime:'SHORT SQUEEZE',clockAtLock:714,hour:16,session:'US',windowType:'15m',signals:{gap:0.04,momentum:1.96,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78153.0,closingPrice:77978.3,strikeAtLock:78150.05,strikePrice:78150.05,gapAtEntry:0.4,closingGapBps:-22.0,fgtAlignment:1,rangeBps:0.0,qualityScore:56},
-  {id:1777668358727,timestampISO:'2026-05-01T20:45:58.727Z',dir:'UP',outcomeDir:'DOWN',posterior:65.4,rawPosterior:65.4,regime:'SHORT SQUEEZE',clockAtLock:841,hour:16,session:'US',windowType:'15m',signals:{gap:0.33,momentum:1.95,structure:-9.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78020.28,closingPrice:77872.97,strikeAtLock:77986.13,strikePrice:77986.13,gapAtEntry:4.4,closingGapBps:-14.5,fgtAlignment:1,rangeBps:0.23,qualityScore:21},
-  {id:1777669394598,timestampISO:'2026-05-01T21:03:14.598Z',dir:'UP',outcomeDir:'UP',posterior:84.6,rawPosterior:83.6,regime:'SHORT SQUEEZE',clockAtLock:706,hour:17,session:'US',windowType:'15m',signals:{gap:1.05,momentum:8.9,structure:-12.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77950.55,closingPrice:77959.2,strikeAtLock:77873.81,strikePrice:77873.81,gapAtEntry:9.9,closingGapBps:11.0,fgtAlignment:1,rangeBps:0.0,qualityScore:54},
-  {id:1777670321365,timestampISO:'2026-05-01T21:18:41.365Z',dir:'UP',outcomeDir:'UP',posterior:83.7,rawPosterior:87.1,regime:'SHORT SQUEEZE',clockAtLock:679,hour:17,session:'US',windowType:'15m',signals:{gap:0.47,momentum:2.56,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77975.0,closingPrice:78026.44,strikeAtLock:77944.16,strikePrice:77944.16,gapAtEntry:4.0,closingGapBps:10.6,fgtAlignment:1,rangeBps:0.05,qualityScore:59},
-  {id:1777671150190,timestampISO:'2026-05-01T21:32:30.190Z',dir:'UP',outcomeDir:'UP',posterior:84.1,rawPosterior:84.1,regime:'SHORT SQUEEZE',clockAtLock:750,hour:17,session:'US',windowType:'15m',signals:{gap:1.25,momentum:9.35,structure:0.0,flow:55.0,technical:-25.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78108.33,closingPrice:78112.95,strikeAtLock:78006.44,strikePrice:78006.44,gapAtEntry:13.1,closingGapBps:13.7,fgtAlignment:1,rangeBps:0.29,qualityScore:55},
-  {id:1777672208830,timestampISO:'2026-05-01T21:50:08.830Z',dir:'UP',outcomeDir:'UP',posterior:88.1,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:592,hour:17,session:'US',windowType:'15m',signals:{gap:1.51,momentum:4.99,structure:12.0,flow:55.0,technical:-15.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78171.78,closingPrice:78207.04,strikeAtLock:78098.34,strikePrice:78098.34,gapAtEntry:9.4,closingGapBps:13.9,fgtAlignment:0,rangeBps:0.15,qualityScore:61},
-  {id:1777672896917,timestampISO:'2026-05-01T22:01:36.917Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:803,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.57,momentum:1.86,structure:15.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78249.16,closingPrice:78330.1,strikeAtLock:78195.36,strikePrice:78195.36,gapAtEntry:6.9,closingGapBps:17.2,fgtAlignment:0,rangeBps:0.0,qualityScore:49},
-  {id:1777675668449,timestampISO:'2026-05-01T22:47:48.449Z',dir:'DOWN',outcomeDir:'DOWN',posterior:16.7,rawPosterior:20.8,regime:'RANGE-CHOP',clockAtLock:732,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:-0.31,momentum:-1.2,structure:0.0,flow:-19.3,technical:-8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78216.55,closingPrice:78146.63,strikeAtLock:78240.46,strikePrice:78240.46,gapAtEntry:-3.1,closingGapBps:-12.0,fgtAlignment:-1,rangeBps:0.0,qualityScore:35},
-  {id:1777676615456,timestampISO:'2026-05-01T23:03:35.456Z',dir:'UP',outcomeDir:'DOWN',posterior:87.0,rawPosterior:87.0,regime:'SHORT SQUEEZE',clockAtLock:685,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.1,momentum:2.72,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78152.29,closingPrice:78121.18,strikeAtLock:78145.51,strikePrice:78145.51,gapAtEntry:0.9,closingGapBps:-3.1,fgtAlignment:-1,rangeBps:0.0,qualityScore:58},
-  {id:1777678676827,timestampISO:'2026-05-01T23:37:56.827Z',dir:'UP',outcomeDir:'UP',posterior:87.5,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:423,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:1.57,momentum:5.0,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78095.22,closingPrice:78095.66,strikeAtLock:78051.28,strikePrice:78051.28,gapAtEntry:5.6,closingGapBps:5.7,fgtAlignment:-1,rangeBps:0.12,qualityScore:60},
-  {id:1777679342049,timestampISO:'2026-05-01T23:49:02.049Z',dir:'UP',outcomeDir:'UP',posterior:87.5,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:658,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.77,momentum:4.4,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78167.36,closingPrice:78231.97,strikeAtLock:78120.6,strikePrice:78120.6,gapAtEntry:6.0,closingGapBps:14.3,fgtAlignment:-1,rangeBps:0.0,qualityScore:60},
-  {id:1777680090860,timestampISO:'2026-05-02T00:01:30.860Z',dir:'UP',outcomeDir:'DOWN',posterior:81.2,rawPosterior:60.4,regime:'SHORT SQUEEZE',clockAtLock:809,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.35,momentum:7.51,structure:0.0,flow:21.58,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78249.42,closingPrice:78200.16,strikeAtLock:78215.98,strikePrice:78215.98,gapAtEntry:4.3,closingGapBps:-2.0,fgtAlignment:-1,rangeBps:0.09,qualityScore:27},
-  {id:1777681337840,timestampISO:'2026-05-02T00:22:17.840Z',dir:'UP',outcomeDir:'UP',posterior:88.3,rawPosterior:74.4,regime:'SHORT SQUEEZE',clockAtLock:462,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.79,momentum:3.01,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78228.31,closingPrice:78279.04,strikeAtLock:78203.41,strikePrice:78203.41,gapAtEntry:3.2,closingGapBps:9.7,fgtAlignment:-1,rangeBps:0.08,qualityScore:42},
-  {id:1777681867794,timestampISO:'2026-05-02T00:31:07.794Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'RANGE-CHOP',clockAtLock:832,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.23,momentum:-0.32,structure:0.0,flow:55.0,technical:8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78305.53,closingPrice:78325.19,strikeAtLock:78281.9,strikePrice:78281.9,gapAtEntry:3.0,closingGapBps:5.5,fgtAlignment:-1,rangeBps:0.2,qualityScore:46},
-  {id:1777682722823,timestampISO:'2026-05-02T00:45:22.823Z',dir:'UP',outcomeDir:'UP',posterior:80.3,rawPosterior:60.7,regime:'TRENDING UP',clockAtLock:877,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.4,momentum:14.23,structure:-10.0,flow:27.9,technical:3.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78361.66,closingPrice:78346.02,strikeAtLock:78317.17,strikePrice:78317.17,gapAtEntry:5.7,closingGapBps:3.7,fgtAlignment:0,rangeBps:0.39,qualityScore:22},
-  {id:1777683905786,timestampISO:'2026-05-02T01:05:05.786Z',dir:'UP',outcomeDir:'UP',posterior:87.5,rawPosterior:87.5,regime:'SHORT SQUEEZE',clockAtLock:594,hour:21,session:'ASIA',windowType:'15m',signals:{gap:-0.32,momentum:-3.94,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78301.99,closingPrice:78349.0,strikeAtLock:78317.62,strikePrice:78317.62,gapAtEntry:-2.0,closingGapBps:4.0,fgtAlignment:0,rangeBps:-0.16,qualityScore:63},
-  {id:1777684528587,timestampISO:'2026-05-02T01:15:28.587Z',dir:'UP',outcomeDir:'DOWN',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:871,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.12,momentum:0.03,structure:7.2,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78370.04,closingPrice:78345.4,strikeAtLock:78356.61,strikePrice:78356.61,gapAtEntry:1.7,closingGapBps:-1.4,fgtAlignment:0,rangeBps:0.24,qualityScore:54},
-  {id:1777685527740,timestampISO:'2026-05-02T01:32:07.740Z',dir:'UP',outcomeDir:'UP',posterior:84.5,rawPosterior:84.5,regime:'RANGE-CHOP',clockAtLock:772,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.24,momentum:3.73,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78365.0,closingPrice:78375.99,strikeAtLock:78343.9,strikePrice:78343.9,gapAtEntry:2.7,closingGapBps:4.1,fgtAlignment:1,rangeBps:0.11,qualityScore:51},
-  {id:1777686506060,timestampISO:'2026-05-02T01:48:26.060Z',dir:'UP',outcomeDir:'UP',posterior:84.1,rawPosterior:87.4,regime:'RANGE-CHOP',clockAtLock:694,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.07,momentum:0.54,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78337.99,closingPrice:78339.79,strikeAtLock:78332.89,strikePrice:78332.89,gapAtEntry:0.7,closingGapBps:0.9,fgtAlignment:1,rangeBps:-0.17,qualityScore:56},
-  {id:1777687585600,timestampISO:'2026-05-02T02:06:25.600Z',dir:'UP',outcomeDir:'DOWN',posterior:87.5,rawPosterior:87.4,regime:'SHORT SQUEEZE',clockAtLock:515,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.88,momentum:-0.22,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78348.23,closingPrice:78291.56,strikeAtLock:78314.97,strikePrice:78314.97,gapAtEntry:4.2,closingGapBps:-3.0,fgtAlignment:0,rangeBps:0.0,qualityScore:64},
-  {id:1777690300228,timestampISO:'2026-05-02T02:51:40.228Z',dir:'UP',outcomeDir:'DOWN',posterior:88.0,rawPosterior:87.8,regime:'SHORT SQUEEZE',clockAtLock:500,hour:22,session:'ASIA',windowType:'15m',signals:{gap:1.01,momentum:2.16,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78413.98,closingPrice:78358.09,strikeAtLock:78377.62,strikePrice:78377.62,gapAtEntry:4.6,closingGapBps:-2.5,fgtAlignment:-1,rangeBps:0.0,qualityScore:64},
-  {id:1777690851218,timestampISO:'2026-05-02T03:00:51.218Z',dir:'DOWN',outcomeDir:'DOWN',posterior:58.9,rawPosterior:58.9,regime:'RANGE-CHOP',clockAtLock:849,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.21,momentum:-3.39,structure:0.0,flow:31.03,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78380.59,closingPrice:78269.55,strikeAtLock:78358.79,strikePrice:78358.79,gapAtEntry:2.8,closingGapBps:-11.4,fgtAlignment:-1,rangeBps:0.21,qualityScore:16},
-  {id:1777691790489,timestampISO:'2026-05-02T03:16:30.489Z',dir:'UP',outcomeDir:'UP',posterior:49.8,rawPosterior:49.8,regime:'TRENDING DOWN',clockAtLock:809,hour:23,session:'ASIA',windowType:'15m',signals:{gap:-0.3,momentum:-1.7,structure:0.0,flow:-42.99,technical:8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78248.58,closingPrice:78382.85,strikeAtLock:78277.2,strikePrice:78277.2,gapAtEntry:-3.7,closingGapBps:13.5,fgtAlignment:1,rangeBps:-0.14,qualityScore:34},
-  {id:1777692779590,timestampISO:'2026-05-02T03:32:59.590Z',dir:'UP',outcomeDir:'UP',posterior:60.0,rawPosterior:60.0,regime:'RANGE-CHOP',clockAtLock:720,hour:23,session:'ASIA',windowType:'15m',signals:{gap:-0.11,momentum:-0.01,structure:0.0,flow:-25.71,technical:8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78380.95,closingPrice:78400.73,strikeAtLock:78389.01,strikePrice:78389.01,gapAtEntry:-1.0,closingGapBps:1.5,fgtAlignment:0,rangeBps:-0.01,qualityScore:16},
-  {id:1777693519286,timestampISO:'2026-05-02T03:45:19.286Z',dir:'DOWN',outcomeDir:'UP',posterior:50.4,rawPosterior:50.4,regime:'RANGE-CHOP',clockAtLock:881,hour:23,session:'ASIA',windowType:'15m',signals:{gap:-0.13,momentum:-6.24,structure:0.0,flow:-37.83,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78382.34,closingPrice:78438.76,strikeAtLock:78396.72,strikePrice:78396.72,gapAtEntry:-1.8,closingGapBps:5.4,fgtAlignment:0,rangeBps:-0.23,qualityScore:16},
-  {id:1777694440054,timestampISO:'2026-05-02T04:00:40.054Z',dir:'DOWN',outcomeDir:'DOWN',posterior:41.7,rawPosterior:41.7,regime:'RANGE-CHOP',clockAtLock:860,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:1.64,structure:9.0,flow:-36.25,technical:10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78434.73,closingPrice:78288.28,strikeAtLock:78434.29,strikePrice:78434.29,gapAtEntry:0.1,closingGapBps:-18.6,fgtAlignment:0,rangeBps:-0.04,qualityScore:16},
-  {id:1777695358318,timestampISO:'2026-05-02T04:15:58.318Z',dir:'UP',outcomeDir:'DOWN',posterior:80.4,rawPosterior:80.6,regime:'SHORT SQUEEZE',clockAtLock:842,hour:0,session:'ASIA',windowType:'15m',signals:{gap:-0.15,momentum:-1.06,structure:0.0,flow:40.71,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78268.17,closingPrice:78281.05,strikeAtLock:78283.39,strikePrice:78283.39,gapAtEntry:-1.9,closingGapBps:-0.3,fgtAlignment:1,rangeBps:-0.16,qualityScore:53},
-  {id:1777696641171,timestampISO:'2026-05-02T04:37:21.171Z',dir:'DOWN',outcomeDir:'DOWN',posterior:47.0,rawPosterior:47.0,regime:'RANGE-CHOP',clockAtLock:459,hour:0,session:'ASIA',windowType:'15m',signals:{gap:-0.11,momentum:0.03,structure:-9.0,flow:-38.31,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78275.59,closingPrice:78229.36,strikeAtLock:78278.98,strikePrice:78278.98,gapAtEntry:-0.4,closingGapBps:-6.3,fgtAlignment:1,rangeBps:-0.02,qualityScore:16},
-  {id:1777698580777,timestampISO:'2026-05-02T05:09:40.778Z',dir:'UP',outcomeDir:'DOWN',posterior:54.5,rawPosterior:54.5,regime:'RANGE-CHOP',clockAtLock:319,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.3,momentum:3.57,structure:0.0,flow:17.83,technical:-2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78192.88,closingPrice:78092.36,strikeAtLock:78174.98,strikePrice:78174.98,gapAtEntry:2.3,closingGapBps:-10.6,fgtAlignment:1,rangeBps:0.0,qualityScore:16},
-  {id:1777699897035,timestampISO:'2026-05-02T05:31:37.035Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.3,regime:'SHORT SQUEEZE',clockAtLock:803,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.56,momentum:10.03,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78143.99,closingPrice:78193.8,strikeAtLock:78090.86,strikePrice:78090.86,gapAtEntry:6.8,closingGapBps:13.2,fgtAlignment:1,rangeBps:0.25,qualityScore:54},
-  {id:1777700842998,timestampISO:'2026-05-02T05:47:22.998Z',dir:'UP',outcomeDir:'UP',posterior:84.1,rawPosterior:84.8,regime:'SHORT SQUEEZE',clockAtLock:757,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.37,momentum:4.36,structure:9.0,flow:55.0,technical:-2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78220.22,closingPrice:78211.79,strikeAtLock:78189.11,strikePrice:78189.11,gapAtEntry:4.0,closingGapBps:2.9,fgtAlignment:0,rangeBps:0.14,qualityScore:60},
+  {id:1777623321860,timestampISO:'2026-05-01T08:15:21.860Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:878,hour:4,session:'EU',windowType:'15m',signals:{gap:0.22,momentum:5.76,structure:9.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77212.2,closingPrice:77420.0,strikeAtLock:77188.32,strikePrice:77188.32,gapAtEntry:3.1,closingGapBps:30.0,fgtAlignment:0.0,rangeBps:-0.3,qualityScore:56},
+  {id:1777625065746,timestampISO:'2026-05-01T08:44:25.746Z',dir:'DOWN',outcomeDir:'DOWN',posterior:25.0,rawPosterior:25.0,regime:'RANGE-CHOP',clockAtLock:34,hour:4,session:'EU',windowType:'15m',signals:{gap:-14.97,momentum:-1.81,structure:0.0,flow:-14.65,technical:10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77355.98,closingPrice:77351.35,strikeAtLock:77431.88,strikePrice:77431.88,gapAtEntry:-9.8,closingGapBps:-10.4,fgtAlignment:-3.0,rangeBps:0.0,qualityScore:13},
+  {id:1777625149938,timestampISO:'2026-05-01T08:45:49.938Z',dir:'DOWN',outcomeDir:'UP',posterior:9.8,rawPosterior:9.8,regime:'RANGE-CHOP',clockAtLock:850,hour:4,session:'EU',windowType:'15m',signals:{gap:-0.04,momentum:0.0,structure:0.0,flow:-55.0,technical:10.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:77349.0,closingPrice:77358.39,strikeAtLock:77353.67,strikePrice:77353.67,gapAtEntry:-0.6,closingGapBps:0.6,fgtAlignment:-3.0,rangeBps:0.0,qualityScore:58},
+  {id:1777626839895,timestampISO:'2026-05-01T09:13:59.895Z',dir:'UP',outcomeDir:'DOWN',posterior:61.5,rawPosterior:61.5,regime:'RANGE-CHOP',clockAtLock:60,hour:5,session:'EU',windowType:'15m',signals:{gap:-7.77,momentum:0.0,structure:-9.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77318.65,closingPrice:77315.94,strikeAtLock:77360.41,strikePrice:77360.41,gapAtEntry:-5.4,closingGapBps:-5.7,fgtAlignment:-3.0,rangeBps:0.0,qualityScore:0},
+  {id:1777627444347,timestampISO:'2026-05-01T09:24:04.347Z',dir:'DOWN',outcomeDir:'UP',posterior:60.8,rawPosterior:60.8,regime:'SHORT SQUEEZE',clockAtLock:355,hour:5,session:'EU',windowType:'15m',signals:{gap:-0.76,momentum:-0.54,structure:-12.0,flow:47.0,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:77308.25,closingPrice:77332.42,strikeAtLock:77319.74,strikePrice:77319.74,gapAtEntry:-1.5,closingGapBps:1.6,fgtAlignment:-2.0,rangeBps:-0.02,qualityScore:26},
+  {id:1777627826877,timestampISO:'2026-05-01T09:30:26.877Z',dir:'DOWN',outcomeDir:'DOWN',posterior:9.8,rawPosterior:9.8,regime:'TRENDING DOWN',clockAtLock:873,hour:5,session:'EU',windowType:'15m',signals:{gap:-0.41,momentum:-6.7,structure:-12.0,flow:-55.0,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77291.99,closingPrice:77265.21,strikeAtLock:77336.66,strikePrice:77336.66,gapAtEntry:-5.8,closingGapBps:-9.2,fgtAlignment:0.0,rangeBps:-0.4,qualityScore:78},
+  {id:1777628737068,timestampISO:'2026-05-01T09:45:37.068Z',dir:'DOWN',outcomeDir:'DOWN',posterior:9.8,rawPosterior:9.8,regime:'RANGE-CHOP',clockAtLock:863,hour:5,session:'EU',windowType:'15m',signals:{gap:-0.25,momentum:-2.29,structure:0.0,flow:-54.31,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77242.69,closingPrice:77261.71,strikeAtLock:77269.11,strikePrice:77269.11,gapAtEntry:-3.4,closingGapBps:-1.0,fgtAlignment:-2.0,rangeBps:0.0,qualityScore:57},
+  {id:1777629651971,timestampISO:'2026-05-01T10:00:51.971Z',dir:'DOWN',outcomeDir:'DOWN',posterior:34.5,rawPosterior:22.4,regime:'TRENDING DOWN',clockAtLock:848,hour:6,session:'EU',windowType:'15m',signals:{gap:-0.21,momentum:0.13,structure:0.0,flow:-42.38,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77235.01,closingPrice:77151.72,strikeAtLock:77257.26,strikePrice:77257.26,gapAtEntry:-2.9,closingGapBps:-13.7,fgtAlignment:-1.0,rangeBps:-0.2,qualityScore:58},
+  {id:1777630526828,timestampISO:'2026-05-01T10:15:26.828Z',dir:'UP',outcomeDir:'UP',posterior:80.5,rawPosterior:64.8,regime:'RANGE-CHOP',clockAtLock:873,hour:6,session:'EU',windowType:'15m',signals:{gap:0.05,momentum:-0.78,structure:0.0,flow:51.02,technical:-15.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77162.79,closingPrice:77333.58,strikeAtLock:77156.79,strikePrice:77156.79,gapAtEntry:0.8,closingGapBps:22.9,fgtAlignment:0.0,rangeBps:0.12,qualityScore:22},
+  {id:1777631423940,timestampISO:'2026-05-01T10:30:23.940Z',dir:'DOWN',outcomeDir:'DOWN',posterior:47.5,rawPosterior:47.5,regime:'RANGE-CHOP',clockAtLock:876,hour:6,session:'EU',windowType:'15m',signals:{gap:-0.13,momentum:-4.17,structure:0.0,flow:-51.43,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77323.49,closingPrice:77223.6,strikeAtLock:77337.29,strikePrice:77337.29,gapAtEntry:-1.8,closingGapBps:-14.7,fgtAlignment:0.0,rangeBps:-0.1,qualityScore:18},
+  {id:1777632450103,timestampISO:'2026-05-01T10:47:30.103Z',dir:'DOWN',outcomeDir:'UP',posterior:22.7,rawPosterior:25.2,regime:'RANGE-CHOP',clockAtLock:750,hour:6,session:'EU',windowType:'15m',signals:{gap:-0.09,momentum:-1.75,structure:0.0,flow:-20.85,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:77231.07,closingPrice:77277.85,strikeAtLock:77238.15,strikePrice:77238.15,gapAtEntry:-0.9,closingGapBps:5.1,fgtAlignment:-2.0,rangeBps:0.03,qualityScore:34},
+  {id:1777633215405,timestampISO:'2026-05-01T11:00:15.405Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:884,hour:7,session:'EU',windowType:'15m',signals:{gap:0.18,momentum:7.87,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77291.99,closingPrice:77318.06,strikeAtLock:77271.46,strikePrice:77271.46,gapAtEntry:2.7,closingGapBps:6.0,fgtAlignment:0.0,rangeBps:0.15,qualityScore:56},
+  {id:1777654050998,timestampISO:'2026-05-01T16:47:30.998Z',dir:'DOWN',outcomeDir:'DOWN',posterior:24.4,rawPosterior:38.4,regime:'HIGH VOL CHOP',clockAtLock:749,hour:12,session:'US',windowType:'15m',signals:{gap:-0.68,momentum:-3.97,structure:-15.0,flow:-6.8,technical:18.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78216.73,closingPrice:78202.92,strikeAtLock:78272.34,strikePrice:78272.34,gapAtEntry:-7.1,closingGapBps:-8.9,fgtAlignment:-1.0,rangeBps:-0.1,qualityScore:11},
+  {id:1777654857038,timestampISO:'2026-05-01T17:00:57.038Z',dir:'UP',outcomeDir:'UP',posterior:80.4,rawPosterior:72.1,regime:'SHORT SQUEEZE',clockAtLock:843,hour:13,session:'US',windowType:'15m',signals:{gap:0.48,momentum:-1.23,structure:-10.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78275.58,closingPrice:78330.61,strikeAtLock:78225.0,strikePrice:78225.0,gapAtEntry:6.5,closingGapBps:13.5,fgtAlignment:-1.0,rangeBps:0.21,qualityScore:35},
+  {id:1777655727557,timestampISO:'2026-05-01T17:15:27.558Z',dir:'UP',outcomeDir:'DOWN',posterior:81.4,rawPosterior:80.8,regime:'SHORT SQUEEZE',clockAtLock:872,hour:13,session:'US',windowType:'15m',signals:{gap:0.04,momentum:11.51,structure:0.0,flow:39.86,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78289.26,closingPrice:78249.99,strikeAtLock:78284.99,strikePrice:78284.99,gapAtEntry:0.5,closingGapBps:-4.5,fgtAlignment:0.0,rangeBps:-0.17,qualityScore:49},
+  {id:1777656861754,timestampISO:'2026-05-01T17:34:21.754Z',dir:'UP',outcomeDir:'UP',posterior:88.3,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:638,hour:13,session:'US',windowType:'15m',signals:{gap:0.22,momentum:0.0,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78215.99,closingPrice:78443.01,strikeAtLock:78203.71,strikePrice:78203.71,gapAtEntry:1.6,closingGapBps:30.6,fgtAlignment:-1.0,rangeBps:-0.06,qualityScore:61},
+  {id:1777658869636,timestampISO:'2026-05-01T18:07:49.636Z',dir:'UP',outcomeDir:'DOWN',posterior:47.0,rawPosterior:47.0,regime:'TRENDING DOWN',clockAtLock:430,hour:14,session:'US',windowType:'15m',signals:{gap:-1.45,momentum:-4.98,structure:10.0,flow:-49.96,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78509.9,closingPrice:78521.55,strikeAtLock:78551.63,strikePrice:78551.63,gapAtEntry:-5.3,closingGapBps:-3.8,fgtAlignment:-3.0,rangeBps:0.0,qualityScore:33},
+  {id:1777659474015,timestampISO:'2026-05-01T18:17:54.015Z',dir:'DOWN',outcomeDir:'UP',posterior:13.8,rawPosterior:14.5,regime:'RANGE-CHOP',clockAtLock:726,hour:14,session:'US',windowType:'15m',signals:{gap:-0.06,momentum:-3.03,structure:0.0,flow:-34.92,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78528.02,closingPrice:78592.43,strikeAtLock:78532.23,strikePrice:78532.23,gapAtEntry:-0.5,closingGapBps:7.7,fgtAlignment:-2.0,rangeBps:0.0,qualityScore:45},
+  {id:1777660258139,timestampISO:'2026-05-01T18:30:58.139Z',dir:'DOWN',outcomeDir:'DOWN',posterior:20.5,rawPosterior:21.6,regime:'RANGE-CHOP',clockAtLock:842,hour:14,session:'US',windowType:'15m',signals:{gap:-0.05,momentum:1.17,structure:0.0,flow:-24.6,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78545.87,closingPrice:78433.58,strikeAtLock:78550.9,strikePrice:78550.9,gapAtEntry:-0.6,closingGapBps:-14.9,fgtAlignment:-3.0,rangeBps:0.0,qualityScore:33},
+  {id:1777661334368,timestampISO:'2026-05-01T18:48:54.368Z',dir:'UP',outcomeDir:'UP',posterior:48.4,rawPosterior:48.4,regime:'RANGE-CHOP',clockAtLock:666,hour:14,session:'US',windowType:'15m',signals:{gap:0.13,momentum:1.18,structure:0.0,flow:-26.79,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78439.99,closingPrice:78435.04,strikeAtLock:78431.64,strikePrice:78431.64,gapAtEntry:1.1,closingGapBps:0.4,fgtAlignment:-3.0,rangeBps:0.01,qualityScore:12},
+  {id:1777662190323,timestampISO:'2026-05-01T19:03:10.323Z',dir:'UP',outcomeDir:'UP',posterior:84.8,rawPosterior:84.8,regime:'SHORT SQUEEZE',clockAtLock:710,hour:15,session:'US',windowType:'15m',signals:{gap:0.78,momentum:10.28,structure:-10.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78478.36,closingPrice:78513.16,strikeAtLock:78422.21,strikePrice:78422.21,gapAtEntry:7.2,closingGapBps:11.6,fgtAlignment:-1.0,rangeBps:0.1,qualityScore:56},
+  {id:1777663030533,timestampISO:'2026-05-01T19:17:10.533Z',dir:'DOWN',outcomeDir:'DOWN',posterior:51.9,rawPosterior:51.9,regime:'TRENDING DOWN',clockAtLock:769,hour:15,session:'US',windowType:'15m',signals:{gap:-0.65,momentum:-5.91,structure:10.0,flow:-16.26,technical:10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78446.22,closingPrice:78429.07,strikeAtLock:78502.3,strikePrice:78502.3,gapAtEntry:-7.1,closingGapBps:-9.3,fgtAlignment:-1.0,rangeBps:-0.19,qualityScore:33},
+  {id:1777665881166,timestampISO:'2026-05-01T20:04:41.166Z',dir:'UP',outcomeDir:'DOWN',posterior:87.6,rawPosterior:87.5,regime:'SHORT SQUEEZE',clockAtLock:619,hour:16,session:'US',windowType:'15m',signals:{gap:-0.59,momentum:2.73,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78380.28,closingPrice:78300.0,strikeAtLock:78411.55,strikePrice:78411.55,gapAtEntry:-4.0,closingGapBps:-14.2,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:60},
+  {id:1777666573330,timestampISO:'2026-05-01T20:16:13.330Z',dir:'DOWN',outcomeDir:'DOWN',posterior:19.8,rawPosterior:41.7,regime:'RANGE-CHOP',clockAtLock:827,hour:16,session:'US',windowType:'15m',signals:{gap:-0.24,momentum:-2.88,structure:0.0,flow:-4.55,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78269.99,closingPrice:78141.44,strikeAtLock:78293.82,strikePrice:78293.82,gapAtEntry:-3.0,closingGapBps:-19.5,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:13},
+  {id:1777667585357,timestampISO:'2026-05-01T20:33:05.357Z',dir:'UP',outcomeDir:'DOWN',posterior:84.8,rawPosterior:84.8,regime:'SHORT SQUEEZE',clockAtLock:714,hour:16,session:'US',windowType:'15m',signals:{gap:0.04,momentum:1.96,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78153.0,closingPrice:77978.3,strikeAtLock:78150.05,strikePrice:78150.05,gapAtEntry:0.4,closingGapBps:-22.0,fgtAlignment:1.0,rangeBps:0.0,qualityScore:56},
+  {id:1777668358727,timestampISO:'2026-05-01T20:45:58.727Z',dir:'UP',outcomeDir:'DOWN',posterior:65.4,rawPosterior:65.4,regime:'SHORT SQUEEZE',clockAtLock:841,hour:16,session:'US',windowType:'15m',signals:{gap:0.33,momentum:1.95,structure:-9.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78020.28,closingPrice:77872.97,strikeAtLock:77986.13,strikePrice:77986.13,gapAtEntry:4.4,closingGapBps:-14.5,fgtAlignment:1.0,rangeBps:0.23,qualityScore:21},
+  {id:1777669394598,timestampISO:'2026-05-01T21:03:14.598Z',dir:'UP',outcomeDir:'UP',posterior:84.6,rawPosterior:83.6,regime:'SHORT SQUEEZE',clockAtLock:706,hour:17,session:'US',windowType:'15m',signals:{gap:1.05,momentum:8.9,structure:-12.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77950.55,closingPrice:77959.2,strikeAtLock:77873.81,strikePrice:77873.81,gapAtEntry:9.9,closingGapBps:11.0,fgtAlignment:1.0,rangeBps:0.0,qualityScore:54},
+  {id:1777670321365,timestampISO:'2026-05-01T21:18:41.365Z',dir:'UP',outcomeDir:'UP',posterior:83.7,rawPosterior:87.1,regime:'SHORT SQUEEZE',clockAtLock:679,hour:17,session:'US',windowType:'15m',signals:{gap:0.47,momentum:2.56,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77975.0,closingPrice:78026.44,strikeAtLock:77944.16,strikePrice:77944.16,gapAtEntry:4.0,closingGapBps:10.6,fgtAlignment:1.0,rangeBps:0.05,qualityScore:59},
+  {id:1777671150190,timestampISO:'2026-05-01T21:32:30.190Z',dir:'UP',outcomeDir:'UP',posterior:84.1,rawPosterior:84.1,regime:'SHORT SQUEEZE',clockAtLock:750,hour:17,session:'US',windowType:'15m',signals:{gap:1.25,momentum:9.35,structure:0.0,flow:55.0,technical:-25.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78108.33,closingPrice:78112.95,strikeAtLock:78006.44,strikePrice:78006.44,gapAtEntry:13.1,closingGapBps:13.7,fgtAlignment:1.0,rangeBps:0.29,qualityScore:55},
+  {id:1777672208830,timestampISO:'2026-05-01T21:50:08.830Z',dir:'UP',outcomeDir:'UP',posterior:88.1,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:592,hour:17,session:'US',windowType:'15m',signals:{gap:1.51,momentum:4.99,structure:12.0,flow:55.0,technical:-15.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78171.78,closingPrice:78207.04,strikeAtLock:78098.34,strikePrice:78098.34,gapAtEntry:9.4,closingGapBps:13.9,fgtAlignment:0.0,rangeBps:0.15,qualityScore:61},
+  {id:1777672896917,timestampISO:'2026-05-01T22:01:36.917Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:803,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.57,momentum:1.86,structure:15.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78249.16,closingPrice:78330.1,strikeAtLock:78195.36,strikePrice:78195.36,gapAtEntry:6.9,closingGapBps:17.2,fgtAlignment:0.0,rangeBps:0.0,qualityScore:49},
+  {id:1777675668449,timestampISO:'2026-05-01T22:47:48.449Z',dir:'DOWN',outcomeDir:'DOWN',posterior:16.7,rawPosterior:20.8,regime:'RANGE-CHOP',clockAtLock:732,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:-0.31,momentum:-1.2,structure:0.0,flow:-19.3,technical:-8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78216.55,closingPrice:78146.63,strikeAtLock:78240.46,strikePrice:78240.46,gapAtEntry:-3.1,closingGapBps:-12.0,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:35},
+  {id:1777676615456,timestampISO:'2026-05-01T23:03:35.456Z',dir:'UP',outcomeDir:'DOWN',posterior:87.0,rawPosterior:87.0,regime:'SHORT SQUEEZE',clockAtLock:685,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.1,momentum:2.72,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78152.29,closingPrice:78121.18,strikeAtLock:78145.51,strikePrice:78145.51,gapAtEntry:0.9,closingGapBps:-3.1,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:58},
+  {id:1777678676827,timestampISO:'2026-05-01T23:37:56.827Z',dir:'UP',outcomeDir:'UP',posterior:87.5,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:423,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:1.57,momentum:5.0,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78095.22,closingPrice:78095.66,strikeAtLock:78051.28,strikePrice:78051.28,gapAtEntry:5.6,closingGapBps:5.7,fgtAlignment:-1.0,rangeBps:0.12,qualityScore:60},
+  {id:1777679342049,timestampISO:'2026-05-01T23:49:02.049Z',dir:'UP',outcomeDir:'UP',posterior:87.5,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:658,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.77,momentum:4.4,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78167.36,closingPrice:78231.97,strikeAtLock:78120.6,strikePrice:78120.6,gapAtEntry:6.0,closingGapBps:14.3,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:60},
+  {id:1777680090860,timestampISO:'2026-05-02T00:01:30.860Z',dir:'UP',outcomeDir:'DOWN',posterior:81.2,rawPosterior:60.4,regime:'SHORT SQUEEZE',clockAtLock:809,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.35,momentum:7.51,structure:0.0,flow:21.58,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78249.42,closingPrice:78200.16,strikeAtLock:78215.98,strikePrice:78215.98,gapAtEntry:4.3,closingGapBps:-2.0,fgtAlignment:-1.0,rangeBps:0.09,qualityScore:27},
+  {id:1777681337840,timestampISO:'2026-05-02T00:22:17.840Z',dir:'UP',outcomeDir:'UP',posterior:88.3,rawPosterior:74.4,regime:'SHORT SQUEEZE',clockAtLock:462,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.79,momentum:3.01,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78228.31,closingPrice:78279.04,strikeAtLock:78203.41,strikePrice:78203.41,gapAtEntry:3.2,closingGapBps:9.7,fgtAlignment:-1.0,rangeBps:0.08,qualityScore:42},
+  {id:1777681867794,timestampISO:'2026-05-02T00:31:07.794Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'RANGE-CHOP',clockAtLock:832,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.23,momentum:-0.32,structure:0.0,flow:55.0,technical:8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78305.53,closingPrice:78325.19,strikeAtLock:78281.9,strikePrice:78281.9,gapAtEntry:3.0,closingGapBps:5.5,fgtAlignment:-1.0,rangeBps:0.2,qualityScore:46},
+  {id:1777682722823,timestampISO:'2026-05-02T00:45:22.823Z',dir:'UP',outcomeDir:'UP',posterior:80.3,rawPosterior:60.7,regime:'TRENDING UP',clockAtLock:877,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.4,momentum:14.23,structure:-10.0,flow:27.9,technical:3.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78361.66,closingPrice:78346.02,strikeAtLock:78317.17,strikePrice:78317.17,gapAtEntry:5.7,closingGapBps:3.7,fgtAlignment:0.0,rangeBps:0.39,qualityScore:22},
+  {id:1777683905786,timestampISO:'2026-05-02T01:05:05.786Z',dir:'UP',outcomeDir:'UP',posterior:87.5,rawPosterior:87.5,regime:'SHORT SQUEEZE',clockAtLock:594,hour:21,session:'ASIA',windowType:'15m',signals:{gap:-0.32,momentum:-3.94,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78301.99,closingPrice:78349.0,strikeAtLock:78317.62,strikePrice:78317.62,gapAtEntry:-2.0,closingGapBps:4.0,fgtAlignment:0.0,rangeBps:-0.16,qualityScore:63},
+  {id:1777684528587,timestampISO:'2026-05-02T01:15:28.587Z',dir:'UP',outcomeDir:'DOWN',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:871,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.12,momentum:0.03,structure:7.2,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78370.04,closingPrice:78345.4,strikeAtLock:78356.61,strikePrice:78356.61,gapAtEntry:1.7,closingGapBps:-1.4,fgtAlignment:0.0,rangeBps:0.24,qualityScore:54},
+  {id:1777685527740,timestampISO:'2026-05-02T01:32:07.740Z',dir:'UP',outcomeDir:'UP',posterior:84.5,rawPosterior:84.5,regime:'RANGE-CHOP',clockAtLock:772,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.24,momentum:3.73,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78365.0,closingPrice:78375.99,strikeAtLock:78343.9,strikePrice:78343.9,gapAtEntry:2.7,closingGapBps:4.1,fgtAlignment:1.0,rangeBps:0.11,qualityScore:51},
+  {id:1777686506060,timestampISO:'2026-05-02T01:48:26.060Z',dir:'UP',outcomeDir:'UP',posterior:84.1,rawPosterior:87.4,regime:'RANGE-CHOP',clockAtLock:694,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.07,momentum:0.54,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78337.99,closingPrice:78339.79,strikeAtLock:78332.89,strikePrice:78332.89,gapAtEntry:0.7,closingGapBps:0.9,fgtAlignment:1.0,rangeBps:-0.17,qualityScore:56},
+  {id:1777687585600,timestampISO:'2026-05-02T02:06:25.600Z',dir:'UP',outcomeDir:'DOWN',posterior:87.5,rawPosterior:87.4,regime:'SHORT SQUEEZE',clockAtLock:515,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.88,momentum:-0.22,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78348.23,closingPrice:78291.56,strikeAtLock:78314.97,strikePrice:78314.97,gapAtEntry:4.2,closingGapBps:-3.0,fgtAlignment:0.0,rangeBps:0.0,qualityScore:64},
+  {id:1777690300228,timestampISO:'2026-05-02T02:51:40.228Z',dir:'UP',outcomeDir:'DOWN',posterior:88.0,rawPosterior:87.8,regime:'SHORT SQUEEZE',clockAtLock:500,hour:22,session:'ASIA',windowType:'15m',signals:{gap:1.01,momentum:2.16,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78413.98,closingPrice:78358.09,strikeAtLock:78377.62,strikePrice:78377.62,gapAtEntry:4.6,closingGapBps:-2.5,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:64},
+  {id:1777690851218,timestampISO:'2026-05-02T03:00:51.218Z',dir:'DOWN',outcomeDir:'DOWN',posterior:58.9,rawPosterior:58.9,regime:'RANGE-CHOP',clockAtLock:849,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.21,momentum:-3.39,structure:0.0,flow:31.03,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78380.59,closingPrice:78269.55,strikeAtLock:78358.79,strikePrice:78358.79,gapAtEntry:2.8,closingGapBps:-11.4,fgtAlignment:-1.0,rangeBps:0.21,qualityScore:16},
+  {id:1777691790489,timestampISO:'2026-05-02T03:16:30.489Z',dir:'UP',outcomeDir:'UP',posterior:49.8,rawPosterior:49.8,regime:'TRENDING DOWN',clockAtLock:809,hour:23,session:'ASIA',windowType:'15m',signals:{gap:-0.3,momentum:-1.7,structure:0.0,flow:-42.99,technical:8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78248.58,closingPrice:78382.85,strikeAtLock:78277.2,strikePrice:78277.2,gapAtEntry:-3.7,closingGapBps:13.5,fgtAlignment:1.0,rangeBps:-0.14,qualityScore:34},
+  {id:1777692779590,timestampISO:'2026-05-02T03:32:59.590Z',dir:'UP',outcomeDir:'UP',posterior:60.0,rawPosterior:60.0,regime:'RANGE-CHOP',clockAtLock:720,hour:23,session:'ASIA',windowType:'15m',signals:{gap:-0.11,momentum:-0.01,structure:0.0,flow:-25.71,technical:8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78380.95,closingPrice:78400.73,strikeAtLock:78389.01,strikePrice:78389.01,gapAtEntry:-1.0,closingGapBps:1.5,fgtAlignment:0.0,rangeBps:-0.01,qualityScore:16},
+  {id:1777693519286,timestampISO:'2026-05-02T03:45:19.286Z',dir:'DOWN',outcomeDir:'UP',posterior:50.4,rawPosterior:50.4,regime:'RANGE-CHOP',clockAtLock:881,hour:23,session:'ASIA',windowType:'15m',signals:{gap:-0.13,momentum:-6.24,structure:0.0,flow:-37.83,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78382.34,closingPrice:78438.76,strikeAtLock:78396.72,strikePrice:78396.72,gapAtEntry:-1.8,closingGapBps:5.4,fgtAlignment:0.0,rangeBps:-0.23,qualityScore:16},
+  {id:1777694440054,timestampISO:'2026-05-02T04:00:40.054Z',dir:'DOWN',outcomeDir:'DOWN',posterior:41.7,rawPosterior:41.7,regime:'RANGE-CHOP',clockAtLock:860,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:1.64,structure:9.0,flow:-36.25,technical:10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78434.73,closingPrice:78288.28,strikeAtLock:78434.29,strikePrice:78434.29,gapAtEntry:0.1,closingGapBps:-18.6,fgtAlignment:0.0,rangeBps:-0.04,qualityScore:16},
+  {id:1777695358318,timestampISO:'2026-05-02T04:15:58.318Z',dir:'UP',outcomeDir:'DOWN',posterior:80.4,rawPosterior:80.6,regime:'SHORT SQUEEZE',clockAtLock:842,hour:0,session:'ASIA',windowType:'15m',signals:{gap:-0.15,momentum:-1.06,structure:0.0,flow:40.71,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78268.17,closingPrice:78281.05,strikeAtLock:78283.39,strikePrice:78283.39,gapAtEntry:-1.9,closingGapBps:-0.3,fgtAlignment:1.0,rangeBps:-0.16,qualityScore:53},
+  {id:1777696641171,timestampISO:'2026-05-02T04:37:21.171Z',dir:'DOWN',outcomeDir:'DOWN',posterior:47.0,rawPosterior:47.0,regime:'RANGE-CHOP',clockAtLock:459,hour:0,session:'ASIA',windowType:'15m',signals:{gap:-0.11,momentum:0.03,structure:-9.0,flow:-38.31,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78275.59,closingPrice:78229.36,strikeAtLock:78278.98,strikePrice:78278.98,gapAtEntry:-0.4,closingGapBps:-6.3,fgtAlignment:1.0,rangeBps:-0.02,qualityScore:16},
+  {id:1777698580777,timestampISO:'2026-05-02T05:09:40.778Z',dir:'UP',outcomeDir:'DOWN',posterior:54.5,rawPosterior:54.5,regime:'RANGE-CHOP',clockAtLock:319,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.3,momentum:3.57,structure:0.0,flow:17.83,technical:-2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78192.88,closingPrice:78092.36,strikeAtLock:78174.98,strikePrice:78174.98,gapAtEntry:2.3,closingGapBps:-10.6,fgtAlignment:1.0,rangeBps:0.0,qualityScore:16},
+  {id:1777699897035,timestampISO:'2026-05-02T05:31:37.035Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.3,regime:'SHORT SQUEEZE',clockAtLock:803,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.56,momentum:10.03,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78143.99,closingPrice:78193.8,strikeAtLock:78090.86,strikePrice:78090.86,gapAtEntry:6.8,closingGapBps:13.2,fgtAlignment:1.0,rangeBps:0.25,qualityScore:54},
+  {id:1777700842998,timestampISO:'2026-05-02T05:47:22.998Z',dir:'UP',outcomeDir:'UP',posterior:84.1,rawPosterior:84.8,regime:'SHORT SQUEEZE',clockAtLock:757,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.37,momentum:4.36,structure:9.0,flow:55.0,technical:-2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78220.22,closingPrice:78211.79,strikeAtLock:78189.11,strikePrice:78189.11,gapAtEntry:4.0,closingGapBps:2.9,fgtAlignment:0.0,rangeBps:0.14,qualityScore:60},
+  {id:1777709015809,timestampISO:'2026-05-02T08:03:35.809Z',dir:'UP',outcomeDir:'UP',posterior:62.2,rawPosterior:62.2,regime:'SHORT SQUEEZE',clockAtLock:684,hour:4,session:'EU',windowType:'15m',signals:{gap:-0.18,momentum:-0.79,structure:-5.4,flow:47.0,technical:-8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78200.55,closingPrice:78256.19,strikeAtLock:78212.66,strikePrice:78212.66,gapAtEntry:-1.5,closingGapBps:5.6,fgtAlignment:0.30000000000000004,rangeBps:-0.06,qualityScore:27},
 ];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
@@ -1274,7 +1274,7 @@ const TradingViewChart=({resolution,onResolutionChange})=>{
     '&studies=%5B%22Volume%40tv-basicstudies%22%5D',
     '&theme=dark',
     '&style=1',
-    '&timezone=Etc%2FUTC',
+    '&timezone=America%2FNew_York',
     '&locale=en',
     '&withdateranges=1',
     '&allow_symbol_change=0',
@@ -2340,7 +2340,11 @@ function PredictionContent(props){
   const formingCount=formingDir?analysis.bullCount:analysis.bearCount;
   const formingPct=Math.min(100,(formingCount/analysis.consecutiveNeeded)*100);
   const formingBarCls='h-full rounded-full transition-all duration-500 '+(formingDir?'bg-emerald-500/60':'bg-rose-500/60');
+  // V3.1.4: Two heading variants — the original "hero" size for short single-word states
+  // (UP - LOCKED, DOWN, SEARCHING) and a tighter size for longer multi-word titles
+  // (REJECTED, BLACKOUT, etc.) so they don't wrap into 3 lines on narrow viewports.
   const headingCls='prediction-heading text-3xl sm:text-4xl md:text-5xl font-serif font-bold leading-none tracking-tight '+(analysis.textColor||'')+' drop-shadow-lg';
+  const headingClsCompact='prediction-heading text-2xl sm:text-3xl md:text-4xl font-serif font-bold leading-tight tracking-tight '+(analysis.textColor||'')+' drop-shadow-lg';
 
   return(
     <div className="flex flex-col flex-1 gap-3">
@@ -2477,17 +2481,33 @@ function PredictionContent(props){
         </div>
         {/* V143: Smart prediction text routing — split long status messages into a tight
                   title + subtitle so the giant heading doesn't wrap to 3 lines. Short messages
-                  (UP - LOCKED, DOWN - LOCKED, UP (FORMING), SEARCHING...) render as the big heading. */}
+                  (UP - LOCKED, DOWN - LOCKED, UP (FORMING), SEARCHING...) render as the big heading.
+            V3.1.4: REJECTED messages moved out of isShort — they're sentence-length and were
+                  wrapping awkwardly across 3 lines at the hero size. Now split into title +
+                  subtitle ("UP REJECTED" + "trajectory says DOWN") and use the compact heading
+                  variant. */}
         {(()=>{
           const p=analysis.prediction||'';
-          // Lock and FORMING and SEARCHING — short, render full as heading
-          const isShort=p.includes('LOCKED')||p.includes('FORMING')||p==='SEARCHING...'||p==='NO CALL'||p==='CLOSED'||p.includes('WAITING FOR MOMENTUM')||p.includes('REJECTED')||p.includes('LOCK RELEASED');
+          // Lock and FORMING and SEARCHING — short, render full as hero heading
+          const isShort=p.includes('LOCKED')||p.includes('FORMING')||p==='SEARCHING...'||p==='NO CALL'||p==='CLOSED'||p.includes('WAITING FOR MOMENTUM')||p.includes('LOCK RELEASED');
           if(isShort){
             return <h2 className={headingCls}>{p}</h2>;
           }
           // Long-form status — split into uppercase title + subtitle
           let title='', subtitle='';
-          if(p.includes('ANALYZING')){
+          if(p.includes('REJECTED')){
+            // V3.1.4: "UP REJECTED — trajectory says DOWN" → title "UP REJECTED" / subtitle "Trajectory says DOWN"
+            const dashIdx=p.indexOf('—');
+            if(dashIdx>0){
+              title=p.slice(0,dashIdx).trim();
+              const rest=p.slice(dashIdx+1).trim();
+              // Capitalize first letter of subtitle for readability
+              subtitle=rest.charAt(0).toUpperCase()+rest.slice(1);
+            } else {
+              title=p;
+              subtitle='';
+            }
+          } else if(p.includes('ANALYZING')){
             const m=p.match(/\[(\d+)s\]/);
             const lean=p.match(/leaning (UP|DOWN)/);
             title='ANALYZING';
@@ -2518,8 +2538,8 @@ function PredictionContent(props){
           }
           return(
             <div className="flex flex-col items-center text-center">
-              <h2 className={headingCls}>{title}</h2>
-              {subtitle&&<div className={'mt-1 text-sm sm:text-base text-[#E8E9E4]/55 font-sans tracking-tight max-w-md'}>{subtitle}</div>}
+              <h2 className={headingClsCompact}>{title}</h2>
+              {subtitle&&<div className={'mt-1.5 text-sm sm:text-base text-[#E8E9E4]/55 font-sans tracking-tight max-w-md leading-snug'}>{subtitle}</div>}
             </div>
           );
         })()}
@@ -3191,8 +3211,7 @@ function CohortCard({title,stamp,rows}){
 // ── V3.1: TapeStrip ──
 //   Sliding-window buy/sell pressure across 5s, 15s, 30s, 60s windows.
 //   Shows users whether buying or selling pressure is accelerating or fading,
-//   not just the current state. Inspired by the windowed-tape design from a
-//   competitor product but built in Tara's two-tone palette.
+//   not just the current state.
 //
 //   Reading the strip:
 //     - Bar fills from buy-USD side toward sell-USD side, percentage shows dominant share
@@ -3200,49 +3219,64 @@ function CohortCard({title,stamp,rows}){
 //       * 5s rising vs 60s = buying ACCELERATING (top-of-move signal)
 //       * 5s falling vs 60s = buying FADING (potential reversal)
 //       * All four similar = stable pressure
+//
+//   V3.1.5: Per-window volume floors. Below these thresholds the percentage is replaced
+//   with "—" because the reading would be misleading (single $200K print can flip a $30K
+//   window from 50% to 90%). Floors:
+//     5s ≥ $50K, 15s ≥ $100K, 30s ≥ $200K, 60s ≥ $400K
+//   When the headline 30s window is below floor, the whole strip shows "TAPE THIN" instead
+//   of confident percentages. Trend indicator only computes when at least 3 windows clear
+//   their floors — otherwise we'd be inferring acceleration from noise.
+const TAPE_FLOORS={w5:50000,w15:100000,w30:200000,w60:400000};
+
 function TapeStrip({tapeWindows}){
   if(!tapeWindows)return null;
   const w5=tapeWindows.w5||{},w15=tapeWindows.w15||{},w30=tapeWindows.w30||{},w60=tapeWindows.w60||{};
-  // Use 30s as the headline bar (matches the time-frame most legible to a trader watching ticks)
+  // Use 30s as the headline bar
   const hl=w30;
   const hlBuys=hl.buys||0,hlSells=hl.sells||0;
   const hlTotal=hlBuys+hlSells;
   const hlBuyPct=hlTotal>0?(hlBuys/hlTotal)*100:50;
   const dominant=hlBuyPct>=50?'BUY':'SELL';
   const dominantPct=Math.max(hlBuyPct,100-hlBuyPct);
+  const hlAboveFloor=hlTotal>=TAPE_FLOORS.w30;
   const fmtUSD=(n)=>{
     const v=Math.round(n);
     if(v>=1e6)return '$'+(v/1e6).toFixed(1)+'M';
     if(v>=1e3)return '$'+(v/1e3).toFixed(0)+'K';
     return '$'+v;
   };
-  // Color-map: emerald for buy-dominant, copper-ish rose for sell-dominant
-  // Using emerald for "up pressure" and rose for "down pressure" since these match Tara's
-  // existing direction colors. T2_COPPER would work but we want clear up/down semantics.
   const buyColor='#6ee7b7';
   const sellColor='#f87171';
-  // Trend indicator — is buy% rising or falling across windows?
+  // Trend indicator — only compute when the headline window AND at least 2 others
+  // are above their floors. Otherwise we're inferring acceleration from noise.
   const _trend=(()=>{
-    if(hlTotal<5000)return null;
-    const seq=[w60.buyPct,w30.buyPct,w15.buyPct,w5.buyPct].filter(v=>v!=null);
-    if(seq.length<3)return null;
-    const dir=seq[seq.length-1]-seq[0];
+    if(!hlAboveFloor)return null;
+    const validWindows=[
+      {pct:w60.buyPct,total:(w60.buys||0)+(w60.sells||0),floor:TAPE_FLOORS.w60},
+      {pct:w30.buyPct,total:(w30.buys||0)+(w30.sells||0),floor:TAPE_FLOORS.w30},
+      {pct:w15.buyPct,total:(w15.buys||0)+(w15.sells||0),floor:TAPE_FLOORS.w15},
+      {pct:w5.buyPct,total:(w5.buys||0)+(w5.sells||0),floor:TAPE_FLOORS.w5},
+    ].filter(w=>w.total>=w.floor&&w.pct!=null).map(w=>w.pct);
+    if(validWindows.length<3)return null;
+    const dir=validWindows[validWindows.length-1]-validWindows[0];
     if(Math.abs(dir)<8)return null;
     return dir>0?'rising':'falling';
   })();
   const trendLabel=_trend==='rising'?(dominant==='BUY'?'↑ accelerating buy':'↑ buy reversing'):
                   _trend==='falling'?(dominant==='BUY'?'↓ buy fading':'↓ accelerating sell'):
                   null;
-  const renderWindow=(label,w)=>{
+  const renderWindow=(label,w,floor)=>{
     const pct=w.buyPct!=null?w.buyPct:50;
     const total=(w.buys||0)+(w.sells||0);
+    const aboveFloor=total>=floor;
     const isBuy=pct>=50;
-    const color=total<1000?'rgba(232,233,228,0.35)':isBuy?buyColor:sellColor;
+    const color=!aboveFloor?'rgba(232,233,228,0.30)':isBuy?buyColor:sellColor;
     const display=Math.max(pct,100-pct);
     return(
       <div className="flex flex-col items-center" key={label}>
         <div className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/35 font-medium mb-0.5">{label}</div>
-        <div className="text-base sm:text-lg font-bold tabular-nums" style={{color,letterSpacing:'-0.01em'}}>{total<1000?'—':display.toFixed(1)+'%'}</div>
+        <div className="text-base sm:text-lg font-bold tabular-nums" style={{color,letterSpacing:'-0.01em'}}>{!aboveFloor?'—':display.toFixed(1)+'%'}</div>
       </div>
     );
   };
@@ -3251,32 +3285,36 @@ function TapeStrip({tapeWindows}){
       <T2Stamp code="TAPE · 030"/>
       <div className="flex items-baseline justify-between mb-2">
         <span className="text-[10px] uppercase tracking-[0.18em] text-[#E8E9E4]/50 font-bold">Tape</span>
-        {trendLabel&&(
+        {!hlAboveFloor?(
+          <span className="text-[10px] font-medium tracking-wider text-[#E8E9E4]/40 uppercase">Tape thin · {fmtUSD(hlTotal)} / 30s</span>
+        ):trendLabel&&(
           <span className="text-[10px] font-medium" style={{color:_trend==='rising'?(dominant==='BUY'?buyColor:sellColor):(dominant==='BUY'?sellColor:buyColor),letterSpacing:'0.04em'}}>{trendLabel}</span>
         )}
       </div>
       {/* Headline bar with USD endpoints + percentage in middle */}
       <div className="relative mb-1">
         <div className="flex items-center justify-between text-[11px] mb-1.5">
-          <span className="font-bold tabular-nums" style={{color:hlBuyPct>=50?buyColor:'rgba(232,233,228,0.55)',letterSpacing:'-0.01em'}}>BUY {fmtUSD(hlBuys)}</span>
-          <span className="font-bold text-[#E8E9E4]/95 tabular-nums" style={{letterSpacing:'-0.01em'}}>{hlTotal<1000?'—':dominantPct.toFixed(1)+'%'}</span>
-          <span className="font-bold tabular-nums" style={{color:hlBuyPct<50?sellColor:'rgba(232,233,228,0.55)',letterSpacing:'-0.01em'}}>SELL {fmtUSD(hlSells)}</span>
+          <span className="font-bold tabular-nums" style={{color:hlAboveFloor&&hlBuyPct>=50?buyColor:'rgba(232,233,228,0.40)',letterSpacing:'-0.01em'}}>BUY {fmtUSD(hlBuys)}</span>
+          <span className="font-bold tabular-nums" style={{color:hlAboveFloor?'rgba(232,233,228,0.95)':'rgba(232,233,228,0.30)',letterSpacing:'-0.01em'}}>{!hlAboveFloor?'—':dominantPct.toFixed(1)+'%'}</span>
+          <span className="font-bold tabular-nums" style={{color:hlAboveFloor&&hlBuyPct<50?sellColor:'rgba(232,233,228,0.40)',letterSpacing:'-0.01em'}}>SELL {fmtUSD(hlSells)}</span>
         </div>
         <div className="relative h-1.5 rounded-sm bg-black/40 overflow-hidden">
-          {hlTotal>=1000&&(
+          {hlAboveFloor?(
             <>
               <div className="absolute top-0 bottom-0 left-0 transition-all duration-500" style={{width:hlBuyPct.toFixed(1)+'%',background:buyColor,opacity:0.85}}></div>
               <div className="absolute top-0 bottom-0 right-0 transition-all duration-500" style={{width:(100-hlBuyPct).toFixed(1)+'%',background:sellColor,opacity:0.85}}></div>
             </>
+          ):(
+            <div className="absolute top-0 bottom-0 left-0 right-0" style={{background:'rgba(232,233,228,0.08)'}}></div>
           )}
         </div>
       </div>
       {/* Four-window strip */}
       <div className="grid grid-cols-4 gap-2 mt-2">
-        {renderWindow('5s',w5)}
-        {renderWindow('15s',w15)}
-        {renderWindow('30s',w30)}
-        {renderWindow('60s',w60)}
+        {renderWindow('5s',w5,TAPE_FLOORS.w5)}
+        {renderWindow('15s',w15,TAPE_FLOORS.w15)}
+        {renderWindow('30s',w30,TAPE_FLOORS.w30)}
+        {renderWindow('60s',w60,TAPE_FLOORS.w60)}
       </div>
     </div>
   );
@@ -3821,11 +3859,19 @@ const buildPlainEnglish=(analysis,qualityGate,advisor)=>{
     return `🔍 Searching for signal — decision within ${secs}s (sooner if FGT aligns)`;
   } else if(dir.includes('SITTING OUT')){
     return '⛔ Sitting out — signals are split, no clear edge this window';
+  } else if(dir.includes('REJECTED')){
+    // V3.1.4: REJECTED gets its own clean line — title is already shown in the hero,
+    // this just gives the regime + driver context underneath without "in RANGE-CHOP" awkwardness.
+    const reasonAfterDash=dir.split('—').slice(1).join('—').trim();
+    const cleanReason=reasonAfterDash?reasonAfterDash.charAt(0).toUpperCase()+reasonAfterDash.slice(1):'mixed signals';
+    return `${regime||'Mixed signals'} · ${cleanReason}`;
   } else if(dir.includes('BLACKOUT')||dir.includes('OBSERVE')||dir.includes('LOW QUALITY')){
     return 'STAND DOWN — '+dir;
   }
-  // Regime context
-  if(regime&&!dir.includes('SEARCHING'))pieces.push(`in ${regime}`);
+  // Regime context — only push when there's already a leading piece. Avoids "in RANGE-CHOP"
+  // showing up as a sentence opener for fall-through states.
+  if(regime&&!dir.includes('SEARCHING')&&pieces.length>0)pieces.push(`in ${regime}`);
+  else if(regime&&!dir.includes('SEARCHING'))pieces.push(regime);
   // Top driving reasons (max 2)
   const drivers=[];
   const flowTag=findTag('FLOW');
@@ -3931,7 +3977,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>3.1.1</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>3.1.5</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -4111,7 +4157,7 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:485,losses:302},'5m':{wins:33,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:486,losses:302},'5m':{wins:33,losses:25}});
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -4184,7 +4230,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 3.1.1 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 3.1.5 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -4219,7 +4265,6 @@ function TaraApp(){
       const Ctx=window.AudioContext||window.webkitAudioContext;
       if(!audioCtxRef.current)audioCtxRef.current=new Ctx();
       const ctx=audioCtxRef.current;
-      if(ctx.state==='suspended'){ctx.resume();return;}
       const tone=(freq,vol,dur,wave)=>{
         const o=ctx.createOscillator(),g=ctx.createGain();
         o.type=wave||'sine';o.frequency.value=freq;
@@ -4227,13 +4272,25 @@ function TaraApp(){
         g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);
         o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+dur);
       };
-      if(type==='lock-up'){tone(523,0.08,0.2);setTimeout(()=>tone(659,0.1,0.3),180);}
-      else if(type==='lock-down'){tone(659,0.08,0.2);setTimeout(()=>tone(523,0.1,0.3),180);}
-      else if(type==='entry'){tone(880,0.07,0.12,'square');setTimeout(()=>tone(880,0.07,0.12,'square'),120);setTimeout(()=>tone(880,0.07,0.12,'square'),240);}
-      else if(type==='profit'){tone(523,0.07,0.15);setTimeout(()=>tone(659,0.07,0.15),100);setTimeout(()=>tone(784,0.09,0.3),200);}
-      else if(type==='warning'){tone(220,0.1,0.15,'sawtooth');setTimeout(()=>tone(220,0.1,0.15,'sawtooth'),200);}
-      else if(type==='emergency'){tone(180,0.12,0.12,'sawtooth');setTimeout(()=>tone(180,0.12,0.12,'sawtooth'),150);setTimeout(()=>tone(180,0.12,0.12,'sawtooth'),300);}
-      else{tone(440,0.06,0.2);}
+      const playSequence=()=>{
+        if(type==='lock-up'){tone(523,0.08,0.2);setTimeout(()=>tone(659,0.1,0.3),180);}
+        else if(type==='lock-down'){tone(659,0.08,0.2);setTimeout(()=>tone(523,0.1,0.3),180);}
+        else if(type==='entry'){tone(880,0.07,0.12,'square');setTimeout(()=>tone(880,0.07,0.12,'square'),120);setTimeout(()=>tone(880,0.07,0.12,'square'),240);}
+        else if(type==='profit'){tone(523,0.07,0.15);setTimeout(()=>tone(659,0.07,0.15),100);setTimeout(()=>tone(784,0.09,0.3),200);}
+        else if(type==='warning'){tone(220,0.1,0.15,'sawtooth');setTimeout(()=>tone(220,0.1,0.15,'sawtooth'),200);}
+        else if(type==='emergency'){tone(180,0.12,0.12,'sawtooth');setTimeout(()=>tone(180,0.12,0.12,'sawtooth'),150);setTimeout(()=>tone(180,0.12,0.12,'sawtooth'),300);}
+        else{tone(440,0.06,0.2);}
+      };
+      // V3.1.2 BUGFIX: Don't return early on suspended context. Browsers auto-suspend audio
+      // contexts after tab inactivity — previously this silently dropped every alert that
+      // happened to occur while suspended. Now we await resume() and then play.
+      if(ctx.state==='suspended'){
+        const r=ctx.resume();
+        if(r&&typeof r.then==='function'){r.then(()=>{try{playSequence();}catch(e){}}).catch(()=>{});}
+        else {playSequence();}
+      } else {
+        playSequence();
+      }
     }catch(e){}
   };
   const[showWhaleLog,setShowWhaleLog]=useState(false);
@@ -4282,7 +4339,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 3.1.1'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 3.1.5'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -4315,9 +4372,12 @@ function TaraApp(){
     //       Kalshi's CF Benchmarks settlement index disagree by a few bps near strike — using
     //       Kalshi's strike directly eliminates the strike-misalignment problem at window open.
     //       Fall back to live price if Kalshi data is unavailable.
+    // V3.1.4: Round strike to whole dollar. Kalshi BTC strikes are always whole-dollar amounts,
+    //       and live spot's fractional cents (.21, .87) are visual noise that don't aid trading.
     const _kStrike=kalshiStrikeRef.current;
     const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
-    const p=_kStrikeValid?_kStrike:(price||currentPriceRef.current);
+    const _raw=_kStrikeValid?_kStrike:(price||currentPriceRef.current);
+    const p=_raw?Math.round(_raw):_raw;
     const _source=_kStrikeValid?'kalshi':'live';
     // Always reset strike to blank (0) at window start
     // Tara's suggestion shows as pendingStrike — user edits or taps OK
@@ -4386,7 +4446,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 3.1.1  |  signal'},
+        footer:{text:'Tara 3.1.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -4400,7 +4460,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 3.1.1  |  stand-down'},
+        footer:{text:'Tara 3.1.5  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -4414,7 +4474,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 3.1.1  |  search'},
+        footer:{text:'Tara 3.1.5  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -4431,7 +4491,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 3.1.1  |  lock'},
+        footer:{text:'Tara 3.1.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -4448,7 +4508,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 3.1.1  |  close'},
+          footer:{text:'Tara 3.1.5  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -4469,7 +4529,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 3.1.1  |  exit'},
+        footer:{text:'Tara 3.1.5  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -4498,12 +4558,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara 3.1.1  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 3.1.5  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 3.1.1',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 3.1.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -4522,7 +4582,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 3.1.1 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 3.1.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -4557,9 +4617,12 @@ function TaraApp(){
   // V143: Fetches for both 5m and 15m markets. Previously 15m-only meant 5m windows had
   //       zero Kalshi reference, so the EDGE metric never appeared. Also resets the price to
   //       null on window change so a stale previous-strike price doesn't get displayed.
-  // V3.0: Now also extracts Kalshi's published strike and the active market ticker.
-  //       The strike is used as the preferred strike suggestion at window open.
-  //       The ticker is stored so we can fetch the exact same market's settlement value at close.
+  // V3.0: Extracts Kalshi's published strike and the active market ticker.
+  // V3.1.2: Strike extraction made strike-aware. Kalshi BTC markets are published as a
+  //         SERIES of strikes per close_time (20+ markets for each window). Previous logic
+  //         picked any market matching close_time, which often grabbed a far-OTM strike
+  //         instead of the at-the-money one. Now we filter by close_time first, then within
+  //         that close_time find the market whose strike is closest to current BTC price.
   useEffect(()=>{
     setKalshiYesPrice(null); // reset on window change so we don't show stale prior-strike price
     setKalshiStrike(null);
@@ -4577,44 +4640,58 @@ function TaraApp(){
         if(!r.ok)return;
         const d=await r.json();
         const markets=d.markets||d.data||[];
-        let best=null,bestDiff=Infinity;
-        for(const m of markets){
-          const closeMs=m.close_time?new Date(m.close_time).getTime():0;
-          if(!closeMs)continue;
-          const diff=Math.abs(closeMs-nextMs);
-          if(diff<bestDiff){bestDiff=diff;best=m;}
-        }
-        // V143: tightened tolerance to half the window — was 10min hardcoded, no good for 5m
-        const tolMs=Math.floor(intervalMin*60*1000/2);
-        if(best&&bestDiff<tolMs){
-          const yes=best.yes_ask??best.yes_bid??best.last_price??null;
-          if(yes!=null)setKalshiYesPrice(Number(yes));
-          // V3.0: extract Kalshi's published strike with defensive multi-field handling
-          const _extractedStrike=(()=>{
-            // Try direct numeric fields first
-            if(best.floor_strike!=null)return Number(best.floor_strike);
-            if(best.cap_strike!=null)return Number(best.cap_strike);
-            if(best.strike_price!=null)return Number(best.strike_price);
-            if(best.strike!=null)return Number(best.strike);
-            // Fall back to parsing the ticker — KXBTC markets typically encode strike like
-            // KXBTC-26MAY02H1715-T78250.00 (T<strike>) or KXBTCD-26MAY02H1715-78250
-            if(best.ticker){
-              const m1=best.ticker.match(/T(\d+(?:\.\d+)?)/);
-              if(m1)return Number(m1[1]);
-              const m2=best.ticker.match(/-(\d{5,7}(?:\.\d+)?)$/);
-              if(m2)return Number(m2[1]);
-            }
-            // Last resort: parse from subtitle/title text — "Above $77,500" or "$77,500"
-            const titleText=(best.subtitle||best.title||best.yes_sub_title||'')+' ';
-            const tm=titleText.match(/\$([\d,]+(?:\.\d+)?)/);
-            if(tm)return Number(tm[1].replace(/,/g,''));
-            return null;
-          })();
-          if(_extractedStrike!=null&&_extractedStrike>1000&&_extractedStrike<10000000){
-            setKalshiStrike(_extractedStrike);
+        // V3.1.2: Helper to extract strike from a market — try direct fields, then ticker, then title
+        const _extractStrike=(m)=>{
+          if(m.floor_strike!=null)return Number(m.floor_strike);
+          if(m.cap_strike!=null)return Number(m.cap_strike);
+          if(m.strike_price!=null)return Number(m.strike_price);
+          if(m.strike!=null)return Number(m.strike);
+          if(m.ticker){
+            const m1=m.ticker.match(/T(\d+(?:\.\d+)?)/);
+            if(m1)return Number(m1[1]);
+            const m2=m.ticker.match(/-(\d{5,7}(?:\.\d+)?)$/);
+            if(m2)return Number(m2[1]);
           }
-          if(best.ticker)setKalshiActiveMarket({ticker:best.ticker,closeTime:best.close_time,strike:_extractedStrike});
+          const titleText=(m.subtitle||m.title||m.yes_sub_title||'')+' ';
+          const tm=titleText.match(/\$?([\d,]+(?:\.\d+)?)/);
+          if(tm){const n=Number(tm[1].replace(/,/g,''));if(n>1000&&n<10000000)return n;}
+          return null;
+        };
+        // V3.1.2: Filter to markets whose close_time matches our active window
+        const tolMs=Math.floor(intervalMin*60*1000/2);
+        const matchingClose=markets.filter(m=>{
+          const closeMs=m.close_time?new Date(m.close_time).getTime():0;
+          return closeMs && Math.abs(closeMs-nextMs)<tolMs;
+        });
+        if(matchingClose.length===0)return;
+        // V3.1.2: Within those, find the market whose strike is closest to current spot.
+        //         Critical fix: previous logic just picked the first match by close_time, which
+        //         often grabbed a random OTM strike from the 20+ markets at that close time.
+        const _curPrice=currentPriceRef.current||0;
+        let best=null,bestStrikeDiff=Infinity,bestStrike=null;
+        for(const m of matchingClose){
+          const _s=_extractStrike(m);
+          if(_s==null||_s<1000||_s>10000000)continue;
+          if(_curPrice>0){
+            const diff=Math.abs(_s-_curPrice);
+            if(diff<bestStrikeDiff){bestStrikeDiff=diff;best=m;bestStrike=_s;}
+          } else if(best===null){
+            // No spot price yet — fall back to first valid market
+            best=m; bestStrike=_s;
+          }
         }
+        if(!best){
+          // No market with extractable strike — fall back to first matching-close market
+          best=matchingClose[0];
+          bestStrike=_extractStrike(best);
+        }
+        // YES price for the at-the-money market (most useful as reference)
+        const yes=best.yes_ask??best.yes_bid??best.last_price??null;
+        if(yes!=null)setKalshiYesPrice(Number(yes));
+        if(bestStrike!=null&&bestStrike>1000&&bestStrike<10000000){
+          setKalshiStrike(bestStrike);
+        }
+        if(best.ticker)setKalshiActiveMarket({ticker:best.ticker,closeTime:best.close_time,strike:bestStrike});
       }catch(e){}
     };
     fetchKalshi();
@@ -5100,24 +5177,14 @@ function TaraApp(){
             taraAdviceRef.current='BREAKING NEWS — OBSERVE';
           } else if(_quality<45){
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
-          } else if(_isChoppyRegime&&posterior>=75&&Math.abs(eng.mtfAlignment||0)<2){
-            // V2.8: HIGH-POSTERIOR FGT GATE.
-            //   Trade audit (53 trades, May 2026) showed 5 consecutive UP losses in 02:51-05:09
-            //   stretch. All had posterior 80%+ but FGT alignment of 0 or 1 — no consensus from
-            //   the primary signal. Quality scores 50-65, "moderate" tier. Tara was firing high-
-            //   conviction UP locks based on flow/structure/technical alone while FGT was silent.
-            //   Outcome: BTC drifted DOWN through the entire stretch.
-            //
-            //   This gate says: in choppy regimes (RANGE-CHOP / SHORT SQUEEZE / HIGH VOL CHOP),
-            //   if posterior is claiming ≥75% conviction, the primary signal (FGT) must back it
-            //   with at least |alignment| ≥ 2 (2 of 4 timeframes agreeing). Otherwise the conviction
-            //   is coming from secondary signals only — which the data shows is unreliable in chop.
-            //
-            //   Trending regimes (TRENDING UP / TRENDING DOWN) are exempt — directional signal is
-            //   already coming from the regime classification itself.
-            taraAdviceRef.current='UP REJECTED — high posterior but FGT silent';
-            reasoning.push(`[GATE] UP blocked: posterior ${posterior.toFixed(0)} but FGT only ${(eng.mtfAlignment||0).toFixed(1)}/4 — primary signal not backing claim`);
           } else if((eng.trajectoryAdj||0)<=-7&&(eng.mtfAlignment||0)<4){
+            // V3.1.3: V2.8 FGT support gate REMOVED. Data audit on 56 trades showed it would have
+            //   blocked 29 UP trades winning at 62% — ABOVE the overall 64% WR. The original 5-loss
+            //   cluster (02:51-05:09) was a temporal artifact, not a structural failure mode.
+            //   Gating against it was overcorrection that suppressed a winning category of trades.
+            //   Other V2.8 changes (symmetric thresholds, SHORT SQUEEZE UP raised to 64,
+            //   fast-track extended to FGT 3/4) remain in place — those addressed real measured
+            //   asymmetries.
             // V135: Boundary fix — was `< -8`, missed trajectoryAdj exactly -8 (rare but possible).
             //       Threshold tightened -8 → -7 to match the symmetric DOWN side and respect the new ±12 cap.
             // V139: FGT 4/4 UP overrides this rejection. When all four timeframes scream UP,
@@ -5213,13 +5280,10 @@ function TaraApp(){
             taraAdviceRef.current='BREAKING NEWS — OBSERVE';
           } else if(_quality2<45){
             taraAdviceRef.current='LOW QUALITY — SITTING OUT';
-          } else if(_isChoppyRegime2&&posterior<=25&&Math.abs(eng.mtfAlignment||0)<2){
-            // V2.8 symmetric mirror of UP-side FGT gate. If posterior is claiming ≤25 (strong DOWN
-            // conviction) in a choppy regime but FGT primary signal isn't backing it (|alignment|<2),
-            // the conviction is coming from secondary signals only — sit out.
-            taraAdviceRef.current='DOWN REJECTED — low posterior but FGT silent';
-            reasoning.push(`[GATE] DOWN blocked: posterior ${posterior.toFixed(0)} but FGT only ${(eng.mtfAlignment||0).toFixed(1)}/4 — primary signal not backing claim`);
           } else if((eng.trajectoryAdj||0)>=7&&(eng.mtfAlignment||0)>-4){
+            // V3.1.3: V2.8 DOWN-side FGT support gate REMOVED, mirroring UP-side removal.
+            //   Audit showed 3 DOWN-gated trades all won (100% WR). Same conclusion as UP side —
+            //   the gate was overcorrection.
             // V135: Boundary fix mirroring UP side — was `> 8`, tightened to `>= 7`.
             // V139: FGT 4/4 DOWN overrides this rejection (mtfAlignment <= -4).
             taraAdviceRef.current='DOWN REJECTED — trajectory says UP';
@@ -5759,8 +5823,16 @@ function TaraApp(){
   //         start a 90s idle timer. Resets on real whale activity (score or streak rising).
   //         Without this, the panel stayed open indefinitely after any manual click — visible
   //         and obstructive long after the user had moved on.
+  // V2.3 / V3.1.2: Manual-open auto-close. When user manually clicks FLOW to open the panel,
+  //         start a 90s idle timer. Resets on real whale activity (score or streak rising).
+  //         V3.1.2 BUGFIX: Previous version re-ran the effect on every flowSignal change,
+  //         which meant the timer was being cleared and reset on every scoring tick (constant
+  //         activity in live markets). Now the effect only depends on showWhaleLog itself,
+  //         and reads flowSignal through a ref inside the timer callback.
   const manualCloseTimerRef=useRef(null);
   const lastFlowSignalActivityRef=useRef({score:0,streak:0});
+  const flowSignalRef=useRef(flowSignal);
+  useEffect(()=>{flowSignalRef.current=flowSignal;},[flowSignal]);
   useEffect(()=>{
     if(!showWhaleLog){
       // Panel closed — clear the idle timer
@@ -5769,26 +5841,27 @@ function TaraApp(){
     }
     // Only set the manual auto-close when this open was NOT triggered by autoOpen
     if(autoOpenedRef.current)return;
-    // Initialize activity baseline
-    lastFlowSignalActivityRef.current={score:flowSignal.score||0,streak:flowSignal.streakCount||0};
+    // Initialize activity baseline from current flowSignal at open
+    const fs0=flowSignalRef.current||{};
+    lastFlowSignalActivityRef.current={score:fs0.score||0,streak:fs0.streakCount||0};
     if(manualCloseTimerRef.current)clearTimeout(manualCloseTimerRef.current);
-    manualCloseTimerRef.current=setTimeout(()=>{
-      // Re-check whether activity happened — if yes, extend; if no, close
-      const cur={score:flowSignal.score||0,streak:flowSignal.streakCount||0};
-      const last=lastFlowSignalActivityRef.current;
-      const meaningfulActivity=Math.abs(cur.score-last.score)>=15||cur.streak-last.streak>=3;
-      if(meaningfulActivity){
-        // Real activity in the panel — extend by another 60s
-        lastFlowSignalActivityRef.current=cur;
-        manualCloseTimerRef.current=setTimeout(()=>{
+    const _scheduleClose=(delayMs)=>{
+      manualCloseTimerRef.current=setTimeout(()=>{
+        const cur={score:flowSignalRef.current?.score||0,streak:flowSignalRef.current?.streakCount||0};
+        const last=lastFlowSignalActivityRef.current;
+        const meaningfulActivity=Math.abs(cur.score-last.score)>=15||cur.streak-last.streak>=3;
+        if(meaningfulActivity){
+          // Real activity — extend by another 60s
+          lastFlowSignalActivityRef.current=cur;
+          _scheduleClose(60000);
+        } else {
           setShowWhaleLog(false);
-        },60000);
-      } else {
-        setShowWhaleLog(false);
-      }
-    },90000);
+        }
+      },delayMs);
+    };
+    _scheduleClose(90000);
     return()=>{if(manualCloseTimerRef.current)clearTimeout(manualCloseTimerRef.current);};
-  },[showWhaleLog,flowSignal.score,flowSignal.streakCount,setShowWhaleLog]);
+  },[showWhaleLog,setShowWhaleLog]);
 
   useEffect(()=>{
     if(!showWhaleAlerts||!discordWebhook)return;
@@ -6013,7 +6086,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 3.1.1...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 3.1.5...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -6113,7 +6186,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              3.1.1
+              3.1.5
             </span>
           </div>
 
@@ -6225,9 +6298,9 @@ function TaraApp(){
                 <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide'}>Strike</div>
                 <span
                   onClick={()=>{isManualStrikeRef.current=false;hasSetInitialMargin.current=false;setWindowOpenStrike(currentPriceRef.current||currentPrice);}}
-                  title={strikeMode==='auto'?'Live spot price at window open · click to re-capture':'Manual override · click to restore live'}
-                  className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer select-none font-bold transition-colors ${strikeMode==='auto'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-emerald-500/15 hover:text-emerald-400'}`}
-                >{strikeMode==='auto'?'LIVE':'MANUAL'}</span>
+                  title={strikeSource==='kalshi'?'Strike from Kalshi · click to re-capture':strikeMode==='auto'?'Live spot price at window open · click to re-capture':'Manual override · click to restore live'}
+                  className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer select-none font-bold transition-colors ${strikeSource==='kalshi'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':strikeMode==='auto'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-emerald-500/15 hover:text-emerald-400'}`}
+                >{strikeSource==='kalshi'?'KLSH':strikeMode==='auto'?'LIVE':'MANUAL'}</span>
               </div>
               <div className="flex items-center gap-1">
                 <IC.Crosshair className="w-4 h-4 text-indigo-400 hidden sm:block"/>
@@ -6567,7 +6640,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 3.1.1</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 3.1.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -7193,7 +7266,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 3.1.1 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 3.1.5 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -7349,7 +7422,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 3.1.1 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 3.1.5 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
