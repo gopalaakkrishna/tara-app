@@ -4184,7 +4184,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 3.1.1 online — Canvas Chart + Weighted Signal Engine + Smart Advisor active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 3.1.1 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6327,6 +6327,9 @@ function TaraApp(){
           </div>
         </div>
 
+        {/* V3.1: Tape strip — sliding-window buy/sell pressure */}
+        <TapeStrip tapeWindows={tapeWindows}/>
+
         {/* MOBILE TAB NAV */}
         <div className={'flex lg:hidden bg-[#181A19] border border-[#E8E9E4]/10 rounded-xl p-1 gap-1 shrink-0'}>
           {[{id:'signal',label:'Signal',icon:<IC.Zap className="w-4 h-4"/>},{id:'chart',label:'Chart',icon:<IC.Activity className="w-4 h-4"/>},{id:'logs',label:'Analytics',icon:<IC.BarChart className="w-4 h-4"/>}].map(tab=>(
@@ -6439,9 +6442,6 @@ function TaraApp(){
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab}/>
         </div>
-
-        {/* V3.1: Tape strip — sliding-window buy/sell pressure (above the chart) */}
-        <TapeStrip tapeWindows={tapeWindows}/>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
         <ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution}/>
@@ -7203,18 +7203,18 @@ function TaraApp(){
 
               {/* V134: BEST PRACTICES */}
               <section className={'bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-4'}>
-                <h3 className={'text-emerald-400 font-bold uppercase tracking-wide mb-3 text-xs'}>🏆 Best Way to Use Tara (V135)</h3>
+                <h3 className={'text-emerald-400 font-bold uppercase tracking-wide mb-3 text-xs'}>🏆 Best Way to Use Tara</h3>
                 <div className="space-y-2.5 text-xs leading-relaxed text-[#E8E9E4]/70">
-                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">1.</span><p><strong className="text-white">Trade EU session when possible.</strong> Your strongest performance is 70% WR in EU. US is your weakest at 55%. Skip OFF-HOURS entirely (50% = coin flip).</p></div>
-                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">2.</span><p><strong className="text-white">Watch the macro banner.</strong> Red BLACKOUT before CPI/NFP/FOMC means SIT OUT. Trading through scheduled news is your highest-loss category. The 30min before any major release is the worst time to enter.</p></div>
-                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">3.</span><p><strong className="text-white">Use Premium Mode for selective trading.</strong> When you need a high WR streak (after losses, when betting larger), toggle ★ PREMIUM. Skip when you want more entries at moderate quality.</p></div>
+                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">1.</span><p><strong className="text-white">Use the Stats view (📊 button) to find your edges.</strong> Click hourly cells to drill into individual trades. Look at the "Insights" section — auto-generated findings tell you which regimes, hours, and FGT alignments are actually working for you.</p></div>
+                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">2.</span><p><strong className="text-white">Watch the macro banner.</strong> Red BLACKOUT before CPI/NFP/FOMC means SIT OUT. Trading through scheduled news is a high-loss category. The 30min before any major release is the worst time to enter.</p></div>
+                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">3.</span><p><strong className="text-white">Trust FGT alignment.</strong> When 5m + 15m agree (the two highest-weight timeframes), Tara has her strongest forecast. FGT 3/4+ alignment in the data audit correlated with 70-100% WR depending on regime. The badge in the prediction card pulses on full alignment — watch for it.</p></div>
                   <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">4.</span><p><strong className="text-white">Trust the trajectory badge.</strong> When you see ↗ TRAJ +X or ↘ TRAJ -X, Tara is reading where price is heading, not just where it is. Strong trajectory locks (≥12) are her highest-conviction calls.</p></div>
                   <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">5.</span><p><strong className="text-white">Respect the velocity badge.</strong> 🔥 EXTREME means a news/CPI move is happening — wait for the dust to settle. ⚡ FAST is great for trajectory locks. 🐢 SLOW often means choppy noise — be more selective.</p></div>
-                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">6.</span><p><strong className="text-white">Bet sizing follows the Bet: X% indicator.</strong> When Tara shows Q70-80, she recommends ½ Kelly. Q90+ recommends ¾ Kelly. Never bet beyond her suggestion — that's where blowups happen.</p></div>
-                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">7.</span><p><strong className="text-white">DOWN regime caveats.</strong> DOWN in TRENDING DOWN = 88% WR (best signal). DOWN in SHORT SQUEEZE = 50% (skip). DOWN in HVC/RC = ~50% (require strong trajectory). UP is your stronger direction overall (64% vs 57%).</p></div>
+                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">6.</span><p><strong className="text-white">Read the tape strip.</strong> Buy% trajectory across 5s/15s/30s/60s windows tells you if pressure is accelerating or fading. Confirms or challenges Tara's call. When Tara says UP and tape is "↑ accelerating buy" — high conviction. When Tara says UP and tape is "↓ buy fading" — caution.</p></div>
+                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">7.</span><p><strong className="text-white">Bet sizing follows the Bet: X% indicator.</strong> When Tara shows Q70-80, she recommends ½ Kelly. Q90+ recommends ¾ Kelly. Never bet beyond her suggestion — that's where blowups happen.</p></div>
                   <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">8.</span><p><strong className="text-white">After 3 losses, slow down.</strong> Tara auto-tightens (-8 quality) on cold streaks to prevent revenge trading. Trust the signal — it's there to protect you.</p></div>
-                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">9.</span><p><strong className="text-white">Send to Discord only when you're entering.</strong> Tara doesn't auto-broadcast anymore. Click the 📡 button only when you actually take the trade. Keeps your Discord clean.</p></div>
-                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">10.</span><p><strong className="text-white">Sync after major updates.</strong> Settings → Sync to Latest Baseline pulls the freshest training data (currently 358W-257L from 283 trades) so you start with Tara's best weights.</p></div>
+                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">9.</span><p><strong className="text-white">Send to Discord only when you're entering.</strong> Tara doesn't auto-broadcast. Click the 📡 button only when you actually take the trade.</p></div>
+                  <div className="flex gap-3"><span className="text-emerald-400 font-bold shrink-0 w-5">10.</span><p><strong className="text-white">Sync after major updates.</strong> Settings → Sync to Latest Baseline pulls the freshest training data (currently 485-302) so you start with Tara's best weights.</p></div>
                 </div>
               </section>
 
@@ -7232,15 +7232,15 @@ function TaraApp(){
                   </div>
                   <div className={'bg-[#111312] rounded-lg p-3 border border-emerald-500/20'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-emerald-400 font-bold text-xs">UP — LOCKED 🔒</span><span className={'text-[10px] text-[#E8E9E4]/30 uppercase'}>Entry signal — act now</span></div>
-                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/60'}>3 consecutive readings (15m) or 2 consecutive (5m) all above 68% threshold. Tara has committed for the window. She will NOT change this prediction — the posterior can drop to 55% and she stays locked UP. The only releases are a 55+ bps adverse gap or catastrophic rug pull. This is the <strong className="text-white">only state to enter on.</strong></p>
+                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/60'}>2 consecutive readings (15m) or 1 consecutive (5m) all above the regime-specific threshold (60-75 depending on regime). Tara has committed for the window. She will NOT change this prediction without a 25+ point posterior collapse or severe trajectory flip. The lock state machine is designed to commit and stay committed. This is the <strong className="text-white">primary state to enter on.</strong></p>
                   </div>
                   <div className={'bg-[#111312] rounded-lg p-3 border border-rose-500/20'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-rose-400 font-bold text-xs">DOWN — LOCKED 🔒</span><span className={'text-[10px] text-[#E8E9E4]/30 uppercase'}>Entry signal — act now</span></div>
-                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/60'}>Same as UP — LOCKED but bearish. Posterior consistently below 32% for N consecutive samples. If you missed the entry window and it's late, the advisor will say WINDOW CLOSING — don't chase it.</p>
+                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/60'}>Same as UP — LOCKED but bearish. Posterior consistently below the regime-specific DOWN threshold (20-36 depending on regime — V2.8 made these symmetric with UP-side thresholds in choppy regimes). If you missed the entry window and it's late, the advisor will say WINDOW CLOSING — don't chase it.</p>
                   </div>
                   <div className={'bg-[#111312] rounded-lg p-3 border border-zinc-500/15'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">NO CALL — WINDOW CLOSED — LOCK RELEASED</span><span className="text-[10px] text-rose-400 uppercase">Sit out</span></div>
-                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/60'}><strong className="text-white">NO CALL:</strong> Never reached threshold before endgame. Skip this round.<br/><strong className="text-white">WINDOW CLOSED:</strong> Last 90s (15m) or 45s (5m) with no lock. Too late to enter safely.<br/><strong className="text-white">LOCK RELEASED:</strong> Price moved 55+ bps wrong direction, Tara released. Respect it immediately.</p>
+                    <p className={'text-xs leading-relaxed text-[#E8E9E4]/60'}><strong className="text-white">NO CALL:</strong> Never reached threshold before endgame. Skip this round.<br/><strong className="text-white">WINDOW CLOSED:</strong> Last 90s (15m) or 45s (5m) with no lock. Too late to enter safely.<br/><strong className="text-white">LOCK RELEASED:</strong> Posterior collapsed 25+ points or trajectory/FGT flipped against direction. Tara released — respect it immediately.</p>
                   </div>
                 </div>
               </section>
@@ -7353,13 +7353,129 @@ function TaraApp(){
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+              {/* V3.1: Tape strip — windowed buy/sell pressure visualization */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>UI · Flow Visibility</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>3.1</span> — Tape strip</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Sliding-window buy/sell pressure visualization. Aggregates trade flow from Coinbase, Binance Futures, and Bybit websockets into 5s/15s/30s/60s buckets so you can see whether buying pressure is accelerating or fading — not just where it is right now.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Headline bar.</strong> Buy USD vs sell USD in the dominant 30s window with the percentage in the middle. Emerald when buying dominates, rose when selling does.</li>
+                  <li><strong>Four-window strip.</strong> 5s, 15s, 30s, 60s percentages side by side. Reading the trajectory across windows tells you if pressure is building or easing — 5s rising vs 60s = accelerating, 5s falling vs 60s = fading.</li>
+                  <li><strong>Trend label.</strong> "↑ accelerating buy" / "↓ buy fading" / "↑ accelerating sell" — automated read of the multi-window pattern.</li>
+                  <li><strong>Honest caveat.</strong> Tape data is only from 3 venues — covers ~60-70% of global BTC volume. Doesn't see hidden liquidity (OTC, iceberg orders) or spoofing. Use as confirming/challenging signal alongside Tara's call, not as a standalone prediction.</li>
+                  <li><strong>Not yet wired into the engine.</strong> Tape pressure is informational only — Tara's posterior calculations are unchanged from 3.0. We'd want to validate correlation with outcomes across 50-100 trades before integrating into the prediction logic.</li>
+                </ul>
+              </section>
+
+              {/* V3.0: Kalshi strike snap */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Settlement Alignment</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>3.0</span> — Kalshi strike snap</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Tara's strike now matches Kalshi's strike exactly. The "Tara says UP wins by +0.9bps but Kalshi paid out DOWN" disagreement should disappear at the open and close moments where it matters.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Strike at window open.</strong> Reads Kalshi's published strike from the active market metadata (defensive multi-field parsing handles different Kalshi market naming conventions). Uses that as the strike suggestion instead of computing it from the live Coinbase price. Falls back to live price if Kalshi data is unavailable.</li>
+                  <li><strong>Closing price at settlement.</strong> When V2.6's marginal-close resolver kicks in, also captures Kalshi's authoritative settled price (settlement_value, final_value, etc.) and stores it in the trade log as <code>kalshiClosingPrice</code>.</li>
+                  <li><strong>What this is and isn't.</strong> Tara still uses Coinbase/Binance for live tick monitoring during the window — predictions are unchanged. We snap to Kalshi only at the two moments where misalignment costs you money: strike capture and settlement.</li>
+                  <li><strong>Why we didn't pull live CF Benchmarks.</strong> Real-time CF Benchmarks (the index Kalshi uses for settlement) is a paid commercial product. Free workarounds aren't reliable. Snapping at open and close gets us 95% of the alignment benefit without the engineering cost.</li>
+                </ul>
+              </section>
+
+              {/* V2.9: FGT weighted voting */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Engine · Primary Signal</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>2.9</span> — FGT weighted voting</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">FGT's four timeframes no longer vote equally — 5m and 15m carry more weight than 1m and 3m. FGT's overall contribution to posterior also increased, since the data audit showed FGT 3/4+ alignment correlating with 70-100% WR.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Per-timeframe weights.</strong> 5m ±1.5 (primary, most relevant horizon for a 15m window), 15m ±1.2 (high-quality directional), 1m ±0.8 (fast but noisy), 3m ±0.5 (somewhat redundant given 1m/5m bracket it). Sum is still 4.0 so existing alignment-bucket thresholds remain valid.</li>
+                  <li><strong>Bonus magnitudes raised.</strong> Full alignment (≥3.5) now contributes ±42 to posterior (was ±30). Strong (≥2.5) → ±26 (was ±18). Moderate (≥1.5) → ±14 (was ±8). New tier: weak (≥0.7) → ±6 — catches setups where 5m alone is calling a direction.</li>
+                  <li><strong>Why this matters.</strong> Your concern was that Tara was "chasing the side in favor" — letting backward-looking signals (gap, momentum, flow) push posterior even when FGT was silent. Bumping FGT's weight makes Tara more of a forecaster and less of a trend-follower.</li>
+                  <li><strong>Watch this.</strong> Posteriors can now climb higher (90+ on full FGT alignment with secondary signals). The V144 calibration table doesn't have data at those high posteriors yet, so treat any 90%+ confidence with appropriate skepticism until calibration buckets fill in.</li>
+                </ul>
+              </section>
+
+              {/* V2.8: UP-bias targeted fixes */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Engine · Bias Correction</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>2.8</span> — UP-bias targeted fixes</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Trade audit on 53 trades revealed Tara was firing UP locks at 66% rate vs DOWN at 34%, with 5 consecutive UP losses at posterior 80%+ all having FGT alignment 0 or 1. Three targeted fixes shipped.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Symmetric thresholds in chop.</strong> RANGE-CHOP / HIGH VOL CHOP now require equal conviction either direction — UP 65 / DN 35 (both 15 points from neutral 50). Was UP 62 / DN 32 (12pt vs 18pt asymmetry favoring UP).</li>
+                  <li><strong>SHORT SQUEEZE UP threshold raised 60 → 64.</strong> SS was Tara's biggest bias source — 24 UP calls at 58% WR. Still UP-favored regime, no longer triggers on weak setups.</li>
+                  <li><strong>FGT support gate.</strong> In any choppy regime, if posterior claims ≥75 conviction but FGT alignment is &lt;|2|, Tara doesn't lock. Mirrored on DOWN side at posterior ≤25. Directly stops the "high posterior, FGT silent" failure pattern that caused the 5-in-a-row UP loss cluster.</li>
+                  <li><strong>Fast-track extended to FGT 3/4.</strong> Was only EXTREME or FGT 4/4 → 1 sample to fire. Now FGT 3/4 also fast-tracks — when 3 of 4 timeframes agree, sample confirmation is redundant. Addresses "Tara waits too long when there's edge."</li>
+                  <li><strong>Net effect.</strong> Fewer weak UP locks, faster firing on genuinely strong signals. Trade volume may drop slightly; WR should improve.</li>
+                </ul>
+              </section>
+
+              {/* V2.7: Stats analytics view */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>UI · Analytics</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>2.7</span> — Stats analytics view</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">New 📊 button in the header opens a fullscreen analytics modal. Three drill levels (top stats → hourly heatmap → individual trades) plus auto-generated insights from your actual data.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Top stats grid.</strong> Trades count, accuracy with W/L breakdown, current streak, lifetime scorecard. Today / 7 Days / All Time toggle filters everything below.</li>
+                  <li><strong>Hourly heatmap.</strong> 24 hour cells, green/copper/rose colored by WR, with trade count below. Click any hour to drill — expands inline showing every trade from that hour with timestamp, regime, posterior, FGT, quality, gap, and result.</li>
+                  <li><strong>Insights surface.</strong> Auto-generated bullets from cohort analysis. "Strongest regime: TRENDING UP at 68%" / "Direction bias: 73% UP — may be drift" / "Quality gate is working: high (72%) outperforms low (51%) by 21 points." Honest about insufficient data: "Only N trades — insights need ≥5 to be meaningful."</li>
+                  <li><strong>Six cohort cards.</strong> By Direction, Regime, Quality bucket, FGT Alignment, Session, Lock Timing. Each row visualizes WR with trade count.</li>
+                  <li><strong>What it deliberately doesn't do.</strong> No fake "Advisor vs Final Call" dual scores, no inflated 75% headlines. Tara has one prediction system; we don't fabricate metrics.</li>
+                </ul>
+              </section>
+
+              {/* V2.6: Marginal-close Kalshi resolver */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Settlement</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>2.6</span> — Marginal-close Kalshi resolver</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Marginal trades (closing gap &lt;10bps) where Tara's local price feed and Kalshi's settlement could disagree no longer auto-record. They defer to Kalshi's API for the authoritative outcome.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Auto-defer for marginal closes.</strong> When |closingGapBps| &lt; 10, trade is marked PENDING-VERIFY instead of recorded as WIN/LOSS. A separate effect polls Kalshi every 20s for the settled market.</li>
+                  <li><strong>Kalshi API as source of truth.</strong> When Kalshi returns the settled market with its result field ('yes' = UP wins, 'no' = DOWN wins), Tara updates the trade with Kalshi's authoritative outcome and runs gradient descent.</li>
+                  <li><strong>Fallback after 5 minutes.</strong> If Kalshi can't be reached, falls back to Tara's local-feed result and flags <code>kalshiResolutionFailed: true</code> for visibility.</li>
+                  <li><strong>UI badge.</strong> Top stat strip shows a gold pulsing pill "Pending Kalshi · N" whenever trades are awaiting resolution. Disappears once Kalshi confirms.</li>
+                  <li><strong>Analytics protected.</strong> WR and calibration math exclude PENDING-VERIFY trades so the scorecard doesn't get polluted by unresolved trades.</li>
+                </ul>
+              </section>
+
+              {/* V2.5: Sample floor */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Engine · Lock Timing</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>2.5</span> — Sample floor</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Tara was firing locks too quickly when multiple shortcuts piled on. The CONSECUTIVE_NEEDED floor was raised from 1 to 2 for non-extreme setups so she takes a moment to verify the signal before committing.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Sample floor 1 → 2.</strong> Single-character change, real impact. High-conviction setups (FGT 3/4 + strong trajectory + signal consensus) used to lock on a single tick. Now require 2 confirming ticks (~3-6 seconds of confirmation).</li>
+                  <li><strong>Fast-track preserved for genuinely extreme cases.</strong> EXTREME velocity OR FGT 4/4 still gets the 1-sample fast-track. The "obvious" cases stay fast.</li>
+                  <li><strong>Marginal setups unchanged.</strong> Already at 2-3 samples by default. No effect on those.</li>
+                  <li><strong>Post-lock stability unchanged.</strong> 30s window where Tara doesn't flip-flop unless posterior collapses 25+ points. Once committed, she stays committed.</li>
+                </ul>
+              </section>
+
               {/* V2.1: Visual refresh — Direction C palette and layout changes */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Visual Refresh</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>3.1.1</span></h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>2.1</span></h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Direction C visual reset. Engine architecture from 2.0 unchanged — this is purely a coat of paint, but a deliberate one. Gold and copper now coexist as a two-tone palette for premium versus cautionary states.</p>
               </section>
               <section className="mb-4"><h3 className="font-bold uppercase tracking-wide mb-2 text-xs" style={{color:T2_GOLD}}>What Changed in 2.1</h3>
