@@ -99,7 +99,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.02-v3.2.3-corsproxy-kalshi';
+const BASELINE_VERSION='2026.05.02-v4.1-personal-scorecard';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -120,7 +120,12 @@ const T2_COPPER_BORDER='rgba(201,125,74,0.30)';
 const T2_MONO_STYLE={fontVariantNumeric:'tabular-nums',letterSpacing:'-0.01em'};
 // Corner stamp component — small gold serial mark in upper-right of panels
 function T2Stamp({code}){return(<span style={{position:'absolute',top:'8px',right:'10px',fontSize:'8px',letterSpacing:'0.18em',color:T2_GOLD_DIM,fontWeight:500}}>{code}</span>);}
-const BASELINE_RECORD={'15m':{wins:487,losses:302},'5m':{wins:33,losses:25}};
+// V3.2.4: BASELINE_RECORD reset to zero. Per user request: "completely reset the stats and
+//   score. lets start fresh." The 487-302 figure was the live cumulative running tally; with
+//   the new architecture (Tara's Call is the only thing that scores; general prediction is
+//   informational only), we start the new tracking from zero. The seed trades remain for
+//   weight calibration, but no synthetic baseline scorecard.
+const BASELINE_RECORD={'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}};
 
 const SEED_TRADES=[
 // V3.2: 57 trades. Bumping the version family.
@@ -232,6 +237,9 @@ const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV110',JSON.stri
   localStorage.removeItem('taraWeightsV110');
   localStorage.setItem('taraBaselineVersion',BASELINE_VERSION);
   Object.keys(localStorage).filter(k=>k.startsWith('taraV110RW_')).forEach(k=>localStorage.removeItem(k));
+  // V3.2.4: User explicitly requested fresh start — clear Tara's Call scorecard too.
+  //   New architecture: Tara's Call is the only thing that scores. Start tracking from zero.
+  localStorage.removeItem('taraCallScorecards_v1');
   return true;
 }catch(e){return false;}};
 
@@ -2678,7 +2686,8 @@ function PredictionContent(props){
     handleManualSync,getMarketSessions,executeAction,
     broadcastSignalManual,discordWebhook,regimeDirWR,
     kalshiYesPrice,
-    newsSentiment // V145: dual-source news scanner output (geoRisk, geoTopic, source)
+    newsSentiment, // V145: dual-source news scanner output (geoRisk, geoTopic, source)
+    taraCall,taraScorecards,windowType, // V3.2.4: Tara's Call surface
   }=props;
   // V113: Track local broadcast state (so button shows "Sent ✓" after click)
   const[broadcasted,setBroadcasted]=React.useState({key:'',sent:false});
@@ -3118,6 +3127,40 @@ function PredictionContent(props){
                   );
                 })}
               </div>
+            </div>
+          );
+        })()}
+
+        {/* V3.2.4: TARA'S CALL — separate, higher-conviction filtered output. */}
+        {taraCall&&(()=>{
+          const tc=taraCall;
+          const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
+          const total=(sc.wins||0)+(sc.losses||0);
+          const wr=total>0?Math.round((sc.wins/total)*100):null;
+          const isCall=tc.call==='UP'||tc.call==='DOWN';
+          const callColor=tc.call==='UP'?'text-emerald-300':tc.call==='DOWN'?'text-rose-300':'text-amber-300/80';
+          const borderClr=tc.call==='UP'?'rgba(52,211,153,0.35)':tc.call==='DOWN'?'rgba(244,114,182,0.35)':T2_GOLD_BORDER;
+          const bgClr=tc.call==='UP'?'rgba(52,211,153,0.06)':tc.call==='DOWN'?'rgba(244,114,182,0.06)':'rgba(229,200,112,0.04)';
+          const callLabel=tc.call==='SIT_OUT'?'SIT OUT':tc.call;
+          const arrow=tc.call==='UP'?'▲':tc.call==='DOWN'?'▼':'—';
+          return(
+            <div className="mt-3 px-3 py-2.5 rounded-lg max-w-md w-full" style={{background:bgClr,border:'1px solid '+borderClr}}>
+              <div className="flex items-baseline justify-between mb-1.5">
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-[10px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Tara's Call</span>
+                  {isCall&&<span className="text-[9px] tracking-wider text-[#E8E9E4]/35">· conviction filtered</span>}
+                </div>
+                {wr!==null&&<span className="text-[9px] tracking-wider text-[#E8E9E4]/40 tabular-nums">{sc.wins}W · {sc.losses}L · {sc.sitouts||0} skip · {wr}%</span>}
+                {wr===null&&((sc.sitouts||0)>0)&&<span className="text-[9px] tracking-wider text-[#E8E9E4]/40 tabular-nums">{sc.sitouts} skip · no calls yet</span>}
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className={`flex items-baseline gap-2 ${callColor}`}>
+                  <span className="text-xl">{arrow}</span>
+                  <span className="text-2xl font-serif font-bold tracking-tight">{callLabel}</span>
+                  {isCall&&<span className="text-base tabular-nums opacity-70">{tc.confidence}%</span>}
+                </div>
+              </div>
+              <div className="text-[11px] text-[#E8E9E4]/55 mt-1.5 leading-snug">{tc.reason}</div>
             </div>
           );
         })()}
@@ -4851,7 +4894,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>3.2.3</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>4.1</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5049,7 +5092,25 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:487,losses:302},'5m':{wins:33,losses:25}});
+  const[scorecards,setScorecards]=useState({'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}});
+  // V3.2.4: Tara's Call scorecard — separate from general prediction. Tracks UP/DOWN/SIT_OUT
+  //   decisions where Tara has applied an additional conviction filter. SIT_OUT trades don't
+  //   count for or against. Lets us measure "would Tara's selective calls win at higher rate?"
+  const[taraScorecards,setTaraScorecards]=useState(()=>{
+    try{
+      const stored=localStorage.getItem('taraCallScorecards_v1');
+      if(stored)return JSON.parse(stored);
+    }catch(e){}
+    return{'15m':{wins:0,losses:0,sitouts:0},'5m':{wins:0,losses:0,sitouts:0}};
+  });
+  useEffect(()=>{
+    try{localStorage.setItem('taraCallScorecards_v1',JSON.stringify(taraScorecards));}catch(e){}
+  },[taraScorecards]);
+  // V3.2.4: Snapshot Tara's Call at endgame freeze. Whatever Tara is calling when the
+  //   final 90s zone begins becomes "Tara's Call for this round." It gets resolved when
+  //   the window rolls over. This ref persists across the snapshot→rollover transition.
+  //   The snapshot is reset (to null) on rollover so the next window starts fresh.
+  const taraCallSnapshotRef=useRef(null);
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -5122,7 +5183,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 3.2.3 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 4.1 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5231,7 +5292,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 3.2.3'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 4.1'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -5336,27 +5397,26 @@ function TaraApp(){
   //   returned, so the strike usually gets set to live spot first. When Kalshi data arrives
   //   ~2s later, this effect re-snaps the strike to Kalshi's published value — but only if
   //   we're still in the early window (< 30s elapsed) AND user hasn't manually overridden
-  //   AND hasn't tapped OK to confirm yet.
-  // V3.1.10 BUGFIX: Previous version referenced `clockSeconds` here but that variable is
-  //   scoped inside the analysis useMemo, not at component level → ReferenceError on mount.
-  //   Now uses windowOpenTimeRef to compute elapsed-seconds-since-window-open, which is
-  //   actually the correct measurement for "are we still early in the window?"
+  // V3.2.4: Auto-snap to Kalshi strike when it arrives — even if live-spot was already
+  //   confirmed. User explicitly wants Kalshi as the source of truth on 15m markets.
+  //   Only respect a true manual override (user typed something custom). Also extends
+  //   the early-window from 30s to 60s so slow Kalshi responses still get applied.
   useEffect(()=>{
     if(!kalshiStrike||kalshiStrike<1000||kalshiStrike>10000000)return;
-    if(isManualStrikeRef.current)return;       // user picked their own strike
-    if(strikeConfirmed)return;                  // user already confirmed live-spot strike
-    if(strikeSource==='kalshi')return;          // already using Kalshi
-    // Only re-snap in early window (first 30s after window open)
+    if(isManualStrikeRef.current)return;       // user typed their own strike — respect it
+    if(strikeSource==='kalshi'&&Math.abs((targetMargin||0)-Math.round(kalshiStrike))<1)return; // already set, no change
     const _openTime=windowOpenTimeRef.current||0;
     if(_openTime===0)return; // no window open yet
     const _elapsedSec=(Date.now()-_openTime)/1000;
-    if(_elapsedSec>30)return;
+    if(_elapsedSec>60)return; // V3.2.4: extended 30→60s
     const rounded=Math.round(kalshiStrike);
     windowOpenPriceRef.current=rounded;
-    setPendingStrike(rounded);
-    setStrikeMode('manual'); // treat as manual until confirmed
+    setTargetMargin(rounded); // V3.2.4: directly set instead of pending — user wanted automatic
+    setPendingStrike(null);
+    setStrikeMode('manual');
     setStrikeSource('kalshi');
-  },[kalshiStrike,strikeConfirmed,strikeSource]);
+    setStrikeConfirmed(true); // V3.2.4: auto-confirm Kalshi strike, no extra tap needed
+  },[kalshiStrike,strikeSource,targetMargin]);
 
   const liveHistory=useMemo(()=>{if(history.length===0||!currentPrice)return history;const u=[...history];u[0]={...u[0],c:currentPrice,h:Math.max(u[0].h||currentPrice,currentPrice),l:Math.min(u[0].l||currentPrice,currentPrice)};return u;},[history,currentPrice]);
 
@@ -5392,7 +5452,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 3.2.3  |  signal'},
+        footer:{text:'Tara 4.1  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5406,7 +5466,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 3.2.3  |  stand-down'},
+        footer:{text:'Tara 4.1  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5420,7 +5480,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 3.2.3  |  search'},
+        footer:{text:'Tara 4.1  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5437,7 +5497,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 3.2.3  |  lock'},
+        footer:{text:'Tara 4.1  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5454,7 +5514,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 3.2.3  |  close'},
+          footer:{text:'Tara 4.1  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5475,11 +5535,111 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 3.2.3  |  exit'},
+        footer:{text:'Tara 4.1  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
       // Whale pressure alert — clinical, accurate, no hype
+      // V3.2.4: Tara's Call broadcasts — auto-sent. The user's "general prediction" path
+      //   (SIGNAL/LOCK above) is now manual-only. These four are Tara talking, distinct from
+      //   the engine's general lock state.
+      else if(type==='TARA_SCAN')embed={
+        title:`TARA  ·  SCANNING`,
+        color:6710886,
+        description:data.summary||'No commitment yet — observing.',
+        fields:[
+          {name:'Posterior',value:`${(data.posterior||0).toFixed(0)}`,inline:true},
+          {name:'Quality',value:`${data.quality||0}/100`,inline:true},
+          {name:'FGT',value:`${(data.fgtAbs||0).toFixed(1)}/4`,inline:true},
+          {name:'Regime',value:data.regime||'—',inline:true},
+          {name:'Window',value:data.windowAmp||'—',inline:true},
+          {name:'Clock',value:data.clock||'—',inline:true},
+          {name:'Record',value:data.taraRecord||'—',inline:false},
+        ],
+        footer:{text:'Tara 4.1  |  scanning'},
+        timestamp:new Date().toISOString(),
+      };
+
+      else if(type==='TARA_SIGNAL')embed={
+        title:`TARA  ·  ${data.dir} SIGNAL`,
+        color:data.dir==='UP'?3404125:16478549,
+        description:data.reason||`Forming ${data.dir}. Not yet locked.`,
+        fields:[
+          {name:'Direction',value:data.dir||'—',inline:true},
+          {name:'Confidence',value:`${data.confidence||0}%`,inline:true},
+          {name:'Posterior',value:`${(data.posterior||0).toFixed(0)}`,inline:true},
+          {name:'Quality',value:`${data.quality||0}/100`,inline:true},
+          {name:'FGT',value:`${(data.fgtAbs||0).toFixed(1)}/4 ${data.fgtDir||''}`,inline:true},
+          {name:'Regime',value:data.regime||'—',inline:true},
+          {name:'Strike',value:`$${(data.strike||0).toFixed(2)}`,inline:true},
+          {name:'Price',value:`$${(data.price||0).toFixed(2)}`,inline:true},
+          {name:'Clock',value:data.clock||'—',inline:true},
+          {name:'Record',value:data.taraRecord||'—',inline:false},
+        ],
+        footer:{text:'Tara 4.1  |  signal'},
+        timestamp:new Date().toISOString(),
+      };
+
+      else if(type==='TARA_LOCK')embed={
+        title:`TARA  ·  ${data.dir} LOCKED`,
+        color:data.dir==='UP'?3404125:16478549,
+        description:data.reason||`Committed ${data.dir} for this round.`,
+        fields:[
+          {name:'Direction',value:data.dir||'—',inline:true},
+          {name:'Confidence',value:`${data.confidence||0}%`,inline:true},
+          {name:'Posterior',value:`${(data.posterior||0).toFixed(0)}`,inline:true},
+          {name:'Strike',value:`$${(data.strike||0).toFixed(2)}`,inline:true},
+          {name:'Price',value:`$${(data.price||0).toFixed(2)}`,inline:true},
+          {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
+          {name:'Quality',value:`${data.quality||0}/100`,inline:true},
+          {name:'FGT',value:`${(data.fgtAbs||0).toFixed(1)}/4 ${data.fgtDir||''}`,inline:true},
+          {name:'Regime',value:data.regime||'—',inline:true},
+          {name:'Record',value:data.taraRecord||'—',inline:false},
+        ],
+        footer:{text:'Tara 4.1  |  lock'},
+        timestamp:new Date().toISOString(),
+      };
+
+      else if(type==='TARA_SITOUT')embed={
+        title:`TARA  ·  SITTING OUT`,
+        color:14935562, // amber
+        description:data.reason||'Conditions don\'t support a confident call.',
+        fields:[
+          {name:'Posterior',value:`${(data.posterior||0).toFixed(0)}`,inline:true},
+          {name:'Quality',value:`${data.quality||0}/100`,inline:true},
+          {name:'FGT',value:`${(data.fgtAbs||0).toFixed(1)}/4`,inline:true},
+          {name:'Regime',value:data.regime||'—',inline:true},
+          {name:'Window',value:data.windowAmp||'—',inline:true},
+          {name:'Clock',value:data.clock||'—',inline:true},
+          {name:'Record',value:data.taraRecord||'—',inline:false},
+        ],
+        footer:{text:'Tara 4.1  |  sit-out'},
+        timestamp:new Date().toISOString(),
+      };
+
+      // V3.2.4: Tara's Call result — fires when window resolves
+      else if(type==='TARA_RESULT'){
+        const isWin=data.result==='WIN';
+        const isSitout=data.result==='SITOUT';
+        embed={
+          title:`TARA  ·  ${isSitout?'SAT OUT':isWin?'WIN':'LOSS'}  ·  ${data.window||windowType}`,
+          color:isSitout?6710886:isWin?3404125:16478549,
+          description:isSitout
+            ? `Tara passed on this round.${data.outcomeDir?` Actual outcome: ${data.outcomeDir}.`:''}`
+            : `Tara called ${data.calledDir}. Actual: ${data.outcomeDir}. ${isWin?'Correct.':'Wrong.'}`,
+          fields:[
+            {name:'Tara\'s Call',value:isSitout?'SIT OUT':data.calledDir||'—',inline:true},
+            {name:'Outcome',value:data.outcomeDir||'—',inline:true},
+            {name:'Strike',value:`$${(data.strike||0).toFixed(2)}`,inline:true},
+            {name:'Close',value:`$${(data.price||0).toFixed(2)}`,inline:true},
+            {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
+            {name:'Record',value:data.taraRecord||'—',inline:false},
+          ],
+          footer:{text:'Tara 4.1  |  result'},
+          timestamp:new Date().toISOString(),
+        };
+      }
+
       else if(type==='WHALE'){
         const isBuy=data.netFlow>0;
         const netAbs=Math.abs(data.netFlow);
@@ -5491,6 +5651,13 @@ function TaraApp(){
           : data.exchangeCount===1
           ? 'Single exchange — treat as unconfirmed.'
           : 'Futures only — possible hedging or basis trade.';
+        // V3.2.4: position-aware advisory line
+        let advisoryLine='';
+        if(data.whaleAdvisory){
+          const a=data.whaleAdvisory;
+          const tag=a.action==='HOLD'?'🟢 HOLD':a.action==='CASH OUT'?'🔴 CASH OUT':'🟡 WATCH';
+          advisoryLine=`\n**${tag}**  ·  position ${data.userPosition}\n${a.reason}\n`;
+        }
         embed={
           title:`TARA — WHALE PRESSURE: ${isBuy?'BUY':'SELL'}`,
           color:isBuy?3404125:16478549,
@@ -5503,13 +5670,14 @@ function TaraApp(){
             `\`\`\``,
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
-          ].join('\n'),
-          footer:{text:'Tara 3.2.3  |  futures tape  |  not financial advice'},
+            advisoryLine,
+          ].filter(Boolean).join('\n'),
+          footer:{text:'Tara 4.1  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 3.2.3',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 4.1',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -5528,7 +5696,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 3.2.3 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 4.1 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -5574,12 +5742,17 @@ function TaraApp(){
     setKalshiYesPrice(null); // reset on window change so we don't show stale prior-strike price
     setKalshiStrike(null);
     setKalshiActiveMarket(null);
-    // V3.2.1: Helper to retry the Kalshi fetch up to 3 times with backoff on 503/transient errors
+    // V3.2.2: Helper to retry the Kalshi fetch up to 3 times with backoff on 503/transient errors
+    // V3.2.4: Removed the `Accept: application/json` header. That header is "non-simple" per
+    //   CORS spec and forces a preflight OPTIONS request before the GET. Kalshi's CORS handling
+    //   for OPTIONS may return 503 even when the GET would succeed — and the browser surfaces
+    //   the 503 from OPTIONS as if the GET failed. Without that header, the browser does a
+    //   simple GET (no preflight) and the request goes through cleanly.
     const fetchWithRetry=async(url,attempts=3)=>{
       let lastError=null;
       for(let i=0;i<attempts;i++){
         try{
-          const r=await fetch(url,{signal:AbortSignal.timeout(6000),headers:{'Accept':'application/json'}});
+          const r=await fetch(url,{signal:AbortSignal.timeout(6000)});
           // 503 = Service Unavailable, 502 = Bad Gateway, 504 = Gateway Timeout, 429 = Rate Limited.
           // All transient — retry. Other 4xx/5xx are not retried.
           if(r.status===503||r.status===502||r.status===504||r.status===429){
@@ -5803,12 +5976,13 @@ function TaraApp(){
           const _settleSeries=pending.windowType==='5m'?'KXBTC5M':'KXBTC15M';
           const _settleUrl=`https://api.elections.kalshi.com/trade-api/v2/markets?limit=200&series_ticker=${_settleSeries}&status=settled`;
           // V3.2.3: Use CORS proxy first to avoid 503 throttling, fall back to direct
+          // V3.2.4: Removed Accept header to skip CORS preflight (likely root cause of 503)
           let r=await fetch(
             `https://corsproxy.io/?url=${encodeURIComponent(_settleUrl)}`,
-            {signal:AbortSignal.timeout(8000),headers:{'Accept':'application/json'}}
+            {signal:AbortSignal.timeout(8000)}
           ).catch(()=>null);
           if(!r||!r.ok){
-            r=await fetch(_settleUrl,{signal:AbortSignal.timeout(8000),headers:{'Accept':'application/json'}});
+            r=await fetch(_settleUrl,{signal:AbortSignal.timeout(8000)});
           }
           if(!r.ok)continue;
           const d=await r.json();
@@ -5863,20 +6037,25 @@ function TaraApp(){
   // Window rollover
   useEffect(()=>{if(timeState.nextWindow&&timeState.nextWindow!==lastWindowRef.current){if(currentPrice!==null){if(lastWindowRef.current!==''){
           let won=false,active=false;
-          // ── SCORING: only score the trade the user was actually IN ──
-          // userPosition tracks what user entered (UP/DOWN), not Tara's prediction
-          // manuallyClosedRef tracks if user already exited early
+          // V3.2.4: General scorecard no longer auto-updates. Per user: scoring is decoupled
+          //   from general predictions. The user enters/closes positions for their own use,
+          //   and we DO track personal W-L when they take a position — that's their personal
+          //   trading record. Tara's Call has a separate scorecard.
+          //
+          //   Three scorecards now:
+          //     scorecards       — personal: only updates when userPosition!==null
+          //     taraScorecards   — Tara's Call: updates on her own conviction-filtered decisions
+          //     general prediction itself does not drive any scorecard
           if(manuallyClosedRef.current!==null){
-            // User manually closed — result already scored when they exited
+            // User manually closed — result already captured at the moment of close
             won=manuallyClosedRef.current==='WIN';
-            active=!!pendingTradeRef.current; // only broadcast if they had a trade
+            active=!!pendingTradeRef.current;
+            // Personal scorecard already updated at exit time, no double-count here
           } else if(userPosition==='UP'){
-            // User was in UP — score based on price vs strike
             active=true;
             if(currentPrice>targetMargin){won=true;updateScore(windowType,'wins',1);}
             else updateScore(windowType,'losses',1);
           } else if(userPosition==='DOWN'){
-            // User was in DOWN — score based on price vs strike
             active=true;
             if(currentPrice<targetMargin){won=true;updateScore(windowType,'wins',1);}
             else updateScore(windowType,'losses',1);
@@ -5891,8 +6070,8 @@ function TaraApp(){
               const gapBpsRecap=targetMargin>0?((currentPrice-targetMargin)/targetMargin*10000):0;
               setWindowRecap({won,dir:userPosition,closePrice:currentPrice,strike:targetMargin,gapBps:gapBpsRecap,regime:lastRegimeRef.current});
               setTimeout(()=>setWindowRecap(null),6000);
-              const winsNow=(scorecards[windowType]?.wins||0)+(won?1:0);
-              const lossesNow=(scorecards[windowType]?.losses||0)+(won?0:1);
+              // Note: scorecard wins/losses NOT pre-incremented since we no longer auto-score the general
+              const winsNow=scorecards[windowType]?.wins||0,lossesNow=scorecards[windowType]?.losses||0;
               broadcastToDiscord('CLOSE',{window:windowType,won,dir:userPosition,regime:lastRegimeRef.current,price:currentPrice,strike:targetMargin,wins:winsNow,losses:lossesNow});
             }
             // Resolve training trade
@@ -5936,6 +6115,41 @@ function TaraApp(){
         setWindowOpenStrike(currentPriceRef.current||currentPrice);
         // NOTE: do NOT setPendingStrike(null) here — setWindowOpenStrike just set it
         mtfLocksRef.current[windowType]=null; // clear this timeframe's lock on rollover
+        // V3.2.4: Resolve Tara's Call for the round just closed.
+        //   This runs whether or not the user actively traded — Tara has her own scorecard.
+        //   If snapshot is null (window closed before endgame freeze fired), treat as SIT_OUT.
+        if(currentPrice!==null&&targetMargin>0){
+          const _snap=taraCallSnapshotRef.current;
+          const _outcomeDir=currentPrice>targetMargin?'UP':currentPrice<targetMargin?'DOWN':null;
+          const _gap=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
+          // No snapshot OR explicit SIT_OUT → sitouts++
+          if(!_snap||_snap.call==='SIT_OUT'){
+            setTaraScorecards(prev=>{
+              const wt=windowType;
+              const cur=prev[wt]||{wins:0,losses:0,sitouts:0};
+              const next={...prev,[wt]:{...cur,sitouts:(cur.sitouts||0)+1}};
+              // Broadcast result with updated tally
+              const tw=next[wt];
+              const taraRecord=`${tw.wins}W · ${tw.losses}L · ${tw.sitouts} sat out  (${tw.wins+tw.losses>0?((tw.wins/(tw.wins+tw.losses))*100).toFixed(1):'—'}%)`;
+              broadcastToDiscord('TARA_RESULT',{result:'SITOUT',calledDir:'SIT_OUT',outcomeDir:_outcomeDir,window:windowType,strike:targetMargin,price:currentPrice,gap:_gap,taraRecord});
+              return next;
+            });
+          } else if(_outcomeDir&&(_snap.call==='UP'||_snap.call==='DOWN')){
+            // Real call — score against outcome
+            const _won=_snap.call===_outcomeDir;
+            setTaraScorecards(prev=>{
+              const wt=windowType;
+              const cur=prev[wt]||{wins:0,losses:0,sitouts:0};
+              const next={...prev,[wt]:{...cur,[_won?'wins':'losses']:(cur[_won?'wins':'losses']||0)+1}};
+              const tw=next[wt];
+              const taraRecord=`${tw.wins}W · ${tw.losses}L · ${tw.sitouts} sat out  (${tw.wins+tw.losses>0?((tw.wins/(tw.wins+tw.losses))*100).toFixed(1):'—'}%)`;
+              broadcastToDiscord('TARA_RESULT',{result:_won?'WIN':'LOSS',calledDir:_snap.call,outcomeDir:_outcomeDir,window:windowType,strike:targetMargin,price:currentPrice,gap:_gap,taraRecord});
+              return next;
+            });
+          }
+        }
+        // Clear snapshot for next window
+        taraCallSnapshotRef.current=null;
         taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;}},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights,userPosition]);
 
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
@@ -6106,15 +6320,19 @@ function TaraApp(){
       //   This maintains V143's firing balance (UP/DN ratio ~1.6x in seed) while making
       //   high-conf UP locks honest about their actual win probability.
       let _baseUpThr, _baseDnThr;
-      if(regime==='TRENDING DOWN'||regime==='LONG SQUEEZE'){_baseUpThr=is15m?75:73; _baseDnThr=is15m?36:34;}
+      // V3.2.4: TRENDING DOWN — apply UP threshold raise to lock gate. Was UP 75/DN 36.
+      //   In a downtrending regime, UP should be very expensive. Now UP 85, DN 26 (let DOWN
+      //   fire on more reasonable conviction in the regime designed to favor it).
+      if(regime==='TRENDING DOWN'){_baseUpThr=is15m?85:83; _baseDnThr=is15m?26:28;}
+      else if(regime==='LONG SQUEEZE'){_baseUpThr=is15m?75:73; _baseDnThr=is15m?36:34;}
       else if(regime==='TRENDING UP'){_baseUpThr=is15m?60:58; _baseDnThr=is15m?20:22;}
-      // V2.8: SHORT SQUEEZE UP threshold raised 60 → 64. Trade audit (53 trades) showed:
-      //       - SS regime over-fires UP at 58% WR (24 trades, 14W)
-      //       - 5 consecutive UP losses in 02:51-05:09 cluster, all FGT 0 or 1 (no consensus)
-      //       - SS is supposed to be UP-favored but the favoritism was producing low-conviction firings
-      //       The +4 makes UP slightly harder to fire in SS — should reduce noise locks while
-      //       still allowing strong-conviction UP firings on real squeezes (posterior 70+).
-      else if(regime==='SHORT SQUEEZE'){_baseUpThr=is15m?64:62; _baseDnThr=is15m?22:24;}
+      // V3.2.4: Apply the SS rebalance from V3.2.1 to the actual lock-gate thresholds.
+      //   The line 2067 fix changed the regime classifier values but those are dead-ish; the
+      //   real lock decision uses these `_baseUpThr` / `_baseDnThr` values. So V3.2.1's
+      //   intent (UP 64→72, DN 22→26) wasn't actually being applied.
+      //   SS in lock gate: UP 64 / DN 22 was 14pt up-bias asymmetry (UP only needed 14 from
+      //   neutral, DN needed 28 — exactly 2× harder). Now UP 72 / DN 26: 22 vs 24 — symmetric.
+      else if(regime==='SHORT SQUEEZE'){_baseUpThr=is15m?72:70; _baseDnThr=is15m?26:28;}
       // V2.8: RANGE-CHOP / HIGH VOL CHOP — symmetric thresholds. UP and DOWN now require equal conviction.
       //       Was UP 62 / DN 32 (12pt vs 18pt asymmetry favoring UP).
       //       Now UP 65 / DN 35 (both 15pt of conviction from neutral 50).
@@ -6789,6 +7007,72 @@ function TaraApp(){
   };
   const qualityGate=_computeQuality(analysis,regimeMemory);
 
+  // V3.2.4: TARA'S CALL — a separate, higher-conviction decision layer.
+  //   The "general prediction" (analysis.prediction / posterior) tells you the most likely
+  //   outcome given current signals. Tara's Call adds an explicit conviction filter — she
+  //   only "calls" UP or DOWN when MULTIPLE signals confirm. Otherwise she sits out.
+  //
+  //   Decision tree (in order):
+  //     1. Quality < 50           → SIT OUT (low signal quality, sit-out trades)
+  //     2. |Posterior - 50| < 12  → SIT OUT (no real conviction either way)
+  //     3. |FGT| < 1.5/4          → SIT OUT (primary multi-timeframe signal silent)
+  //     4. Window DEAD/WHIPSAW + quality<70 → SIT OUT (regime hostile to direction trades)
+  //     5. VOL-FLOW divergent against direction → SIT OUT (tape disagrees with price)
+  //     6. Otherwise → match general prediction direction
+  //
+  //   The result is tracked separately in taraScorecards. SIT_OUT counts neither way.
+  //   This lets us measure: do Tara's selective calls win at higher rate than the firehose?
+  const taraCall=(()=>{
+    if(!analysis||!analysis.posterior)return{call:'SIT_OUT',reason:'No analysis yet',confidence:0};
+    const post=analysis.posterior;
+    const conviction=Math.abs(post-50);
+    const dir=post>=50?'UP':'DOWN';
+    const fgtAbs=Math.abs(analysis.mtfAlignment||0);
+    const winType=analysis.windowAmplitude?.label||'NORMAL';
+    const vfLabel=analysis.volFlow?.label||'';
+    const q=qualityGate?.score||0;
+    // Gate 1: quality
+    if(q<50)return{call:'SIT_OUT',reason:`Quality only ${q}/100 — too low to commit`,confidence:0,direction:dir,conviction};
+    // Gate 2: conviction
+    if(conviction<12)return{call:'SIT_OUT',reason:`Posterior ${post.toFixed(0)} — too close to neutral (need ±12 from 50)`,confidence:0,direction:dir,conviction};
+    // Gate 3: FGT support — exception for fast-track regimes (TRENDING UP/DOWN, strong SS)
+    const isFastTrackRegime=analysis.regime==='TRENDING UP'||analysis.regime==='TRENDING DOWN';
+    if(fgtAbs<1.5&&!isFastTrackRegime){
+      return{call:'SIT_OUT',reason:`FGT only ${fgtAbs.toFixed(1)}/4 — primary timeframe signal silent`,confidence:Math.round(q*0.4),direction:dir,conviction};
+    }
+    // Gate 4: regime hostility
+    if((winType==='DEAD'||winType==='WHIPSAW')&&q<70){
+      return{call:'SIT_OUT',reason:`${winType} window with quality ${q} — regime not hospitable enough`,confidence:Math.round(q*0.5),direction:dir,conviction};
+    }
+    // Gate 5: vol-flow divergence — tape says one thing, price says another
+    if(dir==='UP'&&(vfLabel==='BUY-DIVERGENT'||vfLabel==='BUY-FAILING')){
+      return{call:'SIT_OUT',reason:`Tape (${vfLabel}) disagrees with UP move — price up but volume not confirming`,confidence:Math.round(q*0.6),direction:dir,conviction};
+    }
+    if(dir==='DOWN'&&(vfLabel==='SELL-DIVERGENT'||vfLabel==='SELL-FAILING')){
+      return{call:'SIT_OUT',reason:`Tape (${vfLabel}) disagrees with DOWN move — price down but volume not confirming`,confidence:Math.round(q*0.6),direction:dir,conviction};
+    }
+    // All gates passed — Tara calls
+    // Confidence: blend of posterior conviction and quality
+    const _confBase=Math.min(95,Math.round(conviction*1.5+q*0.4));
+    return{call:dir,reason:`${conviction.toFixed(0)}pt ${dir} lean · FGT ${fgtAbs.toFixed(1)}/4 · quality ${q}`,confidence:_confBase,direction:dir,conviction};
+  })();
+
+  // V3.2.4: Snapshot Tara's Call when endgame freeze first fires. This pins Tara's
+  //   call for this round. Subsequent posterior shifts within the freeze zone don't
+  //   change what gets scored. Reset on each window rollover (handled in rollover effect).
+  useEffect(()=>{
+    if(!analysis?.isSystemLocked)return;
+    if(taraCallSnapshotRef.current!==null)return; // already snapshotted this window
+    taraCallSnapshotRef.current={
+      call:taraCall.call,
+      direction:taraCall.direction||null,
+      confidence:taraCall.confidence,
+      reason:taraCall.reason,
+      atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+      atPosterior:analysis.posterior,
+    };
+  },[analysis?.isSystemLocked,taraCall.call,taraCall.direction,taraCall.confidence,timeState.minsRemaining,timeState.secsRemaining,analysis?.posterior,taraCall.reason]);
+
   // ── LOCK BROADCAST EFFECT — Two-stage: SIGNAL fires when FORMING, LOCK fires on commit ──
   const lastBroadcastLockRef=useRef(null);
   const lastSignalBroadcastRef=useRef(null); // track forming signal broadcasts
@@ -6856,6 +7140,62 @@ function TaraApp(){
     // Just mark as broadcasted to prevent repeats; actual broadcast is manual
     lastFormingBroadcastRef.current=formingKey;
   },[analysis?.prediction]);
+
+  // ── V3.2.4: TARA'S CALL AUTO-BROADCASTS ───────────────────────────────────
+  // Tara's Call has its own broadcast lifecycle, distinct from the user-facing manual sends.
+  // She auto-sends one of: SCAN (window opens, observing), SIGNAL (forming UP/DOWN), LOCK
+  // (committed call), or SITOUT (explicit pass). Each fires at most once per window.
+  const taraBroadcastRef=useRef({key:null,sentScan:false,sentSignalDir:null,sentLock:false,sentSitout:false});
+  useEffect(()=>{
+    if(!analysis||!discordWebhook||!discordWebhook.startsWith('http'))return;
+    const winKey=timeState.startWindow||timeState.nextWindow;
+    if(!winKey)return;
+    // Reset broadcast flags on window change
+    if(taraBroadcastRef.current.key!==winKey){
+      taraBroadcastRef.current={key:winKey,sentScan:false,sentSignalDir:null,sentLock:false,sentSitout:false};
+    }
+    const sec=timeState.minsRemaining*60+timeState.secsRemaining;
+    const totalSec=windowType==='15m'?900:300;
+    const elapsed=totalSec-sec;
+    const tc=taraCall;
+    const tw=taraScorecards[windowType]||{wins:0,losses:0,sitouts:0};
+    const taraRecord=`${tw.wins}W · ${tw.losses}L · ${tw.sitouts} sat out  (${tw.wins+tw.losses>0?((tw.wins/(tw.wins+tw.losses))*100).toFixed(1):'—'}%)`;
+    const fgtAbs=Math.abs(analysis.mtfAlignment||0);
+    const fgtDir=(analysis.mtfAlignment||0)>0.05?'UP':(analysis.mtfAlignment||0)<-0.05?'DOWN':'';
+    const baseData={
+      posterior:analysis.posterior,
+      quality:qualityGate?.score||0,
+      fgtAbs,fgtDir,
+      regime:analysis.regime,
+      windowAmp:analysis.windowAmplitude?.label,
+      clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,
+      taraRecord,
+      strike:targetMargin,
+      price:currentPrice,
+    };
+    // SCAN: broadcast once per window after 30s of observing (gives signals time to develop)
+    if(!taraBroadcastRef.current.sentScan&&elapsed>=30&&elapsed<=60){
+      taraBroadcastRef.current.sentScan=true;
+      broadcastToDiscord('TARA_SCAN',{...baseData,summary:`Posterior ${(analysis.posterior||50).toFixed(0)} · ${analysis.regime} · scanning`});
+    }
+    // SIGNAL: broadcast once per direction per window when Tara's Call resolves to UP or DOWN
+    if((tc.call==='UP'||tc.call==='DOWN')&&taraBroadcastRef.current.sentSignalDir!==tc.call&&elapsed>=20){
+      taraBroadcastRef.current.sentSignalDir=tc.call;
+      broadcastToDiscord('TARA_SIGNAL',{...baseData,dir:tc.call,confidence:tc.confidence,reason:tc.reason});
+    }
+    // LOCK: broadcast once per window after Tara's Call is snapshotted at endgame
+    if(!taraBroadcastRef.current.sentLock&&taraCallSnapshotRef.current&&taraCallSnapshotRef.current.call!=='SIT_OUT'){
+      taraBroadcastRef.current.sentLock=true;
+      const snap=taraCallSnapshotRef.current;
+      broadcastToDiscord('TARA_LOCK',{...baseData,dir:snap.call,confidence:snap.confidence,reason:snap.reason,gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0});
+    }
+    // SITOUT: broadcast if Tara has been SIT_OUT for the bulk of the window AND we haven't broadcast a signal
+    // Fires at endgame freeze if she's still SIT_OUT and never had a directional call
+    if(!taraBroadcastRef.current.sentSitout&&!taraBroadcastRef.current.sentSignalDir&&analysis.isSystemLocked&&tc.call==='SIT_OUT'){
+      taraBroadcastRef.current.sentSitout=true;
+      broadcastToDiscord('TARA_SITOUT',{...baseData,reason:tc.reason});
+    }
+  },[analysis?.posterior,taraCall.call,taraCall.confidence,taraCall.reason,analysis?.isSystemLocked,timeState.startWindow,timeState.nextWindow,timeState.minsRemaining,timeState.secsRemaining,discordWebhook,windowType,taraScorecards,qualityGate?.score,targetMargin,currentPrice]);
 
   // ── WHALE AUTO-BROADCAST ─────────────────────────────────────────────────
   // Only fires when: streak ≥4 AND net delta >$500K AND 5-min cooldown passed
@@ -7023,6 +7363,31 @@ function TaraApp(){
     const totalSell=recentPrints.filter(w=>w.side==='SELL').reduce((a,w)=>a+w.usd,0);
     const biggest=Math.max(...recentPrints.map(w=>w.usd),0);
 
+    // V3.2.4: Whale advisory — if user has a position open, evaluate whether this whale
+    //   flow helps or hurts them. Buy-side whale flow is bullish (good for UP positions,
+    //   adverse for DOWN). Sell-side whale flow is bearish (good for DOWN, adverse for UP).
+    //   The advisory is informational — user decides whether to act.
+    let whaleAdvisory=null;
+    if(userPosition&&fs.netDelta90s){
+      const whaleDir=fs.netDelta90s>0?'UP':'DOWN';
+      const aligned=whaleDir===userPosition;
+      const heavySize=Math.abs(fs.netDelta90s)>=750000; // $750K+ in 90s
+      const veryHeavy=Math.abs(fs.netDelta90s)>=1500000;
+      if(aligned){
+        whaleAdvisory={
+          action:'HOLD',
+          tone:'favorable',
+          reason:`Whale flow ${whaleDir} ($${(Math.abs(fs.netDelta90s)/1000).toFixed(0)}K) aligns with your ${userPosition} position. ${veryHeavy?'Very heavy size — consider scaling up if room remains.':heavySize?'Heavy size — conviction increasing.':'Modest support.'}`
+        };
+      } else {
+        whaleAdvisory={
+          action:veryHeavy?'CASH OUT':heavySize?'CASH OUT':'WATCH',
+          tone:'adverse',
+          reason:`Whale flow ${whaleDir} ($${(Math.abs(fs.netDelta90s)/1000).toFixed(0)}K) opposes your ${userPosition} position. ${veryHeavy?'Very heavy adverse size — consider closing.':heavySize?'Heavy adverse size — exit risk rising.':'Watch for confirmation before acting.'}`
+        };
+      }
+    }
+
     broadcastToDiscord('WHALE',{
       netFlow:fs.netDelta90s,
       totalVol:fs.streakUSD,
@@ -7032,7 +7397,10 @@ function TaraApp(){
       totalBuy,totalSell,biggest,
       spotAligned,
       price:currentPrice,
-      clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`
+      clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,
+      // V3.2.4: position-aware advisory
+      userPosition,
+      whaleAdvisory,
     });
   },[flowSignal.streakCount,flowSignal.streakDir]);
 
@@ -7135,6 +7503,7 @@ function TaraApp(){
       const result=target==='CASH'?'WIN':'LOSS';
       if(hasActiveLock&&manuallyClosedRef.current===null){
         manuallyClosedRef.current=result;
+        // V4.1: Personal scorecard updates on manual close. User took action, that counts.
         if(result==='WIN')updateScore(windowType,'wins',1);
         else updateScore(windowType,'losses',1);
         if(pendingTradeRef.current&&pendingTradeRef.current.result===null){
@@ -7220,7 +7589,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 3.2.3...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 4.1...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -7321,7 +7690,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              3.2.3
+              4.1
             </span>
           </div>
 
@@ -7532,7 +7901,7 @@ function TaraApp(){
                 </div>
               ):(
                 <div>
-                  <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide mb-1 flex items-center gap-1'}><IC.Terminal className="w-4 h-4"/> {windowType.toUpperCase()} SCORE</div>
+                  <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide mb-1 flex items-center gap-1'}><IC.Terminal className="w-4 h-4"/> YOUR {windowType.toUpperCase()}</div>
                   <div className="flex items-center gap-3">
                     <div className="flex flex-col items-center"><div className="flex items-center gap-1 text-xs text-emerald-400"><button onClick={()=>updateScore(windowType,'wins',-1)} className={'hover:bg-emerald-500/20 rounded px-0.5'}>-</button>W<button onClick={()=>updateScore(windowType,'wins',1)} className={'hover:bg-emerald-500/20 rounded px-0.5'}>+</button></div><span className="text-2xl sm:text-3xl font-serif text-emerald-400 font-bold">{Number(scorecards[windowType]?.wins||0)}</span></div>
                     <div className={'h-6 w-px bg-[#E8E9E4]/10'}></div>
@@ -7656,6 +8025,7 @@ function TaraApp(){
                   const inProfit=offerVal>betAmount||(positionStatus&&positionStatus.pnlPct>0);
                   const result=inProfit?'WIN':'LOSS';
                   manuallyClosedRef.current=result;
+                  // V4.1: Personal scorecard updates on force exit.
                   if(result==='WIN')updateScore(windowType,'wins',1);else updateScore(windowType,'losses',1);
                   if(pendingTradeRef.current&&pendingTradeRef.current.result===null){
                     const resolvedTrade={...pendingTradeRef.current,result,closingPrice:currentPrice,strikePrice:targetMargin,forceExit:true,
@@ -7718,7 +8088,7 @@ function TaraApp(){
               );
             })()}
 
-            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment}/>
+            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
@@ -7852,7 +8222,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 3.2.3</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 4.1</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -8478,7 +8848,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 3.2.3 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 4.1 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -8634,7 +9004,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 3.2.3 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 4.1 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
