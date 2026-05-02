@@ -52,9 +52,10 @@ const sigmoid=(x,steep=0.035)=>1/(1+Math.exp(-steep*x));
 // DOWN in SHORT SQUEEZE: 50% — regime-gated suppression active
 // V152: Added rangePosition — mean-reversion / range-exhaustion signal.
 // Measures how far we've drifted from window-open price relative to ATR-scaled envelope.
-// Contributes contrarian to the recent direction when |range| > 1.0 in late window.
-// Default weight matches "regime" tier — moderate, gradient descent can grow it if predictive.
-const DEFAULT_WEIGHTS={gap:52.69,momentum:49.99,structure:21.54,flow:58.00,technical:26.71,regime:43.13,rangePosition:35.00};
+// V4.6 FRESH START: Default weights reset to neutral midpoint. Per user request — full
+//   training reset, no carryover from the 57-trade seed CSV. Each signal starts at the
+//   same weight so gradient descent learns purely from the user's live trades.
+const DEFAULT_WEIGHTS={gap:35.00,momentum:35.00,structure:35.00,flow:35.00,technical:35.00,regime:35.00,rangePosition:35.00};
 
 // Per-regime weight sets — each regime gets its own gradient descent
 // Initialized from global defaults, diverge over time based on what works in each regime
@@ -64,12 +65,13 @@ const DEFAULT_WEIGHTS={gap:52.69,momentum:49.99,structure:21.54,flow:58.00,techn
 //       produced ~1-3pt deltas after hundreds of trades. Pre-baking the seed-trained values
 //       gives users a differentiated starting point on first load. Subsequent live trades
 //       continue to update via gradient descent on top.
+// V4.6 FRESH START: Per-regime weights reset to neutral. All four regimes start identical
+//   from DEFAULT_WEIGHTS — gradient descent will differentiate them as you trade.
 const DEFAULT_REGIME_WEIGHTS={
-  // V145/V152: Per-regime starting weights — flat across regimes. rangePosition added in V152.
-  'SHORT SQUEEZE': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13,rangePosition:35.00},
-  'RANGE-CHOP':    {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13,rangePosition:35.00},
-  'HIGH VOL CHOP': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13,rangePosition:35.00},
-  'TRENDING DOWN': {gap:52.69,momentum:49.99,structure:21.54,flow:55.00,technical:26.71,regime:41.13,rangePosition:35.00},
+  'SHORT SQUEEZE': {...DEFAULT_WEIGHTS},
+  'RANGE-CHOP':    {...DEFAULT_WEIGHTS},
+  'HIGH VOL CHOP': {...DEFAULT_WEIGHTS},
+  'TRENDING DOWN': {...DEFAULT_WEIGHTS},
 };
 const REGIME_WEIGHT_KEYS={'SHORT SQUEEZE':'taraV110RW_SS_V110','RANGE-CHOP':'taraV110RW_RC_V110','HIGH VOL CHOP':'taraV110RW_HVC_V110','TRENDING DOWN':'taraV110RW_TD_V110'};
 const loadRegimeWeights=()=>{
@@ -99,7 +101,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.02-v4.5-faster-commit-countdown';
+const BASELINE_VERSION='2026.05.02-v5.0-tara-decisive';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -127,71 +129,8 @@ function T2Stamp({code}){return(<span style={{position:'absolute',top:'8px',righ
 //   weight calibration, but no synthetic baseline scorecard.
 const BASELINE_RECORD={'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}};
 
-const SEED_TRADES=[
-// V3.2: 57 trades. Bumping the version family.
-//   Major themes from 3.1.x: window-type classifier, candle-pattern detection, FlowPanel
-//   3-min hard close, FGT decimal display, Tara's Brain modal, reasoning chips on prediction
-//   card, window phase timeline, Kalshi extraction diagnostic surface.
-//
-// BASELINE_RECORD scorecard preserves the live cumulative number — independent of seed.
-  {id:1777623321860,timestampISO:'2026-05-01T08:15:21.860Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:878,hour:4,session:'EU',windowType:'15m',signals:{gap:0.22,momentum:5.76,structure:9.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77212.2,closingPrice:77420.0,strikeAtLock:77188.32,strikePrice:77188.32,gapAtEntry:3.1,closingGapBps:30.0,fgtAlignment:0.0,rangeBps:-0.3,qualityScore:56},
-  {id:1777625065746,timestampISO:'2026-05-01T08:44:25.746Z',dir:'DOWN',outcomeDir:'DOWN',posterior:25.0,rawPosterior:25.0,regime:'RANGE-CHOP',clockAtLock:34,hour:4,session:'EU',windowType:'15m',signals:{gap:-14.97,momentum:-1.81,structure:0.0,flow:-14.65,technical:10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77355.98,closingPrice:77351.35,strikeAtLock:77431.88,strikePrice:77431.88,gapAtEntry:-9.8,closingGapBps:-10.4,fgtAlignment:-3.0,rangeBps:0.0,qualityScore:13},
-  {id:1777625149938,timestampISO:'2026-05-01T08:45:49.938Z',dir:'DOWN',outcomeDir:'UP',posterior:9.8,rawPosterior:9.8,regime:'RANGE-CHOP',clockAtLock:850,hour:4,session:'EU',windowType:'15m',signals:{gap:-0.04,momentum:0.0,structure:0.0,flow:-55.0,technical:10.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:77349.0,closingPrice:77358.39,strikeAtLock:77353.67,strikePrice:77353.67,gapAtEntry:-0.6,closingGapBps:0.6,fgtAlignment:-3.0,rangeBps:0.0,qualityScore:58},
-  {id:1777626839895,timestampISO:'2026-05-01T09:13:59.895Z',dir:'UP',outcomeDir:'DOWN',posterior:61.5,rawPosterior:61.5,regime:'RANGE-CHOP',clockAtLock:60,hour:5,session:'EU',windowType:'15m',signals:{gap:-7.77,momentum:0.0,structure:-9.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77318.65,closingPrice:77315.94,strikeAtLock:77360.41,strikePrice:77360.41,gapAtEntry:-5.4,closingGapBps:-5.7,fgtAlignment:-3.0,rangeBps:0.0,qualityScore:0},
-  {id:1777627444347,timestampISO:'2026-05-01T09:24:04.347Z',dir:'DOWN',outcomeDir:'UP',posterior:60.8,rawPosterior:60.8,regime:'SHORT SQUEEZE',clockAtLock:355,hour:5,session:'EU',windowType:'15m',signals:{gap:-0.76,momentum:-0.54,structure:-12.0,flow:47.0,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:77308.25,closingPrice:77332.42,strikeAtLock:77319.74,strikePrice:77319.74,gapAtEntry:-1.5,closingGapBps:1.6,fgtAlignment:-2.0,rangeBps:-0.02,qualityScore:26},
-  {id:1777627826877,timestampISO:'2026-05-01T09:30:26.877Z',dir:'DOWN',outcomeDir:'DOWN',posterior:9.8,rawPosterior:9.8,regime:'TRENDING DOWN',clockAtLock:873,hour:5,session:'EU',windowType:'15m',signals:{gap:-0.41,momentum:-6.7,structure:-12.0,flow:-55.0,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77291.99,closingPrice:77265.21,strikeAtLock:77336.66,strikePrice:77336.66,gapAtEntry:-5.8,closingGapBps:-9.2,fgtAlignment:0.0,rangeBps:-0.4,qualityScore:78},
-  {id:1777628737068,timestampISO:'2026-05-01T09:45:37.068Z',dir:'DOWN',outcomeDir:'DOWN',posterior:9.8,rawPosterior:9.8,regime:'RANGE-CHOP',clockAtLock:863,hour:5,session:'EU',windowType:'15m',signals:{gap:-0.25,momentum:-2.29,structure:0.0,flow:-54.31,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77242.69,closingPrice:77261.71,strikeAtLock:77269.11,strikePrice:77269.11,gapAtEntry:-3.4,closingGapBps:-1.0,fgtAlignment:-2.0,rangeBps:0.0,qualityScore:57},
-  {id:1777629651971,timestampISO:'2026-05-01T10:00:51.971Z',dir:'DOWN',outcomeDir:'DOWN',posterior:34.5,rawPosterior:22.4,regime:'TRENDING DOWN',clockAtLock:848,hour:6,session:'EU',windowType:'15m',signals:{gap:-0.21,momentum:0.13,structure:0.0,flow:-42.38,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77235.01,closingPrice:77151.72,strikeAtLock:77257.26,strikePrice:77257.26,gapAtEntry:-2.9,closingGapBps:-13.7,fgtAlignment:-1.0,rangeBps:-0.2,qualityScore:58},
-  {id:1777630526828,timestampISO:'2026-05-01T10:15:26.828Z',dir:'UP',outcomeDir:'UP',posterior:80.5,rawPosterior:64.8,regime:'RANGE-CHOP',clockAtLock:873,hour:6,session:'EU',windowType:'15m',signals:{gap:0.05,momentum:-0.78,structure:0.0,flow:51.02,technical:-15.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77162.79,closingPrice:77333.58,strikeAtLock:77156.79,strikePrice:77156.79,gapAtEntry:0.8,closingGapBps:22.9,fgtAlignment:0.0,rangeBps:0.12,qualityScore:22},
-  {id:1777631423940,timestampISO:'2026-05-01T10:30:23.940Z',dir:'DOWN',outcomeDir:'DOWN',posterior:47.5,rawPosterior:47.5,regime:'RANGE-CHOP',clockAtLock:876,hour:6,session:'EU',windowType:'15m',signals:{gap:-0.13,momentum:-4.17,structure:0.0,flow:-51.43,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77323.49,closingPrice:77223.6,strikeAtLock:77337.29,strikePrice:77337.29,gapAtEntry:-1.8,closingGapBps:-14.7,fgtAlignment:0.0,rangeBps:-0.1,qualityScore:18},
-  {id:1777632450103,timestampISO:'2026-05-01T10:47:30.103Z',dir:'DOWN',outcomeDir:'UP',posterior:22.7,rawPosterior:25.2,regime:'RANGE-CHOP',clockAtLock:750,hour:6,session:'EU',windowType:'15m',signals:{gap:-0.09,momentum:-1.75,structure:0.0,flow:-20.85,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:77231.07,closingPrice:77277.85,strikeAtLock:77238.15,strikePrice:77238.15,gapAtEntry:-0.9,closingGapBps:5.1,fgtAlignment:-2.0,rangeBps:0.03,qualityScore:34},
-  {id:1777633215405,timestampISO:'2026-05-01T11:00:15.405Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:884,hour:7,session:'EU',windowType:'15m',signals:{gap:0.18,momentum:7.87,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77291.99,closingPrice:77318.06,strikeAtLock:77271.46,strikePrice:77271.46,gapAtEntry:2.7,closingGapBps:6.0,fgtAlignment:0.0,rangeBps:0.15,qualityScore:56},
-  {id:1777654050998,timestampISO:'2026-05-01T16:47:30.998Z',dir:'DOWN',outcomeDir:'DOWN',posterior:24.4,rawPosterior:38.4,regime:'HIGH VOL CHOP',clockAtLock:749,hour:12,session:'US',windowType:'15m',signals:{gap:-0.68,momentum:-3.97,structure:-15.0,flow:-6.8,technical:18.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78216.73,closingPrice:78202.92,strikeAtLock:78272.34,strikePrice:78272.34,gapAtEntry:-7.1,closingGapBps:-8.9,fgtAlignment:-1.0,rangeBps:-0.1,qualityScore:11},
-  {id:1777654857038,timestampISO:'2026-05-01T17:00:57.038Z',dir:'UP',outcomeDir:'UP',posterior:80.4,rawPosterior:72.1,regime:'SHORT SQUEEZE',clockAtLock:843,hour:13,session:'US',windowType:'15m',signals:{gap:0.48,momentum:-1.23,structure:-10.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78275.58,closingPrice:78330.61,strikeAtLock:78225.0,strikePrice:78225.0,gapAtEntry:6.5,closingGapBps:13.5,fgtAlignment:-1.0,rangeBps:0.21,qualityScore:35},
-  {id:1777655727557,timestampISO:'2026-05-01T17:15:27.558Z',dir:'UP',outcomeDir:'DOWN',posterior:81.4,rawPosterior:80.8,regime:'SHORT SQUEEZE',clockAtLock:872,hour:13,session:'US',windowType:'15m',signals:{gap:0.04,momentum:11.51,structure:0.0,flow:39.86,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78289.26,closingPrice:78249.99,strikeAtLock:78284.99,strikePrice:78284.99,gapAtEntry:0.5,closingGapBps:-4.5,fgtAlignment:0.0,rangeBps:-0.17,qualityScore:49},
-  {id:1777656861754,timestampISO:'2026-05-01T17:34:21.754Z',dir:'UP',outcomeDir:'UP',posterior:88.3,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:638,hour:13,session:'US',windowType:'15m',signals:{gap:0.22,momentum:0.0,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78215.99,closingPrice:78443.01,strikeAtLock:78203.71,strikePrice:78203.71,gapAtEntry:1.6,closingGapBps:30.6,fgtAlignment:-1.0,rangeBps:-0.06,qualityScore:61},
-  {id:1777658869636,timestampISO:'2026-05-01T18:07:49.636Z',dir:'UP',outcomeDir:'DOWN',posterior:47.0,rawPosterior:47.0,regime:'TRENDING DOWN',clockAtLock:430,hour:14,session:'US',windowType:'15m',signals:{gap:-1.45,momentum:-4.98,structure:10.0,flow:-49.96,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78509.9,closingPrice:78521.55,strikeAtLock:78551.63,strikePrice:78551.63,gapAtEntry:-5.3,closingGapBps:-3.8,fgtAlignment:-3.0,rangeBps:0.0,qualityScore:33},
-  {id:1777659474015,timestampISO:'2026-05-01T18:17:54.015Z',dir:'DOWN',outcomeDir:'UP',posterior:13.8,rawPosterior:14.5,regime:'RANGE-CHOP',clockAtLock:726,hour:14,session:'US',windowType:'15m',signals:{gap:-0.06,momentum:-3.03,structure:0.0,flow:-34.92,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78528.02,closingPrice:78592.43,strikeAtLock:78532.23,strikePrice:78532.23,gapAtEntry:-0.5,closingGapBps:7.7,fgtAlignment:-2.0,rangeBps:0.0,qualityScore:45},
-  {id:1777660258139,timestampISO:'2026-05-01T18:30:58.139Z',dir:'DOWN',outcomeDir:'DOWN',posterior:20.5,rawPosterior:21.6,regime:'RANGE-CHOP',clockAtLock:842,hour:14,session:'US',windowType:'15m',signals:{gap:-0.05,momentum:1.17,structure:0.0,flow:-24.6,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78545.87,closingPrice:78433.58,strikeAtLock:78550.9,strikePrice:78550.9,gapAtEntry:-0.6,closingGapBps:-14.9,fgtAlignment:-3.0,rangeBps:0.0,qualityScore:33},
-  {id:1777661334368,timestampISO:'2026-05-01T18:48:54.368Z',dir:'UP',outcomeDir:'UP',posterior:48.4,rawPosterior:48.4,regime:'RANGE-CHOP',clockAtLock:666,hour:14,session:'US',windowType:'15m',signals:{gap:0.13,momentum:1.18,structure:0.0,flow:-26.79,technical:2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78439.99,closingPrice:78435.04,strikeAtLock:78431.64,strikePrice:78431.64,gapAtEntry:1.1,closingGapBps:0.4,fgtAlignment:-3.0,rangeBps:0.01,qualityScore:12},
-  {id:1777662190323,timestampISO:'2026-05-01T19:03:10.323Z',dir:'UP',outcomeDir:'UP',posterior:84.8,rawPosterior:84.8,regime:'SHORT SQUEEZE',clockAtLock:710,hour:15,session:'US',windowType:'15m',signals:{gap:0.78,momentum:10.28,structure:-10.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78478.36,closingPrice:78513.16,strikeAtLock:78422.21,strikePrice:78422.21,gapAtEntry:7.2,closingGapBps:11.6,fgtAlignment:-1.0,rangeBps:0.1,qualityScore:56},
-  {id:1777663030533,timestampISO:'2026-05-01T19:17:10.533Z',dir:'DOWN',outcomeDir:'DOWN',posterior:51.9,rawPosterior:51.9,regime:'TRENDING DOWN',clockAtLock:769,hour:15,session:'US',windowType:'15m',signals:{gap:-0.65,momentum:-5.91,structure:10.0,flow:-16.26,technical:10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78446.22,closingPrice:78429.07,strikeAtLock:78502.3,strikePrice:78502.3,gapAtEntry:-7.1,closingGapBps:-9.3,fgtAlignment:-1.0,rangeBps:-0.19,qualityScore:33},
-  {id:1777665881166,timestampISO:'2026-05-01T20:04:41.166Z',dir:'UP',outcomeDir:'DOWN',posterior:87.6,rawPosterior:87.5,regime:'SHORT SQUEEZE',clockAtLock:619,hour:16,session:'US',windowType:'15m',signals:{gap:-0.59,momentum:2.73,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78380.28,closingPrice:78300.0,strikeAtLock:78411.55,strikePrice:78411.55,gapAtEntry:-4.0,closingGapBps:-14.2,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:60},
-  {id:1777666573330,timestampISO:'2026-05-01T20:16:13.330Z',dir:'DOWN',outcomeDir:'DOWN',posterior:19.8,rawPosterior:41.7,regime:'RANGE-CHOP',clockAtLock:827,hour:16,session:'US',windowType:'15m',signals:{gap:-0.24,momentum:-2.88,structure:0.0,flow:-4.55,technical:2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78269.99,closingPrice:78141.44,strikeAtLock:78293.82,strikePrice:78293.82,gapAtEntry:-3.0,closingGapBps:-19.5,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:13},
-  {id:1777667585357,timestampISO:'2026-05-01T20:33:05.357Z',dir:'UP',outcomeDir:'DOWN',posterior:84.8,rawPosterior:84.8,regime:'SHORT SQUEEZE',clockAtLock:714,hour:16,session:'US',windowType:'15m',signals:{gap:0.04,momentum:1.96,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78153.0,closingPrice:77978.3,strikeAtLock:78150.05,strikePrice:78150.05,gapAtEntry:0.4,closingGapBps:-22.0,fgtAlignment:1.0,rangeBps:0.0,qualityScore:56},
-  {id:1777668358727,timestampISO:'2026-05-01T20:45:58.727Z',dir:'UP',outcomeDir:'DOWN',posterior:65.4,rawPosterior:65.4,regime:'SHORT SQUEEZE',clockAtLock:841,hour:16,session:'US',windowType:'15m',signals:{gap:0.33,momentum:1.95,structure:-9.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78020.28,closingPrice:77872.97,strikeAtLock:77986.13,strikePrice:77986.13,gapAtEntry:4.4,closingGapBps:-14.5,fgtAlignment:1.0,rangeBps:0.23,qualityScore:21},
-  {id:1777669394598,timestampISO:'2026-05-01T21:03:14.598Z',dir:'UP',outcomeDir:'UP',posterior:84.6,rawPosterior:83.6,regime:'SHORT SQUEEZE',clockAtLock:706,hour:17,session:'US',windowType:'15m',signals:{gap:1.05,momentum:8.9,structure:-12.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77950.55,closingPrice:77959.2,strikeAtLock:77873.81,strikePrice:77873.81,gapAtEntry:9.9,closingGapBps:11.0,fgtAlignment:1.0,rangeBps:0.0,qualityScore:54},
-  {id:1777670321365,timestampISO:'2026-05-01T21:18:41.365Z',dir:'UP',outcomeDir:'UP',posterior:83.7,rawPosterior:87.1,regime:'SHORT SQUEEZE',clockAtLock:679,hour:17,session:'US',windowType:'15m',signals:{gap:0.47,momentum:2.56,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:77975.0,closingPrice:78026.44,strikeAtLock:77944.16,strikePrice:77944.16,gapAtEntry:4.0,closingGapBps:10.6,fgtAlignment:1.0,rangeBps:0.05,qualityScore:59},
-  {id:1777671150190,timestampISO:'2026-05-01T21:32:30.190Z',dir:'UP',outcomeDir:'UP',posterior:84.1,rawPosterior:84.1,regime:'SHORT SQUEEZE',clockAtLock:750,hour:17,session:'US',windowType:'15m',signals:{gap:1.25,momentum:9.35,structure:0.0,flow:55.0,technical:-25.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78108.33,closingPrice:78112.95,strikeAtLock:78006.44,strikePrice:78006.44,gapAtEntry:13.1,closingGapBps:13.7,fgtAlignment:1.0,rangeBps:0.29,qualityScore:55},
-  {id:1777672208830,timestampISO:'2026-05-01T21:50:08.830Z',dir:'UP',outcomeDir:'UP',posterior:88.1,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:592,hour:17,session:'US',windowType:'15m',signals:{gap:1.51,momentum:4.99,structure:12.0,flow:55.0,technical:-15.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78171.78,closingPrice:78207.04,strikeAtLock:78098.34,strikePrice:78098.34,gapAtEntry:9.4,closingGapBps:13.9,fgtAlignment:0.0,rangeBps:0.15,qualityScore:61},
-  {id:1777672896917,timestampISO:'2026-05-01T22:01:36.917Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:803,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.57,momentum:1.86,structure:15.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78249.16,closingPrice:78330.1,strikeAtLock:78195.36,strikePrice:78195.36,gapAtEntry:6.9,closingGapBps:17.2,fgtAlignment:0.0,rangeBps:0.0,qualityScore:49},
-  {id:1777675668449,timestampISO:'2026-05-01T22:47:48.449Z',dir:'DOWN',outcomeDir:'DOWN',posterior:16.7,rawPosterior:20.8,regime:'RANGE-CHOP',clockAtLock:732,hour:18,session:'OFF-HOURS',windowType:'15m',signals:{gap:-0.31,momentum:-1.2,structure:0.0,flow:-19.3,technical:-8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78216.55,closingPrice:78146.63,strikeAtLock:78240.46,strikePrice:78240.46,gapAtEntry:-3.1,closingGapBps:-12.0,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:35},
-  {id:1777676615456,timestampISO:'2026-05-01T23:03:35.456Z',dir:'UP',outcomeDir:'DOWN',posterior:87.0,rawPosterior:87.0,regime:'SHORT SQUEEZE',clockAtLock:685,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.1,momentum:2.72,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78152.29,closingPrice:78121.18,strikeAtLock:78145.51,strikePrice:78145.51,gapAtEntry:0.9,closingGapBps:-3.1,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:58},
-  {id:1777678676827,timestampISO:'2026-05-01T23:37:56.827Z',dir:'UP',outcomeDir:'UP',posterior:87.5,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:423,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:1.57,momentum:5.0,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78095.22,closingPrice:78095.66,strikeAtLock:78051.28,strikePrice:78051.28,gapAtEntry:5.6,closingGapBps:5.7,fgtAlignment:-1.0,rangeBps:0.12,qualityScore:60},
-  {id:1777679342049,timestampISO:'2026-05-01T23:49:02.049Z',dir:'UP',outcomeDir:'UP',posterior:87.5,rawPosterior:88.3,regime:'SHORT SQUEEZE',clockAtLock:658,hour:19,session:'OFF-HOURS',windowType:'15m',signals:{gap:0.77,momentum:4.4,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78167.36,closingPrice:78231.97,strikeAtLock:78120.6,strikePrice:78120.6,gapAtEntry:6.0,closingGapBps:14.3,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:60},
-  {id:1777680090860,timestampISO:'2026-05-02T00:01:30.860Z',dir:'UP',outcomeDir:'DOWN',posterior:81.2,rawPosterior:60.4,regime:'SHORT SQUEEZE',clockAtLock:809,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.35,momentum:7.51,structure:0.0,flow:21.58,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78249.42,closingPrice:78200.16,strikeAtLock:78215.98,strikePrice:78215.98,gapAtEntry:4.3,closingGapBps:-2.0,fgtAlignment:-1.0,rangeBps:0.09,qualityScore:27},
-  {id:1777681337840,timestampISO:'2026-05-02T00:22:17.840Z',dir:'UP',outcomeDir:'UP',posterior:88.3,rawPosterior:74.4,regime:'SHORT SQUEEZE',clockAtLock:462,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.79,momentum:3.01,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78228.31,closingPrice:78279.04,strikeAtLock:78203.41,strikePrice:78203.41,gapAtEntry:3.2,closingGapBps:9.7,fgtAlignment:-1.0,rangeBps:0.08,qualityScore:42},
-  {id:1777681867794,timestampISO:'2026-05-02T00:31:07.794Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.4,regime:'RANGE-CHOP',clockAtLock:832,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.23,momentum:-0.32,structure:0.0,flow:55.0,technical:8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78305.53,closingPrice:78325.19,strikeAtLock:78281.9,strikePrice:78281.9,gapAtEntry:3.0,closingGapBps:5.5,fgtAlignment:-1.0,rangeBps:0.2,qualityScore:46},
-  {id:1777682722823,timestampISO:'2026-05-02T00:45:22.823Z',dir:'UP',outcomeDir:'UP',posterior:80.3,rawPosterior:60.7,regime:'TRENDING UP',clockAtLock:877,hour:20,session:'ASIA',windowType:'15m',signals:{gap:0.4,momentum:14.23,structure:-10.0,flow:27.9,technical:3.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78361.66,closingPrice:78346.02,strikeAtLock:78317.17,strikePrice:78317.17,gapAtEntry:5.7,closingGapBps:3.7,fgtAlignment:0.0,rangeBps:0.39,qualityScore:22},
-  {id:1777683905786,timestampISO:'2026-05-02T01:05:05.786Z',dir:'UP',outcomeDir:'UP',posterior:87.5,rawPosterior:87.5,regime:'SHORT SQUEEZE',clockAtLock:594,hour:21,session:'ASIA',windowType:'15m',signals:{gap:-0.32,momentum:-3.94,structure:0.0,flow:55.0,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78301.99,closingPrice:78349.0,strikeAtLock:78317.62,strikePrice:78317.62,gapAtEntry:-2.0,closingGapBps:4.0,fgtAlignment:0.0,rangeBps:-0.16,qualityScore:63},
-  {id:1777684528587,timestampISO:'2026-05-02T01:15:28.587Z',dir:'UP',outcomeDir:'DOWN',posterior:81.4,rawPosterior:81.4,regime:'SHORT SQUEEZE',clockAtLock:871,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.12,momentum:0.03,structure:7.2,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78370.04,closingPrice:78345.4,strikeAtLock:78356.61,strikePrice:78356.61,gapAtEntry:1.7,closingGapBps:-1.4,fgtAlignment:0.0,rangeBps:0.24,qualityScore:54},
-  {id:1777685527740,timestampISO:'2026-05-02T01:32:07.740Z',dir:'UP',outcomeDir:'UP',posterior:84.5,rawPosterior:84.5,regime:'RANGE-CHOP',clockAtLock:772,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.24,momentum:3.73,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78365.0,closingPrice:78375.99,strikeAtLock:78343.9,strikePrice:78343.9,gapAtEntry:2.7,closingGapBps:4.1,fgtAlignment:1.0,rangeBps:0.11,qualityScore:51},
-  {id:1777686506060,timestampISO:'2026-05-02T01:48:26.060Z',dir:'UP',outcomeDir:'UP',posterior:84.1,rawPosterior:87.4,regime:'RANGE-CHOP',clockAtLock:694,hour:21,session:'ASIA',windowType:'15m',signals:{gap:0.07,momentum:0.54,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78337.99,closingPrice:78339.79,strikeAtLock:78332.89,strikePrice:78332.89,gapAtEntry:0.7,closingGapBps:0.9,fgtAlignment:1.0,rangeBps:-0.17,qualityScore:56},
-  {id:1777687585600,timestampISO:'2026-05-02T02:06:25.600Z',dir:'UP',outcomeDir:'DOWN',posterior:87.5,rawPosterior:87.4,regime:'SHORT SQUEEZE',clockAtLock:515,hour:22,session:'ASIA',windowType:'15m',signals:{gap:0.88,momentum:-0.22,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78348.23,closingPrice:78291.56,strikeAtLock:78314.97,strikePrice:78314.97,gapAtEntry:4.2,closingGapBps:-3.0,fgtAlignment:0.0,rangeBps:0.0,qualityScore:64},
-  {id:1777690300228,timestampISO:'2026-05-02T02:51:40.228Z',dir:'UP',outcomeDir:'DOWN',posterior:88.0,rawPosterior:87.8,regime:'SHORT SQUEEZE',clockAtLock:500,hour:22,session:'ASIA',windowType:'15m',signals:{gap:1.01,momentum:2.16,structure:0.0,flow:55.0,technical:-5.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78413.98,closingPrice:78358.09,strikeAtLock:78377.62,strikePrice:78377.62,gapAtEntry:4.6,closingGapBps:-2.5,fgtAlignment:-1.0,rangeBps:0.0,qualityScore:64},
-  {id:1777690851218,timestampISO:'2026-05-02T03:00:51.218Z',dir:'DOWN',outcomeDir:'DOWN',posterior:58.9,rawPosterior:58.9,regime:'RANGE-CHOP',clockAtLock:849,hour:23,session:'ASIA',windowType:'15m',signals:{gap:0.21,momentum:-3.39,structure:0.0,flow:31.03,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78380.59,closingPrice:78269.55,strikeAtLock:78358.79,strikePrice:78358.79,gapAtEntry:2.8,closingGapBps:-11.4,fgtAlignment:-1.0,rangeBps:0.21,qualityScore:16},
-  {id:1777691790489,timestampISO:'2026-05-02T03:16:30.489Z',dir:'UP',outcomeDir:'UP',posterior:49.8,rawPosterior:49.8,regime:'TRENDING DOWN',clockAtLock:809,hour:23,session:'ASIA',windowType:'15m',signals:{gap:-0.3,momentum:-1.7,structure:0.0,flow:-42.99,technical:8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78248.58,closingPrice:78382.85,strikeAtLock:78277.2,strikePrice:78277.2,gapAtEntry:-3.7,closingGapBps:13.5,fgtAlignment:1.0,rangeBps:-0.14,qualityScore:34},
-  {id:1777692779590,timestampISO:'2026-05-02T03:32:59.590Z',dir:'UP',outcomeDir:'UP',posterior:60.0,rawPosterior:60.0,regime:'RANGE-CHOP',clockAtLock:720,hour:23,session:'ASIA',windowType:'15m',signals:{gap:-0.11,momentum:-0.01,structure:0.0,flow:-25.71,technical:8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78380.95,closingPrice:78400.73,strikeAtLock:78389.01,strikePrice:78389.01,gapAtEntry:-1.0,closingGapBps:1.5,fgtAlignment:0.0,rangeBps:-0.01,qualityScore:16},
-  {id:1777693519286,timestampISO:'2026-05-02T03:45:19.286Z',dir:'DOWN',outcomeDir:'UP',posterior:50.4,rawPosterior:50.4,regime:'RANGE-CHOP',clockAtLock:881,hour:23,session:'ASIA',windowType:'15m',signals:{gap:-0.13,momentum:-6.24,structure:0.0,flow:-37.83,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78382.34,closingPrice:78438.76,strikeAtLock:78396.72,strikePrice:78396.72,gapAtEntry:-1.8,closingGapBps:5.4,fgtAlignment:0.0,rangeBps:-0.23,qualityScore:16},
-  {id:1777694440054,timestampISO:'2026-05-02T04:00:40.054Z',dir:'DOWN',outcomeDir:'DOWN',posterior:41.7,rawPosterior:41.7,regime:'RANGE-CHOP',clockAtLock:860,hour:0,session:'ASIA',windowType:'15m',signals:{gap:0.0,momentum:1.64,structure:9.0,flow:-36.25,technical:10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78434.73,closingPrice:78288.28,strikeAtLock:78434.29,strikePrice:78434.29,gapAtEntry:0.1,closingGapBps:-18.6,fgtAlignment:0.0,rangeBps:-0.04,qualityScore:16},
-  {id:1777695358318,timestampISO:'2026-05-02T04:15:58.318Z',dir:'UP',outcomeDir:'DOWN',posterior:80.4,rawPosterior:80.6,regime:'SHORT SQUEEZE',clockAtLock:842,hour:0,session:'ASIA',windowType:'15m',signals:{gap:-0.15,momentum:-1.06,structure:0.0,flow:40.71,technical:0.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78268.17,closingPrice:78281.05,strikeAtLock:78283.39,strikePrice:78283.39,gapAtEntry:-1.9,closingGapBps:-0.3,fgtAlignment:1.0,rangeBps:-0.16,qualityScore:53},
-  {id:1777696641171,timestampISO:'2026-05-02T04:37:21.171Z',dir:'DOWN',outcomeDir:'DOWN',posterior:47.0,rawPosterior:47.0,regime:'RANGE-CHOP',clockAtLock:459,hour:0,session:'ASIA',windowType:'15m',signals:{gap:-0.11,momentum:0.03,structure:-9.0,flow:-38.31,technical:0.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78275.59,closingPrice:78229.36,strikeAtLock:78278.98,strikePrice:78278.98,gapAtEntry:-0.4,closingGapBps:-6.3,fgtAlignment:1.0,rangeBps:-0.02,qualityScore:16},
-  {id:1777698580777,timestampISO:'2026-05-02T05:09:40.778Z',dir:'UP',outcomeDir:'DOWN',posterior:54.5,rawPosterior:54.5,regime:'RANGE-CHOP',clockAtLock:319,hour:1,session:'ASIA',windowType:'15m',signals:{gap:1.3,momentum:3.57,structure:0.0,flow:17.83,technical:-2.0,regime:0.0,rangePosition:0.0},result:'LOSS',entryPrice:78192.88,closingPrice:78092.36,strikeAtLock:78174.98,strikePrice:78174.98,gapAtEntry:2.3,closingGapBps:-10.6,fgtAlignment:1.0,rangeBps:0.0,qualityScore:16},
-  {id:1777699897035,timestampISO:'2026-05-02T05:31:37.035Z',dir:'UP',outcomeDir:'UP',posterior:81.4,rawPosterior:81.3,regime:'SHORT SQUEEZE',clockAtLock:803,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.56,momentum:10.03,structure:0.0,flow:55.0,technical:-10.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78143.99,closingPrice:78193.8,strikeAtLock:78090.86,strikePrice:78090.86,gapAtEntry:6.8,closingGapBps:13.2,fgtAlignment:1.0,rangeBps:0.25,qualityScore:54},
-  {id:1777700842998,timestampISO:'2026-05-02T05:47:22.998Z',dir:'UP',outcomeDir:'UP',posterior:84.1,rawPosterior:84.8,regime:'SHORT SQUEEZE',clockAtLock:757,hour:1,session:'ASIA',windowType:'15m',signals:{gap:0.37,momentum:4.36,structure:9.0,flow:55.0,technical:-2.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78220.22,closingPrice:78211.79,strikeAtLock:78189.11,strikePrice:78189.11,gapAtEntry:4.0,closingGapBps:2.9,fgtAlignment:0.0,rangeBps:0.14,qualityScore:60},
-  {id:1777709015809,timestampISO:'2026-05-02T08:03:35.809Z',dir:'UP',outcomeDir:'UP',posterior:62.2,rawPosterior:62.2,regime:'SHORT SQUEEZE',clockAtLock:684,hour:4,session:'EU',windowType:'15m',signals:{gap:-0.18,momentum:-0.79,structure:-5.4,flow:47.0,technical:-8.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78200.55,closingPrice:78256.19,strikeAtLock:78212.66,strikePrice:78212.66,gapAtEntry:-1.5,closingGapBps:5.6,fgtAlignment:0.30000000000000004,rangeBps:-0.06,qualityScore:27},
-  {id:1777713653321,timestampISO:'2026-05-02T09:20:53.321Z',dir:'UP',outcomeDir:'UP',posterior:61.1,rawPosterior:61.1,regime:'RANGE-CHOP',clockAtLock:546,hour:5,session:'EU',windowType:'15m',signals:{gap:0.74,momentum:0.0,structure:0.0,flow:23.81,technical:-5.0,regime:0.0,rangePosition:0.0},result:'WIN',entryPrice:78327.48,closingPrice:78306.29,strikeAtLock:78296.42,strikePrice:78296.42,gapAtEntry:4.0,closingGapBps:1.3,fgtAlignment:0.30000000000000004,rangeBps:0.0,qualityScore:19},
-];
+// V4.6 FRESH START: Per user request — full reset, no baked-in seed data.
+const SEED_TRADES=[];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
 const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV110',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
@@ -3387,7 +3326,7 @@ function TaraAdvisorPanel({advisor,executeAction}){
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,timeState}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -3415,14 +3354,41 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType}
         const bgClr=tc.call==='UP'?'rgba(52,211,153,0.08)':tc.call==='DOWN'?'rgba(244,114,182,0.08)':'rgba(229,200,112,0.05)';
         const callLabel=tc.call==='SIT_OUT'?'SIT OUT':tc.call;
         const arrow=tc.call==='UP'?'▲':tc.call==='DOWN'?'▼':'—';
-        // V4.5: Phase derived from snapshot + sample state, with countdown timer
+        // V4.6: Phase derived from snapshot + sample state, with proper countdown timer.
+        //   FORMING → 'locks in ~Xs' + sample-progress bar
+        //   LOCKED / SAT OUT / WATCHING → window time-remaining + window-elapsed bar
         const snap=tc.snapshot;
         const phaseLabel=snap?(snap.call==='SIT_OUT'?'SAT OUT':'LOCKED'):isCall?'FORMING':tc.call==='SIT_OUT'?'WATCHING':'ANALYZING';
-        // Countdown: how many more samples until lock fires (~1Hz cadence ≈ seconds)
         const samplesLeft=Math.max(0,(tc.needSamples||3)-(tc.samples||0));
-        const countdownText=snap?(snap.earlyLock?'committed early':'committed at endgame'):isCall?(samplesLeft===0?'committing this tick':`locks in ~${samplesLeft}s`):tc.call==='SIT_OUT'?'no commitment':'looking for direction';
-        const phaseHint=snap?'':isCall?`${tc.samples||0}/${tc.needSamples||3} confirms`:tc.call==='SIT_OUT'?(tc.reason||'').split(' — ')[0]:'';
-        const phaseProgressPct=snap?100:isCall&&tc.needSamples?Math.min(95,(tc.samples/tc.needSamples)*100):tc.call==='SIT_OUT'?60:15;
+        // Window time-remaining label (passed via timeState)
+        const _totalSec=windowType==='15m'?900:300;
+        const _elapsed=timeState?Math.max(0,_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining)):0;
+        const _remSec=Math.max(0,_totalSec-_elapsed);
+        const _remMin=Math.floor(_remSec/60),_remRem=_remSec%60;
+        const _remLabel=_remMin>0?`${_remMin}m ${String(_remRem).padStart(2,'0')}s left`:`${_remRem}s left`;
+        const _elapsedFrac=Math.min(1,_elapsed/_totalSec);
+        // Countdown text + progress
+        let countdownText,phaseHint='',phaseProgressPct;
+        if(snap){
+          // Tara has committed (locked or sat out) — show window remaining
+          countdownText=_remLabel;
+          phaseHint=snap.earlyLock?'committed early':snap.call==='SIT_OUT'?'declined':'committed';
+          phaseProgressPct=_elapsedFrac*100;
+        } else if(isCall){
+          // FORMING — sample-based progress
+          countdownText=samplesLeft===0?'committing this tick':`locks in ~${samplesLeft}s`;
+          phaseHint=`${tc.samples||0}/${tc.needSamples||3} confirms`;
+          phaseProgressPct=tc.needSamples?Math.min(95,(tc.samples/tc.needSamples)*100):50;
+        } else if(tc.call==='SIT_OUT'){
+          // WATCHING — window elapsed, no commitment expected
+          countdownText=_remLabel;
+          phaseHint='no commitment';
+          phaseProgressPct=_elapsedFrac*100;
+        } else {
+          // ANALYZING — fill slowly with elapsed time
+          countdownText='looking for direction';
+          phaseProgressPct=Math.min(15,_elapsed*0.7);
+        }
         return(
           <div className="mb-3 px-3 py-3 rounded-lg shrink-0" style={{background:bgClr,border:'1px solid '+borderClr,boxShadow:isCall?`inset 0 0 24px ${tc.call==='UP'?'rgba(52,211,153,0.06)':'rgba(244,114,182,0.06)'}`:'none'}}>
             <div className="flex items-baseline justify-between mb-2">
@@ -5006,7 +4972,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>4.5</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.0</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5298,7 +5264,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 4.5 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.0 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5380,7 +5346,38 @@ function TaraApp(){
         }
       }).catch(()=>{});
     }
-    // V134: Baseline version check — detect if a newer baseline has shipped
+    // V4.6 AUTO FRESH-START: If user has any prior baseline version stored, wipe all training
+    //   data automatically on first load of V4.6. Per user: 'i asked for a fresh start right'.
+    //   This fires once on version-bump, then never again.
+    try{
+      const lastSyncedVersion=localStorage.getItem('taraBaselineVersion');
+      const FRESH_START_MARKER='taraFreshStartV46';
+      const alreadyWiped=localStorage.getItem(FRESH_START_MARKER);
+      if(!alreadyWiped&&lastSyncedVersion&&lastSyncedVersion!==BASELINE_VERSION){
+        // Wipe everything training-related
+        localStorage.removeItem('taraTradeLogV110');
+        localStorage.removeItem('taraV110Score');
+        localStorage.removeItem('taraScoreV110');
+        localStorage.removeItem('taraWeightsV110');
+        localStorage.removeItem('taraCalibrationV110');
+        localStorage.removeItem('taraV110Mem');
+        localStorage.removeItem('taraCallScorecards_v1');
+        Object.keys(localStorage).filter(k=>k.startsWith('taraV110RW_')).forEach(k=>localStorage.removeItem(k));
+        // Mark as wiped so we don't re-wipe on subsequent loads
+        localStorage.setItem(FRESH_START_MARKER,'1');
+        localStorage.setItem('taraBaselineVersion',BASELINE_VERSION);
+        console.info('[Tara] V4.6 fresh-start migration completed — all training data wiped');
+        // Reload to re-init from clean state
+        window.location.reload();
+        return;
+      }
+      // First-ever install — just stamp the version
+      if(!lastSyncedVersion){
+        localStorage.setItem('taraBaselineVersion',BASELINE_VERSION);
+        localStorage.setItem(FRESH_START_MARKER,'1');
+      }
+    }catch(e){}
+    // V134: Baseline version check — detect if a newer baseline has shipped (post-fresh-start)
     try{
       const lastSyncedVersion=localStorage.getItem('taraBaselineVersion');
       if(lastSyncedVersion&&lastSyncedVersion!==BASELINE_VERSION){
@@ -5407,7 +5404,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 4.5'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.0'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -5510,23 +5507,17 @@ function TaraApp(){
 
   // V3.1.7: Kalshi strike re-snap. The window-open event fires before Kalshi's API has
   //   returned, so the strike usually gets set to live spot first. When Kalshi data arrives
-  //   ~2s later, this effect re-snaps the strike to Kalshi's published value — but only if
-  //   we're still in the early window (< 30s elapsed) AND user hasn't manually overridden
-  // V3.2.4: Auto-snap to Kalshi strike when it arrives — even if live-spot was already
-  //   confirmed. User explicitly wants Kalshi as the source of truth on 15m markets.
-  //   Only respect a true manual override (user typed something custom). Also extends
-  //   the early-window from 30s to 60s so slow Kalshi responses still get applied.
+  // V5.0: Kalshi strike auto-set works on page-open AND new window. Per user:
+  //   'when i open the page anytime or when the new window start can it automatically
+  //    set itself, i'll still be checking and confirming'. Removed the 60s elapsed
+  //   cutoff that was preventing auto-snap on mid-window page opens.
   useEffect(()=>{
     if(!kalshiStrike||kalshiStrike<1000||kalshiStrike>10000000)return;
     if(isManualStrikeRef.current)return;       // user typed their own strike — respect it
     if(strikeSource==='kalshi'&&Math.abs((targetMargin||0)-Math.round(kalshiStrike))<1)return; // already set, no change
-    const _openTime=windowOpenTimeRef.current||0;
-    if(_openTime===0)return; // no window open yet
-    const _elapsedSec=(Date.now()-_openTime)/1000;
-    if(_elapsedSec>60)return; // V3.2.4: extended 30→60s
     const rounded=Math.round(kalshiStrike);
     windowOpenPriceRef.current=rounded;
-    setTargetMargin(rounded); // V3.2.4: directly set instead of pending — user wanted automatic
+    setTargetMargin(rounded);
     setPendingStrike(null);
     setStrikeMode('manual');
     setStrikeSource('kalshi');
@@ -5567,7 +5558,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 4.5  |  signal'},
+        footer:{text:'Tara 5.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5581,7 +5572,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 4.5  |  stand-down'},
+        footer:{text:'Tara 5.0  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5595,7 +5586,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 4.5  |  search'},
+        footer:{text:'Tara 5.0  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5612,7 +5603,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 4.5  |  lock'},
+        footer:{text:'Tara 5.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5629,7 +5620,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 4.5  |  close'},
+          footer:{text:'Tara 5.0  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5650,7 +5641,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 4.5  |  exit'},
+        footer:{text:'Tara 5.0  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5671,7 +5662,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 4.5  |  scanning'},
+        footer:{text:'Tara 5.0  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5691,7 +5682,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 4.5  |  signal'},
+        footer:{text:'Tara 5.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5711,7 +5702,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 4.5  |  lock'},
+        footer:{text:'Tara 5.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5728,7 +5719,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 4.5  |  sit-out'},
+        footer:{text:'Tara 5.0  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5750,7 +5741,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 4.5  |  result'},
+          footer:{text:'Tara 5.0  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5787,12 +5778,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 4.5  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.0  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 4.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -5811,7 +5802,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 4.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -6127,7 +6118,10 @@ function TaraApp(){
     };
     fetchKalshi();
     const iv=setInterval(fetchKalshi,30000);
-    return()=>clearInterval(iv);
+    // V5.0: Refetch when tab becomes visible again — background tabs can stall the interval
+    const onVisible=()=>{if(document.visibilityState==='visible')fetchKalshi();};
+    document.addEventListener('visibilitychange',onVisible);
+    return()=>{clearInterval(iv);document.removeEventListener('visibilitychange',onVisible);};
   },[windowType,timeState.nextWindow]);
 
   // V2.6: Kalshi settlement resolver for marginal trades.
@@ -7245,37 +7239,68 @@ function TaraApp(){
     const winType=analysis.windowAmplitude?.label||'NORMAL';
     const vfLabel=analysis.volFlow?.label||'';
     const q=qualityGate?.score||0;
-    // Gate 1: quality
-    if(q<50)return{call:'SIT_OUT',reason:`Quality only ${q}/100 — too low to commit`,confidence:0,direction:dir,conviction};
-    // Gate 2: conviction
-    if(conviction<12)return{call:'SIT_OUT',reason:`Posterior ${post.toFixed(0)} — too close to neutral (need ±12 from 50)`,confidence:0,direction:dir,conviction};
-    // Gate 3: FGT support — exception for fast-track regimes (TRENDING UP/DOWN, strong SS)
-    const isFastTrackRegime=analysis.regime==='TRENDING UP'||analysis.regime==='TRENDING DOWN';
-    if(fgtAbs<1.5&&!isFastTrackRegime){
-      return{call:'SIT_OUT',reason:`FGT only ${fgtAbs.toFixed(1)}/4 — primary timeframe signal silent`,confidence:Math.round(q*0.4),direction:dir,conviction};
+    // V5.0 'TARA DECISIVE': philosophy shift. V3.2.4-V4.6 gates were defensive — five
+    //   independent SIT_OUT triggers, any one of which killed the call. User feedback: too
+    //   many sit-outs. New approach: loosen all gates, demote vol-flow divergence + regime
+    //   hostility from blocks to confidence haircuts, add time-decay so Tara gets MORE
+    //   willing to commit as the window progresses. Weak setups now show as 30-50% confidence
+    //   calls (user decides), only genuinely bad setups block.
+    // V5.0: Time-decay — each minute elapsed, quality bar drops 5pts (floor 25),
+    //   conviction bar drops 1pt (floor 4). Forces commitment on slow-developing windows.
+    const _totalSec=windowType==='15m'?900:300;
+    const _elapsed=_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
+    const _minutesIn=Math.floor(Math.max(0,_elapsed)/60);
+    const qThreshold=Math.max(25,35-_minutesIn*5);
+    const convThreshold=Math.max(4,7-_minutesIn);
+    // Gate 1: quality (V5.0: 50→35 base, time-decays to 25)
+    if(q<qThreshold)return{call:'SIT_OUT',reason:`Quality only ${q}/100 — below ${qThreshold} threshold`,confidence:0,direction:dir,conviction};
+    // Gate 2: conviction (V5.0: 12→7 base, time-decays to 4)
+    if(conviction<convThreshold)return{call:'SIT_OUT',reason:`Posterior ${post.toFixed(0)} — too close to neutral (need ±${convThreshold} from 50)`,confidence:0,direction:dir,conviction};
+    // Gate 3: FGT support (V5.0: 1.5→0.8 base; q≥55 lets FGT≥0.5 through;
+    //   all trending/squeeze regimes fast-track regardless of FGT)
+    const isFastTrackRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(analysis.regime);
+    const fgtMin=q>=55?0.5:0.8;
+    if(fgtAbs<fgtMin&&!isFastTrackRegime){
+      return{call:'SIT_OUT',reason:`FGT only ${fgtAbs.toFixed(1)}/4 — multi-timeframe alignment too silent`,confidence:0,direction:dir,conviction};
     }
-    // Gate 4: regime hostility
-    if((winType==='DEAD'||winType==='WHIPSAW')&&q<70){
-      return{call:'SIT_OUT',reason:`${winType} window with quality ${q} — regime not hospitable enough`,confidence:Math.round(q*0.5),direction:dir,conviction};
+    // V5.0: Gates 4 + 5 are now SOFT — they apply confidence haircuts instead of blocking.
+    //   Hard block retained only when both quality AND conviction are weak — that's the
+    //   actually-bad-setup zone where divergence/regime hostility tips into 'don't trade'.
+    let confidenceHaircut=0;
+    let haircutReasons=[];
+    // Gate 4: regime hostility (V5.0: q<70→q<45 hard-block, otherwise -10 haircut)
+    if(winType==='DEAD'||winType==='WHIPSAW'){
+      if(q<45){
+        return{call:'SIT_OUT',reason:`${winType} window + quality ${q} — too risky to trade`,confidence:0,direction:dir,conviction};
+      }
+      confidenceHaircut+=10;
+      haircutReasons.push(`${winType} window`);
     }
-    // Gate 5: vol-flow divergence — tape says one thing, price says another
-    if(dir==='UP'&&(vfLabel==='BUY-DIVERGENT'||vfLabel==='BUY-FAILING')){
-      return{call:'SIT_OUT',reason:`Tape (${vfLabel}) disagrees with UP move — price up but volume not confirming`,confidence:Math.round(q*0.6),direction:dir,conviction};
-    }
-    if(dir==='DOWN'&&(vfLabel==='SELL-DIVERGENT'||vfLabel==='SELL-FAILING')){
-      return{call:'SIT_OUT',reason:`Tape (${vfLabel}) disagrees with DOWN move — price down but volume not confirming`,confidence:Math.round(q*0.6),direction:dir,conviction};
+    // Gate 5: vol-flow divergence (V5.0: soft haircut by default, hard block only when q+conv both weak)
+    const isDivergent=
+      (dir==='UP'&&(vfLabel==='BUY-DIVERGENT'||vfLabel==='BUY-FAILING'))||
+      (dir==='DOWN'&&(vfLabel==='SELL-DIVERGENT'||vfLabel==='SELL-FAILING'));
+    if(isDivergent){
+      if(q<50&&conviction<20){
+        return{call:'SIT_OUT',reason:`Tape (${vfLabel}) disagrees with ${dir} — and quality+conviction too weak to override`,confidence:0,direction:dir,conviction};
+      }
+      confidenceHaircut+=15;
+      haircutReasons.push(`tape ${vfLabel}`);
     }
     // All gates passed — Tara calls
-    // Confidence: blend of posterior conviction and quality
+    // Confidence: blend of posterior conviction and quality, then apply haircuts
     const _confBase=Math.min(95,Math.round(conviction*1.5+q*0.4));
-    return{call:dir,reason:`${conviction.toFixed(0)}pt ${dir} lean · FGT ${fgtAbs.toFixed(1)}/4 · quality ${q}`,confidence:_confBase,direction:dir,conviction};
+    const _confidence=Math.max(20,_confBase-confidenceHaircut);
+    const _reasonParts=[`${conviction.toFixed(0)}pt ${dir} lean`,`FGT ${fgtAbs.toFixed(1)}/4`,`quality ${q}`];
+    if(haircutReasons.length>0)_reasonParts.push(`-${confidenceHaircut} for ${haircutReasons.join(' + ')}`);
+    return{call:dir,reason:_reasonParts.join(' · '),confidence:_confidence,direction:dir,conviction};
   })();
   // V4.3: Attach lifecycle data so the Tara's Call card can render phase/samples/snapshot.
   //   Refs read at render time — same data the lifecycle effect uses.
   taraCall.samples=taraCallSampleRef.current?.count||0;
   taraCall.snapshot=taraCallSnapshotRef.current||null;
-  // V4.5: Compute needSamples for display — mirrors the faster lifecycle-effect logic
-  //   (lower thresholds + time-decay).
+  // V5.0: Compute needSamples for display — mirrors faster V5.0 lifecycle logic
+  //   (lower thresholds + per-30s time-decay).
   (()=>{
     const _q=qualityGate?.score||0;
     const _fgtAbs=Math.abs(analysis?.mtfAlignment||0);
@@ -7285,15 +7310,15 @@ function TaraApp(){
     const _hostile=_winType==='DEAD'||_winType==='WHIPSAW';
     let _need;
     if(_q>=72&&_fgtAbs>=2.0&&_cleanRegime&&!_hostile)_need=1;
-    else if(_q>=60&&_fgtAbs>=1.5&&!_hostile)_need=2;
-    else if(_hostile)_need=5;
-    else _need=3;
-    // Time-decay: minute-by-minute reduction
+    else if(_q>=55&&_fgtAbs>=1.2&&!_hostile)_need=1;
+    else if(_hostile)_need=4;
+    else _need=2;
+    // Time-decay per 30s
     const _totalSec=windowType==='15m'?900:300;
     const _elapsed=_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
-    const _minIn=Math.floor(Math.max(0,_elapsed)/60);
-    taraCall.needSamples=Math.max(1,_need-_minIn);
-    // V4.5: Estimated seconds until lock — assume samples increment ~1Hz with the analysis loop.
+    const _halfMinIn=Math.floor(Math.max(0,_elapsed)/30);
+    taraCall.needSamples=Math.max(1,_need-_halfMinIn);
+    // Estimated seconds until lock — samples increment ~1Hz
     taraCall.lockEtaSec=Math.max(0,(taraCall.needSamples-taraCall.samples));
   })();
 
@@ -7338,25 +7363,25 @@ function TaraApp(){
     const cleanRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(regime);
     const winType=analysis?.windowAmplitude?.label;
     const hostileWindow=winType==='DEAD'||winType==='WHIPSAW';
-    // V4.5: Sample thresholds halved — Tara commits sooner. User feedback: 6+ samples
-    //   was too slow given conviction was already there at 2-3 samples.
+    // V5.0: Sample thresholds tightened further. User: 'lock soon, take more calls.'
+    //   V4.5 was clean=1/good=2/default=3/hostile=5 with per-minute decay.
+    //   V5.0: clean=1/good=1/default=2/hostile=4, with per-30s decay (twice as fast).
     let needSamples;
     if(q>=72&&fgtAbs>=2.0&&cleanRegime&&!hostileWindow){
-      needSamples=1;       // clean: lock immediately on first directional sample
-    } else if(q>=60&&fgtAbs>=1.5&&!hostileWindow){
-      needSamples=2;       // good: 2 confirming samples
+      needSamples=1;       // clean: instant lock
+    } else if(q>=55&&fgtAbs>=1.2&&!hostileWindow){
+      needSamples=1;       // good: instant lock too (was 2)
     } else if(hostileWindow){
-      needSamples=5;       // hostile: extra confirmation but capped
+      needSamples=4;       // hostile: capped tighter (was 5)
     } else {
-      needSamples=3;       // default: 3 samples
+      needSamples=2;       // default: 2 (was 3)
     }
-    // V4.5: Time-decay — Tara becomes more decisive as the window progresses.
-    //   Every full minute elapsed reduces needSamples by 1 (floor 1). By minute 4 of a
-    //   15m window, even trickiest setups need only 1 sample. Forces commitment.
+    // V5.0: Time-decay accelerated to per-30s (was per-60s). By 90s into a 15m window
+    //   even hostile setups need 1 sample. Forces decisive commitment.
     const totalSec=windowType==='15m'?900:300;
     const elapsedSec=totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
-    const minutesIn=Math.floor(Math.max(0,elapsedSec)/60);
-    needSamples=Math.max(1,needSamples-minutesIn);
+    const halfMinutesIn=Math.floor(Math.max(0,elapsedSec)/30);
+    needSamples=Math.max(1,needSamples-halfMinutesIn);
     if(samples>=needSamples||analysis?.isSystemLocked){
       taraCallSnapshotRef.current={
         call:tc.call,direction:tc.direction||tc.call,confidence:tc.confidence,reason:tc.reason,
@@ -7886,7 +7911,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 4.5...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.0...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -7987,7 +8012,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              4.5
+              5.0
             </span>
           </div>
 
@@ -8343,8 +8368,11 @@ function TaraApp(){
               </button>
             </div>
 
-            {/* V4.5: Tara's lifecycle phase strip with countdown timer.
-                Shows: Analyzing → Forming → Locked / Sit Out. Includes 'locks in ~Xs'. */}
+            {/* V4.6: Tara's lifecycle phase strip with proper countdown for ALL states.
+                - ANALYZING / SCANNING: progress fills as elapsed time, hint = 'looking for direction'
+                - FORMING: bar tracks samples-to-lock, hint = 'locks in ~Xs'
+                - LOCKED: bar fills toward window-close, hint = 'Xm Ys left'
+                - WATCHING / SIT_OUT: bar tracks window elapsed, hint = 'Xm Ys left' */}
             {(()=>{
               const totalSec=windowType==='15m'?900:300;
               const elapsed=totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
@@ -8354,17 +8382,23 @@ function TaraApp(){
               const isSitOut=taraCallSnapshotRef.current?.call==='SIT_OUT'||(tc?.call==='SIT_OUT'&&analysis?.isSystemLocked);
               const isCall=tc?.call==='UP'||tc?.call==='DOWN';
               const samplesLeft=Math.max(0,(tc?.needSamples||3)-(tc?.samples||0));
+              // Window time-remaining label: "Xm Ys" or "Xs"
+              const remSec=Math.max(0,totalSec-elapsed);
+              const remMin=Math.floor(remSec/60),remRem=remSec%60;
+              const remLabel=remMin>0?`${remMin}m ${String(remRem).padStart(2,'0')}s left`:`${remRem}s left`;
+              // Window-elapsed fraction (0-1)
+              const elapsedFrac=Math.min(1,elapsed/totalSec);
               let label='ANALYZING',accent=T2_GOLD,progressPct=10,countdownText='looking for direction';
               if(isLocked){
                 label='LOCKED';
                 accent=tc?.call==='UP'?'rgba(52,211,153,0.7)':'rgba(244,114,182,0.7)';
-                progressPct=100;
-                countdownText=taraCallSnapshotRef.current?.earlyLock?'committed early':'committed';
+                progressPct=elapsedFrac*100;
+                countdownText=remLabel;
               } else if(isSitOut){
                 label='SIT OUT';
-                accent='rgba(245,158,11,0.55)';
-                progressPct=100;
-                countdownText='no commitment';
+                accent='rgba(245,158,11,0.5)';
+                progressPct=elapsedFrac*100;
+                countdownText=remLabel;
               } else if(isCall){
                 label='FORMING';
                 accent=tc.call==='UP'?'rgba(52,211,153,0.55)':'rgba(244,114,182,0.55)';
@@ -8373,8 +8407,8 @@ function TaraApp(){
               } else if(tc?.call==='SIT_OUT'){
                 label='WATCHING';
                 accent='rgba(245,158,11,0.4)';
-                progressPct=Math.min(50,15+elapsed/totalSec*30);
-                countdownText='no signal';
+                progressPct=elapsedFrac*100;
+                countdownText=remLabel;
               } else if(elapsed>=20){
                 label='SCANNING';
                 accent='rgba(229,200,112,0.5)';
@@ -8390,7 +8424,7 @@ function TaraApp(){
                 <div className="mb-3 px-1">
                   <div className="flex justify-between items-baseline mb-1 gap-2">
                     <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold shrink-0">Tara · {label}</span>
-                    <span className={`text-[10px] tabular-nums tracking-wide truncate ${isCall&&!isLocked?'text-[#E8E9E4]/85 font-bold':'text-[#E8E9E4]/40'}`}>{countdownText}</span>
+                    <span className={`text-[10px] tabular-nums tracking-wide truncate ${(isCall&&!isLocked)||isLocked?'text-[#E8E9E4]/85 font-bold':'text-[#E8E9E4]/45'}`}>{countdownText}</span>
                   </div>
                   <div className="relative h-1 bg-[#0E100F] rounded-full overflow-hidden">
                     <div className="absolute top-0 bottom-0 w-px bg-[#E8E9E4]/15" style={{left:'15%'}}></div>
@@ -8410,7 +8444,7 @@ function TaraApp(){
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} timeState={timeState}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab}/>
@@ -8540,7 +8574,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 4.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -9166,7 +9200,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 4.5 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.0 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -9322,7 +9356,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 4.5 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.0 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
