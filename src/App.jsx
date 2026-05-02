@@ -99,7 +99,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.02-v3.2.1-ss-rebalance-kalshi-resilience';
+const BASELINE_VERSION='2026.05.02-v3.2.2-vwap-removed-kxbtc15m-tape-override';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -1899,6 +1899,32 @@ const computeV99Posterior=(params)=>{
   let flowScore=aggrFlow*(is15m?W.flow:W.flow*1.5);
   if(accel&&drift1m>0&&accel>0)flowScore+=8;
   if(accel&&drift1m<0&&accel<0)flowScore-=8;
+  // V3.2.2: Tape acceleration override. The aggrFlow value averages 90 seconds of trades,
+  //   so a sharp 30s shift gets diluted. When the 30s window is extremely one-sided
+  //   (≥85% one direction AND ≥$30K total volume), surface that recency directly.
+  //   This catches "tape just flipped" scenarios that the slower average misses.
+  const _ticks=params.tradeTicksRef?.current||[];
+  if(_ticks.length>=5){
+    const now=Date.now();
+    let buy30=0,sell30=0;
+    for(const t of _ticks){
+      if(now-t.time>30000)continue;
+      const u=t.usd||(t.s*t.p);
+      if(t.t==='B')buy30+=u;else sell30+=u;
+    }
+    const total30=buy30+sell30;
+    if(total30>=30000){
+      const sellPct=sell30/total30;
+      const buyPct=buy30/total30;
+      if(sellPct>=0.85){
+        flowScore-=15;
+        reasoning.push(`[TAPE-30s] ${(sellPct*100).toFixed(0)}% sell on $${(total30/1000).toFixed(0)}K — sharp recent shift, boosting DOWN`);
+      } else if(buyPct>=0.85){
+        flowScore+=15;
+        reasoning.push(`[TAPE-30s] ${(buyPct*100).toFixed(0)}% buy on $${(total30/1000).toFixed(0)}K — sharp recent shift, boosting UP`);
+      }
+    }
+  }
   const flowClamped=Math.max(-W.flow,Math.min(W.flow,flowScore));
   rawSignalScores.flow=flowClamped;
   totalScore+=flowClamped;
@@ -1910,8 +1936,12 @@ const computeV99Posterior=(params)=>{
   else if(rsi<30&&realGapBps<0){techScore+=15;reasoning.push(`[RSI] Oversold (${rsi.toFixed(0)}) — fading bottom`);}
   else if(rsi>60&&drift1m<0)techScore-=8;
   else if(rsi<40&&drift1m>0)techScore+=8;
-  if(drift1m>0&&vwapGapBps<-5){techScore-=10;reasoning.push(`[VWAP] Below VWAP — suppressing UP`);}
-  if(drift1m<0&&vwapGapBps>5){techScore+=10;reasoning.push(`[VWAP] Above VWAP — suppressing DOWN`);}
+  // V3.2.2: VWAP "suppression" rules removed. They were actively fighting real reversals.
+  //   The intent was mean-reversion to VWAP, but on 15m windows this added counter-trend
+  //   bias precisely when the trend was breaking. Example: price above VWAP + drift turning
+  //   negative = REAL DOWN setup, but the rule added +10 to UP, killing the DOWN call.
+  //   RSI overbought/oversold above already handles mean-reversion at extremes; VWAP rule
+  //   was redundant noise.
   if(bb.pctB>0.85&&realGapBps>0){techScore-=8;reasoning.push(`[BB] Upper band squeeze — overbought`);}
   if(bb.pctB<0.15&&realGapBps<0){techScore+=8;reasoning.push(`[BB] Lower band squeeze — oversold`);}
   if(channel>0.8&&drift1m>0)techScore-=5;
@@ -4482,7 +4512,7 @@ function ChartBottomCard({mobileTab,resolution,setResolution}){
 }
 
 // ── V111: MobileTabBar - 4 tabs: signal/projections/logs/chart ──
-function MobileTabBar({mobileTab,setMobileTab}){
+function MobileTabBar({mobileTab,setMobileTab,setShowBrain,setShowStats}){
   const tabs=[
     {id:'signal',label:'SIGNAL'},
     {id:'projections',label:'TARGETS'},
@@ -4496,6 +4526,9 @@ function MobileTabBar({mobileTab,setMobileTab}){
         const cls='flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'bg-indigo-500/15 text-indigo-300 border-indigo-500/40':'text-[#E8E9E4]/40 border-[#E8E9E4]/10');
         return(<button key={t.id} onClick={()=>setMobileTab(t.id)} className={cls}>{t.label}</button>);
       })}
+      {/* V3.2.2: Brain + Stats access on mobile — header buttons hidden at this width */}
+      <button onClick={()=>setShowBrain&&setShowBrain(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}} title="Tara's Brain">🧠</button>
+      <button onClick={()=>setShowStats&&setShowStats(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}} title="Stats">📊</button>
     </div>
   );
 }
@@ -4818,7 +4851,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>3.2.1</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>3.2.2</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5089,7 +5122,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 3.2.1 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 3.2.2 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5198,7 +5231,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 3.2.1'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 3.2.2'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -5359,7 +5392,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 3.2.1  |  signal'},
+        footer:{text:'Tara 3.2.2  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5373,7 +5406,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 3.2.1  |  stand-down'},
+        footer:{text:'Tara 3.2.2  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5387,7 +5420,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 3.2.1  |  search'},
+        footer:{text:'Tara 3.2.2  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5404,7 +5437,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 3.2.1  |  lock'},
+        footer:{text:'Tara 3.2.2  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5421,7 +5454,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 3.2.1  |  close'},
+          footer:{text:'Tara 3.2.2  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5442,7 +5475,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 3.2.1  |  exit'},
+        footer:{text:'Tara 3.2.2  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5471,12 +5504,12 @@ function TaraApp(){
             `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
             `${reliabilityNote}`,
           ].join('\n'),
-          footer:{text:'Tara 3.2.1  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 3.2.2  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 3.2.1',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 3.2.2',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -5495,7 +5528,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 3.2.1 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 3.2.2 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -5580,7 +5613,13 @@ function TaraApp(){
         const intervalMin=windowType==='5m'?5:15;
         const iMs=intervalMin*60*1000;
         const nextMs=Math.ceil((now+500)/iMs)*iMs;
-        const result=await fetchWithRetry('https://api.elections.kalshi.com/trade-api/v2/markets?limit=200&ticker_name_prefix=KXBTC&status=open');
+        // V3.2.2: Use correct series. Kalshi has multiple BTC series:
+        //   KXBTC15M  — 15-minute BTC up/down markets (the ones we trade)
+        //   KXBTCD    — 1-hour BTC range markets
+        //   KXBTC     — longer-term "BTC above $X by date" markets (NOT what we want)
+        // We pick the series matching the user's window type.
+        const _seriesTicker=windowType==='5m'?'KXBTC5M':'KXBTC15M';
+        const result=await fetchWithRetry(`https://api.elections.kalshi.com/trade-api/v2/markets?limit=200&series_ticker=${_seriesTicker}&status=open`);
         if(!result.ok){
           // V3.2.1: All retries exhausted. Try last-successful cache before giving up.
           const cache=lastKalshiSuccessRef.current;
@@ -5751,8 +5790,9 @@ function TaraApp(){
         // Try to fetch settlement from Kalshi
         try{
           pending.attempts++;
+          const _settleSeries=pending.windowType==='5m'?'KXBTC5M':'KXBTC15M';
           const r=await fetch(
-            'https://api.elections.kalshi.com/trade-api/v2/markets?limit=200&ticker_name_prefix=KXBTC&status=settled',
+            `https://api.elections.kalshi.com/trade-api/v2/markets?limit=200&series_ticker=${_settleSeries}&status=settled`,
             {signal:AbortSignal.timeout(8000),headers:{'Accept':'application/json'}}
           );
           if(!r.ok)continue;
@@ -7165,7 +7205,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 3.2.1...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 3.2.2...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -7266,7 +7306,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              3.2.1
+              3.2.2
             </span>
           </div>
 
@@ -7296,17 +7336,19 @@ function TaraApp(){
               <span className={'text-xs text-[#E8E9E4]/40 uppercase'}>{useLocalTime?'LOCAL':'EST'}</span>
               <span className={'text-sm font-mono text-[#E8E9E4]/80'}>{timeState.currentTime||'--:--:--'}</span>
             </div>
-            {/* Always visible */}
+            {/* Always visible — sound is essential */}
             <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
             <button onClick={()=>setShowSessionStart(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors text-xs font-bold'} title="Session Status Check">📋</button>
-            {/* V2.7: Stats button — gold accent matches the analytics view */}
-            <button onClick={()=>setShowStats(true)} className={'p-1.5 rounded-lg transition-colors text-xs font-bold'} style={{
+            {/* V2.7: Stats button — gold accent matches the analytics view.
+                V3.2.2: hidden on tiny screens (<sm) to free header space. */}
+            <button onClick={()=>setShowStats(true)} className={'hidden sm:flex p-1.5 rounded-lg transition-colors text-xs font-bold'} style={{
               background:T2_GOLD_GLOW,
               color:T2_GOLD,
               border:'0.5px solid '+T2_GOLD_BORDER,
             }} title="Performance Stats & Insights">📊</button>
-            {/* V3.1.12: Brain button — Tara's synthesized current reasoning */}
-            <button onClick={()=>setShowBrain(true)} className={'p-1.5 rounded-lg transition-colors text-xs font-bold'} style={{
+            {/* V3.1.12: Brain button — Tara's synthesized current reasoning.
+                V3.2.2: also hidden on tiny screens — accessible via mobile tab nav. */}
+            <button onClick={()=>setShowBrain(true)} className={'hidden sm:flex p-1.5 rounded-lg transition-colors text-xs font-bold'} style={{
               background:T2_GOLD_GLOW,
               color:T2_GOLD,
               border:'0.5px solid '+T2_GOLD_BORDER,
@@ -7573,7 +7615,7 @@ function TaraApp(){
         )}
 
         {/* ── V111: MOBILE TAB NAV ── */}
-        <MobileTabBar mobileTab={mobileTab} setMobileTab={setMobileTab}/>
+        <MobileTabBar mobileTab={mobileTab} setMobileTab={setMobileTab} setShowBrain={setShowBrain} setShowStats={setShowStats}/>
 
         {/* V2.1: Grid changed from equal 3-col to 1.25fr/1fr/1fr at lg+ — prediction card promoted as hero.
                   V2.2.1: tightened from 1.5fr → 1.25fr (1.5 was overshooting visually). auto-rows-fr restored
@@ -7795,7 +7837,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 3.2.1</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 3.2.2</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -8421,7 +8463,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 3.2.1 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 3.2.2 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -8577,7 +8619,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 3.2.1 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 3.2.2 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
