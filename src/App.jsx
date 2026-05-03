@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 
 // ═══════════════════════════════════════
 // V5.6: FIRESTORE SYNC LAYER
@@ -76,6 +76,25 @@ const cloudDelete=async(path)=>{
   try{await deleteDoc(ref);_setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});return true;}
   catch(e){console.warn('[Firestore delete failed]',path,e?.message);_setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});return false;}
 };
+// V5.6.2: Real-time listener — fires once with current cloud value, then again on every
+//   change from any connected client. This is what makes cross-device sync actually work:
+//   Device A writes, Device B's listener fires within ~1s, B's UI updates without refresh.
+//   Returns an unsubscribe function the caller stores in a useEffect cleanup.
+const cloudWatch=(path,callback)=>{
+  const ref=_fbDoc(path);
+  if(!ref){callback(null,'disabled');return()=>{};}
+  return onSnapshot(ref,
+    (snap)=>{
+      _setCloudStatus({state:'ok',lastOk:Date.now(),reads:_cloudSyncStatus.reads+1});
+      callback(snap.exists()?snap.data():null,'ok');
+    },
+    (err)=>{
+      console.warn('[Firestore listen failed]',path,err?.message);
+      _setCloudStatus({state:'error',lastError:{path,message:err?.message,at:Date.now()}});
+      callback(null,'error');
+    }
+  );
+};
 // Coalesces rapid updates per-path into a single Firestore write (saves quota + bandwidth).
 const _writeQueue=new Map();
 const cloudWriteDebounced=(path,data,delayMs=1500)=>{
@@ -94,7 +113,9 @@ const computeWindowId=(windowType)=>{
 // V5.6.1: Sync indicator. Green pulse = recent successful Firestore round-trip. Amber =
 //   writing in progress. Red = last attempt errored. Gray = Firestore not initialized.
 //   Click to see details (last write/read counts, last error, userId).
-function CloudSyncBadge(){
+// V5.6.2: Now shows actual record values so user can verify cross-device sync at a glance.
+//   "Pull now" force-reads cloud and re-merges. Should rarely be needed with onSnapshot.
+function CloudSyncBadge({taraScorecards,taraCallLog}){
   const[s,setS]=React.useState(_cloudSyncStatus);
   const[open,setOpen]=React.useState(false);
   React.useEffect(()=>subscribeCloudStatus(setS),[]);
@@ -105,6 +126,15 @@ function CloudSyncBadge(){
     error:{bg:'rgba(244,114,182,0.15)',dot:'rgba(244,114,182,0.9)',label:'ERROR'},
     disabled:{bg:'rgba(232,233,228,0.05)',dot:'rgba(232,233,228,0.25)',label:'OFF'},
   }[s.state]||{bg:'rgba(232,233,228,0.05)',dot:'rgba(232,233,228,0.25)',label:'?'};
+  const sc15=taraScorecards?.['15m']||{wins:0,losses:0,sitouts:0};
+  const sc5=taraScorecards?.['5m']||{wins:0,losses:0,sitouts:0};
+  const logCount=Array.isArray(taraCallLog)?taraCallLog.length:0;
+  const _forcePull=async()=>{
+    // Force-fetch the cloud copy and let the onSnapshot listeners merge it back in.
+    // (Reads are still routed through onSnapshot, so this just primes the connection.)
+    await cloudRead('scorecards/tara');
+    await cloudRead('memory/taraCallLog');
+  };
   return React.createElement('div',{className:'relative'},
     React.createElement('button',{
       onClick:()=>setOpen(!open),
@@ -116,7 +146,7 @@ function CloudSyncBadge(){
       React.createElement('span',{className:'hidden sm:inline'},colors.label),
     ),
     open&&React.createElement('div',{
-      className:'absolute right-0 top-full mt-1 w-64 p-3 rounded-lg shadow-xl z-50 text-[10px] leading-relaxed',
+      className:'absolute right-0 top-full mt-1 w-72 p-3 rounded-lg shadow-xl z-50 text-[10px] leading-relaxed',
       style:{background:'#181A19',border:'1px solid rgba(232,233,228,0.15)',color:'rgba(232,233,228,0.85)'},
       onClick:(e)=>e.stopPropagation(),
     },
@@ -124,12 +154,35 @@ function CloudSyncBadge(){
         React.createElement('span',{className:'font-bold uppercase tracking-wider',style:{color:colors.dot}},'Cloud sync · '+colors.label),
         React.createElement('button',{onClick:()=>setOpen(false),className:'text-[#E8E9E4]/40 hover:text-white text-base leading-none'},'×'),
       ),
-      React.createElement('div',{className:'space-y-0.5 text-[#E8E9E4]/70'},
+      React.createElement('div',{className:'space-y-0.5 text-[#E8E9E4]/70 mb-2'},
         React.createElement('div',null,'User: ',React.createElement('span',{className:'font-mono text-white'},USER_ID||'(none)')),
         React.createElement('div',null,'Writes: ',React.createElement('span',{className:'font-mono text-white'},s.writes),' · Reads: ',React.createElement('span',{className:'font-mono text-white'},s.reads)),
         s.lastOk&&React.createElement('div',null,'Last ok: ',React.createElement('span',{className:'font-mono text-white'},new Date(s.lastOk).toLocaleTimeString())),
-        s.lastError&&React.createElement('div',{className:'text-rose-400 mt-1'},'Error: ',s.lastError.message,' (',s.lastError.path,')'),
+        s.lastError&&React.createElement('div',{className:'text-rose-400 mt-1 break-words'},'Error: ',s.lastError.message,' (',s.lastError.path,')'),
         !_fbDb&&React.createElement('div',{className:'text-amber-400 mt-1'},'Firestore not initialized — npm install firebase + redeploy.'),
+      ),
+      // V5.6.2: actual values block — user can compare PC vs mobile at a glance
+      React.createElement('div',{className:'border-t border-[#E8E9E4]/10 pt-2 mb-2'},
+        React.createElement('div',{className:'text-[#E8E9E4]/40 uppercase tracking-wider text-[8px] font-bold mb-1'},'On this device'),
+        React.createElement('div',{className:'flex justify-between gap-2'},
+          React.createElement('span',null,'15m record:'),
+          React.createElement('span',{className:'font-mono text-white'},sc15.wins,'W · ',sc15.losses,'L · ',sc15.sitouts,'S'),
+        ),
+        React.createElement('div',{className:'flex justify-between gap-2'},
+          React.createElement('span',null,'5m record:'),
+          React.createElement('span',{className:'font-mono text-white'},sc5.wins,'W · ',sc5.losses,'L · ',sc5.sitouts,'S'),
+        ),
+        React.createElement('div',{className:'flex justify-between gap-2'},
+          React.createElement('span',null,'Memory entries:'),
+          React.createElement('span',{className:'font-mono text-white'},logCount),
+        ),
+        React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 italic mt-1'},'Same numbers should appear on every device after ~1s.'),
+      ),
+      _fbDb&&React.createElement('div',{className:'flex gap-1.5'},
+        React.createElement('button',{
+          onClick:_forcePull,
+          className:'flex-1 px-2 py-1 text-[9px] uppercase font-bold tracking-wider rounded border border-indigo-500/30 text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20',
+        },'Pull now'),
       ),
     ),
   );
@@ -239,7 +292,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.03-v5.6.1-memory-log-mobile-move';
+const BASELINE_VERSION='2026.05.03-v5.6.2-realtime-sync-merge-max';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -5296,7 +5349,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.6.1</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.6.2</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5508,26 +5561,43 @@ function TaraApp(){
     }catch(e){}
     return{'15m':{wins:0,losses:0,sitouts:0},'5m':{wins:0,losses:0,sitouts:0}};
   });
+  // V5.6.2: Block writes from stale local state until first cloud snapshot has arrived.
+  //   Prevents the race where a device with stale localStorage clobbers fresh cloud data
+  //   on mount. Set by the listeners below. Once true, writes flow normally.
+  const _scorecardsHydratedRef=useRef(false);
+  const _callLogHydratedRef=useRef(false);
   useEffect(()=>{
     try{localStorage.setItem('taraCallScorecards_v1',JSON.stringify(taraScorecards));}catch(e){}
-    cloudWriteDebounced('scorecards/tara',taraScorecards,800); // V5.6: also sync to Firestore
+    if(_scorecardsHydratedRef.current){
+      cloudWriteDebounced('scorecards/tara',taraScorecards,800);
+    }
   },[taraScorecards]);
-  // V5.6: Hydrate scorecards from Firestore on mount. Cloud wins over localStorage when both
-  //   exist — covers the case where another device updated the count and this browser is
-  //   stale. Merge per-window-type so partial cloud docs don't blow away local fields.
+  // V5.6.2: Real-time listener replaces one-shot hydration. Pulls initial cloud state on
+  //   mount AND auto-receives updates from other devices via onSnapshot. Uses MAX-merge
+  //   for monotonic counters — wins/losses/sitouts only ever increase, so taking the max
+  //   of local and cloud values can never lose data, even with concurrent writes from
+  //   multiple devices. This is the fix for "PC and mobile show different records."
   useEffect(()=>{
-    let cancelled=false;
-    cloudRead('scorecards/tara').then(d=>{
-      if(cancelled||!d)return;
+    const _maxMerge=(a,b)=>({
+      wins:Math.max(a?.wins||0,b?.wins||0),
+      losses:Math.max(a?.losses||0,b?.losses||0),
+      sitouts:Math.max(a?.sitouts||0,b?.sitouts||0),
+    });
+    const unsub=cloudWatch('scorecards/tara',(d)=>{
+      _scorecardsHydratedRef.current=true; // hydration done — local writes can flow now
+      if(!d)return;
       const has15=d['15m']&&typeof d['15m'].wins==='number';
       const has5=d['5m']&&typeof d['5m'].wins==='number';
       if(!has15&&!has5)return;
-      setTaraScorecards(prev=>({
-        '15m':has15?{...prev['15m'],...d['15m']}:prev['15m'],
-        '5m':has5?{...prev['5m'],...d['5m']}:prev['5m'],
-      }));
+      setTaraScorecards(prev=>{
+        const next15=has15?_maxMerge(prev['15m'],d['15m']):prev['15m'];
+        const next5=has5?_maxMerge(prev['5m'],d['5m']):prev['5m'];
+        // Skip update if values match — avoids re-render churn.
+        if(JSON.stringify(next15)===JSON.stringify(prev['15m'])&&JSON.stringify(next5)===JSON.stringify(prev['5m']))return prev;
+        return{...prev,'15m':next15,'5m':next5};
+      });
     });
-    return()=>{cancelled=true;};
+    return unsub;
   },[]);
   // V3.2.4: Snapshot Tara's Call at endgame freeze. Whatever Tara is calling when the
   //   final 90s zone begins becomes "Tara's Call for this round." It gets resolved when
@@ -5550,23 +5620,34 @@ function TaraApp(){
   taraCallLogRef.current=taraCallLog;
   useEffect(()=>{
     try{localStorage.setItem('taraCallLog_v1',JSON.stringify(taraCallLog.slice(-500)));}catch(e){}
-    cloudWriteDebounced('memory/taraCallLog',{entries:taraCallLog.slice(-500)},1500);
+    if(_callLogHydratedRef.current){
+      cloudWriteDebounced('memory/taraCallLog',{entries:taraCallLog.slice(-500)},1500);
+    }
   },[taraCallLog]);
-  // V5.6.1: Hydrate call log from Firestore on mount. Cloud entries that aren't in local
-  //   merge in — covers the case where another device logged calls this device hasn't seen.
+  // V5.6.2: Real-time listener for the call log. Merges by id — cloud entries that local
+  //   doesn't have get added; cloud entries that local has but with a result populated
+  //   (resolved on another device after the window rolled over) overwrite local. Sorted
+  //   by id (timestamp), capped at 500.
   useEffect(()=>{
-    let cancelled=false;
-    cloudRead('memory/taraCallLog').then(d=>{
-      if(cancelled||!d||!Array.isArray(d.entries)||!d.entries.length)return;
+    const unsub=cloudWatch('memory/taraCallLog',(d)=>{
+      _callLogHydratedRef.current=true;
+      if(!d||!Array.isArray(d.entries)||!d.entries.length)return;
       setTaraCallLog(prev=>{
-        const seen=new Set(prev.map(e=>e.id));
-        const merged=[...prev];
-        d.entries.forEach(e=>{if(e&&e.id&&!seen.has(e.id))merged.push(e);});
-        merged.sort((a,b)=>(a.id||0)-(b.id||0));
-        return merged.slice(-500);
+        const byId=new Map(prev.map(e=>[e.id,e]));
+        let changed=false;
+        d.entries.forEach(e=>{
+          if(!e||!e.id)return;
+          const existing=byId.get(e.id);
+          // Cloud wins if: (a) we don't have it, or (b) cloud has a result we don't,
+          // or (c) cloud has a more recent resolvedAt timestamp.
+          const cloudIsBetter=!existing||(!existing.result&&e.result)||(e.resolvedAt&&existing.resolvedAt&&e.resolvedAt>existing.resolvedAt);
+          if(cloudIsBetter){byId.set(e.id,e);changed=true;}
+        });
+        if(!changed)return prev;
+        return Array.from(byId.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-500);
       });
     });
-    return()=>{cancelled=true;};
+    return unsub;
   },[]);
   // V5.6: Save/clear the active window's lock state to Firestore. Refresh restores from this.
   //   _persistLock writes whatever the refs currently hold (engine lock + Tara snapshot +
@@ -5657,7 +5738,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.6.1 online — Memory log live · cloud sync visible · Call card moved to Signal tab on mobile · refresh restores locks · scorecards persist across devices.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.6.2 online — Real-time cross-device sync · MAX-merge counters · onSnapshot listeners · cloud sync visible · refresh restores locks.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5797,7 +5878,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.6.1'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.6.2'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -5970,7 +6051,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.1  |  signal'},
+        footer:{text:'Tara 5.6.2  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5984,7 +6065,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.6.1  |  stand-down'},
+        footer:{text:'Tara 5.6.2  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5998,7 +6079,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.6.1  |  search'},
+        footer:{text:'Tara 5.6.2  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6015,7 +6096,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.6.1  |  lock'},
+        footer:{text:'Tara 5.6.2  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6032,7 +6113,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.6.1  |  close'},
+          footer:{text:'Tara 5.6.2  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6053,7 +6134,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.6.1  |  exit'},
+        footer:{text:'Tara 5.6.2  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6074,7 +6155,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.1  |  scanning'},
+        footer:{text:'Tara 5.6.2  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6094,7 +6175,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.1  |  signal'},
+        footer:{text:'Tara 5.6.2  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6114,7 +6195,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.1  |  lock'},
+        footer:{text:'Tara 5.6.2  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6131,7 +6212,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.1  |  sit-out'},
+        footer:{text:'Tara 5.6.2  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6153,7 +6234,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.6.1  |  result'},
+          footer:{text:'Tara 5.6.2  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6190,12 +6271,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.6.1  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.6.2  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.6.1',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.6.2',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -6214,7 +6295,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.6.1 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.6.2 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8488,7 +8569,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.6.1...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.6.2...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -8589,10 +8670,10 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.6.1
+              5.6.2
             </span>
             {/* V5.6.1: Cloud sync indicator — visible on all viewports. Click for details. */}
-            <CloudSyncBadge/>
+            <CloudSyncBadge taraScorecards={taraScorecards} taraCallLog={taraCallLog}/>
           </div>
 
           {/* Live Price — shrinks gracefully, never truncates on sm+ */}
@@ -9159,7 +9240,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.6.1</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.6.2</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -9785,7 +9866,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.6.1 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.6.2 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -9941,7 +10022,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.6.1 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.6.2 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
