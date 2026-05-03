@@ -101,7 +101,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.02-v5.3-instant-strike-no-confirm';
+const BASELINE_VERSION='2026.05.02-v5.5-multi-window-tape-consensus';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -2999,7 +2999,7 @@ function PredictionContent(props){
             Compact: shows top 5 contributors by absolute weight. */}
         {(()=>{
           const sig=analysis.rawSignalScores||{};
-          const post=analysis.posterior||50;
+          const post=analysis.rawProbAbove||50;
           const leaning=post>=50?'UP':'DOWN';
           const fgt=analysis.mtfAlignment||0;
           const fgtAbs=Math.abs(fgt);
@@ -3109,7 +3109,7 @@ function PredictionContent(props){
         {showFormingProgress&&(
           <div className="mt-2 w-full px-4 max-w-md">
             {(()=>{
-              const post=analysis.posterior||50;
+              const post=analysis.rawProbAbove||50;
               const dir=post>=50?'UP':'DOWN';
               const conviction=Math.abs(post-50);
               const fgt=analysis.mtfAlignment||0;
@@ -3420,7 +3420,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,
             {/* V4.3: vs General prediction — show how Tara compares to the engine's read */}
             {analysis&&(()=>{
               const genPred=analysis.prediction||'';
-              const genPost=analysis.posterior||50;
+              const genPost=analysis.rawProbAbove||50;
               const genDir=genPred.includes('UP')?'UP':genPred.includes('DOWN')?'DOWN':null;
               const genState=genPred.includes('LOCKED')?'LOCKED':genPred.includes('FORMING')?'FORMING':genPred.includes('SEARCHING')?'SEARCHING':genPred.includes('SITTING')?'SIT OUT':genPred.includes('REJECTED')?'REJECTED':'WATCHING';
               const isOverride=tc.call==='SIT_OUT'&&genDir!=null;
@@ -3609,7 +3609,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,
 //   Designed to read like a trader's thought process, not a dump of internals.
 function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeSource,strikeMode,taraCall,taraScorecards,windowType,onClose}){
   if(!analysis)return null;
-  const post=analysis.posterior||50;
+  const post=analysis.rawProbAbove||50;
   // V3.2.1: Acknowledge balanced posterior. When |post-50|<3, signals are genuinely mixed.
   //   Don't force a UP/DOWN tiebreaker that creates false 'UP bias' framing.
   const conviction=Math.abs(post-50);
@@ -5002,7 +5002,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.3</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.5</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5294,7 +5294,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.3 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.5 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5434,7 +5434,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.3'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.5'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -5608,7 +5608,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.3  |  signal'},
+        footer:{text:'Tara 5.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5622,7 +5622,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.3  |  stand-down'},
+        footer:{text:'Tara 5.5  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5636,7 +5636,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.3  |  search'},
+        footer:{text:'Tara 5.5  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5653,7 +5653,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.3  |  lock'},
+        footer:{text:'Tara 5.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5670,7 +5670,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.3  |  close'},
+          footer:{text:'Tara 5.5  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5691,7 +5691,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.3  |  exit'},
+        footer:{text:'Tara 5.5  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5712,7 +5712,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.3  |  scanning'},
+        footer:{text:'Tara 5.5  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5732,7 +5732,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.3  |  signal'},
+        footer:{text:'Tara 5.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5752,7 +5752,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.3  |  lock'},
+        footer:{text:'Tara 5.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5769,7 +5769,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.3  |  sit-out'},
+        footer:{text:'Tara 5.5  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5791,7 +5791,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.3  |  result'},
+          footer:{text:'Tara 5.5  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5828,12 +5828,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.3  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.5  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.3',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -5852,7 +5852,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.3 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -7239,6 +7239,11 @@ function TaraApp(){
         mtfAlignment:eng.mtfAlignment,
         fgtResults:eng.fgtResults||{},
         rangeBps:Number(eng.rangeBps||0), // V152
+        // V5.5: Pass through threshold values used by the lock state machine. These were
+        //   computed inside the analysis useMemo but never exposed to consumers, so the
+        //   projections panel showed `||65` and `||35` defaults instead of regime-adjusted values.
+        upThreshold:Number(upThreshold),
+        downThreshold:Number(downThreshold),
         // V3.1.7: volume-flow + window-amplitude signals (informational, surfaced via UI chips)
         volFlow:eng.volFlow||null,
         windowAmplitude:eng.windowAmplitude||null,
@@ -7284,9 +7289,13 @@ function TaraApp(){
   //   The result is tracked separately in taraScorecards. SIT_OUT counts neither way.
   //   This lets us measure: do Tara's selective calls win at higher rate than the firehose?
   const taraCall=(()=>{
-    // V5.2 FIX: Gate 0 — robust posterior check. Old `!analysis.posterior` fired on posterior=0
-    //   (clamp floor) and NaN. Now use proper null/undefined/NaN check + fallback chain.
-    const _post=analysis?.posterior??analysis?.rawPosterior??analysis?.displayPosterior;
+    // V5.4 ROOT CAUSE FIX: The outer analysis useMemo (line ~7235) returns `rawProbAbove`,
+    //   NOT `posterior`. The engine internally produces `posterior` but it's renamed during
+    //   the outer return. So `analysis.posterior` was always undefined → Gate 0 always fired.
+    //   The display-side `analysis.posterior||50` fallback masked this everywhere else
+    //   (showed 50% silently), but Tara's Call's null check correctly fired SIT_OUT.
+    //   This was the actual bug behind every SIT_OUT screenshot since V3.x.
+    const _post=analysis?.rawProbAbove;
     if(!analysis||_post==null||isNaN(_post)){
       return{call:'SIT_OUT',reason:'Engine still loading — analysis not ready yet',confidence:0};
     }
@@ -7311,11 +7320,25 @@ function TaraApp(){
     // V5.1: Base thresholds tightened. Quality 20 base → 10 floor, conviction 5 base → 3 floor.
     let qThreshold=Math.max(10,20-_halfMinutesIn*2);
     let convThreshold=Math.max(3,5-_halfMinutesIn);
-    // V5.1: Tape-agreement override
-    const tapeBuyPct=tapeWindows?.w30?.buyPct??50;
-    const tapeAgreesUP=tapeBuyPct>=70&&dir==='UP';
-    const tapeAgreesDOWN=tapeBuyPct<=30&&dir==='DOWN';
+    // V5.5: MULTI-WINDOW tape consensus override. Single-window 30s check was noise-prone —
+    //   user's image 2 had 30s=64.4% (just under 70% threshold), but 15s=65.3% AND 60s=75.4%
+    //   ALL confirming UP. Tara missed an obvious UP win. Now require multi-window agreement.
+    const _tape15=tapeWindows?.w15?.buyPct??50;
+    const _tape30=tapeWindows?.w30?.buyPct??50;
+    const _tape60=tapeWindows?.w60?.buyPct??50;
+    const _tapes=[_tape15,_tape30,_tape60];
+    // Standard agreement: ≥2 of 3 windows show ≥60% same side
+    const _upAgrees=_tapes.filter(p=>p>=60).length>=2;
+    const _downAgrees=_tapes.filter(p=>p<=40).length>=2;
+    const tapeAgreesUP=_upAgrees&&dir==='UP';
+    const tapeAgreesDOWN=_downAgrees&&dir==='DOWN';
     const tapeStronglyAgrees=tapeAgreesUP||tapeAgreesDOWN;
+    // Super-strong: ≥2 of 3 windows show ≥70% same side (rare, big confidence boost)
+    const _upSuper=_tapes.filter(p=>p>=70).length>=2;
+    const _downSuper=_tapes.filter(p=>p<=30).length>=2;
+    const tapeSuperStrong=(_upSuper&&dir==='UP')||(_downSuper&&dir==='DOWN');
+    // Display value — pick the most-aligned window for reason text
+    const tapeBuyPct=dir==='UP'?Math.max(..._tapes):Math.min(..._tapes);
     if(tapeStronglyAgrees){
       qThreshold=Math.max(5,qThreshold-15);  // floor 5 even with override — never call on q<5
       convThreshold=Math.max(2,convThreshold-2);
@@ -7359,10 +7382,11 @@ function TaraApp(){
     }
     // All gates passed — Tara calls
     const _confBase=Math.min(95,Math.round(conviction*1.5+q*0.4));
-    const _tapeBoost=tapeStronglyAgrees?10:0;  // V5.1: tape agreement adds +10 to confidence
+    const _tapeBoost=tapeSuperStrong?20:tapeStronglyAgrees?10:0;  // V5.5: tiered boost
     const _confidence=Math.max(20,_confBase-confidenceHaircut+_tapeBoost);
     const _reasonParts=[`${conviction.toFixed(0)}pt ${dir} lean`,`FGT ${fgtAbs.toFixed(1)}/4`,`q ${q}`];
-    if(tapeStronglyAgrees)_reasonParts.push(`tape ${tapeBuyPct.toFixed(0)}% agrees`);
+    if(tapeSuperStrong)_reasonParts.push(`tape super-strong (${tapeBuyPct.toFixed(0)}%)`);
+    else if(tapeStronglyAgrees)_reasonParts.push(`tape ${tapeBuyPct.toFixed(0)}% agrees`);
     if(haircutReasons.length>0)_reasonParts.push(`-${confidenceHaircut} for ${haircutReasons.join(' + ')}`);
     return{call:dir,reason:_reasonParts.join(' · '),confidence:_confidence,direction:dir,conviction};
   })();
@@ -7413,7 +7437,7 @@ function TaraApp(){
         taraCallSnapshotRef.current={
           call:tc.call,direction:null,confidence:tc.confidence,reason:tc.reason,
           atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
-          atPosterior:analysis.posterior,
+          atPosterior:analysis.rawProbAbove,
           locked:false,
           earlyLock:false,
         };
@@ -7457,14 +7481,14 @@ function TaraApp(){
       taraCallSnapshotRef.current={
         call:tc.call,direction:tc.direction||tc.call,confidence:tc.confidence,reason:tc.reason,
         atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
-        atPosterior:analysis?.posterior,
+        atPosterior:analysis?.rawProbAbove,
         locked:true,
         earlyLock:!analysis?.isSystemLocked,
         samples,
         needSamples,
       };
     }
-  },[analysis?.isSystemLocked,taraCall.call,taraCall.direction,taraCall.confidence,timeState.minsRemaining,timeState.secsRemaining,analysis?.posterior,taraCall.reason,qualityGate?.score,analysis?.mtfAlignment,analysis?.regime,analysis?.windowAmplitude?.label]);
+  },[analysis?.isSystemLocked,taraCall.call,taraCall.direction,taraCall.confidence,timeState.minsRemaining,timeState.secsRemaining,analysis?.rawProbAbove,taraCall.reason,qualityGate?.score,analysis?.mtfAlignment,analysis?.regime,analysis?.windowAmplitude?.label]);
 
   // ── LOCK BROADCAST EFFECT — Two-stage: SIGNAL fires when FORMING, LOCK fires on commit ──
   const lastBroadcastLockRef=useRef(null);
@@ -7556,7 +7580,7 @@ function TaraApp(){
     const fgtAbs=Math.abs(analysis.mtfAlignment||0);
     const fgtDir=(analysis.mtfAlignment||0)>0.05?'UP':(analysis.mtfAlignment||0)<-0.05?'DOWN':'';
     const baseData={
-      posterior:analysis.posterior,
+      posterior:analysis.rawProbAbove,
       quality:qualityGate?.score||0,
       fgtAbs,fgtDir,
       regime:analysis.regime,
@@ -7569,7 +7593,7 @@ function TaraApp(){
     // SCAN: broadcast once per window after 30s of observing (gives signals time to develop)
     if(!taraBroadcastRef.current.sentScan&&elapsed>=30&&elapsed<=60){
       taraBroadcastRef.current.sentScan=true;
-      broadcastToDiscord('TARA_SCAN',{...baseData,summary:`Posterior ${(analysis.posterior||50).toFixed(0)} · ${analysis.regime} · scanning`});
+      broadcastToDiscord('TARA_SCAN',{...baseData,summary:`Posterior ${(analysis.rawProbAbove||50).toFixed(0)} · ${analysis.regime} · scanning`});
     }
     // SIGNAL: broadcast once per direction per window when Tara's Call resolves to UP or DOWN
     if((tc.call==='UP'||tc.call==='DOWN')&&taraBroadcastRef.current.sentSignalDir!==tc.call&&elapsed>=20){
@@ -7588,7 +7612,7 @@ function TaraApp(){
       taraBroadcastRef.current.sentSitout=true;
       broadcastToDiscord('TARA_SITOUT',{...baseData,reason:tc.reason});
     }
-  },[analysis?.posterior,taraCall.call,taraCall.confidence,taraCall.reason,analysis?.isSystemLocked,timeState.startWindow,timeState.nextWindow,timeState.minsRemaining,timeState.secsRemaining,discordWebhook,windowType,taraScorecards,qualityGate?.score,targetMargin,currentPrice]);
+  },[analysis?.rawProbAbove,taraCall.call,taraCall.confidence,taraCall.reason,analysis?.isSystemLocked,timeState.startWindow,timeState.nextWindow,timeState.minsRemaining,timeState.secsRemaining,discordWebhook,windowType,taraScorecards,qualityGate?.score,targetMargin,currentPrice]);
 
   // ── WHALE AUTO-BROADCAST ─────────────────────────────────────────────────
   // Only fires when: streak ≥4 AND net delta >$500K AND 5-min cooldown passed
@@ -7982,7 +8006,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.3...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.5...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -8083,7 +8107,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.3
+              5.5
             </span>
           </div>
 
@@ -8648,7 +8672,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.3</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -9274,7 +9298,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.3 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.5 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -9430,10 +9454,44 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.3 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.5 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V5.5: Multi-window tape consensus + missing field fix */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Tape Consensus · Code Audit</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>5.5</span> — Multi-Window Tape + Audit</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User showed me a missed UP win — POST 63%, tape 65% / 64% / 75% across 15s/30s/60s windows, but Tara still sat out. V5.4's field-name fix was correct but the tape-agreement logic itself was too brittle (single 30s window check). Plus a thorough code audit found another bug.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Multi-window tape consensus.</strong> Old override checked only 30s tape ≥ 70%. Single-window threshold meant a brief 30-second selling flush could turn off the override even when 60s and 15s both confirmed direction. New: tape agreement requires ≥2 of {'{'}15s, 30s, 60s{'}'} windows showing ≥60% same side. Much more robust to noise.</li>
+                  <li><strong>Super-strong consensus tier.</strong> When ≥2 of 3 windows show ≥70% same direction, Tara gets a +20 confidence boost (was +10). This rewards rare strong-consensus setups where every tape window agrees decisively.</li>
+                  <li><strong>For your screenshot's case.</strong> 15s=65, 30s=64, 60s=75 all ≥60 → tapeAgreesUP=true. Quality threshold drops 15→5, FGT bypassed, conviction floor drops to 2. Tara would have called UP at low confidence (~25%) instead of sitting out.</li>
+                  <li><strong>Audit found: missing fields.</strong> The projections panel referenced <code>analysis.upThreshold</code> and <code>analysis.downThreshold</code> but those were never added to the analysis return. Fallbacks <code>||65</code> and <code>||35</code> masked it — projections always showed those fixed numbers regardless of regime. Now actually exposes regime-adjusted thresholds (e.g. SHORT SQUEEZE = 72/26, TRENDING UP = 64/20).</li>
+                  <li><strong>Audit found: V5.4 field rename was complete.</strong> All 10 prior <code>analysis.posterior</code> references successfully migrated to <code>rawProbAbove</code>. Verified zero remaining incorrect references via grep.</li>
+                  <li><strong>Audit confirmed: Tara is symmetric on direction.</strong> Both UP and DOWN paths in the engine have identical quality-floor gates (<code>_quality{'<'}45</code>), choppy-regime gates (<code>{'<'}50 in chop</code>), and trajectory-rejection gates. Tara's Call gates use absolute-value math — no UP-vs-DOWN bias.</li>
+                </ul>
+              </section>
+
+              {/* V5.4: The actual root cause — wrong field name */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>The Actual Bug · Owning It</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>5.4</span> — Wrong Field Name</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">V5.2 and V5.3 fixes were correct but didn't fix the real bug. V5.4 fixes it.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>The actual bug.</strong> The engine produces a value called <code>posterior</code> internally. The outer analysis useMemo renames it to <code>rawProbAbove</code> in its return object. Every consumer was reading <code>analysis.posterior</code> — which is undefined — and silently falling back to 50% via <code>analysis.posterior||50</code>. Tara's Call's null check correctly fired SIT_OUT on undefined, while every display showed 50% as if it was a real reading.</li>
+                  <li><strong>Why it took 4 versions to find.</strong> The display-side fallback masked the bug everywhere except Tara's Call. Engine general prediction "LOCKED 50%" looked like neutral conviction, not undefined. Score breakdown used a different field (rawProbAbove) so it always showed correct values. The disagreement between the two displays was the clue I missed in your earlier screenshots.</li>
+                  <li><strong>Fix.</strong> All 10 references to <code>analysis.posterior</code> changed to <code>analysis.rawProbAbove</code>. Tara's Call gates now read the real value. Engine general prediction now shows real percentage instead of always 50. Lifecycle effect dep array now triggers correctly on posterior changes.</li>
+                  <li><strong>Honest debrief.</strong> V5.0/5.1/5.2/5.3 gate logic and architecture were sound — they just never got real data. With V5.4, the gates I designed actually run. If you still see 100% sit-outs after this, the gates need genuine tuning. But this should be the fix.</li>
+                </ul>
+              </section>
 
               {/* V5.3: Removed strike confirm box + root cause of all the SIT_OUTs */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
