@@ -101,7 +101,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.02-v5.1-tape-override-decision-timer';
+const BASELINE_VERSION='2026.05.02-v5.2-show-watching-instant-kalshi';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -3349,11 +3349,16 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,
         const total=(sc.wins||0)+(sc.losses||0);
         const wr=total>0?Math.round((sc.wins/total)*100):null;
         const isCall=tc.call==='UP'||tc.call==='DOWN';
-        const callColor=tc.call==='UP'?'text-emerald-300':tc.call==='DOWN'?'text-rose-300':'text-amber-300/80';
-        const borderClr=tc.call==='UP'?'rgba(52,211,153,0.45)':tc.call==='DOWN'?'rgba(244,114,182,0.45)':T2_GOLD_BORDER;
-        const bgClr=tc.call==='UP'?'rgba(52,211,153,0.08)':tc.call==='DOWN'?'rgba(244,114,182,0.08)':'rgba(229,200,112,0.05)';
-        const callLabel=tc.call==='SIT_OUT'?'SIT OUT':tc.call;
-        const arrow=tc.call==='UP'?'▲':tc.call==='DOWN'?'▼':'—';
+        // V5.2: When SIT_OUT but Tara has a proposed direction (conviction > 0), show
+        //   'WATCHING ▼ DOWN' so user sees what she's considering even when not committing.
+        const proposedDir=tc.direction;  // present even on SIT_OUT (gate logic sets it)
+        const isWatchingDir=tc.call==='SIT_OUT'&&(proposedDir==='UP'||proposedDir==='DOWN')&&tc.conviction>0;
+        const effDir=isCall?tc.call:isWatchingDir?proposedDir:null;
+        const callColor=effDir==='UP'?(isCall?'text-emerald-300':'text-emerald-400/55'):effDir==='DOWN'?(isCall?'text-rose-300':'text-rose-400/55'):'text-amber-300/80';
+        const borderClr=effDir==='UP'?(isCall?'rgba(52,211,153,0.45)':'rgba(52,211,153,0.22)'):effDir==='DOWN'?(isCall?'rgba(244,114,182,0.45)':'rgba(244,114,182,0.22)'):T2_GOLD_BORDER;
+        const bgClr=effDir==='UP'?(isCall?'rgba(52,211,153,0.08)':'rgba(52,211,153,0.035)'):effDir==='DOWN'?(isCall?'rgba(244,114,182,0.08)':'rgba(244,114,182,0.035)'):'rgba(229,200,112,0.05)';
+        const callLabel=tc.call==='SIT_OUT'?(isWatchingDir?`WATCHING ${proposedDir}`:'SIT OUT'):tc.call;
+        const arrow=effDir==='UP'?'▲':effDir==='DOWN'?'▼':'—';
         // V5.1: Phase derived from snapshot + sample state with decision-step countdown.
         //   FORMING → 'locks in ~Xs' + sample-based bar fill
         //   LOCKED / SAT OUT → window-close countdown + elapsed bar
@@ -4997,7 +5002,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.1</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.2</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5289,7 +5294,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.1 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.2 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5429,7 +5434,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.1'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.2'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -5583,7 +5588,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.1  |  signal'},
+        footer:{text:'Tara 5.2  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5597,7 +5602,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.1  |  stand-down'},
+        footer:{text:'Tara 5.2  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5611,7 +5616,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.1  |  search'},
+        footer:{text:'Tara 5.2  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5628,7 +5633,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.1  |  lock'},
+        footer:{text:'Tara 5.2  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5645,7 +5650,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.1  |  close'},
+          footer:{text:'Tara 5.2  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5666,7 +5671,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.1  |  exit'},
+        footer:{text:'Tara 5.2  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5687,7 +5692,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.1  |  scanning'},
+        footer:{text:'Tara 5.2  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5707,7 +5712,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.1  |  signal'},
+        footer:{text:'Tara 5.2  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5727,7 +5732,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.1  |  lock'},
+        footer:{text:'Tara 5.2  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5744,7 +5749,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.1  |  sit-out'},
+        footer:{text:'Tara 5.2  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5766,7 +5771,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.1  |  result'},
+          footer:{text:'Tara 5.2  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5803,12 +5808,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.1  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.2  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.1',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.2',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -5827,7 +5832,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.1 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.2 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -5890,7 +5895,7 @@ function TaraApp(){
       let lastError=null;
       for(let i=0;i<attempts;i++){
         try{
-          const r=await fetch(url,{signal:AbortSignal.timeout(6000)});
+          const r=await fetch(url,{signal:AbortSignal.timeout(3500)});
           // 503 = Service Unavailable, 502 = Bad Gateway, 504 = Gateway Timeout, 429 = Rate Limited.
           // All transient — retry. Other 4xx/5xx are not retried.
           if(r.status===503||r.status===502||r.status===504||r.status===429){
@@ -5946,24 +5951,27 @@ function TaraApp(){
         //   the active window plus a buffer for clock skew between us and Kalshi.
         const _minCloseTs=Math.floor(Date.now()/1000)-300;
         const _eventsUrl=`https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=${_seriesTicker}&with_nested_markets=true&status=open&limit=50&min_close_ts=${_minCloseTs}`;
-        // V4.3: Multi-proxy strategy. Direct first (some networks let it through), then
-        //   corsproxy.io, then allorigins.win. Different IPs, different rate-limit buckets.
-        let result=await fetchWithRetry(_eventsUrl,1); // direct, single try
-        if(!result.ok){
-          result=await fetchWithRetry(`https://corsproxy.io/?url=${encodeURIComponent(_eventsUrl)}`,1);
-        }
-        if(!result.ok){
-          // allorigins wraps response in {contents: "<json>"}, unwrap below
-          const allOriginsResult=await fetchWithRetry(`https://api.allorigins.win/get?url=${encodeURIComponent(_eventsUrl)}`,1);
-          if(allOriginsResult.ok&&allOriginsResult.data?.contents){
-            try{
-              result={ok:true,data:JSON.parse(allOriginsResult.data.contents)};
-            }catch(e){
-              result={ok:false,reason:'allorigins parse error'};
-            }
-          } else {
-            result=allOriginsResult;
+        // V5.2: PARALLEL multi-proxy strategy — fire all 3 paths at once, take fastest success.
+        //   User feedback: 'fetches but it takes a min ish to get it. can it be instant.'
+        //   Sequential fetch was up to 18s (6s × 3 timeouts) when first paths fail. Parallel
+        //   gets us the strike from whichever proxy responds first — typically 1-3s.
+        const _directPromise=fetchWithRetry(_eventsUrl,1).then(r=>{if(r.ok)return r;throw new Error(r.reason||'direct fail');});
+        const _corsproxyPromise=fetchWithRetry(`https://corsproxy.io/?url=${encodeURIComponent(_eventsUrl)}`,1).then(r=>{if(r.ok)return r;throw new Error(r.reason||'corsproxy fail');});
+        const _allOriginsPromise=fetchWithRetry(`https://api.allorigins.win/get?url=${encodeURIComponent(_eventsUrl)}`,1).then(r=>{
+          if(!r.ok)throw new Error(r.reason||'allorigins fail');
+          if(r.data?.contents){
+            try{return{ok:true,data:JSON.parse(r.data.contents)};}
+            catch(e){throw new Error('allorigins parse error');}
           }
+          throw new Error('allorigins empty');
+        });
+        let result;
+        try{
+          result=await Promise.any([_directPromise,_corsproxyPromise,_allOriginsPromise]);
+        }catch(aggregateError){
+          // All three failed — get a useful error message from the most recent
+          const _errMsgs=aggregateError?.errors?.map(e=>e?.message||String(e))||['unknown'];
+          result={ok:false,reason:`all proxies failed: ${_errMsgs.join(' / ')}`.slice(0,140)};
         }
         if(!result.ok){
           // V3.2.1: All retries exhausted. Try last-successful cache before giving up.
@@ -7256,8 +7264,13 @@ function TaraApp(){
   //   The result is tracked separately in taraScorecards. SIT_OUT counts neither way.
   //   This lets us measure: do Tara's selective calls win at higher rate than the firehose?
   const taraCall=(()=>{
-    if(!analysis||!analysis.posterior)return{call:'SIT_OUT',reason:'No analysis yet',confidence:0};
-    const post=analysis.posterior;
+    // V5.2 FIX: Gate 0 — robust posterior check. Old `!analysis.posterior` fired on posterior=0
+    //   (clamp floor) and NaN. Now use proper null/undefined/NaN check + fallback chain.
+    const _post=analysis?.posterior??analysis?.rawPosterior??analysis?.displayPosterior;
+    if(!analysis||_post==null||isNaN(_post)){
+      return{call:'SIT_OUT',reason:'Engine still loading — analysis not ready yet',confidence:0};
+    }
+    const post=_post;
     const conviction=Math.abs(post-50);
     const dir=post>=50?'UP':'DOWN';
     const fgtAbs=Math.abs(analysis.mtfAlignment||0);
@@ -7273,6 +7286,8 @@ function TaraApp(){
     const _elapsed=_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
     // V5.1: time decay accelerated to per-30s (was per-min). Halves time-to-decisive-window.
     const _halfMinutesIn=Math.floor(Math.max(0,_elapsed)/30);
+    const _secToNextCheck=30-(Math.max(0,_elapsed)%30);
+    const _checkLabel=`next gate check in ${Math.ceil(_secToNextCheck)}s`;
     // V5.1: Base thresholds tightened. Quality 20 base → 10 floor, conviction 5 base → 3 floor.
     let qThreshold=Math.max(10,20-_halfMinutesIn*2);
     let convThreshold=Math.max(3,5-_halfMinutesIn);
@@ -7285,19 +7300,20 @@ function TaraApp(){
       qThreshold=Math.max(5,qThreshold-15);  // floor 5 even with override — never call on q<5
       convThreshold=Math.max(2,convThreshold-2);
     }
+    // V5.2: SIT_OUT reasons now lead with proposed direction so Tara's thinking is visible.
+    const _dirLead=`Watching ${dir} (${conviction.toFixed(0)}pt lean)`;
     // Gate 1: quality
     if(q<qThreshold){
-      const _baseReason=`Quality only ${q}/100 — below ${qThreshold} threshold`;
-      const _tapeNote=tapeStronglyAgrees?` (tape ${tapeBuyPct.toFixed(0)}% agrees but quality too low even with override)`:'';
-      return{call:'SIT_OUT',reason:_baseReason+_tapeNote,confidence:0,direction:dir,conviction};
+      const _tapeNote=tapeStronglyAgrees?` · tape ${tapeBuyPct.toFixed(0)}% agrees but q still too low`:'';
+      return{call:'SIT_OUT',reason:`${_dirLead} — quality ${q} < ${qThreshold} bar${_tapeNote} · ${_checkLabel}`,confidence:0,direction:dir,conviction};
     }
     // Gate 2: conviction
-    if(conviction<convThreshold)return{call:'SIT_OUT',reason:`Posterior ${post.toFixed(0)} — too close to neutral (need ±${convThreshold} from 50)`,confidence:0,direction:dir,conviction};
+    if(conviction<convThreshold)return{call:'SIT_OUT',reason:`Watching ${dir} but posterior ${post.toFixed(0)} too close to neutral (need ±${convThreshold}) · ${_checkLabel}`,confidence:0,direction:dir,conviction};
     // Gate 3: FGT support — fast-tracked when tape agrees OR regime favors direction
     const isFastTrackRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(analysis.regime);
     const fgtMin=tapeStronglyAgrees?0.0:(q>=55?0.4:0.7);  // V5.1: tape agreement bypasses FGT
     if(fgtAbs<fgtMin&&!isFastTrackRegime&&!tapeStronglyAgrees){
-      return{call:'SIT_OUT',reason:`FGT only ${fgtAbs.toFixed(1)}/4 — multi-timeframe alignment too silent`,confidence:0,direction:dir,conviction};
+      return{call:'SIT_OUT',reason:`${_dirLead} — but FGT ${fgtAbs.toFixed(1)}/4 too quiet (need ${fgtMin}) · ${_checkLabel}`,confidence:0,direction:dir,conviction};
     }
     // V5.0: Gates 4 + 5 are now SOFT — they apply confidence haircuts instead of blocking.
     let confidenceHaircut=0;
@@ -7305,7 +7321,7 @@ function TaraApp(){
     // Gate 4: regime hostility — V5.1: hard-block only when q<35 AND no tape override
     if(winType==='DEAD'||winType==='WHIPSAW'){
       if(q<35&&!tapeStronglyAgrees){
-        return{call:'SIT_OUT',reason:`${winType} window + quality ${q} — too risky to trade`,confidence:0,direction:dir,conviction};
+        return{call:'SIT_OUT',reason:`${_dirLead} — but ${winType} window + q${q} too risky · ${_checkLabel}`,confidence:0,direction:dir,conviction};
       }
       confidenceHaircut+=10;
       haircutReasons.push(`${winType} window`);
@@ -7316,7 +7332,7 @@ function TaraApp(){
       (dir==='DOWN'&&(vfLabel==='SELL-DIVERGENT'||vfLabel==='SELL-FAILING'));
     if(isDivergent){
       if(q<40&&conviction<15&&!tapeStronglyAgrees){
-        return{call:'SIT_OUT',reason:`Tape (${vfLabel}) disagrees with ${dir} — q+conv too weak to override`,confidence:0,direction:dir,conviction};
+        return{call:'SIT_OUT',reason:`${_dirLead} — but tape ${vfLabel} disagrees, q+conv weak · ${_checkLabel}`,confidence:0,direction:dir,conviction};
       }
       confidenceHaircut+=15;
       haircutReasons.push(`tape ${vfLabel}`);
@@ -7946,7 +7962,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.1...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.2...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -8047,7 +8063,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.1
+              5.2
             </span>
           </div>
 
@@ -8634,7 +8650,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.1</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.2</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -9260,7 +9276,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.1 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.2 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -9416,10 +9432,175 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.1 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.2 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V5.2: Bug fix + WATCHING display + parallel Kalshi */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Bug Fix · Visibility · Speed</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>5.2</span> — Show Tara's Thinking + Instant Kalshi</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User report: "I've never seen Tara's call be anything other than sit out." Investigation found a real bug — Gate 0 was misfiring. Plus made Tara's reasoning visible during SIT_OUT, plus parallel Kalshi fetch.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Gate 0 bug fix.</strong> The first gate used <code>!analysis.posterior</code> to check for missing data. When the engine was super-confident DOWN, posterior could clamp to a value that triggered <code>!posterior=true</code> as a falsy edge case. This silently fired SIT_OUT with reason "No analysis yet" — even when posterior was 12% (88% DOWN) and every other signal aligned. Replaced with proper null/NaN check + fallback to rawPosterior/displayPosterior. This was likely the cause of most of the 100% sit-out rate.</li>
+                  <li><strong>WATCHING ▼ DOWN display.</strong> When SIT_OUT but Tara has a proposed direction (conviction &gt; 0), the card now shows "WATCHING ▼ DOWN" with faded color + faint direction-tinted background, instead of just "— SIT OUT". You see what she's considering even when not committing.</li>
+                  <li><strong>Transparent SIT_OUT reasons.</strong> Every blocker reason now leads with proposed direction + conviction + specific blocker + countdown to next gate-relax. Examples: "Watching DOWN (38pt lean) — quality 14 &lt; 25 bar · next gate check in 18s" or "Watching UP (15pt lean) — but FGT 0.4/4 too quiet (need 0.7) · next gate check in 22s".</li>
+                  <li><strong>Parallel Kalshi fetch.</strong> User feedback: "fetches now thanks but it takes a min ish to get it. can it be instant." Sequential 3-proxy fallback (direct → corsproxy → allorigins) was up to 18 seconds when first paths failed. Now using <code>Promise.any</code> — all three fire simultaneously and fastest success wins. Typical strike fetch drops to 1-3 seconds. Per-attempt timeout reduced from 6s to 3.5s for faster failure detection.</li>
+                </ul>
+              </section>
+
+              {/* V5.1: Tape-agreement override + decision-progress timer */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Engine · Decisive++ </span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>5.1</span> — Tape Override</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User feedback: "Tara missed an UP — POST 67%, tape 86% buy, but quality 14 because FGT conflicted." V5.0's gates blocked her. V5.1 adds the missing piece — when 30s tape strongly agrees with proposed direction, override the quality + FGT gates.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Tape-agreement override.</strong> Tape ≥70% same side as posterior → quality threshold drops 15pts (floor 5), FGT requirement bypassed entirely, conviction threshold drops 2pts. Tape is real money hitting the offer in size — when it agrees with price direction, that's two independent confirmations.</li>
+                  <li><strong>Confidence boost.</strong> Tape agreement adds +10 to the call's confidence number. Strong tape + decent quality → 65%+ confidence. Tape agrees but quality is 14 → 35-40% confidence. The number tells you how much weight to put on the call.</li>
+                  <li><strong>Time-decay accelerated.</strong> Gates loosen every 30s now (was 60s). By 90s into a 15m window, even hostile setups have minimal thresholds.</li>
+                  <li><strong>Decision-progress timer.</strong> Phase strip redesigned per user spec — bar shows minute markers (1m, 2m, 3m...) along the 15m window with a position dot tracking current elapsed time. Watching countdown reads "decision check at 3m (in 25s)" — telling you exactly when Tara's next gate-relax fires.</li>
+                  <li><strong>Honest framing.</strong> Lower-confidence calls now happen by design. A 35% Tara call means "she sees a lean but it's marginal — your judgment matters more here." The scorecard will tell us over 30+ trades whether the lower-confidence calls are worth taking.</li>
+                </ul>
+              </section>
+
+              {/* V5.0: Decisive philosophy shift + Kalshi auto-set */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Engine · Philosophy Shift</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>5.0</span> — Decisive</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Tara was sitting out too many windows. V5.0 flipped her stance — gates are looser, time-decay aggressive, regime hostility + vol-flow divergence demoted from hard blocks to confidence haircuts. Plus Kalshi auto-sets on page-open and new windows.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Looser gates.</strong> Quality threshold 50→35, conviction 12→7, FGT 1.5→0.8. Time-decay drops these further as the window progresses.</li>
+                  <li><strong>Soft-blocks become haircuts.</strong> DEAD/WHIPSAW window + low quality used to kill the call entirely. Now it's a -10 confidence haircut (call still happens, just at lower confidence). Vol-flow divergence: same — was hard block, now -15 haircut.</li>
+                  <li><strong>Aggressive time-decay.</strong> Sample requirements drop every 30s. By 90s into a 15m window, even hostile setups need just 1 sample to lock.</li>
+                  <li><strong>Kalshi auto-set.</strong> Removed the 60s elapsed cutoff that was preventing strike auto-snap on mid-window page opens. Now whenever Kalshi data arrives, it auto-sets and auto-confirms — regardless of when in the window you opened the page.</li>
+                  <li><strong>Tab-visibility refetch.</strong> When you bring the tab back from background, Kalshi refetches immediately instead of waiting up to 30s for the next interval tick.</li>
+                </ul>
+              </section>
+
+              {/* V4.6: Fresh start + countdown overhaul */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Reset · Clean Slate</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>4.6</span> — Fresh Start</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for a real fresh start. V4.0 had reset the scorecard but the 57-trade seed CSV was still loading + engine weights were pre-calibrated from those trades. V4.6 actually wipes everything.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>SEED_TRADES = [].</strong> No baked-in trade history.</li>
+                  <li><strong>DEFAULT_WEIGHTS reset to neutral 35.</strong> All 7 signals start at the same weight. Per-regime weights also reset — gradient descent will differentiate them as you trade.</li>
+                  <li><strong>Auto-migration on first load.</strong> If your stored baseline version differs from V4.6, the app silently wipes trade log, scorecards, weights, calibration, regime memory, then reloads. One-shot, never re-fires.</li>
+                  <li><strong>Phase strip countdown overhaul.</strong> Every state has a real countdown now — FORMING shows "locks in ~Xs", LOCKED/SIT_OUT/WATCHING show "Xm Ys left" until window close. Bar progress is meaningful in every state.</li>
+                </ul>
+              </section>
+
+              {/* V4.5: Faster commit + countdown timer */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Engine · Faster Commit</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>4.5</span> — Lock Sooner</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Sample thresholds halved. Plus time-decay forces commitment — by 4 minutes into a 15m window, even trickiest setups need just 1 sample.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Sample thresholds halved.</strong> Clean: 1 sample (was 2). Good: 2 samples (was 4). Default: 3 samples (was 6). Hostile: 5 samples (was 8).</li>
+                  <li><strong>Time-decay added.</strong> Every full minute that passes, needSamples drops by 1 (floor 1).</li>
+                  <li><strong>Layout fix.</strong> Pushed TARA ADVISOR + sync buttons to bottom of prediction column with mt-auto. Empty space distributes naturally instead of dead patch at the bottom.</li>
+                  <li><strong>Engine sample line clarified.</strong> Now reads "Engine forming UP — 2 more samples" so you can tell it apart from Tara's Call sample count.</li>
+                </ul>
+              </section>
+
+              {/* V4.4: Kalshi events endpoint breakthrough */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Kalshi · Breakthrough</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>4.4</span> — Strike Pull Works</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Five attempts to get Kalshi strikes pulling failed. The sixth — reading the official docs carefully — finally worked. Three things were wrong with prior attempts.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Wrong endpoint.</strong> Tara was hammering /markets which returns ALL markets across the series (200+). Right call: /events?series_ticker=KXBTC15M&with_nested_markets=true&status=open&min_close_ts=&lt;now-5min&gt;. Smaller payload, different rate-limit bucket.</li>
+                  <li><strong>Wrong field names.</strong> Kalshi migrated from integer-cents (yes_ask, yes_bid) to dollars-formatted strings (yes_ask_dollars: "0.5600"). Old fields are deprecated.</li>
+                  <li><strong>floor_strike IS the strike.</strong> Per OpenAPI spec, no ticker regex needed — the strike value is on the market object directly. For 15m KXBTC events, each event has 2 markets: strike_type='greater' (above) and 'less' (below). Pick 'greater' for our UP-bet semantics.</li>
+                  <li><strong>3-proxy fallback retained.</strong> Direct → corsproxy.io → allorigins.win. Whichever gets through wins.</li>
+                </ul>
+              </section>
+
+              {/* V4.3: Tara's Call clarity */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>UI · Tara's Call Clarity</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>4.3</span> — Visible Scorecard + Comparison</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three real complaints from screenshot review: scorecard counter invisible, no phase strip on Tara's Call card, can't tell how Tara's Call differs from general prediction.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Visible scorecard row.</strong> Big 2xl serif W/L/Sat-Out numbers at the bottom of Tara's Call card. Color-coded — emerald wins, rose losses, gold sat-outs.</li>
+                  <li><strong>Phase strip on Tara's Call card itself.</strong> Was only on the prediction card before. Now visible from both surfaces.</li>
+                  <li><strong>Engine general prediction sub-panel.</strong> Inside Tara's Call card, shows engine direction + state alongside Tara's call with explicit comparison tag — TARA AGREES / TARA OVERRIDES / TARA DISAGREES / TARA OBSERVING. Makes the difference between systems visible.</li>
+                  <li><strong>Three-proxy Kalshi fallback added.</strong> Direct → corsproxy.io → allorigins.win.</li>
+                </ul>
+              </section>
+
+              {/* V4.2: Tara's Call prominence + faster lock + 15m only */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>UI · Prominence</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>4.2</span> — Promoted to Center</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Tara's Call moved to the top of the projections column — bigger, more prominent. Adaptive lock speed introduced.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Tara's Call is the hero.</strong> 3xl serif, gets the dominant slot in the middle column.</li>
+                  <li><strong>Adaptive lock speed.</strong> Clean conditions → 2 samples; mixed → 4-6 samples; hostile → 8 samples. Fast when it's obvious, slow when it isn't.</li>
+                  <li><strong>Phase strip tracks Tara's lifecycle.</strong> ANALYZING → SCANNING → SIGNAL → LOCKED / SIT OUT, not the window-clock phase.</li>
+                  <li><strong>Brain modal leads with Tara's Call.</strong> Engine context becomes supporting evidence below.</li>
+                  <li><strong>Kalshi 15m only.</strong> 5m falls back to live spot since KXBTC5M may not exist as a series.</li>
+                </ul>
+              </section>
+
+              {/* V4.1: Personal scorecard restored */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Tracking · Personal vs Tara</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>4.1</span> — Your Trading Record</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Two independent scorecards now: Personal (only updates when you trade) and Tara's Call (her selective conviction-filtered decisions).</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Personal scorecard auto-updates.</strong> Click UP/DOWN sync → entry tracked. Window closes or you cash out → result counted. If you don't trade, nothing changes.</li>
+                  <li><strong>Tara's Call scorecard.</strong> Independent — counts her calls regardless of your action. SIT_OUT counts as 'sat out', neither way.</li>
+                  <li><strong>Strike row label change.</strong> "15M SCORE" → "YOUR 15M" to make distinction obvious from Tara's Call card.</li>
+                  <li><strong>Manual ± buttons retained</strong> for adjustments to your personal record.</li>
+                </ul>
+              </section>
+
+              {/* V4.0: Tara's Call architecture */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Architecture · Major Reset</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>4.0</span> — Three Surfaces</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Major architectural rewire. Per user request: complete reset, decouple scoring from general prediction, Tara's Call as primary auto-broadcast surface, whale advisory based on position context.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>Three independent surfaces.</strong> (1) General prediction = informational only, no auto-scoring. (2) Tara's Call = autonomous, conviction-filtered, auto-broadcast. (3) Personal scorecard = your trading record.</li>
+                  <li><strong>Tara's Call decision tree.</strong> 5 gates — quality &lt; 50 → SIT_OUT, conviction &lt; 12 → SIT_OUT, FGT &lt; 1.5 → SIT_OUT, DEAD/WHIPSAW + low quality → SIT_OUT, vol-flow divergent → SIT_OUT, otherwise match general direction.</li>
+                  <li><strong>Auto-broadcasts.</strong> TARA_SCAN (30s in), TARA_SIGNAL (per direction once), TARA_LOCK (at snapshot), TARA_SITOUT (endgame still SIT_OUT), TARA_RESULT (window close).</li>
+                  <li><strong>Whale advisory.</strong> When you have a position: HOLD (aligned), CASH OUT (heavy adverse $750K+), WATCH (small adverse).</li>
+                  <li><strong>Fresh-start scorecards.</strong> All counters reset to 0 — prior baseline of 487-302 was preserved as historical reference but no longer auto-displayed.</li>
+                </ul>
+              </section>
+
               {/* V3.1: Tape strip — windowed buy/sell pressure visualization */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
@@ -9433,7 +9614,7 @@ function TaraApp(){
                   <li><strong>Four-window strip.</strong> 5s, 15s, 30s, 60s percentages side by side. Reading the trajectory across windows tells you if pressure is building or easing — 5s rising vs 60s = accelerating, 5s falling vs 60s = fading.</li>
                   <li><strong>Trend label.</strong> "↑ accelerating buy" / "↓ buy fading" / "↑ accelerating sell" — automated read of the multi-window pattern.</li>
                   <li><strong>Honest caveat.</strong> Tape data is only from 3 venues — covers ~60-70% of global BTC volume. Doesn't see hidden liquidity (OTC, iceberg orders) or spoofing. Use as confirming/challenging signal alongside Tara's call, not as a standalone prediction.</li>
-                  <li><strong>Not yet wired into the engine.</strong> Tape pressure is informational only — Tara's posterior calculations are unchanged from 3.0. We'd want to validate correlation with outcomes across 50-100 trades before integrating into the prediction logic.</li>
+                  <li><strong>(Outdated note from 3.1 launch — see V5.1)</strong> Tape was originally informational only; since V3.2.2 it feeds the FLOW signal (acceleration override) and as of V5.1 the 30s buyPct is a major Tara's Call gate-override. Tape is now one of the most-weighted inputs.</li>
                 </ul>
               </section>
 
