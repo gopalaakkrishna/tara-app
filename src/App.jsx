@@ -82,17 +82,20 @@ const loadRegimeWeights=()=>{
   });
   return out;
 };
-const saveRegimeWeights=(rwObj)=>{
-  Object.entries(REGIME_WEIGHT_KEYS).forEach(([rg,key])=>{
-    if(rwObj[rg])try{localStorage.setItem(key,JSON.stringify(rwObj[rg]));}catch(e){}
-  });
-};
-const WEIGHT_BOUNDS={gap:[5,65],momentum:[5,58],structure:[2,38],flow:[2,55],technical:[5,48],regime:[2,45],rangePosition:[5,55]}; // V152: rangePosition added — bounds let gradient descent grow or shrink it
-const LEARNING_RATE=0.8; // how aggressively to update weights per trade
+// V5.5b: User-trade persistence stubbed per user request:
+//   'stats and training records for Tara's calls needs to be saved only, not the ones i
+//    take from predictor'.
+//   - saveRegimeWeights: was learning per-regime weights from user trades → no-op
+//   - saveWeights: was learning adaptive weights from user trades → no-op
+//   - saveTradeLog (below at line ~136): was user trade history → no-op
+//   In-memory state still updates during a session so existing logic doesn't break.
+//   Tara's Call scorecards (taraCallScorecards_v1) remain persisted independently.
+const saveRegimeWeights=(rwObj)=>{};
+const WEIGHT_BOUNDS={gap:[5,65],momentum:[5,58],structure:[2,38],flow:[2,55],technical:[5,48],regime:[2,45],rangePosition:[5,55]};
+const LEARNING_RATE=0.8;
 
-// Load weights from localStorage or use defaults
 const loadWeights=()=>{try{const s=localStorage.getItem('taraWeightsV110');if(s){const w=JSON.parse(s);if(w&&typeof w.gap==='number')return w;}return{...DEFAULT_WEIGHTS};}catch(e){return{...DEFAULT_WEIGHTS};}};
-const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringify(w));}catch(e){}};
+const saveWeights=(w)=>{};
 
 // Load trade log
 // removed
@@ -133,7 +136,7 @@ const BASELINE_RECORD={'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}};
 const SEED_TRADES=[];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
-const saveTradeLog=(log)=>{try{localStorage.setItem('taraTradeLogV110',JSON.stringify(log.slice(-500)));}catch(e){}}; // keep last 500
+const saveTradeLog=(log)=>{}; // V5.5b: stubbed — user trades no longer persist per user request
 // V134: Reset just the directional/learning state, keep trade history + scorecard
   // Use this when you want Tara to give UP/DOWN equal consideration without losing your wins/losses record
   const resetDirectionalBias=()=>{
@@ -3348,22 +3351,30 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,
         const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
         const total=(sc.wins||0)+(sc.losses||0);
         const wr=total>0?Math.round((sc.wins/total)*100):null;
-        const isCall=tc.call==='UP'||tc.call==='DOWN';
+        // V5.5b: Snapshot persistence. Once Tara has committed (snap locked), the display
+        //   should NOT shift back to WATCHING just because subsequent renders see gate failures.
+        //   The lock IS her decision for this window. Read all display values from snap when
+        //   it exists and is locked. Only fall back to current tc when no commit yet.
+        const snap=tc.snapshot;
+        const isLockedSnap=snap&&snap.call!=='SIT_OUT';
+        const isSatOutSnap=snap&&snap.call==='SIT_OUT';
+        // Effective values for display — prefer snapshot once committed
+        const dispCall=isLockedSnap?snap.call:tc.call;
+        const dispDir=isLockedSnap?(snap.direction||snap.call):tc.direction;
+        const dispConfidence=isLockedSnap?snap.confidence:tc.confidence;
+        const dispReason=isLockedSnap?snap.reason:isSatOutSnap?(snap.reason||'Sat out — committed at endgame'):tc.reason;
+        const isCall=dispCall==='UP'||dispCall==='DOWN';
         // V5.2: When SIT_OUT but Tara has a proposed direction (conviction > 0), show
         //   'WATCHING ▼ DOWN' so user sees what she's considering even when not committing.
         const proposedDir=tc.direction;  // present even on SIT_OUT (gate logic sets it)
-        const isWatchingDir=tc.call==='SIT_OUT'&&(proposedDir==='UP'||proposedDir==='DOWN')&&tc.conviction>0;
-        const effDir=isCall?tc.call:isWatchingDir?proposedDir:null;
+        const isWatchingDir=!snap&&dispCall==='SIT_OUT'&&(proposedDir==='UP'||proposedDir==='DOWN')&&tc.conviction>0;
+        const effDir=isCall?dispCall:isWatchingDir?proposedDir:null;
         const callColor=effDir==='UP'?(isCall?'text-emerald-300':'text-emerald-400/55'):effDir==='DOWN'?(isCall?'text-rose-300':'text-rose-400/55'):'text-amber-300/80';
         const borderClr=effDir==='UP'?(isCall?'rgba(52,211,153,0.45)':'rgba(52,211,153,0.22)'):effDir==='DOWN'?(isCall?'rgba(244,114,182,0.45)':'rgba(244,114,182,0.22)'):T2_GOLD_BORDER;
         const bgClr=effDir==='UP'?(isCall?'rgba(52,211,153,0.08)':'rgba(52,211,153,0.035)'):effDir==='DOWN'?(isCall?'rgba(244,114,182,0.08)':'rgba(244,114,182,0.035)'):'rgba(229,200,112,0.05)';
-        const callLabel=tc.call==='SIT_OUT'?(isWatchingDir?`WATCHING ${proposedDir}`:'SIT OUT'):tc.call;
+        const callLabel=isCall?dispCall:(dispCall==='SIT_OUT'?(isWatchingDir?`WATCHING ${proposedDir}`:'SIT OUT'):dispCall);
         const arrow=effDir==='UP'?'▲':effDir==='DOWN'?'▼':'—';
         // V5.1: Phase derived from snapshot + sample state with decision-step countdown.
-        //   FORMING → 'locks in ~Xs' + sample-based bar fill
-        //   LOCKED / SAT OUT → window-close countdown + elapsed bar
-        //   WATCHING → 'decision check at Xm (in Ys)' + minute-marker bar
-        const snap=tc.snapshot;
         const phaseLabel=snap?(snap.call==='SIT_OUT'?'SAT OUT':'LOCKED'):isCall?'FORMING':tc.call==='SIT_OUT'?'WATCHING':'ANALYZING';
         const samplesLeft=Math.max(0,(tc.needSamples||3)-(tc.samples||0));
         // Window timing
@@ -3412,10 +3423,10 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,
               <div className={`flex items-baseline gap-2 ${callColor}`}>
                 <span className="text-2xl">{arrow}</span>
                 <span className="text-3xl font-serif font-bold tracking-tight leading-none">{callLabel}</span>
-                {isCall&&<span className="text-lg tabular-nums opacity-75 self-baseline">{tc.confidence}%</span>}
+                {isCall&&<span className="text-lg tabular-nums opacity-75 self-baseline">{dispConfidence}%</span>}
               </div>
             </div>
-            <div className="text-[11px] text-[#E8E9E4]/65 leading-snug mb-3">{tc.reason||'Awaiting signal data...'}</div>
+            <div className="text-[11px] text-[#E8E9E4]/65 leading-snug mb-3">{dispReason||'Awaiting signal data...'}</div>
 
             {/* V4.3: vs General prediction — show how Tara compares to the engine's read */}
             {analysis&&(()=>{
@@ -3423,9 +3434,9 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,
               const genPost=analysis.rawProbAbove||50;
               const genDir=genPred.includes('UP')?'UP':genPred.includes('DOWN')?'DOWN':null;
               const genState=genPred.includes('LOCKED')?'LOCKED':genPred.includes('FORMING')?'FORMING':genPred.includes('SEARCHING')?'SEARCHING':genPred.includes('SITTING')?'SIT OUT':genPred.includes('REJECTED')?'REJECTED':'WATCHING';
-              const isOverride=tc.call==='SIT_OUT'&&genDir!=null;
-              const isAgree=isCall&&genDir===tc.call;
-              const isDisagree=isCall&&genDir&&genDir!==tc.call;
+              const isOverride=dispCall==='SIT_OUT'&&genDir!=null;
+              const isAgree=isCall&&genDir===dispCall;
+              const isDisagree=isCall&&genDir&&genDir!==dispCall;
               const tagLabel=isOverride?'TARA OVERRIDES — engine sees a call, Tara isn\'t convinced':isAgree?'TARA AGREES — same direction as engine':isDisagree?'TARA DISAGREES — engine and Tara split':'TARA OBSERVING — engine still searching';
               const tagColor=isOverride?'text-amber-400/85':isAgree?'text-emerald-400/85':isDisagree?'text-rose-400/85':'text-[#E8E9E4]/45';
               const genArrow=genDir==='UP'?'▲':genDir==='DOWN'?'▼':'—';
@@ -5438,7 +5449,10 @@ function TaraApp(){
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
-  useEffect(()=>{if(!isMounted)return;try{localStorage.setItem('taraV110Score',JSON.stringify(scorecards));localStorage.setItem('taraV110Mem',JSON.stringify(regimeMemory));localStorage.setItem('taraV110Hook',discordWebhook);localStorage.setItem('taraV110TZ',String(useLocalTime));localStorage.setItem('taraV110DU',discordUsername);localStorage.setItem('taraV110DA',discordAvatar);}catch(e){};},[scorecards,regimeMemory,discordWebhook,useLocalTime,discordUsername,discordAvatar,isMounted]);
+  // V5.5b: Personal scorecard (taraV110Score) and regime memory (taraV110Mem) no longer
+  //   persist — they're derived from user trades, which user wants excluded from saved
+  //   stats/training. Discord settings (preference, not trade data) still persist.
+  useEffect(()=>{if(!isMounted)return;try{localStorage.setItem('taraV110Hook',discordWebhook);localStorage.setItem('taraV110TZ',String(useLocalTime));localStorage.setItem('taraV110DU',discordUsername);localStorage.setItem('taraV110DA',discordAvatar);}catch(e){};},[discordWebhook,useLocalTime,discordUsername,discordAvatar,isMounted]);
 
   useEffect(()=>{if(!currentPrice)return;const iv=setInterval(()=>{priceMemoryRef.current.push({p:currentPrice,time:Date.now()});priceMemoryRef.current=priceMemoryRef.current.filter(t=>Date.now()-t.time<600000);},2000);return()=>clearInterval(iv);},[currentPrice]);
 
@@ -5478,50 +5492,43 @@ function TaraApp(){
   // No API calls, no CORS, no parsing — zero latency, always accurate
   const setWindowOpenStrike=(price)=>{
     if(isManualStrikeRef.current)return;
-    // V5.3: Auto-confirm strike at window open. Per user: 'remove the confirm strike box
-    //   completely now. we don't need it with kalshi price working. if i need to ill edit
-    //   and press ok manually if and when needed.'
-    //   The old flow set targetMargin=0 + strikeConfirmed=false at rollover, then waited
-    //   for user to tap OK or for Kalshi to arrive. During this gap (often 1-3s, sometimes
-    //   longer if Kalshi failed) analysis would return null because of the
-    //   `!strikeConfirmed&&strikeMode==='manual'&&targetMargin>0` AND `!targetMargin` checks.
-    //   That's why Tara was returning "Engine still loading" — analysis literally was null.
-    //   New flow: use Kalshi if available, otherwise live spot. Either way, set + confirm
-    //   immediately. Analysis runs from second 1. Kalshi auto-set effect overrides later.
+    // V5.5b: KALSHI-ONLY strike sourcing per user request: 'at the start of the window or
+    //   any point during the window only get it from kalshi otherwise keep it blank i will
+    //   enter manually and press ok myself if everything fails to fetch'.
+    //   No live-spot fallback. If Kalshi is unavailable, strike stays blank.
+    //   Window high/low/amplitude refs still track current price for indicator math.
     const _kStrike=kalshiStrikeRef.current;
     const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
-    const _raw=_kStrikeValid?_kStrike:(price||currentPriceRef.current);
-    const p=_raw?Math.round(_raw):_raw;
-    const _source=_kStrikeValid?'kalshi':'live';
-    if(!p||p<=0){
-      // No price available at all — clear state, leave for user
+    const _now=Date.now();
+    const _trackPrice=price||currentPriceRef.current||0;
+    if(_kStrikeValid){
+      const rounded=Math.round(_kStrike);
+      windowOpenPriceRef.current=rounded;
+      windowHighRef.current=rounded;
+      windowLowRef.current=rounded;
+      windowHighTimeRef.current=_now;
+      windowLowTimeRef.current=_now;
+      windowOpenTimeRef.current=_now;
+      setTargetMargin(rounded);
+      setStrikeConfirmed(true);
+      setPendingStrike(null);
+      setStrikeMode('manual');
+      setStrikeSource('kalshi');
+    }else{
+      // Kalshi not available — leave strike blank for manual entry. Tracking refs still
+      //   advance from current price so amplitude/high/low calculations work once strike set.
+      windowOpenPriceRef.current=0;
+      windowHighRef.current=_trackPrice;
+      windowLowRef.current=_trackPrice;
+      windowHighTimeRef.current=_now;
+      windowLowTimeRef.current=_now;
+      windowOpenTimeRef.current=_now;
       setTargetMargin(0);
       setStrikeConfirmed(false);
-      windowOpenPriceRef.current=0;
-      windowHighRef.current=0;
-      windowLowRef.current=0;
-      windowHighTimeRef.current=0;
-      windowLowTimeRef.current=0;
-      windowOpenTimeRef.current=0;
+      setPendingStrike(null);
       setStrikeMode('manual');
       setStrikeSource('manual');
-      hasSetInitialMargin.current=true;
-      return;
     }
-    // V5.3: Auto-set + auto-confirm immediately. Kalshi auto-set effect will override
-    //   targetMargin when Kalshi data arrives (typically 1-3s later with V5.2 parallel fetch).
-    windowOpenPriceRef.current=p;
-    windowHighRef.current=p;
-    windowLowRef.current=p;
-    const _now=Date.now();
-    windowHighTimeRef.current=_now;
-    windowLowTimeRef.current=_now;
-    windowOpenTimeRef.current=_now;
-    setTargetMargin(p);
-    setStrikeConfirmed(true);  // V5.3: auto-confirm
-    setPendingStrike(null);    // V5.3: never use pending UI
-    setStrikeMode('manual');
-    setStrikeSource(_source);
     hasSetInitialMargin.current=true;
   };
 
@@ -5530,27 +5537,34 @@ function TaraApp(){
     setWindowOpenStrike(currentPriceRef.current);
   },[]);
 
-  // V5.3: When page opens mid-window with no strike set, auto-set to live spot so analysis
-  //   runs immediately. Kalshi auto-set effect will override when Kalshi data arrives.
-  //   The old behavior left strike at 0, blocking analysis until user manually entered or
-  //   Kalshi fetched — that meant Tara was 'still loading' for as long as Kalshi took.
+  // V5.5b: Page-load mid-window — KALSHI ONLY per user request. If Kalshi not yet fetched
+  //   when page loads, leave strike blank. The Kalshi auto-set effect will fill it once
+  //   data arrives. User can manually enter + press OK any time.
   useEffect(()=>{
     if(!hasSetInitialMargin.current&&currentPrice){
       const _kStrike=kalshiStrikeRef.current;
       const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
-      const _raw=_kStrikeValid?_kStrike:currentPrice;
-      const p=Math.round(_raw);
-      windowOpenPriceRef.current=p;
-      windowHighRef.current=p;
-      windowLowRef.current=p;
       const _now=Date.now();
-      windowHighTimeRef.current=_now;
-      windowLowTimeRef.current=_now;
-      windowOpenTimeRef.current=_now;
-      setTargetMargin(p);
-      setStrikeConfirmed(true);
-      setStrikeMode('manual');
-      setStrikeSource(_kStrikeValid?'kalshi':'live');
+      if(_kStrikeValid){
+        const p=Math.round(_kStrike);
+        windowOpenPriceRef.current=p;
+        windowHighRef.current=p;
+        windowLowRef.current=p;
+        windowHighTimeRef.current=_now;
+        windowLowTimeRef.current=_now;
+        windowOpenTimeRef.current=_now;
+        setTargetMargin(p);
+        setStrikeConfirmed(true);
+        setStrikeMode('manual');
+        setStrikeSource('kalshi');
+      }else{
+        // Kalshi not yet — leave blank, but track high/low from current price
+        windowHighRef.current=currentPrice;
+        windowLowRef.current=currentPrice;
+        windowHighTimeRef.current=_now;
+        windowLowTimeRef.current=_now;
+        windowOpenTimeRef.current=_now;
+      }
       hasSetInitialMargin.current=true;
     }
   },[currentPrice]);
@@ -7305,8 +7319,7 @@ function TaraApp(){
     const fgtAbs=Math.abs(analysis.mtfAlignment||0);
     const winType=analysis.windowAmplitude?.label||'NORMAL';
     const vfLabel=analysis.volFlow?.label||'';
-    const q=qualityGate?.score||0;
-    // V5.1 'TARA DECISIVE++': loosened further per user feedback. The previous V5.0 quality
+    const q=Math.round(qualityGate?.score||0);
     //   floor of 25 was still blocking calls when tape strongly agreed with direction.
     //   New addition: TAPE-AGREEMENT OVERRIDE — when 30s tape is 70%+ same side as proposed
     //   direction, drop quality threshold by 15 points. Tape going one way + price moving
