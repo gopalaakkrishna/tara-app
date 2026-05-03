@@ -1,5 +1,5 @@
-// Tara V110 Service Worker — clears all caches on every activate
-const CACHE_NAME = 'tara-v110-fresh';
+// Tara V5.6.4 Service Worker — clears all caches on every activate
+const CACHE_NAME = 'tara-v564-fresh';
 
 self.addEventListener('install', () => self.skipWaiting());
 
