@@ -1934,8 +1934,49 @@ const computeV99Posterior=(params)=>{
   let fgtResults={};
   // V6.2.0: Structural indicators — compute unconditionally when candles exist.
   //   Multi-hour context (5m × 100+ bars = 8+ hours) doesn't depend on window timing.
-  const _trendChannel=tfCandles?.c5m?.length>=60?computeFutureTrendChannel(tfCandles.c5m,100,3,50):null;
-  const _grandTrend=tfCandles?.c5m?.length>=60?computeFutureGrandTrend(tfCandles.c5m,70,100):null;
+  // V6.2.1: User's actual workflow uses TradingView with 1m/5m/15m timeframe switching,
+  //   calling only when indicators ALIGN across all three. Compute on all three and
+  //   derive an alignment count instead of single-TF readings.
+  const _tcByTf={
+    '1m': tfCandles?.c1m?.length>=60?computeFutureTrendChannel(tfCandles.c1m,100,3,50):null,
+    '5m': tfCandles?.c5m?.length>=60?computeFutureTrendChannel(tfCandles.c5m,100,3,50):null,
+    '15m': tfCandles?.c15m?.length>=60?computeFutureTrendChannel(tfCandles.c15m,100,3,50):null,
+  };
+  const _gtByTf={
+    '1m': tfCandles?.c1m?.length>=60?computeFutureGrandTrend(tfCandles.c1m,70,100):null,
+    '5m': tfCandles?.c5m?.length>=60?computeFutureGrandTrend(tfCandles.c5m,70,100):null,
+    '15m': tfCandles?.c15m?.length>=60?computeFutureGrandTrend(tfCandles.c15m,70,100):null,
+  };
+  // Aggregate: which way does each TF point? Count agreements.
+  const _tcDirs=['1m','5m','15m'].map(k=>_tcByTf[k]?.valid?_tcByTf[k].trendDir:null);
+  const _gtDirs=['1m','5m','15m'].map(k=>_gtByTf[k]?.valid?_gtByTf[k].dir:null);
+  const _countDir=(arr,dir)=>arr.filter(x=>x===dir).length;
+  // Trend Channel: count UP vs DOWN across timeframes
+  const _tcUpCount=_countDir(_tcDirs,'UP');
+  const _tcDnCount=_countDir(_tcDirs,'DOWN');
+  // Grand Trend: count UP vs DOWN (NEUTRAL doesn't count)
+  const _gtUpCount=_countDir(_gtDirs,'UP');
+  const _gtDnCount=_countDir(_gtDirs,'DOWN');
+  // Combined alignment: how many of 6 total signals (3 TC + 3 GT) point each way
+  const _structUpCount=_tcUpCount+_gtUpCount;
+  const _structDnCount=_tcDnCount+_gtDnCount;
+  const _structDir=_structUpCount>_structDnCount&&_structUpCount>=3?'UP':_structDnCount>_structUpCount&&_structDnCount>=3?'DOWN':'NEUTRAL';
+  const _structAlignment=Math.max(_structUpCount,_structDnCount); // 0-6 scale
+  // Use the 5m as the "primary" reading for display (it's the middle ground), but the
+  //   gate decision uses the multi-TF alignment count.
+  const _trendChannel=_tcByTf['5m']?{
+    ..._tcByTf['5m'],
+    // Augment with multi-TF alignment data
+    multiTfDirs:_tcDirs,                    // ['UP','UP','DOWN'] etc.
+    multiTfAgreement:Math.max(_tcUpCount,_tcDnCount), // 0-3 scale (how many TFs agree)
+    multiTfDir:_tcUpCount>_tcDnCount?'UP':_tcDnCount>_tcUpCount?'DOWN':'NEUTRAL',
+  }:null;
+  const _grandTrend=_gtByTf['5m']?{
+    ..._gtByTf['5m'],
+    multiTfDirs:_gtDirs,
+    multiTfAgreement:Math.max(_gtUpCount,_gtDnCount),
+    multiTfDir:_gtUpCount>_gtDnCount?'UP':_gtDnCount>_gtUpCount?'DOWN':'NEUTRAL',
+  }:null;
   if(tfCandles&&targetMargin>0&&_secsLeft>30){
     // V5.7.7: Drop 3m timeframe (dead weight — often invalid, weight 0.5, redundant given
     //   1m/5m bracket per its own comment). Redistribute: 1m 0.8→1.0, 5m 1.5→1.7, 15m 1.2→1.3.
@@ -1996,12 +2037,17 @@ const computeV99Posterior=(params)=>{
   } else {
     reasoning.push(`[FGT] Loading multi-timeframe data...`);
   }
-  // V6.2.0: Log structural primary indicators
+  // V6.2.0/V6.2.1: Log structural primary indicators with multi-TF alignment.
   if(_grandTrend?.valid){
-    reasoning.push(`[GRAND-TREND] ${_grandTrend.dir} · ${_grandTrend.projectionBps>0?'+':''}${_grandTrend.projectionBps}bps proj · strength ${_grandTrend.strengthBps}/100`);
+    const _gtArr=_gtDirs.map((d,i)=>['1m','5m','15m'][i]+(d==='UP'?'↑':d==='DOWN'?'↓':'·')).join(' ');
+    reasoning.push(`[GRAND-TREND] 5m ${_grandTrend.dir} ${_grandTrend.projectionBps>0?'+':''}${_grandTrend.projectionBps}bps · TFs: ${_gtArr}`);
   }
   if(_trendChannel?.valid){
-    reasoning.push(`[CHANNEL] ${_trendChannel.trendDir} regime · pos ${Math.round(_trendChannel.channelPos*100)}% in band · future ${_trendChannel.futurePriceBps>0?'+':''}${_trendChannel.futurePriceBps}bps`);
+    const _tcArr=_tcDirs.map((d,i)=>['1m','5m','15m'][i]+(d==='UP'?'↑':d==='DOWN'?'↓':'·')).join(' ');
+    reasoning.push(`[CHANNEL] 5m ${_trendChannel.trendDir} · pos ${Math.round(_trendChannel.channelPos*100)}% · TFs: ${_tcArr}`);
+  }
+  if(_structDir!=='NEUTRAL'&&_structAlignment>=3){
+    reasoning.push(`[STRUCT] ${_structAlignment}/6 align ${_structDir} (${_tcUpCount+_gtUpCount}↑ vs ${_tcDnCount+_gtDnCount}↓)`);
   }
   // V134: FORECAST-STICKY removed — replaced by HPotter FGT (more rigorous)
   // Also: pure trajectory without strike (for early-window calls when strike not set yet)
@@ -2683,8 +2729,16 @@ const computeV99Posterior=(params)=>{
     // V6.2.0: STRUCTURAL INDICATORS — primary lead signals replacing tape-following.
     //   trendChannel: ChartPrime Future Trend Channel — current channel position + trend regime.
     //   grandTrend:   HPotter Future Grand Trend — multi-hour structural projection.
+    // V6.2.1: Both now include multi-TF alignment data (1m/5m/15m). The structAlignment
+    //   field is the dominant count across ALL 6 readings (3 TC + 3 GT), 0-6 scale.
     trendChannel:_trendChannel,
     grandTrend:_grandTrend,
+    structAlignment:{
+      dir:_structDir,                    // UP / DOWN / NEUTRAL — dominant cross-TF cross-indicator direction
+      count:_structAlignment,            // 0-6: how many of 6 signals (3 TC + 3 GT) agree
+      tcDirs:_tcDirs,                    // ['UP','UP','DOWN'] for [1m,5m,15m] trend channel
+      gtDirs:_gtDirs,                    // same for grand trend
+    },
   };
 };
 
@@ -5553,29 +5607,53 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
                 </div>
                 <span style={T2_MONO_STYLE} className={'text-[10px] w-10 shrink-0 text-right font-bold '+(fgtContribution>0?'text-emerald-300':fgtContribution<0?'text-rose-300':'text-[#E8E9E4]/30')}>{formatSignedInt(fgtContribution)}</span>
               </div>
-              {/* V6.2.0: Structural primary indicators — Grand Trend + Trend Channel.
-                   These don't directly contribute to posterior score (they're used by
-                   Tara's gate as structural-led trigger), but their state is shown so
-                   user can see the multi-hour context driving fast-lock decisions. */}
+              {/* V6.2.0/V6.2.1: Structural primary indicators — Grand Trend + Trend Channel.
+                   Now show multi-TF alignment (1m/5m/15m) like the user's TradingView workflow.
+                   These don't directly contribute to posterior score (they're used by Tara's
+                   gate as structural-led trigger), but state is shown so user can see the
+                   multi-hour context driving fast-lock decisions. */}
               {(()=>{
                 const gt=analysis?.grandTrend;
                 const tc=analysis?.trendChannel;
+                const struct=analysis?.structAlignment;
                 if(!gt?.valid&&!tc?.valid)return null;
-                const _gtArrow=gt?.dir==='UP'?'▲':gt?.dir==='DOWN'?'▼':'·';
-                const _gtColor=gt?.dir==='UP'?'text-emerald-300':gt?.dir==='DOWN'?'text-rose-300':'text-[#E8E9E4]/40';
-                const _tcArrow=tc?.trendDir==='UP'?'▲':tc?.trendDir==='DOWN'?'▼':'·';
-                const _tcColor=tc?.trendDir==='UP'?'text-emerald-300':tc?.trendDir==='DOWN'?'text-rose-300':'text-[#E8E9E4]/40';
+                const _arrowFor=(d)=>d==='UP'?'▲':d==='DOWN'?'▼':'·';
+                const _colorFor=(d)=>d==='UP'?'text-emerald-300':d==='DOWN'?'text-rose-300':'text-[#E8E9E4]/30';
+                // Per-TF mini-grid: shows 1m/5m/15m arrows for each indicator
+                const _tcDirs=tc?.multiTfDirs||['?','?','?'];
+                const _gtDirs=gt?.multiTfDirs||['?','?','?'];
                 const _channelPosPct=tc?.valid?Math.round(tc.channelPos*100):null;
+                const _structDir=struct?.dir||'NEUTRAL';
+                const _structCount=struct?.count||0;
+                const _structColor=_colorFor(_structDir);
                 return React.createElement(React.Fragment,null,
+                  // Combined alignment header
                   React.createElement('div',{className:'flex items-center gap-2 text-[10px] pt-1.5 mt-0.5',style:{borderTop:'1px solid rgba(196,181,253,0.18)'}},
-                    React.createElement('span',{className:'w-16 shrink-0 font-bold',style:{color:'#C4B5FD'}},'Grand Trend'),
-                    React.createElement('span',{className:`flex-1 ${_gtColor} text-[10px]`},gt?.valid?`${_gtArrow} ${gt.dir} · ${gt.projectionBps>0?'+':''}${gt.projectionBps}bps proj`:'no data'),
-                    React.createElement('span',{className:'w-10 shrink-0 text-right font-mono text-[10px] '+_gtColor},gt?.valid?`${gt.strengthBps}`:'—')
+                    React.createElement('span',{className:'w-16 shrink-0 font-bold text-[10px]',style:{color:'#C4B5FD'}},'Structural'),
+                    React.createElement('span',{className:`flex-1 ${_structColor} text-[10px] font-bold`},`${_arrowFor(_structDir)} ${_structDir} · ${_structCount}/6 align`),
+                    React.createElement('span',{className:'w-10 shrink-0 text-right font-mono text-[10px] text-[#E8E9E4]/40'},_structCount>=4?'gate':_structCount>=3?'edge':'mixed')
                   ),
+                  // Grand Trend per-timeframe row
                   React.createElement('div',{className:'flex items-center gap-2 text-[10px]'},
-                    React.createElement('span',{className:'w-16 shrink-0 font-bold',style:{color:'#C4B5FD'}},'Trend Ch.'),
-                    React.createElement('span',{className:`flex-1 ${_tcColor} text-[10px]`},tc?.valid?`${_tcArrow} ${tc.trendDir} · pos ${_channelPosPct}% in band`:'no data'),
-                    React.createElement('span',{className:'w-10 shrink-0 text-right font-mono text-[10px] '+_tcColor},tc?.valid?`${tc.futurePriceBps>0?'+':''}${tc.futurePriceBps}`:'—')
+                    React.createElement('span',{className:'w-16 shrink-0 text-[10px] text-[#E8E9E4]/55'},'Grand Tr.'),
+                    React.createElement('div',{className:'flex-1 flex items-center gap-1.5 text-[10px]'},
+                      ['1m','5m','15m'].map((tf,i)=>React.createElement('span',{key:tf,className:'flex items-baseline gap-0.5'},
+                        React.createElement('span',{className:'text-[#E8E9E4]/35 text-[9px]'},tf),
+                        React.createElement('span',{className:`font-bold ${_colorFor(_gtDirs[i])}`},_arrowFor(_gtDirs[i]))
+                      ))
+                    ),
+                    React.createElement('span',{className:`w-10 shrink-0 text-right font-mono text-[10px] ${_colorFor(gt?.dir)}`},gt?.valid?`${gt.projectionBps>0?'+':''}${gt.projectionBps}`:'—')
+                  ),
+                  // Trend Channel per-timeframe row
+                  React.createElement('div',{className:'flex items-center gap-2 text-[10px]'},
+                    React.createElement('span',{className:'w-16 shrink-0 text-[10px] text-[#E8E9E4]/55'},'Trend Ch.'),
+                    React.createElement('div',{className:'flex-1 flex items-center gap-1.5 text-[10px]'},
+                      ['1m','5m','15m'].map((tf,i)=>React.createElement('span',{key:tf,className:'flex items-baseline gap-0.5'},
+                        React.createElement('span',{className:'text-[#E8E9E4]/35 text-[9px]'},tf),
+                        React.createElement('span',{className:`font-bold ${_colorFor(_tcDirs[i])}`},_arrowFor(_tcDirs[i]))
+                      ))
+                    ),
+                    React.createElement('span',{className:`w-10 shrink-0 text-right font-mono text-[10px] ${_colorFor(tc?.trendDir)}`},tc?.valid?`${_channelPosPct}%`:'—')
                   )
                 );
               })()}
@@ -5597,7 +5675,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
             <div className={'text-[#E8E9E4]/30 italic'}>Waiting for signals...</div>
           ):reasoning.slice(0,20).map((r,i)=>{
             const tag=(r.match(/^\[(\w+)\]/)||[])[1]||'';
-            const tagCls={GAP:'text-amber-400',MOMENTUM:'text-indigo-400',STRUCTURE:'text-purple-400',FLOW:'text-emerald-400',TECHNICAL:'text-cyan-400',REGIME:'text-rose-400',CAP:'text-orange-400',MEMORY:'text-pink-400',CAL:'text-blue-400',TIME:'text-yellow-400',ATR:'text-teal-400','GRAND-TREND':'text-violet-300',CHANNEL:'text-violet-300'}[tag]||'text-[#E8E9E4]/40';
+            const tagCls={GAP:'text-amber-400',MOMENTUM:'text-indigo-400',STRUCTURE:'text-purple-400',FLOW:'text-emerald-400',TECHNICAL:'text-cyan-400',REGIME:'text-rose-400',CAP:'text-orange-400',MEMORY:'text-pink-400',CAL:'text-blue-400',TIME:'text-yellow-400',ATR:'text-teal-400','GRAND-TREND':'text-violet-300',CHANNEL:'text-violet-300',STRUCT:'text-violet-200'}[tag]||'text-[#E8E9E4]/40';
             const text=r.replace(/^\[(\w+)\]\s*/,'');
             return(
               <div key={i} className="flex gap-1.5">
@@ -6017,7 +6095,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.2.0</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.2.1</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6615,7 +6693,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.2.0 online — STRUCTURAL PRIMARY SIGNALS. Two new lead indicators: Future Trend Channel (ChartPrime) and Future Grand Trend (HPotter), ported from your TradingView Pine scripts. They look at multi-hour 5m-candle context (8-17 hours) and predict where price IS GOING — not where order flow already showed up. New STRUCTURAL-LED tier locks in 3 samples (~3s) when grand trend + channel align with my direction. Tape becomes confirmation only. The point: catch moves BEFORE Kalshi reprices, not after. ◈ structural-led badge (lavender) shows when this tier fires. Grand Trend + Trend Channel rows added to score breakdown.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.2.1 online — MULTI-TF STRUCTURAL ALIGNMENT. You said you switch between 1m/5m/15m on TradingView and only call when indicators agree across timeframes. V6.2.0 only computed on 5m. Now I compute Future Trend Channel + Future Grand Trend on ALL THREE timeframes (6 readings total) and structural-led only fires when ≥4 of 6 agree with the lock direction. Score Breakdown shows per-TF arrows so you can see alignment at a glance — same as switching tabs on TradingView. Engine log shows the exact alignment count (e.g. "5/6 align DOWN").'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6903,7 +6981,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.2.0'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.2.1'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -7076,7 +7154,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.0  |  signal'},
+        footer:{text:'Tara 6.2.1  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7090,7 +7168,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.2.0  |  stand-down'},
+        footer:{text:'Tara 6.2.1  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7104,7 +7182,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.2.0  |  search'},
+        footer:{text:'Tara 6.2.1  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7121,7 +7199,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.2.0  |  lock'},
+        footer:{text:'Tara 6.2.1  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7138,7 +7216,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.2.0  |  close'},
+          footer:{text:'Tara 6.2.1  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7159,7 +7237,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.2.0  |  exit'},
+        footer:{text:'Tara 6.2.1  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7180,7 +7258,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.0  |  scanning'},
+        footer:{text:'Tara 6.2.1  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7200,7 +7278,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.0  |  signal'},
+        footer:{text:'Tara 6.2.1  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7220,7 +7298,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.0  |  lock'},
+        footer:{text:'Tara 6.2.1  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7237,7 +7315,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.0  |  sit-out'},
+        footer:{text:'Tara 6.2.1  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7259,7 +7337,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.2.0  |  result'},
+          footer:{text:'Tara 6.2.1  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7296,12 +7374,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.2.0  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.2.1  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.2.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.2.1',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -7320,7 +7398,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.2.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.2.1 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8850,6 +8928,8 @@ function TaraApp(){
         // V6.2.0: structural indicators surfaced for Tara's gate + score breakdown UI
         trendChannel:eng.trendChannel||null,
         grandTrend:eng.grandTrend||null,
+        // V6.2.1: multi-TF alignment across all structural signals (1m/5m/15m × 2 indicators)
+        structAlignment:eng.structAlignment||null,
         rangeBps:Number(eng.rangeBps||0), // V152
         // V5.5: Pass through threshold values used by the lock state machine. These were
         //   computed inside the analysis useMemo but never exposed to consumers, so the
@@ -9023,21 +9103,30 @@ function TaraApp(){
       &&!_isChopRegime;
     // V6.2.0: STRUCTURAL-LED TIER — primary fast-lock based on grand trend + trend channel.
     //   These are the user's preferred indicators: multi-hour structural context, looking
-    //   at where price IS GOING, not where order flow already showed up. Fires when:
-    //     - Grand trend direction matches lock direction (with meaningful strength)
-    //     - Trend channel direction matches OR price at favorable channel position
-    //     - Posterior leans the locking direction (conv ≥ 6)
-    //     - Tape doesn't super-oppose (don't fight overwhelming flow)
-    //     - Strike reachable (gap ≤ 30bps adverse)
-    //   This is the ONE tier explicitly designed to catch moves before Kalshi reprices.
+    //   at where price IS GOING, not where order flow already showed up.
+    // V6.2.1: REWRITTEN to match user's actual workflow. He switches between 1m/5m/15m on
+    //   TradingView and only takes a call when indicators agree across timeframes. So
+    //   structural-led now requires ≥4 of 6 readings (Trend Channel × 3 TFs + Grand Trend
+    //   × 3 TFs) to point the lock direction. Single-timeframe agreement isn't enough.
     const _gt=analysis?.grandTrend;
     const _tc=analysis?.trendChannel;
-    const _gtAgrees=_gt?.valid&&_gt.dir!=='NEUTRAL'&&_gt.dir===dir&&_gt.strengthBps>=20;
-    const _tcAgrees=_tc?.valid&&_tc.trendDir===dir;
-    // Channel position alignment: for UP locks, want price in lower half (room to run up).
-    //   For DOWN locks, want price in upper half. Mid-channel = no edge either way.
+    const _struct=analysis?.structAlignment;
+    // Cross-TF cross-indicator alignment in the lock direction
+    const _structAgreesDir=_struct?.dir===dir&&_struct?.count>=4; // 4 of 6 signals minimum
+    // Channel position alignment (5m): for UP locks, want price in lower half (room to run up).
+    //   For DOWN locks, want price in upper half. Mid-channel = no edge.
     const _tcPosFavors=_tc?.valid&&((dir==='UP'&&_tc.channelPos<=0.45)||(dir==='DOWN'&&_tc.channelPos>=0.55));
-    const isStructuralLed=_gtAgrees&&(_tcAgrees||_tcPosFavors)&&conviction>=6&&!tapeSuperOpposes&&_strikeReasonable&&!kalshiExtremeDisagrees;
+    // Grand trend strength on 5m needs to be meaningful too (not just neutral with tied counts)
+    const _gtStrengthOk=_gt?.valid&&_gt.strengthBps>=20;
+    // Strong version: 5+ of 6 align AND strength is real (the "perfect alignment" you'd see
+    //   on TradingView when all timeframes scream the same direction)
+    const _structStrong=_struct?.dir===dir&&_struct?.count>=5&&_gtStrengthOk;
+    // Standard structural-led: 4 of 6 align + favorable channel position + meaningful strength
+    const isStructuralLed=(_structStrong||(_structAgreesDir&&(_tcPosFavors||_gtStrengthOk)))
+      &&conviction>=6
+      &&!tapeSuperOpposes
+      &&_strikeReasonable
+      &&!kalshiExtremeDisagrees;
     const _strikeActionable=strikeFavorable||Math.abs(_gapBpsForDir)<=20;
     // Rising-confluence requires 3 of {15s tape, FGT-leans, score-leans, strike-actionable}
     //   plus existing vetoes still apply. Don't fire if already isConfluent — we have a
@@ -10107,7 +10196,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.2.0...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.2.1...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -10208,7 +10297,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.2.0
+              6.2.1
             </span>
           </div>
 
@@ -10797,7 +10886,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.2.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.2.1</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -11453,7 +11542,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.2.0 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.2.1 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -11609,10 +11698,42 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.2.0 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.2.1 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.2.1 — Multi-TF structural alignment */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Multi-Timeframe Alignment</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.2.1</span> — Same Logic You Use on TradingView</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User clarification: &ldquo;My TradingView chart isn&rsquo;t configured much. I just have those indicators enabled and switch between 1min/5min/15min to see how they align and take the call.&rdquo; Critical info — V6.2.0 only computed on 5m. That&rsquo;s a different signal than what the user actually trades. Fixed.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What changed</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Both indicators now compute on 1m, 5m, AND 15m candles.</strong> Each gives its own direction reading per timeframe.</li>
+                  <li><strong>6 total signals:</strong> 3 timeframes × 2 indicators (Trend Channel + Grand Trend).</li>
+                  <li><strong>Structural-led requires ≥4 of 6 to agree</strong> with the lock direction. Stronger version (5+ of 6 + meaningful 5m strength) is the &ldquo;perfect alignment&rdquo; you&rsquo;d see when all timeframes scream the same direction on TradingView.</li>
+                  <li><strong>Single-timeframe agreement is no longer enough</strong> — the V6.2.0 logic was too lenient compared to your actual workflow.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">UI: see alignment at a glance</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Score Breakdown panel now shows three rows:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Structural</strong> — combined alignment (e.g. &ldquo;▼ DOWN · 5/6 align&rdquo; with &ldquo;gate&rdquo; status meaning structural-led can fire)</li>
+                  <li><strong>Grand Tr.</strong> — per-timeframe arrows: <code className="text-[10px]">1m▼ 5m▼ 15m▼</code></li>
+                  <li><strong>Trend Ch.</strong> — same per-timeframe layout, plus 5m channel position %</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">No more switching tabs to check alignment — it&rsquo;s right there on screen. Status hints: <strong>gate</strong> (4+/6 — structural-led can lock), <strong>edge</strong> (3/6 — informational), <strong>mixed</strong> (≤2/6 — no signal).</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Engine Log addition</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">New <code className="text-[10px] bg-[#0E100F] px-1">[STRUCT]</code> entries show the alignment count (e.g. &ldquo;5/6 align DOWN (1↑ vs 5↓)&rdquo;). Plus per-TF detail in the existing GRAND-TREND and CHANNEL entries.</p>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">Net: structural-led now reflects what you actually trade off TradingView. Single-TF noise no longer triggers it. Cross-TF alignment is the threshold, same as your manual workflow.</p>
+              </section>
 
               {/* V6.2.0 — Structural primary signals */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
