@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.03-v6.0.3-call-more-cap-time-not-quality';
+const BASELINE_VERSION='2026.05.03-v6.0.4-visible-lean-and-countdown';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -3512,9 +3512,19 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     const dispCall=snap?snap.call:'SCANNING';
     const dispDir=snap?(snap.direction||snap.call):null;
     const dispConfidence=snap?snap.confidence:0;
+    // V6.0.4: Surface live gate info during scanning. Previously this hid all developing
+    //   info behind generic "Scanning for direction" — user couldn't tell which way she
+    //   was leaning or what was blocking commit, so by the time she locked, Kalshi had
+    //   already priced in the move. Now we show the specific gate reason (e.g. "Coin-flip
+    //   — posterior 53% only 3pt off neutral") so the user has actionable info early.
     const dispReason=snap
       ?(snap.reason||(isSatOutSnap?'Sat out — no edge this window':'Locked'))
-      :'Scanning for direction. She\'ll signal only on commit.';
+      :(tc?.reason||'Scanning for direction.');
+    // V6.0.4: Soft lean indicator — surfaces direction + conviction during scanning
+    //   when there's meaningful directional pressure. Headline stays SCANNING (4-state
+    //   model preserved); this is a sub-line that gives user enough info to act.
+    const _liveLeanDir=!snap&&tc?.direction&&tc?.conviction>=4?tc.direction:null;
+    const _liveLeanConv=tc?.conviction||0;
     const isCall=isLockedSnap;
     const effDir=isLockedSnap?snap.call:null;
     const callColor=effDir==='UP'?'text-emerald-300':effDir==='DOWN'?'text-rose-300':isSatOutSnap?'text-amber-400/85':'text-amber-300/80';
@@ -3556,7 +3566,10 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
       const _samplesInt=Math.round(_samples);
       const _needInt=Math.round(_need);
       // V5.7.2: Honest ETA. tc.lockEtaSec is null when stalled (samples not accruing).
-      if(_samples>=5&&_need>0){
+      // V6.0.4: Show progress info even at low sample counts (was: required >=5 samples).
+      //   Also show a clear "lean" indicator when the gate has picked a direction but
+      //   not yet started forming (typical when conviction is below floor).
+      if(_samples>=2&&_need>0){
         if(tc.lockEtaStalled||tc.lockEtaSec==null){
           countdownText='waiting for stronger signal';
           phaseHint=`${_samplesInt}/${_needInt} samples · conviction not firm enough yet`;
@@ -3568,12 +3581,17 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           phaseHint=`${_samplesInt}/${_needInt} samples`;
         }
         phaseProgressPct=Math.min(95,(_samples/_need)*100);
+      } else if(_liveLeanDir){
+        // V6.0.4: gate sees a direction but hasn't started forming yet — show what's blocking
+        countdownText=`${_liveLeanDir==='UP'?'▲':'▼'} ${_liveLeanConv.toFixed(0)}pt ${_liveLeanDir} lean — not yet committed`;
+        phaseHint=tc?.reason?tc.reason.replace(/^[^—]*—\s*/,'').slice(0,50):'awaiting confirmation';
+        phaseProgressPct=Math.min(40,_elapsed*0.1);
       } else if(_elapsed<20){
         countdownText=`observing — ${20-_elapsed}s of search remaining`;
         phaseProgressPct=Math.min(15,_elapsed*0.7);
       } else {
         countdownText='scanning for edge';
-        phaseHint=tc.phase==='WATCHING'?'no clear direction yet':'';
+        phaseHint=tc?.reason?tc.reason.slice(0,60):'no clear direction yet';
         phaseProgressPct=Math.min(50,_elapsed*0.05);
       }
     }
@@ -3597,6 +3615,15 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             {isLockedSnap&&<span className="text-lg tabular-nums opacity-75 self-baseline">{dispConfidence}%</span>}
           </div>
         </div>
+        {/* V6.0.4: Soft lean indicator during scanning — small, italic, lower-saturation
+             so it doesn't compete with the 4-state headline. Only when conviction ≥ 4pt. */}
+        {!snap&&_liveLeanDir&&(
+          <div className={`text-[11px] mb-1 tracking-wide ${_liveLeanDir==='UP'?'text-emerald-400/70':'text-rose-400/70'}`}>
+            <span className="font-bold mr-1">{_liveLeanDir==='UP'?'▲':'▼'}</span>
+            <span className="font-bold">{_liveLeanDir} lean · {_liveLeanConv.toFixed(0)}pt</span>
+            <span className="text-[#E8E9E4]/50 italic ml-1">— not yet committed{_liveLeanConv<10?` (need ${10-Math.round(_liveLeanConv)} more for forming)`:''}</span>
+          </div>
+        )}
         <div className="text-[11px] text-[#E8E9E4]/65 leading-snug mb-3">{dispReason||'Awaiting signal data...'}</div>
 
         {/* V4.3: vs General prediction — show how Tara compares to the engine's read.
@@ -5672,7 +5699,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.0.3</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.0.4</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6254,7 +6281,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.0.3 online — Course-corrected from 6.0.2. The high-WR quality gate was sitting out too many windows that weren\'t actually coin flips. Now: existing coin-flip gates filter the genuinely-no-information cases, every other setup gets called, and lock time is hard-capped at 130 samples (~2 min typical, ~3 min worst-case at low conviction). WR floor is protected by confluence-bucket learning, not by skipping calls.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.0.4 online — You can now see my developing lean during scanning, not just at lock time. Once I see ≥4pt of directional pressure, the call card shows a small ▲/▼ lean indicator with conviction and what\'s blocking my commit. The countdown text now shows the specific gate reason (coin-flip threshold, FGT quiet, tape mixed, etc.) so you know what I\'m waiting on. Use this to enter Kalshi early when you trust the lean — or wait for my formal lock.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6542,7 +6569,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.0.3'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.0.4'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -6715,7 +6742,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.3  |  signal'},
+        footer:{text:'Tara 6.0.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6729,7 +6756,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.0.3  |  stand-down'},
+        footer:{text:'Tara 6.0.4  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6743,7 +6770,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.0.3  |  search'},
+        footer:{text:'Tara 6.0.4  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6760,7 +6787,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.0.3  |  lock'},
+        footer:{text:'Tara 6.0.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6777,7 +6804,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.0.3  |  close'},
+          footer:{text:'Tara 6.0.4  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6798,7 +6825,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.0.3  |  exit'},
+        footer:{text:'Tara 6.0.4  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6819,7 +6846,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.3  |  scanning'},
+        footer:{text:'Tara 6.0.4  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6839,7 +6866,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.3  |  signal'},
+        footer:{text:'Tara 6.0.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6859,7 +6886,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.3  |  lock'},
+        footer:{text:'Tara 6.0.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6876,7 +6903,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.3  |  sit-out'},
+        footer:{text:'Tara 6.0.4  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6898,7 +6925,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.0.3  |  result'},
+          footer:{text:'Tara 6.0.4  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6935,12 +6962,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.0.3  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.0.4  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.0.3',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.0.4',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -6959,7 +6986,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.0.3 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.0.4 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -9546,7 +9573,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.0.3...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.0.4...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -9647,7 +9674,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.0.3
+              6.0.4
             </span>
           </div>
 
@@ -10236,7 +10263,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.0.3</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.0.4</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -10892,7 +10919,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.0.3 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.0.4 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -11048,10 +11075,30 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.0.3 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.0.4 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.0.4 — Visible lean + dynamic countdown */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Visible Lean · Live Countdown</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.0.4</span> — Show the Lean, Show the Clock</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User feedback: &ldquo;Where&rsquo;s the countdown? She locks at halfway through the window — by then Kalshi has already priced the move in.&rdquo; Right diagnosis: Tara had all the developing info internally but the UI was hiding it behind a generic SCANNING placeholder.</p>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Soft lean indicator on the call card.</strong> Once Tara sees ≥4pt of directional pressure, the card shows a small ▲ / ▼ line under the SCANNING headline with current conviction and what&rsquo;s blocking. Example: &ldquo;▼ DOWN lean · 7pt &mdash; not yet committed (need 3 more for forming).&rdquo; This breaks the strict no-direction-reveal rule for SCANNING because the user explicitly needs the lean info to enter Kalshi while odds are still actionable.</li>
+                  <li><strong>Live gate reason as the call subtitle.</strong> Was the static &ldquo;Scanning for direction. She&rsquo;ll signal only on commit.&rdquo; Now shows the specific reason from the active gate — e.g., &ldquo;Coin-flip — posterior 53% only 3pt off neutral (need ±10)&rdquo; or &ldquo;Watching DOWN — FGT 0.4/4 below 1.0 threshold.&rdquo; You see exactly what would need to change for her to commit.</li>
+                  <li><strong>Countdown shows progress earlier.</strong> Was waiting until samples ≥ 5 to show ETA — now shows from sample 2. When samples haven&rsquo;t started, shows the gate-block reason instead. No more dead air during the early window.</li>
+                  <li><strong>Phase hint surfaces dynamic info.</strong> The small text next to the phase bar now mirrors the gate reason (truncated) instead of the generic &ldquo;no clear direction yet.&rdquo;</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Why she still locks late in choppy markets</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Honest answer: when the market is genuinely choppy, conviction stays under the floor for several minutes. Tara correctly waits for clarity. The lock-at-halfway pattern is real and correct in those windows — there wasn&rsquo;t a high-confidence read available earlier. With this update you&rsquo;ll now see her developing lean as it forms, even if she doesn&rsquo;t formally commit until later. That&rsquo;s the actionable info you needed.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Workflow: when the lean shows ≥6pt sustained for 15&ndash;30 seconds and Kalshi is still near 50/50, enter early on the lean. Tara&rsquo;s formal lock will follow when conditions confirm. If the lean flips, you exit — that&rsquo;s the trade-off you accepted for better entry pricing. Tara&rsquo;s Record (W/L) below still reflects only her formally-committed calls, so you can audit her actual discipline separately from your early-lean entries.</p>
+              </section>
 
               {/* V6.0.3 — Course correction: call more, cap time not quality */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
