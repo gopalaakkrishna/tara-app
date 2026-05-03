@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.03-v5.7.3-text-polish-pass';
+const BASELINE_VERSION='2026.05.03-v6.0-tape-truth-confluence-learning';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -6259,6 +6259,17 @@ function TaraApp(){
   const audioCtxRef=useRef(null);
   const soundEnabledRef=useRef(false);
   soundEnabledRef.current=soundEnabled;
+  // V6.0: master alert volume (0..1), persisted to localStorage. UI exposes slider next to
+  //   the sound button when sound is on. Default 0.7 — audible but not startling.
+  const[alertVolume,setAlertVolume]=useState(()=>{
+    try{const s=localStorage.getItem('taraAlertVolume');if(s!=null)return Math.max(0,Math.min(1,parseFloat(s)));}catch(e){}
+    return 0.7;
+  });
+  const alertVolumeRef=useRef(alertVolume);
+  alertVolumeRef.current=alertVolume;
+  useEffect(()=>{try{localStorage.setItem('taraAlertVolume',String(alertVolume));}catch(e){}},[alertVolume]);
+  // V6.0: dedup — prevent the same alert from firing twice in quick succession.
+  const lastAlertRef=useRef({type:null,at:0});
 
   const handleSoundToggle=()=>{
     const next=!soundEnabled;
@@ -6268,38 +6279,166 @@ function TaraApp(){
         const Ctx=window.AudioContext||window.webkitAudioContext;
         if(!audioCtxRef.current)audioCtxRef.current=new Ctx();
         if(audioCtxRef.current.state==='suspended')audioCtxRef.current.resume();
-        // Confirmation beep
+        // V6.0: confirmation chime — soft major-third glide instead of single beep.
         const ctx=audioCtxRef.current;
-        const o=ctx.createOscillator(),g=ctx.createGain();
-        o.type='sine';o.frequency.value=880;
-        g.gain.setValueAtTime(0.06,ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.15);
-        o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+0.15);
+        const t0=ctx.currentTime;
+        const _vol=alertVolumeRef.current||0.7;
+        const note=(freq,when,dur,vol)=>{
+          const o=ctx.createOscillator(),g=ctx.createGain();
+          o.type='sine';o.frequency.value=freq;
+          g.gain.setValueAtTime(0.0001,t0+when);
+          g.gain.exponentialRampToValueAtTime(vol*_vol,t0+when+0.008);
+          g.gain.exponentialRampToValueAtTime(0.0001,t0+when+dur);
+          o.connect(g);g.connect(ctx.destination);
+          o.start(t0+when);o.stop(t0+when+dur);
+        };
+        note(659.25,0,0.18,0.06);    // E5
+        note(987.77,0.10,0.30,0.07); // B5 (perfect fifth above)
       }catch(e){}
     }
   };
 
+  // V6.0: Layered voice engine. Each call to voice() creates one note with envelope shaping,
+  //   optional harmonic layer, optional filter sweep, optional stereo pan. Clean attacks
+  //   (8ms ramp) eliminate clicks. Harmonic layering gives warmth — pure sine is too thin.
+  //   Filter sweeps add "ping" character without harshness.
   const playAlert=(type)=>{
     if(!soundEnabledRef.current)return;
+    // Dedup: same type within 500ms is ignored
+    const _now=Date.now();
+    if(lastAlertRef.current.type===type&&_now-lastAlertRef.current.at<500)return;
+    lastAlertRef.current={type,at:_now};
     try{
       const Ctx=window.AudioContext||window.webkitAudioContext;
       if(!audioCtxRef.current)audioCtxRef.current=new Ctx();
       const ctx=audioCtxRef.current;
-      const tone=(freq,vol,dur,wave)=>{
-        const o=ctx.createOscillator(),g=ctx.createGain();
-        o.type=wave||'sine';o.frequency.value=freq;
-        g.gain.setValueAtTime(vol,ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);
-        o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+dur);
+      const masterVol=alertVolumeRef.current||0.7;
+      // Master gain — multiplied into every voice via individual envelope volumes
+      const voice=(opts)=>{
+        const{freq,when=0,dur=0.3,vol=0.1,wave='sine',harmonic=null,pan=0,filter=null}=opts;
+        const t0=ctx.currentTime+when;
+        const finalVol=vol*masterVol;
+        // Envelope — smooth attack avoids clicks, exponential decay tail
+        const env=ctx.createGain();
+        const attack=0.008;
+        env.gain.setValueAtTime(0.0001,t0);
+        env.gain.exponentialRampToValueAtTime(Math.max(0.0001,finalVol),t0+attack);
+        env.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+        // Routing: env → (filter?) → (pan?) → destination
+        let tail=env;
+        if(filter){
+          const f=ctx.createBiquadFilter();
+          f.type='lowpass';
+          f.frequency.setValueAtTime(filter.start||800,t0);
+          f.frequency.exponentialRampToValueAtTime(filter.end||4000,t0+(filter.dur||dur*0.5));
+          f.Q.value=filter.Q||1;
+          env.connect(f);
+          tail=f;
+        }
+        if(pan!==0&&typeof ctx.createStereoPanner==='function'){
+          const p=ctx.createStereoPanner();
+          p.pan.value=Math.max(-1,Math.min(1,pan));
+          tail.connect(p);
+          p.connect(ctx.destination);
+        } else {
+          tail.connect(ctx.destination);
+        }
+        // Primary oscillator
+        const o=ctx.createOscillator();
+        o.type=wave;
+        o.frequency.value=freq;
+        o.connect(env);
+        o.start(t0);
+        o.stop(t0+dur);
+        // Optional harmonic layer (octave/fifth/whatever) for richness
+        if(harmonic){
+          const hg=ctx.createGain();
+          const hVol=finalVol*(harmonic.vol||0.3);
+          hg.gain.setValueAtTime(0.0001,t0);
+          hg.gain.exponentialRampToValueAtTime(Math.max(0.0001,hVol),t0+attack);
+          hg.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+          hg.connect(tail===env?env:env); // route through same envelope path
+          // Actually route harmonic through its OWN tail so filter applies independently
+          hg.disconnect();
+          let hTail=hg;
+          if(filter){
+            const hf=ctx.createBiquadFilter();
+            hf.type='lowpass';
+            hf.frequency.setValueAtTime(filter.start||800,t0);
+            hf.frequency.exponentialRampToValueAtTime(filter.end||4000,t0+(filter.dur||dur*0.5));
+            hf.Q.value=filter.Q||1;
+            hg.connect(hf);
+            hTail=hf;
+          }
+          if(pan!==0&&typeof ctx.createStereoPanner==='function'){
+            const hp=ctx.createStereoPanner();
+            hp.pan.value=Math.max(-1,Math.min(1,pan));
+            hTail.connect(hp);
+            hp.connect(ctx.destination);
+          } else {
+            hTail.connect(ctx.destination);
+          }
+          const h=ctx.createOscillator();
+          h.type=harmonic.wave||'sine';
+          h.frequency.value=freq*(harmonic.ratio||2);
+          h.connect(hg);
+          h.start(t0);
+          h.stop(t0+dur);
+        }
       };
+      // V6.0: Sound recipes per alert type. Designed to be musical and distinct so you can
+      //   identify the event without looking at the screen. Pan: UP slightly right, DOWN
+      //   slightly left — subtle directional cue.
       const playSequence=()=>{
-        if(type==='lock-up'){tone(523,0.08,0.2);setTimeout(()=>tone(659,0.1,0.3),180);}
-        else if(type==='lock-down'){tone(659,0.08,0.2);setTimeout(()=>tone(523,0.1,0.3),180);}
-        else if(type==='entry'){tone(880,0.07,0.12,'square');setTimeout(()=>tone(880,0.07,0.12,'square'),120);setTimeout(()=>tone(880,0.07,0.12,'square'),240);}
-        else if(type==='profit'){tone(523,0.07,0.15);setTimeout(()=>tone(659,0.07,0.15),100);setTimeout(()=>tone(784,0.09,0.3),200);}
-        else if(type==='warning'){tone(220,0.1,0.15,'sawtooth');setTimeout(()=>tone(220,0.1,0.15,'sawtooth'),200);}
-        else if(type==='emergency'){tone(180,0.12,0.12,'sawtooth');setTimeout(()=>tone(180,0.12,0.12,'sawtooth'),150);setTimeout(()=>tone(180,0.12,0.12,'sawtooth'),300);}
-        else{tone(440,0.06,0.2);}
+        if(type==='lock-up'){
+          // Two-note rising fifth, warm — Tara committed UP
+          voice({freq:523.25,when:0,   dur:0.25,vol:0.10,harmonic:{ratio:2,vol:0.30},pan:0.15});
+          voice({freq:783.99,when:0.16,dur:0.40,vol:0.12,harmonic:{ratio:2,vol:0.30},pan:0.15});
+        } else if(type==='lock-down'){
+          // Falling fifth, warm — Tara committed DOWN
+          voice({freq:659.25,when:0,   dur:0.25,vol:0.10,harmonic:{ratio:2,vol:0.25},pan:-0.15});
+          voice({freq:392.00,when:0.16,dur:0.40,vol:0.12,harmonic:{ratio:2,vol:0.25},pan:-0.15});
+        } else if(type==='confluence-lock-up'){
+          // Three-note major arpeggio C-E-G with bright capping ping. Super-confluence UP.
+          voice({freq:523.25,when:0,   dur:0.20,vol:0.10,harmonic:{ratio:2,vol:0.40,wave:'triangle'},pan:0.18});
+          voice({freq:659.25,when:0.13,dur:0.20,vol:0.10,harmonic:{ratio:2,vol:0.40,wave:'triangle'},pan:0.18});
+          voice({freq:783.99,when:0.26,dur:0.50,vol:0.13,harmonic:{ratio:2,vol:0.40,wave:'triangle'},pan:0.18,filter:{start:1200,end:5000,dur:0.15}});
+          voice({freq:1046.50,when:0.36,dur:0.30,vol:0.06,harmonic:{ratio:2,vol:0.30}});
+        } else if(type==='confluence-lock-down'){
+          // Three-note minor descending G-Eb-C with cap. Super-confluence DOWN.
+          voice({freq:783.99,when:0,   dur:0.20,vol:0.10,harmonic:{ratio:2,vol:0.40,wave:'triangle'},pan:-0.18});
+          voice({freq:622.25,when:0.13,dur:0.20,vol:0.10,harmonic:{ratio:2,vol:0.40,wave:'triangle'},pan:-0.18});
+          voice({freq:523.25,when:0.26,dur:0.50,vol:0.13,harmonic:{ratio:2,vol:0.40,wave:'triangle'},pan:-0.18,filter:{start:800,end:2500,dur:0.15}});
+          voice({freq:261.63,when:0.36,dur:0.30,vol:0.06,harmonic:{ratio:2,vol:0.30}});
+        } else if(type==='entry'){
+          // Three-pulse alert with bright filter sweep — "act now"
+          voice({freq:880, when:0,   dur:0.10,vol:0.10,filter:{start:600,end:5000,dur:0.04}});
+          voice({freq:880, when:0.12,dur:0.10,vol:0.10,filter:{start:600,end:5000,dur:0.04}});
+          voice({freq:1108,when:0.24,dur:0.18,vol:0.12,filter:{start:600,end:5000,dur:0.04}});
+        } else if(type==='profit'){
+          // Sparkling pentatonic ascent — celebratory but not silly
+          voice({freq:523.25,when:0,   dur:0.13,vol:0.08,harmonic:{ratio:2,vol:0.30}});
+          voice({freq:659.25,when:0.10,dur:0.13,vol:0.08,harmonic:{ratio:2,vol:0.30}});
+          voice({freq:783.99,when:0.20,dur:0.13,vol:0.08,harmonic:{ratio:2,vol:0.30}});
+          voice({freq:1046.50,when:0.30,dur:0.40,vol:0.10,harmonic:{ratio:2,vol:0.40}});
+        } else if(type==='warning'){
+          // Two-note descending tritone — uneasy but not panic
+          voice({freq:466.16,when:0,   dur:0.20,vol:0.10,wave:'triangle',harmonic:{ratio:2,vol:0.20}});
+          voice({freq:329.63,when:0.18,dur:0.30,vol:0.10,wave:'triangle',harmonic:{ratio:2,vol:0.20}});
+        } else if(type==='emergency'){
+          // Rapid pulsing low — urgent, gets attention
+          for(let i=0;i<4;i++){
+            voice({freq:196,when:i*0.13,dur:0.10,vol:0.13,wave:'sawtooth',filter:{start:200,end:1000,dur:0.04,Q:2}});
+          }
+        } else if(type==='tape-veto'){
+          // Soft "stand-down" — high-to-low filter sweep, brief
+          voice({freq:392,when:0,dur:0.40,vol:0.06,filter:{start:1500,end:200,dur:0.35}});
+        } else if(type==='window-open'){
+          // Subtle bell — barely noticeable, just a gentle transition cue
+          voice({freq:880,when:0,dur:0.5,vol:0.04,harmonic:{ratio:2,vol:0.30}});
+        } else {
+          voice({freq:440,dur:0.20,vol:0.06});
+        }
       };
       // V3.1.2 BUGFIX: Don't return early on suspended context. Browsers auto-suspend audio
       // contexts after tab inactivity — previously this silently dropped every alert that
@@ -7333,6 +7472,8 @@ function TaraApp(){
         isManualStrikeRef.current=false;
         hasSetInitialMargin.current=false;
         setWindowOpenStrike(currentPriceRef.current||currentPrice);
+        // V6.0: subtle bell on window rollover — tells you a new window opened without looking
+        playAlert('window-open');
         // NOTE: do NOT setPendingStrike(null) here — setWindowOpenStrike just set it
         mtfLocksRef.current[windowType]=null; // clear this timeframe's lock on rollover
         // V3.2.4: Resolve Tara's Call for the round just closed.
@@ -8782,6 +8923,12 @@ function TaraApp(){
         qScore:Math.round(qualityGate?.score||0),
         fgt:analysis?.mtfAlignment,
       };
+      // V6.0: Fire commit sound. Super-confluence gets the special arpeggio.
+      if(tc?._ctx?.isSuperConfluent){
+        playAlert(_committedCall==='UP'?'confluence-lock-up':'confluence-lock-down');
+      } else {
+        playAlert(_committedCall==='UP'?'lock-up':'lock-down');
+      }
       _persistLock(); // V5.6: cloud-save LOCKED snapshot
       // V5.6.1: log entry — committed UP/DOWN
       // V5.6.9: windowId added so cross-device entries dedupe to one log row per window.
@@ -9436,7 +9583,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.7.8
+              6.0
             </span>
           </div>
 
@@ -9467,7 +9614,19 @@ function TaraApp(){
               <span className={'text-sm font-mono text-[#E8E9E4]/80'}>{timeState.currentTime||'--:--:--'}</span>
             </div>
             {/* Always visible — sound is essential */}
-            <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
+            <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`} title={soundEnabled?'Sound on — click to mute':'Sound off — click to enable'}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
+            {/* V6.0: master volume slider — only shows when sound is on. Persists to localStorage. */}
+            {soundEnabled&&(
+              <div className="hidden sm:flex items-center gap-1 ml-0.5" title="Alert volume">
+                <input
+                  type="range" min="0" max="1" step="0.05"
+                  value={alertVolume}
+                  onChange={(e)=>setAlertVolume(parseFloat(e.target.value))}
+                  className="w-16 h-1 accent-indigo-400 cursor-pointer"
+                  style={{accentColor:'#818CF8'}}
+                />
+              </div>
+            )}
             <button onClick={()=>setShowSessionStart(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors text-xs font-bold'} title="Session Status Check">📋</button>
             {/* V2.7: Stats button — gold accent matches the analytics view.
                 V3.2.2: hidden on tiny screens (<sm) to free header space. */}
