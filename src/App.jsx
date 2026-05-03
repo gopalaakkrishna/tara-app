@@ -5554,7 +5554,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.7.3</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.7.4</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5770,23 +5770,7 @@ function TaraApp(){
   //   and synced, then tab synced to 4, then tab bumped its own copy to 5, both ended
   //   at 5 for what should have been a single +1). With derive-from-log, the dedup'd
   //   call log is the single source of truth — no separate counter to drift.
-  const taraScorecards=React.useMemo(()=>{
-    const out={'15m':{wins:0,losses:0,sitouts:0},'5m':{wins:0,losses:0,sitouts:0}};
-    (taraCallLog||[]).forEach(e=>{
-      if(!e||!e.windowType||!e.result)return;
-      const wt=e.windowType;
-      if(!out[wt])out[wt]={wins:0,losses:0,sitouts:0};
-      if(e.result==='WIN')out[wt].wins++;
-      else if(e.result==='LOSS')out[wt].losses++;
-      else if(e.result==='SITOUT')out[wt].sitouts++;
-    });
-    return out;
-  },[taraCallLog]);
-  // V5.7.1: scorecards/tara cloud doc is now legacy. Local-only — no setTaraScorecards
-  //   exists. The derived value above is canonical. localStorage cached for fast paint.
-  React.useEffect(()=>{
-    try{localStorage.setItem('taraCallScorecards_v1',JSON.stringify(taraScorecards));}catch(e){}
-  },[taraScorecards]);
+  // V5.7.1 declarations moved to AFTER taraCallLog (V5.7.4 hotfix — TDZ fix).
   const _callLogHydratedRef=useRef(false);
   // V3.2.4: Snapshot Tara's Call at endgame freeze. Whatever Tara is calling when the
   //   final 90s zone begins becomes "Tara's Call for this round." It gets resolved when
@@ -5809,6 +5793,28 @@ function TaraApp(){
     try{const stored=localStorage.getItem('taraCallLog_v1');if(stored)return JSON.parse(stored);}catch(e){}
     return[];
   });
+  // V5.7.1: taraScorecards is DERIVED from taraCallLog instead of incrementally tracked.
+  //   Eliminates multi-device double-counting: a sync race could otherwise turn one LOSS
+  //   into 2 (PC bumped 3→4 + synced, tab synced to 4 + bumped its copy to 5, both end at 5).
+  //   With derive-from-log, the dedup'd log is the single source of truth — no counter to
+  //   drift. Declaration order matters: this MUST be after the taraCallLog useState.
+  const taraScorecards=React.useMemo(()=>{
+    const out={'15m':{wins:0,losses:0,sitouts:0},'5m':{wins:0,losses:0,sitouts:0}};
+    (taraCallLog||[]).forEach(e=>{
+      if(!e||!e.windowType||!e.result)return;
+      const wt=e.windowType;
+      if(!out[wt])out[wt]={wins:0,losses:0,sitouts:0};
+      if(e.result==='WIN')out[wt].wins++;
+      else if(e.result==='LOSS')out[wt].losses++;
+      else if(e.result==='SITOUT')out[wt].sitouts++;
+    });
+    return out;
+  },[taraCallLog]);
+  // V5.7.1: scorecards/tara cloud doc is legacy. Local-only — no setTaraScorecards exists.
+  //   localStorage cached for fast paint on next mount.
+  React.useEffect(()=>{
+    try{localStorage.setItem('taraCallScorecards_v1',JSON.stringify(taraScorecards));}catch(e){}
+  },[taraScorecards]);
   const taraCallLogRef=useRef(taraCallLog);
   taraCallLogRef.current=taraCallLog;
   useEffect(()=>{
@@ -6100,7 +6106,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.7.3 online — Format polish pass. Single duration helper across the UI · clean signed integers in score breakdowns (no more "-0") · safe tooltip rendering for past windows and memory pills · cooldown messages match the m:ss style.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.7.4 online — TDZ hotfix. The V5.7.1 derived-scorecard useMemo was reading taraCallLog before its declaration, crashing the engine on mount. Reordered declarations.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6240,7 +6246,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.7.3'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.7.4'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -6413,7 +6419,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.3  |  signal'},
+        footer:{text:'Tara 5.7.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6427,7 +6433,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.7.3  |  stand-down'},
+        footer:{text:'Tara 5.7.4  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6441,7 +6447,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.7.3  |  search'},
+        footer:{text:'Tara 5.7.4  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6458,7 +6464,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.7.3  |  lock'},
+        footer:{text:'Tara 5.7.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6475,7 +6481,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.7.3  |  close'},
+          footer:{text:'Tara 5.7.4  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6496,7 +6502,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.7.3  |  exit'},
+        footer:{text:'Tara 5.7.4  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6517,7 +6523,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.3  |  scanning'},
+        footer:{text:'Tara 5.7.4  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6537,7 +6543,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.3  |  signal'},
+        footer:{text:'Tara 5.7.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6557,7 +6563,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.3  |  lock'},
+        footer:{text:'Tara 5.7.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6574,7 +6580,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.3  |  sit-out'},
+        footer:{text:'Tara 5.7.4  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6596,7 +6602,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.7.3  |  result'},
+          footer:{text:'Tara 5.7.4  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6633,12 +6639,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.7.3  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.7.4  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.7.3',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.7.4',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -6657,7 +6663,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.7.3 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.7.4 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -9096,7 +9102,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.7.3...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.7.4...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -9197,7 +9203,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.7.3
+              5.7.4
             </span>
           </div>
 
@@ -9774,7 +9780,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.7.3</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.7.4</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -10430,7 +10436,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.7.3 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.7.4 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -10586,7 +10592,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.7.3 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.7.4 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
