@@ -1442,32 +1442,34 @@ const computeAdvisor=(params)=>{
     if(isLate&&!isLocked)return{label:'WINDOW CLOSING',reason:`${timeLabel} — no confirmed lock. High-risk to enter now. Stand by for next window.`,color:'amber',animate:false,hasAction:false};
 
     // Tara has a committed lock — this is the ONLY time to show an entry signal
+    // V6.1.1: Renamed from "Tara locked" → "Engine locked" because this advisor
+    //   reflects the ENGINE's lock state. Tara has her own card with her own state
+    //   (which may differ — she may sit out while the engine locks). Sharper text too.
     if(isLocked&&lockDir){
       const lockGap=lockInfo?.lockPrice>0?((cp-lockInfo.lockPrice)/lockInfo.lockPrice)*10000:0;
       const lockedSec=lockInfo?.lockedAt>0?Math.floor((Date.now()-lockInfo.lockedAt)/1000):0;
-      if(lockDir==='UP')return{label:`ENTRY SIGNAL: UP`,reason:`Tara locked UP ${lockedSec}s ago at ${lockInfo.lockedPosterior?.toFixed(0)||'—'}% conf. Gap: ${gapBps.toFixed(1)} bps. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:`CONFIRM ENTRY 'UP'`,actionTarget:'UP'};
-      if(lockDir==='DOWN')return{label:`ENTRY SIGNAL: DOWN`,reason:`Tara locked DOWN ${lockedSec}s ago at ${lockInfo.lockedPosterior?.toFixed(0)||'—'}% conf. Gap: ${gapBps.toFixed(1)} bps. [${timeLabel}]`,color:'rose',animate:false,hasAction:true,actionLabel:`CONFIRM ENTRY 'DOWN'`,actionTarget:'DOWN'};
+      const _lockConf=lockInfo.lockedPosterior?.toFixed(0)||'—';
+      if(lockDir==='UP')return{label:`ENTRY SIGNAL · UP`,reason:`Engine locked UP ${lockedSec}s ago · ${_lockConf}% conf · gap ${gapBps>=0?'+':''}${gapBps.toFixed(1)}bps · ${timeLabel} left`,color:'emerald',animate:false,hasAction:true,actionLabel:`CONFIRM ENTRY 'UP'`,actionTarget:'UP'};
+      if(lockDir==='DOWN')return{label:`ENTRY SIGNAL · DOWN`,reason:`Engine locked DOWN ${lockedSec}s ago · ${_lockConf}% conf · gap ${gapBps>=0?'+':''}${gapBps.toFixed(1)}bps · ${timeLabel} left`,color:'rose',animate:false,hasAction:true,actionLabel:`CONFIRM ENTRY 'DOWN'`,actionTarget:'DOWN'};
     }
 
     // Already manually closed this window — no new entries
-    if(activePrediction==='CLOSED'||activePrediction==='SIT OUT')return{label:'TRADE CLOSED',reason:`Position manually closed this window. Score recorded. Standing by for next window. [${timeLabel}]`,color:'zinc',animate:false,hasAction:false};
+    if(activePrediction==='CLOSED'||activePrediction==='SIT OUT')return{label:'TRADE CLOSED',reason:`Position closed · ${timeLabel} left`,color:'zinc',animate:false,hasAction:false};
 
     // Forming — show progress, no action button
     if(activePrediction?.includes('DELIBERATING')){
-      const m=activePrediction.match(/\[(\d+)s left\]/);
-      const secs=m?parseInt(m[1]):0;
-      return{label:'🧠 DELIBERATING',reason:`Reading market structure. Tara commits when conviction sustains. [${timeLabel}]`,color:'indigo',animate:true,hasAction:false};
+      return{label:'🧠 DELIBERATING',reason:`Reading market structure · ${timeLabel} left`,color:'indigo',animate:true,hasAction:false};
     }
-    if(activePrediction?.includes('SITTING OUT'))return{label:'⛔ SITTING OUT',reason:`Signals are split, no clear edge this window. Better to skip than force a call. [${timeLabel}]`,color:'rose',animate:false,hasAction:false};
+    if(activePrediction?.includes('SITTING OUT'))return{label:'⛔ SITTING OUT',reason:`Signals split · no clear edge this window`,color:'rose',animate:false,hasAction:false};
     if(activePrediction?.includes('ANALYZING')){
-      return{label:'🔍 ANALYZING',reason:`Scanning for direction. Tara loosens her standards each minute — even mixed setups get a call eventually. [${timeLabel}]`,color:'indigo',animate:true,hasAction:false};
+      return{label:'🔍 ANALYZING',reason:`Scanning for direction · ${timeLabel} left`,color:'indigo',animate:true,hasAction:false};
     }
-    if(activePrediction?.includes('UP (FORMING)'))return{label:'SIGNAL FORMING — UP',reason:`Bullish bias building (${posterior.toFixed(1)}%). Tara commits when tape agrees or quality clears bar. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
-    if(activePrediction?.includes('DOWN (FORMING)'))return{label:'SIGNAL FORMING — DOWN',reason:`Bearish bias building (${(100-posterior).toFixed(1)}%). Tara commits when tape agrees or quality clears bar. [${timeLabel}]`,color:'amber',animate:false,hasAction:false};
+    if(activePrediction?.includes('UP (FORMING)'))return{label:'SIGNAL FORMING · UP',reason:`Bullish bias building · posterior ${posterior.toFixed(0)}% · ${timeLabel} left`,color:'amber',animate:false,hasAction:false};
+    if(activePrediction?.includes('DOWN (FORMING)'))return{label:'SIGNAL FORMING · DOWN',reason:`Bearish bias building · posterior ${(100-posterior).toFixed(0)}% · ${timeLabel} left`,color:'amber',animate:false,hasAction:false};
 
     // No call yet / endgame no-call
-    if(activePrediction==='NO CALL')return{label:'NO CALL THIS WINDOW',reason:`Lock threshold not reached before endgame. Sit out and wait for next window.`,color:'zinc',animate:false,hasAction:false};
-    return{label:'SCANNING...',reason:`Analyzing ${windowType} window. No confirmed lock yet — ${posterior.toFixed(1)}% UP / ${(100-posterior).toFixed(1)}% DN. [${timeLabel}]`,color:'zinc',animate:false,hasAction:false};
+    if(activePrediction==='NO CALL')return{label:'NO CALL',reason:`Lock threshold not reached · sit out, wait next window`,color:'zinc',animate:false,hasAction:false};
+    return{label:'SCANNING',reason:`${posterior.toFixed(0)}% UP · ${(100-posterior).toFixed(0)}% DOWN · ${timeLabel} left`,color:'zinc',animate:false,hasAction:false};
   }
 
   // ── IN-TRADE ADVISOR ──
@@ -3572,7 +3574,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     // V6.1.0: Hard cadence cap (90s for 15m, 45s for 5m) is now the PRIMARY deadline.
     //   Past this cap, Tara auto-sits-out. So this is the real "decide by" clock the
     //   user has been asking for: predictable, hard, never-changing.
-    const _hardCapSec=windowType==='15m'?90:45;
+    const _hardCapSec=windowType==='15m'?120:60;
     const _secsUntilCap=Math.max(0,_hardCapSec-_elapsed);
     const _endgameSec=windowType==='15m'?90:45;
     const _secsUntilDeadline=Math.max(0,_remSec-_endgameSec);
@@ -5843,7 +5845,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.1.0</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.1.1</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6435,7 +6437,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.1.0 online — HARD CADENCE: I commit within the first 90 seconds of a 15m window or first 45 seconds of a 5m window. Past that, I sit out for the rest of the window. No more "is she going to call in 3 min or 10 min." Either it happens fast or it doesn\'t happen. The Decision Clock now counts down to this hard cap, not a soft deadline.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.1.1 online — Loosened cap to 120s (15m) / 60s (5m) — 90s was too aggressive. Plus super-confluence override past the cap: when conditions are genuinely slam-dunk (super-confluent OR tape-led with strongly favorable strike), I can still lock past 2 minutes. Also fixed misleading "Tara locked" text in the engine prediction card — now correctly says "Engine locked" since that card reflects engine state, not mine.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6723,7 +6725,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.1.0'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.1.1'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -6896,7 +6898,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.1.0  |  signal'},
+        footer:{text:'Tara 6.1.1  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6910,7 +6912,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.1.0  |  stand-down'},
+        footer:{text:'Tara 6.1.1  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6924,7 +6926,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.1.0  |  search'},
+        footer:{text:'Tara 6.1.1  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6941,7 +6943,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.1.0  |  lock'},
+        footer:{text:'Tara 6.1.1  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6958,7 +6960,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.1.0  |  close'},
+          footer:{text:'Tara 6.1.1  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6979,7 +6981,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.1.0  |  exit'},
+        footer:{text:'Tara 6.1.1  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7000,7 +7002,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.1.0  |  scanning'},
+        footer:{text:'Tara 6.1.1  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7020,7 +7022,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.1.0  |  signal'},
+        footer:{text:'Tara 6.1.1  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7040,7 +7042,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.1.0  |  lock'},
+        footer:{text:'Tara 6.1.1  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7057,7 +7059,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.1.0  |  sit-out'},
+        footer:{text:'Tara 6.1.1  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7079,7 +7081,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.1.0  |  result'},
+          footer:{text:'Tara 6.1.1  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7116,12 +7118,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.1.0  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.1.1  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.1.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.1.1',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -7140,7 +7142,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.1.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.1.1 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -9147,30 +9149,42 @@ function TaraApp(){
     // V6.1.0: HARD CADENCE CAP. User feedback after 9 versions: "no time limit on when
     //   she'd call it. Is it instantly? 2 min? 5 min? 10 min? Idk." Predictability matters.
     //   Now: Tara MUST commit within the first N seconds of the window or sit out for the
-    //   rest. 15m → 90s cap (10% of window). 5m → 45s cap (15% of window). Within these
-    //   caps, all the existing tiers can fire — fast tiers (super-confluence, tape-led,
-    //   confluence, rising-confluence) lock in 5-8s; patient tier won't have time so it
-    //   becomes effectively a sit-out. That's the trade-off the user has been asking for.
-    const HARD_CAP_SEC=windowType==='15m'?90:45;
+    //   rest. 15m → 120s cap. 5m → 60s cap. Within these caps, all the existing tiers can
+    //   fire — fast tiers (super-confluence, tape-led, confluence, rising-confluence) lock
+    //   in 5-8s; patient tier won't have time so it becomes effectively a sit-out.
+    // V6.1.1: Loosened cap from 90s/45s to 120s/60s. Real-world test: engine locked a
+    //   slam-dunk DOWN at 2:16 (TRAJ -12, EXTREME, gap -18bps, posterior 92%) but Tara
+    //   sat out at 90s. The 90s cap was too aggressive. Plus added super-confluence
+    //   override below — past the cap, genuinely super-clean conditions can still lock.
+    const HARD_CAP_SEC=windowType==='15m'?120:60;
     if(elapsedSec>=HARD_CAP_SEC&&taraCallSnapshotRef.current===null){
-      // No commit by the cap → snapshot SIT_OUT for the rest of the window
-      taraCallSnapshotRef.current={
-        call:'SIT_OUT',direction:null,confidence:0,
-        reason:`No clean read in first ${HARD_CAP_SEC}s — sitting out`,
-        atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
-        atPosterior:analysis?.rawProbAbove,
-        kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
-        locked:false,earlyLock:false,
-        isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,
-        samples,needSamples:0,
-        tier:'cadence-sitout',
-        session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
-        regime:analysis?.regime||'',
-        qScore:Math.round(qualityGate?.score||0),
-        fgt:analysis?.mtfAlignment,
-      };
-      _persistLock();
-      return;
+      // V6.1.1: Past the cap — but check for super-clean override conditions before sitting out.
+      //   Override fires only when:
+      //     - Super-confluent (tape ≥70% × 2 windows + FGT-sign + score-sign + strike-favorable + no Kalshi disagree), OR
+      //     - Tape-led AND strike strongly favorable (price already on the right side by ≥10bps)
+      //   These are the cases where missing the lock costs us obvious wins.
+      const _isSuperClean=(taraCall?._ctx?.isSuperConfluent)||(taraCall?._ctx?.isTapeLed&&taraCall?._ctx?.strikeFavorable);
+      if(!_isSuperClean){
+        // Normal case: no commit by the cap → snapshot SIT_OUT for the rest of the window
+        taraCallSnapshotRef.current={
+          call:'SIT_OUT',direction:null,confidence:0,
+          reason:`No clean read in first ${HARD_CAP_SEC}s — sitting out`,
+          atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+          atPosterior:analysis?.rawProbAbove,
+          kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
+          locked:false,earlyLock:false,
+          isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,
+          samples,needSamples:0,
+          tier:'cadence-sitout',
+          session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+          regime:analysis?.regime||'',
+          qScore:Math.round(qualityGate?.score||0),
+          fgt:analysis?.mtfAlignment,
+        };
+        _persistLock();
+        return;
+      }
+      // Else: super-clean override — fall through to normal commit logic below
     }
     // V5.6.7: Five tiers now. Tier 1.5 fills the gap between "perfect" (rare) and
     //   "strong" (1 min). Catches the "fast clean market" case the user worried about
@@ -9809,7 +9823,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.1.0...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.1.1...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -9910,7 +9924,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.1.0
+              6.1.1
             </span>
           </div>
 
@@ -10499,7 +10513,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.1.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.1.1</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -11155,7 +11169,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.1.0 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.1.1 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -11311,10 +11325,46 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.1.0 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.1.1 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.1.1 — Loosen cap + super-confluence override + cleaner engine text */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Loosened Cap · Cleaner Engine Card</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.1.1</span> — Cap, but Smarter</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Real-world test of V6.1.0 caught it: engine locked a slam-dunk DOWN at 2:16 (TRENDING DOWN, TRAJ -12, EXTREME, gap -18bps, posterior 92%) but Tara sat out at 90s. The 90s cap was too aggressive. Loosened plus added an override for genuinely super-clean conditions.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">New cap timing</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>15m windows:</strong> 90s → <strong style={{color:T2_GOLD}}>120s</strong> (2 min)</li>
+                  <li><strong>5m windows:</strong> 45s → <strong style={{color:T2_GOLD}}>60s</strong> (1 min)</li>
+                  <li>Still well within the user&rsquo;s stated &ldquo;2&ndash;3 min max,&rdquo; gives 30&ndash;45 more seconds for legitimate setups.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Super-confluence override past the cap</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Past the 120s/60s cap, I can still lock — but only if conditions are genuinely super-clean.</strong> Two override paths:</li>
+                  <li><strong>Path 1 · Super-confluent:</strong> tape ≥70% across 2+ windows + FGT-sign agrees + score-sign agrees + strike favorable + no Kalshi disagreement. All five conditions.</li>
+                  <li><strong>Path 2 · Tape-led + favorable strike:</strong> tape ≥70% across 2+ windows AND price already on the right side by ≥10bps. The slam-dunk case.</li>
+                  <li><strong>What this catches:</strong> the screenshot scenario. Tape was 79.1% / 76.7% sell, gap was -18bps DOWN, engine locked at 2:16 — exactly Path 2. Past V6.1.1, Tara would have locked here too.</li>
+                  <li><strong>What it doesn&rsquo;t do:</strong> rescue marginal late commits. Single-signal, mixed-FGT, late-window setups still sit out — that&rsquo;s the V6.0.9 late-commit guard, still active.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Engine card text cleanup</div>
+                <ul className="list-disc pl-4 space-y-1.5 text-[11px]">
+                  <li><strong>&ldquo;Tara locked DOWN 33s ago at 8% conf. Gap: -18.1 bps. [12m 10s left]&rdquo;</strong> → <strong>&ldquo;Engine locked DOWN 33s ago · 8% conf · gap -18.1bps · 12m 10s left&rdquo;</strong></li>
+                  <li><strong>Why:</strong> the engine prediction card was saying &ldquo;Tara locked&rdquo; even when Tara was sitting out. That card reflects engine state, not Tara&rsquo;s. Now correctly attributed.</li>
+                  <li><strong>&ldquo;Tara loosens her standards each minute&rdquo;</strong> → <strong>&ldquo;Scanning for direction&rdquo;</strong> (was Tara behavior, doesn&rsquo;t apply to engine)</li>
+                  <li>Format simplified throughout: dot separators (·) instead of brackets/periods, shorter prose.</li>
+                </ul>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">Net: cap stays predictable (120s ceiling on 15m), but obvious slam-dunk windows aren&rsquo;t missed. Engine card no longer claims to speak for Tara.</p>
+              </section>
 
               {/* V6.1.0 — Hard cadence cap */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
