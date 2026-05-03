@@ -38,20 +38,43 @@ const _fbDoc=(path)=>{
   const segs=['users',USER_ID,...path.split('/')];
   return doc(_fbDb,...segs);
 };
+// V5.6.1: Cloud sync status — subscribers (React components) get notified on state change.
+//   States: 'idle' (no recent activity), 'writing' (debounced or in-flight), 'ok' (last
+//   write succeeded), 'error' (last write/read failed). Used for a visible indicator dot.
+const _cloudSyncListeners=new Set();
+let _cloudSyncStatus={state:_fbDb?'idle':'disabled',lastOk:null,lastError:null,writes:0,reads:0};
+const _setCloudStatus=(patch)=>{_cloudSyncStatus={..._cloudSyncStatus,...patch};_cloudSyncListeners.forEach(l=>l(_cloudSyncStatus));};
+const subscribeCloudStatus=(fn)=>{_cloudSyncListeners.add(fn);fn(_cloudSyncStatus);return()=>_cloudSyncListeners.delete(fn);};
+
 const cloudRead=async(path)=>{
   const ref=_fbDoc(path);if(!ref)return null;
-  try{const s=await getDoc(ref);return s.exists()?s.data():null;}
-  catch(e){console.warn('[Firestore read failed]',path,e?.message);return null;}
+  try{
+    const s=await getDoc(ref);
+    _setCloudStatus({state:'ok',lastOk:Date.now(),reads:_cloudSyncStatus.reads+1});
+    return s.exists()?s.data():null;
+  }catch(e){
+    console.warn('[Firestore read failed]',path,e?.message);
+    _setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});
+    return null;
+  }
 };
 const cloudWrite=async(path,data)=>{
   const ref=_fbDoc(path);if(!ref)return false;
-  try{await setDoc(ref,{...data,_updatedAt:serverTimestamp()});return true;}
-  catch(e){console.warn('[Firestore write failed]',path,e?.message);return false;}
+  _setCloudStatus({state:'writing'});
+  try{
+    await setDoc(ref,{...data,_updatedAt:serverTimestamp()});
+    _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
+    return true;
+  }catch(e){
+    console.warn('[Firestore write failed]',path,e?.message);
+    _setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});
+    return false;
+  }
 };
 const cloudDelete=async(path)=>{
   const ref=_fbDoc(path);if(!ref)return false;
-  try{await deleteDoc(ref);return true;}
-  catch(e){console.warn('[Firestore delete failed]',path,e?.message);return false;}
+  try{await deleteDoc(ref);_setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});return true;}
+  catch(e){console.warn('[Firestore delete failed]',path,e?.message);_setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});return false;}
 };
 // Coalesces rapid updates per-path into a single Firestore write (saves quota + bandwidth).
 const _writeQueue=new Map();
@@ -67,6 +90,50 @@ const computeWindowId=(windowType)=>{
   const bucketMs=Math.floor(Date.now()/winMs)*winMs;
   return `${windowType}-${new Date(bucketMs).toISOString()}`;
 };
+
+// V5.6.1: Sync indicator. Green pulse = recent successful Firestore round-trip. Amber =
+//   writing in progress. Red = last attempt errored. Gray = Firestore not initialized.
+//   Click to see details (last write/read counts, last error, userId).
+function CloudSyncBadge(){
+  const[s,setS]=React.useState(_cloudSyncStatus);
+  const[open,setOpen]=React.useState(false);
+  React.useEffect(()=>subscribeCloudStatus(setS),[]);
+  const colors={
+    idle:{bg:'rgba(232,233,228,0.10)',dot:'rgba(232,233,228,0.5)',label:'IDLE'},
+    writing:{bg:'rgba(245,158,11,0.15)',dot:'rgba(245,158,11,0.9)',label:'SYNC'},
+    ok:{bg:'rgba(52,211,153,0.12)',dot:'rgba(52,211,153,0.9)',label:'SYNCED'},
+    error:{bg:'rgba(244,114,182,0.15)',dot:'rgba(244,114,182,0.9)',label:'ERROR'},
+    disabled:{bg:'rgba(232,233,228,0.05)',dot:'rgba(232,233,228,0.25)',label:'OFF'},
+  }[s.state]||{bg:'rgba(232,233,228,0.05)',dot:'rgba(232,233,228,0.25)',label:'?'};
+  return React.createElement('div',{className:'relative'},
+    React.createElement('button',{
+      onClick:()=>setOpen(!open),
+      className:'flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-md border uppercase',
+      style:{background:colors.bg,borderColor:colors.dot,color:colors.dot},
+      title:'Cloud sync status',
+    },
+      React.createElement('span',{className:'w-1 h-1 rounded-full '+(s.state==='writing'?'animate-pulse':''),style:{background:colors.dot}}),
+      React.createElement('span',{className:'hidden sm:inline'},colors.label),
+    ),
+    open&&React.createElement('div',{
+      className:'absolute right-0 top-full mt-1 w-64 p-3 rounded-lg shadow-xl z-50 text-[10px] leading-relaxed',
+      style:{background:'#181A19',border:'1px solid rgba(232,233,228,0.15)',color:'rgba(232,233,228,0.85)'},
+      onClick:(e)=>e.stopPropagation(),
+    },
+      React.createElement('div',{className:'flex justify-between items-baseline mb-2'},
+        React.createElement('span',{className:'font-bold uppercase tracking-wider',style:{color:colors.dot}},'Cloud sync · '+colors.label),
+        React.createElement('button',{onClick:()=>setOpen(false),className:'text-[#E8E9E4]/40 hover:text-white text-base leading-none'},'×'),
+      ),
+      React.createElement('div',{className:'space-y-0.5 text-[#E8E9E4]/70'},
+        React.createElement('div',null,'User: ',React.createElement('span',{className:'font-mono text-white'},USER_ID||'(none)')),
+        React.createElement('div',null,'Writes: ',React.createElement('span',{className:'font-mono text-white'},s.writes),' · Reads: ',React.createElement('span',{className:'font-mono text-white'},s.reads)),
+        s.lastOk&&React.createElement('div',null,'Last ok: ',React.createElement('span',{className:'font-mono text-white'},new Date(s.lastOk).toLocaleTimeString())),
+        s.lastError&&React.createElement('div',{className:'text-rose-400 mt-1'},'Error: ',s.lastError.message,' (',s.lastError.path,')'),
+        !_fbDb&&React.createElement('div',{className:'text-amber-400 mt-1'},'Firestore not initialized — npm install firebase + redeploy.'),
+      ),
+    ),
+  );
+}
 
 // ═══════════════════════════════════════
 // ICONS
@@ -172,7 +239,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.03-v5.6.0-firestore-sync';
+const BASELINE_VERSION='2026.05.03-v5.6.1-memory-log-mobile-move';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -3395,9 +3462,334 @@ function TaraAdvisorPanel({advisor,executeAction}){
 // V111 — IMPROVED LAYOUT COMPONENTS
 // ══════════════════════════════════════════════════
 
+
+// V5.6.1: Tara's Call card extracted into reusable component so it can render in both
+//   the desktop projections column (hidden md:block) and the mobile signal section
+//   (md:hidden). Same logic, same display, two mount points.
+function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className}){
+  if(!taraCall)return null;
+    const tc=taraCall;
+    const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
+    const total=(sc.wins||0)+(sc.losses||0);
+    const wr=total>0?Math.round((sc.wins/total)*100):null;
+    // V5.5b/c: Snapshot persistence. Once Tara has committed (snap set), the display
+    //   stays committed for the window — never flips back to WATCHING/SIT_OUT/different
+    //   direction. User spec: 'once she says down up or sitout she sticks to it no
+    //   matter what'. All display values read from snap when present.
+    const snap=tc.snapshot;
+    const isCommittedSnap=snap!==null;
+    const isLockedSnap=snap&&snap.call!=='SIT_OUT';
+    const isSatOutSnap=snap&&snap.call==='SIT_OUT';
+    // Effective values for display — snapshot wins when present
+    const dispCall=isCommittedSnap?snap.call:tc.call;
+    const dispDir=isCommittedSnap?(snap.direction||snap.call):tc.direction;
+    const dispConfidence=isCommittedSnap?snap.confidence:tc.confidence;
+    const dispReason=isCommittedSnap?(snap.reason||(isSatOutSnap?'Sat out — committed at endgame':'Locked')):tc.reason;
+    const isCall=dispCall==='UP'||dispCall==='DOWN';
+    // V5.2: When SIT_OUT but Tara has a proposed direction (conviction > 0), show
+    //   'WATCHING ▼ DOWN' so user sees what she's considering even when not committing.
+    const proposedDir=tc.direction;  // present even on SIT_OUT (gate logic sets it)
+    const isWatchingDir=!snap&&dispCall==='SIT_OUT'&&(proposedDir==='UP'||proposedDir==='DOWN')&&tc.conviction>0;
+    const effDir=isCall?dispCall:isWatchingDir?proposedDir:null;
+    const callColor=effDir==='UP'?(isCall?'text-emerald-300':'text-emerald-400/55'):effDir==='DOWN'?(isCall?'text-rose-300':'text-rose-400/55'):'text-amber-300/80';
+    const borderClr=effDir==='UP'?(isCall?'rgba(52,211,153,0.45)':'rgba(52,211,153,0.22)'):effDir==='DOWN'?(isCall?'rgba(244,114,182,0.45)':'rgba(244,114,182,0.22)'):T2_GOLD_BORDER;
+    const bgClr=effDir==='UP'?(isCall?'rgba(52,211,153,0.08)':'rgba(52,211,153,0.035)'):effDir==='DOWN'?(isCall?'rgba(244,114,182,0.08)':'rgba(244,114,182,0.035)'):'rgba(229,200,112,0.05)';
+    const callLabel=isCall?dispCall:(dispCall==='SIT_OUT'?(isWatchingDir?`WATCHING ${proposedDir}`:'SIT OUT'):dispCall);
+    const arrow=effDir==='UP'?'▲':effDir==='DOWN'?'▼':'—';
+    // V5.1: Phase derived from snapshot + sample state with decision-step countdown.
+    const phaseLabel=snap?(snap.call==='SIT_OUT'?'SAT OUT':'LOCKED'):isCall?'FORMING':tc.call==='SIT_OUT'?'WATCHING':'ANALYZING';
+    const samplesLeft=Math.max(0,(tc.needSamples||3)-(tc.samples||0));
+    // Window timing
+    const _totalSec=windowType==='15m'?900:300;
+    const _elapsed=timeState?Math.max(0,_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining)):0;
+    const _remSec=Math.max(0,_totalSec-_elapsed);
+    const _remMin=Math.floor(_remSec/60),_remRem=_remSec%60;
+    const _remLabel=_remMin>0?`${_remMin}m ${String(_remRem).padStart(2,'0')}s left`:`${_remRem}s left`;
+    const _elapsedFrac=Math.min(1,_elapsed/_totalSec);
+    // Decision-step countdown
+    const _elapsedMin=Math.floor(_elapsed/60);
+    const _secIntoMin=_elapsed%60;
+    const _secToNextMin=60-_secIntoMin;
+    const _nextDecisionMin=_elapsedMin+1;
+    const _totalMin=_totalSec/60;
+    // Minute markers for the bar
+    const _minMarkers=[];
+    for(let m=1;m<_totalMin;m++){
+      _minMarkers.push({pos:(m/_totalMin)*100,m,isPast:_elapsed>=m*60});
+    }
+    // Countdown text + progress
+    let countdownText,phaseHint='',phaseProgressPct;
+    if(snap){
+      countdownText=_remLabel;
+      phaseHint=snap.earlyLock?'committed early':snap.call==='SIT_OUT'?'declined':'committed';
+      phaseProgressPct=_elapsedFrac*100;
+    } else if(isCall){
+      countdownText=samplesLeft===0?'committing this tick':`locks in ~${samplesLeft}s`;
+      phaseHint=`${tc.samples||0}/${tc.needSamples||3} confirms`;
+      phaseProgressPct=tc.needSamples?Math.min(95,(tc.samples/tc.needSamples)*100):50;
+    } else if(tc.call==='SIT_OUT'){
+      countdownText=`check at ${_nextDecisionMin}m (in ${_secToNextMin}s)`;
+      phaseHint='gates loosening each minute';
+      phaseProgressPct=_elapsedFrac*100;
+    } else {
+      countdownText='looking for direction';
+      phaseProgressPct=Math.min(15,_elapsed*0.7);
+    }
+    return(
+      <div className={"mb-3 px-3 py-3 rounded-lg shrink-0 "+(className||"")} style={{background:bgClr,border:'1px solid '+borderClr,boxShadow:isCall?`inset 0 0 24px ${tc.call==='UP'?'rgba(52,211,153,0.06)':'rgba(244,114,182,0.06)'}`:'none'}}>
+        <div className="flex items-baseline justify-between mb-2">
+          <span className="text-[10px] uppercase tracking-[0.22em] font-bold" style={{color:T2_GOLD}}>Tara's Call</span>
+          {snap&&snap.earlyLock&&<span className="text-[8px] tracking-[0.18em] uppercase text-emerald-400/70 font-bold">⚡ early lock</span>}
+        </div>
+        <div className="flex items-center justify-between gap-3 mb-1.5">
+          <div className={`flex items-baseline gap-2 ${callColor}`}>
+            <span className="text-2xl">{arrow}</span>
+            <span className="text-3xl font-serif font-bold tracking-tight leading-none">{callLabel}</span>
+            {isCall&&<span className="text-lg tabular-nums opacity-75 self-baseline">{dispConfidence}%</span>}
+          </div>
+        </div>
+        <div className="text-[11px] text-[#E8E9E4]/65 leading-snug mb-3">{dispReason||'Awaiting signal data...'}</div>
+
+        {/* V4.3: vs General prediction — show how Tara compares to the engine's read */}
+        {analysis&&(()=>{
+          const genPred=analysis.prediction||'';
+          const genPost=analysis.rawProbAbove||50;
+          const genDir=genPred.includes('UP')?'UP':genPred.includes('DOWN')?'DOWN':null;
+          const genState=genPred.includes('LOCKED')?'LOCKED':genPred.includes('FORMING')?'FORMING':genPred.includes('SEARCHING')?'SEARCHING':genPred.includes('SITTING')?'SIT OUT':genPred.includes('REJECTED')?'REJECTED':'WATCHING';
+          const isOverride=dispCall==='SIT_OUT'&&genDir!=null;
+          const isAgree=isCall&&genDir===dispCall;
+          const isDisagree=isCall&&genDir&&genDir!==dispCall;
+          const tagLabel=isOverride?'TARA OVERRIDES — engine sees a call, Tara isn\'t convinced':isAgree?'TARA AGREES — same direction as engine':isDisagree?'TARA DISAGREES — engine and Tara split':'TARA OBSERVING — engine still searching';
+          const tagColor=isOverride?'text-amber-400/85':isAgree?'text-emerald-400/85':isDisagree?'text-rose-400/85':'text-[#E8E9E4]/45';
+          const genArrow=genDir==='UP'?'▲':genDir==='DOWN'?'▼':'—';
+          const genColor=genDir==='UP'?'text-emerald-400/65':genDir==='DOWN'?'text-rose-400/65':'text-[#E8E9E4]/45';
+          return(
+            <div className="mb-3 px-2.5 py-2 rounded-md bg-[#0E100F]/50 border border-[#E8E9E4]/8">
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-[8px] uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold">Engine general prediction</span>
+              </div>
+              <div className="flex items-baseline justify-between gap-2">
+                <div className={`flex items-baseline gap-1.5 ${genColor}`}>
+                  <span className="text-sm">{genArrow}</span>
+                  <span className="text-sm font-bold tabular-nums">{genState}</span>
+                  {genDir&&<span className="text-[10px] tabular-nums opacity-70">{genPost.toFixed(0)}%</span>}
+                </div>
+                <span className={`text-[9px] tracking-wider uppercase font-bold ${tagColor} text-right`}>{tagLabel.split('—')[0].trim()}</span>
+              </div>
+              <div className="text-[9px] text-[#E8E9E4]/45 mt-1 italic">{tagLabel.split('—')[1]?.trim()||''}</div>
+            </div>
+          );
+        })()}
+
+        {/* V5.1: Phase strip with minute-marker decision-progress timeline. */}
+        <div className="mb-3">
+          <div className="flex justify-between items-baseline mb-1 gap-2">
+            <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold shrink-0">Phase · {phaseLabel}</span>
+            <div className="flex items-baseline gap-1.5 min-w-0 justify-end">
+              <span className={`text-[10px] tabular-nums font-bold tracking-wide truncate ${isCall&&!snap?'text-[#E8E9E4]/85':snap?'text-[#E8E9E4]/85':'text-[#E8E9E4]/45'}`}>{countdownText}</span>
+              {phaseHint&&<span className="text-[8px] tracking-wider text-[#E8E9E4]/35 hidden sm:inline">· {phaseHint}</span>}
+            </div>
+          </div>
+          <div className="relative h-1.5 bg-[#0E100F] rounded-full overflow-hidden">
+            {/* Minute tick markers */}
+            {_minMarkers.map((mk,i)=>(
+              <div key={i} className="absolute top-0 bottom-0 w-px" style={{
+                left:mk.pos+'%',
+                background:mk.isPast?'rgba(229,200,112,0.4)':'rgba(232,233,228,0.15)',
+              }}></div>
+            ))}
+            {/* Progress fill — elapsed-time based */}
+            <div className="absolute top-0 bottom-0 left-0 transition-all duration-700" style={{
+              width:(_elapsedFrac*100).toFixed(1)+'%',
+              background:isCall?(tc.call==='UP'?'rgba(52,211,153,0.6)':'rgba(244,114,182,0.6)'):tc.call==='SIT_OUT'?'rgba(245,158,11,0.5)':T2_GOLD,
+              opacity:0.85,
+            }}/>
+            {/* Position marker */}
+            <div className="absolute top-0 bottom-0 w-0.5 transition-all duration-700" style={{
+              left:(_elapsedFrac*100).toFixed(1)+'%',
+              background:isCall?(tc.call==='UP'?'rgba(52,211,153,0.9)':'rgba(244,114,182,0.9)'):snap?'rgba(245,158,11,0.7)':T2_GOLD,
+              transform:'translateX(-50%)',
+              boxShadow:'0 0 4px currentColor',
+            }}/>
+          </div>
+          {_totalMin>=10&&(
+            <div className="flex justify-between mt-0.5 px-px text-[7px] text-[#E8E9E4]/30 tabular-nums">
+              <span>0</span><span>5m</span><span>10m</span><span>15m</span>
+            </div>
+          )}
+        </div>
+
+        {/* V4.3: Scorecard — visible, larger numbers, color-coded. */}
+        <div className="border-t border-[#E8E9E4]/8 pt-2.5">
+          <div className="flex justify-between items-baseline mb-1.5">
+            <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/45 font-bold">Tara's Record</span>
+            {wr!==null&&<span className="text-[10px] tabular-nums text-[#E8E9E4]/60">{wr}% win rate</span>}
+            {wr===null&&<span className="text-[10px] text-[#E8E9E4]/35">no calls yet</span>}
+          </div>
+          <div className="flex items-end gap-3">
+            <div className="flex flex-col items-center">
+              <span className="text-2xl font-serif font-bold text-emerald-400 tabular-nums leading-none">{sc.wins||0}</span>
+              <span className="text-[8px] uppercase tracking-wider text-emerald-400/60 mt-1">wins</span>
+            </div>
+            <div className="h-7 w-px bg-[#E8E9E4]/10"></div>
+            <div className="flex flex-col items-center">
+              <span className="text-2xl font-serif font-bold text-rose-400 tabular-nums leading-none">{sc.losses||0}</span>
+              <span className="text-[8px] uppercase tracking-wider text-rose-400/60 mt-1">losses</span>
+            </div>
+            <div className="h-7 w-px bg-[#E8E9E4]/10"></div>
+            <div className="flex flex-col items-center">
+              <span className="text-2xl font-serif font-bold tabular-nums leading-none" style={{color:T2_GOLD}}>{sc.sitouts||0}</span>
+              <span className="text-[8px] uppercase tracking-wider mt-1" style={{color:'rgba(229,200,112,0.6)'}}>sat out</span>
+            </div>
+          </div>
+        </div>
+
+        {/* V5.6.1: Tara's Memory — last 6 calls with results. Synced to Firestore so it
+            survives refresh + spans devices. Click "all" to see the full history. */}
+        {taraCallLog&&taraCallLog.length>0&&(
+          <TaraMemoryStrip taraCallLog={taraCallLog} windowType={windowType}/>
+        )}
+      </div>
+    );
+
+}
+
+// V5.6.1: Tara's Memory — compact strip showing the most recent calls inline in the
+//   Tara card. Click "all" to open a fuller paged view. The strip + modal both source
+//   from taraCallLog (cloud-synced array of every call she's made).
+function TaraMemoryStrip({taraCallLog,windowType}){
+  const[open,setOpen]=React.useState(false);
+  const recent=React.useMemo(()=>{
+    return [...taraCallLog].filter(e=>e&&e.windowType===windowType).slice(-6).reverse();
+  },[taraCallLog,windowType]);
+  if(recent.length===0)return null;
+  const _resultColors={WIN:{bg:'rgba(52,211,153,0.18)',fg:'rgba(110,231,183,0.95)'},LOSS:{bg:'rgba(244,114,182,0.18)',fg:'rgba(244,114,182,0.95)'},SITOUT:{bg:'rgba(229,200,112,0.16)',fg:'rgba(229,200,112,0.85)'},pending:{bg:'rgba(232,233,228,0.06)',fg:'rgba(232,233,228,0.5)'}};
+  const _dirArrow=(d)=>d==='UP'?'▲':d==='DOWN'?'▼':'·';
+  const _fmtTime=(ms)=>{const d=new Date(ms);return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});};
+  return React.createElement(React.Fragment,null,
+    React.createElement('div',{className:'border-t border-[#E8E9E4]/8 pt-2.5 mt-2.5'},
+      React.createElement('div',{className:'flex justify-between items-baseline mb-1.5'},
+        React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/45 font-bold'},'Tara\'s Memory'),
+        React.createElement('button',{onClick:()=>setOpen(true),className:'text-[9px] uppercase tracking-wider text-indigo-400/70 hover:text-indigo-300 font-bold'},'all →'),
+      ),
+      React.createElement('div',{className:'flex flex-wrap gap-1'},
+        recent.map((e)=>{
+          const r=e.result||'pending';
+          const c=_resultColors[r]||_resultColors.pending;
+          return React.createElement('div',{
+            key:e.id,
+            className:'flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] tabular-nums font-bold',
+            style:{background:c.bg,color:c.fg},
+            title:`${_fmtTime(e.time)} · ${e.regime||'?'} · q${e.qScore||0} · ${e.dir} ${e.confidence||0}% · ${r}${e.gapBps?` · ${e.gapBps>=0?'+':''}${e.gapBps.toFixed(0)}bps`:''}`,
+          },
+            React.createElement('span',null,_dirArrow(e.dir)),
+            React.createElement('span',{className:'text-[8px] opacity-70'},_fmtTime(e.time)),
+            e.result&&React.createElement('span',{className:'text-[8px]'},r==='WIN'?'✓':r==='LOSS'?'✗':'—'),
+          );
+        })
+      ),
+    ),
+    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false)}),
+  );
+}
+
+// V5.6.1: Full memory history modal. Filter by window type, sort newest first.
+function TaraMemoryModal({taraCallLog,onClose}){
+  const[filter,setFilter]=React.useState('all'); // all | 15m | 5m | wins | losses | sitouts
+  const filtered=React.useMemo(()=>{
+    let arr=[...taraCallLog].reverse();
+    if(filter==='15m'||filter==='5m')arr=arr.filter(e=>e.windowType===filter);
+    else if(filter==='wins')arr=arr.filter(e=>e.result==='WIN');
+    else if(filter==='losses')arr=arr.filter(e=>e.result==='LOSS');
+    else if(filter==='sitouts')arr=arr.filter(e=>e.result==='SITOUT');
+    return arr;
+  },[taraCallLog,filter]);
+  const counts=React.useMemo(()=>{
+    return {
+      total:taraCallLog.length,
+      wins:taraCallLog.filter(e=>e.result==='WIN').length,
+      losses:taraCallLog.filter(e=>e.result==='LOSS').length,
+      sitouts:taraCallLog.filter(e=>e.result==='SITOUT').length,
+      pending:taraCallLog.filter(e=>!e.result).length,
+    };
+  },[taraCallLog]);
+  const _wr=counts.wins+counts.losses>0?Math.round((counts.wins/(counts.wins+counts.losses))*100):null;
+  const _resultStyle=(r)=>r==='WIN'?{color:'rgba(110,231,183,0.95)'}:r==='LOSS'?{color:'rgba(244,114,182,0.95)'}:r==='SITOUT'?{color:'rgba(229,200,112,0.85)'}:{color:'rgba(232,233,228,0.4)'};
+  const _dirStyle=(d)=>d==='UP'?{color:'rgba(110,231,183,0.85)'}:d==='DOWN'?{color:'rgba(244,114,182,0.85)'}:{color:'rgba(229,200,112,0.7)'};
+  return React.createElement('div',{
+    className:'fixed inset-0 z-50 bg-[#0E100F]/95 backdrop-blur-md overflow-y-auto',
+    onClick:(e)=>{if(e.target===e.currentTarget)onClose();},
+  },
+    React.createElement('div',{className:'max-w-[900px] mx-auto px-4 py-6 sm:py-8'},
+      React.createElement('div',{className:'flex items-center justify-between mb-5'},
+        React.createElement('div',null,
+          React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-[0.18em]',style:{color:T2_GOLD}},'TARA · MEMORY'),
+          React.createElement('h2',{className:'font-serif text-3xl text-white tracking-tight'},'Every call, ',React.createElement('span',{style:{color:T2_GOLD}},'·'),' her record'),
+        ),
+        React.createElement('button',{onClick:onClose,className:'p-2 rounded-lg hover:bg-[#E8E9E4]/5 text-[#E8E9E4]/60 hover:text-white transition-colors text-xl'},'✕'),
+      ),
+      React.createElement('div',{className:'grid grid-cols-2 sm:grid-cols-5 gap-2 mb-5'},
+        React.createElement('div',{className:'bg-[#181A19] border border-[#E8E9E4]/8 rounded-xl p-3'},
+          React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 font-bold mb-1'},'Total calls'),
+          React.createElement('div',{className:'text-2xl font-bold text-white tabular-nums'},counts.total),
+        ),
+        React.createElement('div',{className:'bg-[#181A19] border border-[#E8E9E4]/8 rounded-xl p-3'},
+          React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 font-bold mb-1'},'Win rate'),
+          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:_wr>=60?'rgb(110,231,183)':_wr>=50?'#fff':'rgb(244,114,182)'}},_wr!==null?`${_wr}%`:'—'),
+        ),
+        React.createElement('div',{className:'bg-[#181A19] border border-[#E8E9E4]/8 rounded-xl p-3'},
+          React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 font-bold mb-1'},'Wins'),
+          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(110,231,183)'}},counts.wins),
+        ),
+        React.createElement('div',{className:'bg-[#181A19] border border-[#E8E9E4]/8 rounded-xl p-3'},
+          React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 font-bold mb-1'},'Losses'),
+          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(244,114,182)'}},counts.losses),
+        ),
+        React.createElement('div',{className:'bg-[#181A19] border border-[#E8E9E4]/8 rounded-xl p-3'},
+          React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 font-bold mb-1'},'Sat out'),
+          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:T2_GOLD}},counts.sitouts),
+        ),
+      ),
+      React.createElement('div',{className:'flex flex-wrap gap-1 mb-4'},
+        ['all','15m','5m','wins','losses','sitouts'].map(f=>(
+          React.createElement('button',{
+            key:f,
+            onClick:()=>setFilter(f),
+            className:'px-3 py-1 text-[10px] uppercase font-bold tracking-wider rounded-md transition-colors '+(filter===f?'':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70'),
+            style:filter===f?{background:'rgba(229,200,112,0.12)',color:T2_GOLD,border:'1px solid rgba(229,200,112,0.3)'}:{border:'1px solid rgba(232,233,228,0.08)'},
+          },f)
+        )),
+      ),
+      React.createElement('div',{className:'bg-[#181A19] border border-[#E8E9E4]/8 rounded-xl overflow-hidden'},
+        filtered.length===0
+          ? React.createElement('div',{className:'p-8 text-center text-[#E8E9E4]/40 italic'},'No calls match this filter yet.')
+          : React.createElement('div',{className:'divide-y divide-[#E8E9E4]/5 max-h-[60vh] overflow-y-auto'},
+              filtered.map((e)=>(
+                React.createElement('div',{key:e.id,className:'px-3 sm:px-4 py-2.5 hover:bg-[#E8E9E4]/3 flex items-center justify-between gap-3 text-xs'},
+                  React.createElement('div',{className:'flex items-center gap-2 sm:gap-3 min-w-0 flex-1'},
+                    React.createElement('span',{className:'tabular-nums text-[10px] text-[#E8E9E4]/40 shrink-0',style:{minWidth:80}},new Date(e.time).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})),
+                    React.createElement('span',{className:'tabular-nums text-[10px] text-[#E8E9E4]/30 shrink-0 hidden sm:inline'},e.windowType),
+                    React.createElement('span',{className:'font-bold tabular-nums shrink-0',style:_dirStyle(e.dir)},e.dir==='UP'?'▲ UP':e.dir==='DOWN'?'▼ DOWN':'· SIT'),
+                    React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40 shrink-0 hidden sm:inline'},'q',e.qScore||0),
+                    e.regime&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/35 truncate hidden md:inline'},e.regime),
+                    e.confidence&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40 tabular-nums shrink-0'},e.confidence,'%'),
+                  ),
+                  React.createElement('div',{className:'flex items-center gap-2 shrink-0'},
+                    e.gapBps!=null&&React.createElement('span',{className:'text-[10px] tabular-nums',style:{color:e.gapBps>=0?'rgba(110,231,183,0.7)':'rgba(244,114,182,0.7)'}},(e.gapBps>=0?'+':'')+e.gapBps.toFixed(0)+'bps'),
+                    React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider',style:_resultStyle(e.result)},e.result||'pending'),
+                  ),
+                )
+              )),
+            ),
+      ),
+      React.createElement('div',{className:'mt-4 text-[10px] text-[#E8E9E4]/40 leading-relaxed'},'Memory is cloud-synced — same record across devices. Showing ',filtered.length,' of ',taraCallLog.length,' total. Capped at 500 most recent.'),
+    ),
+  );
+}
+
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,timeState}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -3414,185 +3806,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,
       <T2Stamp code="PROJ · 042"/>
 
       {/* V4.2: TARA'S CALL — primary panel, top of column. */}
-      {taraCall&&(()=>{
-        const tc=taraCall;
-        const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
-        const total=(sc.wins||0)+(sc.losses||0);
-        const wr=total>0?Math.round((sc.wins/total)*100):null;
-        // V5.5b/c: Snapshot persistence. Once Tara has committed (snap set), the display
-        //   stays committed for the window — never flips back to WATCHING/SIT_OUT/different
-        //   direction. User spec: 'once she says down up or sitout she sticks to it no
-        //   matter what'. All display values read from snap when present.
-        const snap=tc.snapshot;
-        const isCommittedSnap=snap!==null;
-        const isLockedSnap=snap&&snap.call!=='SIT_OUT';
-        const isSatOutSnap=snap&&snap.call==='SIT_OUT';
-        // Effective values for display — snapshot wins when present
-        const dispCall=isCommittedSnap?snap.call:tc.call;
-        const dispDir=isCommittedSnap?(snap.direction||snap.call):tc.direction;
-        const dispConfidence=isCommittedSnap?snap.confidence:tc.confidence;
-        const dispReason=isCommittedSnap?(snap.reason||(isSatOutSnap?'Sat out — committed at endgame':'Locked')):tc.reason;
-        const isCall=dispCall==='UP'||dispCall==='DOWN';
-        // V5.2: When SIT_OUT but Tara has a proposed direction (conviction > 0), show
-        //   'WATCHING ▼ DOWN' so user sees what she's considering even when not committing.
-        const proposedDir=tc.direction;  // present even on SIT_OUT (gate logic sets it)
-        const isWatchingDir=!snap&&dispCall==='SIT_OUT'&&(proposedDir==='UP'||proposedDir==='DOWN')&&tc.conviction>0;
-        const effDir=isCall?dispCall:isWatchingDir?proposedDir:null;
-        const callColor=effDir==='UP'?(isCall?'text-emerald-300':'text-emerald-400/55'):effDir==='DOWN'?(isCall?'text-rose-300':'text-rose-400/55'):'text-amber-300/80';
-        const borderClr=effDir==='UP'?(isCall?'rgba(52,211,153,0.45)':'rgba(52,211,153,0.22)'):effDir==='DOWN'?(isCall?'rgba(244,114,182,0.45)':'rgba(244,114,182,0.22)'):T2_GOLD_BORDER;
-        const bgClr=effDir==='UP'?(isCall?'rgba(52,211,153,0.08)':'rgba(52,211,153,0.035)'):effDir==='DOWN'?(isCall?'rgba(244,114,182,0.08)':'rgba(244,114,182,0.035)'):'rgba(229,200,112,0.05)';
-        const callLabel=isCall?dispCall:(dispCall==='SIT_OUT'?(isWatchingDir?`WATCHING ${proposedDir}`:'SIT OUT'):dispCall);
-        const arrow=effDir==='UP'?'▲':effDir==='DOWN'?'▼':'—';
-        // V5.1: Phase derived from snapshot + sample state with decision-step countdown.
-        const phaseLabel=snap?(snap.call==='SIT_OUT'?'SAT OUT':'LOCKED'):isCall?'FORMING':tc.call==='SIT_OUT'?'WATCHING':'ANALYZING';
-        const samplesLeft=Math.max(0,(tc.needSamples||3)-(tc.samples||0));
-        // Window timing
-        const _totalSec=windowType==='15m'?900:300;
-        const _elapsed=timeState?Math.max(0,_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining)):0;
-        const _remSec=Math.max(0,_totalSec-_elapsed);
-        const _remMin=Math.floor(_remSec/60),_remRem=_remSec%60;
-        const _remLabel=_remMin>0?`${_remMin}m ${String(_remRem).padStart(2,'0')}s left`:`${_remRem}s left`;
-        const _elapsedFrac=Math.min(1,_elapsed/_totalSec);
-        // Decision-step countdown
-        const _elapsedMin=Math.floor(_elapsed/60);
-        const _secIntoMin=_elapsed%60;
-        const _secToNextMin=60-_secIntoMin;
-        const _nextDecisionMin=_elapsedMin+1;
-        const _totalMin=_totalSec/60;
-        // Minute markers for the bar
-        const _minMarkers=[];
-        for(let m=1;m<_totalMin;m++){
-          _minMarkers.push({pos:(m/_totalMin)*100,m,isPast:_elapsed>=m*60});
-        }
-        // Countdown text + progress
-        let countdownText,phaseHint='',phaseProgressPct;
-        if(snap){
-          countdownText=_remLabel;
-          phaseHint=snap.earlyLock?'committed early':snap.call==='SIT_OUT'?'declined':'committed';
-          phaseProgressPct=_elapsedFrac*100;
-        } else if(isCall){
-          countdownText=samplesLeft===0?'committing this tick':`locks in ~${samplesLeft}s`;
-          phaseHint=`${tc.samples||0}/${tc.needSamples||3} confirms`;
-          phaseProgressPct=tc.needSamples?Math.min(95,(tc.samples/tc.needSamples)*100):50;
-        } else if(tc.call==='SIT_OUT'){
-          countdownText=`check at ${_nextDecisionMin}m (in ${_secToNextMin}s)`;
-          phaseHint='gates loosening each minute';
-          phaseProgressPct=_elapsedFrac*100;
-        } else {
-          countdownText='looking for direction';
-          phaseProgressPct=Math.min(15,_elapsed*0.7);
-        }
-        return(
-          <div className="mb-3 px-3 py-3 rounded-lg shrink-0" style={{background:bgClr,border:'1px solid '+borderClr,boxShadow:isCall?`inset 0 0 24px ${tc.call==='UP'?'rgba(52,211,153,0.06)':'rgba(244,114,182,0.06)'}`:'none'}}>
-            <div className="flex items-baseline justify-between mb-2">
-              <span className="text-[10px] uppercase tracking-[0.22em] font-bold" style={{color:T2_GOLD}}>Tara's Call</span>
-              {snap&&snap.earlyLock&&<span className="text-[8px] tracking-[0.18em] uppercase text-emerald-400/70 font-bold">⚡ early lock</span>}
-            </div>
-            <div className="flex items-center justify-between gap-3 mb-1.5">
-              <div className={`flex items-baseline gap-2 ${callColor}`}>
-                <span className="text-2xl">{arrow}</span>
-                <span className="text-3xl font-serif font-bold tracking-tight leading-none">{callLabel}</span>
-                {isCall&&<span className="text-lg tabular-nums opacity-75 self-baseline">{dispConfidence}%</span>}
-              </div>
-            </div>
-            <div className="text-[11px] text-[#E8E9E4]/65 leading-snug mb-3">{dispReason||'Awaiting signal data...'}</div>
-
-            {/* V4.3: vs General prediction — show how Tara compares to the engine's read */}
-            {analysis&&(()=>{
-              const genPred=analysis.prediction||'';
-              const genPost=analysis.rawProbAbove||50;
-              const genDir=genPred.includes('UP')?'UP':genPred.includes('DOWN')?'DOWN':null;
-              const genState=genPred.includes('LOCKED')?'LOCKED':genPred.includes('FORMING')?'FORMING':genPred.includes('SEARCHING')?'SEARCHING':genPred.includes('SITTING')?'SIT OUT':genPred.includes('REJECTED')?'REJECTED':'WATCHING';
-              const isOverride=dispCall==='SIT_OUT'&&genDir!=null;
-              const isAgree=isCall&&genDir===dispCall;
-              const isDisagree=isCall&&genDir&&genDir!==dispCall;
-              const tagLabel=isOverride?'TARA OVERRIDES — engine sees a call, Tara isn\'t convinced':isAgree?'TARA AGREES — same direction as engine':isDisagree?'TARA DISAGREES — engine and Tara split':'TARA OBSERVING — engine still searching';
-              const tagColor=isOverride?'text-amber-400/85':isAgree?'text-emerald-400/85':isDisagree?'text-rose-400/85':'text-[#E8E9E4]/45';
-              const genArrow=genDir==='UP'?'▲':genDir==='DOWN'?'▼':'—';
-              const genColor=genDir==='UP'?'text-emerald-400/65':genDir==='DOWN'?'text-rose-400/65':'text-[#E8E9E4]/45';
-              return(
-                <div className="mb-3 px-2.5 py-2 rounded-md bg-[#0E100F]/50 border border-[#E8E9E4]/8">
-                  <div className="flex items-baseline justify-between mb-1">
-                    <span className="text-[8px] uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold">Engine general prediction</span>
-                  </div>
-                  <div className="flex items-baseline justify-between gap-2">
-                    <div className={`flex items-baseline gap-1.5 ${genColor}`}>
-                      <span className="text-sm">{genArrow}</span>
-                      <span className="text-sm font-bold tabular-nums">{genState}</span>
-                      {genDir&&<span className="text-[10px] tabular-nums opacity-70">{genPost.toFixed(0)}%</span>}
-                    </div>
-                    <span className={`text-[9px] tracking-wider uppercase font-bold ${tagColor} text-right`}>{tagLabel.split('—')[0].trim()}</span>
-                  </div>
-                  <div className="text-[9px] text-[#E8E9E4]/45 mt-1 italic">{tagLabel.split('—')[1]?.trim()||''}</div>
-                </div>
-              );
-            })()}
-
-            {/* V5.1: Phase strip with minute-marker decision-progress timeline. */}
-            <div className="mb-3">
-              <div className="flex justify-between items-baseline mb-1 gap-2">
-                <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold shrink-0">Phase · {phaseLabel}</span>
-                <div className="flex items-baseline gap-1.5 min-w-0 justify-end">
-                  <span className={`text-[10px] tabular-nums font-bold tracking-wide truncate ${isCall&&!snap?'text-[#E8E9E4]/85':snap?'text-[#E8E9E4]/85':'text-[#E8E9E4]/45'}`}>{countdownText}</span>
-                  {phaseHint&&<span className="text-[8px] tracking-wider text-[#E8E9E4]/35 hidden sm:inline">· {phaseHint}</span>}
-                </div>
-              </div>
-              <div className="relative h-1.5 bg-[#0E100F] rounded-full overflow-hidden">
-                {/* Minute tick markers */}
-                {_minMarkers.map((mk,i)=>(
-                  <div key={i} className="absolute top-0 bottom-0 w-px" style={{
-                    left:mk.pos+'%',
-                    background:mk.isPast?'rgba(229,200,112,0.4)':'rgba(232,233,228,0.15)',
-                  }}></div>
-                ))}
-                {/* Progress fill — elapsed-time based */}
-                <div className="absolute top-0 bottom-0 left-0 transition-all duration-700" style={{
-                  width:(_elapsedFrac*100).toFixed(1)+'%',
-                  background:isCall?(tc.call==='UP'?'rgba(52,211,153,0.6)':'rgba(244,114,182,0.6)'):tc.call==='SIT_OUT'?'rgba(245,158,11,0.5)':T2_GOLD,
-                  opacity:0.85,
-                }}/>
-                {/* Position marker */}
-                <div className="absolute top-0 bottom-0 w-0.5 transition-all duration-700" style={{
-                  left:(_elapsedFrac*100).toFixed(1)+'%',
-                  background:isCall?(tc.call==='UP'?'rgba(52,211,153,0.9)':'rgba(244,114,182,0.9)'):snap?'rgba(245,158,11,0.7)':T2_GOLD,
-                  transform:'translateX(-50%)',
-                  boxShadow:'0 0 4px currentColor',
-                }}/>
-              </div>
-              {_totalMin>=10&&(
-                <div className="flex justify-between mt-0.5 px-px text-[7px] text-[#E8E9E4]/30 tabular-nums">
-                  <span>0</span><span>5m</span><span>10m</span><span>15m</span>
-                </div>
-              )}
-            </div>
-
-            {/* V4.3: Scorecard — visible, larger numbers, color-coded. */}
-            <div className="border-t border-[#E8E9E4]/8 pt-2.5">
-              <div className="flex justify-between items-baseline mb-1.5">
-                <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/45 font-bold">Tara's Record</span>
-                {wr!==null&&<span className="text-[10px] tabular-nums text-[#E8E9E4]/60">{wr}% win rate</span>}
-                {wr===null&&<span className="text-[10px] text-[#E8E9E4]/35">no calls yet</span>}
-              </div>
-              <div className="flex items-end gap-3">
-                <div className="flex flex-col items-center">
-                  <span className="text-2xl font-serif font-bold text-emerald-400 tabular-nums leading-none">{sc.wins||0}</span>
-                  <span className="text-[8px] uppercase tracking-wider text-emerald-400/60 mt-1">wins</span>
-                </div>
-                <div className="h-7 w-px bg-[#E8E9E4]/10"></div>
-                <div className="flex flex-col items-center">
-                  <span className="text-2xl font-serif font-bold text-rose-400 tabular-nums leading-none">{sc.losses||0}</span>
-                  <span className="text-[8px] uppercase tracking-wider text-rose-400/60 mt-1">losses</span>
-                </div>
-                <div className="h-7 w-px bg-[#E8E9E4]/10"></div>
-                <div className="flex flex-col items-center">
-                  <span className="text-2xl font-serif font-bold tabular-nums leading-none" style={{color:T2_GOLD}}>{sc.sitouts||0}</span>
-                  <span className="text-[8px] uppercase tracking-wider mt-1" style={{color:'rgba(229,200,112,0.6)'}}>sat out</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} className="hidden md:block"/>
 
       <div className="flex items-center justify-between mb-3 shrink-0">
         <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
@@ -5082,7 +5296,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.5.5</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.6.1</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5323,6 +5537,37 @@ function TaraApp(){
   // V4.2: Track consecutive frames Tara has a directional call. Used to determine when
   //   she's confident enough to lock early — fast for clean setups, slower for mixed.
   const taraCallSampleRef=useRef({dir:null,count:0});
+  // V5.6.1: TARA CALL LOG — per-call memory. Every call she commits (UP/DOWN/SIT_OUT) appends
+  //   one entry; on rollover scoring the entry gets a result. This is "Tara's training records"
+  //   — the user-visible audit trail of what she called, why, and how it resolved. Persisted
+  //   to Firestore so it accumulates across sessions and devices. Capped at 500 most-recent
+  //   entries to keep payload size sane.
+  const[taraCallLog,setTaraCallLog]=useState(()=>{
+    try{const stored=localStorage.getItem('taraCallLog_v1');if(stored)return JSON.parse(stored);}catch(e){}
+    return[];
+  });
+  const taraCallLogRef=useRef(taraCallLog);
+  taraCallLogRef.current=taraCallLog;
+  useEffect(()=>{
+    try{localStorage.setItem('taraCallLog_v1',JSON.stringify(taraCallLog.slice(-500)));}catch(e){}
+    cloudWriteDebounced('memory/taraCallLog',{entries:taraCallLog.slice(-500)},1500);
+  },[taraCallLog]);
+  // V5.6.1: Hydrate call log from Firestore on mount. Cloud entries that aren't in local
+  //   merge in — covers the case where another device logged calls this device hasn't seen.
+  useEffect(()=>{
+    let cancelled=false;
+    cloudRead('memory/taraCallLog').then(d=>{
+      if(cancelled||!d||!Array.isArray(d.entries)||!d.entries.length)return;
+      setTaraCallLog(prev=>{
+        const seen=new Set(prev.map(e=>e.id));
+        const merged=[...prev];
+        d.entries.forEach(e=>{if(e&&e.id&&!seen.has(e.id))merged.push(e);});
+        merged.sort((a,b)=>(a.id||0)-(b.id||0));
+        return merged.slice(-500);
+      });
+    });
+    return()=>{cancelled=true;};
+  },[]);
   // V5.6: Save/clear the active window's lock state to Firestore. Refresh restores from this.
   //   _persistLock writes whatever the refs currently hold (engine lock + Tara snapshot +
   //   sample formation progress). _clearLock wipes the doc — used only on rollover when
@@ -5412,7 +5657,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.6.0 online — Firestore sync active · refresh now restores locks · scorecards persist across devices.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.6.1 online — Memory log live · cloud sync visible · Call card moved to Signal tab on mobile · refresh restores locks · scorecards persist across devices.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5552,7 +5797,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.5.5'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.6.1'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -5725,7 +5970,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.5.5  |  signal'},
+        footer:{text:'Tara 5.6.1  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5739,7 +5984,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.5.5  |  stand-down'},
+        footer:{text:'Tara 5.6.1  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5753,7 +5998,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.5.5  |  search'},
+        footer:{text:'Tara 5.6.1  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5770,7 +6015,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.5.5  |  lock'},
+        footer:{text:'Tara 5.6.1  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5787,7 +6032,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.5.5  |  close'},
+          footer:{text:'Tara 5.6.1  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5808,7 +6053,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.5.5  |  exit'},
+        footer:{text:'Tara 5.6.1  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5829,7 +6074,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.5.5  |  scanning'},
+        footer:{text:'Tara 5.6.1  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5849,7 +6094,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.5.5  |  signal'},
+        footer:{text:'Tara 5.6.1  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5869,7 +6114,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.5.5  |  lock'},
+        footer:{text:'Tara 5.6.1  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5886,7 +6131,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.5.5  |  sit-out'},
+        footer:{text:'Tara 5.6.1  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5908,7 +6153,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.5.5  |  result'},
+          footer:{text:'Tara 5.6.1  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5945,12 +6190,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.5.5  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.6.1  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.5.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.6.1',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -5969,7 +6214,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.5.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.6.1 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -6507,6 +6752,18 @@ function TaraApp(){
           const _snap=taraCallSnapshotRef.current;
           const _outcomeDir=currentPrice>_scoringStrike?'UP':currentPrice<_scoringStrike?'DOWN':null;
           const _gap=_scoringStrike>0?((currentPrice-_scoringStrike)/_scoringStrike)*10000:0;
+          // V5.6.1: helper — populate result on the latest unresolved log entry. Matched by
+          //   most-recent entry with result===null and same windowType. Robust to repeats
+          //   across multiple windows.
+          const _logResult=(resultStr)=>{
+            setTaraCallLog(prev=>{
+              const idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e.result===null&&e.windowType===windowType);
+              if(!idx)return prev;
+              const next=[...prev];
+              next[idx.i]={...idx.e,result:resultStr,outcomeDir:_outcomeDir,strike:_scoringStrike,closingPrice:currentPrice,gapBps:_gap,resolvedAt:Date.now()};
+              return next;
+            });
+          };
           // No snapshot OR explicit SIT_OUT → sitouts++
           if(!_snap||_snap.call==='SIT_OUT'){
             setTaraScorecards(prev=>{
@@ -6519,6 +6776,7 @@ function TaraApp(){
               broadcastToDiscord('TARA_RESULT',{result:'SITOUT',calledDir:'SIT_OUT',outcomeDir:_outcomeDir,window:windowType,strike:targetMargin,price:currentPrice,gap:_gap,taraRecord});
               return next;
             });
+            _logResult('SITOUT');
           } else if(_outcomeDir&&(_snap.call==='UP'||_snap.call==='DOWN')){
             // Real call — score against outcome
             const _won=_snap.call===_outcomeDir;
@@ -6531,6 +6789,7 @@ function TaraApp(){
               broadcastToDiscord('TARA_RESULT',{result:_won?'WIN':'LOSS',calledDir:_snap.call,outcomeDir:_outcomeDir,window:windowType,strike:targetMargin,price:currentPrice,gap:_gap,taraRecord});
               return next;
             });
+            _logResult(_won?'WIN':'LOSS');
           }
         }
         // Clear snapshot for next window
@@ -7614,6 +7873,18 @@ function TaraApp(){
           earlyLock:false,
         };
         _persistLock(); // V5.6: cloud-save SIT_OUT commit
+        // V5.6.1: log entry — committed SIT_OUT
+        const _entry={
+          id:Date.now(),time:Date.now(),windowType,
+          regime:analysis?.regime||'',
+          dir:'SIT_OUT',confidence:tc.confidence,
+          posterior:analysis?.rawProbAbove,
+          qScore:Math.round(qualityGate?.score||0),
+          fgt:analysis?.mtfAlignment,
+          reason:tc.reason,
+          result:null, // populated at rollover
+        };
+        setTaraCallLog(prev=>[...prev,_entry].slice(-500));
       }
       return;
     }
@@ -7678,6 +7949,20 @@ function TaraApp(){
         needSamples,
       };
       _persistLock(); // V5.6: cloud-save LOCKED snapshot
+      // V5.6.1: log entry — committed UP/DOWN
+      const _entry={
+        id:Date.now(),time:Date.now(),windowType,
+        regime:analysis?.regime||'',
+        dir:_committedCall,confidence:tc.confidence,
+        posterior:analysis?.rawProbAbove,
+        qScore:Math.round(qualityGate?.score||0),
+        fgt:analysis?.mtfAlignment,
+        reason:_committedReason,
+        earlyLock:!analysis?.isSystemLocked,
+        samples,needSamples,
+        result:null, // populated at rollover scoring
+      };
+      setTaraCallLog(prev=>[...prev,_entry].slice(-500));
     } else {
       // V5.6: Mid-formation persist — refresh during ANALYZING/FORMING restores sample
       //   count so Tara picks up where she left off instead of resetting to 0/N. Debounced
@@ -8203,7 +8488,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.5.5...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.6.1...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -8304,8 +8589,10 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.5.5
+              5.6.1
             </span>
+            {/* V5.6.1: Cloud sync indicator — visible on all viewports. Click for details. */}
+            <CloudSyncBadge/>
           </div>
 
           {/* Live Price — shrinks gracefully, never truncates on sm+ */}
@@ -8735,11 +9022,14 @@ function TaraApp(){
               );
             })()}
 
+            {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab. */}
+            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} className="md:hidden"/>
+
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} timeState={timeState}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab}/>
@@ -8869,7 +9159,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.5.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.6.1</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -9495,7 +9785,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.5.5 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.6.1 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -9651,7 +9941,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.5.5 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.6.1 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
