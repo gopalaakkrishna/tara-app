@@ -3351,18 +3351,19 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,windowType,
         const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
         const total=(sc.wins||0)+(sc.losses||0);
         const wr=total>0?Math.round((sc.wins/total)*100):null;
-        // V5.5b: Snapshot persistence. Once Tara has committed (snap locked), the display
-        //   should NOT shift back to WATCHING just because subsequent renders see gate failures.
-        //   The lock IS her decision for this window. Read all display values from snap when
-        //   it exists and is locked. Only fall back to current tc when no commit yet.
+        // V5.5b/c: Snapshot persistence. Once Tara has committed (snap set), the display
+        //   stays committed for the window — never flips back to WATCHING/SIT_OUT/different
+        //   direction. User spec: 'once she says down up or sitout she sticks to it no
+        //   matter what'. All display values read from snap when present.
         const snap=tc.snapshot;
+        const isCommittedSnap=snap!==null;
         const isLockedSnap=snap&&snap.call!=='SIT_OUT';
         const isSatOutSnap=snap&&snap.call==='SIT_OUT';
-        // Effective values for display — prefer snapshot once committed
-        const dispCall=isLockedSnap?snap.call:tc.call;
-        const dispDir=isLockedSnap?(snap.direction||snap.call):tc.direction;
-        const dispConfidence=isLockedSnap?snap.confidence:tc.confidence;
-        const dispReason=isLockedSnap?snap.reason:isSatOutSnap?(snap.reason||'Sat out — committed at endgame'):tc.reason;
+        // Effective values for display — snapshot wins when present
+        const dispCall=isCommittedSnap?snap.call:tc.call;
+        const dispDir=isCommittedSnap?(snap.direction||snap.call):tc.direction;
+        const dispConfidence=isCommittedSnap?snap.confidence:tc.confidence;
+        const dispReason=isCommittedSnap?(snap.reason||(isSatOutSnap?'Sat out — committed at endgame':'Locked')):tc.reason;
         const isCall=dispCall==='UP'||dispCall==='DOWN';
         // V5.2: When SIT_OUT but Tara has a proposed direction (conviction > 0), show
         //   'WATCHING ▼ DOWN' so user sees what she's considering even when not committing.
@@ -7407,8 +7408,8 @@ function TaraApp(){
   //   Refs read at render time — same data the lifecycle effect uses.
   taraCall.samples=taraCallSampleRef.current?.count||0;
   taraCall.snapshot=taraCallSnapshotRef.current||null;
-  // V5.0: Compute needSamples for display — mirrors faster V5.0 lifecycle logic
-  //   (lower thresholds + per-30s time-decay).
+  // V5.5d: Compute needSamples for display — mirrors lifecycle (clean=1, good=2, default=3,
+  //   hostile=5) with per-60s time-decay.
   (()=>{
     const _q=qualityGate?.score||0;
     const _fgtAbs=Math.abs(analysis?.mtfAlignment||0);
@@ -7418,14 +7419,14 @@ function TaraApp(){
     const _hostile=_winType==='DEAD'||_winType==='WHIPSAW';
     let _need;
     if(_q>=72&&_fgtAbs>=2.0&&_cleanRegime&&!_hostile)_need=1;
-    else if(_q>=55&&_fgtAbs>=1.2&&!_hostile)_need=1;
-    else if(_hostile)_need=4;
-    else _need=2;
-    // Time-decay per 30s
+    else if(_q>=55&&_fgtAbs>=1.2&&!_hostile)_need=2;
+    else if(_hostile)_need=5;
+    else _need=3;
+    // Per-60s decay
     const _totalSec=windowType==='15m'?900:300;
     const _elapsed=_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
-    const _halfMinIn=Math.floor(Math.max(0,_elapsed)/30);
-    taraCall.needSamples=Math.max(1,_need-_halfMinIn);
+    const _minIn=Math.floor(Math.max(0,_elapsed)/60);
+    taraCall.needSamples=Math.max(1,_need-_minIn);
     // Estimated seconds until lock — samples increment ~1Hz
     taraCall.lockEtaSec=Math.max(0,(taraCall.needSamples-taraCall.samples));
   })();
@@ -7457,13 +7458,23 @@ function TaraApp(){
       }
       return;
     }
-    if(ref.dir!==tc.call){
-      // Direction flipped — reset count to 1
+    if(ref.dir!==null&&ref.dir!==tc.call){
+      // V5.5d: Direction flipped during formation. Old behavior: reset count and start
+      //   forming the new direction. User: 'if the outcome flips against tara's call I
+      //   dont want tara to flip too'. Now: keep the original direction claimed, treat
+      //   opposite samples as noise (no count change). If price returns to original
+      //   direction, samples resume counting. Otherwise she ends up SIT_OUT this window.
+      // No state change — preserve original ref.dir and count.
+    } else if(ref.dir===null){
+      // First directional sample — claim this direction for the window
       taraCallSampleRef.current={dir:tc.call,count:1};
     } else {
+      // Same direction continues — increment
       taraCallSampleRef.current={dir:tc.call,count:ref.count+1};
     }
     const samples=taraCallSampleRef.current.count;
+    // V5.5d: Use claimed direction for snapshot, not necessarily current tc.call
+    const claimedDir=taraCallSampleRef.current.dir;
     // Determine sample threshold based on condition cleanness
     const q=qualityGate?.score||0;
     const fgtAbs=Math.abs(analysis?.mtfAlignment||0);
@@ -7471,28 +7482,36 @@ function TaraApp(){
     const cleanRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(regime);
     const winType=analysis?.windowAmplitude?.label;
     const hostileWindow=winType==='DEAD'||winType==='WHIPSAW';
-    // V5.0: Sample thresholds tightened further. User: 'lock soon, take more calls.'
-    //   V4.5 was clean=1/good=2/default=3/hostile=5 with per-minute decay.
-    //   V5.0: clean=1/good=1/default=2/hostile=4, with per-30s decay (twice as fast).
+    // V5.5d: Re-tuned per user: 'sooner the better if she's sure but if a few seconds or
+    //   couple mins in the beginning of the window helps let's do that.' Clean conditions
+    //   still lock at 1 sample (fast). Less-clean conditions get more analyzing time before
+    //   committing. Time-decay slowed to per-60s (was per-30s) so she has 2-3 minutes of
+    //   patient analysis before gates fully open.
     let needSamples;
     if(q>=72&&fgtAbs>=2.0&&cleanRegime&&!hostileWindow){
-      needSamples=1;       // clean: instant lock
+      needSamples=1;       // very clean: instant lock
     } else if(q>=55&&fgtAbs>=1.2&&!hostileWindow){
-      needSamples=1;       // good: instant lock too (was 2)
+      needSamples=2;       // good but not super clean: 2 confirms (~30s analyzing)
     } else if(hostileWindow){
-      needSamples=4;       // hostile: capped tighter (was 5)
+      needSamples=5;       // hostile: extra patience
     } else {
-      needSamples=2;       // default: 2 (was 3)
+      needSamples=3;       // default: 3 confirms (~1 min analyzing)
     }
-    // V5.0: Time-decay accelerated to per-30s (was per-60s). By 90s into a 15m window
-    //   even hostile setups need 1 sample. Forces decisive commitment.
+    // V5.5d: Time-decay slowed to per-60s. Default 3 → 2 by 60s → 1 by 120s.
+    //   Hostile 5 → 4 → 3 → 2 → 1 by 240s. Gives Tara genuine analyzing time early window.
     const totalSec=windowType==='15m'?900:300;
     const elapsedSec=totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
-    const halfMinutesIn=Math.floor(Math.max(0,elapsedSec)/30);
-    needSamples=Math.max(1,needSamples-halfMinutesIn);
+    const minutesIn=Math.floor(Math.max(0,elapsedSec)/60);
+    needSamples=Math.max(1,needSamples-minutesIn);
+    if(taraCallSnapshotRef.current!==null)return; // already committed — don't overwrite
     if(samples>=needSamples||analysis?.isSystemLocked){
+      // V5.5d: Snapshot uses CLAIMED direction (the first formed direction this window),
+      //   not current tc.call. If tc.call has flipped temporarily, we still commit to
+      //   the original direction Tara was building toward.
+      const _committedCall=claimedDir||tc.call;  // claimed wins; tc.call as fallback for safety
+      const _committedReason=ref.dir===tc.call?tc.reason:`Locked ${_committedCall} — original lean held through flip`;
       taraCallSnapshotRef.current={
-        call:tc.call,direction:tc.direction||tc.call,confidence:tc.confidence,reason:tc.reason,
+        call:_committedCall,direction:_committedCall,confidence:tc.confidence,reason:_committedReason,
         atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
         atPosterior:analysis?.rawProbAbove,
         locked:true,
@@ -7575,14 +7594,14 @@ function TaraApp(){
   // Tara's Call has its own broadcast lifecycle, distinct from the user-facing manual sends.
   // She auto-sends one of: SCAN (window opens, observing), SIGNAL (forming UP/DOWN), LOCK
   // (committed call), or SITOUT (explicit pass). Each fires at most once per window.
-  const taraBroadcastRef=useRef({key:null,sentScan:false,sentSignalDir:null,sentLock:false,sentSitout:false});
+  const taraBroadcastRef=useRef({key:null,sentScan:false,sentSignal:false,sentLock:false,sentSitout:false});
   useEffect(()=>{
     if(!analysis||!discordWebhook||!discordWebhook.startsWith('http'))return;
     const winKey=timeState.startWindow||timeState.nextWindow;
     if(!winKey)return;
     // Reset broadcast flags on window change
     if(taraBroadcastRef.current.key!==winKey){
-      taraBroadcastRef.current={key:winKey,sentScan:false,sentSignalDir:null,sentLock:false,sentSitout:false};
+      taraBroadcastRef.current={key:winKey,sentScan:false,sentSignal:false,sentLock:false,sentSitout:false};
     }
     const sec=timeState.minsRemaining*60+timeState.secsRemaining;
     const totalSec=windowType==='15m'?900:300;
@@ -7608,9 +7627,10 @@ function TaraApp(){
       taraBroadcastRef.current.sentScan=true;
       broadcastToDiscord('TARA_SCAN',{...baseData,summary:`Posterior ${(analysis.rawProbAbove||50).toFixed(0)} · ${analysis.regime} · scanning`});
     }
-    // SIGNAL: broadcast once per direction per window when Tara's Call resolves to UP or DOWN
-    if((tc.call==='UP'||tc.call==='DOWN')&&taraBroadcastRef.current.sentSignalDir!==tc.call&&elapsed>=20){
-      taraBroadcastRef.current.sentSignalDir=tc.call;
+    // SIGNAL: V5.5d — fires exactly ONCE per window. User: '1 of each message type'.
+    //   Old logic let SIGNAL fire again on direction flip — that's now disabled.
+    if(!taraBroadcastRef.current.sentSignal&&(tc.call==='UP'||tc.call==='DOWN')&&elapsed>=20){
+      taraBroadcastRef.current.sentSignal=true;
       broadcastToDiscord('TARA_SIGNAL',{...baseData,dir:tc.call,confidence:tc.confidence,reason:tc.reason});
     }
     // LOCK: broadcast once per window after Tara's Call is snapshotted at endgame
@@ -7621,7 +7641,7 @@ function TaraApp(){
     }
     // SITOUT: broadcast if Tara has been SIT_OUT for the bulk of the window AND we haven't broadcast a signal
     // Fires at endgame freeze if she's still SIT_OUT and never had a directional call
-    if(!taraBroadcastRef.current.sentSitout&&!taraBroadcastRef.current.sentSignalDir&&analysis.isSystemLocked&&tc.call==='SIT_OUT'){
+    if(!taraBroadcastRef.current.sentSitout&&!taraBroadcastRef.current.sentSignal&&analysis.isSystemLocked&&tc.call==='SIT_OUT'){
       taraBroadcastRef.current.sentSitout=true;
       broadcastToDiscord('TARA_SITOUT',{...baseData,reason:tc.reason});
     }
