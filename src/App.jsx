@@ -153,6 +153,23 @@ const IC={
 // MATH & INDICATORS (V99 ENHANCED)
 // ═══════════════════════════════════════
 const formatUSD=(val)=>{const abs=Math.abs(val);if(abs>=1e6)return(val/1e6).toFixed(2)+'M';if(abs>=1e3)return(val/1e3).toFixed(1)+'K';return val.toFixed(0);};
+// V5.7.3: Single source of truth for duration formatting. Returns "Xs" under 60s,
+//   "Mm SSs" otherwise. Handles null/NaN gracefully. Used everywhere a countdown is shown.
+const formatDuration=(seconds)=>{
+  if(seconds==null||isNaN(seconds))return'—';
+  const s=Math.max(0,Math.round(seconds));
+  if(s<60)return`${s}s`;
+  const m=Math.floor(s/60);
+  const r=s%60;
+  return`${m}m ${String(r).padStart(2,'0')}s`;
+};
+// V5.7.3: Stable signed-integer formatter — fixes -0 / +0 weirdness in score breakdowns.
+const formatSignedInt=(val)=>{
+  if(val==null||isNaN(val))return'0';
+  const r=Math.round(val);
+  if(r===0)return'0';
+  return(r>0?'+':'')+r;
+};
 const calcEMA=(d,p)=>{if(!d||d.length<p)return new Array(d?.length||0).fill(null);const k=2/(p+1),r=new Array(d.length).fill(null);let s=0;for(let i=0;i<p;i++)s+=d[i];r[p-1]=s/p;for(let i=p;i<d.length;i++)r[i]=(d[i]-r[i-1])*k+r[i-1];return r;};
 const calcVWAP=(h)=>{if(!h||!h.length)return null;let t=0,v=0;h.forEach(c=>{t+=((c.h+c.l+c.c)/3)*c.v;v+=c.v;});return v===0?null:t/v;};
 const calcRSI=(d,p=14)=>{if(!d||d.length<p+1)return 50;let ag=0,al=0;for(let i=1;i<=p;i++){const x=d[i-1]-d[i];if(x>0)ag+=x;else al-=x;}ag/=p;al/=p;for(let i=p+1;i<Math.min(d.length,p+30);i++){const x=d[i-1]-d[i];ag=(ag*(p-1)+Math.max(x,0))/p;al=(al*(p-1)+Math.max(-x,0))/p;}return al===0?100:100-(100/(1+(ag/al)));};
@@ -3527,14 +3544,6 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
       const _samples=tc.samples||0;
       const _samplesInt=Math.round(_samples);
       const _needInt=Math.round(_need);
-      // V5.7.2: format helper — m:ss when ≥60s, else "Xs"
-      const _fmtSec=(s)=>{
-        if(s==null)return '—';
-        if(s<60)return `${Math.round(s)}s`;
-        const m=Math.floor(s/60);
-        const r=Math.round(s%60);
-        return `${m}m ${String(r).padStart(2,'0')}s`;
-      };
       // V5.7.2: Honest ETA. tc.lockEtaSec is null when stalled (samples not accruing).
       if(_samples>=5&&_need>0){
         if(tc.lockEtaStalled||tc.lockEtaSec==null){
@@ -3544,12 +3553,12 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           countdownText='committing this tick';
           phaseHint=`${_samplesInt}/${_needInt} samples`;
         } else {
-          countdownText=`decision in ~${_fmtSec(tc.lockEtaSec)}`;
+          countdownText=`decision in ~${formatDuration(tc.lockEtaSec)}`;
           phaseHint=`${_samplesInt}/${_needInt} samples`;
         }
         phaseProgressPct=Math.min(95,(_samples/_need)*100);
       } else if(_elapsed<20){
-        countdownText=`observing (${20-_elapsed}s of search remaining)`;
+        countdownText=`observing — ${20-_elapsed}s of search remaining`;
         phaseProgressPct=Math.min(15,_elapsed*0.7);
       } else {
         countdownText='scanning for edge';
@@ -3736,7 +3745,7 @@ function PastWindowsPill({pastWindows,windowType}){
       filtered.slice(0,15).map((w)=>React.createElement('div',{
         key:w.id,
         className:'flex items-center gap-2 px-3 py-1.5 hover:bg-[#E8E9E4]/5 transition-colors',
-        title:`Strike $${w.strike?.toLocaleString()} → Close $${w.closingPrice?.toLocaleString()} · ${w.gapBps>=0?'+':''}${w.gapBps?.toFixed(0)} bps`,
+        title:`Strike $${(w.strike||0).toLocaleString(undefined,{maximumFractionDigits:0})} → Close $${(w.closingPrice||0).toLocaleString(undefined,{maximumFractionDigits:0})} · ${w.gapBps!=null?formatSignedInt(w.gapBps):'?'} bps`,
       },
         React.createElement('span',{className:`text-base ${w.dir==='UP'?'text-emerald-400':'text-rose-400'}`},w.dir==='UP'?'▲':'▼'),
         React.createElement('span',{className:'text-[11px] tabular-nums text-[#E8E9E4]/70 whitespace-nowrap'},_fmt(w.time)),
@@ -3787,7 +3796,7 @@ function TaraMemoryStrip({taraCallLog,windowType,taraLearnings}){
                 key:e.id,
                 className:'flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] tabular-nums font-bold',
                 style:{background:c.bg,color:c.fg},
-                title:`${_fmtTime(e.time)} · ${e.regime||'?'} · q${e.qScore||0} · ${e.dir} ${e.confidence||0}% · ${r}${e.gapBps?` · ${e.gapBps>=0?'+':''}${e.gapBps.toFixed(0)}bps`:''}`,
+                title:`${_fmtTime(e.time)} · ${e.regime||'?'} · q${e.qScore||0} · ${e.dir||'?'} ${e.confidence||0}% · ${r}${e.gapBps!=null?` · ${formatSignedInt(e.gapBps)} bps`:''}`,
               },
                 React.createElement('span',null,_dirArrow(e.dir)),
                 React.createElement('span',{className:'text-[8px] opacity-70'},_fmtTime(e.time)),
@@ -5092,7 +5101,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
                       width:`${(Math.abs(e.v)/maxAbs)*50}%`,
                     }}></div>
                   </div>
-                  <span className={'font-mono text-[10px] w-10 shrink-0 text-right '+(e.v>0.5?'text-emerald-300':e.v<-0.5?'text-rose-300':'text-[#E8E9E4]/30')}>{e.v>=0?'+':''}{e.v.toFixed(0)}</span>
+                  <span className={'font-mono text-[10px] w-10 shrink-0 text-right '+(e.v>0.5?'text-emerald-300':e.v<-0.5?'text-rose-300':'text-[#E8E9E4]/30')}>{formatSignedInt(e.v)}</span>
                 </div>
               ))}
               {/* FGT row — primary signal, separated with gold-tinted divider (V2.1) */}
@@ -5105,13 +5114,13 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
                     width:`${(Math.abs(fgtContribution)/maxAbs)*50}%`,
                   }}></div>
                 </div>
-                <span style={T2_MONO_STYLE} className={'text-[10px] w-10 shrink-0 text-right font-bold '+(fgtContribution>0?'text-emerald-300':fgtContribution<0?'text-rose-300':'text-[#E8E9E4]/30')}>{fgtContribution>=0?'+':''}{fgtContribution.toFixed(0)}</span>
+                <span style={T2_MONO_STYLE} className={'text-[10px] w-10 shrink-0 text-right font-bold '+(fgtContribution>0?'text-emerald-300':fgtContribution<0?'text-rose-300':'text-[#E8E9E4]/30')}>{formatSignedInt(fgtContribution)}</span>
               </div>
               {/* Total row with gold accent divider above (V2.1 — major boundary) */}
               <div className="flex items-center gap-2 text-[10px] pt-1.5 mt-1" style={{borderTop:'1px solid '+T2_GOLD_BORDER}}>
                 <span className="w-16 shrink-0 font-bold uppercase tracking-[0.18em] text-[8px]" style={{color:T2_GOLD}}>Total</span>
                 <span style={T2_MONO_STYLE} className={'flex-1 text-[#E8E9E4]/40'}>→ posterior {post.toFixed(0)}% {dir}</span>
-                <span style={T2_MONO_STYLE} className={'w-10 text-right font-bold '+(totalAll>0?'text-emerald-400':'text-rose-400')}>{totalAll>=0?'+':''}{totalAll.toFixed(0)}</span>
+                <span style={T2_MONO_STYLE} className={'w-10 text-right font-bold '+(totalAll>0?'text-emerald-400':'text-rose-400')}>{formatSignedInt(totalAll)}</span>
               </div>
             </div>
           );
@@ -6091,7 +6100,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.7.3 online — Text and labels polished across the UI. Tighter copy in the call card · cleaner engine-vs-Tara comparison tags · sharper memory empty states.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.7.3 online — Format polish pass. Single duration helper across the UI · clean signed integers in score breakdowns (no more "-0") · safe tooltip rendering for past windows and memory pills · cooldown messages match the m:ss style.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7668,7 +7677,7 @@ function TaraApp(){
               // V5.6.11: post-release cooldown — must scan for 45s before re-locking
               taraAdviceRef.current='UP - SCANNING (post-release cooldown)';
               const _wait=Math.ceil((45000-(Date.now()-lockReleasedAtRef.current))/1000);
-              reasoning.push(`[LOCK] UP candidate held — cooldown ${_wait}s remaining`);
+              reasoning.push(`[LOCK] UP candidate held — cooldown ${formatDuration(_wait)} remaining`);
             } else {
               lockedCallRef.current={dir:'UP',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null}; // V134: snapshot signals at lock
               taraAdviceRef.current='UP - LOCKED';
@@ -7767,7 +7776,7 @@ function TaraApp(){
               // V5.6.11: post-release cooldown
               taraAdviceRef.current='DOWN - SCANNING (post-release cooldown)';
               const _wait=Math.ceil((45000-(Date.now()-lockReleasedAtRef.current))/1000);
-              reasoning.push(`[LOCK] DOWN candidate held — cooldown ${_wait}s remaining`);
+              reasoning.push(`[LOCK] DOWN candidate held — cooldown ${formatDuration(_wait)} remaining`);
             } else {
               lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,rugPullLock:isRugPull};
               if(isRugPull&&bearCount<CONSECUTIVE_NEEDED_DN)reasoning.push(`[RUG-FIRE] Rug pull detected — DOWN locked early at posterior ${posterior.toFixed(0)}`); // V134: snapshot signals at lock
@@ -9570,24 +9579,16 @@ function TaraApp(){
                 // Pre-commit: pure scanning. No FORMING/WATCHING reveal.
                 const _need=tc?.needSamples||100;
                 const _samples=tc?.samples||0;
-                // V5.7.2: format m:ss when ≥60s
-                const _fmt=(s)=>{
-                  if(s==null)return '—';
-                  if(s<60)return `${Math.round(s)}s`;
-                  const m=Math.floor(s/60);
-                  const r=Math.round(s%60);
-                  return `${m}m ${String(r).padStart(2,'0')}s`;
-                };
                 if(_samples>=5&&_need>0){
                   if(tc?.lockEtaStalled||tc?.lockEtaSec==null){
                     countdownText='waiting for stronger signal';
                   } else if(tc.lockEtaSec===0){
                     countdownText='committing this tick';
                   } else {
-                    countdownText=`decision in ~${_fmt(tc.lockEtaSec)}`;
+                    countdownText=`decision in ~${formatDuration(tc.lockEtaSec)}`;
                   }
                 } else if(elapsed<20){
-                  countdownText=`observing (${20-elapsed}s)`;
+                  countdownText=`observing — ${20-elapsed}s of search remaining`;
                 } else {
                   countdownText='scanning for edge';
                 }
