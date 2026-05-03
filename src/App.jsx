@@ -1,4 +1,72 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+
+// ═══════════════════════════════════════
+// V5.6: FIRESTORE SYNC LAYER
+// ═══════════════════════════════════════
+// Cloud-backed persistence for Tara. Fixes the "refresh-roulette" problem where Tara's Call
+// and the engine lock both reset on page reload because they lived only in React refs.
+//
+// Model: localStorage stays as the fast-paint cache so first paint is instant. Firestore
+// is the source of truth — its read overwrites local state ~200-500ms after mount when
+// fresher data exists. Writes go to both stores (localStorage immediately, Firestore
+// debounced 300-1500ms depending on path).
+//
+// Paths (all under users/{USER_ID}/):
+//   state/currentLock     → engine lockedCallRef + Tara snapshot for the active window.
+//                           windowId-keyed so a refresh during the same window restores
+//                           exactly what was on screen before reload. Stale locks from
+//                           previous windows are ignored on restore.
+//   scorecards/tara       → Tara's Call W/L/sitouts per window-type. Cross-device.
+//   meta/info             → baselineVersion + lastSeenAt for migration tracking.
+//
+// NOT cloud-synced (per V5.5b decision — user-trade-driven training stays ephemeral):
+//   adaptiveWeights, regimeWeights, tradeLog. These remain in-memory only this session.
+//   If you want them persisted later, that's a separate scoped change.
+//
+// Test-mode caveat: Firestore rules are wide open for ~30 days. Lock down in V5.7 with
+// proper rules tied to USER_ID. Low risk meanwhile (project ID needed to write).
+const FIREBASE_CONFIG={apiKey:"AIzaSyD8jltDNdmXPE0JolUSX6fXzSQUdsYjLcY",authDomain:"tara-app-ee39d.firebaseapp.com",projectId:"tara-app-ee39d",storageBucket:"tara-app-ee39d.firebasestorage.app",messagingSenderId:"512450573817",appId:"1:512450573817:web:b1659b8f28f894900f7928"};
+const USER_ID='Gohan';
+let _fbApp=null,_fbDb=null;
+try{_fbApp=initializeApp(FIREBASE_CONFIG);_fbDb=getFirestore(_fbApp);console.info('[Firestore] init ok — userId:',USER_ID);}
+catch(e){console.warn('[Firestore] init failed — falling back to localStorage only:',e?.message);}
+
+const _fbDoc=(path)=>{
+  if(!_fbDb)return null;
+  const segs=['users',USER_ID,...path.split('/')];
+  return doc(_fbDb,...segs);
+};
+const cloudRead=async(path)=>{
+  const ref=_fbDoc(path);if(!ref)return null;
+  try{const s=await getDoc(ref);return s.exists()?s.data():null;}
+  catch(e){console.warn('[Firestore read failed]',path,e?.message);return null;}
+};
+const cloudWrite=async(path,data)=>{
+  const ref=_fbDoc(path);if(!ref)return false;
+  try{await setDoc(ref,{...data,_updatedAt:serverTimestamp()});return true;}
+  catch(e){console.warn('[Firestore write failed]',path,e?.message);return false;}
+};
+const cloudDelete=async(path)=>{
+  const ref=_fbDoc(path);if(!ref)return false;
+  try{await deleteDoc(ref);return true;}
+  catch(e){console.warn('[Firestore delete failed]',path,e?.message);return false;}
+};
+// Coalesces rapid updates per-path into a single Firestore write (saves quota + bandwidth).
+const _writeQueue=new Map();
+const cloudWriteDebounced=(path,data,delayMs=1500)=>{
+  if(_writeQueue.has(path))clearTimeout(_writeQueue.get(path));
+  const tid=setTimeout(()=>{cloudWrite(path,data);_writeQueue.delete(path);},delayMs);
+  _writeQueue.set(path,tid);
+};
+// Deterministic ID for the current trading window (UTC ISO of window-open boundary).
+// Refresh during the same window → same ID → restore the same lock.
+const computeWindowId=(windowType)=>{
+  const winMs=windowType==='15m'?900000:300000;
+  const bucketMs=Math.floor(Date.now()/winMs)*winMs;
+  return `${windowType}-${new Date(bucketMs).toISOString()}`;
+};
 
 // ═══════════════════════════════════════
 // ICONS
@@ -104,7 +172,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.02-v5.5.5-strike-fill-firmer-locks';
+const BASELINE_VERSION='2026.05.03-v5.6.0-firestore-sync';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -5228,7 +5296,25 @@ function TaraApp(){
   });
   useEffect(()=>{
     try{localStorage.setItem('taraCallScorecards_v1',JSON.stringify(taraScorecards));}catch(e){}
+    cloudWriteDebounced('scorecards/tara',taraScorecards,800); // V5.6: also sync to Firestore
   },[taraScorecards]);
+  // V5.6: Hydrate scorecards from Firestore on mount. Cloud wins over localStorage when both
+  //   exist — covers the case where another device updated the count and this browser is
+  //   stale. Merge per-window-type so partial cloud docs don't blow away local fields.
+  useEffect(()=>{
+    let cancelled=false;
+    cloudRead('scorecards/tara').then(d=>{
+      if(cancelled||!d)return;
+      const has15=d['15m']&&typeof d['15m'].wins==='number';
+      const has5=d['5m']&&typeof d['5m'].wins==='number';
+      if(!has15&&!has5)return;
+      setTaraScorecards(prev=>({
+        '15m':has15?{...prev['15m'],...d['15m']}:prev['15m'],
+        '5m':has5?{...prev['5m'],...d['5m']}:prev['5m'],
+      }));
+    });
+    return()=>{cancelled=true;};
+  },[]);
   // V3.2.4: Snapshot Tara's Call at endgame freeze. Whatever Tara is calling when the
   //   final 90s zone begins becomes "Tara's Call for this round." It gets resolved when
   //   the window rolls over. This ref persists across the snapshot→rollover transition.
@@ -5237,6 +5323,23 @@ function TaraApp(){
   // V4.2: Track consecutive frames Tara has a directional call. Used to determine when
   //   she's confident enough to lock early — fast for clean setups, slower for mixed.
   const taraCallSampleRef=useRef({dir:null,count:0});
+  // V5.6: Save/clear the active window's lock state to Firestore. Refresh restores from this.
+  //   _persistLock writes whatever the refs currently hold (engine lock + Tara snapshot +
+  //   sample formation progress). _clearLock wipes the doc — used only on rollover when
+  //   the window changes and the previous lock is no longer relevant.
+  const _hasRestoredLockRef=useRef(false);
+  const _persistLock=()=>{
+    if(!_fbDb)return;
+    cloudWriteDebounced('state/currentLock',{
+      windowId:computeWindowId(windowType),
+      windowType,
+      engineLock:lockedCallRef.current?{...lockedCallRef.current}:null,
+      taraSnapshot:taraCallSnapshotRef.current?{...taraCallSnapshotRef.current}:null,
+      taraSamples:taraCallSampleRef.current?{...taraCallSampleRef.current}:null,
+      savedAt:Date.now(),
+    },300);
+  };
+  const _clearLock=()=>{cloudDelete('state/currentLock');};
   const[regimeMemory,setRegimeMemory]=useState({
     'TRENDING UP':   {wins:0,losses:0},
     'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
@@ -5309,7 +5412,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.5.5 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.6.0 online — Firestore sync active · refresh now restores locks · scorecards persist across devices.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6433,9 +6536,60 @@ function TaraApp(){
         // Clear snapshot for next window
         taraCallSnapshotRef.current=null;
         taraCallSampleRef.current={dir:null,count:0};
-        taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;}},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights,userPosition]);
+        taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;setManualAction(null);tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;
+        _clearLock(); // V5.6: wipe cloud lock — new window starts clean
+        _hasRestoredLockRef.current=false; // allow restore on next window if user refreshes
+        }},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights,userPosition]);
 
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
+
+  // V5.6: LOCK RESTORE — runs once on mount once currentPrice is alive.
+  //   Reads cloud state/currentLock. If the saved windowId matches the window we're in
+  //   right now, restore the engine lock + Tara snapshot + sample formation progress.
+  //   This is the fix for "refresh and Tara/the predictor flip" — they no longer recompute
+  //   from scratch; they pick up exactly where they were.
+  //
+  //   What happens if the saved lock is now objectively wrong (price ran hard against)?
+  //   We restore it anyway — the lock-release effect already running every tick will fire
+  //   the appropriate safety release (rugpull/spike/deep-adverse-gap) on the very next tick.
+  //   So we honor the historical commitment but let live data invalidate it normally.
+  useEffect(()=>{
+    if(_hasRestoredLockRef.current||!currentPrice||!_fbDb)return;
+    _hasRestoredLockRef.current=true;
+    let cancelled=false;
+    cloudRead('state/currentLock').then(d=>{
+      if(cancelled||!d)return;
+      const expectedWid=computeWindowId(windowType);
+      if(d.windowId!==expectedWid){
+        console.info('[Firestore] saved lock is from a different window — ignoring',{saved:d.windowId,now:expectedWid});
+        return;
+      }
+      if(d.windowType!==windowType)return;
+      let restored=[];
+      // Engine lock — only restore if not already set (the engine may have raced and locked
+      // before our async cloud read returned).
+      if(d.engineLock&&!lockedCallRef.current){
+        lockedCallRef.current={...d.engineLock};
+        taraAdviceRef.current=d.engineLock.dir==='UP'?'UP - LOCKED':'DOWN - LOCKED';
+        restored.push(`engine ${d.engineLock.dir}`);
+      }
+      // Tara snapshot — same idea
+      if(d.taraSnapshot&&!taraCallSnapshotRef.current){
+        taraCallSnapshotRef.current={...d.taraSnapshot};
+        restored.push(`tara ${d.taraSnapshot.call}${d.taraSnapshot.locked?' LOCKED':''}`);
+      }
+      // Mid-formation sample progress
+      if(d.taraSamples&&taraCallSampleRef.current.dir===null&&d.taraSamples.dir){
+        taraCallSampleRef.current={...d.taraSamples};
+        restored.push(`forming ${d.taraSamples.dir} ${d.taraSamples.count}`);
+      }
+      if(restored.length){
+        console.info('[Firestore] restored lock state:',restored.join(' · '));
+        setForceRender(p=>p+1); // ensure UI re-renders with restored refs
+      }
+    });
+    return()=>{cancelled=true;};
+  },[currentPrice,windowType]);
 
   // News
   useEffect(()=>{let news=[];if(orderBook.imbalance>1.5)news.push({title:`BID wall detected near $${targetMargin.toFixed(0)} — maker support`,type:'info'});if(orderBook.imbalance<0.6)news.push({title:`ASK pressure at $${targetMargin.toFixed(0)} — sellers defending`,type:'info'});if(showWhaleAlerts&&whaleLog.length>0){const w=whaleLog[0];const age=Math.round((Date.now()-w.time)/1000);if(age<120)news.push({title:`WHALE PRESSURE: ${w.side}  $${(w.usd/1000).toFixed(0)}K  ${w.src}  ${age}s ago`,type:'whale'});}if(news.length<3)news.push({title:`Tara 3.1 active  ·  789 trades trained  ·  ${lastRegimeRef.current||'scanning'}`,type:'info'});setNewsEvents(news);},[orderBook.imbalance,globalFlow,targetMargin,windowType,showWhaleAlerts,whaleLog]);
@@ -6802,6 +6956,7 @@ function TaraApp(){
               lockedCallRef.current={dir:'UP',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null}; // V134: snapshot signals at lock
               taraAdviceRef.current='UP - LOCKED';
               biasCountRef.current={UP:0,DOWN:0};
+              _persistLock(); // V5.6: cloud-save so refresh restores this lock
             }
           }
           } // close quality gate else
@@ -6896,6 +7051,7 @@ function TaraApp(){
               if(isRugPull&&bearCount<CONSECUTIVE_NEEDED_DN)reasoning.push(`[RUG-FIRE] Rug pull detected — DOWN locked early at posterior ${posterior.toFixed(0)}`); // V134: snapshot signals at lock
               taraAdviceRef.current='DOWN - LOCKED';
               biasCountRef.current={UP:0,DOWN:0};
+              _persistLock(); // V5.6: cloud-save so refresh restores this lock
             }
           }
           } // close quality gate else
@@ -7061,6 +7217,7 @@ function TaraApp(){
           // V134: reset window-direction commitment so flip to opposite direction is allowed
           windowSignalDirRef.current=null;
           taraAdviceRef.current='LOCK RELEASED';
+          _persistLock(); // V5.6: reflect the now-released state in cloud
           if(catastrophicRugpull)reasoning.push(`[LOCK] Released — catastrophic rug pull (UP lock)`);
           else if(catastrophicSpike)reasoning.push(`[LOCK] Released — catastrophic upward spike (DOWN lock)`);
           else if(signalRegimeChange)reasoning.push(`[LOCK] Released — signal regime flipped (${flippedSignals.join(',')} now against ${lock.dir})`);
@@ -7456,6 +7613,7 @@ function TaraApp(){
           locked:false,
           earlyLock:false,
         };
+        _persistLock(); // V5.6: cloud-save SIT_OUT commit
       }
       return;
     }
@@ -7519,6 +7677,12 @@ function TaraApp(){
         samples,
         needSamples,
       };
+      _persistLock(); // V5.6: cloud-save LOCKED snapshot
+    } else {
+      // V5.6: Mid-formation persist — refresh during ANALYZING/FORMING restores sample
+      //   count so Tara picks up where she left off instead of resetting to 0/N. Debounced
+      //   so this doesn't hammer Firestore on every tick.
+      _persistLock();
     }
   },[analysis?.isSystemLocked,taraCall.call,taraCall.direction,taraCall.confidence,timeState.minsRemaining,timeState.secsRemaining,analysis?.rawProbAbove,taraCall.reason,qualityGate?.score,analysis?.mtfAlignment,analysis?.regime,analysis?.windowAmplitude?.label]);
 
@@ -8037,7 +8201,7 @@ function TaraApp(){
 
   const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast`;setChatLog([...log,{role:'tara',text:r}]);},400);};
 
-  const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
+  const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
   if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.5.5...</div>;
 
