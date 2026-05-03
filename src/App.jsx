@@ -5526,34 +5526,47 @@ function TaraApp(){
     setWindowOpenStrike(currentPriceRef.current);
   },[]);
 
-  // V5.5.5: Strike capture effect — fires when currentPrice tick arrives and we need
-  //   a strike. Two scenarios:
-  //     (a) Page loads mid-window with no strike → first tick captures
-  //     (b) Window just rolled over → needsCapturedPriceRef set → next tick fills
-  //   Per user: 'when Tara finds the current price of the window lets have that set'.
+  // V5.5.5 patch: Strike capture effect — Kalshi-ONLY per user request.
+  //   'if this happens keep the strike price blank and dont pull from live, i will
+  //    enter myself'. If Kalshi cached → fill. Otherwise leave strike blank for
+  //    manual entry. windowOpenPriceRef still gets captured from live spot for
+  //    scoring fallback purposes only (so Tara's record updates even with blank strike).
   useEffect(()=>{
     if(!currentPrice)return;
     const _firstTime=!hasSetInitialMargin.current;
     const _needsFill=needsCapturedPriceRef.current;
-    if(!_firstTime&&!_needsFill)return; // nothing to do
-    // Prefer Kalshi if cached, else live spot. Either way, fill strike now.
+    if(!_firstTime&&!_needsFill)return;
+    // Always capture windowOpenPriceRef from live for scoring-fallback (never displayed).
+    const _now=Date.now();
+    if(windowOpenPriceRef.current===0){
+      windowOpenPriceRef.current=Math.round(currentPrice);
+      windowHighRef.current=Math.round(currentPrice);
+      windowLowRef.current=Math.round(currentPrice);
+      windowHighTimeRef.current=_now;
+      windowLowTimeRef.current=_now;
+      windowOpenTimeRef.current=_now;
+    }
+    // Strike-fill: ONLY if Kalshi cached. No live-spot fallback per user spec.
     const _kStrike=kalshiStrikeRef.current;
     const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
-    const _raw=_kStrikeValid?_kStrike:currentPrice;
-    const p=Math.round(_raw);
-    const _now=Date.now();
-    windowOpenPriceRef.current=p;
-    windowHighRef.current=p;
-    windowLowRef.current=p;
-    windowHighTimeRef.current=_now;
-    windowLowTimeRef.current=_now;
-    windowOpenTimeRef.current=_now;
-    setTargetMargin(p);
-    setStrikeConfirmed(true);
-    setStrikeMode('manual');
-    setStrikeSource(_kStrikeValid?'kalshi':'live');
-    hasSetInitialMargin.current=true;
-    needsCapturedPriceRef.current=false;
+    if(_kStrikeValid){
+      const p=Math.round(_kStrike);
+      windowOpenPriceRef.current=p;
+      windowHighRef.current=p;
+      windowLowRef.current=p;
+      setTargetMargin(p);
+      setStrikeConfirmed(true);
+      setStrikeMode('manual');
+      setStrikeSource('kalshi');
+      hasSetInitialMargin.current=true;
+      needsCapturedPriceRef.current=false;
+    } else {
+      // No Kalshi yet — leave strike blank, but mark as initialized so the page-load
+      //   path doesn't fight with the rollover path. Kalshi auto-set effect will fill
+      //   when/if data arrives. User can enter manually anytime.
+      hasSetInitialMargin.current=true;
+      // Keep needsCapturedPriceRef true so we re-check next tick (in case Kalshi arrives)
+    }
   },[currentPrice]);
 
   // V3.1.7: Kalshi strike re-snap. The window-open event fires before Kalshi's API has
@@ -5986,19 +5999,24 @@ function TaraApp(){
           }
           throw new Error('allorigins empty');
         });
+        // V5.5.5 patch: 2 more proxies for resilience. User: 'how to never get this'.
+        //   With 5 parallel paths + 15-min cache, all-paths-fail is exceedingly rare.
+        const _codetabsPromise=fetchWithRetry(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(_eventsUrl)}`,1).then(r=>{if(r.ok)return r;throw new Error(r.reason||'codetabs fail');});
+        const _thingproxyPromise=fetchWithRetry(`https://thingproxy.freeboard.io/fetch/${_eventsUrl}`,1).then(r=>{if(r.ok)return r;throw new Error(r.reason||'thingproxy fail');});
         let result;
         try{
-          result=await Promise.any([_directPromise,_corsproxyPromise,_allOriginsPromise]);
+          result=await Promise.any([_directPromise,_corsproxyPromise,_allOriginsPromise,_codetabsPromise,_thingproxyPromise]);
         }catch(aggregateError){
-          // All three failed — get a useful error message from the most recent
           const _errMsgs=aggregateError?.errors?.map(e=>e?.message||String(e))||['unknown'];
           result={ok:false,reason:`all proxies failed: ${_errMsgs.join(' / ')}`.slice(0,140)};
         }
         if(!result.ok){
-          // V3.2.1: All retries exhausted. Try last-successful cache before giving up.
+          // V5.5.5 patch: Cache TTL extended to 15min (900s) since the strike for a given
+          //   Kalshi event doesn't change once the event opens — using a 15-min-old strike
+          //   value for the same window is safe.
           const cache=lastKalshiSuccessRef.current;
           const cacheAgeS=(Date.now()-cache.at)/1000;
-          if(cache.at>0&&cacheAgeS<=90&&cache.strike!=null){
+          if(cache.at>0&&cacheAgeS<=900&&cache.strike!=null){
             // Keep the cached strike/yes price visible — they don't change second-to-second
             setKalshiStrike(cache.strike);
             if(cache.yesPrice!=null)setKalshiYesPrice(cache.yesPrice);
