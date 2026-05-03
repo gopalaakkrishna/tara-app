@@ -101,7 +101,7 @@ const saveWeights=(w)=>{try{localStorage.setItem('taraWeightsV110',JSON.stringif
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.02-v5.2-show-watching-instant-kalshi';
+const BASELINE_VERSION='2026.05.02-v5.3-instant-strike-no-confirm';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -5002,7 +5002,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.2</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.3</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5294,7 +5294,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.2 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.3 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5434,7 +5434,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.2'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.3'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -5478,24 +5478,26 @@ function TaraApp(){
   // No API calls, no CORS, no parsing — zero latency, always accurate
   const setWindowOpenStrike=(price)=>{
     if(isManualStrikeRef.current)return;
-    // V3.0: Prefer Kalshi's published strike when available. Tara's local Coinbase feed and
-    //       Kalshi's CF Benchmarks settlement index disagree by a few bps near strike — using
-    //       Kalshi's strike directly eliminates the strike-misalignment problem at window open.
-    //       Fall back to live price if Kalshi data is unavailable.
-    // V3.1.4: Round strike to whole dollar. Kalshi BTC strikes are always whole-dollar amounts,
-    //       and live spot's fractional cents (.21, .87) are visual noise that don't aid trading.
+    // V5.3: Auto-confirm strike at window open. Per user: 'remove the confirm strike box
+    //   completely now. we don't need it with kalshi price working. if i need to ill edit
+    //   and press ok manually if and when needed.'
+    //   The old flow set targetMargin=0 + strikeConfirmed=false at rollover, then waited
+    //   for user to tap OK or for Kalshi to arrive. During this gap (often 1-3s, sometimes
+    //   longer if Kalshi failed) analysis would return null because of the
+    //   `!strikeConfirmed&&strikeMode==='manual'&&targetMargin>0` AND `!targetMargin` checks.
+    //   That's why Tara was returning "Engine still loading" — analysis literally was null.
+    //   New flow: use Kalshi if available, otherwise live spot. Either way, set + confirm
+    //   immediately. Analysis runs from second 1. Kalshi auto-set effect overrides later.
     const _kStrike=kalshiStrikeRef.current;
     const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
     const _raw=_kStrikeValid?_kStrike:(price||currentPriceRef.current);
     const p=_raw?Math.round(_raw):_raw;
     const _source=_kStrikeValid?'kalshi':'live';
-    // Always reset strike to blank (0) at window start
-    // Tara's suggestion shows as pendingStrike — user edits or taps OK
-    setTargetMargin(0);
-    setStrikeConfirmed(false);
     if(!p||p<=0){
+      // No price available at all — clear state, leave for user
+      setTargetMargin(0);
+      setStrikeConfirmed(false);
       windowOpenPriceRef.current=0;
-      // V3.1.7+/V3.1.9: Reset window amplitude tracking on rollover
       windowHighRef.current=0;
       windowLowRef.current=0;
       windowHighTimeRef.current=0;
@@ -5506,17 +5508,19 @@ function TaraApp(){
       hasSetInitialMargin.current=true;
       return;
     }
-    // Show suggested price — user must tap OK or edit before analysis runs
+    // V5.3: Auto-set + auto-confirm immediately. Kalshi auto-set effect will override
+    //   targetMargin when Kalshi data arrives (typically 1-3s later with V5.2 parallel fetch).
     windowOpenPriceRef.current=p;
-    // V3.1.7+/V3.1.9: Initialize amplitude tracking at window open
     windowHighRef.current=p;
     windowLowRef.current=p;
     const _now=Date.now();
     windowHighTimeRef.current=_now;
     windowLowTimeRef.current=_now;
     windowOpenTimeRef.current=_now;
-    setPendingStrike(p);
-    setStrikeMode('manual'); // treat as manual until confirmed
+    setTargetMargin(p);
+    setStrikeConfirmed(true);  // V5.3: auto-confirm
+    setPendingStrike(null);    // V5.3: never use pending UI
+    setStrikeMode('manual');
     setStrikeSource(_source);
     hasSetInitialMargin.current=true;
   };
@@ -5526,12 +5530,28 @@ function TaraApp(){
     setWindowOpenStrike(currentPriceRef.current);
   },[]);
 
-  // Strike starts at 0 on page open (mid-window) — never auto-set from current price.
-  // Only the window rollover sets the strike (at the exact moment a new window starts).
-  // On first load, just mark as initialized so rollover can handle it.
+  // V5.3: When page opens mid-window with no strike set, auto-set to live spot so analysis
+  //   runs immediately. Kalshi auto-set effect will override when Kalshi data arrives.
+  //   The old behavior left strike at 0, blocking analysis until user manually entered or
+  //   Kalshi fetched — that meant Tara was 'still loading' for as long as Kalshi took.
   useEffect(()=>{
     if(!hasSetInitialMargin.current&&currentPrice){
-      hasSetInitialMargin.current=true; // page loaded mid-window, leave strike at 0
+      const _kStrike=kalshiStrikeRef.current;
+      const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
+      const _raw=_kStrikeValid?_kStrike:currentPrice;
+      const p=Math.round(_raw);
+      windowOpenPriceRef.current=p;
+      windowHighRef.current=p;
+      windowLowRef.current=p;
+      const _now=Date.now();
+      windowHighTimeRef.current=_now;
+      windowLowTimeRef.current=_now;
+      windowOpenTimeRef.current=_now;
+      setTargetMargin(p);
+      setStrikeConfirmed(true);
+      setStrikeMode('manual');
+      setStrikeSource(_kStrikeValid?'kalshi':'live');
+      hasSetInitialMargin.current=true;
     }
   },[currentPrice]);
 
@@ -5588,7 +5608,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.2  |  signal'},
+        footer:{text:'Tara 5.3  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5602,7 +5622,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.2  |  stand-down'},
+        footer:{text:'Tara 5.3  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5616,7 +5636,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.2  |  search'},
+        footer:{text:'Tara 5.3  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5633,7 +5653,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.2  |  lock'},
+        footer:{text:'Tara 5.3  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5650,7 +5670,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.2  |  close'},
+          footer:{text:'Tara 5.3  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5671,7 +5691,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.2  |  exit'},
+        footer:{text:'Tara 5.3  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5692,7 +5712,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.2  |  scanning'},
+        footer:{text:'Tara 5.3  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5712,7 +5732,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.2  |  signal'},
+        footer:{text:'Tara 5.3  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5732,7 +5752,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.2  |  lock'},
+        footer:{text:'Tara 5.3  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5749,7 +5769,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.2  |  sit-out'},
+        footer:{text:'Tara 5.3  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5771,7 +5791,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.2  |  result'},
+          footer:{text:'Tara 5.3  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5808,12 +5828,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.2  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.3  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.2',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.3',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -5832,7 +5852,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.2 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.3 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -7962,7 +7982,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.2...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.3...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -8063,7 +8083,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.2
+              5.3
             </span>
           </div>
 
@@ -8327,31 +8347,9 @@ function TaraApp(){
           <button onClick={()=>setShowSettings(true)} className={'flex items-center justify-center px-2 py-1.5 rounded-lg text-xs text-[#E8E9E4]/30 hover:text-indigo-400 transition-all'} title="Discord"><IC.Link className="w-3.5 h-3.5"/></button>
         </div>
 
-        {/* ── PENDING STRIKE CONFIRMATION BANNER — always visible ── */}
-        {pendingStrike&&(
-          <div className={'bg-indigo-500/10 border-2 border-indigo-500/50 rounded-xl p-3 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3 shrink-0 animate-pulse-once'}>
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <IC.Crosshair className="w-5 h-5 text-indigo-400 shrink-0"/>
-              <div>
-                <div className="text-xs font-bold uppercase tracking-wide text-indigo-400 mb-0.5">New window — confirm strike price</div>
-                <div className="text-2xl sm:text-3xl font-serif font-bold text-white">${pendingStrike.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-                <div className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Live price captured at window open · tap OK to confirm or Edit to change</div>
-              </div>
-            </div>
-            <div className="flex gap-2 w-full sm:w-auto shrink-0">
-              <button
-                onClick={()=>{setTargetMargin(pendingStrike);setStrikeMode('auto');setPendingStrike(null);}}
-                className="flex-1 sm:flex-none px-5 py-2.5 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg text-sm font-bold uppercase tracking-wide transition-colors">
-                ✓ OK — Use This
-              </button>
-              <button
-                onClick={()=>{setPendingStrike(null);setStrikeMode('manual');isManualStrikeRef.current=true;}}
-                className={'flex-1 sm:flex-none px-4 py-2.5 border border-[#E8E9E4]/20 text-[#E8E9E4]/50 hover:text-white hover:border-[#E8E9E4]/40 rounded-lg text-sm font-bold uppercase tracking-wide transition-colors'}>
-                Edit
-              </button>
-            </div>
-          </div>
-        )}
+        {/* V5.3: pendingStrike confirmation banner removed per user request.
+            Strike auto-confirms at window open (live spot) and Kalshi overrides when its data
+            arrives. User can still manually edit the strike pill any time. */}
 
         {/* ── WINDOW RECAP TOAST ── */}
         {windowRecap&&(
@@ -8650,7 +8648,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.2</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.3</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -9276,7 +9274,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.2 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.3 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -9432,10 +9430,27 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.2 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.3 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V5.3: Removed strike confirm box + root cause of all the SIT_OUTs */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Root Cause · No More Sit-Outs</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.02</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>5.3</span> — Instant Strike, Real Calls</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User report: "still no calls from tara". V5.2's gate-0 fix was correct but NOT sufficient. The actual root cause was upstream — analysis was null because of how strike confirmation worked. Identified and fixed.</p>
+                <ul className="list-disc pl-4 space-y-1 mt-2">
+                  <li><strong>The actual bug.</strong> Window rollover used to set <code>targetMargin=0</code> + <code>strikeConfirmed=false</code> immediately. Then it showed the "NEW WINDOW — CONFIRM STRIKE PRICE" banner waiting for user to tap OK, OR for Kalshi to fetch (1-3s). During that gap, the analysis useMemo returned <code>null</code> because of two checks: <code>!strikeConfirmed&&strikeMode==='manual'&&targetMargin>0</code> AND <code>!targetMargin</code>. With analysis null, every SIT_OUT screenshot you sent had reason "Engine still loading". Tara was never even getting to evaluate her gates.</li>
+                  <li><strong>The fix.</strong> Strike now auto-sets and auto-confirms at window open using live spot. Kalshi auto-set effect overrides when Kalshi data arrives (1-3s later with V5.2 parallel fetch). Analysis runs from second 1 of every window. Tara's gates can actually run.</li>
+                  <li><strong>Same fix for mid-window page-opens.</strong> Used to leave strike at 0 (analysis null) until user manually entered or Kalshi fetched. Now auto-sets to live spot or Kalshi (whichever's available) the moment the page loads.</li>
+                  <li><strong>Strike confirm banner removed.</strong> Per user request: "remove the confirm strike box completely now. we don't need it with kalshi price working. if i need to ill edit and press ok manually if and when needed." The strike pill in the row still lets you edit the value directly any time.</li>
+                  <li><strong>What you should now actually see.</strong> Window opens → strike pill shows live spot immediately, KLSH ✓ → Kalshi overrides 1-3s later → engine forms posterior → Tara's Call evaluates gates → either WATCHING ▼ DOWN (faded) or ▼ DOWN 65% (locked).</li>
+                </ul>
+              </section>
 
               {/* V5.2: Bug fix + WATCHING display + parallel Kalshi */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
