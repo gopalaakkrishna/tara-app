@@ -104,7 +104,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.02-v5.5-multi-window-tape-consensus';
+const BASELINE_VERSION='2026.05.02-v5.5.5-strike-fill-firmer-locks';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -5014,7 +5014,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.5</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.5.5</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5175,6 +5175,9 @@ function TaraApp(){
   const[newsEvents,setNewsEvents]=useState([]);
   const[targetMargin,setTargetMargin]=useState(0);
   const hasSetInitialMargin=useRef(false);
+  // V5.5.5: When true, signals the fill-on-tick effect to set strike from next currentPrice.
+  //   Set true at window rollover or page-load, set false after fill happens.
+  const needsCapturedPriceRef=useRef(false);
   // Auto-strike: tracks the window's opening price, fetched at each new window
   const windowOpenPriceRef=useRef(0);
   // V3.1.7+: Window amplitude tracking — high/low since window open. Reset on rollover.
@@ -5306,7 +5309,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.5 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.5.5 online — FGT primary signal + 7 secondary signals + lock state machine + Kalshi strike snap + tape strip active.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5446,7 +5449,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.5'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.5.5'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -5493,43 +5496,28 @@ function TaraApp(){
   // No API calls, no CORS, no parsing — zero latency, always accurate
   const setWindowOpenStrike=(price)=>{
     if(isManualStrikeRef.current)return;
-    // V5.5b: KALSHI-ONLY strike sourcing per user request: 'at the start of the window or
-    //   any point during the window only get it from kalshi otherwise keep it blank i will
-    //   enter manually and press ok myself if everything fails to fetch'.
-    //   No live-spot fallback. If Kalshi is unavailable, strike stays blank.
-    //   Window high/low/amplitude refs still track current price for indicator math.
-    const _kStrike=kalshiStrikeRef.current;
-    const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
+    // V5.5.5: New strike-source flow per user spec:
+    //   'everytime new window starts, i want strike pricing to go blank and when Tara
+    //    finds the current price of the window lets have that set'.
+    //   Step 1: At rollover, set strike BLANK (targetMargin=0, strikeConfirmed=false).
+    //   Step 2: A separate effect watches currentPrice — when first non-zero tick arrives
+    //           after rollover, that's "Tara finding the current price" → fills strike
+    //           with live spot, auto-confirms.
+    //   Step 3: Kalshi auto-set effect overrides whenever Kalshi data arrives.
+    //   This block only sets the BLANK state. The fill-on-tick is in the effect below.
     const _now=Date.now();
-    const _trackPrice=price||currentPriceRef.current||0;
-    if(_kStrikeValid){
-      const rounded=Math.round(_kStrike);
-      windowOpenPriceRef.current=rounded;
-      windowHighRef.current=rounded;
-      windowLowRef.current=rounded;
-      windowHighTimeRef.current=_now;
-      windowLowTimeRef.current=_now;
-      windowOpenTimeRef.current=_now;
-      setTargetMargin(rounded);
-      setStrikeConfirmed(true);
-      setPendingStrike(null);
-      setStrikeMode('manual');
-      setStrikeSource('kalshi');
-    }else{
-      // Kalshi not available — leave strike blank for manual entry. Tracking refs still
-      //   advance from current price so amplitude/high/low calculations work once strike set.
-      windowOpenPriceRef.current=0;
-      windowHighRef.current=_trackPrice;
-      windowLowRef.current=_trackPrice;
-      windowHighTimeRef.current=_now;
-      windowLowTimeRef.current=_now;
-      windowOpenTimeRef.current=_now;
-      setTargetMargin(0);
-      setStrikeConfirmed(false);
-      setPendingStrike(null);
-      setStrikeMode('manual');
-      setStrikeSource('manual');
-    }
+    windowOpenPriceRef.current=0;
+    windowHighRef.current=0;
+    windowLowRef.current=0;
+    windowHighTimeRef.current=_now;
+    windowLowTimeRef.current=_now;
+    windowOpenTimeRef.current=_now;
+    setTargetMargin(0);
+    setStrikeConfirmed(false);
+    setPendingStrike(null);
+    setStrikeMode('manual');
+    setStrikeSource('manual');
+    needsCapturedPriceRef.current=true;  // signals next-tick-fill effect to fire
     hasSetInitialMargin.current=true;
   };
 
@@ -5538,36 +5526,34 @@ function TaraApp(){
     setWindowOpenStrike(currentPriceRef.current);
   },[]);
 
-  // V5.5b: Page-load mid-window — KALSHI ONLY per user request. If Kalshi not yet fetched
-  //   when page loads, leave strike blank. The Kalshi auto-set effect will fill it once
-  //   data arrives. User can manually enter + press OK any time.
+  // V5.5.5: Strike capture effect — fires when currentPrice tick arrives and we need
+  //   a strike. Two scenarios:
+  //     (a) Page loads mid-window with no strike → first tick captures
+  //     (b) Window just rolled over → needsCapturedPriceRef set → next tick fills
+  //   Per user: 'when Tara finds the current price of the window lets have that set'.
   useEffect(()=>{
-    if(!hasSetInitialMargin.current&&currentPrice){
-      const _kStrike=kalshiStrikeRef.current;
-      const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
-      const _now=Date.now();
-      if(_kStrikeValid){
-        const p=Math.round(_kStrike);
-        windowOpenPriceRef.current=p;
-        windowHighRef.current=p;
-        windowLowRef.current=p;
-        windowHighTimeRef.current=_now;
-        windowLowTimeRef.current=_now;
-        windowOpenTimeRef.current=_now;
-        setTargetMargin(p);
-        setStrikeConfirmed(true);
-        setStrikeMode('manual');
-        setStrikeSource('kalshi');
-      }else{
-        // Kalshi not yet — leave blank, but track high/low from current price
-        windowHighRef.current=currentPrice;
-        windowLowRef.current=currentPrice;
-        windowHighTimeRef.current=_now;
-        windowLowTimeRef.current=_now;
-        windowOpenTimeRef.current=_now;
-      }
-      hasSetInitialMargin.current=true;
-    }
+    if(!currentPrice)return;
+    const _firstTime=!hasSetInitialMargin.current;
+    const _needsFill=needsCapturedPriceRef.current;
+    if(!_firstTime&&!_needsFill)return; // nothing to do
+    // Prefer Kalshi if cached, else live spot. Either way, fill strike now.
+    const _kStrike=kalshiStrikeRef.current;
+    const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
+    const _raw=_kStrikeValid?_kStrike:currentPrice;
+    const p=Math.round(_raw);
+    const _now=Date.now();
+    windowOpenPriceRef.current=p;
+    windowHighRef.current=p;
+    windowLowRef.current=p;
+    windowHighTimeRef.current=_now;
+    windowLowTimeRef.current=_now;
+    windowOpenTimeRef.current=_now;
+    setTargetMargin(p);
+    setStrikeConfirmed(true);
+    setStrikeMode('manual');
+    setStrikeSource(_kStrikeValid?'kalshi':'live');
+    hasSetInitialMargin.current=true;
+    needsCapturedPriceRef.current=false;
   },[currentPrice]);
 
   // V3.1.7: Kalshi strike re-snap. The window-open event fires before Kalshi's API has
@@ -5623,7 +5609,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.5  |  signal'},
+        footer:{text:'Tara 5.5.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5637,7 +5623,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.5  |  stand-down'},
+        footer:{text:'Tara 5.5.5  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5651,7 +5637,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.5  |  search'},
+        footer:{text:'Tara 5.5.5  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5668,7 +5654,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.5  |  lock'},
+        footer:{text:'Tara 5.5.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5685,7 +5671,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.5  |  close'},
+          footer:{text:'Tara 5.5.5  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5706,7 +5692,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.5  |  exit'},
+        footer:{text:'Tara 5.5.5  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5727,7 +5713,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.5  |  scanning'},
+        footer:{text:'Tara 5.5.5  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5747,7 +5733,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.5  |  signal'},
+        footer:{text:'Tara 5.5.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5767,7 +5753,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.5  |  lock'},
+        footer:{text:'Tara 5.5.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5784,7 +5770,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.5  |  sit-out'},
+        footer:{text:'Tara 5.5.5  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -5806,7 +5792,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.5  |  result'},
+          footer:{text:'Tara 5.5.5  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -5843,12 +5829,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.5  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.5.5  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.5.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -5867,7 +5853,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.5.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -6393,10 +6379,13 @@ function TaraApp(){
         // V3.2.4: Resolve Tara's Call for the round just closed.
         //   This runs whether or not the user actively traded — Tara has her own scorecard.
         //   If snapshot is null (window closed before endgame freeze fired), treat as SIT_OUT.
-        if(currentPrice!==null&&targetMargin>0){
+        // V5.5.5: Use windowOpenPriceRef as strike fallback if targetMargin happens to be 0
+        //   at close — this can happen if Kalshi came in after rollover and user cleared it.
+        const _scoringStrike=targetMargin>0?targetMargin:(windowOpenPriceRef.current||0);
+        if(currentPrice!==null&&_scoringStrike>0){
           const _snap=taraCallSnapshotRef.current;
-          const _outcomeDir=currentPrice>targetMargin?'UP':currentPrice<targetMargin?'DOWN':null;
-          const _gap=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
+          const _outcomeDir=currentPrice>_scoringStrike?'UP':currentPrice<_scoringStrike?'DOWN':null;
+          const _gap=_scoringStrike>0?((currentPrice-_scoringStrike)/_scoringStrike)*10000:0;
           // No snapshot OR explicit SIT_OUT → sitouts++
           if(!_snap||_snap.call==='SIT_OUT'){
             setTaraScorecards(prev=>{
@@ -6980,8 +6969,8 @@ function TaraApp(){
         //       can be momentum-tick noise that recovers. Keeps prior V134/V135 behavior here.
         const _sinceLockMs=Date.now()-(lock.lockedAt||Date.now());
         const _postLockStable=_sinceLockMs>30000;
-        const _severeCollapse=postDelta>=25;
-        const decayCollapse=_severeCollapse||(postDelta>=15&&_postLockStable);
+        const _severeCollapse=postDelta>=35; // V5.5.5: 25 → 35, less twitchy
+        const decayCollapse=_severeCollapse||(postDelta>=22&&_postLockStable); // V5.5.5: 15 → 22
         // V135: Deep-adverse threshold lowered 55 → 30 bps. 55 bps on $75K BTC is a $400 move —
         //       by the time you're that far wrong, the round is already lost. 30 bps is enough
         //       adverse to recognize a broken call while still being above tick noise.
@@ -7009,9 +6998,10 @@ function TaraApp(){
         // V140: Mirror — catastrophic upward spike releases DOWN locks immediately.
         //       Faster than waiting for deepWrong (gap > 30 bps adverse). Symmetric to rug-pull.
         const catastrophicSpike=(eng.isMoonshot&&lock.dir==='DOWN')||(eng.isMoonshot&&lock.dir==='DOWN'&&posterior>90);
-        // V134: SIGNAL REGIME CHANGE DETECTION
-        // If 3+ signals flip from agreeing to opposing the lock direction → release
-        // Sharper than waiting for 20pt posterior collapse
+        // V5.5.5: Soft-flip releases tightened. User reports 'locks and releases in a min
+        //   or so' on the engine general prediction. Each soft release now requires more
+        //   decisive evidence before firing. Safety releases (rugpull/spike/deep adverse)
+        //   left unchanged — those are real reversals.
         let signalRegimeChange=false;
         let flippedSignals=[];
         if(lock.lockedSignals&&eng.rawSignalScores&&_postLockStable){
@@ -7020,37 +7010,30 @@ function TaraApp(){
           ['gap','momentum','structure','flow','technical','regime'].forEach(k=>{
             const at=lock.lockedSignals[k]||0;
             const now=eng.rawSignalScores[k]||0;
-            // Was it agreeing with lock direction at lock time? Now opposing?
             const wasWith=Math.sign(at)===lockSign&&Math.abs(at)>3;
             const nowAgainst=Math.sign(now)===-lockSign&&Math.abs(now)>3;
             if(wasWith&&nowAgainst){flipCount++;flippedSignals.push(k);}
           });
-          // 3+ signals flipped = real regime change, release the lock
-          if(flipCount>=3)signalRegimeChange=true;
+          // V5.5.5: 4+ signals flipped (was 3+). Requires stronger consensus reversal.
+          if(flipCount>=4)signalRegimeChange=true;
         }
-        // V135: Trajectory flip threshold tightened -8/+8 → -7/+7 to match the entry gate.
-        const trajFlipAgainst=(lock.dir==='UP'&&(eng.trajectoryAdj||0)<=-7&&_postLockStable)||
-                              (lock.dir==='DOWN'&&(eng.trajectoryAdj||0)>=7&&_postLockStable);
-        // V134: Lock release on FGT alignment flip (3+ timeframes now opposing)
-        // V136: FGT is now the primary signal. Lock release fires earlier — was 3/4 against,
-        //       now 2/4+ against (since FGT 4/4 was driving the lock decision in the first place,
-        //       2/4+ flipping AWAY is meaningful and we want to release fast). Still gated by
-        //       _postLockStable to avoid releasing on tick-noise immediately after lock.
+        // V5.5.5: Trajectory flip threshold ±7 → ±10. Higher bar to release.
+        const trajFlipAgainst=(lock.dir==='UP'&&(eng.trajectoryAdj||0)<=-10&&_postLockStable)||
+                              (lock.dir==='DOWN'&&(eng.trajectoryAdj||0)>=10&&_postLockStable);
+        // V5.5.5: FGT flip threshold 2/4 → 3/4. Harder to flip out.
         const fgtFlipAgainst=_postLockStable&&(
-          (lock.dir==='UP'&&(eng.mtfAlignment||0)<=-2)||
-          (lock.dir==='DOWN'&&(eng.mtfAlignment||0)>=2)
+          (lock.dir==='UP'&&(eng.mtfAlignment||0)<=-3)||
+          (lock.dir==='DOWN'&&(eng.mtfAlignment||0)>=3)
         );
-        // V135: REGIME-CHANGE RE-VALIDATION — if the regime that justified the lock no longer holds
-        //       AND trajectory is now leaning against the lock direction, release.
-        //       Catches: locked UP in SHORT SQUEEZE, regime drifts to RANGE-CHOP, trajectory turns DOWN.
+        // V5.5.5: Regime revalidation tightened — trajectory must lean more decisively against.
         const _bullishRegimes=['SHORT SQUEEZE','TRENDING UP'];
         const _bearishRegimes=['TRENDING DOWN'];
         const _lockedInBullishRg=_bullishRegimes.includes(lock.lockedRegime||'');
         const _lockedInBearishRg=_bearishRegimes.includes(lock.lockedRegime||'');
         const _nowInBullishRg=_bullishRegimes.includes(regime);
         const _nowInBearishRg=_bearishRegimes.includes(regime);
-        const _trajLeansDn=(eng.trajectoryAdj||0)<=-5;
-        const _trajLeansUp=(eng.trajectoryAdj||0)>=5;
+        const _trajLeansDn=(eng.trajectoryAdj||0)<=-8; // V5.5.5: -5 → -8
+        const _trajLeansUp=(eng.trajectoryAdj||0)>=8;  // V5.5.5: +5 → +8
         const regimeRevalidation=_postLockStable&&(
           (lock.dir==='UP'&&_lockedInBullishRg&&!_nowInBullishRg&&_trajLeansDn)||
           (lock.dir==='DOWN'&&_lockedInBearishRg&&!_nowInBearishRg&&_trajLeansUp)
@@ -7418,7 +7401,7 @@ function TaraApp(){
     const _winType=analysis?.windowAmplitude?.label;
     const _hostile=_winType==='DEAD'||_winType==='WHIPSAW';
     let _need;
-    if(_q>=72&&_fgtAbs>=2.0&&_cleanRegime&&!_hostile)_need=1;
+    if(_q>=80&&_fgtAbs>=3.0&&_cleanRegime&&!_hostile)_need=1;
     else if(_q>=55&&_fgtAbs>=1.2&&!_hostile)_need=2;
     else if(_hostile)_need=5;
     else _need=3;
@@ -7482,20 +7465,19 @@ function TaraApp(){
     const cleanRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(regime);
     const winType=analysis?.windowAmplitude?.label;
     const hostileWindow=winType==='DEAD'||winType==='WHIPSAW';
-    // V5.5d: Re-tuned per user: 'sooner the better if she's sure but if a few seconds or
-    //   couple mins in the beginning of the window helps let's do that.' Clean conditions
-    //   still lock at 1 sample (fast). Less-clean conditions get more analyzing time before
-    //   committing. Time-decay slowed to per-60s (was per-30s) so she has 2-3 minutes of
-    //   patient analysis before gates fully open.
+    // V5.5.5: Instant-lock criteria tightened. User: 'where is the analyzing/scanning period.
+    //   or is she doing it cause she is too confident?' Answer: the q≥72/FGT≥2 bar was too
+    //   loose for instant. Now q≥80 + FGT≥3 (top decile + strong alignment) for true instant
+    //   lock. Everything else takes ≥2 samples (visible analyzing time).
     let needSamples;
-    if(q>=72&&fgtAbs>=2.0&&cleanRegime&&!hostileWindow){
-      needSamples=1;       // very clean: instant lock
+    if(q>=80&&fgtAbs>=3.0&&cleanRegime&&!hostileWindow){
+      needSamples=1;       // genuinely exceptional: instant lock
     } else if(q>=55&&fgtAbs>=1.2&&!hostileWindow){
-      needSamples=2;       // good but not super clean: 2 confirms (~30s analyzing)
+      needSamples=2;       // good: ~30s analyzing
     } else if(hostileWindow){
       needSamples=5;       // hostile: extra patience
     } else {
-      needSamples=3;       // default: 3 confirms (~1 min analyzing)
+      needSamples=3;       // default: ~1 min analyzing
     }
     // V5.5d: Time-decay slowed to per-60s. Default 3 → 2 by 60s → 1 by 120s.
     //   Hostile 5 → 4 → 3 → 2 → 1 by 240s. Gives Tara genuine analyzing time early window.
@@ -8039,7 +8021,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.5...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.5.5...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -8140,7 +8122,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.5
+              5.5.5
             </span>
           </div>
 
@@ -8705,7 +8687,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.5.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -9331,7 +9313,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.5 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.5.5 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -9487,7 +9469,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.5 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.5.5 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
