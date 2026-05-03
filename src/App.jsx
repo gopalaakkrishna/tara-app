@@ -13,36 +13,43 @@ import { getFirestore, doc, getDoc, setDoc, deleteDoc, onSnapshot, serverTimesta
 // fresher data exists. Writes go to both stores (localStorage immediately, Firestore
 // debounced 300-1500ms depending on path).
 //
-// Paths (all under users/{USER_ID}/):
+// V5.6.3: SHARED TARA. Previously every userId was its own namespace. Now there is one
+// global Tara — every browser, every device, every user who opens the app sees the same
+// record, the same memory, the same lock state. Paths are 2-segment globals.
+//
+// Paths (global, no namespace):
 //   state/currentLock     → engine lockedCallRef + Tara snapshot for the active window.
 //                           windowId-keyed so a refresh during the same window restores
 //                           exactly what was on screen before reload. Stale locks from
 //                           previous windows are ignored on restore.
-//   scorecards/tara       → Tara's Call W/L/sitouts per window-type. Cross-device.
+//   scorecards/tara       → Tara's Call W/L/sitouts per window-type.
+//   memory/taraCallLog    → array of every call she's made (capped at 500).
 //   meta/info             → baselineVersion + lastSeenAt for migration tracking.
 //
 // NOT cloud-synced (per V5.5b decision — user-trade-driven training stays ephemeral):
 //   adaptiveWeights, regimeWeights, tradeLog. These remain in-memory only this session.
-//   If you want them persisted later, that's a separate scoped change.
 //
 // Test-mode caveat: Firestore rules are wide open for ~30 days. Lock down in V5.7 with
-// proper rules tied to USER_ID. Low risk meanwhile (project ID needed to write).
+// proper rules.
 const FIREBASE_CONFIG={apiKey:"AIzaSyD8jltDNdmXPE0JolUSX6fXzSQUdsYjLcY",authDomain:"tara-app-ee39d.firebaseapp.com",projectId:"tara-app-ee39d",storageBucket:"tara-app-ee39d.firebasestorage.app",messagingSenderId:"512450573817",appId:"1:512450573817:web:b1659b8f28f894900f7928"};
-const USER_ID='Gohan';
 let _fbApp=null,_fbDb=null;
-try{_fbApp=initializeApp(FIREBASE_CONFIG);_fbDb=getFirestore(_fbApp);console.info('[Firestore] init ok — userId:',USER_ID);}
+try{_fbApp=initializeApp(FIREBASE_CONFIG);_fbDb=getFirestore(_fbApp);console.info('[Firestore] init ok — shared Tara, no namespacing');}
 catch(e){console.warn('[Firestore] init failed — falling back to localStorage only:',e?.message);}
 
 const _fbDoc=(path)=>{
   if(!_fbDb)return null;
-  const segs=['users',USER_ID,...path.split('/')];
+  // V5.6.3: paths are 2-segment globals (collection/doc). One Tara, everyone shares.
+  const segs=path.split('/');
   return doc(_fbDb,...segs);
 };
 // V5.6.1: Cloud sync status — subscribers (React components) get notified on state change.
 //   States: 'idle' (no recent activity), 'writing' (debounced or in-flight), 'ok' (last
 //   write succeeded), 'error' (last write/read failed). Used for a visible indicator dot.
+// V5.6.3: Track active onSnapshot listeners. If listeners > 0, real-time sync is alive
+//   and changes from any device propagate within ~1s without refresh. If listeners = 0
+//   but Firestore is initialized, something's wrong (rules, network, etc.).
 const _cloudSyncListeners=new Set();
-let _cloudSyncStatus={state:_fbDb?'idle':'disabled',lastOk:null,lastError:null,writes:0,reads:0};
+let _cloudSyncStatus={state:_fbDb?'idle':'disabled',lastOk:null,lastError:null,writes:0,reads:0,listeners:0};
 const _setCloudStatus=(patch)=>{_cloudSyncStatus={..._cloudSyncStatus,...patch};_cloudSyncListeners.forEach(l=>l(_cloudSyncStatus));};
 const subscribeCloudStatus=(fn)=>{_cloudSyncListeners.add(fn);fn(_cloudSyncStatus);return()=>_cloudSyncListeners.delete(fn);};
 
@@ -80,10 +87,13 @@ const cloudDelete=async(path)=>{
 //   change from any connected client. This is what makes cross-device sync actually work:
 //   Device A writes, Device B's listener fires within ~1s, B's UI updates without refresh.
 //   Returns an unsubscribe function the caller stores in a useEffect cleanup.
+// V5.6.3: Tracks active listener count in sync status — so the badge can show whether
+//   real-time sync is actually established vs. just one-shot reads happening.
 const cloudWatch=(path,callback)=>{
   const ref=_fbDoc(path);
   if(!ref){callback(null,'disabled');return()=>{};}
-  return onSnapshot(ref,
+  _setCloudStatus({listeners:_cloudSyncStatus.listeners+1});
+  const unsub=onSnapshot(ref,
     (snap)=>{
       _setCloudStatus({state:'ok',lastOk:Date.now(),reads:_cloudSyncStatus.reads+1});
       callback(snap.exists()?snap.data():null,'ok');
@@ -94,6 +104,10 @@ const cloudWatch=(path,callback)=>{
       callback(null,'error');
     }
   );
+  return()=>{
+    _setCloudStatus({listeners:Math.max(0,_cloudSyncStatus.listeners-1)});
+    unsub();
+  };
 };
 // Coalesces rapid updates per-path into a single Firestore write (saves quota + bandwidth).
 const _writeQueue=new Map();
@@ -114,35 +128,46 @@ const computeWindowId=(windowType)=>{
 //   writing in progress. Red = last attempt errored. Gray = Firestore not initialized.
 //   Click to see details (last write/read counts, last error, userId).
 // V5.6.2: Now shows actual record values so user can verify cross-device sync at a glance.
-//   "Pull now" force-reads cloud and re-merges. Should rarely be needed with onSnapshot.
+// V5.6.3: Shows live "synced Xs ago" timer + listener count. With real-time sync working,
+//   the user shouldn't need to do anything — sync is automatic. The badge is purely
+//   diagnostic now. Pull button removed (was a band-aid; with onSnapshot it's redundant).
 function CloudSyncBadge({taraScorecards,taraCallLog}){
   const[s,setS]=React.useState(_cloudSyncStatus);
   const[open,setOpen]=React.useState(false);
+  const[,_tick]=React.useState(0);
   React.useEffect(()=>subscribeCloudStatus(setS),[]);
+  // tick every second so "synced Xs ago" stays current
+  React.useEffect(()=>{
+    const id=setInterval(()=>_tick(t=>t+1),1000);
+    return()=>clearInterval(id);
+  },[]);
   const colors={
     idle:{bg:'rgba(232,233,228,0.10)',dot:'rgba(232,233,228,0.5)',label:'IDLE'},
     writing:{bg:'rgba(245,158,11,0.15)',dot:'rgba(245,158,11,0.9)',label:'SYNC'},
-    ok:{bg:'rgba(52,211,153,0.12)',dot:'rgba(52,211,153,0.9)',label:'SYNCED'},
+    ok:{bg:'rgba(52,211,153,0.12)',dot:'rgba(52,211,153,0.9)',label:'LIVE'},
     error:{bg:'rgba(244,114,182,0.15)',dot:'rgba(244,114,182,0.9)',label:'ERROR'},
     disabled:{bg:'rgba(232,233,228,0.05)',dot:'rgba(232,233,228,0.25)',label:'OFF'},
   }[s.state]||{bg:'rgba(232,233,228,0.05)',dot:'rgba(232,233,228,0.25)',label:'?'};
   const sc15=taraScorecards?.['15m']||{wins:0,losses:0,sitouts:0};
   const sc5=taraScorecards?.['5m']||{wins:0,losses:0,sitouts:0};
   const logCount=Array.isArray(taraCallLog)?taraCallLog.length:0;
-  const _forcePull=async()=>{
-    // Force-fetch the cloud copy and let the onSnapshot listeners merge it back in.
-    // (Reads are still routed through onSnapshot, so this just primes the connection.)
-    await cloudRead('scorecards/tara');
-    await cloudRead('memory/taraCallLog');
+  const _agoStr=(ms)=>{
+    if(!ms)return 'never';
+    const d=Math.floor((Date.now()-ms)/1000);
+    if(d<2)return 'just now';
+    if(d<60)return d+'s ago';
+    if(d<3600)return Math.floor(d/60)+'m ago';
+    return Math.floor(d/3600)+'h ago';
   };
+  const listenersAlive=s.listeners>0;
   return React.createElement('div',{className:'relative'},
     React.createElement('button',{
       onClick:()=>setOpen(!open),
       className:'flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-md border uppercase',
       style:{background:colors.bg,borderColor:colors.dot,color:colors.dot},
-      title:'Cloud sync status',
+      title:'Cloud sync · '+(listenersAlive?'live':'not connected'),
     },
-      React.createElement('span',{className:'w-1 h-1 rounded-full '+(s.state==='writing'?'animate-pulse':''),style:{background:colors.dot}}),
+      React.createElement('span',{className:'w-1 h-1 rounded-full '+(listenersAlive?'animate-pulse':''),style:{background:colors.dot}}),
       React.createElement('span',{className:'hidden sm:inline'},colors.label),
     ),
     open&&React.createElement('div',{
@@ -154,35 +179,49 @@ function CloudSyncBadge({taraScorecards,taraCallLog}){
         React.createElement('span',{className:'font-bold uppercase tracking-wider',style:{color:colors.dot}},'Cloud sync · '+colors.label),
         React.createElement('button',{onClick:()=>setOpen(false),className:'text-[#E8E9E4]/40 hover:text-white text-base leading-none'},'×'),
       ),
-      React.createElement('div',{className:'space-y-0.5 text-[#E8E9E4]/70 mb-2'},
-        React.createElement('div',null,'User: ',React.createElement('span',{className:'font-mono text-white'},USER_ID||'(none)')),
-        React.createElement('div',null,'Writes: ',React.createElement('span',{className:'font-mono text-white'},s.writes),' · Reads: ',React.createElement('span',{className:'font-mono text-white'},s.reads)),
-        s.lastOk&&React.createElement('div',null,'Last ok: ',React.createElement('span',{className:'font-mono text-white'},new Date(s.lastOk).toLocaleTimeString())),
-        s.lastError&&React.createElement('div',{className:'text-rose-400 mt-1 break-words'},'Error: ',s.lastError.message,' (',s.lastError.path,')'),
-        !_fbDb&&React.createElement('div',{className:'text-amber-400 mt-1'},'Firestore not initialized — npm install firebase + redeploy.'),
+      // Headline — listener state is the most important signal. If "real-time off",
+      // changes from other devices won't appear without refresh.
+      React.createElement('div',{
+        className:'mb-2 p-2 rounded',
+        style:{background:listenersAlive?'rgba(52,211,153,0.10)':'rgba(244,114,182,0.10)',border:'1px solid '+(listenersAlive?'rgba(52,211,153,0.3)':'rgba(244,114,182,0.3)')},
+      },
+        React.createElement('div',{className:'flex justify-between'},
+          React.createElement('span',{className:'font-bold',style:{color:listenersAlive?'rgba(110,231,183,0.95)':'rgba(244,114,182,0.95)'}},listenersAlive?'● Real-time sync active':'○ Real-time sync OFF'),
+          React.createElement('span',{className:'tabular-nums opacity-70'},s.listeners,' listener',s.listeners===1?'':'s'),
+        ),
+        React.createElement('div',{className:'text-[#E8E9E4]/60 mt-0.5'},listenersAlive
+          ? 'Changes from any device appear here within ~1s automatically.'
+          : (_fbDb?'Listeners not connected — check Firestore rules / network.':'Firestore not initialized — npm install firebase + redeploy.')
+        ),
       ),
-      // V5.6.2: actual values block — user can compare PC vs mobile at a glance
-      React.createElement('div',{className:'border-t border-[#E8E9E4]/10 pt-2 mb-2'},
-        React.createElement('div',{className:'text-[#E8E9E4]/40 uppercase tracking-wider text-[8px] font-bold mb-1'},'On this device'),
+      // Live timestamps + counters
+      React.createElement('div',{className:'space-y-0.5 text-[#E8E9E4]/70 mb-2'},
+        React.createElement('div',{className:'flex justify-between'},
+          React.createElement('span',null,'Last update:'),
+          React.createElement('span',{className:'font-mono text-white'},_agoStr(s.lastOk)),
+        ),
+        React.createElement('div',{className:'flex justify-between'},
+          React.createElement('span',null,'Reads · Writes:'),
+          React.createElement('span',{className:'font-mono text-white'},s.reads,' · ',s.writes),
+        ),
+        s.lastError&&React.createElement('div',{className:'text-rose-400 mt-1 break-words'},'Error: ',s.lastError.message),
+      ),
+      // Actual values block — verify against another device
+      React.createElement('div',{className:'border-t border-[#E8E9E4]/10 pt-2'},
+        React.createElement('div',{className:'text-[#E8E9E4]/40 uppercase tracking-wider text-[8px] font-bold mb-1'},'Tara\'s record · shared globally'),
         React.createElement('div',{className:'flex justify-between gap-2'},
-          React.createElement('span',null,'15m record:'),
+          React.createElement('span',null,'15m:'),
           React.createElement('span',{className:'font-mono text-white'},sc15.wins,'W · ',sc15.losses,'L · ',sc15.sitouts,'S'),
         ),
         React.createElement('div',{className:'flex justify-between gap-2'},
-          React.createElement('span',null,'5m record:'),
+          React.createElement('span',null,'5m:'),
           React.createElement('span',{className:'font-mono text-white'},sc5.wins,'W · ',sc5.losses,'L · ',sc5.sitouts,'S'),
         ),
         React.createElement('div',{className:'flex justify-between gap-2'},
-          React.createElement('span',null,'Memory entries:'),
-          React.createElement('span',{className:'font-mono text-white'},logCount),
+          React.createElement('span',null,'Memory:'),
+          React.createElement('span',{className:'font-mono text-white'},logCount,' calls'),
         ),
-        React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 italic mt-1'},'Same numbers should appear on every device after ~1s.'),
-      ),
-      _fbDb&&React.createElement('div',{className:'flex gap-1.5'},
-        React.createElement('button',{
-          onClick:_forcePull,
-          className:'flex-1 px-2 py-1 text-[9px] uppercase font-bold tracking-wider rounded border border-indigo-500/30 text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20',
-        },'Pull now'),
+        React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 italic mt-1'},'Identical numbers should appear on every device, every browser, simultaneously.'),
       ),
     ),
   );
@@ -292,7 +331,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.03-v5.6.2-realtime-sync-merge-max';
+const BASELINE_VERSION='2026.05.03-v5.6.3-shared-tara-no-namespace';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -5349,7 +5388,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.6.2</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.6.3</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5738,7 +5777,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.6.2 online — Real-time cross-device sync · MAX-merge counters · onSnapshot listeners · cloud sync visible · refresh restores locks.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.6.3 online — One shared Tara · everyone sees the same record · real-time sync · refresh restores locks.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5878,7 +5917,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.6.2'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.6.3'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -6051,7 +6090,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.2  |  signal'},
+        footer:{text:'Tara 5.6.3  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6065,7 +6104,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.6.2  |  stand-down'},
+        footer:{text:'Tara 5.6.3  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6079,7 +6118,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.6.2  |  search'},
+        footer:{text:'Tara 5.6.3  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6096,7 +6135,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.6.2  |  lock'},
+        footer:{text:'Tara 5.6.3  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6113,7 +6152,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.6.2  |  close'},
+          footer:{text:'Tara 5.6.3  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6134,7 +6173,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.6.2  |  exit'},
+        footer:{text:'Tara 5.6.3  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6155,7 +6194,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.2  |  scanning'},
+        footer:{text:'Tara 5.6.3  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6175,7 +6214,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.2  |  signal'},
+        footer:{text:'Tara 5.6.3  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6195,7 +6234,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.2  |  lock'},
+        footer:{text:'Tara 5.6.3  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6212,7 +6251,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.2  |  sit-out'},
+        footer:{text:'Tara 5.6.3  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6234,7 +6273,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.6.2  |  result'},
+          footer:{text:'Tara 5.6.3  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6271,12 +6310,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.6.2  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.6.3  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.6.2',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.6.3',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -6295,7 +6334,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.6.2 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.6.3 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8569,7 +8608,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.6.2...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.6.3...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -8670,7 +8709,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.6.2
+              5.6.3
             </span>
             {/* V5.6.1: Cloud sync indicator — visible on all viewports. Click for details. */}
             <CloudSyncBadge taraScorecards={taraScorecards} taraCallLog={taraCallLog}/>
@@ -9240,7 +9279,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.6.2</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.6.3</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -9866,7 +9905,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.6.2 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.6.3 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -10022,7 +10061,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.6.2 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.6.3 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
