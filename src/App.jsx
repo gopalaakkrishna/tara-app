@@ -3569,12 +3569,18 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     //   or < 45s (5m). After this point a snapshot pins automatically. The deadline is
     //   the LATEST time she could still commit by choice — counts down so user always
     //   sees a real number, even when the gate is blocking and there's no honest ETA.
+    // V6.1.0: Hard cadence cap (90s for 15m, 45s for 5m) is now the PRIMARY deadline.
+    //   Past this cap, Tara auto-sits-out. So this is the real "decide by" clock the
+    //   user has been asking for: predictable, hard, never-changing.
+    const _hardCapSec=windowType==='15m'?90:45;
+    const _secsUntilCap=Math.max(0,_hardCapSec-_elapsed);
     const _endgameSec=windowType==='15m'?90:45;
     const _secsUntilDeadline=Math.max(0,_remSec-_endgameSec);
-    const _deadlineLabel=_secsUntilDeadline>=60
-      ?`${Math.floor(_secsUntilDeadline/60)}m ${String(_secsUntilDeadline%60).padStart(2,'0')}s`
-      :`${_secsUntilDeadline}s`;
-    const _atDeadline=_secsUntilDeadline<=10;
+    const _deadlineLabel=_secsUntilCap>=60
+      ?`${Math.floor(_secsUntilCap/60)}m ${String(_secsUntilCap%60).padStart(2,'0')}s`
+      :`${_secsUntilCap}s`;
+    const _atDeadline=_secsUntilCap<=10;
+    const _capPassed=_secsUntilCap===0;
     // Decision-step countdown
     const _elapsedMin=Math.floor(_elapsed/60);
     const _secIntoMin=_elapsed%60;
@@ -3602,33 +3608,32 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
       //   1. Samples accumulating + ETA available → show real lock ETA
       //   2. Samples accumulating but stalled → deadline countdown (gate flips often)
       //   3. No samples yet → deadline countdown (forced-decision clock)
-      // V6.0.6: ETA must also fit within the remaining window. When samples are accumulating
-      //   so slowly that ETA exceeds the deadline, surface that explicitly.
-      // Phase hint carries the qualitative context (lean / gate reason).
-      const _etaFitsCountdown=_samples>=2&&_need>0&&!tc.lockEtaStalled&&tc.lockEtaSec!=null&&tc.lockEtaSec<=_secsUntilDeadline+30;
-      const _etaExceedsCountdown=_samples>=2&&_need>0&&!tc.lockEtaStalled&&tc.lockEtaSec!=null&&tc.lockEtaSec>_secsUntilDeadline+30;
+      // V6.1.0: Now uses the hard cadence cap as the deadline (not endgame freeze).
+      //   Past the cap → auto sit-out, so the cap is the real "decide by" number.
+      const _etaFitsCountdown=_samples>=2&&_need>0&&!tc.lockEtaStalled&&tc.lockEtaSec!=null&&tc.lockEtaSec<=_secsUntilCap+5;
+      const _etaExceedsCountdown=_samples>=2&&_need>0&&!tc.lockEtaStalled&&tc.lockEtaSec!=null&&tc.lockEtaSec>_secsUntilCap+5;
       if(_etaFitsCountdown){
         if(tc.lockEtaSec===0){
           countdownText='committing this tick';
         } else {
           countdownText=`decision in ~${formatDuration(tc.lockEtaSec)}`;
         }
-        phaseHint=`${_samplesInt}/${_needInt} samples · deadline ${_deadlineLabel}`;
+        phaseHint=`${_samplesInt}/${_needInt} samples · cap ${_deadlineLabel}`;
         phaseProgressPct=Math.min(95,(_samples/_need)*100);
       } else if(_etaExceedsCountdown){
-        // Samples accumulating but too slowly to reach lock before deadline
-        countdownText=`${_deadlineLabel} to decide`;
-        phaseHint=`${_samplesInt}/${_needInt} samples · won't reach lock at current pace`;
+        // Samples accumulating but too slowly to reach lock before cap → will sit out
+        countdownText=`${_deadlineLabel} to commit`;
+        phaseHint=`${_samplesInt}/${_needInt} samples · too slow, will sit out at cap`;
         phaseProgressPct=Math.min(95,(_samples/_need)*100);
       } else if(_samples>=2&&_need>0&&tc.lockEtaStalled){
         // Samples started but stopped accumulating — gate is flipping
-        countdownText=_atDeadline?`${_deadlineLabel} until forced decision`:`${_deadlineLabel} to decide`;
+        countdownText=_atDeadline?`${_deadlineLabel} to cap`:`${_deadlineLabel} to commit`;
         phaseHint=`${_samplesInt}/${_needInt} samples · stalled, conviction not firm`;
         phaseProgressPct=Math.min(95,(_samples/_need)*100);
       } else if(_liveLeanDir){
-        // V6.0.4/5: gate sees a direction but hasn't started forming — show deadline + lean
-        countdownText=`${_deadlineLabel} to decide`;
-        phaseHint=tc?.reason?tc.reason.replace(/^[^—]*—\s*/,'').slice(0,55):`${_liveLeanConv.toFixed(0)}pt ${_liveLeanDir} lean — awaiting confirmation`;
+        // V6.0.4/5: gate sees a direction but hasn't started forming — show cap + lean
+        countdownText=`${_deadlineLabel} to commit`;
+        phaseHint=tc?.reason?tc.reason.slice(0,55):`${_liveLeanConv.toFixed(0)}pt ${_liveLeanDir} lean — awaiting confirmation`;
         phaseProgressPct=Math.min(40,_elapsed*0.1);
       } else if(_elapsed<20){
         countdownText=`observing — ${20-_elapsed}s of search remaining`;
@@ -3675,29 +3680,30 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           //   15min window). When this happens, show the deadline + a "won't reach lock"
           //   warning instead of the nonsensical large number.
           const _hasEta=tc?.lockEtaSec!=null&&!tc.lockEtaStalled&&(tc.samples||0)>=2;
-          const _etaFitsWindow=_hasEta&&tc.lockEtaSec<=_secsUntilDeadline+30; // 30s buffer for noise
-          const _etaExceedsWindow=_hasEta&&!_etaFitsWindow;
+          // V6.1.0: ETA must fit within the hard cap, not the endgame freeze
+          const _etaFitsCap=_hasEta&&tc.lockEtaSec<=_secsUntilCap+5;
+          const _etaExceedsWindow=_hasEta&&!_etaFitsCap;
           return(
           <div className={`flex items-center justify-between gap-2 mb-3 px-2.5 py-1.5 rounded-md bg-[#0E100F]/60 border ${_atDeadline?'border-rose-500/40':_etaExceedsWindow?'border-amber-500/30':'border-[#E8E9E4]/12'}`}>
             <div className="flex items-baseline gap-1.5 min-w-0">
               <span className={`text-[14px] ${_atDeadline?'text-rose-400':_etaExceedsWindow?'text-amber-400':'text-[#E8E9E4]/55'}`}>⏱</span>
-              <span className={`text-[10px] uppercase tracking-[0.18em] font-bold shrink-0 ${_atDeadline?'text-rose-400':_etaExceedsWindow?'text-amber-400':'text-[#E8E9E4]/65'}`}>Decision Clock</span>
+              <span className={`text-[10px] uppercase tracking-[0.18em] font-bold shrink-0 ${_atDeadline?'text-rose-400':_etaExceedsWindow?'text-amber-400':'text-[#E8E9E4]/65'}`}>Decide by</span>
             </div>
             <div className="flex items-baseline gap-2 tabular-nums">
-              {_etaFitsWindow?(
+              {_etaFitsCap?(
                 <>
                   <span className={`text-[12px] font-bold ${tc.lockEtaSec<=10?'text-emerald-400':'text-[#E8E9E4]/85'}`}>~{formatDuration(tc.lockEtaSec)}</span>
-                  <span className="text-[9px] text-[#E8E9E4]/40">to lock · {_deadlineLabel} deadline</span>
+                  <span className="text-[9px] text-[#E8E9E4]/40">to lock · {_deadlineLabel} cap</span>
                 </>
               ):_etaExceedsWindow?(
                 <>
                   <span className={`text-[12px] font-bold ${_atDeadline?'text-rose-400':'text-amber-400'}`}>{_deadlineLabel}</span>
-                  <span className="text-[9px] text-amber-400/70">deadline · won't reach lock at current pace</span>
+                  <span className="text-[9px] text-amber-400/70">cap · too slow, will sit out</span>
                 </>
               ):(
                 <>
                   <span className={`text-[12px] font-bold ${_atDeadline?'text-rose-400':'text-[#E8E9E4]/85'}`}>{_deadlineLabel}</span>
-                  <span className="text-[9px] text-[#E8E9E4]/40">to decide{tc?.needSamples?` · ~${tc.needSamples}s to lock once forming`:''}</span>
+                  <span className="text-[9px] text-[#E8E9E4]/40">{_capPassed?'cap passed · sitting out':'cap · commit or sit out'}</span>
                 </>
               )}
             </div>
@@ -5837,7 +5843,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.0.8</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.1.0</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6429,7 +6435,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.0.8 online — Edge vs Market metric added. Every locked call now shows my confidence, Kalshi\'s confidence, and the edge between them. Same 70% WR at +15pt edge is far more profitable than at -10pt edge — that\'s the real metric. Learnings modal now buckets WR by edge size so you can see whether tape-led actually delivers the value when Kalshi is still 50/50.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.1.0 online — HARD CADENCE: I commit within the first 90 seconds of a 15m window or first 45 seconds of a 5m window. Past that, I sit out for the rest of the window. No more "is she going to call in 3 min or 10 min." Either it happens fast or it doesn\'t happen. The Decision Clock now counts down to this hard cap, not a soft deadline.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6717,7 +6723,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.0.8'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.1.0'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -6890,7 +6896,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.8  |  signal'},
+        footer:{text:'Tara 6.1.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6904,7 +6910,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.0.8  |  stand-down'},
+        footer:{text:'Tara 6.1.0  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6918,7 +6924,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.0.8  |  search'},
+        footer:{text:'Tara 6.1.0  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6935,7 +6941,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.0.8  |  lock'},
+        footer:{text:'Tara 6.1.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6952,7 +6958,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.0.8  |  close'},
+          footer:{text:'Tara 6.1.0  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6973,7 +6979,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.0.8  |  exit'},
+        footer:{text:'Tara 6.1.0  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6994,7 +7000,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.8  |  scanning'},
+        footer:{text:'Tara 6.1.0  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7014,7 +7020,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.8  |  signal'},
+        footer:{text:'Tara 6.1.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7034,7 +7040,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.8  |  lock'},
+        footer:{text:'Tara 6.1.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7051,7 +7057,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.8  |  sit-out'},
+        footer:{text:'Tara 6.1.0  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7073,7 +7079,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.0.8  |  result'},
+          footer:{text:'Tara 6.1.0  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7110,12 +7116,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.0.8  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.1.0  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.0.8',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.1.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -7134,7 +7140,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.0.8 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.1.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8803,44 +8809,61 @@ function TaraApp(){
     //   mild disagreement (was: only extreme blocked). User constraint: WR must not
     //   dip below 70%. The 3/4 threshold was too permissive for high-WR target.
     const isRisingConfluence=!isConfluent&&_risingScore>=4&&!tapeOpposes&&!kalshiDisagrees;
-    const _dirLead=`Watching ${dir} (${conviction.toFixed(0)}pt lean)`;
+    const _dirLead=`${dir} lean (${conviction.toFixed(0)}pt)`;
     // Gate 1: quality floor
     // V6.0.7: tape-led bypass. When tape is super-strong agreeing, q-floor is irrelevant —
     //   raw order flow is direct evidence; quality score is a lagging aggregate.
     if(q<Q_FLOOR&&!isTapeLed){
-      return{call:'SIT_OUT',reason:`${_dirLead} — q${q} below ${Q_FLOOR} floor, signal too weak`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+      return{call:'SIT_OUT',reason:`Signal weak — quality ${q}/${Q_FLOOR}`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // Gate 2: conviction floor (THE coin-flip filter)
     // V6.0.7: tape-led bypass — tape ≥70% across windows is enough directional evidence
     //   even when posterior is still developing.
     if(conviction<CONV_FLOOR&&!isTapeLed){
-      return{call:'SIT_OUT',reason:`Coin-flip — posterior ${post.toFixed(0)}% only ${conviction.toFixed(0)}pt off neutral (need ±${CONV_FLOOR})`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+      return{call:'SIT_OUT',reason:`Coin flip — only ${conviction.toFixed(0)}pt off neutral (need ${CONV_FLOOR})`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // V5.7.7 Gate 2.5: TAPE-OPPOSES veto. The most direct fix for FGT-alone failures.
     //   When two tape windows show ≥70% the OTHER way, no posterior can save this call —
     //   actual order flow is the truth. Even 60%+ opposition with no confluence is a hard veto.
     if(tapeSuperOpposes){
-      return{call:'SIT_OUT',reason:`${_dirLead} — but tape ${(dir==='UP'?(100-tapeBuyPct):tapeBuyPct).toFixed(0)}% opposite, fighting flow`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+      return{call:'SIT_OUT',reason:`${_dirLead} — tape ${(dir==='UP'?(100-tapeBuyPct):tapeBuyPct).toFixed(0)}% opposite, fighting flow`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     if(tapeOpposes&&!kalshiStronglyAgrees){
-      // Mild tape opposition + no Kalshi rescue → veto. Kalshi alone rescues only at strong agreement.
-      return{call:'SIT_OUT',reason:`${_dirLead} — tape opposes (${(dir==='UP'?(100-tapeBuyPct):tapeBuyPct).toFixed(0)}% other way), no Kalshi confirmation to override`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+      return{call:'SIT_OUT',reason:`${_dirLead} — tape ${(dir==='UP'?(100-tapeBuyPct):tapeBuyPct).toFixed(0)}% opposite, no Kalshi rescue`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // V5.7.7 Gate 2.6: Kalshi extreme-disagreement gate. When market is ≥90% certain the
     //   other way, we need BOTH tape alignment AND pattern alignment to commit. Otherwise sit.
     if(kalshiExtremeDisagrees&&!(tapeStronglyAgrees&&_fgtSignAgrees)){
-      return{call:'SIT_OUT',reason:`${_dirLead} — Kalshi at ${_kPct}% is essentially certain ${dir==='UP'?'DOWN':'UP'}, no overriding tape+FGT confluence`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+      return{call:'SIT_OUT',reason:`${_dirLead} — Kalshi ${_kPct}% says opposite, no override`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // Gate 3: Kalshi material disagreement — market sees opposite direction strongly.
-    //   When Kalshi strongly disagrees, we need extreme own-conviction to override.
-    if(kalshiStronglyDisagrees&&conviction<25){
-      return{call:'SIT_OUT',reason:`${_dirLead} — but Kalshi at ${_kPct}% says opposite, conviction ${conviction.toFixed(0)} insufficient to override`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    //   V6.0.9: Tightened to conv ≥30 (was ≥25). User feedback: Tara fights Kalshi too often
+    //   and loses on those bets. Keep the override threshold high so we only fade Kalshi
+    //   when posterior is at 80%+ in our direction.
+    if(kalshiStronglyDisagrees&&conviction<30){
+      return{call:'SIT_OUT',reason:`${_dirLead} — Kalshi ${_kPct}% opposite, need stronger conviction`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    // V6.0.9 Gate 3b: Mild Kalshi disagreement (≥60% opposite) now also needs some override
+    //   conviction. Was unguarded before — Tara would call against Kalshi at 60% with just
+    //   conv 10. That's the source of "wrong-position trades" the user described.
+    if(kalshiDisagrees&&!kalshiStronglyDisagrees&&conviction<18&&!isTapeLed){
+      return{call:'SIT_OUT',reason:`${_dirLead} — Kalshi ${_kPct}% disagrees, conviction insufficient to fade`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // Gate 4: FGT support — primary multi-timeframe signal must show some pulse
     const isFastTrackRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(analysis.regime);
     const fgtMin=tapeStronglyAgrees||kalshiStronglyAgrees?0.5:1.0; // V5.6.4: was 0.0/0.4/0.7
     if(fgtAbs<fgtMin&&!isFastTrackRegime){
-      return{call:'SIT_OUT',reason:`${_dirLead} — FGT ${fgtAbs.toFixed(1)}/4 below ${fgtMin} threshold (multi-timeframe quiet)`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+      return{call:'SIT_OUT',reason:`${_dirLead} — FGT ${fgtAbs.toFixed(1)}/4 mixed across timeframes`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    // V6.0.9 Gate 4.5: LATE-COMMIT GUARD. When elapsed > 70% of window, only high-quality
+    //   tiers (super-confluence, confluence, tape-led, exceptional, strong+) can commit.
+    //   Below that, sit out — late single-signal locks were the source of "confirmed DOWN
+    //   with 4 minutes left" timing complaints. Better to have NO call than a panic-late one.
+    const _elapsedFrac=_elapsed/(_remaining+_elapsed||1);
+    const _isLateWindow=_elapsedFrac>=0.70;
+    const _isHighTier=isSuperConfluent||isConfluent||isTapeLed||isRisingConfluence||(q>=75&&conviction>=18);
+    if(_isLateWindow&&!_isHighTier){
+      return{call:'SIT_OUT',reason:`${_dirLead} — too late for single-signal (${Math.round(_elapsedFrac*100)}% elapsed)`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // V6.0.3: Gate 5 (added in 6.0.2 — high-WR quality threshold) REMOVED. The user
     //   correctly pointed out that "below default tier" is not the same as "coin flip."
@@ -9121,6 +9144,34 @@ function TaraApp(){
     const totalSec=windowType==='15m'?900:300;
     const elapsedSec=totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
     const remaining=Math.max(0,totalSec-elapsedSec);
+    // V6.1.0: HARD CADENCE CAP. User feedback after 9 versions: "no time limit on when
+    //   she'd call it. Is it instantly? 2 min? 5 min? 10 min? Idk." Predictability matters.
+    //   Now: Tara MUST commit within the first N seconds of the window or sit out for the
+    //   rest. 15m → 90s cap (10% of window). 5m → 45s cap (15% of window). Within these
+    //   caps, all the existing tiers can fire — fast tiers (super-confluence, tape-led,
+    //   confluence, rising-confluence) lock in 5-8s; patient tier won't have time so it
+    //   becomes effectively a sit-out. That's the trade-off the user has been asking for.
+    const HARD_CAP_SEC=windowType==='15m'?90:45;
+    if(elapsedSec>=HARD_CAP_SEC&&taraCallSnapshotRef.current===null){
+      // No commit by the cap → snapshot SIT_OUT for the rest of the window
+      taraCallSnapshotRef.current={
+        call:'SIT_OUT',direction:null,confidence:0,
+        reason:`No clean read in first ${HARD_CAP_SEC}s — sitting out`,
+        atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+        atPosterior:analysis?.rawProbAbove,
+        kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
+        locked:false,earlyLock:false,
+        isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,
+        samples,needSamples:0,
+        tier:'cadence-sitout',
+        session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+        regime:analysis?.regime||'',
+        qScore:Math.round(qualityGate?.score||0),
+        fgt:analysis?.mtfAlignment,
+      };
+      _persistLock();
+      return;
+    }
     // V5.6.7: Five tiers now. Tier 1.5 fills the gap between "perfect" (rare) and
     //   "strong" (1 min). Catches the "fast clean market" case the user worried about
     //   missing. Magnitude-weighted samples — high conviction locks faster.
@@ -9758,7 +9809,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.0.8...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.1.0...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -9859,7 +9910,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.0.8
+              6.1.0
             </span>
           </div>
 
@@ -10448,7 +10499,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.0.8</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.1.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -11104,7 +11155,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.0.8 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.1.0 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -11260,10 +11311,86 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.0.8 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.1.0 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.1.0 — Hard cadence cap */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Hard Cadence · Predictable Timing</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.1.0</span> — Fast or Never</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User feedback after 9 versions of escalating gate complexity: &ldquo;No time limit on when she&rsquo;d call it. Is it instantly? 2 min? 5 min? 10 min? Idk. By the time she calls it, Kalshi is at 90%.&rdquo; Right diagnosis. The fix is the simplest thing yet: a hard cap, no exceptions.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">The cap</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>15m windows: commit within the first 90 seconds.</strong> Past that, automatic SIT_OUT for the rest of the window.</li>
+                  <li><strong>5m windows: commit within the first 45 seconds.</strong> Past that, SIT_OUT for the rest.</li>
+                  <li><strong>No exceptions.</strong> Even high-quality late signals are sat out. The point is predictable timing — better to miss some good late entries than to keep you waiting indefinitely.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">What still works</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Tape-led (~5s):</strong> overwhelming tape signal, locks fast. Comfortably within cap.</li>
+                  <li><strong>Super-confluence (~5s) and confluence (~8s):</strong> all signals aligned, locks fast. Within cap.</li>
+                  <li><strong>Rising-confluence (~8s):</strong> early-entry signal. Within cap.</li>
+                  <li><strong>Exceptional (~15s) and Strong+ (~30s):</strong> proven setups. Within cap.</li>
+                  <li><strong>Strong (~60s):</strong> still within 15m cap. Tight on 5m cap (might miss).</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">What now sits out</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Default tier (~90s):</strong> at the edge of the 15m cap. Only fires if conditions clear early.</li>
+                  <li><strong>Patient tier (~130s):</strong> always exceeds the cap. Effectively eliminated.</li>
+                  <li><strong>Late-flip windows:</strong> the &ldquo;watching UP for 5 minutes, then flips DOWN, locks at minute 11&rdquo; pattern. Past 90s = sit out, period.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">UI changes</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Decision Clock label:</strong> &ldquo;Decide by&rdquo; (was &ldquo;Decision Clock&rdquo;). Counts down to the cap.</li>
+                  <li><strong>Past-cap state:</strong> &ldquo;cap passed · sitting out&rdquo; — no ambiguity.</li>
+                  <li><strong>Won&rsquo;t-reach-cap warning:</strong> &ldquo;too slow, will sit out at cap&rdquo; when ETA exceeds remaining cap time.</li>
+                </ul>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">Honest expectation: many more sit-outs. Probably 60&ndash;75% of windows will be sit-outs vs the previous 25&ndash;40%. But the locks that DO happen will be in the early-entry zone where Kalshi is still 50/50, and you&rsquo;ll always know the timing — within 90s on 15m, or it didn&rsquo;t happen. Predictability over volume.</p>
+              </section>
+
+              {/* V6.0.9 — Late-commit guard + cleaner text + tighter Kalshi alignment */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Late-Commit Guard · Cleaner Text</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.0.9</span> — Don&rsquo;t Panic-Lock Late, Don&rsquo;t Fight the Market</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User feedback: &ldquo;Tara contemplated UP for a long time then confirmed DOWN before 4 mins of times. That&rsquo;s really bad timing.&rdquo; Plus: &ldquo;Tara&rsquo;s signals conflict Kalshi way more often and often gets me into wrong-position trades.&rdquo; Two real issues, both fixed.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Late-commit guard</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>New gate at 70% elapsed.</strong> Past the 70% mark of any window, only confluence-tier (super/regular/tape-led/rising) or near-confluence quality (q≥75, conv≥18) can commit. Below that → SIT_OUT.</li>
+                  <li><strong>What this prevents:</strong> exactly the &ldquo;flip and confirm with 4 minutes left&rdquo; pattern you described. When Tara was contemplating UP and tape flipped to DOWN late, the previous architecture would still try to commit DOWN. Now it sits out — too late for a clean entry.</li>
+                  <li><strong>What it doesn&rsquo;t prevent:</strong> high-quality late commits. If tape-led or super-confluence fires at minute 12 of a 15-min window, it still locks. Just not single-signal panic locks.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Tighter Kalshi alignment</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Kalshi-strongly-disagrees gate raised.</strong> Was conv ≥25 to override Kalshi at ≥70% opposite. Now conv ≥30 (posterior ~80%+ in Tara&rsquo;s direction) required to fade.</li>
+                  <li><strong>New mild-disagreement gate.</strong> Even when Kalshi shows 60% opposite (mild disagreement), Tara now needs conv ≥18 to call against it. Was unguarded — that&rsquo;s where most &ldquo;wrong-position&rdquo; trades came from.</li>
+                  <li><strong>Tape-led bypass remains.</strong> When tape ≥70% across 2+ windows AGREES with Tara&rsquo;s direction, all Kalshi-disagreement gates are bypassed. That&rsquo;s the legitimate fade-Kalshi scenario.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Cleaner text</div>
+                <ul className="list-disc pl-4 space-y-1.5 text-[11px]">
+                  <li><strong>&ldquo;DOWN lean (48pt) — FGT 0.0/4 below 0.5 threshold (multi-timeframe quiet)&rdquo;</strong> → <strong>&ldquo;DOWN lean (48pt) — FGT 0.0/4 mixed across timeframes&rdquo;</strong></li>
+                  <li><strong>&ldquo;Coin-flip — posterior 53% only 3pt off neutral (need ±10)&rdquo;</strong> → <strong>&ldquo;Coin flip — only 3pt off neutral (need 10)&rdquo;</strong></li>
+                  <li><strong>&ldquo;Watching DOWN — q11 below 30 floor, signal too weak&rdquo;</strong> → <strong>&ldquo;Signal weak — quality 11/30&rdquo;</strong></li>
+                  <li>All gate reasons audited and shortened. Less jargon, more direct.</li>
+                </ul>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">Net effect: fewer total calls (the late-window panic locks are now sit-outs), better-aligned with Kalshi (less fighting the market), cleaner reading on what&rsquo;s blocking commits.</p>
+              </section>
 
               {/* V6.0.8 — Edge vs Market */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
