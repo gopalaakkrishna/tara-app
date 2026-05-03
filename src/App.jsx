@@ -3786,6 +3786,36 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           )}
         </div>
 
+        {/* V6.0.8: Edge indicator — Tara confidence vs Kalshi implied probability for direction.
+             Shown only on locked snapshots. Edge is what determines profitability: high edge =
+             Tara sees something market doesn't = profitable entry. Negative edge = market
+             already priced in = late entry, low value even if Tara wins. */}
+        {isLockedSnap&&snap?.kalshiAtLock!=null&&snap?.atPosterior!=null&&(()=>{
+          // Tara's confidence in her direction (always shown as 0-100 for chosen side)
+          const _taraDirConf=snap.call==='UP'?snap.atPosterior:(100-snap.atPosterior);
+          // Kalshi's implied probability for the chosen direction
+          const _kalshiDirConf=snap.call==='UP'?snap.kalshiAtLock:(100-snap.kalshiAtLock);
+          const _edge=_taraDirConf-_kalshiDirConf;
+          const _edgeColor=_edge>=15?'text-emerald-400':_edge>=5?'text-emerald-400/70':_edge>=-5?'text-[#E8E9E4]/55':'text-amber-400/85';
+          const _edgeLabel=_edge>=20?'BIG EDGE':_edge>=10?'GOOD EDGE':_edge>=0?'MODEST EDGE':_edge>=-10?'LATE ENTRY':'KALSHI AHEAD';
+          return(
+            <div className="mb-3 px-2.5 py-2 rounded-md bg-[#0E100F]/50 border border-[#E8E9E4]/10">
+              <div className="flex items-baseline justify-between gap-2 mb-1">
+                <span className="text-[8px] uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold">Edge vs market</span>
+                <span className={`text-[9px] uppercase tracking-wider font-bold ${_edgeColor}`}>{_edgeLabel}</span>
+              </div>
+              <div className="flex items-baseline justify-between gap-3 text-[11px] tabular-nums">
+                <div className="flex items-baseline gap-3">
+                  <span className="text-[#E8E9E4]/65">Tara <span className="font-bold text-[#E8E9E4]/85">{Math.round(_taraDirConf)}%</span></span>
+                  <span className="text-[#E8E9E4]/35">·</span>
+                  <span className="text-[#E8E9E4]/65">Kalshi <span className="font-bold text-[#E8E9E4]/85">{Math.round(_kalshiDirConf)}%</span></span>
+                </div>
+                <span className={`font-bold ${_edgeColor}`}>{_edge>0?'+':''}{Math.round(_edge)}pt</span>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* V4.3: Scorecard — visible, larger numbers, color-coded. */}
         <div className="border-t border-[#E8E9E4]/8 pt-2.5">
           <div className="flex justify-between items-baseline mb-1.5">
@@ -4033,6 +4063,34 @@ function TaraLearningsModal({learnings,onClose}){
       )
     );
   };
+  const _renderEdgeBucket=()=>{
+    const entries=Object.entries(data.byEdge||{}).filter(([_,v])=>v&&(v.wins+v.losses)>=3);
+    if(entries.length===0)return null;
+    const _orderRank={'big-edge':0,'good-edge':1,'tight':2,'late':3};
+    entries.sort((a,b)=>(_orderRank[a[0]]??9)-(_orderRank[b[0]]??9));
+    return React.createElement('div',{className:'mb-4'},
+      React.createElement('div',{className:'text-[10px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold mb-2'},'Edge vs market · ENTRY VALUE'),
+      React.createElement('div',{className:'space-y-1'},
+        entries.map(([k,v])=>{
+          const total=v.wins+v.losses;
+          const wr=Math.round((v.wins/total)*100);
+          const wrColor=wr>=70?'text-emerald-400':wr>=55?'text-[#E8E9E4]/80':wr>=45?'text-amber-400/80':'text-rose-400';
+          const _label=k==='big-edge'?'BIG EDGE (≥+15pt)':k==='good-edge'?'GOOD EDGE (+5..+15)':k==='tight'?'TIGHT (-5..+5)':'LATE ENTRY (≤-5)';
+          const _color=k==='big-edge'?{color:'#86EFAC'}:k==='good-edge'?{color:'rgba(134,239,172,0.7)'}:k==='tight'?{color:'rgba(232,233,228,0.65)'}:{color:'rgba(245,158,11,0.85)'};
+          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded bg-[#0E100F]/40 border border-[#E8E9E4]/6'},
+            React.createElement('span',{className:'text-[11px] font-bold tracking-wide truncate',style:_color},_label),
+            React.createElement('div',{className:'flex items-baseline gap-2 shrink-0'},
+              React.createElement('span',{className:`text-[11px] tabular-nums font-bold ${wrColor}`},`${v.wins}W·${v.losses}L`),
+              React.createElement('span',{className:`text-[10px] tabular-nums ${wrColor}`},`${wr}%`),
+            ),
+          );
+        })
+      ),
+      React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 italic mt-2 leading-snug'},
+        'Same WR at +15pt edge is far more profitable than at -10pt edge. The right metric is "how often does Tara win when Kalshi is still 50/50" — that\'s where real value lives.'
+      )
+    );
+  };
   const _renderContextBucket=(title,bucket)=>{
     const entries=Object.entries(bucket||{}).filter(([_,v])=>v&&(v.wins+v.losses)>=3).sort((a,b)=>(b[1].wins+b[1].losses)-(a[1].wins+a[1].losses));
     if(entries.length===0)return null;
@@ -4076,6 +4134,7 @@ function TaraLearningsModal({learnings,onClose}){
             _renderRegimeDirBucket(),
             _renderTierBucket(),
             _renderConfluenceBucket(),
+            _renderEdgeBucket(),
             _renderContextBucket('By Regime',data.byRegime),
             _renderContextBucket('By Direction',data.byDirection),
             _renderContextBucket('By Session',data.bySession),
@@ -5778,7 +5837,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.0.7</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.0.8</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6244,7 +6303,7 @@ function TaraApp(){
   },[]);
   // Recompute learnings from a full call log. Called after each resolution.
   const _recomputeLearningsFromLog=React.useCallback((log)=>{
-    const stats={byRegime:{},byDirection:{},byTier:{},bySession:{},byRegimeDir:{},byConfluence:{}};
+    const stats={byRegime:{},byDirection:{},byTier:{},bySession:{},byRegimeDir:{},byConfluence:{},byEdge:{}};
     let total=0;
     (log||[]).forEach(e=>{
       if(!e||!e.result||e.result==='SITOUT')return;       // only resolved UP/DOWN calls
@@ -6268,6 +6327,15 @@ function TaraApp(){
       // V6.0.7: tape-led is a fifth bucket — fast-lock on overwhelming tape, separate WR.
       const _conflBucket=e.isSuperConfluent?'super-confluence':e.isConfluent?'confluence':e.isTapeLed?'tape-led':e.isRisingConfluence?'rising-confluence':'single-signal';
       _bump(stats.byConfluence,_conflBucket);
+      // V6.0.8: edge bucket — tracks WR by entry profitability. The metric that matters
+      //   most for Kalshi: same WR at +15pt edge ≫ same WR at -10pt edge.
+      if(e.kalshiAtLock!=null&&e.posterior!=null){
+        const _taraDirConf=e.dir==='UP'?e.posterior:(100-e.posterior);
+        const _kalshiDirConf=e.dir==='UP'?e.kalshiAtLock:(100-e.kalshiAtLock);
+        const _edge=_taraDirConf-_kalshiDirConf;
+        const _edgeBucket=_edge>=15?'big-edge':_edge>=5?'good-edge':_edge>=-5?'tight':'late';
+        _bump(stats.byEdge,_edgeBucket);
+      }
     });
     const multipliers=_deriveMultipliers(stats);
     setTaraLearnings({...stats,multipliers,lastUpdated:Date.now(),totalResolved:total});
@@ -6361,7 +6429,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.0.7 online — Real fix for late locks. New TAPE-LED tier: when tape is overwhelming (≥70% in 2 of 3 windows), I bypass q-floor and conv-floor and lock in 5 samples (~5s). Tape is direct order-flow data; quality score is a derived aggregate that lags actual flow. When 90% of trades are one-sided, that IS the signal — waiting for q≥30 was missing the whole point. Look for the cyan ⚡ tape-led badge on the call card.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.0.8 online — Edge vs Market metric added. Every locked call now shows my confidence, Kalshi\'s confidence, and the edge between them. Same 70% WR at +15pt edge is far more profitable than at -10pt edge — that\'s the real metric. Learnings modal now buckets WR by edge size so you can see whether tape-led actually delivers the value when Kalshi is still 50/50.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6649,7 +6717,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.0.7'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.0.8'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -6822,7 +6890,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.7  |  signal'},
+        footer:{text:'Tara 6.0.8  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6836,7 +6904,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.0.7  |  stand-down'},
+        footer:{text:'Tara 6.0.8  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6850,7 +6918,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.0.7  |  search'},
+        footer:{text:'Tara 6.0.8  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6867,7 +6935,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.0.7  |  lock'},
+        footer:{text:'Tara 6.0.8  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6884,7 +6952,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.0.7  |  close'},
+          footer:{text:'Tara 6.0.8  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6905,7 +6973,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.0.7  |  exit'},
+        footer:{text:'Tara 6.0.8  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6926,7 +6994,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.7  |  scanning'},
+        footer:{text:'Tara 6.0.8  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6946,7 +7014,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.7  |  signal'},
+        footer:{text:'Tara 6.0.8  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6966,7 +7034,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.7  |  lock'},
+        footer:{text:'Tara 6.0.8  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6983,7 +7051,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.0.7  |  sit-out'},
+        footer:{text:'Tara 6.0.8  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7005,7 +7073,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.0.7  |  result'},
+          footer:{text:'Tara 6.0.8  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7042,12 +7110,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.0.7  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.0.8  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.0.7',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.0.8',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -7066,7 +7134,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.0.7 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.0.8 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -9096,6 +9164,11 @@ function TaraApp(){
         call:_committedCall,direction:_committedCall,confidence:tc.confidence,reason:_committedReason,
         atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
         atPosterior:analysis?.rawProbAbove,
+        // V6.0.8: Kalshi YES price (0-100) at the moment Tara locked. Combined with
+        //   atPosterior, this gives the "edge" — how much more confident Tara is than
+        //   the market about this direction. Edge is what determines profitability,
+        //   not WR alone. Same 70% WR at +15pt edge ≫ same 70% WR at -10pt edge.
+        kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
         locked:true,
         earlyLock:!analysis?.isSystemLocked,
         // V5.7.7: confluence flags persist on the lock snapshot
@@ -9146,6 +9219,11 @@ function TaraApp(){
         isRisingConfluence:tc?._ctx?.isRisingConfluence||false,
         // V6.0.7: tape-led is a separate learning bucket
         isTapeLed:tc?._ctx?.isTapeLed||false,
+        // V6.0.8: Kalshi YES price at lock — for edge analysis. Edge = posterior - kalshiAtLock
+        //   (UP) or (100-posterior) - (100-kalshiAtLock) (DOWN). Positive edge = Tara more
+        //   confident than market = entry profitable; negative edge = Tara late, market
+        //   already priced in.
+        kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
         samples,needSamples,
         result:null, // populated at rollover scoring
       };
@@ -9680,7 +9758,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.0.7...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.0.8...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -9781,7 +9859,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.0.7
+              6.0.8
             </span>
           </div>
 
@@ -10370,7 +10448,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.0.7</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.0.8</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -11026,7 +11104,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.0.7 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.0.8 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -11182,10 +11260,44 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.0.7 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.0.8 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.0.8 — Edge vs Market */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Edge · The Real Metric</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.0.8</span> — Win Rate Isn&rsquo;t Profit, Edge Is</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked the central question: &ldquo;How do we keep WR above 70% and still get in at 50/50 odds? And how do we catch the long shots when 10&ndash;30% odds win?&rdquo; Honest answer first, code second.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">The math</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">A 60% WR system entered at Kalshi 50/50 makes money. An 80% WR system entered at Kalshi 80/20 makes nothing. Same WR, different profitability — because Kalshi&rsquo;s price IS the implied probability, and your profit is the gap between Tara&rsquo;s confidence and Kalshi&rsquo;s price (the edge).</p>
+                <ul className="list-disc pl-4 space-y-1.5 text-[11px]">
+                  <li><strong>Tara 65% UP, Kalshi 50% UP →</strong> +15pt edge → strongly profitable expected value</li>
+                  <li><strong>Tara 65% UP, Kalshi 65% UP →</strong> 0pt edge → break-even (same probability priced in)</li>
+                  <li><strong>Tara 65% UP, Kalshi 78% UP →</strong> &minus;13pt edge → losing money on average even though Tara wins 65% of the time</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">So the goal isn&rsquo;t just &ldquo;70% WR&rdquo; — it&rsquo;s &ldquo;70% WR at positive edge.&rdquo; That&rsquo;s the holy grail. Tape-led from V6.0.7 is the architecture for it: lock fast on overwhelming tape, before Kalshi has had time to fully reprice.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">What V6.0.8 adds</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Edge indicator on every locked call.</strong> New box on the call card shows: Tara confidence · Kalshi confidence · edge in points. Color-coded — green for big edge (≥+15), gray for tight, amber for late entries.</li>
+                  <li><strong>Edge labels:</strong> BIG EDGE / GOOD EDGE / MODEST EDGE / LATE ENTRY / KALSHI AHEAD. Tells you at a glance whether the lock is profitable or just confirmation of what the market already saw.</li>
+                  <li><strong>Edge buckets in Learnings modal.</strong> WR is now tracked by edge magnitude. After ~10&ndash;15 calls in each bucket you&rsquo;ll see whether tape-led genuinely delivers WR at high edge, or whether the high-edge setups are just lucky coincidences.</li>
+                  <li><strong>Persisted on snapshot and log.</strong> Every committed call records kalshiAtLock so historical analysis is possible.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">On the long-shot question (10&ndash;30% odds winning)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Honest answer: most of the time when Kalshi prices something at 20%, the actual probability really is around 20%. The market is informationally efficient on average. When 20% bets win, that&rsquo;s usually the 1-in-5 outcome happening — statistical noise, not a systematic edge.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">The legitimate way to catch these: detect Kalshi mispricings — moments when Tara has overwhelming evidence the market is wrong. Tape super-strong (≥70% across windows) when Kalshi is at 30% the same direction is exactly that signal. The edge would be huge (&gt;+30pt). These setups are rare but high-value. Watch for &ldquo;BIG EDGE&rdquo; labels with tape-led tier — those are your candidates.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2"><strong>What I won&rsquo;t do:</strong> systematically chase long shots. The expected value math doesn&rsquo;t support it without specific edge. If you want a contrarian-only mode that fights Kalshi when conviction is extreme, that&rsquo;s a different product — let me know.</p>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">Practical workflow: when the edge box shows BIG EDGE / GOOD EDGE on a tape-led or rising-confluence lock, that&rsquo;s the kind of call worth taking. When it shows LATE ENTRY / KALSHI AHEAD, the math says skip it even if Tara&rsquo;s right — you&rsquo;re paying retail for a wholesale outcome.</p>
+              </section>
 
               {/* V6.0.7 — Tape-led fast-lock */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
