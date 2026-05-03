@@ -1429,7 +1429,7 @@ const computeAdvisor=(params)=>{
   const tm=targetMargin||0;
   const gapBps=tm>0?((cp-tm)/tm)*10000:0;
   const isUP=userPosition==='UP';const isDN=userPosition==='DOWN';
-  const isLocked=activePrediction?.includes('LOCKED');
+  const isLocked=activePrediction?.includes('CONFIRMED');
   const lockDir=lockInfo?.dir||null;
 
   // ── NO POSITION — pre-entry advisor ──
@@ -1803,13 +1803,24 @@ const computeV99Posterior=(params)=>{
   let mtfBonus=0;
   let fgtResults={};
   if(tfCandles&&targetMargin>0&&_secsLeft>30){
+    // V5.7.7: Drop 3m timeframe (dead weight — often invalid, weight 0.5, redundant given
+    //   1m/5m bracket per its own comment). Redistribute: 1m 0.8→1.0, 5m 1.5→1.7, 15m 1.2→1.3.
+    //   Total weight remains 4.0 so existing alignment thresholds still mean the same thing.
+    // V5.7.7: forecast cap — each timeframe's projection horizon clamps to bars-remaining-in-window
+    //   so FGT can't project hours ahead when only minutes remain. The case that motivates this:
+    //   15:00 settlement at 14:55 with 5m forecast=40 was projecting 200 minutes forward and
+    //   reading -23 bps, voting DOWN. After cap (forecast=1 with 60s left, =0 with <60s) it
+    //   contributes nothing, letting tape/flow/Kalshi drive the call.
+    const _capForecast=(tfMinutes,baseFore)=>{
+      const _barsLeft=Math.floor(_secsLeft/(tfMinutes*60));
+      return Math.max(0,Math.min(baseFore,_barsLeft));
+    };
     const tfList=[
-      {label:'1m',data:tfCandles.c1m,length:30,forecast:30,weight:0.8},   // tertiary — fast but noisy
-      {label:'3m',data:tfCandles.c3m,length:30,forecast:30,weight:0.5},   // last — redundant given 1m/5m bracket
-      {label:'5m',data:tfCandles.c5m,length:40,forecast:40,weight:1.5},   // primary — most relevant for 15m window
-      {label:'15m',data:tfCandles.c15m,length:50,forecast:30,weight:1.2}, // secondary — high-quality directional
+      {label:'1m',data:tfCandles.c1m,length:30,forecast:_capForecast(1,30),weight:1.0},
+      {label:'5m',data:tfCandles.c5m,length:40,forecast:_capForecast(5,40),weight:1.7},
+      {label:'15m',data:tfCandles.c15m,length:50,forecast:_capForecast(15,30),weight:1.3},
     ];
-    const tfSigns=[]; // weighted signed contributions
+    const tfSigns=[];
     const tfArrows=[];
     tfList.forEach(tf=>{
       const fgt=computeFGT(tf.data,tf.length,tf.forecast);
@@ -1835,7 +1846,7 @@ const computeV99Posterior=(params)=>{
     if(mtfBonus!==0){
       totalScore+=mtfBonus;
       const dirLabel=mtfBonus>0?'UP':'DOWN';
-      reasoning.push(`[FGT] alignment ${mtfAlignment>=0?'+':''}${mtfAlignment.toFixed(1)}/4.0 ${dirLabel} (1m${tfArrows[0]} 3m${tfArrows[1]} 5m${tfArrows[2]} 15m${tfArrows[3]}) → ${mtfBonus>0?'+':''}${mtfBonus}`);
+      reasoning.push(`[FGT] alignment ${mtfAlignment>=0?'+':''}${mtfAlignment.toFixed(1)}/4.0 ${dirLabel} (1m${tfArrows[0]} 5m${tfArrows[1]} 15m${tfArrows[2]}) → ${mtfBonus>0?'+':''}${mtfBonus}`);
       // Detailed forecast values
       const detail=tfList.map((tf,i)=>{
         const f=fgtResults[tf.label];
@@ -2838,7 +2849,7 @@ function PredictionContent(props){
   const formingPct=Math.min(100,(formingCount/analysis.consecutiveNeeded)*100);
   const formingBarCls='h-full rounded-full transition-all duration-500 '+(formingDir?'bg-emerald-500/60':'bg-rose-500/60');
   // V3.1.4: Two heading variants — the original "hero" size for short single-word states
-  // (UP - LOCKED, DOWN, SEARCHING) and a tighter size for longer multi-word titles
+  // (UP - CONFIRMED, DOWN, SEARCHING) and a tighter size for longer multi-word titles
   // (REJECTED, BLACKOUT, etc.) so they don't wrap into 3 lines on narrow viewports.
   const headingCls='prediction-heading text-3xl sm:text-4xl md:text-5xl font-serif font-bold leading-none tracking-tight '+(analysis.textColor||'')+' drop-shadow-lg';
   const headingClsCompact='prediction-heading text-2xl sm:text-3xl md:text-4xl font-serif font-bold leading-tight tracking-tight '+(analysis.textColor||'')+' drop-shadow-lg';
@@ -3070,7 +3081,7 @@ function PredictionContent(props){
         </div>
         {/* V143: Smart prediction text routing — split long status messages into a tight
                   title + subtitle so the giant heading doesn't wrap to 3 lines. Short messages
-                  (UP - LOCKED, DOWN - LOCKED, UP (FORMING), SEARCHING...) render as the big heading.
+                  (UP - CONFIRMED, DOWN - CONFIRMED, UP (FORMING), SEARCHING...) render as the big heading.
             V3.1.4: REJECTED messages moved out of isShort — they're sentence-length and were
                   wrapping awkwardly across 3 lines at the hero size. Now split into title +
                   subtitle ("UP REJECTED" + "trajectory says DOWN") and use the compact heading
@@ -3078,7 +3089,7 @@ function PredictionContent(props){
         {(()=>{
           const p=analysis.prediction||'';
           // Lock and FORMING and SEARCHING — short, render full as hero heading
-          const isShort=p.includes('LOCKED')||p.includes('FORMING')||p==='SEARCHING...'||p==='NO CALL'||p==='CLOSED'||p.includes('WAITING FOR MOMENTUM')||p.includes('LOCK RELEASED');
+          const isShort=p.includes('CONFIRMED')||p.includes('FORMING')||p==='SEARCHING...'||p==='NO CALL'||p==='CLOSED'||p.includes('WAITING FOR MOMENTUM')||p.includes('SIGNAL CLEARED');
           if(isShort){
             return <h2 className={headingCls}>{p}</h2>;
           }
@@ -3570,7 +3581,12 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
       <div className={"mb-3 px-3 py-3 rounded-lg shrink-0 "+(className||"")} style={{background:bgClr,border:'1px solid '+borderClr,boxShadow:isLockedSnap?`inset 0 0 24px ${snap.call==='UP'?'rgba(52,211,153,0.06)':'rgba(244,114,182,0.06)'}`:'none'}}>
         <div className="flex items-baseline justify-between mb-2">
           <span className="text-[10px] uppercase tracking-[0.22em] font-bold" style={{color:T2_GOLD}}>Tara's Call</span>
-          {snap&&snap.earlyLock&&<span className="text-[8px] tracking-[0.18em] uppercase text-emerald-400/70 font-bold">⚡ early lock</span>}
+          <div className="flex items-baseline gap-2">
+            {/* V5.7.7: Confluence indicator — visible while forming and after lock. */}
+            {(tc?._ctx?.isSuperConfluent||snap?.isSuperConfluent)&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:T2_GOLD}}>★ super-confluence</span>}
+            {!(tc?._ctx?.isSuperConfluent||snap?.isSuperConfluent)&&(tc?._ctx?.isConfluent||snap?.isConfluent)&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:T2_GOLD}}>★ confluence</span>}
+            {snap&&snap.earlyLock&&<span className="text-[8px] tracking-[0.18em] uppercase text-emerald-400/70 font-bold">⚡ early lock</span>}
+          </div>
         </div>
         <div className="flex items-center justify-between gap-3 mb-1.5">
           <div className={`flex items-baseline gap-2 ${callColor}`}>
@@ -3589,7 +3605,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const genPred=analysis.prediction||'';
           const genPost=analysis.rawProbAbove||50;
           const genDir=genPred.includes('UP')?'UP':genPred.includes('DOWN')?'DOWN':null;
-          const genState=genPred.includes('LOCKED')?'LOCKED':genPred.includes('FORMING')?'FORMING':genPred.includes('SEARCHING')?'SEARCHING':genPred.includes('SITTING')?'SIT OUT':genPred.includes('REJECTED')?'REJECTED':'WATCHING';
+          const genState=genPred.includes('CONFIRMED')?'CONFIRMED':genPred.includes('FORMING')?'FORMING':genPred.includes('SEARCHING')?'SEARCHING':genPred.includes('SITTING')?'SIT OUT':genPred.includes('REJECTED')?'REJECTED':'WATCHING';
           // Comparison logic — only valid once Tara has committed
           let tagLabel,tagColor;
           if(!snap){
@@ -3602,7 +3618,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             // Tara locked UP or DOWN
             if(genDir===snap.call){tagLabel='AGREED — same direction';tagColor='text-emerald-400/85';}
             else if(genDir&&genDir!==snap.call){tagLabel='DISAGREED — split with engine';tagColor='text-rose-400/85';}
-            else{tagLabel='LOCKED — engine still searching';tagColor='text-[#E8E9E4]/55';}
+            else{tagLabel='TARA LOCKED — engine still searching';tagColor='text-[#E8E9E4]/55';}
           }
           const genArrow=genDir==='UP'?'▲':genDir==='DOWN'?'▼':'—';
           const genColor=genDir==='UP'?'text-emerald-400/65':genDir==='DOWN'?'text-rose-400/65':'text-[#E8E9E4]/45';
@@ -3880,6 +3896,34 @@ function TaraLearningsModal({learnings,onClose}){
       )
     );
   };
+  const _renderConfluenceBucket=()=>{
+    const entries=Object.entries(data.byConfluence||{}).filter(([_,v])=>v&&(v.wins+v.losses)>=3).sort((a,b)=>(b[1].wins+b[1].losses)-(a[1].wins+a[1].losses));
+    if(entries.length===0)return null;
+    const _orderRank={'super-confluence':0,'confluence':1,'single-signal':2};
+    entries.sort((a,b)=>(_orderRank[a[0]]??9)-(_orderRank[b[0]]??9));
+    return React.createElement('div',{className:'mb-4'},
+      React.createElement('div',{className:'text-[10px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold mb-2'},'Confluence · QUALITY LEARNING'),
+      React.createElement('div',{className:'space-y-1'},
+        entries.map(([k,v])=>{
+          const total=v.wins+v.losses;
+          const wr=Math.round((v.wins/total)*100);
+          const adj=data.multipliers?.confluenceConfBoost?.[k]||0;
+          const _adjLabel=adj>0?`+${adj} confidence`:adj<0?`${adj} confidence`:'no change';
+          const _adjColor=adj>0?'text-emerald-400/85':adj<0?'text-amber-400/80':'text-[#E8E9E4]/35';
+          const wrColor=wr>=70?'text-emerald-400':wr>=55?'text-[#E8E9E4]/80':wr>=45?'text-amber-400/80':'text-rose-400';
+          const _label=k==='super-confluence'?'★ Super-confluence':k==='confluence'?'★ Confluence':'Single-signal';
+          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded bg-[#0E100F]/40 border border-[#E8E9E4]/6'},
+            React.createElement('span',{className:'text-[11px] font-bold tracking-wide truncate',style:k!=='single-signal'?{color:T2_GOLD}:{color:'rgba(232,233,228,0.85)'}},_label),
+            React.createElement('div',{className:'flex items-baseline gap-2 shrink-0'},
+              React.createElement('span',{className:`text-[11px] tabular-nums font-bold ${wrColor}`},`${v.wins}W·${v.losses}L`),
+              React.createElement('span',{className:`text-[10px] tabular-nums ${wrColor}`},`${wr}%`),
+              React.createElement('span',{className:`text-[9px] italic ${_adjColor} hidden sm:inline`},_adjLabel),
+            ),
+          );
+        })
+      )
+    );
+  };
   const _renderContextBucket=(title,bucket)=>{
     const entries=Object.entries(bucket||{}).filter(([_,v])=>v&&(v.wins+v.losses)>=3).sort((a,b)=>(b[1].wins+b[1].losses)-(a[1].wins+a[1].losses));
     if(entries.length===0)return null;
@@ -3922,6 +3966,7 @@ function TaraLearningsModal({learnings,onClose}){
         : React.createElement(React.Fragment,null,
             _renderRegimeDirBucket(),
             _renderTierBucket(),
+            _renderConfluenceBucket(),
             _renderContextBucket('By Regime',data.byRegime),
             _renderContextBucket('By Direction',data.byDirection),
             _renderContextBucket('By Session',data.bySession),
@@ -4189,7 +4234,7 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
   const cpScore=analysis.candlePattern?.score||0;
   const vf=analysis.volFlow?.label||null;
   const prediction=analysis.prediction||'';
-  const isLocked=prediction.includes('LOCKED');
+  const isLocked=prediction.includes('CONFIRMED');
   const isRejected=prediction.includes('REJECTED');
   const isSearching=prediction==='SEARCHING...'||prediction.includes('FORMING');
   const lockInfo=analysis.lockInfo||null;
@@ -5474,7 +5519,7 @@ const buildPlainEnglish=(analysis,qualityGate,advisor)=>{
   const findTag=(prefix)=>reasoning.find(r=>r.startsWith('['+prefix+']'));
   const pieces=[];
   // Direction phrasing
-  if(dir.includes('LOCKED')){
+  if(dir.includes('CONFIRMED')){
     const d=dir.includes('UP')?'UP':'DOWN';
     // V136: When FGT 4/4 aligns with the lock, lead with that as the rationale
     if(mtfAbs>=4&&((d==='UP'&&mtfAlign>0)||(d==='DOWN'&&mtfAlign<0))){
@@ -5624,7 +5669,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.7.5</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.0</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5827,6 +5872,10 @@ function TaraApp(){
   //   any lock release, engine must scan for 45s before re-locking. This kills the visible
   //   "advisor keeps flipping" behavior the user reported.
   const lockReleasedAtRef=useRef(0);
+  // V5.7.8: Confluence state ref — engine cooldown reads this to shorten the post-release
+  //   window (45s → 15s) when current candidate is confluent. Updated each cycle by the
+  //   Tara's call gate based on _ctx.isConfluent / isSuperConfluent.
+  const confluenceStateRef=useRef({isConfluent:false,isSuperConfluent:false});
   const posteriorHistoryRef=useRef([]);    // rolling 10-sample history for confirming lock
   const biasCountRef=useRef({UP:0,DOWN:0}); // consecutive samples in same direction before lock
   const peakOfferRef=useRef(0);
@@ -6043,6 +6092,11 @@ function TaraApp(){
       regimeDirSpeedAdj:{},     // {`regime|UP`: -0.20, `regime|DOWN`: +0.20, ...}
       regimeDirConfBoost:{},    // {`regime|UP`: +5, ...}
       tierSamplesAdjust:{},
+      // V5.7.8: Confluence-bucket multipliers — three buckets ('super-confluence', 'confluence', 'single-signal').
+      //   confluenceConfBoost: {bucket: ±N pts} applied to confidence at lock time.
+      //   Lets Tara learn "I'm 90% on confluent calls but 55% on single-signal" and reflect
+      //   that learned skew into the confidence number she shows you.
+      confluenceConfBoost:{},
     };
     // Safety valve — only kicks in for absolute-bad regimes
     Object.entries(stats.byRegime||{}).forEach(([k,v])=>{
@@ -6067,11 +6121,21 @@ function TaraApp(){
       else if(wr<0.50)out.tierSamplesAdjust[k]=0.15;
       else out.tierSamplesAdjust[k]=0;
     });
+    // V5.7.8: Per-confluence-bucket confidence adjustment. n>=5 needed before any adjust.
+    Object.entries(stats.byConfluence||{}).forEach(([k,v])=>{
+      if(!v||(v.wins+v.losses)<5){out.confluenceConfBoost[k]=0;return;}
+      const wr=v.wins/(v.wins+v.losses);
+      if(wr>=0.80)out.confluenceConfBoost[k]=+8;
+      else if(wr>=0.65)out.confluenceConfBoost[k]=+4;
+      else if(wr<0.45)out.confluenceConfBoost[k]=-6;
+      else if(wr<0.55)out.confluenceConfBoost[k]=-3;
+      else out.confluenceConfBoost[k]=0;
+    });
     return out;
   },[]);
   // Recompute learnings from a full call log. Called after each resolution.
   const _recomputeLearningsFromLog=React.useCallback((log)=>{
-    const stats={byRegime:{},byDirection:{},byTier:{},bySession:{},byRegimeDir:{}};
+    const stats={byRegime:{},byDirection:{},byTier:{},bySession:{},byRegimeDir:{},byConfluence:{}};
     let total=0;
     (log||[]).forEach(e=>{
       if(!e||!e.result||e.result==='SITOUT')return;       // only resolved UP/DOWN calls
@@ -6089,6 +6153,10 @@ function TaraApp(){
       _bump(stats.bySession,e.session||'UNKNOWN');
       // V5.6.8: regime+direction combo — the most actionable learning bucket
       _bump(stats.byRegimeDir,(e.regime||'UNKNOWN')+'|'+e.dir);
+      // V5.7.8: confluence bucket — three states. Older entries pre-V5.7.7 lack the flags
+      //   so they bucket as 'single-signal' (most conservative assumption).
+      const _conflBucket=e.isSuperConfluent?'super-confluence':e.isConfluent?'confluence':'single-signal';
+      _bump(stats.byConfluence,_conflBucket);
     });
     const multipliers=_deriveMultipliers(stats);
     setTaraLearnings({...stats,multipliers,lastUpdated:Date.now(),totalResolved:total});
@@ -6182,7 +6250,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.7.5 online — Settlement now waits 8s for Kalshi to publish the official close, so W/L decisions match the market instead of jittering with spot. Memory and Stats rows now show window period (e.g. 09:00–09:15), strike, and closing price. Discord no longer sends standalone result messages — running record rides on every lock and signal.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.0 online — Major release. Tape is the truth-anchor: I won’t lock against current order flow anymore. Confluence detection (tape + FGT + score + strike all aligned) fast-locks in 5–8 seconds. FGT can no longer project past window close. Cross-device sync is fully invisible. I learn from confluence-bucket history alongside regime+direction history. See "What’s New" for the full breakdown.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6322,7 +6390,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.7.5'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.0'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -6495,7 +6563,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.5  |  signal'},
+        footer:{text:'Tara 6.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6509,7 +6577,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.7.5  |  stand-down'},
+        footer:{text:'Tara 6.0  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6523,14 +6591,14 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.7.5  |  search'},
+        footer:{text:'Tara 6.0  |  search'},
         timestamp:new Date().toISOString(),
       };
 
       else if(type==='LOCK')embed={
-        title:`TARA  ${data.dir}  LOCKED`,
+        title:`ENGINE  ${data.dir}  CONFIRMED`,
         color:data.dir==='UP'?3404125:16478549,
-        description:data.summary||`Lock confirmed. Enter ${data.dir}.`,
+        description:data.summary||`Engine confirmed ${data.dir}.`,
         fields:[
           {name:'Price',value:`$${data.price.toFixed(2)}`,inline:true},
           {name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},
@@ -6540,7 +6608,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.7.5  |  lock'},
+        footer:{text:'Tara 6.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6557,7 +6625,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.7.5  |  close'},
+          footer:{text:'Tara 6.0  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6578,7 +6646,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.7.5  |  exit'},
+        footer:{text:'Tara 6.0  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6599,7 +6667,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.5  |  scanning'},
+        footer:{text:'Tara 6.0  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6619,7 +6687,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.5  |  signal'},
+        footer:{text:'Tara 6.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6639,7 +6707,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.5  |  lock'},
+        footer:{text:'Tara 6.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6656,7 +6724,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.5  |  sit-out'},
+        footer:{text:'Tara 6.0  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6678,7 +6746,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.7.5  |  result'},
+          footer:{text:'Tara 6.0  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6715,12 +6783,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.7.5  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.0  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.7.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -6739,7 +6807,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.7.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -7380,7 +7448,7 @@ function TaraApp(){
       // before our async cloud read returned).
       if(d.engineLock&&!lockedCallRef.current){
         lockedCallRef.current={...d.engineLock};
-        taraAdviceRef.current=d.engineLock.dir==='UP'?'UP - LOCKED':'DOWN - LOCKED';
+        taraAdviceRef.current=d.engineLock.dir==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';
         restored.push(`engine ${d.engineLock.dir}`);
       }
       // Tara snapshot — same idea
@@ -7762,14 +7830,17 @@ function TaraApp(){
             const momentumOK=recent>=-_effectiveMomTol;
             if(!momentumOK){
               taraAdviceRef.current='UP - WAITING FOR MOMENTUM';
-            } else if(Date.now()-lockReleasedAtRef.current<45000){
-              // V5.6.11: post-release cooldown — must scan for 45s before re-locking
+            } else if(Date.now()-lockReleasedAtRef.current<(confluenceStateRef.current.isConfluent?15000:45000)){
+              // V5.6.11: post-release cooldown — must scan for 45s before re-locking.
+              // V5.7.8: shortened to 15s when current candidate is confluent — orthogonal-signal
+              //   agreement is strong enough evidence to re-engage faster after a release.
+              const _coolMs=confluenceStateRef.current.isConfluent?15000:45000;
               taraAdviceRef.current='UP - SCANNING (post-release cooldown)';
-              const _wait=Math.ceil((45000-(Date.now()-lockReleasedAtRef.current))/1000);
-              reasoning.push(`[LOCK] UP candidate held — cooldown ${formatDuration(_wait)} remaining`);
+              const _wait=Math.ceil((_coolMs-(Date.now()-lockReleasedAtRef.current))/1000);
+              reasoning.push(`[LOCK] UP candidate held — cooldown ${formatDuration(_wait)} remaining${confluenceStateRef.current.isConfluent?' (shortened — confluence)':''}`);
             } else {
               lockedCallRef.current={dir:'UP',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null}; // V134: snapshot signals at lock
-              taraAdviceRef.current='UP - LOCKED';
+              taraAdviceRef.current='UP - CONFIRMED';
               biasCountRef.current={UP:0,DOWN:0};
               _persistLock(); // V5.6: cloud-save so refresh restores this lock
             }
@@ -7861,15 +7932,16 @@ function TaraApp(){
             const momentumOK=recent<=_effectiveMomTol;
             if(!momentumOK){
               taraAdviceRef.current='DOWN - WAITING FOR MOMENTUM';
-            } else if(Date.now()-lockReleasedAtRef.current<45000){
-              // V5.6.11: post-release cooldown
+            } else if(Date.now()-lockReleasedAtRef.current<(confluenceStateRef.current.isConfluent?15000:45000)){
+              // V5.7.8: shortened cooldown on confluence — see UP path comment.
+              const _coolMs=confluenceStateRef.current.isConfluent?15000:45000;
               taraAdviceRef.current='DOWN - SCANNING (post-release cooldown)';
-              const _wait=Math.ceil((45000-(Date.now()-lockReleasedAtRef.current))/1000);
-              reasoning.push(`[LOCK] DOWN candidate held — cooldown ${formatDuration(_wait)} remaining`);
+              const _wait=Math.ceil((_coolMs-(Date.now()-lockReleasedAtRef.current))/1000);
+              reasoning.push(`[LOCK] DOWN candidate held — cooldown ${formatDuration(_wait)} remaining${confluenceStateRef.current.isConfluent?' (shortened — confluence)':''}`);
             } else {
               lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,rugPullLock:isRugPull};
               if(isRugPull&&bearCount<CONSECUTIVE_NEEDED_DN)reasoning.push(`[RUG-FIRE] Rug pull detected — DOWN locked early at posterior ${posterior.toFixed(0)}`); // V134: snapshot signals at lock
-              taraAdviceRef.current='DOWN - LOCKED';
+              taraAdviceRef.current='DOWN - CONFIRMED';
               biasCountRef.current={UP:0,DOWN:0};
               _persistLock(); // V5.6: cloud-save so refresh restores this lock
             }
@@ -8038,7 +8110,7 @@ function TaraApp(){
           lockReleasedAtRef.current=Date.now();
           // V134: reset window-direction commitment so flip to opposite direction is allowed
           windowSignalDirRef.current=null;
-          taraAdviceRef.current='LOCK RELEASED';
+          taraAdviceRef.current='SIGNAL CLEARED';
           _persistLock(); // V5.6: reflect the now-released state in cloud
           if(catastrophicRugpull)reasoning.push(`[LOCK] Released — catastrophic rug pull (UP lock)`);
           else if(catastrophicSpike)reasoning.push(`[LOCK] Released — catastrophic upward spike (DOWN lock)`);
@@ -8051,13 +8123,13 @@ function TaraApp(){
           else reasoning.push(`[LOCK] Released — extreme adverse gap (${gapBps.toFixed(0)} bps)`);
         } else {
           // Hold the lock regardless of posterior fluctuation
-          taraAdviceRef.current=lock.dir==='UP'?'UP - LOCKED':'DOWN - LOCKED';
+          taraAdviceRef.current=lock.dir==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';
         }
       }
 
       // ── Phase 3: Endgame freeze ──
       if(isEndgameLock){
-        if(!taraAdviceRef.current.includes('LOCKED')&&taraAdviceRef.current!=='LOCK RELEASED'){
+        if(!taraAdviceRef.current.includes('CONFIRMED')&&taraAdviceRef.current!=='SIGNAL CLEARED'){
           taraAdviceRef.current='NO CALL'; // too late to lock
         }
       }
@@ -8069,22 +8141,22 @@ function TaraApp(){
       let activePrediction;
       if(userPosition!==null){
         const _internal=taraAdviceRef.current||'';
-        if(_internal==='LOCK RELEASED'){
-          activePrediction=userPosition==='UP'?'UP - LOCK RELEASED':'DOWN - LOCK RELEASED';
+        if(_internal==='SIGNAL CLEARED'){
+          activePrediction=userPosition==='UP'?'UP - SIGNAL CLEARED':'DOWN - SIGNAL CLEARED';
         } else {
-          activePrediction=userPosition==='UP'?'UP - LOCKED':'DOWN - LOCKED';
+          activePrediction=userPosition==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';
         }
       } else {
         activePrediction=taraAdviceRef.current;
       }
       let textColor='text-zinc-500';
-      if(activePrediction.includes('UP - LOCKED'))textColor='text-emerald-400';
-      else if(activePrediction.includes('DOWN - LOCKED'))textColor='text-rose-400';
+      if(activePrediction.includes('UP - CONFIRMED'))textColor='text-emerald-400';
+      else if(activePrediction.includes('DOWN - CONFIRMED'))textColor='text-rose-400';
       else if(activePrediction.includes('ANALYZING'))textColor='text-indigo-400'; // V141: bounded search state
       else if(activePrediction.includes('SITTING OUT'))textColor='text-amber-400';
       else if(activePrediction.includes('UP (FORMING)'))textColor='text-emerald-600';
       else if(activePrediction.includes('DOWN (FORMING)'))textColor='text-rose-600';
-      else if(activePrediction==='LOCK RELEASED')textColor='text-amber-400';
+      else if(activePrediction==='SIGNAL CLEARED')textColor='text-amber-400';
       // V138: PREMIUM: textColor branch removed — Premium Mode no longer exists
 
       const isUP=activePrediction.includes('UP'),isDN=activePrediction.includes('DOWN');
@@ -8334,6 +8406,17 @@ function TaraApp(){
     const _downSuper=_tapes.filter(p=>p<=30).length>=2;
     const tapeSuperStrong=(_upSuper&&dir==='UP')||(_downSuper&&dir==='DOWN');
     const tapeBuyPct=dir==='UP'?Math.max(..._tapes):Math.min(..._tapes);
+    // V5.7.7: TAPE-OPPOSES-DIRECTION detection. The tape is the only signal that can't lie —
+    //   it's what buyers and sellers ARE doing, no smoothing or extrapolation. When two of
+    //   the three tape windows show ≥60% in the OPPOSITE direction of the candidate, the
+    //   call is fighting actual order flow. Last round's failure: TAPE 79% buy at 30s, model
+    //   wanted to lock DOWN. This veto would have prevented the lock.
+    const _upOpposes=_tapes.filter(p=>p>=60).length>=2&&dir==='DOWN';
+    const _downOpposes=_tapes.filter(p=>p<=40).length>=2&&dir==='UP';
+    const tapeOpposes=_upOpposes||_downOpposes;
+    const _upSuperOpposes=_tapes.filter(p=>p>=70).length>=2&&dir==='DOWN';
+    const _downSuperOpposes=_tapes.filter(p=>p<=30).length>=2&&dir==='UP';
+    const tapeSuperOpposes=_upSuperOpposes||_downSuperOpposes;
     // V5.6.4: KALSHI CROSS-CHECK — market price is a third opinion. Use as sanity check:
     //   - If Kalshi clearly agrees with our direction → boost confidence, allow faster lock
     //   - If Kalshi clearly disagrees → require materially higher conviction or sit out
@@ -8345,6 +8428,25 @@ function TaraApp(){
     // Disagreement: market sees the opposite direction with material conviction
     const kalshiDisagrees=kalshiAvail&&((dir==='UP'&&_kPct<=40)||(dir==='DOWN'&&_kPct>=60));
     const kalshiStronglyDisagrees=kalshiAvail&&((dir==='UP'&&_kPct<=30)||(dir==='DOWN'&&_kPct>=70));
+    // V5.7.7: Kalshi extreme certainty threshold — when market is ≥90% one way and we're
+    //   calling opposite, the disagreement is severe enough that we need extraordinary
+    //   evidence to override (BOTH tape alignment AND pattern alignment).
+    const kalshiExtremeDisagrees=kalshiAvail&&((dir==='UP'&&_kPct<=10)||(dir==='DOWN'&&_kPct>=90));
+    // V5.7.7: STRIKE-FAVORABLE — is current price already on the right side of the strike?
+    //   For UP candidate: price > strike means we're already where we want to settle.
+    //   For DOWN candidate: price < strike likewise. This is a "material evidence" signal.
+    const _gapBpsForDir=analysis?.realGapBps||0;
+    const strikeFavorable=(dir==='UP'&&_gapBpsForDir>0)||(dir==='DOWN'&&_gapBpsForDir<0);
+    // V5.7.7: CONFLUENCE detection — all four primary signals point the same way.
+    //   When this fires, we have orthogonal confirmation and can fast-lock in 5-8 samples
+    //   regardless of the slow-tier criteria. Last round's clean DOWN: tape, FGT, score
+    //   sign, strike all DOWN → confluent. The win round vs the failure round is exactly
+    //   this distinction. Note this evaluates per-direction (UP confluence has all-UP
+    //   conditions, DOWN confluence has all-DOWN).
+    const _scoreSignAgrees=(dir==='UP'&&conviction>=10)||(dir==='DOWN'&&conviction>=10); // post>= +10pt for UP, <=-10pt for DOWN
+    const _fgtSignAgrees=(dir==='UP'&&(analysis?.mtfAlignment||0)>=0.7)||(dir==='DOWN'&&(analysis?.mtfAlignment||0)<=-0.7);
+    const isConfluent=tapeStronglyAgrees&&_fgtSignAgrees&&_scoreSignAgrees&&strikeFavorable;
+    const isSuperConfluent=tapeSuperStrong&&_fgtSignAgrees&&_scoreSignAgrees&&strikeFavorable&&!kalshiDisagrees;
     const _dirLead=`Watching ${dir} (${conviction.toFixed(0)}pt lean)`;
     // Gate 1: quality floor
     if(q<Q_FLOOR){
@@ -8353,6 +8455,21 @@ function TaraApp(){
     // Gate 2: conviction floor (THE coin-flip filter)
     if(conviction<CONV_FLOOR){
       return{call:'SIT_OUT',reason:`Coin-flip — posterior ${post.toFixed(0)}% only ${conviction.toFixed(0)}pt off neutral (need ±${CONV_FLOOR})`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    // V5.7.7 Gate 2.5: TAPE-OPPOSES veto. The most direct fix for FGT-alone failures.
+    //   When two tape windows show ≥70% the OTHER way, no posterior can save this call —
+    //   actual order flow is the truth. Even 60%+ opposition with no confluence is a hard veto.
+    if(tapeSuperOpposes){
+      return{call:'SIT_OUT',reason:`${_dirLead} — but tape ${(dir==='UP'?(100-tapeBuyPct):tapeBuyPct).toFixed(0)}% opposite, fighting flow`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    if(tapeOpposes&&!kalshiStronglyAgrees){
+      // Mild tape opposition + no Kalshi rescue → veto. Kalshi alone rescues only at strong agreement.
+      return{call:'SIT_OUT',reason:`${_dirLead} — tape opposes (${(dir==='UP'?(100-tapeBuyPct):tapeBuyPct).toFixed(0)}% other way), no Kalshi confirmation to override`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    // V5.7.7 Gate 2.6: Kalshi extreme-disagreement gate. When market is ≥90% certain the
+    //   other way, we need BOTH tape alignment AND pattern alignment to commit. Otherwise sit.
+    if(kalshiExtremeDisagrees&&!(tapeStronglyAgrees&&_fgtSignAgrees)){
+      return{call:'SIT_OUT',reason:`${_dirLead} — Kalshi at ${_kPct}% is essentially certain ${dir==='UP'?'DOWN':'UP'}, no overriding tape+FGT confluence`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // Gate 3: Kalshi material disagreement — market sees opposite direction strongly.
     //   When Kalshi strongly disagrees, we need extreme own-conviction to override.
@@ -8394,13 +8511,22 @@ function TaraApp(){
     const _confBase=Math.min(95,Math.round(conviction*1.5+q*0.4));
     const _tapeBoost=tapeSuperStrong?15:tapeStronglyAgrees?8:0;
     const _kalshiBoost=kalshiStronglyAgrees?10:kalshiAgrees?5:0;
+    // V5.7.7: Confluence boost. When tape, FGT, score, AND strike all agree, confidence
+    //   gets a meaningful bump — this is the "this is the kind of call we want" reward.
+    const _confluenceBoost=isSuperConfluent?12:isConfluent?6:0;
     // V5.6.8: Learning boost — when current regime+direction matches historically winning
     //   combos, add small confidence boost. When current matches historically losing combos,
     //   subtract. This is how Tara learns to PICK BETTER without sitting out more.
     const _regDirKey=(analysis.regime||'UNKNOWN')+'|'+dir;
     const _learnConfBoost=Math.max(-8,Math.min(8,_learn?.multipliers?.regimeDirConfBoost?.[_regDirKey]||0));
-    const _confidence=Math.max(25,_confBase-confidenceHaircut+_tapeBoost+_kalshiBoost+_learnConfBoost);
+    // V5.7.8: Learned confluence-bucket boost. Bucket determined by current confluence state.
+    //   Historical WR for this bucket informs the boost/haircut.
+    const _conflBucket=isSuperConfluent?'super-confluence':isConfluent?'confluence':'single-signal';
+    const _learnConflBoost=Math.max(-8,Math.min(8,_learn?.multipliers?.confluenceConfBoost?.[_conflBucket]||0));
+    const _confidence=Math.max(25,_confBase-confidenceHaircut+_tapeBoost+_kalshiBoost+_confluenceBoost+_learnConfBoost+_learnConflBoost);
     const _reasonParts=[`${conviction.toFixed(0)}pt ${dir} lean`,`FGT ${fgtAbs.toFixed(1)}/4`,`q${q}`];
+    if(isSuperConfluent)_reasonParts.unshift(`SUPER-CONFLUENCE — tape+FGT+score+strike all ${dir}`);
+    else if(isConfluent)_reasonParts.unshift(`CONFLUENCE — tape+FGT+score+strike all ${dir}`);
     if(tapeSuperStrong)_reasonParts.push(`tape super-strong (${tapeBuyPct.toFixed(0)}%)`);
     else if(tapeStronglyAgrees)_reasonParts.push(`tape ${tapeBuyPct.toFixed(0)}%`);
     if(kalshiStronglyAgrees)_reasonParts.push(`kalshi ${_kPct}% confirms`);
@@ -8408,12 +8534,19 @@ function TaraApp(){
     if(haircutReasons.length>0)_reasonParts.push(`-${confidenceHaircut} for ${haircutReasons.join(' + ')}`);
     if(_learnConfBoost>0)_reasonParts.push(`+${_learnConfBoost} learned ${dir} preference in ${analysis.regime}`);
     else if(_learnConfBoost<0)_reasonParts.push(`${_learnConfBoost} historical ${dir} weakness in ${analysis.regime}`);
+    if(_learnConflBoost>0)_reasonParts.push(`+${_learnConflBoost} from ${_conflBucket} history`);
+    else if(_learnConflBoost<0)_reasonParts.push(`${_learnConflBoost} from ${_conflBucket} history`);
     return{
       call:dir,reason:_reasonParts.join(' · '),confidence:_confidence,direction:dir,conviction,phase:'FORMING',
       // Pass through to lifecycle so it can compute needSamples consistently
-      _ctx:{q,conviction,fgtAbs,regime:analysis.regime,winType,tapeStronglyAgrees,tapeSuperStrong,kalshiAgrees,kalshiStronglyAgrees,_remaining,_elapsed},
+      _ctx:{q,conviction,fgtAbs,regime:analysis.regime,winType,tapeStronglyAgrees,tapeSuperStrong,kalshiAgrees,kalshiStronglyAgrees,_remaining,_elapsed,isConfluent,isSuperConfluent,strikeFavorable},
     };
   })();
+  // V5.7.8: mirror confluence into the ref so the engine cooldown gate can read it
+  confluenceStateRef.current={
+    isConfluent:taraCall?._ctx?.isConfluent||false,
+    isSuperConfluent:taraCall?._ctx?.isSuperConfluent||false,
+  };
   // V4.3: Attach lifecycle data so the Tara's Call card can render phase/samples/snapshot.
   //   Refs read at render time — same data the lifecycle effect uses.
   taraCall.samples=taraCallSampleRef.current?.count||0;
@@ -8439,12 +8572,23 @@ function TaraApp(){
     const _elapsed=_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
     const _remaining=Math.max(0,_totalSec-_elapsed);
     // V5.6.4: Tier-based sample requirements (one sample ≈ one second).
-    //   Tier 1 (exceptional, ~15s):   q≥85, conv≥20, FGT≥3.5, clean+!hostile, tape super-strong, kalshi confirms
-    //   Tier 2 (strong,      ~60s):   q≥70, conv≥15, FGT≥2.5, !hostile, AND (tape OR kalshi agrees)
-    //   Tier 3 (default,    ~180s):   q≥55, conv≥10, FGT≥1.5, !hostile  ← target sweet spot
-    //   Tier 4 (patient,    ~270s):   anything else passing the gates
+    //   Tier 0 (super-confluence, ~5s):  TAPE+FGT+SCORE+STRIKE all agree, tape super-strong, no Kalshi disagreement
+    //   Tier 0b (confluence, ~8s):       TAPE+FGT+SCORE+STRIKE all agree
+    //   Tier 1 (exceptional, ~15s):      q≥85, conv≥20, FGT≥3.5, clean+!hostile, tape super-strong, kalshi confirms
+    //   Tier 2 (strong,      ~60s):      q≥70, conv≥15, FGT≥2.5, !hostile, AND (tape OR kalshi agrees)
+    //   Tier 3 (default,    ~180s):      q≥55, conv≥10, FGT≥1.5, !hostile  ← target sweet spot
+    //   Tier 4 (patient,    ~270s):      anything else passing the gates
+    // V5.7.7: Confluence tiers are the new top — orthogonal-signal agreement is stronger
+    //   evidence than any single-signal exceptional setup. The win round had super-confluence
+    //   (tape 99/85/65/76% sell + FGT -2.7 DOWN + score -25 + price below strike).
+    const _isConf=_ctx?.isConfluent||false;
+    const _isSuperConf=_ctx?.isSuperConfluent||false;
     let _need;
-    if(_q>=85&&_conv>=20&&_fgtAbs>=3.5&&_cleanRegime&&!_hostile&&_tapeSuperStrong&&_kalshiStronglyAgrees){
+    if(_isSuperConf){
+      _need=5;
+    } else if(_isConf){
+      _need=8;
+    } else if(_q>=85&&_conv>=20&&_fgtAbs>=3.5&&_cleanRegime&&!_hostile&&_tapeSuperStrong&&_kalshiStronglyAgrees){
       _need=10;
     } else if(_q>=75&&_conv>=18&&_fgtAbs>=3.0&&!_hostile&&_tapeStronglyAgrees&&_kalshiAgrees){
       _need=20;
@@ -8627,6 +8771,9 @@ function TaraApp(){
         atPosterior:analysis?.rawProbAbove,
         locked:true,
         earlyLock:!analysis?.isSystemLocked,
+        // V5.7.7: confluence flags persist on the lock snapshot
+        isConfluent:tc?._ctx?.isConfluent||false,
+        isSuperConfluent:tc?._ctx?.isSuperConfluent||false,
         samples,
         needSamples,
         tier:tierLabel,
@@ -8651,6 +8798,9 @@ function TaraApp(){
         session:_session,
         reason:_committedReason,
         earlyLock:!analysis?.isSystemLocked,
+        // V5.7.7: confluence flags on the call log row for future learning bucketing
+        isConfluent:tc?._ctx?.isConfluent||false,
+        isSuperConfluent:tc?._ctx?.isSuperConfluent||false,
         samples,needSamples,
         result:null, // populated at rollover scoring
       };
@@ -9094,7 +9244,7 @@ function TaraApp(){
   const executeAction=(target,advisorLabel)=>{
     if(target==='UP'||target==='DOWN'){handleManualSync(target);return;}
     if(target==='CASH'||target==='SIT OUT'){
-      const hasActiveLock=taraAdviceRef.current.includes('LOCKED');
+      const hasActiveLock=taraAdviceRef.current.includes('CONFIRMED');
       const gapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
       const result=target==='CASH'?'WIN':'LOSS';
       if(hasActiveLock&&manuallyClosedRef.current===null){
@@ -9185,7 +9335,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.7.5...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.0...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -9286,7 +9436,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.7.5
+              5.7.8
             </span>
           </div>
 
@@ -9598,7 +9748,7 @@ function TaraApp(){
               </div>
               <button onClick={()=>{
                 // Force exit: score based on whether offer > bet (profit) or position in loss
-                if(userPosition&&manuallyClosedRef.current===null&&taraAdviceRef.current.includes('LOCKED')){
+                if(userPosition&&manuallyClosedRef.current===null&&taraAdviceRef.current.includes('CONFIRMED')){
                   const offerVal=parseFloat(currentOffer)||0;
                   const inProfit=offerVal>betAmount||(positionStatus&&positionStatus.pnlPct>0);
                   const result=inProfit?'WIN':'LOSS';
@@ -9863,7 +10013,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.7.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -10519,7 +10669,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.7.5 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.0 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -10675,10 +10825,54 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.7.5 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.0 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.0 — Milestone release. Consolidates 5.6.x and 5.7.x into a coherent story. */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major Release · Tape Truth + Confluence</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.0</span> — Tape is the Truth, Confluence is the Trigger</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">A philosophical shift, not a feature pack. V5.6 brought multi-device sync and self-learning. V5.7 polished correctness and surfaces. V6.0 is when the decision logic itself was rebuilt around a single principle: the tape is the only signal that can&rsquo;t lie. Everything else is derived from past prices.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Decision logic</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Tape-opposes veto.</strong> When two of the three tape windows (15s/30s/60s) show ≥60% in the OPPOSITE direction of the candidate call, the lock is vetoed. ≥70% the other way is a hard veto regardless of Kalshi. The case that motivated it: tape was 79% buy and Tara wanted to lock DOWN — that&rsquo;s fighting actual order flow. No more.</li>
+                  <li><strong>Confluence detection + fast-lock tier.</strong> When tape + FGT-sign + score-sign + strike-position all agree, it&rsquo;s &ldquo;confluence.&rdquo; All four PLUS tape super-strong PLUS no Kalshi disagreement is &ldquo;super-confluence.&rdquo; Confluent setups lock in 8 samples (~8s); super-confluent in 5. Single-signal setups still go through the patient 100–150 sample default.</li>
+                  <li><strong>FGT horizon cap.</strong> Each timeframe&rsquo;s forecast was projecting hours ahead while the trading window was minutes. Now each timeframe&rsquo;s forecast bars clamp to remaining-window seconds. A 5m FGT with 3 minutes left projects 0 bars forward — neutral. Stops the structural misread that flipped marginal-up reads into confident-down locks at boundaries.</li>
+                  <li><strong>Kalshi extreme-disagreement gate.</strong> When market is ≥90% certain the other way and Tara wants to call opposite, the call requires BOTH tape strong-agree AND FGT-sign-agree. Otherwise SIT_OUT. The market is right often enough that fighting 90%+ certainty without overwhelming evidence is a losing bet.</li>
+                  <li><strong>3m FGT removed, weights redistributed.</strong> 3m was dead weight per its own comment — often invalid, only 0.5 weight, redundant given 1m and 5m bracket it. Now 1m=1.0, 5m=1.7, 15m=1.3 (still totals 4.0 so alignment thresholds mean the same thing).</li>
+                  <li><strong>Engine vocabulary distinct from Tara&rsquo;s.</strong> Engine general prediction reads UP&nbsp;-&nbsp;CONFIRMED / DOWN&nbsp;-&nbsp;CONFIRMED / SIGNAL CLEARED. The word LOCKED is reserved for Tara&rsquo;s own commit.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Self-learning</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Confluence-bucket learning.</strong> Every resolved call buckets into super-confluence / confluence / single-signal. After 5+ calls in a bucket, Tara adjusts confidence per-bucket based on observed WR (≥80% → +8 conf; ≥65% → +4; &lt;55% → −3; &lt;45% → −6). Stacks with the existing regime+direction adjustment. Visible in the Learnings modal.</li>
+                  <li><strong>15s cooldown after release on confluence.</strong> The post-release cooldown was 45s flat. Now it drops to 15s when the current candidate is confluent. Re-engaging faster when all signals re-align is justified — confluence carries enough orthogonal evidence.</li>
+                  <li><strong>Per regime+direction speed and confidence learning.</strong> (V5.6.8 carried forward.) Combos with ≥75% WR over 5+ calls get 20% faster locks and +5 confidence. Combos with &lt;40% get 20% slower locks and −5 confidence. Tara picks better, doesn&rsquo;t call less.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Settlement and memory</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Settlement waits 8s for Kalshi&rsquo;s official close.</strong> At rollover, scoring defers 8 seconds while Kalshi publishes the new window&rsquo;s strike — that value equals the just-closed window&rsquo;s true close per Kalshi&rsquo;s feed. Falls back to the rollover-instant spot snapshot if Kalshi didn&rsquo;t refresh in time. Each resolved row is tagged with whether kalshi or spot settled it.</li>
+                  <li><strong>Memory and Stats rows show window period, strike, closing price.</strong> Each call now displays the window time range (e.g. 09:00&ndash;09:15), strike, and close price on a second line.</li>
+                  <li><strong>Scorecards derived from log.</strong> W/L/SITOUT counters compute directly from the call log instead of being separately incremented. Multi-device counting can no longer drift — opening Tara on PC and tab simultaneously can&rsquo;t double-count results.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Sync and reliability</div>
+                <ul className="list-disc pl-4 space-y-1.5">
+                  <li><strong>Firestore sync, invisible.</strong> Call log, lock state, learnings, past windows all sync across devices in real time. No badges, no buttons — same Tara on every screen.</li>
+                  <li><strong>Per-window dedup.</strong> Each call has a windowId derived from the bucket-start timestamp. Two devices committing the same window produce one log entry, not two.</li>
+                  <li><strong>Honest decision ETA.</strong> The countdown is computed from actual sample-accumulation rate, not a fictional 1Hz assumption. When samples aren&rsquo;t accruing, the display says &ldquo;waiting for stronger signal&rdquo; instead of pretending a lock is imminent.</li>
+                  <li><strong>All time classifications local.</strong> Hourly stats, sessions, day-of-week buckets all use your local clock. Macro events stay UTC since those are globally fixed.</li>
+                </ul>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">Practical effect: more calls, better picks. Fewer single-signal locks (vetoed when tape opposes). Faster locks on confluence. Same patient default for ambiguous setups. The confluence learning makes Tara calibrate her own confidence over time so the displayed % reflects what&rsquo;s actually been working.</p>
+              </section>
 
               {/* V5.5: Multi-window tape consensus + missing field fix */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
