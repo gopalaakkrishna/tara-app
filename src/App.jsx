@@ -3957,6 +3957,20 @@ function TaraMemoryModal({taraCallLog,onClose}){
   const _wr=counts.wins+counts.losses>0?Math.round((counts.wins/(counts.wins+counts.losses))*100):null;
   const _resultStyle=(r)=>r==='WIN'?{color:'rgba(110,231,183,0.95)'}:r==='LOSS'?{color:'rgba(244,114,182,0.95)'}:r==='SITOUT'?{color:'rgba(229,200,112,0.85)'}:{color:'rgba(232,233,228,0.4)'};
   const _dirStyle=(d)=>d==='UP'?{color:'rgba(110,231,183,0.85)'}:d==='DOWN'?{color:'rgba(244,114,182,0.85)'}:{color:'rgba(229,200,112,0.7)'};
+  // V5.7.5: derive window period (e.g. "09:00–09:15") from windowId. windowId encodes the
+  //   bucket-start ISO timestamp, so end = start + winMs. Renders in viewer's local time.
+  const _periodFromWindowId=(wid,wt)=>{
+    if(!wid)return null;
+    try{
+      const m=wid.match(/-(.+)$/); if(!m)return null;
+      const start=new Date(m[1]); if(isNaN(start.getTime()))return null;
+      const winMs=wt==='15m'?900000:300000;
+      const end=new Date(start.getTime()+winMs);
+      const _f=(d)=>`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      return`${_f(start)}–${_f(end)}`;
+    }catch(e){return null;}
+  };
+  const _fmtPrice=(p)=>p?'$'+Math.round(p).toLocaleString():null;
   return React.createElement('div',{
     className:'fixed inset-0 z-50 bg-[#0E100F]/95 backdrop-blur-md overflow-y-auto',
     onClick:(e)=>{if(e.target===e.currentTarget)onClose();},
@@ -4005,22 +4019,36 @@ function TaraMemoryModal({taraCallLog,onClose}){
         filtered.length===0
           ? React.createElement('div',{className:'p-8 text-center text-[#E8E9E4]/40 italic'},'No calls match this filter yet.')
           : React.createElement('div',{className:'divide-y divide-[#E8E9E4]/5 max-h-[60vh] overflow-y-auto'},
-              filtered.map((e)=>(
-                React.createElement('div',{key:e.id,className:'px-3 sm:px-4 py-2.5 hover:bg-[#E8E9E4]/3 flex items-center justify-between gap-3 text-xs'},
-                  React.createElement('div',{className:'flex items-center gap-2 sm:gap-3 min-w-0 flex-1'},
-                    React.createElement('span',{className:'tabular-nums text-[10px] text-[#E8E9E4]/40 shrink-0',style:{minWidth:80}},new Date(e.time).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})),
-                    React.createElement('span',{className:'tabular-nums text-[10px] text-[#E8E9E4]/30 shrink-0 hidden sm:inline'},e.windowType),
-                    React.createElement('span',{className:'font-bold tabular-nums shrink-0',style:_dirStyle(e.dir)},e.dir==='UP'?'▲ UP':e.dir==='DOWN'?'▼ DOWN':'· SIT'),
-                    React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40 shrink-0 hidden sm:inline'},'q',e.qScore||0),
-                    e.regime&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/35 truncate hidden md:inline'},e.regime),
-                    e.confidence&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40 tabular-nums shrink-0'},e.confidence,'%'),
+              filtered.map((e)=>{
+                const _period=_periodFromWindowId(e.windowId,e.windowType);
+                const _strikeFmt=_fmtPrice(e.strike);
+                const _closeFmt=_fmtPrice(e.closingPrice);
+                return(
+                React.createElement('div',{key:e.id,className:'px-3 sm:px-4 py-2.5 hover:bg-[#E8E9E4]/3 text-xs'},
+                  // Top row: date · windowType · period · direction · result
+                  React.createElement('div',{className:'flex items-center justify-between gap-3 mb-1'},
+                    React.createElement('div',{className:'flex items-center gap-2 sm:gap-3 min-w-0 flex-1'},
+                      React.createElement('span',{className:'tabular-nums text-[10px] text-[#E8E9E4]/40 shrink-0',style:{minWidth:80}},new Date(e.time).toLocaleString([],{month:'short',day:'numeric'})),
+                      React.createElement('span',{className:'tabular-nums text-[10px] text-[#E8E9E4]/30 shrink-0'},e.windowType),
+                      _period&&React.createElement('span',{className:'tabular-nums text-[10px] text-[#E8E9E4]/60 shrink-0',style:T2_MONO_STYLE},_period),
+                      React.createElement('span',{className:'font-bold tabular-nums shrink-0',style:_dirStyle(e.dir)},e.dir==='UP'?'▲ UP':e.dir==='DOWN'?'▼ DOWN':'· SIT'),
+                      e.confidence&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40 tabular-nums shrink-0'},e.confidence,'%'),
+                    ),
+                    React.createElement('div',{className:'flex items-center gap-2 shrink-0'},
+                      e.gapBps!=null&&React.createElement('span',{className:'text-[10px] tabular-nums',style:{color:e.gapBps>=0?'rgba(110,231,183,0.7)':'rgba(244,114,182,0.7)'}},formatSignedInt(e.gapBps)+' bps'),
+                      React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider',style:_resultStyle(e.result)},e.result||'pending'),
+                    ),
                   ),
-                  React.createElement('div',{className:'flex items-center gap-2 shrink-0'},
-                    e.gapBps!=null&&React.createElement('span',{className:'text-[10px] tabular-nums',style:{color:e.gapBps>=0?'rgba(110,231,183,0.7)':'rgba(244,114,182,0.7)'}},(e.gapBps>=0?'+':'')+e.gapBps.toFixed(0)+'bps'),
-                    React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider',style:_resultStyle(e.result)},e.result||'pending'),
+                  // Bottom row: strike → close · regime · qScore. Only renders when settled.
+                  (_strikeFmt||e.regime)&&React.createElement('div',{className:'flex items-center gap-2 sm:gap-3 text-[10px] text-[#E8E9E4]/40 pl-[88px]'},
+                    _strikeFmt&&_closeFmt&&React.createElement('span',{className:'tabular-nums shrink-0',style:T2_MONO_STYLE},'Strike ',_strikeFmt,' → Close ',_closeFmt),
+                    _strikeFmt&&!_closeFmt&&React.createElement('span',{className:'tabular-nums shrink-0',style:T2_MONO_STYLE},'Strike ',_strikeFmt),
+                    e.regime&&React.createElement('span',{className:'text-[#E8E9E4]/35 truncate hidden sm:inline'},'· ',e.regime),
+                    e.qScore!=null&&React.createElement('span',{className:'text-[#E8E9E4]/35 shrink-0 hidden sm:inline'},'· q',e.qScore),
+                    e.closeSource==='kalshi'&&React.createElement('span',{className:'text-[#E8E9E4]/30 shrink-0 hidden md:inline italic'},'· kalshi-settled'),
                   ),
                 )
-              )),
+              );})
             ),
       ),
       React.createElement('div',{className:'mt-4 text-[10px] text-[#E8E9E4]/40 leading-relaxed'},'Memory is cloud-synced — same record across devices. Showing ',filtered.length,' of ',taraCallLog.length,' total. Capped at 500 most recent.'),
@@ -4443,14 +4471,27 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose}){
   //   don't contribute to win rate). Tagged with `source` so we can show the split.
   const allResolved=React.useMemo(()=>{
     const manual=(tradeLog||[]).filter(t=>t.result==='WIN'||t.result==='LOSS').map(t=>({...t,source:'manual'}));
+    // V5.7.5: Plumb strike/closingPrice/windowId/posterior/qScore through so the drill
+    //   rows can render market context. Previously only id/time/result/regime/dir/etc were
+    //   passed — drill rows for Tara-source trades had blank %, FGT, Q, bps cells.
     const taraCalls=(taraCallLog||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.dir==='UP'||e.dir==='DOWN')).map(e=>({
       id:e.id,time:e.time,result:e.result,
       regime:e.regime,
       direction:e.dir,
+      dir:e.dir, // alias for drill row template
       session:e.session,
       hour:new Date(e.id||e.time||0).getHours(),
       windowType:e.windowType,
+      windowId:e.windowId, // V5.7.5: for period derivation
+      strike:e.strike,
+      closingPrice:e.closingPrice,
+      closeSource:e.closeSource,
+      posterior:e.posterior, // V5.7.5: drill row reads this
       qScore:e.qScore,
+      qualityScore:e.qScore, // alias for drill row template
+      fgt:e.fgt,
+      fgtAlignment:e.fgt, // alias for drill row template
+      closingGapBps:e.gapBps, // alias for drill row template
       tier:e.tier,
       source:'tara',
     }));
@@ -4712,16 +4753,45 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose}){
                   const fgtAbs=Math.abs(t.fgtAlignment||0);
                   // V3.1.7: round to 1 decimal (V2.9 weighted FGT can be fractional)
                   const fgtAbsDisplay=fgtAbs<0.05?'0':fgtAbs.toFixed(1).replace(/\.0$/,'');
+                  // V5.7.5: Window period derived from windowId (encodes bucket-start ISO).
+                  let _period=null;
+                  if(t.windowId){
+                    try{
+                      const m=t.windowId.match(/-(.+)$/);
+                      if(m){
+                        const start=new Date(m[1]);
+                        if(!isNaN(start.getTime())){
+                          const winMs=t.windowType==='15m'?900000:300000;
+                          const end=new Date(start.getTime()+winMs);
+                          const _f=(d)=>`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                          _period=`${_f(start)}–${_f(end)}`;
+                        }
+                      }
+                    }catch(e){}
+                  }
+                  const _strikeFmt=t.strike?'$'+Math.round(t.strike).toLocaleString():null;
+                  const _closeFmt=t.closingPrice?'$'+Math.round(t.closingPrice).toLocaleString():null;
                   return(
-                    <div key={i} className="flex items-center gap-2 sm:gap-3 px-2 py-1.5 rounded text-[11px] hover:bg-[#0E100F]/40">
-                      <span className="text-[#E8E9E4]/50 w-16 shrink-0" style={T2_MONO_STYLE}>{ts}</span>
-                      <span className={'font-bold w-12 shrink-0 '+dirCol}>{t.dir}</span>
-                      <span className="text-[#E8E9E4]/40 w-24 sm:w-28 truncate hidden sm:block">{t.regime}</span>
-                      <span className="text-[#E8E9E4]/40 w-12 hidden sm:block" style={T2_MONO_STYLE}>{t.posterior?.toFixed(0)}%</span>
-                      <span className="text-[#E8E9E4]/40 w-14 hidden md:block" style={T2_MONO_STYLE}>FGT {fgtAbsDisplay}/4</span>
-                      <span className="text-[#E8E9E4]/40 w-12 hidden md:block" style={T2_MONO_STYLE}>Q{t.qualityScore?.toFixed(0)||'—'}</span>
-                      <span className={'text-[#E8E9E4]/40 w-16 ml-auto sm:ml-0'} style={T2_MONO_STYLE}>{t.closingGapBps>=0?'+':''}{t.closingGapBps?.toFixed(1)}bps</span>
-                      <span className={'font-bold w-12 shrink-0 text-right '+resCol}>{t.result}</span>
+                    <div key={i} className="px-2 py-1.5 rounded text-[11px] hover:bg-[#0E100F]/40">
+                      {/* Top row: time · period · direction · stats · result */}
+                      <div className="flex items-center gap-2 sm:gap-3">
+                        <span className="text-[#E8E9E4]/50 w-16 shrink-0" style={T2_MONO_STYLE}>{ts}</span>
+                        {_period&&<span className="text-[#E8E9E4]/55 shrink-0 hidden sm:inline" style={T2_MONO_STYLE}>{_period}</span>}
+                        <span className={'font-bold w-12 shrink-0 '+dirCol}>{t.dir}</span>
+                        <span className="text-[#E8E9E4]/40 w-24 sm:w-28 truncate hidden sm:block">{t.regime}</span>
+                        <span className="text-[#E8E9E4]/40 w-12 hidden sm:block" style={T2_MONO_STYLE}>{t.posterior?t.posterior.toFixed(0)+'%':'—'}</span>
+                        <span className="text-[#E8E9E4]/40 w-14 hidden md:block" style={T2_MONO_STYLE}>FGT {fgtAbsDisplay}/4</span>
+                        <span className="text-[#E8E9E4]/40 w-12 hidden md:block" style={T2_MONO_STYLE}>{t.qualityScore!=null?'Q'+t.qualityScore:'Q—'}</span>
+                        <span className={'text-[#E8E9E4]/40 w-16 ml-auto sm:ml-0'} style={T2_MONO_STYLE}>{t.closingGapBps!=null?formatSignedInt(t.closingGapBps)+' bps':'—'}</span>
+                        <span className={'font-bold w-12 shrink-0 text-right '+resCol}>{t.result}</span>
+                      </div>
+                      {/* V5.7.5: Bottom row — strike → close. Only when both prices are known. */}
+                      {_strikeFmt&&_closeFmt&&(
+                        <div className="flex items-center gap-2 mt-0.5 pl-[72px] text-[10px] text-[#E8E9E4]/40">
+                          <span style={T2_MONO_STYLE}>Strike {_strikeFmt} → Close {_closeFmt}</span>
+                          {t.closeSource==='kalshi'&&<span className="italic text-[#E8E9E4]/30 hidden md:inline">· kalshi-settled</span>}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -5554,7 +5624,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.7.4</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.7.5</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5714,6 +5784,12 @@ function TaraApp(){
   const[liquidations,setLiquidations]=useState([]);
   const[newsEvents,setNewsEvents]=useState([]);
   const[targetMargin,setTargetMargin]=useState(0);
+  // V5.7.5: Mirror targetMargin in a ref so deferred rollover scoring (~8s after rollover)
+  //   can read the latest value. After rollover, Kalshi's fetch refreshes targetMargin to
+  //   the NEW window's strike — which equals the OLD window's close price per Kalshi's feed.
+  //   Reading it from a ref dodges the closure-capture problem in the setTimeout.
+  const targetMarginRef=useRef(0);
+  useEffect(()=>{targetMarginRef.current=targetMargin;},[targetMargin]);
   const hasSetInitialMargin=useRef(false);
   // V5.5.5: When true, signals the fill-on-tick effect to set strike from next currentPrice.
   //   Set true at window rollover or page-load, set false after fill happens.
@@ -6106,7 +6182,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.7.4 online — TDZ hotfix. The V5.7.1 derived-scorecard useMemo was reading taraCallLog before its declaration, crashing the engine on mount. Reordered declarations.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.7.5 online — Settlement now waits 8s for Kalshi to publish the official close, so W/L decisions match the market instead of jittering with spot. Memory and Stats rows now show window period (e.g. 09:00–09:15), strike, and closing price. Discord no longer sends standalone result messages — running record rides on every lock and signal.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6246,7 +6322,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.7.4'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.7.5'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -6419,7 +6495,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.4  |  signal'},
+        footer:{text:'Tara 5.7.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6433,7 +6509,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.7.4  |  stand-down'},
+        footer:{text:'Tara 5.7.5  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6447,7 +6523,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.7.4  |  search'},
+        footer:{text:'Tara 5.7.5  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6464,7 +6540,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.7.4  |  lock'},
+        footer:{text:'Tara 5.7.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6481,7 +6557,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.7.4  |  close'},
+          footer:{text:'Tara 5.7.5  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6502,7 +6578,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.7.4  |  exit'},
+        footer:{text:'Tara 5.7.5  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6523,7 +6599,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.4  |  scanning'},
+        footer:{text:'Tara 5.7.5  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6543,7 +6619,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.4  |  signal'},
+        footer:{text:'Tara 5.7.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6563,7 +6639,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.4  |  lock'},
+        footer:{text:'Tara 5.7.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6580,7 +6656,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.7.4  |  sit-out'},
+        footer:{text:'Tara 5.7.5  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6602,7 +6678,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.7.4  |  result'},
+          footer:{text:'Tara 5.7.5  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6639,12 +6715,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.7.4  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.7.5  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.7.4',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.7.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -6663,7 +6739,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.7.4 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.7.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -7197,67 +7273,74 @@ function TaraApp(){
         // V5.5.5: Use windowOpenPriceRef as strike fallback if targetMargin happens to be 0
         //   at close — this can happen if Kalshi came in after rollover and user cleared it.
         const _scoringStrike=targetMargin>0?targetMargin:(windowOpenPriceRef.current||0);
-        if(currentPrice!==null&&_scoringStrike>0){
-          const _snap=taraCallSnapshotRef.current;
-          const _outcomeDir=currentPrice>_scoringStrike?'UP':currentPrice<_scoringStrike?'DOWN':null;
-          const _gap=_scoringStrike>0?((currentPrice-_scoringStrike)/_scoringStrike)*10000:0;
-          // V5.6.6: Capture this window's outcome to the past-windows tracker. Every window
-          //   gets recorded regardless of whether Tara called — pure market history.
-          if(_outcomeDir){
-            // V5.6.9: windowId for cross-device dedup. Just-closed window = current bucket - winMs.
-            const _winMs=windowType==='15m'?900000:300000;
-            const _justClosedBucket=Math.floor(Date.now()/_winMs)*_winMs-_winMs;
-            const _pwid=`${windowType}-${new Date(_justClosedBucket).toISOString()}`;
-            const _pastEntry={
-              id:Date.now(),
-              windowId:_pwid,
-              time:Date.now(),
-              windowType,
-              strike:_scoringStrike,
-              closingPrice:currentPrice,
-              dir:_outcomeDir,
-              gapBps:_gap,
+        // V5.7.5: Capture rollover-instant spot as fallback close price. The DEFERRED scorer
+        //   runs ~8s later and prefers the just-refreshed Kalshi strike (= the just-closed
+        //   window's true close per Kalshi's settlement feed) over this spot snapshot.
+        const _closeAtRolloverSpot=currentPriceRef.current||currentPrice;
+        const _capturedSnap=taraCallSnapshotRef.current;
+        const _capturedWindowType=windowType;
+        if(_closeAtRolloverSpot!==null&&_scoringStrike>0){
+          // V5.7.5: Defer scoring by 8s. During the wait Kalshi's events poll refreshes the
+          //   NEW window's strike, which equals the OLD window's close per Kalshi. We prefer
+          //   that over local spot to avoid wrong W/L when spot wobbled at the boundary.
+          const _newWindowStrikeAtRollover=targetMarginRef.current; // capture for delta-detection
+          setTimeout(()=>{
+            // V5.7.5: Prefer Kalshi-derived close. After ~8s, targetMarginRef should reflect
+            //   the NEW window's strike. If it's CHANGED from what it was at rollover, the
+            //   change came from Kalshi — use that as the close price. If unchanged, Kalshi
+            //   didn't refresh in time (5m windows skip Kalshi entirely, or the API is down)
+            //   so fall back to the spot snapshot we captured at rollover.
+            const _fresh=targetMarginRef.current;
+            const _kalshiRefreshed=_fresh>0&&_fresh!==_newWindowStrikeAtRollover;
+            const _closingPrice=_kalshiRefreshed?_fresh:_closeAtRolloverSpot;
+            const _closeSource=_kalshiRefreshed?'kalshi':'spot';
+            const _outcomeDir=_closingPrice>_scoringStrike?'UP':_closingPrice<_scoringStrike?'DOWN':null;
+            const _gap=_scoringStrike>0?((_closingPrice-_scoringStrike)/_scoringStrike)*10000:0;
+            // V5.6.6: past-windows tracker — every window recorded regardless of Tara's call.
+            if(_outcomeDir){
+              const _winMs=_capturedWindowType==='15m'?900000:300000;
+              // V5.7.5: just-closed bucket is the bucket BEFORE this run's rollover, but we
+              //   ran the timer from rollover-instant — so still subtract one winMs from now.
+              //   At +8s into the new window, current bucket - 1 = the just-closed window.
+              const _justClosedBucket=Math.floor(Date.now()/_winMs)*_winMs-_winMs;
+              const _pwid=`${_capturedWindowType}-${new Date(_justClosedBucket).toISOString()}`;
+              const _pastEntry={
+                id:Date.now(),
+                windowId:_pwid,
+                time:Date.now(),
+                windowType:_capturedWindowType,
+                strike:_scoringStrike,
+                closingPrice:_closingPrice,
+                closeSource:_closeSource, // V5.7.5: track which source settled this row
+                dir:_outcomeDir,
+                gapBps:_gap,
+              };
+              const _sixtySecAgo=Date.now()-60000;
+              setPastWindows(prev=>{
+                if(prev.some(e=>e&&((e.windowId&&e.windowId===_pwid)||(e.windowType===_capturedWindowType&&e.time>_sixtySecAgo))))return prev;
+                return [...prev,_pastEntry].slice(-50);
+              });
+            }
+            // V5.6.1: populate result on the latest unresolved log entry for this windowType.
+            const _logResult=(resultStr)=>{
+              setTaraCallLog(prev=>{
+                const idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e.result===null&&e.windowType===_capturedWindowType);
+                if(!idx)return prev;
+                const next=[...prev];
+                next[idx.i]={...idx.e,result:resultStr,outcomeDir:_outcomeDir,strike:_scoringStrike,closingPrice:_closingPrice,closeSource:_closeSource,gapBps:_gap,resolvedAt:Date.now()};
+                setTimeout(()=>_recomputeLearningsFromLog(next),0);
+                return next;
+              });
             };
-            // V5.6.9: at-append dedup. Match by windowId, or fallback to time-window for legacy entries.
-            const _sixtySecAgo=Date.now()-60000;
-            setPastWindows(prev=>{
-              if(prev.some(e=>e&&((e.windowId&&e.windowId===_pwid)||(e.windowType===windowType&&e.time>_sixtySecAgo))))return prev;
-              return [...prev,_pastEntry].slice(-50);
-            });
-          }
-          // V5.6.1: helper — populate result on the latest unresolved log entry. Matched by
-          //   most-recent entry with result===null and same windowType. Robust to repeats
-          //   across multiple windows.
-          const _logResult=(resultStr)=>{
-            setTaraCallLog(prev=>{
-              const idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e.result===null&&e.windowType===windowType);
-              if(!idx)return prev;
-              const next=[...prev];
-              next[idx.i]={...idx.e,result:resultStr,outcomeDir:_outcomeDir,strike:_scoringStrike,closingPrice:currentPrice,gapBps:_gap,resolvedAt:Date.now()};
-              // V5.6.7: Trigger self-learning recompute on the updated log. Async via setTimeout
-              //   so we don't loop inside the setState callback. This is the per-trade learning step.
-              setTimeout(()=>_recomputeLearningsFromLog(next),0);
-              return next;
-            });
-          };
-          // No snapshot OR explicit SIT_OUT → sitouts++
-          if(!_snap||_snap.call==='SIT_OUT'){
-            // V5.7.1: scorecards derive from log — just log the result. Broadcast uses
-            //   a forward-looking estimate (current scorecard + this result).
-            const _curRec=taraScorecards[windowType]||{wins:0,losses:0,sitouts:0};
-            const _projRec={..._curRec,sitouts:(_curRec.sitouts||0)+1};
-            const taraRecord=`${_projRec.wins}W · ${_projRec.losses}L · ${_projRec.sitouts} sat out  (${_projRec.wins+_projRec.losses>0?((_projRec.wins/(_projRec.wins+_projRec.losses))*100).toFixed(1):'—'}%)`;
-            broadcastToDiscord('TARA_RESULT',{result:'SITOUT',calledDir:'SIT_OUT',outcomeDir:_outcomeDir,window:windowType,strike:targetMargin,price:currentPrice,gap:_gap,taraRecord});
-            _logResult('SITOUT');
-          } else if(_outcomeDir&&(_snap.call==='UP'||_snap.call==='DOWN')){
-            // Real call — score against outcome
-            const _won=_snap.call===_outcomeDir;
-            const _curRec=taraScorecards[windowType]||{wins:0,losses:0,sitouts:0};
-            const _projRec={..._curRec,[_won?'wins':'losses']:(_curRec[_won?'wins':'losses']||0)+1};
-            const taraRecord=`${_projRec.wins}W · ${_projRec.losses}L · ${_projRec.sitouts} sat out  (${_projRec.wins+_projRec.losses>0?((_projRec.wins/(_projRec.wins+_projRec.losses))*100).toFixed(1):'—'}%)`;
-            broadcastToDiscord('TARA_RESULT',{result:_won?'WIN':'LOSS',calledDir:_snap.call,outcomeDir:_outcomeDir,window:windowType,strike:targetMargin,price:currentPrice,gap:_gap,taraRecord});
-            _logResult(_won?'WIN':'LOSS');
-          }
+            // V5.7.5: TARA_RESULT Discord broadcasts removed — running record now rides on
+            //   every TARA_LOCK / TARA_SIGNAL / TARA_SCAN / TARA_SITOUT message via baseData.
+            if(!_capturedSnap||_capturedSnap.call==='SIT_OUT'){
+              _logResult('SITOUT');
+            } else if(_outcomeDir&&(_capturedSnap.call==='UP'||_capturedSnap.call==='DOWN')){
+              const _won=_capturedSnap.call===_outcomeDir;
+              _logResult(_won?'WIN':'LOSS');
+            }
+          },8000); // V5.7.5: 8s wait for Kalshi refresh
         }
         // Clear snapshot for next window
         taraCallSnapshotRef.current=null;
@@ -9102,7 +9185,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.7.4...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.7.5...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -9203,7 +9286,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.7.4
+              5.7.5
             </span>
           </div>
 
@@ -9780,7 +9863,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.7.4</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.7.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -10436,7 +10519,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.7.4 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.7.5 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -10592,7 +10675,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.7.4 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.7.5 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
