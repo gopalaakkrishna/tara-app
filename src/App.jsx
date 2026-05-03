@@ -124,109 +124,6 @@ const computeWindowId=(windowType)=>{
   return `${windowType}-${new Date(bucketMs).toISOString()}`;
 };
 
-// V5.6.1: Sync indicator. Green pulse = recent successful Firestore round-trip. Amber =
-//   writing in progress. Red = last attempt errored. Gray = Firestore not initialized.
-//   Click to see details (last write/read counts, last error, userId).
-// V5.6.2: Now shows actual record values so user can verify cross-device sync at a glance.
-// V5.6.3: Shows live "synced Xs ago" timer + listener count. With real-time sync working,
-//   the user shouldn't need to do anything — sync is automatic. The badge is purely
-//   diagnostic now. Pull button removed (was a band-aid; with onSnapshot it's redundant).
-function CloudSyncBadge({taraScorecards,taraCallLog}){
-  const[s,setS]=React.useState(_cloudSyncStatus);
-  const[open,setOpen]=React.useState(false);
-  const[,_tick]=React.useState(0);
-  React.useEffect(()=>subscribeCloudStatus(setS),[]);
-  // tick every second so "synced Xs ago" stays current
-  React.useEffect(()=>{
-    const id=setInterval(()=>_tick(t=>t+1),1000);
-    return()=>clearInterval(id);
-  },[]);
-  const colors={
-    idle:{bg:'rgba(232,233,228,0.10)',dot:'rgba(232,233,228,0.5)',label:'IDLE'},
-    writing:{bg:'rgba(245,158,11,0.15)',dot:'rgba(245,158,11,0.9)',label:'SYNC'},
-    ok:{bg:'rgba(52,211,153,0.12)',dot:'rgba(52,211,153,0.9)',label:'LIVE'},
-    error:{bg:'rgba(244,114,182,0.15)',dot:'rgba(244,114,182,0.9)',label:'ERROR'},
-    disabled:{bg:'rgba(232,233,228,0.05)',dot:'rgba(232,233,228,0.25)',label:'OFF'},
-  }[s.state]||{bg:'rgba(232,233,228,0.05)',dot:'rgba(232,233,228,0.25)',label:'?'};
-  const sc15=taraScorecards?.['15m']||{wins:0,losses:0,sitouts:0};
-  const sc5=taraScorecards?.['5m']||{wins:0,losses:0,sitouts:0};
-  const logCount=Array.isArray(taraCallLog)?taraCallLog.length:0;
-  const _agoStr=(ms)=>{
-    if(!ms)return 'never';
-    const d=Math.floor((Date.now()-ms)/1000);
-    if(d<2)return 'just now';
-    if(d<60)return d+'s ago';
-    if(d<3600)return Math.floor(d/60)+'m ago';
-    return Math.floor(d/3600)+'h ago';
-  };
-  const listenersAlive=s.listeners>0;
-  return React.createElement('div',{className:'relative'},
-    React.createElement('button',{
-      onClick:()=>setOpen(!open),
-      className:'flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-md border uppercase',
-      style:{background:colors.bg,borderColor:colors.dot,color:colors.dot},
-      title:'Cloud sync · '+(listenersAlive?'live':'not connected'),
-    },
-      React.createElement('span',{className:'w-1 h-1 rounded-full '+(listenersAlive?'animate-pulse':''),style:{background:colors.dot}}),
-      React.createElement('span',{className:'hidden sm:inline'},colors.label),
-    ),
-    open&&React.createElement('div',{
-      className:'absolute right-0 top-full mt-1 w-72 p-3 rounded-lg shadow-xl z-50 text-[10px] leading-relaxed',
-      style:{background:'#181A19',border:'1px solid rgba(232,233,228,0.15)',color:'rgba(232,233,228,0.85)'},
-      onClick:(e)=>e.stopPropagation(),
-    },
-      React.createElement('div',{className:'flex justify-between items-baseline mb-2'},
-        React.createElement('span',{className:'font-bold uppercase tracking-wider',style:{color:colors.dot}},'Cloud sync · '+colors.label),
-        React.createElement('button',{onClick:()=>setOpen(false),className:'text-[#E8E9E4]/40 hover:text-white text-base leading-none'},'×'),
-      ),
-      // Headline — listener state is the most important signal. If "real-time off",
-      // changes from other devices won't appear without refresh.
-      React.createElement('div',{
-        className:'mb-2 p-2 rounded',
-        style:{background:listenersAlive?'rgba(52,211,153,0.10)':'rgba(244,114,182,0.10)',border:'1px solid '+(listenersAlive?'rgba(52,211,153,0.3)':'rgba(244,114,182,0.3)')},
-      },
-        React.createElement('div',{className:'flex justify-between'},
-          React.createElement('span',{className:'font-bold',style:{color:listenersAlive?'rgba(110,231,183,0.95)':'rgba(244,114,182,0.95)'}},listenersAlive?'● Real-time sync active':'○ Real-time sync OFF'),
-          React.createElement('span',{className:'tabular-nums opacity-70'},s.listeners,' listener',s.listeners===1?'':'s'),
-        ),
-        React.createElement('div',{className:'text-[#E8E9E4]/60 mt-0.5'},listenersAlive
-          ? 'Changes from any device appear here within ~1s automatically.'
-          : (_fbDb?'Listeners not connected — check Firestore rules / network.':'Firestore not initialized — npm install firebase + redeploy.')
-        ),
-      ),
-      // Live timestamps + counters
-      React.createElement('div',{className:'space-y-0.5 text-[#E8E9E4]/70 mb-2'},
-        React.createElement('div',{className:'flex justify-between'},
-          React.createElement('span',null,'Last update:'),
-          React.createElement('span',{className:'font-mono text-white'},_agoStr(s.lastOk)),
-        ),
-        React.createElement('div',{className:'flex justify-between'},
-          React.createElement('span',null,'Reads · Writes:'),
-          React.createElement('span',{className:'font-mono text-white'},s.reads,' · ',s.writes),
-        ),
-        s.lastError&&React.createElement('div',{className:'text-rose-400 mt-1 break-words'},'Error: ',s.lastError.message),
-      ),
-      // Actual values block — verify against another device
-      React.createElement('div',{className:'border-t border-[#E8E9E4]/10 pt-2'},
-        React.createElement('div',{className:'text-[#E8E9E4]/40 uppercase tracking-wider text-[8px] font-bold mb-1'},'Tara\'s record · shared globally'),
-        React.createElement('div',{className:'flex justify-between gap-2'},
-          React.createElement('span',null,'15m:'),
-          React.createElement('span',{className:'font-mono text-white'},sc15.wins,'W · ',sc15.losses,'L · ',sc15.sitouts,'S'),
-        ),
-        React.createElement('div',{className:'flex justify-between gap-2'},
-          React.createElement('span',null,'5m:'),
-          React.createElement('span',{className:'font-mono text-white'},sc5.wins,'W · ',sc5.losses,'L · ',sc5.sitouts,'S'),
-        ),
-        React.createElement('div',{className:'flex justify-between gap-2'},
-          React.createElement('span',null,'Memory:'),
-          React.createElement('span',{className:'font-mono text-white'},logCount,' calls'),
-        ),
-        React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 italic mt-1'},'Identical numbers should appear on every device, every browser, simultaneously.'),
-      ),
-    ),
-  );
-}
-
 // ═══════════════════════════════════════
 // ICONS
 // ═══════════════════════════════════════
@@ -331,7 +228,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.03-v5.6.3-shared-tara-no-namespace';
+const BASELINE_VERSION='2026.05.03-v5.6.4-slower-locks-kalshi-check-no-badge';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -3738,9 +3635,9 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
 
         {/* V5.6.1: Tara's Memory — last 6 calls with results. Synced to Firestore so it
             survives refresh + spans devices. Click "all" to see the full history. */}
-        {taraCallLog&&taraCallLog.length>0&&(
-          <TaraMemoryStrip taraCallLog={taraCallLog} windowType={windowType}/>
-        )}
+        {/* V5.6.4: Always render. Empty-state placeholder ensures users know where to find it
+            even before Tara has committed to any windows. */}
+        <TaraMemoryStrip taraCallLog={taraCallLog||[]} windowType={windowType}/>
       </div>
     );
 
@@ -3754,7 +3651,10 @@ function TaraMemoryStrip({taraCallLog,windowType}){
   const recent=React.useMemo(()=>{
     return [...taraCallLog].filter(e=>e&&e.windowType===windowType).slice(-6).reverse();
   },[taraCallLog,windowType]);
-  if(recent.length===0)return null;
+  const totalAcrossWindows=Array.isArray(taraCallLog)?taraCallLog.length:0;
+  // V5.6.4: Empty-state placeholder so users always see this section (and the "all" button
+  //   to open the full history). Previously hidden entirely when log was empty, which made
+  //   it look like memory wasn't being tracked at all.
   const _resultColors={WIN:{bg:'rgba(52,211,153,0.18)',fg:'rgba(110,231,183,0.95)'},LOSS:{bg:'rgba(244,114,182,0.18)',fg:'rgba(244,114,182,0.95)'},SITOUT:{bg:'rgba(229,200,112,0.16)',fg:'rgba(229,200,112,0.85)'},pending:{bg:'rgba(232,233,228,0.06)',fg:'rgba(232,233,228,0.5)'}};
   const _dirArrow=(d)=>d==='UP'?'▲':d==='DOWN'?'▼':'·';
   const _fmtTime=(ms)=>{const d=new Date(ms);return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});};
@@ -3762,24 +3662,30 @@ function TaraMemoryStrip({taraCallLog,windowType}){
     React.createElement('div',{className:'border-t border-[#E8E9E4]/8 pt-2.5 mt-2.5'},
       React.createElement('div',{className:'flex justify-between items-baseline mb-1.5'},
         React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/45 font-bold'},'Tara\'s Memory'),
-        React.createElement('button',{onClick:()=>setOpen(true),className:'text-[9px] uppercase tracking-wider text-indigo-400/70 hover:text-indigo-300 font-bold'},'all →'),
+        React.createElement('button',{onClick:()=>setOpen(true),className:'text-[9px] uppercase tracking-wider text-indigo-400/70 hover:text-indigo-300 font-bold'},totalAcrossWindows>0?'all →':'open ↗'),
       ),
-      React.createElement('div',{className:'flex flex-wrap gap-1'},
-        recent.map((e)=>{
-          const r=e.result||'pending';
-          const c=_resultColors[r]||_resultColors.pending;
-          return React.createElement('div',{
-            key:e.id,
-            className:'flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] tabular-nums font-bold',
-            style:{background:c.bg,color:c.fg},
-            title:`${_fmtTime(e.time)} · ${e.regime||'?'} · q${e.qScore||0} · ${e.dir} ${e.confidence||0}% · ${r}${e.gapBps?` · ${e.gapBps>=0?'+':''}${e.gapBps.toFixed(0)}bps`:''}`,
-          },
-            React.createElement('span',null,_dirArrow(e.dir)),
-            React.createElement('span',{className:'text-[8px] opacity-70'},_fmtTime(e.time)),
-            e.result&&React.createElement('span',{className:'text-[8px]'},r==='WIN'?'✓':r==='LOSS'?'✗':'—'),
-          );
-        })
-      ),
+      recent.length===0
+        ? React.createElement('div',{className:'text-[9px] italic text-[#E8E9E4]/35'},
+            totalAcrossWindows===0
+              ? 'No calls yet — Tara\'s record is empty until she commits her first window.'
+              : `No ${windowType} calls yet. Switch windows or open "${'open ↗'}" for the full record.`
+          )
+        : React.createElement('div',{className:'flex flex-wrap gap-1'},
+            recent.map((e)=>{
+              const r=e.result||'pending';
+              const c=_resultColors[r]||_resultColors.pending;
+              return React.createElement('div',{
+                key:e.id,
+                className:'flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] tabular-nums font-bold',
+                style:{background:c.bg,color:c.fg},
+                title:`${_fmtTime(e.time)} · ${e.regime||'?'} · q${e.qScore||0} · ${e.dir} ${e.confidence||0}% · ${r}${e.gapBps?` · ${e.gapBps>=0?'+':''}${e.gapBps.toFixed(0)}bps`:''}`,
+              },
+                React.createElement('span',null,_dirArrow(e.dir)),
+                React.createElement('span',{className:'text-[8px] opacity-70'},_fmtTime(e.time)),
+                e.result&&React.createElement('span',{className:'text-[8px]'},r==='WIN'?'✓':r==='LOSS'?'✗':'—'),
+              );
+            })
+          ),
     ),
     open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false)}),
   );
@@ -5388,7 +5294,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.6.3</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>5.6.4</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -5777,7 +5683,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.6.3 online — One shared Tara · everyone sees the same record · real-time sync · refresh restores locks.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 5.6.4 online — Slower deliberate locks · 20s search phase · Kalshi cross-check · coin-flip filter · sync badge gone · same Tara for everyone.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -5917,7 +5823,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.6.3'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 5.6.4'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -6090,7 +5996,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.3  |  signal'},
+        footer:{text:'Tara 5.6.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6104,7 +6010,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.6.3  |  stand-down'},
+        footer:{text:'Tara 5.6.4  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6118,7 +6024,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 5.6.3  |  search'},
+        footer:{text:'Tara 5.6.4  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6135,7 +6041,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 5.6.3  |  lock'},
+        footer:{text:'Tara 5.6.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6152,7 +6058,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 5.6.3  |  close'},
+          footer:{text:'Tara 5.6.4  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6173,7 +6079,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 5.6.3  |  exit'},
+        footer:{text:'Tara 5.6.4  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6194,7 +6100,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.3  |  scanning'},
+        footer:{text:'Tara 5.6.4  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6214,7 +6120,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.3  |  signal'},
+        footer:{text:'Tara 5.6.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6234,7 +6140,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.3  |  lock'},
+        footer:{text:'Tara 5.6.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6251,7 +6157,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 5.6.3  |  sit-out'},
+        footer:{text:'Tara 5.6.4  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -6273,7 +6179,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 5.6.3  |  result'},
+          footer:{text:'Tara 5.6.4  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -6310,12 +6216,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 5.6.3  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 5.6.4  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.6.3',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 5.6.4',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -6334,7 +6240,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 5.6.3 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 5.6.4 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -7840,13 +7746,15 @@ function TaraApp(){
   //
   //   The result is tracked separately in taraScorecards. SIT_OUT counts neither way.
   //   This lets us measure: do Tara's selective calls win at higher rate than the firehose?
+  // V5.6.4 REDESIGN: Slower, more deliberate calls. User feedback: "Tara needs to stop
+  //   locking so quickly, now most of her decision are being 50-50 at that point it is
+  //   a coin flip." New flow:
+  //     1. SEARCH phase (first 20s of every window): observe only, no commit possible
+  //     2. SIGNAL phase: direction emerges, gates measure conviction
+  //     3. LOCK: only when conviction is real and persistent (handled in lifecycle effect)
+  //     4. Coin-flip → SIT_OUT (handled by tightened gates + posterior-history check)
+  //     5. Kalshi sanity check: if market disagrees materially, require higher conviction
   const taraCall=(()=>{
-    // V5.4 ROOT CAUSE FIX: The outer analysis useMemo (line ~7235) returns `rawProbAbove`,
-    //   NOT `posterior`. The engine internally produces `posterior` but it's renamed during
-    //   the outer return. So `analysis.posterior` was always undefined → Gate 0 always fired.
-    //   The display-side `analysis.posterior||50` fallback masked this everywhere else
-    //   (showed 50% silently), but Tara's Call's null check correctly fired SIT_OUT.
-    //   This was the actual bug behind every SIT_OUT screenshot since V3.x.
     const _post=analysis?.rawProbAbove;
     if(!analysis||_post==null||isNaN(_post)){
       return{call:'SIT_OUT',reason:'Engine still loading — analysis not ready yet',confidence:0};
@@ -7858,88 +7766,104 @@ function TaraApp(){
     const winType=analysis.windowAmplitude?.label||'NORMAL';
     const vfLabel=analysis.volFlow?.label||'';
     const q=Math.round(qualityGate?.score||0);
-    //   floor of 25 was still blocking calls when tape strongly agreed with direction.
-    //   New addition: TAPE-AGREEMENT OVERRIDE — when 30s tape is 70%+ same side as proposed
-    //   direction, drop quality threshold by 15 points. Tape going one way + price moving
-    //   that way = real signal even if FGT disagrees on longer timeframes.
     const _totalSec=windowType==='15m'?900:300;
     const _elapsed=_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
-    // V5.1: time decay accelerated to per-30s (was per-min). Halves time-to-decisive-window.
-    const _halfMinutesIn=Math.floor(Math.max(0,_elapsed)/30);
-    const _secToNextCheck=30-(Math.max(0,_elapsed)%30);
-    const _checkLabel=`next gate check in ${Math.ceil(_secToNextCheck)}s`;
-    // V5.1: Base thresholds tightened. Quality 20 base → 10 floor, conviction 5 base → 3 floor.
-    let qThreshold=Math.max(10,20-_halfMinutesIn*2);
-    let convThreshold=Math.max(3,5-_halfMinutesIn);
-    // V5.5: MULTI-WINDOW tape consensus override. Single-window 30s check was noise-prone —
-    //   user's image 2 had 30s=64.4% (just under 70% threshold), but 15s=65.3% AND 60s=75.4%
-    //   ALL confirming UP. Tara missed an obvious UP win. Now require multi-window agreement.
+    const _remaining=Math.max(0,_totalSec-_elapsed);
+    // V5.6.4: Mandatory search phase — first 20s, observe only. Even with strong signals,
+    //   we don't form a call this early. Catches the "Kalshi initial price snap" noise.
+    if(_elapsed<20){
+      return{call:'SIT_OUT',reason:`Searching for direction (${20-_elapsed}s of observation remaining)`,confidence:0,direction:dir,conviction,phase:'SEARCH'};
+    }
+    // V5.6.4: HARD floors — no time-decay shenanigans. If conviction is below this, sit out
+    //   no matter how late in the window. Coin-flip detection.
+    const Q_FLOOR=30;        // q below 30 = unreliable signal stack
+    const CONV_FLOOR=10;     // posterior must lean ≥10pt off neutral; 5pt was coin-flip noise
+    // Tape consensus (multi-window 15s/30s/60s buy%)
     const _tape15=tapeWindows?.w15?.buyPct??50;
     const _tape30=tapeWindows?.w30?.buyPct??50;
     const _tape60=tapeWindows?.w60?.buyPct??50;
     const _tapes=[_tape15,_tape30,_tape60];
-    // Standard agreement: ≥2 of 3 windows show ≥60% same side
     const _upAgrees=_tapes.filter(p=>p>=60).length>=2;
     const _downAgrees=_tapes.filter(p=>p<=40).length>=2;
     const tapeAgreesUP=_upAgrees&&dir==='UP';
     const tapeAgreesDOWN=_downAgrees&&dir==='DOWN';
     const tapeStronglyAgrees=tapeAgreesUP||tapeAgreesDOWN;
-    // Super-strong: ≥2 of 3 windows show ≥70% same side (rare, big confidence boost)
     const _upSuper=_tapes.filter(p=>p>=70).length>=2;
     const _downSuper=_tapes.filter(p=>p<=30).length>=2;
     const tapeSuperStrong=(_upSuper&&dir==='UP')||(_downSuper&&dir==='DOWN');
-    // Display value — pick the most-aligned window for reason text
     const tapeBuyPct=dir==='UP'?Math.max(..._tapes):Math.min(..._tapes);
-    if(tapeStronglyAgrees){
-      qThreshold=Math.max(5,qThreshold-15);  // floor 5 even with override — never call on q<5
-      convThreshold=Math.max(2,convThreshold-2);
-    }
-    // V5.2: SIT_OUT reasons now lead with proposed direction so Tara's thinking is visible.
+    // V5.6.4: KALSHI CROSS-CHECK — market price is a third opinion. Use as sanity check:
+    //   - If Kalshi clearly agrees with our direction → boost confidence, allow faster lock
+    //   - If Kalshi clearly disagrees → require materially higher conviction or sit out
+    //   kalshiYesPrice is 0-100, representing market's P(price closes above strike) = P(UP).
+    const _kPct=kalshiYesPrice;
+    const kalshiAvail=_kPct!=null&&_kPct>0&&_kPct<100;
+    const kalshiAgrees=kalshiAvail&&((dir==='UP'&&_kPct>=55)||(dir==='DOWN'&&_kPct<=45));
+    const kalshiStronglyAgrees=kalshiAvail&&((dir==='UP'&&_kPct>=65)||(dir==='DOWN'&&_kPct<=35));
+    // Disagreement: market sees the opposite direction with material conviction
+    const kalshiDisagrees=kalshiAvail&&((dir==='UP'&&_kPct<=40)||(dir==='DOWN'&&_kPct>=60));
+    const kalshiStronglyDisagrees=kalshiAvail&&((dir==='UP'&&_kPct<=30)||(dir==='DOWN'&&_kPct>=70));
     const _dirLead=`Watching ${dir} (${conviction.toFixed(0)}pt lean)`;
-    // Gate 1: quality
-    if(q<qThreshold){
-      const _tapeNote=tapeStronglyAgrees?` · tape ${tapeBuyPct.toFixed(0)}% agrees but q still too low`:'';
-      return{call:'SIT_OUT',reason:`${_dirLead} — quality ${q} < ${qThreshold} bar${_tapeNote} · ${_checkLabel}`,confidence:0,direction:dir,conviction};
+    // Gate 1: quality floor
+    if(q<Q_FLOOR){
+      return{call:'SIT_OUT',reason:`${_dirLead} — q${q} below ${Q_FLOOR} floor, signal too weak`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
-    // Gate 2: conviction
-    if(conviction<convThreshold)return{call:'SIT_OUT',reason:`Watching ${dir} but posterior ${post.toFixed(0)} too close to neutral (need ±${convThreshold}) · ${_checkLabel}`,confidence:0,direction:dir,conviction};
-    // Gate 3: FGT support — fast-tracked when tape agrees OR regime favors direction
+    // Gate 2: conviction floor (THE coin-flip filter)
+    if(conviction<CONV_FLOOR){
+      return{call:'SIT_OUT',reason:`Coin-flip — posterior ${post.toFixed(0)}% only ${conviction.toFixed(0)}pt off neutral (need ±${CONV_FLOOR})`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    // Gate 3: Kalshi material disagreement — market sees opposite direction strongly.
+    //   When Kalshi strongly disagrees, we need extreme own-conviction to override.
+    if(kalshiStronglyDisagrees&&conviction<25){
+      return{call:'SIT_OUT',reason:`${_dirLead} — but Kalshi at ${_kPct}% says opposite, conviction ${conviction.toFixed(0)} insufficient to override`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    // Gate 4: FGT support — primary multi-timeframe signal must show some pulse
     const isFastTrackRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(analysis.regime);
-    const fgtMin=tapeStronglyAgrees?0.0:(q>=55?0.4:0.7);  // V5.1: tape agreement bypasses FGT
-    if(fgtAbs<fgtMin&&!isFastTrackRegime&&!tapeStronglyAgrees){
-      return{call:'SIT_OUT',reason:`${_dirLead} — but FGT ${fgtAbs.toFixed(1)}/4 too quiet (need ${fgtMin}) · ${_checkLabel}`,confidence:0,direction:dir,conviction};
+    const fgtMin=tapeStronglyAgrees||kalshiStronglyAgrees?0.5:1.0; // V5.6.4: was 0.0/0.4/0.7
+    if(fgtAbs<fgtMin&&!isFastTrackRegime){
+      return{call:'SIT_OUT',reason:`${_dirLead} — FGT ${fgtAbs.toFixed(1)}/4 below ${fgtMin} threshold (multi-timeframe quiet)`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
-    // V5.0: Gates 4 + 5 are now SOFT — they apply confidence haircuts instead of blocking.
+    // SOFT gates — apply confidence haircuts instead of blocking
     let confidenceHaircut=0;
     let haircutReasons=[];
-    // Gate 4: regime hostility — V5.1: hard-block only when q<35 AND no tape override
     if(winType==='DEAD'||winType==='WHIPSAW'){
-      if(q<35&&!tapeStronglyAgrees){
-        return{call:'SIT_OUT',reason:`${_dirLead} — but ${winType} window + q${q} too risky · ${_checkLabel}`,confidence:0,direction:dir,conviction};
+      if(q<50&&!tapeStronglyAgrees&&!kalshiStronglyAgrees){
+        return{call:'SIT_OUT',reason:`${_dirLead} — ${winType} regime + q${q} no consensus from tape/kalshi`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
       }
-      confidenceHaircut+=10;
-      haircutReasons.push(`${winType} window`);
+      confidenceHaircut+=15;
+      haircutReasons.push(`${winType} regime`);
     }
-    // Gate 5: vol-flow divergence — V5.1: hard-block only when tape AND posterior both weak
     const isDivergent=
       (dir==='UP'&&(vfLabel==='BUY-DIVERGENT'||vfLabel==='BUY-FAILING'))||
       (dir==='DOWN'&&(vfLabel==='SELL-DIVERGENT'||vfLabel==='SELL-FAILING'));
     if(isDivergent){
-      if(q<40&&conviction<15&&!tapeStronglyAgrees){
-        return{call:'SIT_OUT',reason:`${_dirLead} — but tape ${vfLabel} disagrees, q+conv weak · ${_checkLabel}`,confidence:0,direction:dir,conviction};
+      if(q<50&&conviction<18&&!tapeStronglyAgrees){
+        return{call:'SIT_OUT',reason:`${_dirLead} — tape ${vfLabel} disagrees, q+conv weak`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
       }
       confidenceHaircut+=15;
       haircutReasons.push(`tape ${vfLabel}`);
     }
-    // All gates passed — Tara calls
+    if(kalshiDisagrees&&!kalshiStronglyDisagrees){
+      // Mild Kalshi disagreement (40-45 / 55-60) — apply haircut, don't block
+      confidenceHaircut+=10;
+      haircutReasons.push(`kalshi ${_kPct}% disagrees`);
+    }
+    // All gates passed — Tara forms a call
     const _confBase=Math.min(95,Math.round(conviction*1.5+q*0.4));
-    const _tapeBoost=tapeSuperStrong?20:tapeStronglyAgrees?10:0;  // V5.5: tiered boost
-    const _confidence=Math.max(20,_confBase-confidenceHaircut+_tapeBoost);
-    const _reasonParts=[`${conviction.toFixed(0)}pt ${dir} lean`,`FGT ${fgtAbs.toFixed(1)}/4`,`q ${q}`];
+    const _tapeBoost=tapeSuperStrong?15:tapeStronglyAgrees?8:0;
+    const _kalshiBoost=kalshiStronglyAgrees?10:kalshiAgrees?5:0;
+    const _confidence=Math.max(25,_confBase-confidenceHaircut+_tapeBoost+_kalshiBoost);
+    const _reasonParts=[`${conviction.toFixed(0)}pt ${dir} lean`,`FGT ${fgtAbs.toFixed(1)}/4`,`q${q}`];
     if(tapeSuperStrong)_reasonParts.push(`tape super-strong (${tapeBuyPct.toFixed(0)}%)`);
-    else if(tapeStronglyAgrees)_reasonParts.push(`tape ${tapeBuyPct.toFixed(0)}% agrees`);
+    else if(tapeStronglyAgrees)_reasonParts.push(`tape ${tapeBuyPct.toFixed(0)}%`);
+    if(kalshiStronglyAgrees)_reasonParts.push(`kalshi ${_kPct}% confirms`);
+    else if(kalshiAgrees)_reasonParts.push(`kalshi ${_kPct}% leans ${dir}`);
     if(haircutReasons.length>0)_reasonParts.push(`-${confidenceHaircut} for ${haircutReasons.join(' + ')}`);
-    return{call:dir,reason:_reasonParts.join(' · '),confidence:_confidence,direction:dir,conviction};
+    return{
+      call:dir,reason:_reasonParts.join(' · '),confidence:_confidence,direction:dir,conviction,phase:'FORMING',
+      // Pass through to lifecycle so it can compute needSamples consistently
+      _ctx:{q,conviction,fgtAbs,regime:analysis.regime,winType,tapeStronglyAgrees,tapeSuperStrong,kalshiAgrees,kalshiStronglyAgrees,_remaining,_elapsed},
+    };
   })();
   // V4.3: Attach lifecycle data so the Tara's Call card can render phase/samples/snapshot.
   //   Refs read at render time — same data the lifecycle effect uses.
@@ -7954,16 +7878,35 @@ function TaraApp(){
     const _cleanRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(_regime);
     const _winType=analysis?.windowAmplitude?.label;
     const _hostile=_winType==='DEAD'||_winType==='WHIPSAW';
-    let _need;
-    if(_q>=80&&_fgtAbs>=3.0&&_cleanRegime&&!_hostile)_need=1;
-    else if(_q>=55&&_fgtAbs>=1.2&&!_hostile)_need=2;
-    else if(_hostile)_need=5;
-    else _need=3;
-    // Per-60s decay
+    // V5.6.4: Use the same _ctx the gate logic computed if available — keeps display in sync
+    //   with the actual lock criteria. Falls back to local read of qualityGate if missing.
+    const _ctx=taraCall._ctx;
+    const _conv=_ctx?.conviction??Math.abs((analysis?.rawProbAbove||50)-50);
+    const _tapeStronglyAgrees=_ctx?.tapeStronglyAgrees||false;
+    const _tapeSuperStrong=_ctx?.tapeSuperStrong||false;
+    const _kalshiAgrees=_ctx?.kalshiAgrees||false;
+    const _kalshiStronglyAgrees=_ctx?.kalshiStronglyAgrees||false;
     const _totalSec=windowType==='15m'?900:300;
     const _elapsed=_totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
-    const _minIn=Math.floor(Math.max(0,_elapsed)/60);
-    taraCall.needSamples=Math.max(1,_need-_minIn);
+    const _remaining=Math.max(0,_totalSec-_elapsed);
+    // V5.6.4: Tier-based sample requirements (one sample ≈ one second).
+    //   Tier 1 (exceptional, ~15s):   q≥85, conv≥20, FGT≥3.5, clean+!hostile, tape super-strong, kalshi confirms
+    //   Tier 2 (strong,      ~60s):   q≥70, conv≥15, FGT≥2.5, !hostile, AND (tape OR kalshi agrees)
+    //   Tier 3 (default,    ~180s):   q≥55, conv≥10, FGT≥1.5, !hostile  ← target sweet spot
+    //   Tier 4 (patient,    ~270s):   anything else passing the gates
+    let _need;
+    if(_q>=85&&_conv>=20&&_fgtAbs>=3.5&&_cleanRegime&&!_hostile&&_tapeSuperStrong&&_kalshiStronglyAgrees){
+      _need=15;
+    } else if(_q>=70&&_conv>=15&&_fgtAbs>=2.5&&!_hostile&&(_tapeStronglyAgrees||_kalshiStronglyAgrees||_kalshiAgrees)){
+      _need=60;
+    } else if(_q>=55&&_conv>=10&&_fgtAbs>=1.5&&!_hostile){
+      _need=180;
+    } else {
+      _need=270;
+    }
+    // V5.6.4: cap at remaining time minus 90s buffer so lock has time to be meaningful
+    const _maxWithBuffer=Math.max(15,_remaining-90);
+    taraCall.needSamples=Math.min(_need,_maxWithBuffer);
     // Estimated seconds until lock — samples increment ~1Hz
     taraCall.lockEtaSec=Math.max(0,(taraCall.needSamples-taraCall.samples));
   })();
@@ -8025,33 +7968,38 @@ function TaraApp(){
     const samples=taraCallSampleRef.current.count;
     // V5.5d: Use claimed direction for snapshot, not necessarily current tc.call
     const claimedDir=taraCallSampleRef.current.dir;
-    // Determine sample threshold based on condition cleanness
+    // V5.6.4: Tier-based commit thresholds — same logic as display side. One sample ≈ one
+    //   second. NO MORE TIME-DECAY: the decay was the cause of "locks too fast late in
+    //   window" — Tara would lock with 1 confirmation if forming kicked in at minute 2+.
+    //   Now needSamples is fixed by signal strength alone, capped only by remaining-window
+    //   buffer (so we don't lock with 0s left to score).
     const q=qualityGate?.score||0;
     const fgtAbs=Math.abs(analysis?.mtfAlignment||0);
     const regime=analysis?.regime||'';
     const cleanRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(regime);
     const winType=analysis?.windowAmplitude?.label;
     const hostileWindow=winType==='DEAD'||winType==='WHIPSAW';
-    // V5.5.5: Instant-lock criteria tightened. User: 'where is the analyzing/scanning period.
-    //   or is she doing it cause she is too confident?' Answer: the q≥72/FGT≥2 bar was too
-    //   loose for instant. Now q≥80 + FGT≥3 (top decile + strong alignment) for true instant
-    //   lock. Everything else takes ≥2 samples (visible analyzing time).
-    let needSamples;
-    if(q>=80&&fgtAbs>=3.0&&cleanRegime&&!hostileWindow){
-      needSamples=1;       // genuinely exceptional: instant lock
-    } else if(q>=55&&fgtAbs>=1.2&&!hostileWindow){
-      needSamples=2;       // good: ~30s analyzing
-    } else if(hostileWindow){
-      needSamples=5;       // hostile: extra patience
-    } else {
-      needSamples=3;       // default: ~1 min analyzing
-    }
-    // V5.5d: Time-decay slowed to per-60s. Default 3 → 2 by 60s → 1 by 120s.
-    //   Hostile 5 → 4 → 3 → 2 → 1 by 240s. Gives Tara genuine analyzing time early window.
+    const _ctx=tc._ctx;
+    const conv=_ctx?.conviction??Math.abs((analysis?.rawProbAbove||50)-50);
+    const tapeStronglyAgrees=_ctx?.tapeStronglyAgrees||false;
+    const tapeSuperStrong=_ctx?.tapeSuperStrong||false;
+    const kalshiAgrees=_ctx?.kalshiAgrees||false;
+    const kalshiStronglyAgrees=_ctx?.kalshiStronglyAgrees||false;
     const totalSec=windowType==='15m'?900:300;
     const elapsedSec=totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
-    const minutesIn=Math.floor(Math.max(0,elapsedSec)/60);
-    needSamples=Math.max(1,needSamples-minutesIn);
+    const remaining=Math.max(0,totalSec-elapsedSec);
+    let needSamples;
+    if(q>=85&&conv>=20&&fgtAbs>=3.5&&cleanRegime&&!hostileWindow&&tapeSuperStrong&&kalshiStronglyAgrees){
+      needSamples=15;     // exceptional: lock fast, ~15s
+    } else if(q>=70&&conv>=15&&fgtAbs>=2.5&&!hostileWindow&&(tapeStronglyAgrees||kalshiStronglyAgrees||kalshiAgrees)){
+      needSamples=60;     // strong: ~1 min
+    } else if(q>=55&&conv>=10&&fgtAbs>=1.5&&!hostileWindow){
+      needSamples=180;    // default: ~3 min target the user asked for
+    } else {
+      needSamples=270;    // patient: ~4.5 min — usually means we ride out to endgame as SIT_OUT
+    }
+    // Cap so lock has time to be scored after committing
+    needSamples=Math.min(needSamples,Math.max(15,remaining-90));
     if(taraCallSnapshotRef.current!==null)return; // already committed — don't overwrite
     if(samples>=needSamples||analysis?.isSystemLocked){
       // V5.5d: Snapshot uses CLAIMED direction (the first formed direction this window),
@@ -8608,7 +8556,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.6.3...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 5.6.4...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -8709,10 +8657,8 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              5.6.3
+              5.6.4
             </span>
-            {/* V5.6.1: Cloud sync indicator — visible on all viewports. Click for details. */}
-            <CloudSyncBadge taraScorecards={taraScorecards} taraCallLog={taraCallLog}/>
           </div>
 
           {/* Live Price — shrinks gracefully, never truncates on sm+ */}
@@ -9279,7 +9225,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.6.3</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 5.6.4</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -9905,7 +9851,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.6.3 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 5.6.4 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -10061,7 +10007,7 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.6.3 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 5.6.4 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
