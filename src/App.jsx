@@ -1553,7 +1553,9 @@ const TradingViewChart=({resolution,onResolutionChange})=>{
 // V99 ADVISOR STATE MACHINE
 // ═══════════════════════════════════════
 const computeAdvisor=(params)=>{
-  const{userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining,secsRemaining,accel,pnlSlope,atrBps,activePrediction,lockInfo,regime}=params;
+  const{userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining,secsRemaining,accel,pnlSlope,atrBps,activePrediction,lockInfo,regime,
+    // V6.2.8: Tara-aware inputs
+    taraSnapshot,taraLean,taraPosterior,kalshiYesPrice}=params;
   const intervalSeconds=windowType==='15m'?900:300;
   const timeRemainingFrac=Math.max(0,clockSeconds/intervalSeconds);
   const timeLabel=`${minsRemaining}m ${secsRemaining}s left`;
@@ -1566,48 +1568,75 @@ const computeAdvisor=(params)=>{
   const isLocked=activePrediction?.includes('CONFIRMED');
   const lockDir=lockInfo?.dir||null;
 
+  // V6.2.8: Tara summary — used in both minimal pre-entry and post-entry cross-reference.
+  //   Determines what Tara is calling, what she'd have leaned if she sat out, edge math.
+  const _taraDir=taraSnapshot?.call==='UP'||taraSnapshot?.call==='DOWN'?taraSnapshot.call
+    :(taraLean?.dir||null); // even on SIT_OUT, taraLean might exist if she had a forming direction
+  const _taraSatOut=taraSnapshot?.call==='SIT_OUT';
+  // Implied direction Tara would have called if forced — useful display when sitting out.
+  //   Use posterior if available, else lean.
+  const _taraImpliedDir=_taraDir||(taraPosterior!=null?(taraPosterior>=50?'UP':'DOWN'):null);
+  const _taraImpliedConf=_taraImpliedDir
+    ?(_taraDir==='UP'?(taraSnapshot?.atPosterior||taraPosterior||50)
+      :_taraDir==='DOWN'?(100-(taraSnapshot?.atPosterior||taraPosterior||50))
+      :(taraPosterior!=null?(taraPosterior>=50?taraPosterior:(100-taraPosterior)):50))
+    :50;
+  // Edge for the Tara-implied direction
+  const _kPctNow=kalshiYesPrice!=null?Number(kalshiYesPrice):null;
+  const _taraEdge=_kPctNow!=null&&_taraImpliedDir
+    ?(_taraImpliedDir==='UP'?_taraImpliedConf-_kPctNow:_taraImpliedConf-(100-_kPctNow))
+    :null;
+
   // ── NO POSITION — pre-entry advisor ──
+  // V6.2.8: Minimal mode. Tara is in charge of her own call card; advisor doesn't need
+  //   to compete. Only shows hard hazards (rug pull, window closing, stop hit) loudly.
+  //   For everything else: low-noise summary of where Tara stands.
   if(!userPosition){
-    // Rug pull always first
+    // Rug pull always first — only loud alert pre-entry
     if(isRugPull&&showRugPullAlerts)return{label:'RUG PULL — ABORT LONGS',reason:`Massive liquidity collapse detected. Do not enter long. [${timeLabel}]`,color:'rose',animate:true,hasAction:false};
-
-    // Window too late
-    if(isVeryLate)return{label:'WINDOW CLOSED',reason:`Only ${secsRemaining}s remain. Entry window is closed — wait for next candle.`,color:'zinc',animate:false,hasAction:false};
-    if(isLate&&!isLocked)return{label:'WINDOW CLOSING',reason:`${timeLabel} — no confirmed lock. High-risk to enter now. Stand by for next window.`,color:'amber',animate:false,hasAction:false};
-
-    // Tara has a committed lock — this is the ONLY time to show an entry signal
-    // V6.1.1: Renamed from "Tara locked" → "Engine locked" because this advisor
-    //   reflects the ENGINE's lock state. Tara has her own card with her own state
-    //   (which may differ — she may sit out while the engine locks). Sharper text too.
-    if(isLocked&&lockDir){
-      const lockGap=lockInfo?.lockPrice>0?((cp-lockInfo.lockPrice)/lockInfo.lockPrice)*10000:0;
-      const lockedSec=lockInfo?.lockedAt>0?Math.floor((Date.now()-lockInfo.lockedAt)/1000):0;
-      const _lockConf=lockInfo.lockedPosterior?.toFixed(0)||'—';
-      // V6.1.3: EXIT WARNING — engine reversed post-lock. Don't flip the call; alert user to consider exit.
-      if(activePrediction.includes('EXIT WARNING')){
-        return{label:`⚠️ EXIT WARNING · ${lockDir}`,reason:`Engine reversed against ${lockDir} lock · ${lockedSec}s after entry · gap ${gapBps>=0?'+':''}${gapBps.toFixed(1)}bps · use FORCE EXIT to cash out`,color:'amber',animate:true,hasAction:false};
-      }
-      if(lockDir==='UP')return{label:`ENTRY SIGNAL · UP`,reason:`Engine locked UP ${lockedSec}s ago · ${_lockConf}% conf · gap ${gapBps>=0?'+':''}${gapBps.toFixed(1)}bps · ${timeLabel} left`,color:'emerald',animate:false,hasAction:true,actionLabel:`CONFIRM ENTRY 'UP'`,actionTarget:'UP'};
-      if(lockDir==='DOWN')return{label:`ENTRY SIGNAL · DOWN`,reason:`Engine locked DOWN ${lockedSec}s ago · ${_lockConf}% conf · gap ${gapBps>=0?'+':''}${gapBps.toFixed(1)}bps · ${timeLabel} left`,color:'rose',animate:false,hasAction:true,actionLabel:`CONFIRM ENTRY 'DOWN'`,actionTarget:'DOWN'};
+    // Window genuinely closed
+    if(isVeryLate)return{label:'WINDOW CLOSED',reason:`Only ${secsRemaining}s remain · entry window closed · wait for next candle`,color:'zinc',animate:false,hasAction:false};
+    // Tara has committed UP/DOWN — show as a simple badge with edge, no shouting
+    if(taraSnapshot&&(taraSnapshot.call==='UP'||taraSnapshot.call==='DOWN')){
+      const _isUserForcedLock=taraSnapshot.isUserForced;
+      const _color=taraSnapshot.call==='UP'?'emerald':'rose';
+      const _conf=Math.round(_taraImpliedConf);
+      const _edgeStr=_taraEdge!=null?` · edge ${_taraEdge>=0?'+':''}${Math.round(_taraEdge)}pt`:'';
+      const _forceTag=_isUserForcedLock?' (forced)':'';
+      return{
+        label:`Tara ${taraSnapshot.call} ${_conf}%${_forceTag}`,
+        reason:`Locked ${taraSnapshot.call}${_edgeStr} · ${timeLabel}`,
+        color:_color,animate:false,hasAction:true,actionLabel:`ENTER ${taraSnapshot.call}`,actionTarget:taraSnapshot.call,
+      };
     }
-
-    // Already manually closed this window — no new entries
-    if(activePrediction==='CLOSED'||activePrediction==='SIT OUT')return{label:'TRADE CLOSED',reason:`Position closed · ${timeLabel} left`,color:'zinc',animate:false,hasAction:false};
-
-    // Forming — show progress, no action button
-    if(activePrediction?.includes('DELIBERATING')){
-      return{label:'🧠 DELIBERATING',reason:`Reading market structure · ${timeLabel} left`,color:'indigo',animate:true,hasAction:false};
+    // Tara sat out — show what direction she'd have leaned if forced
+    if(_taraSatOut){
+      const _impliedConf=Math.round(_taraImpliedConf);
+      const _impliedStr=_taraImpliedDir?` · would lean ${_taraImpliedDir} ${_impliedConf}%`:'';
+      const _edgeStr=_taraEdge!=null?` · edge ${_taraEdge>=0?'+':''}${Math.round(_taraEdge)}pt`:'';
+      const _reasonStr=taraSnapshot?.reason||'no clean entry';
+      return{
+        label:`Tara sitting out${_impliedStr}`,
+        reason:`${_reasonStr}${_edgeStr} · ${timeLabel}`,
+        color:'zinc',animate:false,hasAction:false,
+      };
     }
-    if(activePrediction?.includes('SITTING OUT'))return{label:'⛔ SITTING OUT',reason:`Signals split · no clear edge this window`,color:'rose',animate:false,hasAction:false};
-    if(activePrediction?.includes('ANALYZING')){
-      return{label:'🔍 ANALYZING',reason:`Scanning for direction · ${timeLabel} left`,color:'indigo',animate:true,hasAction:false};
+    // Tara is still scanning — minimal status. Show lean if she's developing one.
+    if(taraLean){
+      const _conf=Math.round(taraLean.conviction);
+      return{
+        label:`Tara watching ${taraLean.dir}`,
+        reason:`${_conf}pt ${taraLean.dir} lean · awaiting confirmation · ${timeLabel}`,
+        color:taraLean.dir==='UP'?'emerald':'rose',animate:false,hasAction:false,
+      };
     }
-    if(activePrediction?.includes('UP (FORMING)'))return{label:'SIGNAL FORMING · UP',reason:`Bullish bias building · posterior ${posterior.toFixed(0)}% · ${timeLabel} left`,color:'amber',animate:false,hasAction:false};
-    if(activePrediction?.includes('DOWN (FORMING)'))return{label:'SIGNAL FORMING · DOWN',reason:`Bearish bias building · posterior ${(100-posterior).toFixed(0)}% · ${timeLabel} left`,color:'amber',animate:false,hasAction:false};
-
-    // No call yet / endgame no-call
-    if(activePrediction==='NO CALL')return{label:'NO CALL',reason:`Lock threshold not reached · sit out, wait next window`,color:'zinc',animate:false,hasAction:false};
-    return{label:'SCANNING',reason:`${posterior.toFixed(0)}% UP · ${(100-posterior).toFixed(0)}% DOWN · ${timeLabel} left`,color:'zinc',animate:false,hasAction:false};
+    // Pure scanning — no lean yet
+    if(activePrediction==='CLOSED'||activePrediction==='SIT OUT')return{label:'TRADE CLOSED',reason:`Position closed · ${timeLabel}`,color:'zinc',animate:false,hasAction:false};
+    return{
+      label:'Tara scanning',
+      reason:`No direction yet · ${Math.round(taraPosterior||posterior||50)}% UP / ${Math.round(100-(taraPosterior||posterior||50))}% DOWN · ${timeLabel}`,
+      color:'zinc',animate:false,hasAction:false,
+    };
   }
 
   // ── IN-TRADE ADVISOR ──
@@ -1645,6 +1674,26 @@ const computeAdvisor=(params)=>{
   if(positionStatus?.isStopHit)return{label:'30% STOP HIT — EXIT NOW',reason:`Hard stop breached. Entry: $${(positionStatus.entry||0).toFixed(0)} → Now: $${cp.toFixed(0)}. PnL: ${pnlPct.toFixed(1)}%. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EXECUTE EMERGENCY EXIT',actionTarget:'SIT OUT'};
   if(isRugPull&&showRugPullAlerts&&isUP)return{label:'RUG PULL — EMERGENCY EXIT',reason:`Catastrophic drop detected. Exit long immediately. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EMERGENCY CASHOUT',actionTarget:'SIT OUT'};
 
+  // V6.2.8 — TARA CROSS-REFERENCE. When user has a manual position and Tara now thinks
+  //   the OPPOSITE direction with strong conviction, surface that as urgency. Doesn't
+  //   force exit (user might have their own read), but flags the disagreement clearly.
+  //   Three escalating tiers based on Tara's conviction in the opposite direction.
+  if(_taraImpliedDir&&_taraImpliedDir!==userPosition&&_taraImpliedConf>=58){
+    const _opposingConf=Math.round(_taraImpliedConf);
+    const _gapStr=`Gap: ${gapForPosition>=0?'+':''}${gapForPosition.toFixed(1)} bps`;
+    if(_taraImpliedConf>=72){
+      // High conviction opposite — Tara says you're on the wrong side, urgent
+      return{label:`⚠ TARA REVERSED · ${_taraImpliedDir}`,reason:`Tara now leans ${_taraImpliedDir} ${_opposingConf}% — opposite of your ${userPosition} position · ${_gapStr} · ${timeLabel}`,color:'rose',animate:true,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+    }
+    if(_taraImpliedConf>=65){
+      // Medium conviction opposite — flag it, but action depends on profit/gap
+      const _action=offerAboveBet?'TAKE PROFIT NOW':'EXIT NOW';
+      return{label:`⚠ Tara opposes · ${_taraImpliedDir} ${_opposingConf}%`,reason:`Tara reading conditions for ${_taraImpliedDir} now · ${_gapStr} · ${timeLabel}`,color:'amber',animate:true,hasAction:true,actionLabel:_action,actionTarget:offerAboveBet?'CASH':'SIT OUT'};
+    }
+    // Mild opposition — informational, no forced action
+    return{label:`Tara leaning ${_taraImpliedDir} ${_opposingConf}%`,reason:`Mild disagreement with your ${userPosition} · ${_gapStr} · ${timeLabel}`,color:'amber',animate:false,hasAction:false};
+  }
+
   // ── 2. DEEP ADVERSE — always cut regardless of model confidence ───────────
   // Data: even 89% UP calls fail in adverse. Don't let model override reality.
   if(gapMagnitude>30&&isActuallyLosing)return{label:'CUT LOSSES — EXIT NOW',reason:`${gapMagnitude.toFixed(0)} bps adverse — too deep to recover. ${gapStr}. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT NOW',actionTarget:'SIT OUT'};
@@ -1673,6 +1722,12 @@ const computeAdvisor=(params)=>{
   if(!isActuallyWinning)return{label:'AT STRIKE — WATCH CLOSELY',reason:`Price at strike (${gapStr}). No clear edge. Tara: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'EXIT IF NEEDED',actionTarget:'SIT OUT'};
 
   // ── 6. WINNING POSITION ────────────────────────────────────────────────────
+  // V6.2.8: Tara-aligned reassurance — when Tara strongly agrees with user's winning position,
+  //   surface that confidence as "TARA AGREES" instead of generic HOLD STRONG.
+  const _taraAgreesStrong=_taraImpliedDir===userPosition&&_taraImpliedConf>=72;
+  if(isActuallyWinning&&_taraAgreesStrong&&gapMagnitude>10){
+    return{label:`TARA AGREES · HOLD ${userPosition}`,reason:`Tara ${userPosition} ${Math.round(_taraImpliedConf)}% · Edge ${_taraEdge!=null?(_taraEdge>=0?'+':'')+Math.round(_taraEdge)+'pt':'—'} · ${gapStr} · ${timeLabel}`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+  }
   if(isActuallyWinning&&winSide>80&&!offerAboveBet)return{label:'MAX PROFIT ZONE',reason:`${gapForPosition.toFixed(0)} bps favorable. Tara: ${winSide.toFixed(0)}% confident. Wait for offer to appear. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT IF OFFERED',actionTarget:'CASH'};
   if(isActuallyWinning&&momentumWith&&gapMagnitude>10)return{label:'HOLD STRONG',reason:`${gapForPosition.toFixed(0)} bps above/below strike. Momentum aligned. ${gapStr}. Tara: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
   if(isActuallyWinning&&momentumAgainst)return{label:'SECURE HOLD — WATCH MOMENTUM',reason:`Winning by ${gapForPosition.toFixed(0)} bps but momentum flipping. Consider locking in. ${gapStr}. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
@@ -3882,6 +3937,26 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           </div>
         </div>
         <div className="text-[11px] text-[#E8E9E4]/65 leading-snug mb-2">{dispReason||'Awaiting signal data...'}</div>
+        {/* V6.2.8: When sitting out, show what direction Tara would have leaned if forced.
+             Lets the user see her implicit read even when she's not committing. Helps them
+             make their own manual call when they have an external read that disagrees with
+             the sit-out reasoning (e.g. Kalshi pricing was the blocker, not the direction). */}
+        {isSatOutSnap&&(()=>{
+          const _post=snap?.atPosterior;
+          if(_post==null)return null;
+          const _impliedDir=_post>=50?'UP':'DOWN';
+          const _impliedConf=Math.round(_impliedDir==='UP'?_post:(100-_post));
+          // Only meaningful if she had any directional lean (≥55%)
+          if(_impliedConf<55)return null;
+          const _arrow=_impliedDir==='UP'?'▲':'▼';
+          const _color=_impliedDir==='UP'?'text-emerald-400/70':'text-rose-400/70';
+          return(
+            <div className={`text-[11px] ${_color} font-medium mb-2 flex items-baseline gap-1.5`}>
+              <span>{_arrow}</span>
+              <span>Would have leaned <span className="font-bold">{_impliedDir} {_impliedConf}%</span> if not blocked</span>
+            </div>
+          );
+        })()}
         {/* V6.0.5: Always-visible Decision Clock during scanning. Two columns:
              LEFT  = main countdown (real ETA when forming, deadline otherwise)
              RIGHT = secondary number (deadline OR samples context) */}
@@ -6162,7 +6237,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.2.7</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.2.8</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6777,7 +6852,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.2.7 online — KALSHI ENTRY WINDOW. Replaced the time-based hard cap with a Kalshi-based entry rule. I can take any amount of time as long as Kalshi for my chosen direction stays at 65% or below. Past that = entry chance gone, sit out. Special case: if a window opens with Kalshi already past threshold, I wait for it to drop back below — most windows reset at some point. If it never drops by 70% elapsed, sit out for the window. The Decision Clock is replaced with an Entry Window indicator showing "Kalshi 58% UP · 7pt to entry close" with color shifts as it approaches.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.2.8 online — Advisor split into two modes. (1) No manual position: minimal display showing just my view (locked / would-lean / sat-out + edge). No more loud EXIT WARNING / ENTRY SIGNAL / FORMING shouting. (2) You manually entered: advisor activates fully and optimizes YOUR position — including cross-reference alerts when I now lean opposite to your trade (mild → strong → reversed escalation). Plus when sitting out, you can now see what direction I would have leaned.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7065,7 +7140,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.2.7'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.2.8'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -7238,7 +7313,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.7  |  signal'},
+        footer:{text:'Tara 6.2.8  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7252,7 +7327,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.2.7  |  stand-down'},
+        footer:{text:'Tara 6.2.8  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7266,7 +7341,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.2.7  |  search'},
+        footer:{text:'Tara 6.2.8  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7283,7 +7358,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.2.7  |  lock'},
+        footer:{text:'Tara 6.2.8  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7300,7 +7375,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.2.7  |  close'},
+          footer:{text:'Tara 6.2.8  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7321,7 +7396,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.2.7  |  exit'},
+        footer:{text:'Tara 6.2.8  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7342,7 +7417,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.7  |  scanning'},
+        footer:{text:'Tara 6.2.8  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7362,7 +7437,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.7  |  signal'},
+        footer:{text:'Tara 6.2.8  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7382,7 +7457,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.7  |  lock'},
+        footer:{text:'Tara 6.2.8  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7399,7 +7474,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.7  |  sit-out'},
+        footer:{text:'Tara 6.2.8  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7421,7 +7496,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.2.7  |  result'},
+          footer:{text:'Tara 6.2.8  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7458,12 +7533,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.2.7  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.2.8  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.2.7',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.2.8',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -7482,7 +7557,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.2.7 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.2.8 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8872,7 +8947,27 @@ function TaraApp(){
       if((isUP||isDN)&&betAmount>0&&maxPayout>betAmount){const b=(maxPayout-betAmount)/betAmount;const p=currentOdds/100;const k=((p*b)-(1-p))/b;kellyPct=Math.max(0,(k/2)*100);}
 
       // V110 Smart Advisor — lock-state-aware
-      const _advisorResult=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps,activePrediction,regime,lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null});
+      const _advisorResult=computeAdvisor({userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining:timeState.minsRemaining,secsRemaining:timeState.secsRemaining,accel,pnlSlope,atrBps,activePrediction,regime,lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null,
+        // V6.2.8: Pass Tara's state — what she's locked, what she'd lean if scanning, what she
+        //   sat out on. Used for two things:
+        //     (1) When user has no position: minimal display showing just Tara's confidence/edge
+        //     (2) When user has a manual position: cross-reference. Alert if Tara opposes; show
+        //         her view inline; let advisor optimize the user's chosen direction.
+        taraSnapshot:taraCallSnapshotRef.current?{
+          call:taraCallSnapshotRef.current.call,
+          direction:taraCallSnapshotRef.current.direction,
+          confidence:taraCallSnapshotRef.current.confidence,
+          atPosterior:taraCallSnapshotRef.current.atPosterior,
+          kalshiAtLock:taraCallSnapshotRef.current.kalshiAtLock,
+          isUserForced:taraCallSnapshotRef.current.isUserForced,
+        }:null,
+        // Tara's current lean during scanning — even before commit
+        taraLean:taraCall?.direction&&taraCall?.conviction>=5?{dir:taraCall.direction,conviction:taraCall.conviction}:null,
+        // Tara's current posterior (what she'd commit to if forced)
+        taraPosterior:taraCall?.posterior!=null?taraCall.posterior:posterior,
+        // Live Kalshi for edge math
+        kalshiYesPrice:typeof kalshiYesPrice!=='undefined'?kalshiYesPrice:null,
+      });
 
       // V145.2: HPotter-based projections for 5m / 15m / 1h panels
       //
@@ -10412,7 +10507,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.2.7...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.2.8...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -10513,7 +10608,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.2.7
+              6.2.8
             </span>
           </div>
 
@@ -11106,7 +11201,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.2.7</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.2.8</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -11762,7 +11857,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.2.7 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.2.8 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -11918,10 +12013,43 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.2.7 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.2.8 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.2.8 — Two-mode advisor */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Two-Mode Advisor</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.2.8</span> — Quiet When I&rsquo;m Calling, Loud When You Are</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User insight: when I&rsquo;m calling on my own, the advisor doesn&rsquo;t need to compete — Tara&rsquo;s already in charge. When you take a manual trade, the advisor should fully optimize YOUR outcome. Restructured around this.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Mode 1 · No manual position (minimal)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Advisor shows only Tara&rsquo;s state in compact form. No loud alerts unless there&rsquo;s a real hazard (rug pull / window closed). Three displays based on Tara&rsquo;s state:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Tara locked:</strong> &ldquo;Tara UP 78% · Locked UP · edge +12pt&rdquo; with optional Enter button</li>
+                  <li><strong>Tara sitting out:</strong> &ldquo;Tara sitting out · would lean DOWN 62%&rdquo; — shows implicit direction even when blocked</li>
+                  <li><strong>Tara watching/scanning:</strong> &ldquo;Tara watching DOWN · 8pt lean · awaiting confirmation&rdquo;</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Mode 2 · Manual position taken (full advisor)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">All existing trade-management logic stays (hard stops, deep adverse cuts, profit-taking, trailing stops, recovery monitoring). PLUS new Tara cross-reference layer that fires between hard stops and the regular hold/cut decisions:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Tara opposes 58&ndash;64%:</strong> &ldquo;Tara leaning DOWN 62% · mild disagreement&rdquo; (informational, no action)</li>
+                  <li><strong>Tara opposes 65&ndash;71%:</strong> &ldquo;⚠ Tara opposes · DOWN 68%&rdquo; (amber, action: TAKE PROFIT NOW or EXIT NOW)</li>
+                  <li><strong>Tara opposes ≥72%:</strong> &ldquo;⚠ TARA REVERSED · DOWN&rdquo; (rose pulse, urgent CASHOUT)</li>
+                  <li><strong>Tara agrees ≥72%:</strong> &ldquo;TARA AGREES · HOLD UP&rdquo; — explicit reassurance instead of generic HOLD STRONG</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Won&rsquo;t override hard stops or deep-adverse cuts; those still fire first. But Tara&rsquo;s opposition becomes urgency in the otherwise-ambiguous middle zone.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Bonus: SIT_OUT shows would-have-leaned</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">When Tara sits out, the call card now shows &ldquo;▲ Would have leaned UP 62% if not blocked&rdquo; in muted color. Useful when the sit-out reason was a Kalshi-window or edge issue rather than a directional read &mdash; you can decide whether to take your own call.</p>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">No more &ldquo;UP-EXIT WARNING / DOWN 60% / HOLD STRONG&rdquo; contradictions. Single voice per mode, with cross-reference urgency in mode 2 when conditions reverse against your manual position.</p>
+              </section>
 
               {/* V6.2.7 — Kalshi entry window */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
