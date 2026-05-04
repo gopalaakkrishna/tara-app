@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.04-v6.5.2-quiet-scan-when-signal-found';
+const BASELINE_VERSION='2026.05.04-v6.5.4-manual-result-override';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -3866,7 +3866,7 @@ function TaraAdvisorPanel({advisor,executeAction}){
 // V5.6.1: Tara's Call card extracted into reusable component so it can render in both
 //   the desktop projections column (hidden md:block) and the mobile signal section
 //   (md:hidden). Same logic, same display, two mount points.
-function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice}){
+function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry}){
   if(!taraCall)return null;
     const tc=taraCall;
     const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
@@ -4334,7 +4334,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             survives refresh + spans devices. Click "all" to see the full history. */}
         {/* V5.6.4: Always render. Empty-state placeholder ensures users know where to find it
             even before Tara has committed to any windows. */}
-        <TaraMemoryStrip taraCallLog={taraCallLog||[]} windowType={windowType} taraLearnings={taraLearnings}/>
+        <TaraMemoryStrip taraCallLog={taraCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} onEditEntry={onEditEntry}/>
       </div>
     );
 
@@ -4400,7 +4400,7 @@ function PastWindowsPill({pastWindows,windowType}){
 // V5.6.1: Tara's Memory — compact strip showing the most recent calls inline in the
 //   Tara card. Click "all" to open a fuller paged view. The strip + modal both source
 //   from taraCallLog (cloud-synced array of every call she's made).
-function TaraMemoryStrip({taraCallLog,windowType,taraLearnings}){
+function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,onEditEntry}){
   const[open,setOpen]=React.useState(false);
   const[learnOpen,setLearnOpen]=React.useState(false);
   const recent=React.useMemo(()=>{
@@ -4448,7 +4448,7 @@ function TaraMemoryStrip({taraCallLog,windowType,taraLearnings}){
             })
           ),
     ),
-    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false)}),
+    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,onEditEntry:onEditEntry}),
     learnOpen&&React.createElement(TaraLearningsModal,{learnings:taraLearnings,onClose:()=>setLearnOpen(false)}),
   );
 }
@@ -4637,7 +4637,8 @@ function TaraLearningsModal({learnings,onClose}){
 }
 
 // V5.6.1: Full memory history modal. Filter by window type, sort newest first.
-function TaraMemoryModal({taraCallLog,onClose}){
+function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry}){
+  const[editingId,setEditingId]=React.useState(null);
   const[filter,setFilter]=React.useState('all'); // all | 15m | 5m | wins | losses | sitouts
   const filtered=React.useMemo(()=>{
     let arr=[...taraCallLog].reverse();
@@ -4661,6 +4662,9 @@ function TaraMemoryModal({taraCallLog,onClose}){
   const _dirStyle=(d)=>d==='UP'?{color:'rgba(110,231,183,0.85)'}:d==='DOWN'?{color:'rgba(244,114,182,0.85)'}:{color:'rgba(229,200,112,0.7)'};
   // V5.7.5: derive window period (e.g. "09:00–09:15") from windowId. windowId encodes the
   //   bucket-start ISO timestamp, so end = start + winMs. Renders in viewer's local time.
+  // V6.5.3: All time displays in this modal honor the parent's useLocalTime toggle.
+  //   useLocalTime=true → viewer's local timezone. useLocalTime=false → America/New_York (EST/EDT).
+  const _tzOpt=useLocalTime?{}:{timeZone:'America/New_York'};
   const _periodFromWindowId=(wid,wt)=>{
     if(!wid)return null;
     try{
@@ -4668,7 +4672,7 @@ function TaraMemoryModal({taraCallLog,onClose}){
       const start=new Date(m[1]); if(isNaN(start.getTime()))return null;
       const winMs=wt==='15m'?900000:300000;
       const end=new Date(start.getTime()+winMs);
-      const _f=(d)=>`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      const _f=(d)=>d.toLocaleTimeString('en-US',{..._tzOpt,hour12:false,hour:'2-digit',minute:'2-digit'});
       return`${_f(start)}–${_f(end)}`;
     }catch(e){return null;}
   };
@@ -4721,6 +4725,7 @@ function TaraMemoryModal({taraCallLog,onClose}){
             },
             title:'Download call log as JSON for analysis',
           },'↓ Export JSON'),
+          React.createElement('div',{className:'px-2 py-1 rounded-lg text-[9px] uppercase tracking-[0.14em] font-bold',style:{background:'rgba(232,233,228,0.05)',color:'rgba(232,233,228,0.5)',border:'1px solid rgba(232,233,228,0.08)'},title:'All times shown in this view honor the LOCAL/EST toggle in the header'},useLocalTime?'LOCAL':'EST'),
           React.createElement('button',{onClick:onClose,className:'p-2 rounded-lg hover:bg-[#E8E9E4]/5 text-[#E8E9E4]/60 hover:text-white transition-colors text-xl'},'✕'),
         ),
       ),
@@ -4759,12 +4764,16 @@ function TaraMemoryModal({taraCallLog,onClose}){
       // V6.5.1: CALENDAR VIEW — performance by day with hourly breakdown
       filter==='calendar'
         ? (()=>{
-            // Group entries by local-date string
+            // V6.5.3: Helper to extract the hour (0-23) in the selected timezone.
+            const _hourInTz=(d)=>{
+              try{const s=d.toLocaleString('en-US',{..._tzOpt,hour12:false,hour:'2-digit'});return parseInt(s,10)%24;}catch(e){return d.getHours();}
+            };
+            // Group entries by date in the selected timezone
             const byDay=new Map();
             taraCallLog.forEach(e=>{
               if(!e||!e.time)return;
               const d=new Date(e.time);
-              const key=d.toLocaleDateString([],{year:'numeric',month:'2-digit',day:'2-digit'});
+              const key=d.toLocaleDateString('en-US',{..._tzOpt,year:'numeric',month:'2-digit',day:'2-digit'});
               if(!byDay.has(key))byDay.set(key,{date:d,entries:[]});
               byDay.get(key).entries.push(e);
             });
@@ -4782,11 +4791,11 @@ function TaraMemoryModal({taraCallLog,onClose}){
                 const _decided=_wins+_losses;
                 const _dayWr=_decided>0?Math.round((_wins/_decided)*100):null;
                 const _wrColor=_dayWr==null?'#E8E9E4':_dayWr>=70?'rgb(110,231,183)':_dayWr>=50?T2_GOLD:'rgb(244,114,182)';
-                const _dayLabel=day.date.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});
-                // Build hourly bins (24 hours)
+                const _dayLabel=day.date.toLocaleDateString('en-US',{..._tzOpt,weekday:'short',month:'short',day:'numeric'});
+                // Build hourly bins (24 hours) in the selected timezone
                 const hourBins=Array.from({length:24},()=>({wins:0,losses:0,sitouts:0,total:0}));
                 _entries.forEach(e=>{
-                  const h=new Date(e.time).getHours();
+                  const h=_hourInTz(new Date(e.time));
                   hourBins[h].total++;
                   if(e.result==='WIN')hourBins[h].wins++;
                   else if(e.result==='LOSS')hourBins[h].losses++;
@@ -4838,7 +4847,7 @@ function TaraMemoryModal({taraCallLog,onClose}){
                   // Per-call mini-list (collapsed to most recent 5 by default)
                   React.createElement('div',{className:'mt-2 pt-2 border-t border-[#E8E9E4]/5 space-y-1'},
                     _entries.slice().reverse().slice(0,5).map(e=>{
-                      const _t=new Date(e.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+                      const _t=new Date(e.time).toLocaleTimeString('en-US',{..._tzOpt,hour:'2-digit',minute:'2-digit',hour12:false});
                       const _per=_periodFromWindowId(e.windowId,e.windowType);
                       const _strikeFmt=_fmtPrice(e.strike);
                       const _closeFmt=_fmtPrice(e.closingPrice);
@@ -4865,8 +4874,8 @@ function TaraMemoryModal({taraCallLog,onClose}){
                 const _period=_periodFromWindowId(e.windowId,e.windowType);
                 const _strikeFmt=_fmtPrice(e.strike);
                 const _closeFmt=_fmtPrice(e.closingPrice);
-                const _dateLabel=new Date(e.time).toLocaleString([],{month:'short',day:'numeric'});
-                const _timeLabel=new Date(e.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+                const _dateLabel=new Date(e.time).toLocaleString('en-US',{..._tzOpt,month:'short',day:'numeric'});
+                const _timeLabel=new Date(e.time).toLocaleTimeString('en-US',{..._tzOpt,hour:'2-digit',minute:'2-digit',hour12:false});
                 const _dirLabel=e.dir==='UP'?'▲ UP':e.dir==='DOWN'?'▼ DOWN':'· SIT OUT';
                 return(
                 React.createElement('div',{key:e.id,className:'px-3 sm:px-4 py-3 hover:bg-[#E8E9E4]/3'},
@@ -4878,12 +4887,37 @@ function TaraMemoryModal({taraCallLog,onClose}){
                       React.createElement('span',{className:'tabular-nums text-[9px] text-[#E8E9E4]/30 shrink-0 px-1.5 py-0.5 rounded',style:{background:'rgba(232,233,228,0.05)'}},(e.windowType||'').toUpperCase()),
                       _period&&React.createElement('span',{className:'tabular-nums text-[10px] text-[#E8E9E4]/65 shrink-0 font-medium',style:T2_MONO_STYLE},_period),
                     ),
-                    React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider px-2 py-0.5 rounded shrink-0',style:{..._resultStyle(e.result),background:e.result==='WIN'?'rgba(110,231,183,0.10)':e.result==='LOSS'?'rgba(244,114,182,0.10)':e.result==='SITOUT'?'rgba(229,200,112,0.10)':'rgba(232,233,228,0.05)'}},e.result||'pending'),
+                    editingId===e.id&&onEditEntry
+                      ? React.createElement('div',{className:'flex items-center gap-1 shrink-0'},
+                          ['WIN','LOSS','SITOUT'].map(opt=>(
+                            React.createElement('button',{
+                              key:opt,
+                              onClick:()=>{onEditEntry(e.id,opt);setEditingId(null);},
+                              className:'px-2 py-0.5 rounded text-[9px] uppercase font-bold tabular-nums tracking-wider transition-colors',
+                              style:{
+                                color:opt==='WIN'?'rgb(110,231,183)':opt==='LOSS'?'rgb(244,114,182)':T2_GOLD,
+                                background:e.result===opt?(opt==='WIN'?'rgba(110,231,183,0.18)':opt==='LOSS'?'rgba(244,114,182,0.18)':'rgba(229,200,112,0.18)'):'rgba(232,233,228,0.04)',
+                                border:e.result===opt?'1px solid currentColor':'1px solid rgba(232,233,228,0.10)',
+                              },
+                            },opt)
+                          )),
+                          React.createElement('button',{onClick:()=>setEditingId(null),className:'px-1.5 py-0.5 rounded text-[10px] text-[#E8E9E4]/35 hover:text-[#E8E9E4]/70',title:'Cancel'},'✕'),
+                        )
+                      : React.createElement('div',{className:'flex items-center gap-1.5 shrink-0'},
+                          e.manualEdit&&React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/35',title:'Manually edited'},'✎'),
+                          React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider px-2 py-0.5 rounded shrink-0',style:{..._resultStyle(e.result),background:e.result==='WIN'?'rgba(110,231,183,0.10)':e.result==='LOSS'?'rgba(244,114,182,0.10)':e.result==='SITOUT'?'rgba(229,200,112,0.10)':'rgba(232,233,228,0.05)'}},e.result||'pending'),
+                          onEditEntry&&React.createElement('button',{
+                            onClick:()=>setEditingId(e.id),
+                            className:'p-1 rounded text-[#E8E9E4]/30 hover:text-[#E8E9E4]/70 hover:bg-[#E8E9E4]/5 transition-colors',
+                            title:'Override result',
+                            style:{fontSize:11,lineHeight:1},
+                          },'✎'),
+                        ),
                   ),
                   // Mid row: direction + confidence + reason
                   React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 mb-1.5'},
                     React.createElement('span',{className:'font-bold text-sm tabular-nums shrink-0',style:_dirStyle(e.dir)},_dirLabel),
-                    e.confidence>0&&React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/55 tabular-nums shrink-0'},e.confidence,'% conf'),
+                    e.confidence>0&&React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/55 tabular-nums shrink-0'},Math.min(99,Math.round(e.confidence)),'% conf'),
                     e.posterior!=null&&e.dir!=='SIT_OUT'&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40 tabular-nums shrink-0'},'· post ',Math.round(e.posterior),'%'),
                   ),
                   // Strike → Close + gap row
@@ -4917,7 +4951,7 @@ function TaraMemoryModal({taraCallLog,onClose}){
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -4935,7 +4969,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
           V6.2.3: hidden lg:block (was md:block). */}
-      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} className="hidden lg:block"/>
+      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onEditEntry={onEditEntry} className="hidden lg:block"/>
 
       <div className="flex items-center justify-between mb-3 shrink-0">
         <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
@@ -6603,7 +6637,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.5.2</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.5.4</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6903,8 +6937,21 @@ function TaraApp(){
       const seen=new Map();
       const _key=(e)=>(e.windowId||'')+'|'+(e.windowType||'');
       let dropped=0;
+      let resolved=0;
       parsed.forEach(e=>{
         if(!e||!e.windowType)return;
+        // V6.5.3: Auto-fix SITOUT entries that actually had a directional call.
+        //   When a snapshot was lost between lock and rollover (page refresh, cloud-restore
+        //   race), the entry was logged with dir='UP' or 'DOWN' but result was SITOUT.
+        //   If we have valid strike + close, compute the real WIN/LOSS retroactively.
+        if(e.result==='SITOUT'&&(e.dir==='UP'||e.dir==='DOWN')&&e.strike&&e.closingPrice&&Math.abs(e.closingPrice-e.strike)/e.strike<0.20){
+          const _outcome=e.closingPrice>e.strike?'UP':e.closingPrice<e.strike?'DOWN':null;
+          if(_outcome){
+            e.result=e.dir===_outcome?'WIN':'LOSS';
+            e.outcomeDir=_outcome;
+            resolved++;
+          }
+        }
         // Sanity check on strike/close ratio
         if(e.result==='WIN'||e.result==='LOSS'){
           if(e.strike&&e.closingPrice&&Math.abs(e.closingPrice-e.strike)/e.strike>0.20){
@@ -6929,7 +6976,10 @@ function TaraApp(){
       });
       const cleaned=Array.from(seen.values()).sort((a,b)=>(a.time||0)-(b.time||0));
       if(dropped>0){
-        try{console.warn('[V6.3.4 cleanup] Dropped',dropped,'corrupt log entries');}catch(_){}
+        try{console.warn('[V6.5.3 cleanup] Dropped',dropped,'corrupt log entries');}catch(_){}
+      }
+      if(resolved>0){
+        try{console.info('[V6.5.3 cleanup] Resolved',resolved,'misclassified SITOUT → WIN/LOSS');}catch(_){}
       }
       return cleaned;
     }catch(e){return[];}
@@ -6990,6 +7040,8 @@ function TaraApp(){
         //   Legacy entries get windowId backfilled from time+windowType.
         // V6.5: Sanitize at merge time too. Without this, corrupt entries dropped at load
         //   can be re-introduced when Firestore re-syncs (explains why $41K close survived).
+        // V6.5.3: Also auto-resolve misclassified SITOUT entries on incoming cloud data —
+        //   if entry has dir='UP'/'DOWN' + valid strike + valid close, compute the real WIN/LOSS.
         const _isCorrupt=(e)=>{
           if(!e||(e.result!=='WIN'&&e.result!=='LOSS'))return false;
           if(e.strike&&e.closingPrice&&Math.abs(e.closingPrice-e.strike)/e.strike>0.20)return true;
@@ -7000,6 +7052,14 @@ function TaraApp(){
           }
           return false;
         };
+        const _autoResolve=(e)=>{
+          if(!e||e.result!=='SITOUT')return e;
+          if((e.dir!=='UP'&&e.dir!=='DOWN')||!e.strike||!e.closingPrice)return e;
+          if(Math.abs(e.closingPrice-e.strike)/e.strike>=0.20)return e;
+          const _outcome=e.closingPrice>e.strike?'UP':e.closingPrice<e.strike?'DOWN':null;
+          if(!_outcome)return e;
+          return{...e,result:e.dir===_outcome?'WIN':'LOSS',outcomeDir:_outcome};
+        };
         const _key=(e)=>e.windowId+'|'+e.windowType;
         const byKey=new Map();
         const _shouldReplace=(existing,incoming)=>{
@@ -7009,15 +7069,18 @@ function TaraApp(){
           return false;
         };
         prev.forEach(e=>{
-          const f=_backfillCallLogId(e);
+          let f=_backfillCallLogId(e);
           if(!f||!f.windowId)return;
+          f=_autoResolve(f);
           if(_isCorrupt(f))return; // drop corrupt
           byKey.set(_key(f),f);
         });
         let changed=false;
         d.entries.forEach(raw=>{
-          const e=_backfillCallLogId(raw);
+          let e=_backfillCallLogId(raw);
           if(!e||!e.id||!e.windowId)return;
+          const _resolved=_autoResolve(e);
+          if(_resolved!==e){e=_resolved;changed=true;}
           if(_isCorrupt(e)){changed=true;return;} // drop corrupt cloud entry, mark changed
           const k=_key(e);
           const existing=byKey.get(k);
@@ -7295,7 +7358,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.5.2 online — Quieter Discord. SCAN broadcasts only fire when I genuinely have no direction yet. Per your request: "scanning is to be only when we cant find a signal after a few seconds". If I have a UP/DOWN lean already at the 30-second mark, I skip the SCAN message entirely and let SIGNAL fire instead. No more redundant "scanning" messages right before the actual call. All V6.5.1 fixes still in place (lower conviction floor, wider Kalshi entry window with dip grace, calendar view in Memory).'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.5.4 online — Manual override on memory entries. Click the small pencil ✎ next to any result badge in the Memory modal to override WIN / LOSS / SITOUT. Useful when scoring missed something: I had a screenshot earlier where 14:00–14:15 was a real WIN but logged as SITOUT due to a snapshot race. Now you can fix it directly in the UI without exporting / editing JSON. Edited entries are flagged with a small ✎ marker and persist across devices via cloud sync. Performance stats and learnings auto-update from the corrected outcome.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7583,7 +7646,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.5.2'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.5.4'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -7820,7 +7883,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.2  |  signal'},
+        footer:{text:'Tara 6.5.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7834,7 +7897,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.5.2  |  stand-down'},
+        footer:{text:'Tara 6.5.4  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7848,7 +7911,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.5.2  |  search'},
+        footer:{text:'Tara 6.5.4  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7865,7 +7928,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.5.2  |  lock'},
+        footer:{text:'Tara 6.5.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7882,7 +7945,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.5.2  |  close'},
+          footer:{text:'Tara 6.5.4  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7903,7 +7966,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.5.2  |  exit'},
+        footer:{text:'Tara 6.5.4  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7924,7 +7987,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.2  |  scanning'},
+        footer:{text:'Tara 6.5.4  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7944,7 +8007,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.2  |  signal'},
+        footer:{text:'Tara 6.5.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7964,7 +8027,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.2  |  lock'},
+        footer:{text:'Tara 6.5.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7981,7 +8044,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.2  |  sit-out'},
+        footer:{text:'Tara 6.5.4  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8003,7 +8066,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.5.2  |  result'},
+          footer:{text:'Tara 6.5.4  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8040,12 +8103,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.5.2  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.5.4  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.5.2',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.5.4',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -8064,7 +8127,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.5.2 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.5.4 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8673,8 +8736,16 @@ function TaraApp(){
                 }
                 if(!idx)return prev;
                 if(idx.e.result!==null)return prev;
+                // V6.5.3: If we're about to log SITOUT but the entry actually has a directional
+                //   call (dir='UP' or 'DOWN'), resolve from the entry's dir instead. The
+                //   captured snapshot can be lost (page refresh, cloud-restore race) but the
+                //   log entry was already persisted with the real call data.
+                let _resolvedResult=resultStr;
+                if(resultStr==='SITOUT'&&(idx.e.dir==='UP'||idx.e.dir==='DOWN')&&_outcomeDir){
+                  _resolvedResult=idx.e.dir===_outcomeDir?'WIN':'LOSS';
+                }
                 const next=[...prev];
-                next[idx.i]={...idx.e,result:resultStr,outcomeDir:_outcomeDir,strike:_scoringStrike,closingPrice:closeFromKalshi,closeSource:'kalshi',gapBps:_gap,resolvedAt:Date.now()};
+                next[idx.i]={...idx.e,result:_resolvedResult,outcomeDir:_outcomeDir,strike:_scoringStrike,closingPrice:closeFromKalshi,closeSource:'kalshi',gapBps:_gap,resolvedAt:Date.now()};
                 setTimeout(()=>_recomputeLearningsFromLog(next),0);
                 return next;
               });
@@ -10161,7 +10232,11 @@ function TaraApp(){
     // V6.0.7: tape-led is its own bucket too — separate WR tracking from full confluence.
     const _conflBucket=isStructuralLed?'structural-led':isSuperConfluent?'super-confluence':isConfluent?'confluence':isTapeLed?'tape-led':isRisingConfluence?'rising-confluence':'single-signal';
     const _learnConflBoost=Math.max(-8,Math.min(8,_learn?.multipliers?.confluenceConfBoost?.[_conflBucket]||0));
-    const _confidence=Math.max(25,_confBase-confidenceHaircut+_tapeBoost+_kalshiBoost+_confluenceBoost+_learnConfBoost+_learnConflBoost);
+    // V6.5.3 BUGFIX: cap final confidence at 99. Without this cap, base (95) + tape boost
+    //   (+10) + kalshi boost (+10) + confluence boost (+12) + learning boosts could
+    //   exceed 100 — screenshot showed "123% confidence" which is mathematically impossible.
+    //   Floor stays at 25 (a forming call is at least 25% confident).
+    const _confidence=Math.max(25,Math.min(99,_confBase-confidenceHaircut+_tapeBoost+_kalshiBoost+_confluenceBoost+_learnConfBoost+_learnConflBoost));
     const _reasonParts=[`${conviction.toFixed(0)}pt ${dir} lean`,`FGT ${fgtAbs.toFixed(1)}/4`,`q${q}`];
     if(isSuperConfluent)_reasonParts.unshift(`SUPER-CONFLUENCE — tape+FGT+score+strike all ${dir}`);
     else if(isConfluent)_reasonParts.unshift(`CONFLUENCE — tape+FGT+score+strike all ${dir}`);
@@ -11316,7 +11391,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.5.2...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.5.4...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -11417,7 +11492,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.5.2
+              6.5.3
             </span>
           </div>
 
@@ -11874,13 +11949,13 @@ function TaraApp(){
 
             {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab.
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
-            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} className="lg:hidden"/>
+            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
 
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab}/>
@@ -12010,7 +12085,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.5.2</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.5.4</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -12666,7 +12741,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.5.2 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.5.4 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -12822,10 +12897,67 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.5.2 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.5.4 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.5.4 — Manual override on memory entries */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Memory · Manual Override</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.04</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.5.4</span> — Edit Result on Any Entry</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;in tara&rsquo;s memory log also give me an option to edit it. i can select if it was a win/loss or a sitout if and when tara gets it wrong, also ensure the same gets updated in performance stats section.&rdquo;</p>
+
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Each memory entry now has a small pencil <code className="text-[10px] bg-[#0E100F] px-1">✎</code> button next to the result badge:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Click the pencil to enter edit mode &mdash; three buttons appear inline: <span style={{color:'rgb(110,231,183)'}}>WIN</span> · <span style={{color:'rgb(244,114,182)'}}>LOSS</span> · <span style={{color:T2_GOLD}}>SITOUT</span></li>
+                  <li>Current result is highlighted; click any other to override</li>
+                  <li>Edited entries get a permanent <code className="text-[10px] bg-[#0E100F] px-1">✎</code> marker so you know which were manually corrected</li>
+                  <li>Performance stats (header counts, daily WR, hourly heatmap, calendar view) recompute immediately</li>
+                  <li>Learnings system pulls from the corrected outcome &mdash; the override teaches Tara going forward</li>
+                  <li>Persists via cloud sync, so the fix lives on across devices</li>
+                </ul>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-3 italic">Use sparingly &mdash; ideally V6.5.3&rsquo;s scoring fix already prevents most cases. But when an edge case slips through (page refresh mid-window, manually closing position before settle, etc.), this is the clean fix.</p>
+              </section>
+
+              {/* V6.5.3 — Memory accuracy + timezone consistency */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Memory Accuracy · Timezone Consistency</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.04</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.5.3</span> — Real Wins Counted, Times Match Toggle</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;Tara won the trade between 2-2:15. why does she have memory logging issues and saving it right issues. so tara&rsquo;s record should be 40-14-16. also ensure time is either utc or local, for me est when that option is selected throughout tara. every category and section should be categorized according to the time zone i selected when they are opened.&rdquo;</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Scoring fallback uses entry data</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Root cause: <code className="text-[10px] bg-[#0E100F] px-1">taraCallSnapshotRef</code> can be lost between lock-time and rollover (page refresh mid-window, cloud-restore race, in-window snapshot overwrite). The scorer was defaulting to SITOUT whenever the snapshot was missing or stale, even when the call log entry had real DOWN/UP data already persisted.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Fix: at scoring time, if snapshot says SIT_OUT but the entry itself has <code className="text-[10px] bg-[#0E100F] px-1">dir: &lsquo;UP&rsquo;</code> or <code className="text-[10px] bg-[#0E100F] px-1">&lsquo;DOWN&rsquo;</code> with valid <code className="text-[10px] bg-[#0E100F] px-1">outcomeDir</code>, resolve from the entry instead. The entry is the source of truth.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Retroactive cleanup on load + cloud merge</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Load-time:</strong> any existing SITOUT entry with valid dir + strike + close (within 20% sanity range) gets auto-resolved &mdash; computes WIN/LOSS from strike vs close.</li>
+                  <li><strong>Cloud merge:</strong> same auto-fix applied to incoming Firestore data &mdash; corrupt cloud state can&rsquo;t re-introduce a misclassified SITOUT.</li>
+                  <li>Console logs <code className="text-[10px] bg-[#0E100F] px-1">[V6.5.3 cleanup] Resolved N misclassified SITOUT &rarr; WIN/LOSS</code> on load.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · Confidence display clamp</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Memory entries showing &ldquo;123% conf&rdquo; were a display artifact &mdash; the engine clamps at 99 but rendering didn&rsquo;t enforce it. Display now uses <code className="text-[10px] bg-[#0E100F] px-1">Math.min(99, Math.round(e.confidence))</code>.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">4 · Memory modal honors LOCAL/EST toggle</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Threaded <code className="text-[10px] bg-[#0E100F] px-1">useLocalTime</code> through ProjectionsCard &rarr; TaraCallCard &rarr; TaraMemoryStrip &rarr; TaraMemoryModal. Every time display in the modal now respects the toggle:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Entry header dates + timestamps</li>
+                  <li>Window period range (e.g. <code className="text-[10px] bg-[#0E100F] px-1">14:00&ndash;14:15</code>)</li>
+                  <li>Calendar day-grouping (a window at 11:30 PM EST = next day in LOCAL for users west of EST)</li>
+                  <li>Hourly heatmap binning (each call counted in the right hour for the selected timezone)</li>
+                  <li>Calendar inline call list</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">A small <code className="text-[10px] bg-[#0E100F] px-1">LOCAL</code> or <code className="text-[10px] bg-[#0E100F] px-1">EST</code> badge sits next to the Export button in the modal header so you always know which timezone the times are showing in.</p>
+              </section>
 
               {/* V6.5.2 — Quiet scan when signal found */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
