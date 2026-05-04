@@ -6237,7 +6237,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.2.9</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.3.1</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6363,6 +6363,10 @@ function TaraApp(){
   // V3.0: Mirror to ref so the window-rollover handler can read the latest Kalshi strike
   //       at the exact moment a new window opens, without depending on render cycles.
   const kalshiStrikeRef=useRef(null);
+  // V6.3.1: Fetch-on-demand ref. The Kalshi poll effect assigns its fetchKalshi function
+  //   here so other code (window rollover + strike retry effect) can trigger immediate
+  //   refetches without waiting for the 30s interval cycle.
+  const triggerKalshiFetchRef=useRef(null);
   useEffect(()=>{kalshiStrikeRef.current=kalshiStrike;},[kalshiStrike]);
   // V3.2.1: Cache last-successful Kalshi response across 503 outages. When Kalshi's API
   //   returns HTTP 503 (Service Unavailable), instead of falling back to live spot, we
@@ -6852,7 +6856,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.2.9 online — CRASH FIX. V6.2.8 introduced a temporal-dead-zone error that crashed the predictor entirely (the "ReferenceError: Cannot access \'We\' before initialization" you saw). I was passing taraCall into the analysis useMemo, but taraCall is computed AFTER that useMemo runs — closure-over-let problem. Fixed by deriving the same data from refs (taraCallSnapshotRef, taraCallSampleRef) and posterior, which are all in scope at that point. Same advisor logic, no more crash.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.3.1 online — Kalshi-only strike. Reversed V6.3.0\'s live-websocket fallback per your request. Now strike comes from Kalshi cache or stays blank. Plus a fast-retry effect: when strike is blank and window just opened, I trigger Kalshi fetches every 2 seconds for up to 30 seconds. Most rollovers will land within 2-4 seconds. If Kalshi never delivers, strike stays blank and you can enter manually — no live-spot guess.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7140,7 +7144,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.2.9'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.3.1'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -7187,28 +7191,44 @@ function TaraApp(){
   // No API calls, no CORS, no parsing — zero latency, always accurate
   const setWindowOpenStrike=(price)=>{
     if(isManualStrikeRef.current)return;
-    // V5.5.5: New strike-source flow per user spec:
-    //   'everytime new window starts, i want strike pricing to go blank and when Tara
-    //    finds the current price of the window lets have that set'.
-    //   Step 1: At rollover, set strike BLANK (targetMargin=0, strikeConfirmed=false).
-    //   Step 2: A separate effect watches currentPrice — when first non-zero tick arrives
-    //           after rollover, that's "Tara finding the current price" → fills strike
-    //           with live spot, auto-confirms.
-    //   Step 3: Kalshi auto-set effect overrides whenever Kalshi data arrives.
-    //   This block only sets the BLANK state. The fill-on-tick is in the effect below.
+    // V5.5.5 / V6.3.1: Strike comes from Kalshi cache OR stays blank. No live-spot fallback.
+    //   User: "if kalshi cached properly from the current window keep trying till it is found.
+    //   dont do live websocket. if kalshi keeps failing then be blank".
+    //   Step 1: At rollover, immediately set strike from Kalshi cache if available.
+    //   Step 2: If no Kalshi cache, set BLANK and let the fast-retry effect below keep
+    //           polling Kalshi every 2s until strike lands (or window closes).
+    //   Step 3: User can still manually type a strike anytime.
     const _now=Date.now();
-    windowOpenPriceRef.current=0;
-    windowHighRef.current=0;
-    windowLowRef.current=0;
     windowHighTimeRef.current=_now;
     windowLowTimeRef.current=_now;
     windowOpenTimeRef.current=_now;
+    setStrikeMode('manual');
+    setPendingStrike(null);
+    // Try Kalshi cache first (best source — preset strike from market)
+    const _kStrike=kalshiStrikeRef.current;
+    const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
+    if(_kStrikeValid){
+      const p=Math.round(_kStrike);
+      windowOpenPriceRef.current=p;
+      windowHighRef.current=p;
+      windowLowRef.current=p;
+      setTargetMargin(p);
+      setStrikeConfirmed(true);
+      setStrikeSource('kalshi');
+      hasSetInitialMargin.current=true;
+      needsCapturedPriceRef.current=false;
+      return;
+    }
+    // No Kalshi yet — leave strike BLANK. The kalshi-retry effect (below) will fast-poll
+    //   Kalshi until it lands. windowOpenPriceRef stays at live-spot for scoring fallback
+    //   (never displayed), captured by the existing capture effect on next currentPrice tick.
+    windowOpenPriceRef.current=0;
+    windowHighRef.current=0;
+    windowLowRef.current=0;
     setTargetMargin(0);
     setStrikeConfirmed(false);
-    setPendingStrike(null);
-    setStrikeMode('manual');
     setStrikeSource('manual');
-    needsCapturedPriceRef.current=true;  // signals next-tick-fill effect to fire
+    needsCapturedPriceRef.current=true;  // signals next-tick-fill effect to capture windowOpenPriceRef from spot
     hasSetInitialMargin.current=true;
   };
 
@@ -7279,6 +7299,33 @@ function TaraApp(){
     setStrikeConfirmed(true); // V3.2.4: auto-confirm Kalshi strike, no extra tap needed
   },[kalshiStrike,strikeSource,targetMargin]);
 
+  // V6.3.1: KALSHI STRIKE FAST-RETRY. When strike is blank and window has recently opened,
+  //   fire Kalshi fetches every 2s until strike lands or 30s elapsed. Replaces V6.3.0's
+  //   live-spot fallback. Per user: "if kalshi cached properly from the current window keep
+  //   trying till it is found. dont do live websocket. if kalshi keeps failing then be blank".
+  //   Stops automatically once strike is set (any source) or window is past 30s into its life.
+  useEffect(()=>{
+    if(windowType!=='15m')return;            // 5m doesn't use Kalshi
+    if(targetMargin>0)return;                 // strike already set — no need to retry
+    if(isManualStrikeRef.current)return;     // user is typing manually — don't fight them
+    if(!triggerKalshiFetchRef.current)return; // poll effect not yet mounted
+    // Only retry during the first ~30s of the window. After that, Kalshi probably never
+    //   listed this strike (which is a real signal — keep blank, let user decide).
+    const _windowOpen=windowOpenTimeRef.current||0;
+    const _msSinceOpen=Date.now()-_windowOpen;
+    if(_msSinceOpen>30000)return;
+    // Fire immediate retry, then keep retrying every 2s
+    triggerKalshiFetchRef.current();
+    const iv=setInterval(()=>{
+      // Stop if any of the conditions changed mid-flight
+      if(targetMargin>0||isManualStrikeRef.current||!triggerKalshiFetchRef.current){clearInterval(iv);return;}
+      const _ms=Date.now()-(windowOpenTimeRef.current||0);
+      if(_ms>30000){clearInterval(iv);return;}
+      triggerKalshiFetchRef.current();
+    },2000);
+    return()=>clearInterval(iv);
+  },[targetMargin,windowType,timeState.nextWindow]);
+
   const liveHistory=useMemo(()=>{if(history.length===0||!currentPrice)return history;const u=[...history];u[0]={...u[0],c:currentPrice,h:Math.max(u[0].h||currentPrice,currentPrice),l:Math.min(u[0].l||currentPrice,currentPrice)};return u;},[history,currentPrice]);
 
   // Chart data: prefer klines, fallback to liveHistory
@@ -7313,7 +7360,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.9  |  signal'},
+        footer:{text:'Tara 6.3.1  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7327,7 +7374,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.2.9  |  stand-down'},
+        footer:{text:'Tara 6.3.1  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7341,7 +7388,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.2.9  |  search'},
+        footer:{text:'Tara 6.3.1  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7358,7 +7405,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.2.9  |  lock'},
+        footer:{text:'Tara 6.3.1  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7375,7 +7422,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.2.9  |  close'},
+          footer:{text:'Tara 6.3.1  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7396,7 +7443,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.2.9  |  exit'},
+        footer:{text:'Tara 6.3.1  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7417,7 +7464,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.9  |  scanning'},
+        footer:{text:'Tara 6.3.1  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7437,7 +7484,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.9  |  signal'},
+        footer:{text:'Tara 6.3.1  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7457,7 +7504,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.9  |  lock'},
+        footer:{text:'Tara 6.3.1  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7474,7 +7521,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.9  |  sit-out'},
+        footer:{text:'Tara 6.3.1  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7496,7 +7543,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.2.9  |  result'},
+          footer:{text:'Tara 6.3.1  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7533,12 +7580,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.2.9  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.3.1  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.2.9',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.3.1',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -7557,7 +7604,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.2.9 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.3.1 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -7880,11 +7927,13 @@ function TaraApp(){
       }
     };
     fetchKalshi();
+    // V6.3.1: Expose fetchKalshi via ref so external code (window rollover) can trigger refetches
+    triggerKalshiFetchRef.current=fetchKalshi;
     const iv=setInterval(fetchKalshi,30000);
     // V5.0: Refetch when tab becomes visible again — background tabs can stall the interval
     const onVisible=()=>{if(document.visibilityState==='visible')fetchKalshi();};
     document.addEventListener('visibilitychange',onVisible);
-    return()=>{clearInterval(iv);document.removeEventListener('visibilitychange',onVisible);};
+    return()=>{clearInterval(iv);document.removeEventListener('visibilitychange',onVisible);triggerKalshiFetchRef.current=null;};
   },[windowType,timeState.nextWindow]);
 
   // V2.6: Kalshi settlement resolver for marginal trades.
@@ -10518,7 +10567,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.2.9...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.3.1...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -10619,7 +10668,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.2.9
+              6.3.1
             </span>
           </div>
 
@@ -11212,7 +11261,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.2.9</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.3.1</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -11868,7 +11917,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.2.9 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.3.1 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -12024,10 +12073,56 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.2.9 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.3.1 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.3.1 — Kalshi-only strike with fast retry */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Kalshi-Only Strike + Fast Retry</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.3.1</span> — Try Kalshi Until It Lands</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;if kalshi cached properly from the current window keep trying till it is found. dont do live websocket. if kalshi keeps failing then be blank&rdquo;. Reverses V6.3.0&rsquo;s live-spot fallback.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">New flow at window rollover</div>
+                <ol className="list-decimal pl-4 space-y-1 text-[11px]">
+                  <li>Check Kalshi cache. If present → set strike instantly, source = &ldquo;KLSH&rdquo;.</li>
+                  <li>If not cached → strike stays BLANK and the fast-retry effect fires.</li>
+                  <li>Fast retry triggers Kalshi fetches every 2 seconds.</li>
+                  <li>Stops after either: (a) strike lands successfully, or (b) 30 seconds elapsed (Kalshi probably never listed this strike).</li>
+                  <li>Past 30s with no Kalshi data → strike stays blank. User can enter manually anytime.</li>
+                </ol>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">What this protects against</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Live-websocket strike could differ from Kalshi&rsquo;s actual market strike by a few cents to a few dollars (different price sources, different rounding). When Tara scored Kalshi-style 15m windows against a slightly-off strike, results drifted from what Kalshi actually settled. Sticking to Kalshi&rsquo;s strike means scoring matches reality.</p>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">Worst case: 2-4 seconds for first successful Kalshi fetch instead of instant. Best case: same as before when Kalshi was already cached. The tradeoff is correctness over speed.</p>
+              </section>
+
+              {/* V6.3.0 — Instant strike capture */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Instant Strike Capture</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.3.0</span> — Strike Sets at Rollover, Not 5s Later</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User feedback: &ldquo;strike price still pulls like 5 seconds ish from when the window starts. Can that be sooner?&rdquo;</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Why it was slow</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Old flow at window rollover: (1) set strike BLANK, (2) wait for next currentPrice tick to render, (3) capture effect fires, (4) check Kalshi cache, (5) render again with strike. Each React state cycle is a frame; combined with throttled price updates and Kalshi REST polling intervals, end-to-end could hit 3-5 seconds visibly.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">New flow (synchronous)</div>
+                <ol className="list-decimal pl-4 space-y-1 text-[11px]">
+                  <li>Check <code className="text-[10px] bg-[#0E100F] px-1">kalshiStrikeRef.current</code> — if cached, set strike immediately, mark Kalshi-source, done.</li>
+                  <li>Otherwise check <code className="text-[10px] bg-[#0E100F] px-1">currentPriceRef.current</code> — websocket-fed, updates every tick (~250ms), always current. If valid, set strike instantly, mark live-source, done.</li>
+                  <li>Both unavailable (rare — first page load) → fall back to old blank-then-wait flow.</li>
+                </ol>
+
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-3">Net: strike now fills on the same render tick as window rollover. ~250ms worst case if a tick is in-flight, instant otherwise. The blank-strike intermediate state should now only appear on first page open before any data has arrived.</p>
+              </section>
 
               {/* V6.2.9 — TDZ crash fix */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
