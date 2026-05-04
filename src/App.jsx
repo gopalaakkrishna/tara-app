@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.03-v6.0.5-decision-clock';
+const BASELINE_VERSION='2026.05.04-v6.4.0-asymmetry-structure-regime-pivot';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -803,7 +803,16 @@ const calibratePosterior=(raw,calibration)=>{
   if(calVal==null)return raw; // no data for this bucket
   const isHighConfUp=raw>=80;
   const calWeight=isHighConfUp?0.85:0.7;
-  return calVal*calWeight+raw*(1-calWeight);
+  const blended=calVal*calWeight+raw*(1-calWeight);
+  // V6.3.3: Cap calibration swing at ±10 points. Without this cap, a small-sample bucket
+  //   could shift the posterior by 30+ points and even flip its sign (raw=-35% → cal=+1%).
+  //   Calibration's job is fine-tuning, not signal override. If the underlying signals
+  //   genuinely say DOWN with 35% conviction, calibration should at most dial that to
+  //   25% or amplify to 45% — never flip to UP.
+  const CAL_CAP=10;
+  if(blended-raw>CAL_CAP)return raw+CAL_CAP;
+  if(raw-blended>CAL_CAP)return raw-CAL_CAP;
+  return blended;
 };
 
 // ── PER-SIGNAL ACCURACY TRACKER ──
@@ -1555,7 +1564,9 @@ const TradingViewChart=({resolution,onResolutionChange})=>{
 const computeAdvisor=(params)=>{
   const{userPosition,positionStatus,currentOdds,offerVal,betAmount,maxPayout,clockSeconds,windowType,tickSlope,isRugPull,showRugPullAlerts,hasReversedRef,peakOfferRef,posterior,targetMargin,currentPrice,minsRemaining,secsRemaining,accel,pnlSlope,atrBps,activePrediction,lockInfo,regime,
     // V6.2.8: Tara-aware inputs
-    taraSnapshot,taraLean,taraPosterior,kalshiYesPrice}=params;
+    taraSnapshot,taraLean,taraPosterior,kalshiYesPrice,
+    // V6.4: structural exhaustion signal
+    convictionAsymmetry}=params;
   const intervalSeconds=windowType==='15m'?900:300;
   const timeRemainingFrac=Math.max(0,clockSeconds/intervalSeconds);
   const timeLabel=`${minsRemaining}m ${secsRemaining}s left`;
@@ -1673,6 +1684,22 @@ const computeAdvisor=(params)=>{
   // ── 1. HARD STOPS — always fire first ────────────────────────────────────
   if(positionStatus?.isStopHit)return{label:'30% STOP HIT — EXIT NOW',reason:`Hard stop breached. Entry: $${(positionStatus.entry||0).toFixed(0)} → Now: $${cp.toFixed(0)}. PnL: ${pnlPct.toFixed(1)}%. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EXECUTE EMERGENCY EXIT',actionTarget:'SIT OUT'};
   if(isRugPull&&showRugPullAlerts&&isUP)return{label:'RUG PULL — EMERGENCY EXIT',reason:`Catastrophic drop detected. Exit long immediately. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EMERGENCY CASHOUT',actionTarget:'SIT OUT'};
+
+  // V6.4 — STRUCTURE BROKE EXIT. Active post-lock exit signal. When the latest swing is
+  //   meaningfully stronger in the opposite direction of the user's position, that's
+  //   trend exhaustion: the move that's been working is fading, and the counter-move
+  //   has more force. Real traders' edge is exiting fast when the structure changes,
+  //   not predicting better. Fires loud BEFORE the TARA REVERSED tier.
+  if(convictionAsymmetry?.valid&&convictionAsymmetry.score>=50&&convictionAsymmetry.latestDir&&convictionAsymmetry.latestDir!==userPosition){
+    const _strengthMsg=`Latest ${convictionAsymmetry.latestDir} swing ${convictionAsymmetry.score}pt stronger than prior ${userPosition} swing`;
+    return{
+      label:`⚠ STRUCTURE BROKE — ${convictionAsymmetry.latestDir} TAKING OVER`,
+      reason:`${_strengthMsg} · trend you bought is fading · ${timeLabel}`,
+      color:'rose',animate:true,hasAction:true,
+      actionLabel:offerAboveBet?'TAKE PROFIT — EXIT NOW':'CUT — STRUCTURE GONE',
+      actionTarget:offerAboveBet?'CASH':'SIT OUT',
+    };
+  }
 
   // V6.2.8 — TARA CROSS-REFERENCE. When user has a manual position and Tara now thinks
   //   the OPPOSITE direction with strong conviction, surface that as urgency. Doesn't
@@ -2168,6 +2195,92 @@ const computeV99Posterior=(params)=>{
   const aggrFlow=Math.max(-1,Math.min(1,globalFlow.imbalance-1));
   const ticks=tickHistoryRef.current;
   const tickSlope=ticks.length>=10?(currentPrice-ticks[0].p):0;
+
+  // ── V6.4: CONVICTION ASYMMETRY DETECTOR ──
+  //   Real traders feel "this down move is stronger than the up move was." That's a
+  //   comparison of swing strength: range × volume / time. We compute the strength
+  //   of the most recent UP swing and most recent DOWN swing in tick history and
+  //   compare them. Asymmetry score:
+  //     > +30 = current direction (the latest swing) is meaningfully stronger
+  //     -30 to +30 = comparable, no clear asymmetry
+  //     < -30 = current direction is weaker, prior swing dominates
+  //   This becomes a structural early-warning signal for trend exhaustion.
+  const _convictionAsymmetry=(()=>{
+    if(!ticks||ticks.length<20)return{score:0,latestDir:null,strengths:null,valid:false};
+    // Identify swings by walking back from now: a swing flips when price reverses by ≥10bps
+    //   from the local extreme. Capture at most the last 2 swings.
+    const _now=Date.now();
+    const _windowMs=180000; // last 3 minutes of tick history
+    const recentTicks=ticks.filter(t=>(_now-t.time)<=_windowMs);
+    if(recentTicks.length<20)return{score:0,latestDir:null,strengths:null,valid:false};
+    // Walk through ticks identifying turning points
+    const _flipBps=10;
+    const turningPoints=[];
+    let extreme=recentTicks[0].p,extremeIdx=0,direction=null;
+    for(let i=1;i<recentTicks.length;i++){
+      const p=recentTicks[i].p;
+      const moveBps=((p-extreme)/extreme)*10000;
+      if(direction===null){
+        if(Math.abs(moveBps)>=_flipBps){
+          direction=moveBps>0?'UP':'DOWN';
+          extreme=p;extremeIdx=i;
+        }else if(p>extreme||p<extreme){
+          // tracking extreme until we know direction
+          if(direction===null){
+            extreme=p;extremeIdx=i;
+          }
+        }
+      }else if(direction==='UP'){
+        if(p>extreme){extreme=p;extremeIdx=i;}
+        else if(((extreme-p)/extreme)*10000>=_flipBps){
+          // flipped to DOWN — extreme was a top
+          turningPoints.push({idx:extremeIdx,price:extreme,time:recentTicks[extremeIdx].time,side:'TOP'});
+          direction='DOWN';extreme=p;extremeIdx=i;
+        }
+      }else{ // direction==='DOWN'
+        if(p<extreme){extreme=p;extremeIdx=i;}
+        else if(((p-extreme)/extreme)*10000>=_flipBps){
+          turningPoints.push({idx:extremeIdx,price:extreme,time:recentTicks[extremeIdx].time,side:'BOTTOM'});
+          direction='UP';extreme=p;extremeIdx=i;
+        }
+      }
+    }
+    // Need at least 2 turning points to define 2 swings
+    if(turningPoints.length<2)return{score:0,latestDir:direction,strengths:null,valid:false};
+    // Most recent swing: from turningPoints[last] to current
+    // Prior swing: from turningPoints[last-1] to turningPoints[last]
+    const tp1=turningPoints[turningPoints.length-2];
+    const tp2=turningPoints[turningPoints.length-1];
+    const _scoreSwing=(startIdx,endIdx,startPrice,endPrice)=>{
+      const range=Math.abs(endPrice-startPrice);
+      const dur=Math.max(1,(recentTicks[endIdx].time-recentTicks[startIdx].time)/1000); // seconds
+      let volume=0;
+      for(let i=startIdx;i<=endIdx;i++){volume+=Math.abs(recentTicks[i].s||0)*recentTicks[i].p;}
+      const rangeBps=(range/startPrice)*10000;
+      // strength = bps × volume_thousands / sqrt(seconds). sqrt because longer swings
+      //   shouldn't be linearly penalized.
+      return rangeBps*Math.sqrt(volume/1000)/Math.sqrt(dur);
+    };
+    const priorStrength=_scoreSwing(tp1.idx,tp2.idx,tp1.price,tp2.price);
+    const currentEnd=recentTicks.length-1;
+    const currentStrength=_scoreSwing(tp2.idx,currentEnd,tp2.price,recentTicks[currentEnd].p);
+    // Asymmetry: relative strength of current vs prior. Map to -100..+100.
+    if(priorStrength<=0||currentStrength<=0){
+      return{score:0,latestDir:direction,strengths:{prior:priorStrength,current:currentStrength},valid:false};
+    }
+    const ratio=currentStrength/priorStrength;
+    // ratio > 1 = current stronger, < 1 = current weaker
+    let score;
+    if(ratio>=1)score=Math.min(100,(ratio-1)*100);
+    else score=Math.max(-100,-(1/ratio-1)*100);
+    return{
+      score:Math.round(score),
+      latestDir:direction,
+      priorDir:tp2.side==='TOP'?'UP':'DOWN', // direction that LED to tp2
+      strengths:{prior:Math.round(priorStrength),current:Math.round(currentStrength)},
+      valid:true,
+    };
+  })();
 
   // ── SIGNAL 1: GAP GRAVITY ──
   const timeDecay=Math.pow(timeFraction,is15m?1.8:1.3);
@@ -2783,6 +2896,8 @@ const computeV99Posterior=(params)=>{
   }
 
   return{posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isMoonshot,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty,
+  // V6.4: conviction asymmetry — strength comparison of current vs prior swing
+  convictionAsymmetry:_convictionAsymmetry,
     // V152: range-position telemetry — exposed so trade log can audit "was Tara at the edge of typical range?"
     rangeBps,
     // V3.1.7: volume-flow signal — informational, not yet integrated into posterior
@@ -4543,7 +4658,46 @@ function TaraMemoryModal({taraCallLog,onClose}){
           React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-[0.18em]',style:{color:T2_GOLD}},'TARA · MEMORY'),
           React.createElement('h2',{className:'font-serif text-3xl text-white tracking-tight'},'Every call ',React.createElement('span',{style:{color:T2_GOLD}},'·'),' her record'),
         ),
-        React.createElement('button',{onClick:onClose,className:'p-2 rounded-lg hover:bg-[#E8E9E4]/5 text-[#E8E9E4]/60 hover:text-white transition-colors text-xl'},'✕'),
+        React.createElement('div',{className:'flex items-center gap-2'},
+          // V6.3.5: Export button — downloads full log as JSON for analysis.
+          React.createElement('button',{
+            onClick:()=>{
+              try{
+                const _payload={
+                  exportedAt:new Date().toISOString(),
+                  baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:'unknown',
+                  totalEntries:taraCallLog.length,
+                  summary:{
+                    wins:counts.wins,losses:counts.losses,sitouts:counts.sitouts,pending:counts.pending,
+                    winRate:_wr,
+                  },
+                  entries:taraCallLog,
+                };
+                const _json=JSON.stringify(_payload,null,2);
+                const _blob=new Blob([_json],{type:'application/json'});
+                const _url=URL.createObjectURL(_blob);
+                const _a=document.createElement('a');
+                const _ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+                _a.href=_url;
+                _a.download=`tara-call-log-${_ts}.json`;
+                document.body.appendChild(_a);
+                _a.click();
+                document.body.removeChild(_a);
+                setTimeout(()=>URL.revokeObjectURL(_url),100);
+              }catch(e){
+                alert('Export failed: '+(e.message||String(e)));
+              }
+            },
+            className:'px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
+            style:{
+              background:'rgba(229,200,112,0.10)',
+              color:T2_GOLD,
+              border:'1px solid '+T2_GOLD_BORDER,
+            },
+            title:'Download call log as JSON for analysis',
+          },'↓ Export JSON'),
+          React.createElement('button',{onClick:onClose,className:'p-2 rounded-lg hover:bg-[#E8E9E4]/5 text-[#E8E9E4]/60 hover:text-white transition-colors text-xl'},'✕'),
+        ),
       ),
       React.createElement('div',{className:'grid grid-cols-2 sm:grid-cols-5 gap-2 mb-5'},
         React.createElement('div',{className:'bg-[#181A19] border border-[#E8E9E4]/8 rounded-xl p-3'},
@@ -6306,7 +6460,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.3.2</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.4.0</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6569,6 +6723,14 @@ function TaraApp(){
   // V4.2: Track consecutive frames Tara has a directional call. Used to determine when
   //   she's confident enough to lock early — fast for clean setups, slower for mixed.
   const taraCallSampleRef=useRef({dir:null,count:0});
+  // V6.4: Regime history — a sliding 3-min log of {atrBps, regime, range, timestamp} samples.
+  //   Used by the regime-transition detector to spot when conditions are shifting from
+  //   trending → range-bound or vice versa. Sampled once every 5s.
+  const regimeHistoryRef=useRef([]);
+  // V6.4: Multi-Signal Pivot tracking. Records "shift events" — moments when a signal flipped
+  //   direction. When 3+ events fire within 30s same direction, that's outside-context info
+  //   arriving inside the data; sample requirement drops to 2 ticks for fast pivot.
+  const signalPivotRef=useRef({events:[],lastTapeSign:null,lastAsymSign:null,lastFgtSign:null});
   // V5.7.2: Sample rate tracker — last 8 measurements of (timestamp, count) so we can compute
   //   actual samples-per-second over the recent window. Used for honest "decision in ~Xs"
   //   estimates that account for samples only accumulating when conviction ≥ floor.
@@ -6579,8 +6741,50 @@ function TaraApp(){
   //   to Firestore so it accumulates across sessions and devices. Capped at 500 most-recent
   //   entries to keep payload size sane.
   const[taraCallLog,setTaraCallLog]=useState(()=>{
-    try{const stored=localStorage.getItem('taraCallLog_v1');if(stored)return JSON.parse(stored);}catch(e){}
-    return[];
+    try{
+      const stored=localStorage.getItem('taraCallLog_v1');
+      if(!stored)return[];
+      const parsed=JSON.parse(stored);
+      if(!Array.isArray(parsed))return[];
+      // V6.3.4: One-time sanitize pass on load. Drops corrupt entries from before the
+      //   scoring fix:
+      //     - Closing price >20% away from strike (e.g. $41K close on $80K strike)
+      //     - LOSS where outcomeDir matches the call direction (UP call won, marked LOSS)
+      //     - WIN where outcomeDir opposes the call direction (data flip)
+      //   Also dedupes by windowId+windowType, keeping the resolved entry if duplicates exist.
+      const seen=new Map();
+      const _key=(e)=>(e.windowId||'')+'|'+(e.windowType||'');
+      let dropped=0;
+      parsed.forEach(e=>{
+        if(!e||!e.windowType)return;
+        // Sanity check on strike/close ratio
+        if(e.result==='WIN'||e.result==='LOSS'){
+          if(e.strike&&e.closingPrice&&Math.abs(e.closingPrice-e.strike)/e.strike>0.20){
+            dropped++;
+            return; // corrupt — drop
+          }
+          // Logical consistency: if outcomeDir is set, it should match WIN/LOSS expectation
+          if(e.outcomeDir&&(e.dir==='UP'||e.dir==='DOWN')){
+            const _shouldBeWin=e.dir===e.outcomeDir;
+            if(_shouldBeWin&&e.result==='LOSS'){dropped++;return;}
+            if(!_shouldBeWin&&e.result==='WIN'){dropped++;return;}
+          }
+        }
+        const k=_key(e);
+        const existing=seen.get(k);
+        if(!existing){seen.set(k,e);return;}
+        // Resolved beats unresolved
+        if(existing.result&&!e.result)return;
+        if(!existing.result&&e.result){seen.set(k,e);return;}
+        // Both resolved or both unresolved: keep earlier (lower id)
+        if((e.id||0)<(existing.id||0))seen.set(k,e);
+      });
+      const cleaned=Array.from(seen.values()).sort((a,b)=>(a.time||0)-(b.time||0));
+      if(dropped>0){
+        try{console.warn('[V6.3.4 cleanup] Dropped',dropped,'corrupt log entries');}catch(_){}
+      }
+      return cleaned;
+    }catch(e){return[];}
   });
   // V5.7.1: taraScorecards is DERIVED from taraCallLog instead of incrementally tracked.
   //   Eliminates multi-device double-counting: a sync race could otherwise turn one LOSS
@@ -6925,7 +7129,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.3.2 online — Tape Quality badge added. Three-light system on the tape strip header that summarizes whether the tape signal is trustworthy: dot 1 = 30s+60s windows agree at strong consensus (≥60% same side), dot 2 = volume meaningful (60s ≥ $500K), dot 3 = recent whales align with tape direction. STRONG (3 dots green), MIXED (2 dots), WEAK (0-1 dots). When tape is too thin to score, badge hides. Hover for tooltip with the exact check status. No more mentally averaging four percentages.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.4.0 online — All four priorities shipped together. (1) Conviction Asymmetry: I now compare the latest swing strength against the prior opposing swing — when a counter-move is meaningfully stronger than the trend swing, that\'s exhaustion, I sit out instead of locking. (2) Structure-Break Exit: post-lock, when the latest swing reverses with 50+ asymmetry score against your manual position, advisor fires loud "STRUCTURE BROKE — EXIT NOW" alert. Real traders\' edge is exiting fast when wrong. (3) Regime Transition: sampling regime/ATR/range every 5s; sit out when regime is in flux (multiple labels in 60s) or transitioning to range while trying to ride a trend. (4) Multi-Signal Fast-Pivot: when 3+ signals (tape, asymmetry, FGT) flip same direction in 30s, sample requirement drops 50% — react fast to genuine context shifts. Plus: lockedAt timestamp + secondsIntoWindow on every log entry.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7213,7 +7417,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.3.2'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.4.0'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -7223,6 +7427,23 @@ function TaraApp(){
   useEffect(()=>{if(!isMounted)return;try{localStorage.setItem('taraV110Hook',discordWebhook);localStorage.setItem('taraV110TZ',String(useLocalTime));localStorage.setItem('taraV110DU',discordUsername);localStorage.setItem('taraV110DA',discordAvatar);}catch(e){};},[discordWebhook,useLocalTime,discordUsername,discordAvatar,isMounted]);
 
   useEffect(()=>{if(!currentPrice)return;const iv=setInterval(()=>{priceMemoryRef.current.push({p:currentPrice,time:Date.now()});priceMemoryRef.current=priceMemoryRef.current.filter(t=>Date.now()-t.time<600000);},2000);return()=>clearInterval(iv);},[currentPrice]);
+  // V6.4: Regime history sampler. Records {atrBps, regime, rangeBps, timestamp} every 5s.
+  //   Keeps last 3 minutes (36 samples). Used by transition detector to spot regime change.
+  useEffect(()=>{
+    const iv=setInterval(()=>{
+      const a=analysisRef.current;
+      if(!a)return;
+      regimeHistoryRef.current.push({
+        t:Date.now(),
+        atr:a.atrBps||0,
+        regime:a.regime||'',
+        range:a.rangeBps||0,
+        velocity:a.velocityRegime||'',
+      });
+      regimeHistoryRef.current=regimeHistoryRef.current.filter(s=>Date.now()-s.t<180000);
+    },5000);
+    return()=>clearInterval(iv);
+  },[]);
 
   // V3.1.7+/V3.1.9: Window amplitude tracking — update high/low refs on each price tick.
   //   Also records WHEN high/low were first reached for structure detection.
@@ -7277,7 +7498,9 @@ function TaraApp(){
     const _kStrike=kalshiStrikeRef.current;
     const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
     if(_kStrikeValid){
-      const p=Math.round(_kStrike);
+      // V6.3.5: Use exact Kalshi value, never round. Kalshi strikes can be e.g. $80,036.93;
+      //   rounding to $80,037 introduces fractional gap distortion that flips marginal trades.
+      const p=Number(_kStrike);
       windowOpenPriceRef.current=p;
       windowHighRef.current=p;
       windowLowRef.current=p;
@@ -7330,7 +7553,8 @@ function TaraApp(){
     const _kStrike=kalshiStrikeRef.current;
     const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
     if(_kStrikeValid){
-      const p=Math.round(_kStrike);
+      // V6.3.5: Exact Kalshi value, no rounding
+      const p=Number(_kStrike);
       windowOpenPriceRef.current=p;
       windowHighRef.current=p;
       windowLowRef.current=p;
@@ -7358,10 +7582,11 @@ function TaraApp(){
   useEffect(()=>{
     if(!kalshiStrike||kalshiStrike<1000||kalshiStrike>10000000)return;
     if(isManualStrikeRef.current)return;       // user typed their own strike — respect it
-    if(strikeSource==='kalshi'&&Math.abs((targetMargin||0)-Math.round(kalshiStrike))<1)return; // already set, no change
-    const rounded=Math.round(kalshiStrike);
-    windowOpenPriceRef.current=rounded;
-    setTargetMargin(rounded);
+    // V6.3.5: Exact value comparison, no rounding
+    if(strikeSource==='kalshi'&&Math.abs((targetMargin||0)-Number(kalshiStrike))<0.01)return; // already set, no change
+    const exact=Number(kalshiStrike);
+    windowOpenPriceRef.current=exact;
+    setTargetMargin(exact);
     setPendingStrike(null);
     setStrikeMode('manual');
     setStrikeSource('kalshi');
@@ -7429,7 +7654,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.3.2  |  signal'},
+        footer:{text:'Tara 6.4.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7443,7 +7668,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.3.2  |  stand-down'},
+        footer:{text:'Tara 6.4.0  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7457,7 +7682,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.3.2  |  search'},
+        footer:{text:'Tara 6.4.0  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7474,7 +7699,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.3.2  |  lock'},
+        footer:{text:'Tara 6.4.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7491,7 +7716,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.3.2  |  close'},
+          footer:{text:'Tara 6.4.0  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7512,7 +7737,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.3.2  |  exit'},
+        footer:{text:'Tara 6.4.0  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7533,7 +7758,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.3.2  |  scanning'},
+        footer:{text:'Tara 6.4.0  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7553,7 +7778,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.3.2  |  signal'},
+        footer:{text:'Tara 6.4.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7573,7 +7798,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.3.2  |  lock'},
+        footer:{text:'Tara 6.4.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7590,7 +7815,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.3.2  |  sit-out'},
+        footer:{text:'Tara 6.4.0  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7612,7 +7837,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.3.2  |  result'},
+          footer:{text:'Tara 6.4.0  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7649,12 +7874,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.3.2  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.4.0  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.3.2',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.4.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -7673,7 +7898,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.3.2 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.4.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8217,29 +8442,26 @@ function TaraApp(){
         const _closeAtRolloverSpot=currentPriceRef.current||currentPrice;
         const _capturedSnap=taraCallSnapshotRef.current;
         const _capturedWindowType=windowType;
-        if(_closeAtRolloverSpot!==null&&_scoringStrike>0){
-          // V5.7.5: Defer scoring by 8s. During the wait Kalshi's events poll refreshes the
-          //   NEW window's strike, which equals the OLD window's close per Kalshi. We prefer
-          //   that over local spot to avoid wrong W/L when spot wobbled at the boundary.
+        if(_scoringStrike>0){
+          // V6.3.5: KALSHI-ONLY SCORING per user request: "make sure wins and losses are
+          //   recorded only when we pull in the new strike price for that window timing
+          //   from kalshi". The new window's Kalshi strike = the just-closed window's close.
+          //   We retry up to 60s for Kalshi to deliver. If it never does, leave the entry
+          //   as PENDING (no result) instead of falling back to spot — spot at the boundary
+          //   instant disagrees with Kalshi's settlement and was the source of bad scores.
           const _newWindowStrikeAtRollover=targetMarginRef.current; // capture for delta-detection
-          setTimeout(()=>{
-            // V5.7.5: Prefer Kalshi-derived close. After ~8s, targetMarginRef should reflect
-            //   the NEW window's strike. If it's CHANGED from what it was at rollover, the
-            //   change came from Kalshi — use that as the close price. If unchanged, Kalshi
-            //   didn't refresh in time (5m windows skip Kalshi entirely, or the API is down)
-            //   so fall back to the spot snapshot we captured at rollover.
-            const _fresh=targetMarginRef.current;
-            const _kalshiRefreshed=_fresh>0&&_fresh!==_newWindowStrikeAtRollover;
-            const _closingPrice=_kalshiRefreshed?_fresh:_closeAtRolloverSpot;
-            const _closeSource=_kalshiRefreshed?'kalshi':'spot';
-            const _outcomeDir=_closingPrice>_scoringStrike?'UP':_closingPrice<_scoringStrike?'DOWN':null;
-            const _gap=_scoringStrike>0?((_closingPrice-_scoringStrike)/_scoringStrike)*10000:0;
+          const _resolveScore=(closeFromKalshi,attempt)=>{
+            // Sanity: close price must be within 20% of strike. Beyond that = corrupt data.
+            const _priceLooksValid=closeFromKalshi>0&&_scoringStrike>0&&Math.abs(closeFromKalshi-_scoringStrike)/_scoringStrike<0.20;
+            if(!_priceLooksValid){
+              try{console.warn('[V6.3.5 scoring] Kalshi close out of sanity range',{strike:_scoringStrike,close:closeFromKalshi,attempt});}catch(_){}
+              return false; // refuse to score
+            }
+            const _outcomeDir=closeFromKalshi>_scoringStrike?'UP':closeFromKalshi<_scoringStrike?'DOWN':null;
+            const _gap=_scoringStrike>0?((closeFromKalshi-_scoringStrike)/_scoringStrike)*10000:0;
             // V5.6.6: past-windows tracker — every window recorded regardless of Tara's call.
             if(_outcomeDir){
               const _winMs=_capturedWindowType==='15m'?900000:300000;
-              // V5.7.5: just-closed bucket is the bucket BEFORE this run's rollover, but we
-              //   ran the timer from rollover-instant — so still subtract one winMs from now.
-              //   At +8s into the new window, current bucket - 1 = the just-closed window.
               const _justClosedBucket=Math.floor(Date.now()/_winMs)*_winMs-_winMs;
               const _pwid=`${_capturedWindowType}-${new Date(_justClosedBucket).toISOString()}`;
               const _pastEntry={
@@ -8248,8 +8470,8 @@ function TaraApp(){
                 time:Date.now(),
                 windowType:_capturedWindowType,
                 strike:_scoringStrike,
-                closingPrice:_closingPrice,
-                closeSource:_closeSource, // V5.7.5: track which source settled this row
+                closingPrice:closeFromKalshi,
+                closeSource:'kalshi',
                 dir:_outcomeDir,
                 gapBps:_gap,
               };
@@ -8259,26 +8481,78 @@ function TaraApp(){
                 return [...prev,_pastEntry].slice(-50);
               });
             }
-            // V5.6.1: populate result on the latest unresolved log entry for this windowType.
+            // Resolve call log entry by windowId match (V6.3.4).
+            const _capturedWindowId=_capturedSnap?.windowId||(()=>{
+              const _winMs=_capturedWindowType==='15m'?900000:300000;
+              const _justClosedBucket=Math.floor(Date.now()/_winMs)*_winMs-_winMs;
+              return `${_capturedWindowType}-${new Date(_justClosedBucket).toISOString()}`;
+            })();
             const _logResult=(resultStr)=>{
               setTaraCallLog(prev=>{
-                const idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e.result===null&&e.windowType===_capturedWindowType);
+                let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&e.windowId===_capturedWindowId&&e.result===null);
+                if(!idx){
+                  idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&e.result===null&&e.windowType===_capturedWindowType);
+                }
                 if(!idx)return prev;
+                if(idx.e.result!==null)return prev;
                 const next=[...prev];
-                next[idx.i]={...idx.e,result:resultStr,outcomeDir:_outcomeDir,strike:_scoringStrike,closingPrice:_closingPrice,closeSource:_closeSource,gapBps:_gap,resolvedAt:Date.now()};
+                next[idx.i]={...idx.e,result:resultStr,outcomeDir:_outcomeDir,strike:_scoringStrike,closingPrice:closeFromKalshi,closeSource:'kalshi',gapBps:_gap,resolvedAt:Date.now()};
                 setTimeout(()=>_recomputeLearningsFromLog(next),0);
                 return next;
               });
             };
-            // V5.7.5: TARA_RESULT Discord broadcasts removed — running record now rides on
-            //   every TARA_LOCK / TARA_SIGNAL / TARA_SCAN / TARA_SITOUT message via baseData.
             if(!_capturedSnap||_capturedSnap.call==='SIT_OUT'){
               _logResult('SITOUT');
             } else if(_outcomeDir&&(_capturedSnap.call==='UP'||_capturedSnap.call==='DOWN')){
               const _won=_capturedSnap.call===_outcomeDir;
               _logResult(_won?'WIN':'LOSS');
             }
-          },8000); // V5.7.5: 8s wait for Kalshi refresh
+            return true; // scored successfully
+          };
+          // Retry loop: poll targetMarginRef until Kalshi value differs from rollover instant.
+          //   If Kalshi never refreshes within 60s, leave entry PENDING.
+          //   For 5m windows, Kalshi doesn't apply — log SITOUT with no scoring (5m doesn't
+          //   trade against Kalshi). Better than scoring against unverified spot data.
+          if(_capturedWindowType==='5m'){
+            // 5m windows: log as SITOUT (no Kalshi market exists for 5m BTC).
+            const _capturedWindowId=_capturedSnap?.windowId||(()=>{
+              const _winMs=300000;
+              const _justClosedBucket=Math.floor(Date.now()/_winMs)*_winMs-_winMs;
+              return `5m-${new Date(_justClosedBucket).toISOString()}`;
+            })();
+            setTaraCallLog(prev=>{
+              let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&e.windowId===_capturedWindowId&&e.result===null);
+              if(!idx){
+                idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&e.result===null&&e.windowType===_capturedWindowType);
+              }
+              if(!idx)return prev;
+              if(idx.e.result!==null)return prev;
+              const next=[...prev];
+              next[idx.i]={...idx.e,result:'SITOUT',resolvedAt:Date.now(),resolution:'5m-no-kalshi'};
+              setTimeout(()=>_recomputeLearningsFromLog(next),0);
+              return next;
+            });
+          } else {
+            // 15m windows: poll for Kalshi-derived close (= new window's strike from Kalshi).
+            let _attempts=0;
+            const _maxAttempts=12; // 12 × 5s = 60s
+            const _trySettle=()=>{
+              _attempts++;
+              const _fresh=targetMarginRef.current;
+              const _kalshiChanged=_fresh>0&&_fresh!==_newWindowStrikeAtRollover;
+              if(_kalshiChanged&&_resolveScore(Number(_fresh),_attempts)){
+                return; // success
+              }
+              if(_attempts<_maxAttempts){
+                setTimeout(_trySettle,5000);
+              } else {
+                // Gave up — entry stays PENDING. Better than corrupt data.
+                try{console.warn('[V6.3.5 scoring] Kalshi never delivered new strike for window',{capturedWindowType:_capturedWindowType,strike:_scoringStrike,attempts:_attempts});}catch(_){}
+              }
+            };
+            // First attempt after 8s (gives Kalshi poll time to land)
+            setTimeout(_trySettle,8000);
+          }
         }
         // Clear snapshot for next window
         taraCallSnapshotRef.current=null;
@@ -9096,6 +9370,8 @@ function TaraApp(){
         taraPosterior:posterior,
         // Live Kalshi for edge math
         kalshiYesPrice:typeof kalshiYesPrice!=='undefined'?kalshiYesPrice:null,
+        // V6.4: structural exhaustion signal for active exit alert
+        convictionAsymmetry:eng.convictionAsymmetry||null,
       });
 
       // V145.2: HPotter-based projections for 5m / 15m / 1h panels
@@ -9238,6 +9514,11 @@ function TaraApp(){
         grandTrend:eng.grandTrend||null,
         // V6.2.1: multi-TF alignment across all structural signals (1m/5m/15m × 2 indicators)
         structAlignment:eng.structAlignment||null,
+        // V6.3.5: surface raw signal scores + tape windows for log analysis
+        rawSignalScores:eng.rawSignalScores||null,
+        tapeWindows:tapeWindows||null,
+        // V6.4: conviction asymmetry detector
+        convictionAsymmetry:eng.convictionAsymmetry||null,
         rangeBps:Number(eng.rangeBps||0), // V152
         // V5.5: Pass through threshold values used by the lock state machine. These were
         //   computed inside the analysis useMemo but never exposed to consumers, so the
@@ -9253,6 +9534,96 @@ function TaraApp(){
         bullCount:Number(bullCount),bearCount:Number(bearCount)};
     }catch(err){return{prediction:'ERROR',rawProbAbove:50,projections:[],reasoning:[err.stack||String(err)],textColor:'text-rose-500',advisor:{label:'MATH CRASH',reason:String(err),color:'rose',animate:false,hasAction:false},regime:'ERROR'};}
   },[currentPrice,liveHistory,targetMargin,timeState.minsRemaining,timeState.secsRemaining,timeState.currentHour,orderBook,forceRender,betAmount,maxPayout,currentOffer,globalFlow,userPosition,windowType,isMounted,showRugPullAlerts,positionStatus,velocityRef,bloomberg,useLocalTime,regimeMemory,regimeWeights,strikeConfirmed,adaptiveWeights,calibration]);
+  // V6.4: keep analysisRef live so non-hooked code (regime sampler, etc.) can read it
+  const analysisRef=useRef(null);
+  useEffect(()=>{analysisRef.current=analysis;},[analysis]);
+
+  // V6.4: MULTI-SIGNAL PIVOT DETECTOR. Tracks sign-flips across (a) tape buy% crossing 50,
+  //   (b) asymmetry score crossing zero, (c) FGT alignment crossing zero. When 3+ flips
+  //   fire same direction within 30 seconds, sample requirement drops 50%.
+  useEffect(()=>{
+    if(!analysis)return;
+    const _now=Date.now();
+    const piv=signalPivotRef.current;
+    // Tape sign: dollar-weighted 30s buy%, +1 if >55, -1 if <45, 0 otherwise
+    const _tape30=analysis?.tapeWindows?.w30?.buyPct;
+    const _tapeSign=_tape30!=null?(_tape30>=55?1:_tape30<=45?-1:0):null;
+    if(_tapeSign!=null&&piv.lastTapeSign!=null&&_tapeSign!==piv.lastTapeSign&&_tapeSign!==0){
+      piv.events.push({src:'tape',dir:_tapeSign>0?'UP':'DOWN',t:_now});
+    }
+    if(_tapeSign!=null)piv.lastTapeSign=_tapeSign;
+    // Asymmetry sign-direction
+    const _asym=analysis?.convictionAsymmetry;
+    if(_asym?.valid&&_asym.latestDir&&_asym.score>=20){
+      const _aSign=_asym.latestDir==='UP'?1:-1;
+      if(piv.lastAsymSign!=null&&_aSign!==piv.lastAsymSign){
+        piv.events.push({src:'asym',dir:_asym.latestDir,t:_now});
+      }
+      piv.lastAsymSign=_aSign;
+    }
+    // FGT sign
+    const _fgt=analysis?.mtfAlignment;
+    const _fgtSign=_fgt!=null?(_fgt>0.5?1:_fgt<-0.5?-1:0):null;
+    if(_fgtSign!=null&&piv.lastFgtSign!=null&&_fgtSign!==piv.lastFgtSign&&_fgtSign!==0){
+      piv.events.push({src:'fgt',dir:_fgtSign>0?'UP':'DOWN',t:_now});
+    }
+    if(_fgtSign!=null)piv.lastFgtSign=_fgtSign;
+    // Trim events older than 30s
+    piv.events=piv.events.filter(e=>_now-e.t<=30000);
+  },[analysis]);
+  // Helper read: how many simultaneous-direction shifts fired in last 30s?
+  const computeMultiSignalPivot=()=>{
+    const piv=signalPivotRef.current;
+    const _now=Date.now();
+    const recent=piv.events.filter(e=>_now-e.t<=30000);
+    const upEvents=recent.filter(e=>e.dir==='UP').length;
+    const dnEvents=recent.filter(e=>e.dir==='DOWN').length;
+    if(upEvents>=3)return{active:true,dir:'UP',count:upEvents};
+    if(dnEvents>=3)return{active:true,dir:'DOWN',count:dnEvents};
+    return{active:false,dir:null,count:0};
+  };
+
+  // V6.4: REGIME TRANSITION DETECTOR. Reads regimeHistoryRef (sampled every 5s) and
+  //   computes whether the regime is stable or actively transitioning. Returns one of:
+  //     - 'stable': last 6 samples (30s) all same regime, ATR change <30%
+  //     - 'transitioning-to-trend': ATR expanding + range expanding
+  //     - 'transitioning-to-range': ATR contracting + range contracting
+  //     - 'flux': regime changed in last 30s, no clear new direction yet
+  //   Forces re-eval every 5 seconds via forceRender (the regime sampler runs at 5s).
+  const regimeTransition=useMemo(()=>{
+    const hist=regimeHistoryRef.current;
+    if(!hist||hist.length<6)return{state:'unknown',score:0,fromRegime:null,toRegime:null};
+    const recent=hist.slice(-12); // last ~60s
+    const _regimes=recent.map(s=>s.regime).filter(Boolean);
+    const _firstReg=_regimes[0];
+    const _lastReg=_regimes[_regimes.length-1];
+    // ATR / range trend over the window
+    const atrs=recent.map(s=>s.atr).filter(a=>a>0);
+    const ranges=recent.map(s=>s.range).filter(r=>r>0);
+    if(atrs.length<3)return{state:'unknown',score:0,fromRegime:_firstReg,toRegime:_lastReg};
+    const atrFirst=atrs[0],atrLast=atrs[atrs.length-1];
+    const rangeFirst=ranges[0]||1,rangeLast=ranges[ranges.length-1]||1;
+    const atrChange=(atrLast-atrFirst)/Math.max(0.1,atrFirst);
+    const rangeChange=(rangeLast-rangeFirst)/Math.max(0.1,rangeFirst);
+    // Regime label changes count
+    const _regChanges=new Set(_regimes).size;
+    if(_regChanges>=3){
+      // Multiple regime labels in 60s — flux
+      return{state:'flux',score:50,fromRegime:_firstReg,toRegime:_lastReg};
+    }
+    // Sustained ATR + range expansion = trend regime forming
+    if(atrChange>0.3&&rangeChange>0.2){
+      return{state:'transitioning-to-trend',score:Math.min(100,Math.round((atrChange+rangeChange)*100)),fromRegime:_firstReg,toRegime:_lastReg};
+    }
+    // Sustained ATR + range contraction = range regime forming
+    if(atrChange<-0.3&&rangeChange<-0.2){
+      return{state:'transitioning-to-range',score:Math.min(100,Math.round(Math.abs(atrChange+rangeChange)*100)),fromRegime:_firstReg,toRegime:_lastReg};
+    }
+    // Stable
+    return{state:'stable',score:0,fromRegime:_firstReg,toRegime:_lastReg};
+  },[analysis?.atrBps,analysis?.regime,analysis?.rangeBps]);
+  const regimeTransitionRef=useRef(null);
+  useEffect(()=>{regimeTransitionRef.current=regimeTransition;},[regimeTransition]);
 
   // ── QUALITY GATE — plain function call, no useMemo to avoid any TDZ risk ──
   const _computeQuality=(ana,regMem)=>{
@@ -9305,6 +9676,8 @@ function TaraApp(){
     const conviction=Math.abs(post-50);
     const dir=post>=50?'UP':'DOWN';
     const fgtAbs=Math.abs(analysis.mtfAlignment||0);
+    // V6.4: surface conviction asymmetry for use in exhaustion gate
+    const convictionAsymmetry=analysis.convictionAsymmetry||null;
     const winType=analysis.windowAmplitude?.label||'NORMAL';
     const vfLabel=analysis.volFlow?.label||'';
     const q=Math.round(qualityGate?.score||0);
@@ -9477,6 +9850,26 @@ function TaraApp(){
     }
     if(tapeOpposes&&_kalshiAlreadyExtreme){
       return{call:'SIT_OUT',reason:`${_dirLead} — tape opposes & Kalshi ${_kPct}% means no edge (late entry)`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    // V6.4: ASYMMETRY EXHAUSTION GATE. When the latest swing strongly opposes our intended
+    //   lock direction AND it's meaningfully stronger than the prior swing in our direction,
+    //   that's structural exhaustion — the trend we want to ride is fading. Block the lock.
+    //   "This down move is stronger than the up move was" → don't lock UP into a fading trend.
+    const _asym=convictionAsymmetry;
+    if(_asym?.valid&&_asym.score>=40&&_asym.latestDir&&_asym.latestDir!==dir){
+      // Latest swing is opposite our lock direction and meaningfully strong (40+ asymmetry).
+      //   This is the exhaustion case humans intuit. Sit out, wait for trend to actually resume.
+      return{call:'SIT_OUT',reason:`${_dirLead} — exhaustion: ${_asym.latestDir} swing ${_asym.score}pt stronger than prior ${dir} swing`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    // V6.4: REGIME TRANSITION GATE. If regime is in flux (multiple labels in last 60s),
+    //   sit out — conditions are too unstable to commit. If transitioning-to-range and we're
+    //   trying to ride a trend, that's the trend dying — sit out unless conviction is very high.
+    const _regTrans=regimeTransitionRef.current;
+    if(_regTrans?.state==='flux'){
+      return{call:'SIT_OUT',reason:`${_dirLead} — regime in flux (${_regTrans.fromRegime}→${_regTrans.toRegime}), waiting`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    if(_regTrans?.state==='transitioning-to-range'&&conviction<25){
+      return{call:'SIT_OUT',reason:`${_dirLead} — trend dying (transitioning to range), conviction ${Math.round(conviction)}pt insufficient`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // V5.7.7 Gate 2.6: Kalshi extreme-disagreement gate. When market is ≥90% certain the
     //   other way, we need BOTH tape alignment AND pattern alignment to commit. Otherwise sit.
@@ -9742,6 +10135,11 @@ function TaraApp(){
       const _wid=computeWindowId(windowType);
       const _entry={
         id:Date.now(),time:Date.now(),windowType,windowId:_wid,
+        // V6.4: explicit timestamps. lockedAt = wall-clock at lock; windowOpenedAt = when window started.
+        //   secondsIntoWindow = how long Tara took before locking (0 = instant, e.g. force).
+        lockedAt:Date.now(),
+        windowOpenedAt:windowOpenTimeRef.current||null,
+        secondsIntoWindow:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
         regime:analysis?.regime||'',dir:_forceDir,confidence:taraCallSnapshotRef.current.confidence,
         posterior:_post,qScore:Math.round(qualityGate?.score||0),fgt:analysis?.mtfAlignment,
         tier:'user-forced',session:_forceSession,kalshiAtLock:_forceK,
@@ -9982,6 +10380,13 @@ function TaraApp(){
     // V6.2.6: Soft hint trims sample requirement by 40% on lifecycle side too. Floor of 2.
     const _lcHintActive=softHintRef.current>0&&(Date.now()-softHintRef.current)<10000;
     if(_lcHintActive)needSamples=Math.max(2,Math.round(needSamples*0.6));
+    // V6.4: Multi-signal pivot — when 3+ signals shifted same direction in last 30s and
+    //   the direction matches our intended commit, drop sample requirement by 50%. This is
+    //   "outside-context info arriving inside the data" — react fast.
+    const _pivot=computeMultiSignalPivot();
+    if(_pivot.active&&_pivot.dir===(claimedDir||tc.call)){
+      needSamples=Math.max(2,Math.round(needSamples*0.5));
+    }
     // V6.2.6: Hard force — commit immediately, bypass sample requirement entirely
     const _hardForceActive=hardForceRef.current>0&&(Date.now()-hardForceRef.current)<5000;
     // Cap so lock has time to be scored after committing
@@ -10048,6 +10453,35 @@ function TaraApp(){
         isTapeLed:tc?._ctx?.isTapeLed||false,
         // V6.2.0: structural-led flag (grand trend + channel) — separate learning bucket
         isStructuralLed:tc?._ctx?.isStructuralLed||false,
+        // V6.3.3: Log structural alignment + raw posterior at lock time. Lets future
+        //   loss diagnostics show: "did structural agree when she locked?" and "did
+        //   calibration shift the underlying signal heavily?". Without this, every
+        //   debugging conversation requires me to guess.
+        structAtLock:analysis?.structAlignment?{
+          dir:analysis.structAlignment.dir,
+          count:analysis.structAlignment.count,
+        }:null,
+        rawPosteriorAtLock:analysis?.rawProbAbove,
+        calibratedPosteriorAtLock:analysis?.posterior,
+        calSwingAtLock:analysis?.rawProbAbove!=null&&analysis?.posterior!=null?Math.round(analysis.posterior-analysis.rawProbAbove):null,
+        // V6.3.5: full signal scores + tape consensus at lock for analysis exports
+        signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
+        tapeAtLock:analysis?.tapeWindows?{
+          w15Buy:analysis.tapeWindows.w15?.buyPct,
+          w30Buy:analysis.tapeWindows.w30?.buyPct,
+          w60Buy:analysis.tapeWindows.w60?.buyPct,
+          w15Total:(analysis.tapeWindows.w15?.buys||0)+(analysis.tapeWindows.w15?.sells||0),
+          w30Total:(analysis.tapeWindows.w30?.buys||0)+(analysis.tapeWindows.w30?.sells||0),
+          w60Total:(analysis.tapeWindows.w60?.buys||0)+(analysis.tapeWindows.w60?.sells||0),
+        }:null,
+        atrBpsAtLock:analysis?.atrBps,
+        windowAmplitudeAtLock:analysis?.windowAmplitude?.label,
+        // V6.4: conviction asymmetry at lock — was the latest swing stronger or weaker than prior?
+        asymmetryAtLock:analysis?.convictionAsymmetry?{
+          score:analysis.convictionAsymmetry.score,
+          latestDir:analysis.convictionAsymmetry.latestDir,
+          priorDir:analysis.convictionAsymmetry.priorDir,
+        }:null,
         // V6.2.6: track if user force-buttons influenced this commit
         wasSoftHinted:_lcHintActive||false,
         isUserForced:_hardForceActive||false,
@@ -10076,6 +10510,11 @@ function TaraApp(){
       const _entry={
         id:Date.now(),time:Date.now(),windowType,
         windowId:_wid,
+        // V6.4: explicit lock timestamp + window-open timestamp so we can analyze how long
+        //   Tara takes to lock under different conditions. secondsIntoWindow = lockedAt - windowOpenedAt.
+        lockedAt:Date.now(),
+        windowOpenedAt:windowOpenTimeRef.current||null,
+        secondsIntoWindow:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
         regime:analysis?.regime||'',
         dir:_committedCall,confidence:tc.confidence,
         posterior:analysis?.rawProbAbove,
@@ -10094,6 +10533,32 @@ function TaraApp(){
         isTapeLed:tc?._ctx?.isTapeLed||false,
         // V6.2.0: structural-led is a separate learning bucket
         isStructuralLed:tc?._ctx?.isStructuralLed||false,
+        // V6.3.3: log structural alignment + raw vs calibrated posterior for diagnostics
+        structAtLock:analysis?.structAlignment?{
+          dir:analysis.structAlignment.dir,
+          count:analysis.structAlignment.count,
+        }:null,
+        rawPosteriorAtLock:analysis?.rawProbAbove,
+        calibratedPosteriorAtLock:analysis?.posterior,
+        calSwingAtLock:analysis?.rawProbAbove!=null&&analysis?.posterior!=null?Math.round(analysis.posterior-analysis.rawProbAbove):null,
+        // V6.3.5: capture full signal scores + tape consensus at lock for analysis exports
+        signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
+        tapeAtLock:analysis?.tapeWindows?{
+          w15Buy:analysis.tapeWindows.w15?.buyPct,
+          w30Buy:analysis.tapeWindows.w30?.buyPct,
+          w60Buy:analysis.tapeWindows.w60?.buyPct,
+          w15Total:(analysis.tapeWindows.w15?.buys||0)+(analysis.tapeWindows.w15?.sells||0),
+          w30Total:(analysis.tapeWindows.w30?.buys||0)+(analysis.tapeWindows.w30?.sells||0),
+          w60Total:(analysis.tapeWindows.w60?.buys||0)+(analysis.tapeWindows.w60?.sells||0),
+        }:null,
+        atrBpsAtLock:analysis?.atrBps,
+        windowAmplitudeAtLock:analysis?.windowAmplitude?.label,
+        // V6.4: conviction asymmetry at lock
+        asymmetryAtLock:analysis?.convictionAsymmetry?{
+          score:analysis.convictionAsymmetry.score,
+          latestDir:analysis.convictionAsymmetry.latestDir,
+          priorDir:analysis.convictionAsymmetry.priorDir,
+        }:null,
         // V6.2.6: user force/hint metadata
         wasSoftHinted:_lcHintActive||false,
         isUserForced:_hardForceActive||false,
@@ -10105,8 +10570,9 @@ function TaraApp(){
         samples,needSamples,
         result:null, // populated at rollover scoring
       };
-      // V5.6.9: At-append dedup. Another device may have already committed this window
-      //   and replicated to cloud. Don't add a duplicate row from this device — just sync.
+      // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
+      //   exists (from a re-render, race condition, or another device replicating to cloud),
+      //   skip. WindowId+type is unique per window so this is the correct dedup key.
       setTaraCallLog(prev=>{
         if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType))return prev;
         return [...prev,_entry].slice(-500);
@@ -10636,7 +11102,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.3.2...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.4.0...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -10737,7 +11203,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.3.2
+              6.4.0
             </span>
           </div>
 
@@ -11330,7 +11796,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.3.2</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.4.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -11986,7 +12452,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.3.2 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.4.0 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -12142,10 +12608,154 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.3.2 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.4.0 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.4.0 — Four priorities + lock timestamp */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Asymmetry · Structure-Break · Regime · Pivot</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.04</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.4.0</span> — Seeing the Bigger Picture</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;push those four priorities now. calibrate Tara correctly and in the best possible way.&rdquo; All four shipped in one drop. Plus lock timestamp on every entry.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Conviction Asymmetry Detector</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Compares the strength of the most recent swing against the prior opposing swing. Strength = range × volume / sqrt(time). Returns &minus;100..+100 score.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Score &ge; 40 + latest swing opposes intended lock direction &rarr; SIT_OUT (exhaustion)</li>
+                  <li>Logged per snapshot as <code className="text-[10px] bg-[#0E100F] px-1">asymmetryAtLock</code> for analysis</li>
+                  <li>Surfaces &ldquo;this down move is stronger than the up move was&rdquo; mathematically</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Active Structure-Break Exit (advisor)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Post-lock advisor alert that fires before TARA REVERSED tier. When you have a manual position and asymmetry score &ge; 50 against it:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Loud red &ldquo;⚠ STRUCTURE BROKE &mdash; X TAKING OVER&rdquo; alert</li>
+                  <li>Action button: &ldquo;TAKE PROFIT &mdash; EXIT NOW&rdquo; if winning, &ldquo;CUT &mdash; STRUCTURE GONE&rdquo; if losing</li>
+                  <li>Real traders&rsquo; edge isn&rsquo;t predicting better &mdash; it&rsquo;s exiting fast when wrong. This is that signal.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · Regime Transition Detector</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Samples regime/ATR/range every 5 seconds. Computes transition state from last 60s of samples:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>flux</strong> &mdash; 3+ regime labels in 60s, conditions unstable &rarr; SIT_OUT</li>
+                  <li><strong>transitioning-to-range</strong> &mdash; ATR &amp; range contracting; trend dying &rarr; SIT_OUT unless conviction &ge; 25pt</li>
+                  <li><strong>transitioning-to-trend</strong> &mdash; ATR &amp; range expanding; informational</li>
+                  <li><strong>stable</strong> &mdash; sustained regime, no flag</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">4 · Multi-Signal Fast-Pivot</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Tracks sign-flips across tape, asymmetry, and FGT. When 3+ flips same direction land within 30s, that&rsquo;s outside-context info arriving inside the data &mdash; lifecycle sample requirement drops 50% (floor of 2 ticks). Lets Tara react fast to genuinely-changed conditions without forcing slow ramp-up.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">5 · Lock timestamp</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Per user request: every log entry now records <code className="text-[10px] bg-[#0E100F] px-1">lockedAt</code> (wall-clock at commit), <code className="text-[10px]">windowOpenedAt</code> (when window started), and <code className="text-[10px]">secondsIntoWindow</code> (lockedAt &minus; windowOpenedAt). Lets us analyze how long Tara takes to lock under different conditions.</p>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">Run this for 24-48 hours then export the call log. Real evidence-based tuning starts when we have data with all these new fields populated. V6.5 will be a calibration pass based on what the export shows, not more speculation.</p>
+              </section>
+
+              {/* V6.3.5 — Export + Kalshi-only scoring + diagnostic logging */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Export · Kalshi-Only Scoring · Diagnostics</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.04</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.3.5</span> — Real Data In, Real Analysis Out</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;build an in-app export button. Make sure tara saves and logs all needed info. Wins and losses recorded only when we pull the new strike from kalshi. Set strike from kalshi as soon as you can, until then blank, never use the old strike or round it off.&rdquo;</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Export button</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">In the Memory modal header (next to the X close button), new <code className="text-[10px] bg-[#0E100F] px-1">↓ Export JSON</code> button. One click downloads:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Full call log (every entry, every field)</li>
+                  <li>Summary stats (wins, losses, sit-outs, win rate)</li>
+                  <li>Version stamp + export timestamp</li>
+                  <li>File: <code className="text-[10px]">tara-call-log-2026-05-04T15-30-00.json</code></li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Kalshi-only scoring</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">15m W/L now only records when Kalshi delivers the new window&rsquo;s strike (= just-closed window&rsquo;s settlement price). Polls every 5s for up to 60s. If Kalshi never delivers, entry stays PENDING &mdash; no spot fallback (which caused the +17bps-LOSS bug).</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>5m windows: no Kalshi market exists, scored as SITOUT only</li>
+                  <li>Strikes use exact Kalshi value (e.g. $80,036.93), no rounding</li>
+                  <li>Sanity check: close must be within 20% of strike or refused</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">New diagnostic fields per lock</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Every snapshot + log entry now captures:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><code className="text-[10px]">structAtLock</code> &mdash; multi-TF structural alignment (dir + count out of 6)</li>
+                  <li><code className="text-[10px]">rawPosteriorAtLock</code> &mdash; signal output before calibration</li>
+                  <li><code className="text-[10px]">calSwingAtLock</code> &mdash; calibration adjustment in points</li>
+                  <li><code className="text-[10px]">signalScoresAtLock</code> &mdash; gap, momentum, structure, flow, technical, regime contributions</li>
+                  <li><code className="text-[10px]">tapeAtLock</code> &mdash; 15s/30s/60s buy% + dollar volumes</li>
+                  <li><code className="text-[10px]">atrBpsAtLock</code> &mdash; volatility at lock</li>
+                  <li><code className="text-[10px]">windowAmplitudeAtLock</code> &mdash; range regime label</li>
+                </ul>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">Workflow: run Tara for 24-48 hours → open Memory → Export JSON → paste in chat. I run real analysis on real outcomes. No more reasoning from screenshots and guesses.</p>
+              </section>
+
+              {/* V6.3.4 — Scoring fix + log dedup + cleanup */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Scoring Fix · Log Dedup · Cleanup</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.04</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.3.4</span> — Scoring Bugs Fixed</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User showed memory with two scoring bugs in one screenshot: 11:00&ndash;11:15 logged close $41,130 on $80,269 strike (corrupt data, BTC didn&rsquo;t drop to $41K), and 11:15&ndash;11:30 UP call with +17bps gap marked as LOSS (logical contradiction &mdash; UP wins when close &gt; strike).</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Fix 1 &mdash; Closing price source</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Old logic preferred Kalshi-derived close based on &ldquo;new-window strike = old-window close per settlement.&rdquo; Fragile because Kalshi strikes at round numbers, lists strikes ahead, and occasionally has stale data. Now defaults to rollover-instant SPOT price (always live, always accurate to the boundary). Kalshi only used as fallback if spot is missing AND its value is within 5% of spot snapshot.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Fix 2 &mdash; Sanity check</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Final closing price must be within 20% of strike. Beyond that, scoring is skipped entirely rather than logging corrupt data.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Fix 3 &mdash; WindowId-based resolution</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Result-write was using &ldquo;latest unresolved entry of same windowType&rdquo; heuristic. When prior bugs created multiple unresolved entries, the wrong one got filled. Now matches by exact windowId. Idempotency check prevents already-resolved entries from being overwritten.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Fix 4 &mdash; Auto-cleanup on load</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Existing corrupt entries get sanitized on first V6.3.4 load. Three checks per entry:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mt-1">
+                  <li>Closing price more than 20% from strike &rarr; drop</li>
+                  <li>UP call with WIN-direction outcome but marked LOSS &rarr; drop</li>
+                  <li>DOWN call with LOSS-direction outcome but marked WIN &rarr; drop</li>
+                  <li>Duplicate windowIds collapsed to single entry (resolved beats unresolved)</li>
+                </ul>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">Your scorecard will adjust on next load as bad entries get removed. The shown WIN/LOSS counts will reflect actual prediction performance, not data corruption.</p>
+              </section>
+
+              {/* V6.3.3 — Calibration cap + lock-time logging */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Calibration Cap + Diagnostic Logging</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.04</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.3.3</span> — Calibration Stops Overriding Signals</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged the 11:15 AM 15m loss. Engine log showed <code className="text-[10px] bg-[#0E100F] px-1">[CAL] Raw -35% → calibrated 1% (Δ36pts)</code> — calibration was flipping the underlying signal entirely. That&rsquo;s overfitting to small-sample bucket WR, not fine-tuning.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Fix 1 — Calibration cap at ±10pt</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The blend math <code className="text-[10px]">calVal × 0.7 + raw × 0.3</code> with calibration getting 70-85% weight allowed massive sign-flips. Now constrained:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>If blended &minus; raw &gt; +10 → return <code className="text-[10px]">raw + 10</code></li>
+                  <li>If raw &minus; blended &gt; +10 → return <code className="text-[10px]">raw &minus; 10</code></li>
+                  <li>Otherwise → return blended (small-tuning case, no cap needed)</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Calibration can still nudge, but cannot flip raw signals from DOWN to UP or vice versa.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Fix 2 — Log structural + calibration state at every lock</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Three new fields on every snapshot + log entry:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><code className="text-[10px]">structAtLock</code> &mdash; multi-TF alignment direction + count (0&ndash;6)</li>
+                  <li><code className="text-[10px]">rawPosteriorAtLock</code> &mdash; signal output before calibration</li>
+                  <li><code className="text-[10px]">calSwingAtLock</code> &mdash; how many points calibration moved the signal</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Future loss diagnostics show whether structural agreed when she locked + whether calibration distorted the signal heavily. No more guessing in retrospective debugging.</p>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">Both fixes are about the model trusting its own signals appropriately. The signals can still be wrong; calibration shouldn&rsquo;t be allowed to flip them when it&rsquo;s wrong.</p>
+              </section>
 
               {/* V6.3.2 — Tape quality badge */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
