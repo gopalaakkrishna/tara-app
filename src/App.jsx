@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.04-v6.5.4-manual-result-override';
+const BASELINE_VERSION='2026.05.04-v6.5.5-speed-dial-failed-pressure';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -3866,7 +3866,7 @@ function TaraAdvisorPanel({advisor,executeAction}){
 // V5.6.1: Tara's Call card extracted into reusable component so it can render in both
 //   the desktop projections column (hidden md:block) and the mobile signal section
 //   (md:hidden). Same logic, same display, two mount points.
-function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry}){
+function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial}){
   if(!taraCall)return null;
     const tc=taraCall;
     const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
@@ -4285,6 +4285,40 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               Hidden after commit or sit-out — at that point the call is locked one-way and these
               would do nothing useful. Primary button (gold) lowers floors temporarily; secondary
               text-button bypasses all gates with a confirmation dialog. */}
+        {/* V6.5.5: Speed dial — user-tunable 0-100 slider for lock cadence vs confidence. */}
+        {!isCommittedSnap&&typeof setSpeedDial==='function'&&(()=>{
+          const _d=Math.max(0,Math.min(100,speedDial||50));
+          const _label=_d<=20?'⚡ FAST':_d<=40?'fast':_d<=60?'balanced':_d<=80?'patient':'🛡 PATIENT';
+          const _color=_d<=30?'rgb(244,114,182)':_d<=70?T2_GOLD:'rgb(110,231,183)';
+          return(
+            <div className="border-t border-[#E8E9E4]/8 pt-2.5 mt-2.5">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/45 font-bold">Speed vs Confidence</span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="tabular-nums text-[10px] font-bold" style={{color:_color}}>{_d}</span>
+                  <span className="text-[9px] uppercase tracking-wider" style={{color:_color,opacity:0.85}}>{_label}</span>
+                </div>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={_d}
+                onChange={(e)=>setSpeedDial(parseInt(e.target.value,10))}
+                className="w-full"
+                style={{accentColor:_color,height:6}}
+              />
+              <div className="flex items-center justify-between gap-2 mt-1">
+                <span className="text-[9px] text-[#E8E9E4]/35 tabular-nums">0 · faster</span>
+                <span className="text-[9px] text-[#E8E9E4]/35 tabular-nums">100 · patient</span>
+              </div>
+              <span className="text-[9px] text-[#E8E9E4]/35 italic block mt-1 leading-snug">
+                {_d<=30?'Lock fast on weaker confluence — more action, lower WR':_d<=70?'Default cadence — balanced speed and confidence':'Wait for high-confidence setups — fewer locks, higher WR'}
+              </span>
+            </div>
+          );
+        })()}
         {!isCommittedSnap&&(onSoftHint||onHardForce)&&(
           <div className="border-t border-[#E8E9E4]/8 pt-2.5 mt-2.5 flex flex-col gap-1.5">
             <div className="flex items-center justify-between gap-2">
@@ -4951,7 +4985,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry}){
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -4969,7 +5003,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
           V6.2.3: hidden lg:block (was md:block). */}
-      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onEditEntry={onEditEntry} className="hidden lg:block"/>
+      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} className="hidden lg:block"/>
 
       <div className="flex items-center justify-between mb-3 shrink-0">
         <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
@@ -6637,7 +6671,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.5.4</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.5.5</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6780,6 +6814,14 @@ function TaraApp(){
   const[kalshiDebug,setKalshiDebug]=useState({ok:null,reason:'not yet polled',totalMarkets:0,matchingClose:0,bestStrike:null,sampleFields:[]});
   // streakData moved below tradeLog declaration
   const[useLocalTime,setUseLocalTime]=useState(true);
+  // V6.5.5: SPEED DIAL — 0-100, 50 default. Lower = lock faster (fewer samples,
+  //   shorter search phase, lower thresholds). Higher = more patient (more samples,
+  //   higher confidence). Maps to a multiplier applied to sample requirements,
+  //   search-phase duration, and conviction floor in the engine.
+  const[speedDial,setSpeedDial]=useState(()=>{
+    try{const v=parseInt(localStorage.getItem('tara_speed_dial')||'50',10);return Number.isFinite(v)?Math.max(0,Math.min(100,v)):50;}catch(e){return 50;}
+  });
+  useEffect(()=>{try{localStorage.setItem('tara_speed_dial',String(speedDial));}catch(e){}},[speedDial]);
   // V138: Premium Mode removed entirely. The asymmetric blocks it carried (US session skip,
   //       weak RC skip, SS/HVC DOWN block, MTF Confluence cross-window veto) were over-filtering.
   //       Score math is now the only directional bias.
@@ -7156,6 +7198,9 @@ function TaraApp(){
   });
   const taraLearningsRef=useRef(taraLearnings);
   taraLearningsRef.current=taraLearnings;
+  // V6.5.5: ref so the engine can read speed dial without re-threading props
+  const speedDialRef=useRef(speedDial);
+  speedDialRef.current=speedDial;
   const _learningsHydratedRef=useRef(false);
   useEffect(()=>{
     try{localStorage.setItem('taraLearnings_v1',JSON.stringify(taraLearnings));}catch(e){}
@@ -7358,7 +7403,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.5.4 online — Manual override on memory entries. Click the small pencil ✎ next to any result badge in the Memory modal to override WIN / LOSS / SITOUT. Useful when scoring missed something: I had a screenshot earlier where 14:00–14:15 was a real WIN but logged as SITOUT due to a snapshot race. Now you can fix it directly in the UI without exporting / editing JSON. Edited entries are flagged with a small ✎ marker and persist across devices via cloud sync. Performance stats and learnings auto-update from the corrected outcome.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.5.5 online — Speed dial + failed-pressure detector + scan broadcasts disabled. (1) New SPEED DIAL slider 0-100 in the Tara Call panel. Default 50 is current behavior. Slide left for faster locks (fewer samples, lower thresholds, shorter search phase). Slide right for patient mode (more confidence required). (2) HARD FORCE is now a true instant lock — pressed = commits NOW with any directional lean, bypassing all gates. No more sample-waiting. (3) FLASH tier — when super-confluent setup forms in the first 15s with dial<=50, lock at 1 sample. (4) SIGNAL A — failed-pressure detector. When a whale BUY streak fires but price does not follow through (the pattern from the recent dump screenshots — 6x BUY in 44s with no breakout), I block UP locks. Symmetric for SELL exhaustion. Distribution-on-strength is no longer mistaken for buy pressure. (5) Scan broadcasts to Discord disabled entirely — only meaningful events (SIGNAL, LOCK, SITOUT, RESULT, EXIT) post.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7646,7 +7691,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.5.4'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.5.5'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -7883,7 +7928,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.4  |  signal'},
+        footer:{text:'Tara 6.5.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7897,7 +7942,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.5.4  |  stand-down'},
+        footer:{text:'Tara 6.5.5  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7911,7 +7956,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.5.4  |  search'},
+        footer:{text:'Tara 6.5.5  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7928,7 +7973,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.5.4  |  lock'},
+        footer:{text:'Tara 6.5.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7945,7 +7990,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.5.4  |  close'},
+          footer:{text:'Tara 6.5.5  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7966,7 +8011,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.5.4  |  exit'},
+        footer:{text:'Tara 6.5.5  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7987,7 +8032,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.4  |  scanning'},
+        footer:{text:'Tara 6.5.5  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8007,7 +8052,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.4  |  signal'},
+        footer:{text:'Tara 6.5.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8027,7 +8072,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.4  |  lock'},
+        footer:{text:'Tara 6.5.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8044,7 +8089,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.4  |  sit-out'},
+        footer:{text:'Tara 6.5.5  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8066,7 +8111,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.5.4  |  result'},
+          footer:{text:'Tara 6.5.5  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8103,12 +8148,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.5.4  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.5.5  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.5.4',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.5.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -8127,7 +8172,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.5.4 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.5.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -9832,6 +9877,67 @@ function TaraApp(){
     return{active:false,dir:null,count:0};
   };
 
+  // V6.5.5 SIGNAL A: FAILED-PRESSURE DETECTOR. Catches the "whale streak buys but price
+  //   stalls/dumps" pattern. From user screenshots: 6x whale BUY in 44s, $866K total,
+  //   tape STRONG, conviction 81/100 — but price was ALREADY at the local high. Buyers
+  //   were getting absorbed by larger sellers. Classic distribution-on-strength.
+  // Returns {active, dir, why} where dir is the COUNTER-TREND signal (BUY exhaustion → SHORT).
+  const computeFailedPressure=()=>{
+    const _whales=Array.isArray(whaleLog)?whaleLog:[];
+    const _now=Date.now();
+    const _streakWindowMs=60000; // last 60s
+    const _recentWhales=_whales.filter(w=>w&&w.time&&(_now-w.time)<=_streakWindowMs);
+    if(_recentWhales.length<3)return{active:false,dir:null,why:''};
+    // Count buy vs sell whales in window
+    const _buys=_recentWhales.filter(w=>w.side==='B'||w.side==='BUY'||w.t==='B');
+    const _sells=_recentWhales.filter(w=>w.side==='S'||w.side==='SELL'||w.t==='S');
+    let streakSide=null;
+    if(_buys.length>=3&&_buys.length>=_sells.length*2)streakSide='BUY';
+    else if(_sells.length>=3&&_sells.length>=_buys.length*2)streakSide='SELL';
+    if(!streakSide)return{active:false,dir:null,why:''};
+    // Compute total dollar size of streak
+    const _streakWhales=streakSide==='BUY'?_buys:_sells;
+    const _streakUSD=_streakWhales.reduce((s,w)=>s+(w.usd||w.size*w.p||0),0);
+    if(_streakUSD<300000)return{active:false,dir:null,why:''};
+    // Get the high/low of the period when the streak fired
+    const _streakStart=Math.min(..._streakWhales.map(w=>w.time));
+    const _windowAge=_now-_streakStart;
+    // Look at price action since streak started — did it follow through?
+    const _ticks=tickHistoryRef.current||[];
+    const _streakTicks=_ticks.filter(t=>t&&t.time&&t.time>=_streakStart);
+    if(_streakTicks.length<5)return{active:false,dir:null,why:''};
+    const _firstP=_streakTicks[0].p;
+    const _lastP=_streakTicks[_streakTicks.length-1].p;
+    const _highP=Math.max(..._streakTicks.map(t=>t.p));
+    const _lowP=Math.min(..._streakTicks.map(t=>t.p));
+    const _moveBps=((_lastP-_firstP)/_firstP)*10000;
+    // Failed buy: streak was BUY but price flat/down OR has retraced from high
+    if(streakSide==='BUY'){
+      const _retraceFromHigh=((_highP-_lastP)/_highP)*10000;
+      // Buy pressure failed: price moved <10bps up OR has retraced ≥8bps from streak high
+      const _failed=_moveBps<10||_retraceFromHigh>=8;
+      if(_failed){
+        const _whyBits=[`${_streakWhales.length}× BUY whales · $${(_streakUSD/1000).toFixed(0)}K`];
+        if(_moveBps<5)_whyBits.push(`price flat (${_moveBps.toFixed(0)}bps)`);
+        else if(_moveBps<10)_whyBits.push(`weak follow-through (${_moveBps.toFixed(0)}bps)`);
+        if(_retraceFromHigh>=8)_whyBits.push(`already retraced ${_retraceFromHigh.toFixed(0)}bps from high`);
+        return{active:true,dir:'DOWN',why:_whyBits.join(' · '),streakSide:'BUY'};
+      }
+    } else if(streakSide==='SELL'){
+      const _bounceFromLow=((_lastP-_lowP)/_lowP)*10000;
+      const _failed=_moveBps>-10||_bounceFromLow>=8;
+      if(_failed){
+        const _whyBits=[`${_streakWhales.length}× SELL whales · $${(_streakUSD/1000).toFixed(0)}K`];
+        if(_moveBps>-5)_whyBits.push(`price flat (${_moveBps.toFixed(0)}bps)`);
+        else if(_moveBps>-10)_whyBits.push(`weak follow-through (${_moveBps.toFixed(0)}bps)`);
+        if(_bounceFromLow>=8)_whyBits.push(`already bounced ${_bounceFromLow.toFixed(0)}bps from low`);
+        return{active:true,dir:'UP',why:_whyBits.join(' · '),streakSide:'SELL'};
+      }
+    }
+    return{active:false,dir:null,why:''};
+  };
+  const failedPressureRef=useRef({active:false,dir:null,why:''});
+
   // V6.4: REGIME TRANSITION DETECTOR. Reads regimeHistoryRef (sampled every 5s) and
   //   computes whether the regime is stable or actively transitioning. Returns one of:
   //     - 'stable': last 6 samples (30s) all same regime, ATR change <30%
@@ -9937,8 +10043,13 @@ function TaraApp(){
     // V6.5: Reduced from 20s → 10s. Faster cadence target: lock within 1-2 minutes for
     //   strong signals. 10s is enough to filter Kalshi initial-price snap noise without
     //   forcing slow ramp-up on clear setups.
-    if(_elapsed<10){
-      return{call:'SIT_OUT',reason:`Searching for direction (${10-_elapsed}s of observation remaining)`,confidence:0,direction:dir,conviction,phase:'SEARCH'};
+    // V6.5.5: Search phase scales with speed dial. dial=0 → 3s, dial=50 → 10s, dial=100 → 20s.
+    //   Always at least 3s — Tara needs minimum baseline observation.
+    const _dialSearch=Math.max(0,Math.min(100,speedDialRef.current||50));
+    const _searchMultS=_dialSearch<=50?(0.3+(_dialSearch/50)*0.7):(1.0+((_dialSearch-50)/50)*1.0);
+    const _searchPhase=Math.max(3,Math.round(10*_searchMultS));
+    if(_elapsed<_searchPhase){
+      return{call:'SIT_OUT',reason:`Searching for direction (${_searchPhase-_elapsed}s of observation remaining)`,confidence:0,direction:dir,conviction,phase:'SEARCH'};
     }
     // V5.6.4: HARD floors — no time-decay shenanigans. If conviction is below this, sit out
     //   no matter how late in the window. Coin-flip detection.
@@ -9947,15 +10058,22 @@ function TaraApp(){
     //   Active learning lives in lifecycle (samples) and confidence (display), not here.
     const _learn=taraLearningsRef.current;
     const _safety=Math.max(0,Math.min(8,_learn?.multipliers?.regimeFloorSafety?.[analysis.regime]||0));
+    // V6.5.5: SPEED DIAL — user-controlled 0-100 slider. dial=50 is the V6.5.4 default.
+    //   Below 50 = faster locks, fewer samples, lower thresholds, shorter search phase.
+    //   Above 50 = patient mode, more samples, higher confidence requirement.
+    //   Piecewise linear: dial 0→0.3x, dial 50→1.0x, dial 100→2.0x.
+    const _dial=Math.max(0,Math.min(100,speedDialRef.current||50));
+    const _speedMult=_dial<=50?(0.3+(_dial/50)*0.7):(1.0+((_dial-50)/50)*1.0);
     // V6.2.6: SOFT HINT MODE — user pressed "Hint to Lock Faster" recently. Lower floors
     //   for 10 seconds. Tape-opposes, Kalshi-extreme, and edge-guard remain enforced.
     const _softHintActive=softHintRef.current>0&&(Date.now()-softHintRef.current)<10000;
-    const Q_FLOOR=_softHintActive?20:(30+_safety);
-    // V6.5.1: CONV_FLOOR 10 → 5. User wants Tara to lock from 55% conviction when she
-    //   believes the setup is good. Other gates (q-floor, FGT, tape, Kalshi-extreme,
-    //   edge-guard) still filter low-quality calls. This just removes the "min 60%
-    //   confidence" hard gate so 55% setups can pass through.
-    const CONV_FLOOR=_softHintActive?3:(5+_safety);
+    // V6.5.5: at dial<30, q-floor also drops below soft-hint level (down to 12 at dial=0).
+    //   At dial>70, q-floor rises above default (up to 45 at dial=100).
+    const _qBase=_softHintActive?20:(30+_safety);
+    const Q_FLOOR=Math.max(10,Math.round(_qBase*_speedMult));
+    // V6.5.1: CONV_FLOOR 10 → 5. V6.5.5: also dial-aware. dial=0 → 1, dial=50 → 5, dial=100 → 10.
+    const _convBase=_softHintActive?3:(5+_safety);
+    const CONV_FLOOR=Math.max(1,Math.round(_convBase*_speedMult));
     // Tape consensus (multi-window 15s/30s/60s buy%)
     const _tape15=tapeWindows?.w15?.buyPct??50;
     const _tape30=tapeWindows?.w30?.buyPct??50;
@@ -10138,6 +10256,21 @@ function TaraApp(){
     const _fgtAgreesDir=(analysis.mtfAlignment>0&&dir==='UP')||(analysis.mtfAlignment<0&&dir==='DOWN');
     if(_isShortSqueeze&&dir==='UP'&&(!_fgtAgreesDir||_fgtMag<1.5)&&(isStructuralLed||isTapeLed)){
       return{call:'SIT_OUT',reason:`${_dirLead} — SHORT SQUEEZE without FGT confirmation (FGT ${_fgtMag.toFixed(1)}/4) — squeeze likely exhausting`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    // V6.5.5 SIGNAL A: FAILED-PRESSURE GATE. From user's missed-dump screenshots — whale
+    //   streak fires (6× BUY in 44s, $866K) + tape says STRONG BUY + conviction 81/100,
+    //   but the price didn't follow through. Big buyers were getting absorbed by larger
+    //   sellers at a local high. Distribution-on-strength.
+    //   When dir matches the failed-pressure side (Tara wants UP after BUY exhaustion, or
+    //   DOWN after SELL exhaustion), sit out — the apparent flow is exhausted.
+    const _failedP=computeFailedPressure();
+    failedPressureRef.current=_failedP;
+    if(_failedP.active){
+      // Block when Tara's lean matches the EXHAUSTED side (UP after failed-buy, DOWN after failed-sell)
+      const _exhaustedSideMatchesDir=(_failedP.streakSide==='BUY'&&dir==='UP')||(_failedP.streakSide==='SELL'&&dir==='DOWN');
+      if(_exhaustedSideMatchesDir){
+        return{call:'SIT_OUT',reason:`${_dirLead} — ${_failedP.streakSide} pressure exhausting · ${_failedP.why}`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+      }
     }
     // V5.7.7 Gate 2.6: Kalshi extreme-disagreement gate. When market is ≥90% certain the
     //   other way, we need BOTH tape alignment AND pattern alignment to commit. Otherwise sit.
@@ -10670,10 +10803,27 @@ function TaraApp(){
     }
     // V6.2.6: Hard force — commit immediately, bypass sample requirement entirely
     const _hardForceActive=hardForceRef.current>0&&(Date.now()-hardForceRef.current)<5000;
+    // V6.5.5: SPEED DIAL applied here. Same multiplier as floor logic above.
+    const _dialLc=Math.max(0,Math.min(100,speedDialRef.current||50));
+    const _speedMultLc=_dialLc<=50?(0.3+(_dialLc/50)*0.7):(1.0+((_dialLc-50)/50)*1.0);
+    needSamples=Math.max(1,Math.round(needSamples*_speedMultLc));
+    // V6.5.5: FLASH tier — when super-confluent setup forms in first 10s with strong tape,
+    //   and user has dial <=50 (speed-favored), drop to 1 sample. The "lock the second I see
+    //   the move" mode. Only triggers in clear-confluence windows; mixed setups still ramp.
+    const _flashEligible=isSuperConfluent&&_dialLc<=50&&samples>=1&&elapsedSec<=15&&(qFastNow>=45||qSlowNow>=45);
+    if(_flashEligible){
+      needSamples=1;
+      tierLabel='flash';
+    }
     // Cap so lock has time to be scored after committing
     needSamples=Math.min(needSamples,Math.max(15,remaining-90));
     if(taraCallSnapshotRef.current!==null)return; // already committed — don't overwrite
-    if(samples>=needSamples||analysis?.isSystemLocked||_hardForceActive){
+    // V6.5.5: Hard-force is now a TRUE instant lock. If pressed AND we have any directional
+    //   lean (claimed or tc.call), commit RIGHT NOW with whatever data we have. Bypasses
+    //   sample requirement, q-floor, conv-floor, edge-guard, kalshi-window — everything
+    //   except the basic dir-must-exist check. User explicitly accepted the risk by pressing.
+    const _instantForceReady=_hardForceActive&&(claimedDir==='UP'||claimedDir==='DOWN'||tc.call==='UP'||tc.call==='DOWN');
+    if(samples>=needSamples||analysis?.isSystemLocked||_instantForceReady){
       // V5.5d: Snapshot uses CLAIMED direction (the first formed direction this window),
       //   not current tc.call. If tc.call has flipped temporarily, we still commit to
       //   the original direction Tara was building toward.
@@ -10966,18 +11116,11 @@ function TaraApp(){
       strike:targetMargin,
       price:currentPrice,
     };
-    // V6.5.2: SCAN broadcasts only when no directional signal has formed yet.
-    //   Per user: "scanning is to be only when we cant find a signal after a few seconds".
-    //   If tc.call is already UP or DOWN at the 30s mark, skip SCAN entirely — the SIGNAL
-    //   broadcast will fire on the next tick instead. Mark sentScan=true so we don't
-    //   re-attempt later in the same window. SCAN now means literally "I haven't found
-    //   a direction yet" — informational only when there's nothing else to share.
-    if(!taraBroadcastRef.current.sentScan&&elapsed>=30&&elapsed<=60){
-      const _hasDirection=tc.call==='UP'||tc.call==='DOWN';
+    // V6.5.5: SCAN broadcasts disabled entirely. Per user request — no scanning messages
+    //   to Discord. Only meaningful events (SIGNAL, LOCK, SITOUT, RESULT, EXIT) broadcast.
+    //   Flag still set to short-circuit any code that might check it later.
+    if(!taraBroadcastRef.current.sentScan&&elapsed>=30){
       taraBroadcastRef.current.sentScan=true;
-      if(!_hasDirection){
-        broadcastToDiscord('TARA_SCAN',{...baseData,summary:`Posterior ${(analysis.rawProbAbove||50).toFixed(0)} · ${analysis.regime} · scanning`});
-      }
     }
     // SIGNAL: V5.5d — fires exactly ONCE per window. User: '1 of each message type'.
     //   Old logic let SIGNAL fire again on direction flip — that's now disabled.
@@ -11391,7 +11534,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.5.4...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.5.5...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -11949,13 +12092,13 @@ function TaraApp(){
 
             {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab.
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
-            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
+            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
 
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab}/>
@@ -12085,7 +12228,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.5.4</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.5.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -12741,7 +12884,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.5.4 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.5.5 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -12897,10 +13040,49 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.5.4 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.5.5 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.5.5 — Speed dial + Signal A + scan broadcasts off */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Speed Dial · Failed Pressure · Quiet Discord</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.04</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.5.5</span> — Faster When You Want It, Smarter About Exhaustion</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;Tara&rsquo;s flow tape and whale alert missed that dump for me&hellip; Tara&rsquo;s calls are good during predictable markets. but she takes too long. even click on hint to lock faster doesn&rsquo;t do anything. by that time the market is already or mostly decided.&rdquo;</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Speed dial 0-100</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">New slider in the Tara Call panel. Default 50 = V6.5.4 behavior unchanged. Slide left for speed, right for patience. Persists in localStorage.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>dial 0:</strong> 0.3× sample requirement, 3s search phase, q-floor 10, conv-floor 1 — aggressive</li>
+                  <li><strong>dial 50:</strong> 1.0× (current default)</li>
+                  <li><strong>dial 100:</strong> 2.0× sample requirement, 20s search phase, q-floor 60, conv-floor 10 — patient</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Piecewise linear scaling applied to: needSamples, search phase duration, Q_FLOOR, CONV_FLOOR.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Hard-force is now true instant lock</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Override gates button now commits the moment any directional lean exists (claimed or current). No more sample-waiting after press. Bypasses Q-floor, CONV-floor, edge-guard, kalshi-window, tape-opposes &mdash; everything except &ldquo;does a direction exist.&rdquo; The user explicitly accepted the risk by pressing.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · FLASH tier — 1-sample lock</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">When super-confluent setup forms within the first 15s of a window AND speed dial is &le;50 AND quality &ge;45 &mdash; lock at 1 sample. Catches the &ldquo;huge gap up at window open + everything aligns&rdquo; setups that previously took 5-10s to ramp.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">4 · SIGNAL A — failed-pressure detector</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">From the user&rsquo;s missed-dump screenshots: 6× whale BUY in 44s, $866K total, tape STRONG (72.7% buy), conviction 81/100 &mdash; but the price was already at the local high. Buyers were getting absorbed by larger sellers. Distribution-on-strength.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">New <code className="text-[10px] bg-[#0E100F] px-1">computeFailedPressure()</code> helper detects this pattern:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Whale streak (&ge;3 same-side prints in 60s, &ge;$300K total)</li>
+                  <li>Price during streak: flat (&lt;10bps follow-through) OR retraced &ge;8bps from streak high/low</li>
+                  <li>If detected and Tara&rsquo;s lean matches the EXHAUSTED side &rarr; SIT_OUT</li>
+                  <li>Symmetric for buy and sell exhaustion</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Should catch the exact pattern from the screenshot &mdash; UP lock at 81% conviction blocked when buy whales fail to lift price.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">5 · TARA_SCAN broadcasts disabled</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Per user request. Only meaningful events (SIGNAL, LOCK, SITOUT, RESULT, EXIT) post to Discord. SCAN was redundant noise.</p>
+              </section>
 
               {/* V6.5.4 — Manual override on memory entries */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
