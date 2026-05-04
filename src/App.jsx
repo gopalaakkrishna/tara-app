@@ -277,7 +277,15 @@ const BASELINE_RECORD={'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}};
 const SEED_TRADES=[];
 
 const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
-const saveTradeLog=(log)=>{}; // V5.5b: stubbed — user trades no longer persist per user request
+// V6.2.3: Re-enabled per user request: "every time i enter through the normal predictor
+//   let those wins and losses save to local browser." Cap at 1000 most recent entries
+//   to prevent localStorage bloat. Failures are silent (storage full, private mode, etc).
+const saveTradeLog=(log)=>{
+  try{
+    const capped=Array.isArray(log)?log.slice(-1000):[];
+    localStorage.setItem('taraTradeLogV110',JSON.stringify(capped));
+  }catch(e){/* localStorage unavailable or full — silent fail */}
+};
 // V134: Reset just the directional/learning state, keep trade history + scorecard
   // Use this when you want Tara to give UP/DOWN equal consideration without losing your wins/losses record
   const resetDirectionalBias=()=>{
@@ -4400,7 +4408,7 @@ function TaraMemoryModal({taraCallLog,onClose}){
       React.createElement('div',{className:'flex items-center justify-between mb-5'},
         React.createElement('div',null,
           React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-[0.18em]',style:{color:T2_GOLD}},'TARA · MEMORY'),
-          React.createElement('h2',{className:'font-serif text-3xl text-white tracking-tight'},'Every call, ',React.createElement('span',{style:{color:T2_GOLD}},'·'),' her record'),
+          React.createElement('h2',{className:'font-serif text-3xl text-white tracking-tight'},'Every call ',React.createElement('span',{style:{color:T2_GOLD}},'·'),' her record'),
         ),
         React.createElement('button',{onClick:onClose,className:'p-2 rounded-lg hover:bg-[#E8E9E4]/5 text-[#E8E9E4]/60 hover:text-white transition-colors text-xl'},'✕'),
       ),
@@ -4492,11 +4500,12 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
   const tabs=[{id:'5m',label:'5 MIN'},{id:'15m',label:'15 MIN'},{id:'1h',label:'1 HOUR'}];
 
   return(
-    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative '+(mobileTab!=='projections'?'hidden md:flex':'')}>
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative '+(mobileTab!=='projections'?'hidden lg:flex':'')}>
       <T2Stamp code="PROJ · 042"/>
 
-      {/* V4.2: TARA'S CALL — primary panel, top of column. */}
-      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} className="hidden md:block"/>
+      {/* V4.2: TARA'S CALL — primary panel, top of column.
+          V6.2.3: hidden lg:block (was md:block). */}
+      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} className="hidden lg:block"/>
 
       <div className="flex items-center justify-between mb-3 shrink-0">
         <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
@@ -5545,7 +5554,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
   const ls=bloomberg?.longShortRatio||1;
 
   return(
-    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col gap-3 md:col-span-2 lg:col-span-1 relative '+(mobileTab!=='logs'?'hidden md:flex':'')}>
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col gap-3 relative '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
       <T2Stamp code="SCR · 008"/>
       {/* V146.1 Fix B: Score Breakdown — per-signal contribution to current posterior */}
       <div className="shrink-0">
@@ -5737,7 +5746,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
 // ── V111: ChartBottomCard - TradingView at bottom, full width ──
 function ChartBottomCard({mobileTab,resolution,setResolution}){
   return(
-    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden md:flex':'')}>
+    <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
       <div className="flex justify-between items-center mb-2 shrink-0">
         <span className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold'}>Live Chart</span>
         <div className="flex gap-1">
@@ -6095,7 +6104,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.2.1</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.2.3</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6693,7 +6702,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.2.1 online — MULTI-TF STRUCTURAL ALIGNMENT. You said you switch between 1m/5m/15m on TradingView and only call when indicators agree across timeframes. V6.2.0 only computed on 5m. Now I compute Future Trend Channel + Future Grand Trend on ALL THREE timeframes (6 readings total) and structural-led only fires when ≥4 of 6 agree with the lock direction. Score Breakdown shows per-TF arrows so you can see alignment at a glance — same as switching tabs on TradingView. Engine log shows the exact alignment count (e.g. "5/6 align DOWN").'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.2.3 online — Three small fixes. (1) Predictor wins/losses now save to your local browser again — the user-trade log was disabled in V5.5b but you wanted it back. Capped at 1000 entries. (2) Layout responsive fix: dashboard now goes 1-column → 3-column at lg breakpoint cleanly, no more orphan card on tablet widths. (3) Memory modal header typo: "Every call, · her record" → "Every call · her record".'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6981,7 +6990,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.2.1'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.2.3'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -7154,7 +7163,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.1  |  signal'},
+        footer:{text:'Tara 6.2.3  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7168,7 +7177,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.2.1  |  stand-down'},
+        footer:{text:'Tara 6.2.3  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7182,7 +7191,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.2.1  |  search'},
+        footer:{text:'Tara 6.2.3  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7199,7 +7208,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.2.1  |  lock'},
+        footer:{text:'Tara 6.2.3  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7216,7 +7225,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.2.1  |  close'},
+          footer:{text:'Tara 6.2.3  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7237,7 +7246,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.2.1  |  exit'},
+        footer:{text:'Tara 6.2.3  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7258,7 +7267,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.1  |  scanning'},
+        footer:{text:'Tara 6.2.3  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7278,7 +7287,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.1  |  signal'},
+        footer:{text:'Tara 6.2.3  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7298,7 +7307,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.1  |  lock'},
+        footer:{text:'Tara 6.2.3  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7315,7 +7324,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.1  |  sit-out'},
+        footer:{text:'Tara 6.2.3  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7337,7 +7346,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.2.1  |  result'},
+          footer:{text:'Tara 6.2.3  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7374,12 +7383,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.2.1  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.2.3  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.2.1',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.2.3',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -7398,7 +7407,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.2.1 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.2.3 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -9155,8 +9164,17 @@ function TaraApp(){
     if(tapeSuperOpposes){
       return{call:'SIT_OUT',reason:`${_dirLead} — tape ${(dir==='UP'?(100-tapeBuyPct):tapeBuyPct).toFixed(0)}% opposite, fighting flow`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
+    // V6.2.2: When Kalshi is ALREADY extreme (≥85% in our direction), it cannot rescue
+    //   tape opposition. Real-world failure: tape was 78% sell, Tara locked UP because
+    //   Kalshi at 90% "strongly agrees" — but Kalshi at 90% means zero edge (LATE ENTRY,
+    //   -9pt). Correct behavior is sit out: the market has already priced in everything,
+    //   we can't profitably fade tape just because we agree with the priced-in side.
+    const _kalshiAlreadyExtreme=kalshiAvail&&((dir==='UP'&&_kPct>=85)||(dir==='DOWN'&&_kPct<=15));
     if(tapeOpposes&&!kalshiStronglyAgrees){
       return{call:'SIT_OUT',reason:`${_dirLead} — tape ${(dir==='UP'?(100-tapeBuyPct):tapeBuyPct).toFixed(0)}% opposite, no Kalshi rescue`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
+    if(tapeOpposes&&_kalshiAlreadyExtreme){
+      return{call:'SIT_OUT',reason:`${_dirLead} — tape opposes & Kalshi ${_kPct}% means no edge (late entry)`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // V5.7.7 Gate 2.6: Kalshi extreme-disagreement gate. When market is ≥90% certain the
     //   other way, we need BOTH tape alignment AND pattern alignment to commit. Otherwise sit.
@@ -9590,10 +9608,41 @@ function TaraApp(){
       //   not current tc.call. If tc.call has flipped temporarily, we still commit to
       //   the original direction Tara was building toward.
       const _committedCall=claimedDir||tc.call;  // claimed wins; tc.call as fallback for safety
-      const _committedReason=ref.dir===tc.call?tc.reason:`Locked ${_committedCall} — original lean held through flip`;
       // V5.6.7: Compute current session for learning context
       const _sessionInfo=typeof getMarketSessions==='function'?getMarketSessions():null;
       const _session=_sessionInfo?.dominant||analysis?.session?.name||'UNKNOWN';
+      // V6.2.2: EDGE GUARD — final pre-commit check. Compute what edge vs Kalshi would
+      //   look like at this moment. If Kalshi has already priced the move (edge ≤-7pt),
+      //   skip the commit and snapshot a SIT_OUT instead. Capturing the LATE ENTRY case:
+      //   user's screenshot showed Tara locking UP at posterior 81% while Kalshi was 90%
+      //   = -9pt edge. Even though Tara was "right" about direction, no edge = no money.
+      const _kAtCommit=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
+      const _postAtCommit=analysis?.rawProbAbove;
+      if(_kAtCommit!=null&&_postAtCommit!=null){
+        const _taraDirConf=_committedCall==='UP'?_postAtCommit:(100-_postAtCommit);
+        const _kalshiDirConf=_committedCall==='UP'?_kAtCommit:(100-_kAtCommit);
+        const _edgeAtCommit=_taraDirConf-_kalshiDirConf;
+        if(_edgeAtCommit<=-7){
+          taraCallSnapshotRef.current={
+            call:'SIT_OUT',direction:null,confidence:0,
+            reason:`Edge would be ${Math.round(_edgeAtCommit)}pt — Kalshi at ${Math.round(_kalshiDirConf)}% is already pricing this in`,
+            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+            atPosterior:_postAtCommit,
+            kalshiAtLock:_kAtCommit,
+            locked:false,earlyLock:false,
+            isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+            samples,needSamples:0,
+            tier:'edge-sitout',
+            session:_session,
+            regime:analysis?.regime||'',
+            qScore:Math.round(qualityGate?.score||0),
+            fgt:analysis?.mtfAlignment,
+          };
+          _persistLock();
+          return;
+        }
+      }
+      const _committedReason=ref.dir===tc.call?tc.reason:`Locked ${_committedCall} — original lean held through flip`;
       taraCallSnapshotRef.current={
         call:_committedCall,direction:_committedCall,confidence:tc.confidence,reason:_committedReason,
         atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
@@ -10196,7 +10245,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.2.1...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.2.3...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -10297,7 +10346,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.2.1
+              6.2.3
             </span>
           </div>
 
@@ -10601,11 +10650,14 @@ function TaraApp(){
         {/* V2.1: Grid changed from equal 3-col to 1.25fr/1fr/1fr at lg+ — prediction card promoted as hero.
                   V2.2.1: tightened from 1.5fr → 1.25fr (1.5 was overshooting visually). auto-rows-fr restored
                   so supporting columns match hero height — the empty-space fix is now done at the
-                  card-content level (sections inside cards distribute), not at the grid level. */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1.25fr_1fr_1fr] gap-3 shrink-0 auto-rows-fr">
+                  card-content level (sections inside cards distribute), not at the grid level.
+            V6.2.3: Removed md:grid-cols-2 because it created orphan 3rd-card at tablet widths
+                  (the right panel sat alone on a second row). Now goes 1-col → 3-col at lg
+                  with no awkward intermediate stage. Tablet users get cleaner stacked layout. */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3 shrink-0 lg:auto-rows-fr">
           
           {/* ── PREDICTION CARD ── */}
-          <div className={`bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative ${mobileTab!=='signal'?'hidden md:flex':''}`}>
+          <div className={`bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
             <div className="absolute top-0 left-0 w-full h-px rounded-t-xl" style={{background:'linear-gradient(to right, transparent, '+T2_GOLD_BORDER+' 30%, '+T2_GOLD_BORDER+' 70%, transparent)'}}></div>
             <T2Stamp code="PRED · 015"/>
             <div className="flex justify-between items-center mb-3 shrink-0">
@@ -10749,8 +10801,9 @@ function TaraApp(){
               );
             })()}
 
-            {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab. */}
-            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} className="md:hidden"/>
+            {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab.
+                V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
+            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} className="lg:hidden"/>
 
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
           </div>
@@ -10886,7 +10939,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.2.1</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.2.3</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -11542,7 +11595,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.2.1 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.2.3 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -11698,10 +11751,60 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.2.1 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.2.3 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.2.3 — Trade log restored + responsive fix + header typo */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Trade Log + Responsive Layout</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.2.3</span> — Polish</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Predictor wins/losses save again</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">User trade log was disabled in V5.5b at user request (&ldquo;only Tara&rsquo;s calls should record&rdquo;). Re-enabled per latest request: every entry through the normal predictor that resolves to WIN or LOSS now saves to localStorage (key <code className="text-[10px] bg-[#0E100F] px-1">taraTradeLogV110</code>). Capped at 1000 most recent entries. Persists across browser restarts. Tara&rsquo;s own call log (separate, cloud-synced) is unaffected.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Responsive layout fix</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Dashboard grid had an awkward intermediate stage at tablet widths (768&ndash;1023px): <code className="text-[10px]">md:grid-cols-2</code> with three child cards meant the right panel sat orphaned on a second row, leaving big empty space.</p>
+                <ul className="list-disc pl-4 space-y-1.5 text-[11px]">
+                  <li><strong>Removed</strong> the md:grid-cols-2 intermediate stage</li>
+                  <li><strong>Now goes:</strong> 1-column (stacked) → 3-column (lg breakpoint, ~1024px+)</li>
+                  <li>Tablet users get cleaner stacked layout instead of broken 2+1</li>
+                  <li>Desktop layout unchanged at large widths</li>
+                  <li>Mobile tab nav (Signal/Chart/Analytics) remains active below lg, gives full-screen views per tab</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Header typo</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Memory modal: &ldquo;Every call, · her record&rdquo; → &ldquo;Every call · her record&rdquo;.</p>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">No trading-logic changes this version. V6.2.2 edge guard remains active. Run a session and report back what specific dashboard issues you see — &ldquo;some bars don&rsquo;t load properly&rdquo; needs concrete examples to fix correctly.</p>
+              </section>
+
+              {/* V6.2.2 — Edge guard + Kalshi-extreme tape fix */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Edge Guard · Late-Entry Block</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.2.2</span> — No Edge, No Lock</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User caught a lock with -9pt LATE ENTRY edge (Kalshi at 90%, posterior 81%). Direction was right, but Kalshi had already priced in the entire move. Winning the bet at 90% Kalshi pays nothing — same as buying at fair value. Two fixes.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1. Kalshi-already-extreme blocks tape rescue</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Previous logic: when tape opposes our direction, Kalshi-strongly-agrees can override. But if Kalshi is at ≥85% in our direction, it&rsquo;s already priced-in &mdash; agreeing with priced-in Kalshi while fighting tape is exactly the LATE ENTRY case. Now blocked.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2. Pre-commit edge guard</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Final safety check before any lock fires. Computes edge = (Tara dir-confidence) - (Kalshi dir-confidence). If ≤-7pt, snapshot a SIT_OUT instead of locking. Sit-out reason: <code className="text-[10px]">&ldquo;Edge would be -9pt &mdash; Kalshi at 90% is already pricing this in&rdquo;</code></p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Catches LATE ENTRY before it happens (V6.0.8 just labeled it after the fact)</li>
+                  <li>Works across all tiers &mdash; structural-led, tape-led, super-confluence, everything</li>
+                  <li>Tracked as &ldquo;edge-sitout&rdquo; tier for learning</li>
+                </ul>
+
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed mt-4 italic">The architecture finally enforces the principle: WR alone isn&rsquo;t profit. Edge is. No edge, no lock.</p>
+              </section>
 
               {/* V6.2.1 — Multi-TF structural alignment */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
