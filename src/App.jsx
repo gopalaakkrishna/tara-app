@@ -10577,6 +10577,20 @@ function TaraApp(){
     const totalSec=windowType==='15m'?900:300;
     const elapsedSec=totalSec-((timeState.minsRemaining*60)+timeState.secsRemaining);
     const remaining=Math.max(0,totalSec-elapsedSec);
+    // V6.5.7 ETA: write a baseline estimate IMMEDIATELY so the UI always has a value,
+    //   even before any direction is claimed. Refined below once tier is determined.
+    //   Default-tier estimate at current dial: ~30 samples × speedMult, plus search phase remaining.
+    {
+      const _dialEarly=Math.max(0,Math.min(100,speedDialRef.current||50));
+      const _smultEarly=_dialEarly<=50?(0.3+(_dialEarly/50)*0.7):(1.0+((_dialEarly-50)/50)*1.0);
+      const _searchPhaseEarly=Math.max(3,Math.round(10*_smultEarly));
+      const _searchRem=Math.max(0,_searchPhaseEarly-elapsedSec);
+      // Default tier estimate. samples=0 → ~30 to lock at default. Scale by dial.
+      const _baseSamples=Math.max(1,Math.round(30*_smultEarly));
+      const _samplesRem=Math.max(0,_baseSamples-samples);
+      const _baselineEta=_searchRem+_samplesRem;
+      if(tc&&tc._ctx){tc._ctx.lockEtaSec=_baselineEta;tc._ctx.samples=samples;tc._ctx.needSamples=_baseSamples;tc._ctx.tierLabel=claimedDir?'forming':'scanning';}
+    }
     // V6.2.7 / V6.5.1: KALSHI ENTRY WINDOW. Tara can take any amount of time to form a call
     //   as long as Kalshi for the chosen direction stays at or below KALSHI_ENTRY_THRESH (70%).
     //   V6.5.1: threshold raised 65→70 per user — gives more room. Plus: if Kalshi DIPPED
