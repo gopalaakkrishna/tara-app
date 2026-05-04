@@ -276,16 +276,18 @@ const BASELINE_RECORD={'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}};
 // V4.6 FRESH START: Per user request — full reset, no baked-in seed data.
 const SEED_TRADES=[];
 
-const loadTradeLog=()=>{try{const s=localStorage.getItem('taraTradeLogV110');if(s){const p=JSON.parse(s);if(p&&p.length>0)return p;}return SEED_TRADES;}catch(e){return SEED_TRADES;}};
-// V6.2.3: Re-enabled per user request: "every time i enter through the normal predictor
-//   let those wins and losses save to local browser." Cap at 1000 most recent entries
-//   to prevent localStorage bloat. Failures are silent (storage full, private mode, etc).
-const saveTradeLog=(log)=>{
-  try{
-    const capped=Array.isArray(log)?log.slice(-1000):[];
-    localStorage.setItem('taraTradeLogV110',JSON.stringify(capped));
-  }catch(e){/* localStorage unavailable or full — silent fail */}
-};
+const loadTradeLog=()=>{try{
+  // V6.2.5: One-time cleanup — V6.2.3/V6.2.4 briefly re-enabled trade persistence,
+  //   so any localStorage entry from those versions should be cleared on next load.
+  try{localStorage.removeItem('taraTradeLogV110');}catch(_){}
+  return SEED_TRADES;
+}catch(e){return SEED_TRADES;}};
+// V6.2.5: Stubbed AGAIN per user request: "stop completely saving trades from general
+//   prediction. just keep saving my score. i only want trades taken by tara to be logged."
+//   The Tara call log (taraCallLog, separate localStorage key + Firestore-synced) is
+//   unaffected. The Tara scorecard (taraCallScorecards_v1, W-L counts) is also unaffected.
+//   Only general-predictor per-trade detail log is no longer persisted.
+const saveTradeLog=(log)=>{}; // V5.5b → re-enabled in V6.2.3 → stubbed again in V6.2.5
 // V134: Reset just the directional/learning state, keep trade history + scorecard
   // Use this when you want Tara to give UP/DOWN equal consideration without losing your wins/losses record
   const resetDirectionalBias=()=>{
@@ -6104,7 +6106,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.2.4</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.2.5</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6702,7 +6704,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.2.4 online — Mobile empty-space fix. Quality Gate to ENTERED UP/DOWN buttons had ~400px dead space on narrow screens because mt-auto was pushing the buttons to the bottom of a viewport-tall flex column. Now mt-4 — buttons sit naturally below Quality Gate. Dashboard feels much tighter on phones now.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.2.5 online — Reverted V6.2.3. General predictor trades no longer save to your browser per your latest instruction. Only my own calls (locked UP / DOWN / sit-out) get logged. Your overall W-L score (the running counter) keeps saving as before — that\'s a separate piece of state. Any leftover trades saved during V6.2.3/V6.2.4 get cleared on this load.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -6990,7 +6992,7 @@ function TaraApp(){
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.2.4'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.2.5'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -7163,7 +7165,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.4  |  signal'},
+        footer:{text:'Tara 6.2.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7177,7 +7179,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.2.4  |  stand-down'},
+        footer:{text:'Tara 6.2.5  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7191,7 +7193,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.2.4  |  search'},
+        footer:{text:'Tara 6.2.5  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7208,7 +7210,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.2.4  |  lock'},
+        footer:{text:'Tara 6.2.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7225,7 +7227,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.2.4  |  close'},
+          footer:{text:'Tara 6.2.5  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7246,7 +7248,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.2.4  |  exit'},
+        footer:{text:'Tara 6.2.5  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7267,7 +7269,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.4  |  scanning'},
+        footer:{text:'Tara 6.2.5  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7287,7 +7289,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.4  |  signal'},
+        footer:{text:'Tara 6.2.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7307,7 +7309,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.4  |  lock'},
+        footer:{text:'Tara 6.2.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7324,7 +7326,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.2.4  |  sit-out'},
+        footer:{text:'Tara 6.2.5  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7346,7 +7348,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.2.4  |  result'},
+          footer:{text:'Tara 6.2.5  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -7383,12 +7385,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.2.4  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 6.2.5  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.2.4',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.2.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
@@ -7407,7 +7409,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.2.4 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 6.2.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -10245,7 +10247,7 @@ function TaraApp(){
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.2.4...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.2.5...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -10346,7 +10348,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.2.4
+              6.2.5
             </span>
           </div>
 
@@ -10939,7 +10941,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.2.4</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.2.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -11595,7 +11597,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.2.4 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.2.5 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -11751,10 +11753,26 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.2.4 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.2.5 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V6.2.5 — Reverse V6.2.3, stop saving general-predictor trades */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Tara-Only Trade Log</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.03</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>6.2.5</span> — Only Tara&rsquo;s Calls Get Logged</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: &ldquo;stop completely saving trades from general prediction. just keep saving my score. i only want trades taken by tara to be logged.&rdquo; Reverses V6.2.3.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>General predictor per-trade detail log:</strong> no longer persisted to localStorage. <code className="text-[10px] bg-[#0E100F] px-1">saveTradeLog</code> stubbed.</li>
+                  <li><strong>W-L score counter:</strong> still saves as before — different localStorage key (<code className="text-[10px]">taraCallScorecards_v1</code>), separate state.</li>
+                  <li><strong>Tara&rsquo;s own call log:</strong> unchanged — separate localStorage + Firestore-synced.</li>
+                  <li><strong>Cleanup:</strong> any leftover trade entries from V6.2.3/V6.2.4 windows get cleared automatically on next load.</li>
+                </ul>
+              </section>
 
               {/* V6.2.4 — Mobile empty space fix */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
