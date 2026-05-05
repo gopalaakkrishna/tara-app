@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v7.1.0-btc-eth-only-per-asset-calibration';
+const BASELINE_VERSION='2026.05.05-v7.2.0-prediction-improvements';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -2341,6 +2341,28 @@ const computeV99Posterior=(params)=>{
   const gapClamped=Math.max(-W.gap,Math.min(W.gap,gapScore*_gapTaper))*strikeQuality; // V134/V152
   rawSignalScores.gap=gapClamped;
   totalScore+=gapClamped;
+  // V7.2: STRIKE-POSITION DOMINANT OVERRIDE. The Jerome insight — in a binary "price above
+  //   or below strike at close?" market, the highest-edge signal is current price-relative-
+  //   to-strike with time still remaining. Tape can flip in 5 seconds; strike position is
+  //   sticky. When price is clearly on one side (≥3 bps) AND we're still early enough for
+  //   that drift to mean something (≥40% time remaining), add up to ±20 boost in the gap-
+  //   direction. Gated on tape not strongly opposing — if tape is screaming reversal, don't
+  //   force trades into a turn. Caps at ±20 so this is influential but not overwhelming.
+  const _gapAbsBps=Math.abs(realGapBps);
+  if(_gapAbsBps>=3&&timeFraction<=0.6){
+    // Flow opposition check: if aggregated flow is strongly opposite the gap direction,
+    //   skip the boost. aggrFlow ranges -1 (heavy sell) to +1 (heavy buy). Only pulled
+    //   in when flow is not screaming the opposite way — tape can flush before reversing.
+    const _gapDirIsUp=realGapBps>0;
+    const _flowOpposesGap=_gapDirIsUp?(aggrFlow<=-0.6):(aggrFlow>=0.6);
+    if(!_flowOpposesGap){
+      // Boost magnitude scales with gap size up to a 20-point cap.
+      const _strikeDriftBoost=Math.sign(realGapBps)*Math.min(20,_gapAbsBps*2.5);
+      rawSignalScores.gap=gapClamped+_strikeDriftBoost; // expose in telemetry
+      totalScore+=_strikeDriftBoost;
+      if(_gapAbsBps>=5)reasoning.push(`[STRIKE-DRIFT] ${realGapBps.toFixed(1)} bps with ${(timeFraction*100).toFixed(0)}% remaining → +${_strikeDriftBoost.toFixed(0)} (Jerome-style early-window prior)`);
+    }
+  }
   if(gapMag>15)reasoning.push(`[GAP] ${realGapBps.toFixed(1)} bps — gravity ${realGapBps>0?'bullish':'bearish'} | W:${W.gap.toFixed(0)}${_gapTaper!==1.0?` ×${_gapTaper.toFixed(2)}`:''}`);
 
   // ── SIGNAL 2: MOMENTUM COMPOSITE ──
@@ -4340,7 +4362,15 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _engNeed=taraCall&&taraCall._ctx&&typeof taraCall._ctx.needSamples==='number'?taraCall._ctx.needSamples:null;
           let _samplesRem;
           let _tierLabel;
-          if(_engSamples!=null&&_engNeed!=null){
+          // V7.2: stalled — engine forming but samples not advancing (conviction not firm).
+          //   Don't pretend there's an ETA. Show "—" with "stalled" label.
+          const _isStalled=taraCall&&taraCall._ctx&&taraCall._ctx.lockEtaStalled===true;
+          // V7.2: scanning — engine has no direction yet. Same — don't lie about ETA.
+          const _isScanningNoDir=taraCall&&taraCall.call==='SIT_OUT'&&_engSamples==null;
+          if(_isStalled||_isScanningNoDir){
+            _samplesRem=null;
+            _tierLabel=_isStalled?'stalled':'scanning';
+          } else if(_engSamples!=null&&_engNeed!=null){
             // Engine is actively forming — use real samples count
             _samplesRem=Math.max(0,_engNeed-_engSamples);
             _tierLabel=(taraCall&&taraCall._ctx&&taraCall._ctx.tierLabel)||'';
@@ -4350,13 +4380,22 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             //   the engine will start forming after search phase, samples virtually accumulate
             //   at ~1/sec. So the user sees the ETA count down second by second.
             //   When engine actually starts forming, this switches to real samples (above branch).
+            // V7.2: floor changed from 1 → 0 so we don't glue at "~1s" forever.
             const _baseSamples=Math.max(1,Math.round(30*_smult));
             const _virtualElapsedInForming=Math.max(0,_elapsed-_searchPhase);
-            _samplesRem=Math.max(1,_baseSamples-_virtualElapsedInForming);
-            _tierLabel=taraCall&&taraCall.call==='SIT_OUT'?'scanning':'forming';
+            const _vRem=_baseSamples-_virtualElapsedInForming;
+            if(_vRem<=0){
+              // Past virtual lock time but engine still hasn't committed → stalled
+              _samplesRem=null;
+              _tierLabel='stalled';
+            } else {
+              _samplesRem=_vRem;
+              _tierLabel=taraCall&&taraCall.call==='SIT_OUT'?'scanning':'forming';
+            }
           }
-          const _etaNum=Math.max(0,_searchRem+_samplesRem);
-          const _etaStr=_etaNum<=0?'now':_etaNum<60?`~${Math.round(_etaNum)}s`:`~${Math.floor(_etaNum/60)}m ${Math.round(_etaNum%60)}s`;
+          const _etaNum=_samplesRem==null?null:Math.max(0,_searchRem+_samplesRem);
+          // V7.2: when ETA can't be computed (stalled or pure scanning), show "—" instead of fake "~1s".
+          const _etaStr=_etaNum==null?'—':_etaNum<=0?'now':_etaNum<60?`~${Math.round(_etaNum)}s`:`~${Math.floor(_etaNum/60)}m ${Math.round(_etaNum%60)}s`;
           return(
             <div className="border-t border-[#E8E9E4]/8 pt-2.5 mt-2.5">
               <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
@@ -4874,6 +4913,45 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry,initialFi
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:T2_GOLD}},counts.sitouts),
         ),
       ),
+      // V7.2: PER-TIER WR AUDIT. Honest breakdown of win rate by tier — shows
+      //   exactly which decision tiers are dragging down the average so we know
+      //   what to tighten further. Filtered by current windowType filter.
+      (()=>{
+        let _arr=taraCallLog;
+        if(filter==='15m'||filter==='5m')_arr=_arr.filter(e=>e.windowType===filter);
+        const _bucketize=(e)=>e.isStructuralLed?'structural':e.isSuperConfluent?'super':e.isConfluent?'confluence':e.isTapeLed?'tape':e.isRisingConfluence?'rising':e.isUserForced?'forced':'single';
+        const _tiers=['super','confluence','structural','tape','rising','forced','single'];
+        const _tierLabels={super:'★ Super',confluence:'★ Confluence',structural:'◈ Structural',tape:'⚡ Tape-led',rising:'↗ Rising',forced:'⚙ Forced',single:'· Single'};
+        const _tierColors={super:T2_GOLD,confluence:T2_GOLD,structural:'#C4B5FD',tape:'#7DD3FC',rising:'#A6E3A1',forced:'rgba(229,200,112,0.7)',single:'rgba(232,233,228,0.5)'};
+        const _stats={};
+        _tiers.forEach(t=>{_stats[t]={wins:0,losses:0};});
+        _arr.forEach(e=>{
+          if(e.result!=='WIN'&&e.result!=='LOSS')return;
+          const _b=_bucketize(e);
+          if(_stats[_b])_stats[_b][e.result==='WIN'?'wins':'losses']+=1;
+        });
+        const _activeTiers=_tiers.filter(t=>_stats[t].wins+_stats[t].losses>0);
+        if(_activeTiers.length===0)return null;
+        return React.createElement('div',{className:'bg-[#181A19] border border-[#E8E9E4]/8 rounded-xl p-3 mb-4'},
+          React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
+            React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 font-bold'},'Win rate by tier'),
+            React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/30'},filter==='15m'?'15m only':filter==='5m'?'5m only':'all windows'),
+          ),
+          React.createElement('div',{className:'grid grid-cols-2 sm:grid-cols-4 gap-2'},
+            _activeTiers.map(t=>{
+              const s=_stats[t];const total=s.wins+s.losses;const wr=total>0?Math.round((s.wins/total)*100):0;
+              const _wrColor=wr>=70?'rgb(110,231,183)':wr>=55?'#fff':'rgb(244,114,182)';
+              return React.createElement('div',{key:t,className:'rounded-md p-2',style:{background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.06)'}},
+                React.createElement('div',{className:'text-[8px] uppercase tracking-[0.14em] font-bold mb-1',style:{color:_tierColors[t]}},_tierLabels[t]),
+                React.createElement('div',{className:'flex items-baseline gap-1.5'},
+                  React.createElement('span',{className:'text-base font-bold tabular-nums',style:{color:_wrColor}},`${wr}%`),
+                  React.createElement('span',{className:'text-[9px] tabular-nums text-[#E8E9E4]/40'},`${s.wins}W·${s.losses}L`),
+                ),
+              );
+            }),
+          ),
+        );
+      })(),
       React.createElement('div',{className:'flex flex-wrap gap-1 mb-4'},
         ['all','calendar','15m','5m','wins','losses','sitouts'].map(f=>(
           React.createElement('button',{
@@ -7637,7 +7715,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.1.0 online — major restructure. SOL and DOGE removed entirely (broken Kalshi parsing was unfixable without per-asset Kalshi schemas Tara doesn\'t have). Tara is now BTC + ETH only. Per-asset calibration infrastructure: each asset has its own adaptive weights, regime weights, posterior calibration buckets, regime/dir WR, session perf, hourly perf, streak tracking, and direction bias correction. BTC and ETH cannot pollute each other in-session. Both seed from the same V144 prior at session start; ETH will diverge as it accumulates trades. Mid-trade asset switches are safe — learning targets the resolved trade\'s asset, not the active one.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.2.0 online — prediction engine improvements. Honest analysis of why Tara was losing trades Jerome was winning, then fixed it. Five changes: (1) TAPE-EXTREME GUARD blocks tape-led locks when tape is at flush extremes (≥95% one direction) — those are exhaustion points, not continuation. (2) GAP-NOT-MARGINAL requires ≥3 bps in lock direction for tape-led tier — no more locking against price action when price is sitting on the strike. (3) STRIKE-POSITION DOMINANT OVERRIDE adds up to ±20 boost to gap signal when price is clearly drifted (≥3 bps) with ≥40% time remaining — Jerome\'s edge captured. (4) CONFIDENCE CEILING at 85% — actual peak WR is ~80%, no more 99% theater. (5) Lock ETA timer fixed — shows \"—\" when stalled or scanning instead of fake \"~1s\". CONV_FLOOR base 5→7 for slight overall selectivity bump. Combined effect: Tara should miss fewer Jerome-style early gap trades AND lose fewer tape-extreme reversal traps.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7938,7 +8016,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.1.0'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.2.0'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -8208,7 +8286,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.1.0  |  signal'},
+        footer:{text:'Tara 7.2.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8222,7 +8300,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.1.0  |  stand-down'},
+        footer:{text:'Tara 7.2.0  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8236,7 +8314,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.1.0  |  search'},
+        footer:{text:'Tara 7.2.0  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8253,7 +8331,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.1.0  |  lock'},
+        footer:{text:'Tara 7.2.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8270,7 +8348,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.1.0  |  close'},
+          footer:{text:'Tara 7.2.0  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8291,7 +8369,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.1.0  |  exit'},
+        footer:{text:'Tara 7.2.0  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8312,7 +8390,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.1.0  |  scanning'},
+        footer:{text:'Tara 7.2.0  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8332,7 +8410,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.1.0  |  signal'},
+        footer:{text:'Tara 7.2.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8352,7 +8430,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.1.0  |  lock'},
+        footer:{text:'Tara 7.2.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8369,7 +8447,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.1.0  |  sit-out'},
+        footer:{text:'Tara 7.2.0  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8391,7 +8469,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.1.0  |  result'},
+          footer:{text:'Tara 7.2.0  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8428,7 +8506,7 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.1.0  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.2.0  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -10090,7 +10168,14 @@ function TaraApp(){
       const mtfOpposed=_thisLock&&_otherLock&&_otherLock.dir!==_thisLock.dir&&(Date.now()-_otherLock.lockedAt)<20*60*1000;
       // V138: expose session info for UI badge
       const _sessInfo=getMarketSessions();
-      return{confidence:String(isDN?(100-posterior).toFixed(1):posterior.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),session:String(_sessInfo.dominant),sessionDayRating:String(_sessInfo.dsRating),sessionDayKey:String(_sessInfo.dsKey),sessionDayAdj:Number(_sessInfo.dsAdj),velocityRegime:String(velocityRegime||'NORMAL'),trajectoryAdj:Number(eng.trajectoryAdj||0),projectedPrice:Number(eng.projectedPrice||0),projectedGapBps:Number(eng.projectedGapBps||0),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor:_advisorResult,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
+      // V7.2: Confidence ceiling at 85%. Actual WR is ~64% across all trades, with high-conf
+      //   super-confluence trades historically peaking around 80-85%. A "99% confidence" lock
+      //   that loses 35% of the time is calibration theater. Cap displayed confidence at 85%
+      //   to give honest signal. Engine still uses raw posterior internally for decisions; this
+      //   only affects the displayed number on the call card and broadcasts.
+      const _rawConfNum=isDN?(100-posterior):posterior;
+      const _displayConf=Math.min(85,Math.max(0,_rawConfNum));
+      return{confidence:String(_displayConf.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),session:String(_sessInfo.dominant),sessionDayRating:String(_sessInfo.dsRating),sessionDayKey:String(_sessInfo.dsKey),sessionDayAdj:Number(_sessInfo.dsAdj),velocityRegime:String(velocityRegime||'NORMAL'),trajectoryAdj:Number(eng.trajectoryAdj||0),projectedPrice:Number(eng.projectedPrice||0),projectedGapBps:Number(eng.projectedGapBps||0),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor:_advisorResult,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
         // V148.1: surface rawSignalScores and mtfAlignment to consumers (V147 Score Breakdown
         //         panel was reading these but they weren't in the return — every bar showed 0).
         rawSignalScores:eng.rawSignalScores||{},
@@ -10298,8 +10383,10 @@ function TaraApp(){
     const _softHintActive=softHintRef.current>0&&(Date.now()-softHintRef.current)<10000;
     const _qBase=_softHintActive?20:(30+_safety);
     const Q_FLOOR=Math.max(10,Math.round(_qBase*_speedMultEng));
-    // V6.5.1: CONV_FLOOR 10 → 5. V6.5.7: also dial-aware.
-    const _convBase=_softHintActive?3:(5+_safety);
+    // V6.5.1: CONV_FLOOR 10 → 5. V6.5.7: also dial-aware. V7.2: base 5 → 7 for tighter
+    //   selection. With tape-led also tightened (extreme guard, gap-not-marginal), expect
+    //   slightly more sit-outs but with higher per-trade WR.
+    const _convBase=_softHintActive?3:(7+_safety);
     const CONV_FLOOR=Math.max(1,Math.round(_convBase*_speedMultEng));
     // Tape consensus (multi-window 15s/30s/60s buy%)
     const _tape15=tapeWindows?.w15?.buyPct??50;
@@ -10382,9 +10469,24 @@ function TaraApp(){
     const _strikeStronglyFavorable=strikeFavorable&&Math.abs(_gapBpsForDir)>=8;
     const _fgtAlignsDir=_fgtSignAgrees&&fgtAbs>=0.7;
     const _isChopRegime=['RANGE-CHOP','CHOPPY','RANGE-BOUND'].includes(analysis.regime);
+    // V7.2: TAPE-EXTREME GUARD. When 15s tape is at flush extremes (≥95% one direction)
+    //   the move is more likely capitulation/exhaustion than continuation. Reversal odds
+    //   spike. Block tape-led tier in this state — wait for tape to step back from the
+    //   wall. Real-world example: 10:15-10:30 trade where 15s tape was 99.5% SELL, Tara
+    //   tape-led DOWN at 99% conf, price reversed +6.8 bps and trade lost. Guard catches
+    //   this exact pattern.
+    const _tapeAtFlushExtreme=(dir==='UP'&&_tape15>=95)||(dir==='DOWN'&&_tape15<=5);
+    // V7.2: GAP-NOT-MARGINAL. TAPE-LED was originally permissive on gap because tape itself
+    //   was the signal. But marginal gap (price 0-2 bps from strike) means the binary outcome
+    //   is genuinely uncertain — even strong tape can't compensate. Require gap ≥3 bps in
+    //   direction at minimum for tape-led. Combined with the extreme guard above, this kills
+    //   the "strong tape at near-strike inflection point" failure pattern.
+    const _gapNotMarginal=strikeFavorable&&Math.abs(_gapBpsForDir)>=3;
     const isTapeLed=tapeSuperStrong&&conviction>=4&&!tapeOpposes&&!kalshiExtremeDisagrees&&_strikeReasonable
       &&(_fgtAlignsDir||_strikeStronglyFavorable)
-      &&!_isChopRegime;
+      &&!_isChopRegime
+      &&!_tapeAtFlushExtreme   // V7.2: extreme tape = exhaustion, not continuation
+      &&_gapNotMarginal;       // V7.2: gap must be ≥3 bps in direction
     // V6.2.0: STRUCTURAL-LED TIER — primary fast-lock based on grand trend + trend channel.
     //   These are the user's preferred indicators: multi-hour structural context, looking
     //   at where price IS GOING, not where order flow already showed up.
@@ -10713,6 +10815,10 @@ function TaraApp(){
       taraCall.lockEtaSec=Math.round(_remainNeeded/_rate);
       taraCall.lockEtaStalled=false;
     }
+    // V7.2: propagate lockEtaStalled to _ctx so the speed-dial display can read it.
+    //   Without this the "stalled" branch in the ETA UI never fires and the display
+    //   glues at "~1s" once virtual samples count down past zero.
+    if(taraCall&&taraCall._ctx){taraCall._ctx.lockEtaStalled=taraCall.lockEtaStalled===true;}
   })();
 
   // V3.2.4: Snapshot Tara's Call when endgame freeze first fires. This pins Tara's
@@ -11997,7 +12103,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              7.1.0
+              7.2.0
             </span>
           </div>
 
@@ -13451,6 +13557,53 @@ function TaraApp(){
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V7.2.0 — Prediction Engine Improvements */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Prediction Engine · The &ldquo;Why Jerome Beats Tara&rdquo; Fix</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.2.0</span> — Honest Confidence, Smarter Locks</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">After a side-by-side analysis of a real losing trade where Jerome won and Tara lost, we found the structural problem: Tara was over-trusting tape extremes and under-weighting strike position. This release surgically fixes both, plus the timer bug, plus calibrates the confidence display.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tape-extreme guard</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">When 15s tape buy% is at flush extremes (<code className="text-[10px] bg-[#0E100F] px-1">≥95%</code> one direction), TAPE-LED tier is now BLOCKED. Tape extremes signal exhaustion/capitulation, not continuation — this was the exact failure mode of the 10:15&ndash;10:30 trade where 15s tape was 99.5% sell and Tara locked DOWN at 99% conf. Price reversed +6.8 bps and the trade lost.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Gap-not-marginal for tape-led</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">TAPE-LED tier now requires gap ≥<strong>3 bps</strong> in lock direction. Marginal gap (price sitting on the strike) means the binary outcome is genuinely a coin flip — even strong tape can&rsquo;t compensate. Combined with #1, this kills the &ldquo;strong tape at near-strike inflection point&rdquo; failure pattern.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · Strike-position dominant override</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">When price is clearly drifted (≥3 bps) with ≥40% time remaining, the gap signal gets a boost up to <strong>±20 points</strong> in the gap direction (scaling: <code className="text-[10px] bg-[#0E100F] px-1">±gap × 2.5</code>, capped at 20). This is the Jerome insight captured: in a binary &ldquo;above or below at close?&rdquo; market, current price-relative-to-strike with time remaining is the highest-edge signal. Gated on flow not strongly opposing — if flow is screaming reversal, no boost.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">4 · Confidence ceiling at 85%</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Actual WR is ~64% with high-confidence super-confluence trades historically peaking around 80-85%. Displayed confidence now caps at <strong>85%</strong>. The &ldquo;99% LOCKED DOWN&rdquo; theater is over. Engine still uses raw posterior internally for decisions; only the displayed/broadcast number is bounded. You see honest signal strength.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">5 · CONV_FLOOR base 5 → 7</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Slight conviction floor bump for tighter overall selection. Combined with tape-led tightening, expect ~5-10% more sit-outs but the trades we DO take should win more.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">6 · Lock ETA timer fix</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The infamous &ldquo;<code className="text-[10px] bg-[#0E100F] px-1">~1s · SCANNING</code>&rdquo; stuck display. Root cause: when virtual sample count crossed zero, the floor of 1 left the display showing &ldquo;~1s&rdquo; forever. Fixed with two cleanups:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>When engine reports <code className="text-[10px] bg-[#0E100F] px-1">lockEtaStalled</code>, display &ldquo;—&rdquo; with &ldquo;stalled&rdquo; label</li>
+                  <li>When in pure scanning state with no direction yet, display &ldquo;—&rdquo; with &ldquo;scanning&rdquo; label</li>
+                  <li>Virtual sample countdown floors at 0 (was 1) and switches to stalled state past zero</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">lockEtaStalled</code> now propagated through <code className="text-[10px] bg-[#0E100F] px-1">_ctx</code> so display logic can read it</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">7 · Per-tier WR audit in memory</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">New stat row in the memory modal: WR breakdown by tier (★ Super, ★ Confluence, ◈ Structural, ⚡ Tape-led, ↗ Rising, ⚙ Forced, · Single). You&rsquo;ll see exactly which tiers are dragging down the average. Filtered by the active windowType filter so 5m and 15m can be analyzed separately.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">What this should change</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Fewer losses on tape-extreme reversals</strong> &mdash; the exact 10:15 failure mode is now blocked</li>
+                  <li><strong>Faster locks on Jerome-style early-gap trades</strong> &mdash; strike-position prior catches drift early</li>
+                  <li><strong>Honest confidence numbers</strong> &mdash; no more 99% theater</li>
+                  <li><strong>Slightly higher sit-out rate</strong> &mdash; this is intentional, you said you don&rsquo;t like losing</li>
+                  <li><strong>Functional ETA display</strong> &mdash; finally</li>
+                  <li><strong>Tier-level visibility</strong> &mdash; see whether tape-led WR has actually improved over time</li>
+                </ul>
+              </section>
 
               {/* V7.1.0 — BTC + ETH only · per-asset calibration */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
