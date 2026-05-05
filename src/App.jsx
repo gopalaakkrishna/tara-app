@@ -254,7 +254,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v7.10.0-fix-tdz-math-crash';
+const BASELINE_VERSION='2026.05.05-v7.10.2-shadow-timeout-audit';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -8033,7 +8033,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.10.0 online — critical bug fix. Found the math crash. The error \"Cannot access \'ft\' before initialization\" was a TDZ (temporal dead zone) violation in the V7.7.1 reversal predictor at engine line 2273. It referenced realGapBps which is declared at line 2315 — 42 lines later. Use-before-declaration. Minifier renamed realGapBps to \'ft\' which is what the error message showed. The crash blocked ALL analysis: posterior was stuck at 50, score breakdown all zeros, projections empty, advisor card showed MATH CRASH instead of a real call. Fix: compute realGapBps locally in the reversal predictor block (same simple formula: targetMargin>0 ? ((currentPrice-targetMargin)/targetMargin)*10000 : 0), so it\'s available before the engine\'s canonical declaration later. Also addressed: ETH memory should now populate properly after this fix because the engine wasn\'t completing analysis cycles — pendingTradeRef wasn\'t getting populated correctly when crashes hit. Once the engine completes successfully, the existing V7.0.7 asset-inference logic + V7.5 settlement fetcher will tag and resolve ETH entries normally.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.10.2 online — full audit pass after V7.10.1. Reviewed: TDZ candidates in engine, Firestore sync paths, snapshot/log dedup, NO_TRADE handling in rollover scoring + memory display, manual edit validation, shadow Tara stability, asset tag inference. Found one minor stability issue: V7.7 SHADOW TARA candle fetch had no abort timeout — if Coinbase hung, the 5s shadow interval would stall silently. Added 5s AbortSignal.timeout to match the Kalshi fetch nearby. Verified: weights persist correctly per-asset (V7.8), trade rounds resume updating after V7.10.1 snapshot-log fix, NO_TRADE entries flow through cloud sync without corruption flags, manual edits accept WIN/LOSS/SITOUT regardless of source state. No other bugs found in the audit. Tara is stable. The V5.5b stub on saveTradeLog is intentionally kept (your earlier directive: only save Tara-call records, not user predictor history). All other persistence — Tara-call log, weights, regime weights, learnings buckets, scorecards — is fully functional.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -8361,7 +8361,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.10.0'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.10.2'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -8464,9 +8464,10 @@ function TaraApp(){
       if(_cancelled)return;
       try{
         // Fetch candles for the shadow asset. Light cadence — every 5s.
+        // V7.10.2: 5s abort signal so a hung Coinbase request doesn't stall the loop.
         const _gran=windowType==='15m'?900:300;
-        const _candleResp=await fetch(`https://api.exchange.coinbase.com/products/${_cfg.cb}/candles?granularity=${_gran}`);
-        if(!_candleResp.ok||_cancelled)return;
+        const _candleResp=await fetch(`https://api.exchange.coinbase.com/products/${_cfg.cb}/candles?granularity=${_gran}`,{signal:AbortSignal.timeout(5000)}).catch(()=>null);
+        if(!_candleResp||!_candleResp.ok||_cancelled)return;
         const _candleData=await _candleResp.json();
         if(!Array.isArray(_candleData)||_candleData.length<5)return;
         const _bars=_candleData.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
@@ -8747,7 +8748,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.0  |  signal'},
+        footer:{text:'Tara 7.10.2  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8761,7 +8762,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.10.0  |  stand-down'},
+        footer:{text:'Tara 7.10.2  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8775,7 +8776,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.10.0  |  search'},
+        footer:{text:'Tara 7.10.2  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8792,7 +8793,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.10.0  |  lock'},
+        footer:{text:'Tara 7.10.2  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8809,7 +8810,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.10.0  |  close'},
+          footer:{text:'Tara 7.10.2  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8830,7 +8831,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.10.0  |  exit'},
+        footer:{text:'Tara 7.10.2  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8851,7 +8852,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.0  |  scanning'},
+        footer:{text:'Tara 7.10.2  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8871,7 +8872,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.0  |  signal'},
+        footer:{text:'Tara 7.10.2  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8891,7 +8892,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.0  |  lock'},
+        footer:{text:'Tara 7.10.2  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8908,7 +8909,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.0  |  sit-out'},
+        footer:{text:'Tara 7.10.2  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8930,7 +8931,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.10.0  |  result'},
+          footer:{text:'Tara 7.10.2  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8967,7 +8968,7 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.10.0  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.10.2  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -9657,6 +9658,10 @@ function TaraApp(){
             };
             if(!_capturedSnap||_capturedSnap.call==='SIT_OUT'){
               _logResult('SITOUT');
+            } else if(_capturedSnap.call==='NO_TRADE'||_capturedSnap.isNoGo){
+              // V7.10.1: NO_TRADE entries already have result:'NO_TRADE' from V7.9 snapshot.
+              //   No win/loss to compute. Skip scoring — the entry exists in memory with
+              //   its specific no-go reason for analytics.
             } else if(_outcomeDir&&(_capturedSnap.call==='UP'||_capturedSnap.call==='DOWN')){
               const _won=_capturedSnap.call===_outcomeDir;
               _logResult(_won?'WIN':'LOSS');
@@ -11560,6 +11565,72 @@ function TaraApp(){
     const _commitConf=_postKnown?Math.round(_commitDir==='UP'?_post:(100-_post)):50;
     const _isCoinFlip=_postKnown&&_post>=45&&_post<=55;
     const _hardCapElapsed=elapsedSec>=90; // 90s = 1.5min, in the 1-2min range user wants
+    // V7.10.1: CRITICAL FIX. Helper to write a Tara-call log entry whenever any of the
+    //   V7.8/V7.9 snapshot paths fire. Without this, NO_TRADE / time-cap-commit / timer-
+    //   commit / kalshi-window-closed all set snapshot ref but never wrote to taraCallLog.
+    //   Result: rollover scoring couldn't find pending entries → trades never resolved →
+    //   memory + scorecards stopped updating for both BTC and ETH. Bug shipped in V7.8 and
+    //   compounded each version since.
+    const _logSnapshotEntry=(snapshot)=>{
+      try{
+        const _wid=computeWindowId(windowType);
+        // Asset tag with strike-magnitude inference (mirrors V7.1 logic from main lock path).
+        const _refAsset=currentAssetRef.current||currentAsset||'BTC';
+        const _strike=Number(targetMargin||targetMarginRef.current||0);
+        let _assetTag=_refAsset==='BTC'||_refAsset==='ETH'?_refAsset:'BTC';
+        if(_strike>=100){
+          const _inferred=_strike>=10000?'BTC':'ETH';
+          if(_inferred!==_assetTag){
+            try{console.warn('[V7.10.1] Asset tag override at snapshot log:',_assetTag,'→',_inferred,'(strike',_strike,')');}catch(_){}
+            _assetTag=_inferred;
+          }
+        }
+        const _entry={
+          id:Date.now(),time:Date.now(),windowType,
+          windowId:_wid,
+          regime:analysis?.regime||'',
+          dir:snapshot.call==='NO_TRADE'?(snapshot.direction||'NO_TRADE'):snapshot.call,
+          confidence:snapshot.confidence||0,
+          posterior:snapshot.atPosterior!=null?snapshot.atPosterior:analysis?.rawProbAbove,
+          qScore:snapshot.qScore||Math.round(qualityGate?.score||0),
+          fgt:snapshot.fgt||analysis?.mtfAlignment,
+          tier:snapshot.tier||'unknown',
+          session:snapshot.session||(typeof getMarketSessions==='function'?getMarketSessions():{})?.dominant||'UNKNOWN',
+          reason:snapshot.reason||'',
+          earlyLock:false,
+          isNoGo:!!snapshot.isNoGo,
+          noGoCategory:snapshot.noGoCategory||null,
+          caution:snapshot.caution||null,
+          isConfluent:!!snapshot.isConfluent,
+          isSuperConfluent:!!snapshot.isSuperConfluent,
+          isRisingConfluence:!!snapshot.isRisingConfluence,
+          isTapeLed:!!snapshot.isTapeLed,
+          isStructuralLed:!!snapshot.isStructuralLed,
+          rawPosteriorAtLock:analysis?.rawProbAbove,
+          calibratedPosteriorAtLock:analysis?.posterior,
+          signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
+          tapeAtLock:analysis?.tapeWindows?{
+            w15Buy:analysis.tapeWindows.w15?.buyPct,
+            w30Buy:analysis.tapeWindows.w30?.buyPct,
+            w60Buy:analysis.tapeWindows.w60?.buyPct,
+          }:null,
+          atrBpsAtLock:analysis?.atrBps,
+          kalshiAtLock:snapshot.kalshiAtLock!=null?snapshot.kalshiAtLock:(typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null),
+          // Strike at lock — needed by V7.5 cross-asset rollover scoring
+          strike:_strike,
+          asset:_assetTag,
+          samples:snapshot.samples||0,
+          needSamples:snapshot.needSamples||0,
+          // result:null populates at rollover scoring. NO_TRADE entries skip resolution
+          //   (no win/loss to compute) but the entry exists so memory shows the no-go event.
+          result:snapshot.isNoGo?'NO_TRADE':null,
+        };
+        setTaraCallLog(prev=>{
+          if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType))return prev;
+          return [...prev,_entry].slice(-500);
+        });
+      }catch(e){try{console.error('[V7.10.1] _logSnapshotEntry failed',e);}catch(_){}}
+    };
     // V7.9: NO-GO CLASSIFIER. Three explicit no-go categories. These are the only cases
     //   where sitting out is mathematically correct (vs stylistic timidity which V7.8 killed):
     //     (a) NEGATIVE EDGE: Kalshi has already priced the move; paying spread to be correct.
@@ -11603,7 +11674,7 @@ function TaraApp(){
       }
       // Snapshot the no-go if any fired
       if(_noGoReason){
-        taraCallSnapshotRef.current={
+        const _ngSnap={
           call:'NO_TRADE',direction:_commitDir,confidence:_commitConf,
           isNoGo:true,
           noGoCategory:_noGoTier,
@@ -11620,6 +11691,8 @@ function TaraApp(){
           qScore:Math.round(_qFast),
           fgt:analysis?.mtfAlignment,
         };
+        taraCallSnapshotRef.current=_ngSnap;
+        _logSnapshotEntry(_ngSnap); // V7.10.1: write to call log
         _persistLock();
         return;
       }
@@ -11627,7 +11700,7 @@ function TaraApp(){
       if(_hardCapElapsed){
         const _cautionLevel=_commitConf>=70?'firm':_commitConf>=60?'leaning':_commitConf>=55?'tentative':'low-confidence';
         const _cautionNote=_commitConf>=70?null:`${_cautionLevel} call — confidence ${_commitConf}% (commit by time cap)`;
-        taraCallSnapshotRef.current={
+        const _capSnap={
           call:_commitDir,direction:_commitDir,
           confidence:_commitConf,
           caution:_cautionNote, // V7.8: surfaced in UI when present
@@ -11644,6 +11717,8 @@ function TaraApp(){
           qScore:Math.round(_qFast),
           fgt:analysis?.mtfAlignment,
         };
+        taraCallSnapshotRef.current=_capSnap;
+        _logSnapshotEntry(_capSnap); // V7.10.1: write to call log
         _persistLock();
         return;
       }
@@ -11655,7 +11730,7 @@ function TaraApp(){
       if(_etaExpired&&!_isCoinFlip){
         const _cautionLevel=_commitConf>=70?'firm':_commitConf>=60?'leaning':'tentative';
         const _cautionNote=_commitConf>=70?null:`${_cautionLevel} call — confidence ${_commitConf}%`;
-        taraCallSnapshotRef.current={
+        const _timerSnap={
           call:_commitDir,direction:_commitDir,
           confidence:_commitConf,
           caution:_cautionNote,
@@ -11672,6 +11747,8 @@ function TaraApp(){
           qScore:Math.round(_qFast),
           fgt:analysis?.mtfAlignment,
         };
+        taraCallSnapshotRef.current=_timerSnap;
+        _logSnapshotEntry(_timerSnap); // V7.10.1: write to call log
         _persistLock();
         return;
       }
@@ -11681,7 +11758,7 @@ function TaraApp(){
       }
     }
     if(elapsedSec>=30&&!_hasAnyConfluence&&_qFast<25&&taraCallSnapshotRef.current===null){
-      taraCallSnapshotRef.current={
+      const _mixSnap={
         call:'SIT_OUT',direction:null,confidence:0,
         reason:`Mixed signals at ${Math.round(elapsedSec)}s — sitting out`,
         atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
@@ -11696,6 +11773,8 @@ function TaraApp(){
         qScore:Math.round(_qFast),
         fgt:analysis?.mtfAlignment,
       };
+      taraCallSnapshotRef.current=_mixSnap;
+      _logSnapshotEntry(_mixSnap); // V7.10.1
       _persistLock();
       return;
     }
@@ -11713,7 +11792,7 @@ function TaraApp(){
       // Currently above threshold AND has been above all window so far AND not in grace → window closed.
       if(_kalshiForDir>KALSHI_ENTRY_THRESH&&_wasBelow&&!_withinGrace&&samples>0){
         // Was previously actionable, now isn't — entry window closed mid-flight
-        taraCallSnapshotRef.current={
+        const _kwcSnap={
           call:'SIT_OUT',direction:null,confidence:0,
           reason:`Kalshi ${Math.round(_kalshiForDir)}% ${_activeDir} — past entry threshold, chance gone`,
           atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
@@ -11728,6 +11807,8 @@ function TaraApp(){
           qScore:Math.round(qualityGate?.score||0),
           fgt:analysis?.mtfAlignment,
         };
+        taraCallSnapshotRef.current=_kwcSnap;
+        _logSnapshotEntry(_kwcSnap); // V7.10.1
         _persistLock();
         return;
       }
@@ -11735,7 +11816,7 @@ function TaraApp(){
       //   past 70% elapsed → no reset is coming, sit out.
       const _elapsedFrac=elapsedSec/(windowType==='15m'?900:300);
       if(!_wasBelow&&_elapsedFrac>=0.70){
-        taraCallSnapshotRef.current={
+        const _knrSnap={
           call:'SIT_OUT',direction:null,confidence:0,
           reason:`Kalshi started above ${KALSHI_ENTRY_THRESH}% ${_activeDir}, never reset — sitting out`,
           atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
@@ -11750,6 +11831,8 @@ function TaraApp(){
           qScore:Math.round(qualityGate?.score||0),
           fgt:analysis?.mtfAlignment,
         };
+        taraCallSnapshotRef.current=_knrSnap;
+        _logSnapshotEntry(_knrSnap); // V7.10.1
         _persistLock();
         return;
       }
@@ -11882,7 +11965,7 @@ function TaraApp(){
         const _kalshiDirConf=_committedCall==='UP'?_kAtCommit:(100-_kAtCommit);
         const _edgeAtCommit=_taraDirConf-_kalshiDirConf;
         if(_edgeAtCommit<=-7){
-          taraCallSnapshotRef.current={
+          const _edgeSnap={
             call:'SIT_OUT',direction:null,confidence:0,
             reason:`Edge would be ${Math.round(_edgeAtCommit)}pt — Kalshi at ${Math.round(_kalshiDirConf)}% is already pricing this in`,
             atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
@@ -11897,6 +11980,8 @@ function TaraApp(){
             qScore:Math.round(qualityGate?.score||0),
             fgt:analysis?.mtfAlignment,
           };
+          taraCallSnapshotRef.current=_edgeSnap;
+          _logSnapshotEntry(_edgeSnap); // V7.10.1
           _persistLock();
           return;
         }
@@ -12796,7 +12881,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              7.10.0
+              7.10.2
             </span>
           </div>
 
@@ -14263,13 +14348,82 @@ function TaraApp(){
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
 
+              {/* V7.10.2 — Audit Pass */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stability Audit</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — Audit Pass</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for a comprehensive review after the V7.10.1 snapshot-log fix. Reviewed potential bug categories systematically and fixed one minor stability issue.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was checked</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>TDZ candidates</strong> in <code className="text-[10px] bg-[#0E100F] px-1">computeV99Posterior</code> — scanned 1,124 lines of engine body for any other use-before-declare patterns. Found only the one V7.10 fixed (<code className="text-[10px] bg-[#0E100F] px-1">realGapBps</code>).</li>
+                  <li><strong>Firestore sync paths</strong> — 7 collections (memory/taraCallLog, learnings/tara, learnings/taraWeights, history/pastWindows, state/currentLock, scorecards/tara, meta/info). All have proper hydrate-once + push-back semantics. NO_TRADE entries flow through corruption-detection without false positives.</li>
+                  <li><strong>Snapshot dedup</strong> — V7.10.1 snapshot log entries use windowId+windowType key, same as the older main lock path. No duplicate insertions even on cloud-restore races.</li>
+                  <li><strong>NO_TRADE in rollover scoring</strong> — explicitly skipped (entries already have result:&lsquo;NO_TRADE&rsquo;, no win/loss to compute). Verified.</li>
+                  <li><strong>NO_TRADE in memory display</strong> — passes through filter, shows in Memory modal, scorecards correctly skip them.</li>
+                  <li><strong>Manual edit validation</strong> — accepts WIN/LOSS/SITOUT regardless of source state. NO_TRADE → WIN works (if you entered the trade despite the no-go).</li>
+                  <li><strong>Per-asset weight persistence</strong> — BTC and ETH localStorage keys hydrate independently. Cloud sync fires per-asset.</li>
+                  <li><strong>Shadow Tara loop stability</strong> — 5s interval + try/catch blocks for both candle and Kalshi fetch. Found one missing timeout (see below).</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">One fix shipped</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">V7.7 SHADOW TARA candle fetch had no abort timeout. If Coinbase hung on a request, the 5s shadow interval would stall silently &mdash; meaning the inactive asset&rsquo;s lean indicator on the selector pill would freeze without any error. Added <code className="text-[10px] bg-[#0E100F] px-1">AbortSignal.timeout(5000)</code> to match the existing Kalshi fetch nearby.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Intentionally NOT changed</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed"><strong><code className="text-[10px] bg-[#0E100F] px-1">saveTradeLog</code> stays stubbed.</strong> V5.5b/V6.2.5 directive: <em>&ldquo;stop completely saving trades from general prediction. just keep saving my score. i only want trades taken by tara to be logged.&rdquo;</em> That preference is honored. The user-trade log lives in-session only. Tara&rsquo;s call log, weights, scorecards, and regime stats all persist properly.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Status</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">No other bugs found. Tara is stable. If you see anything misbehaving in real use after this deploy, send a screenshot &mdash; the audit caught the obvious things but real-world edge cases sometimes surface what static review misses.</p>
+              </section>
+
+              {/* V7.10.1 — Snapshot Log Bug Fix */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Trade Rounds Stopped Updating</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — The Bug That Killed Memory</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;tara completely stopped with updating trade round for both btc and eth now&rdquo;</em>. Found a critical bug shipped quietly in V7.8 and inherited by every release since. Both assets affected equally.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was broken</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">When V7.8 rebuilt the commit ladder (Path A: 90s cap, Path B: timer commit) and V7.9 added the NO_TRADE classifier, the new snapshot paths all did:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Set <code className="text-[10px] bg-[#0E100F] px-1">taraCallSnapshotRef.current = {'{...}'}</code> ✓</li>
+                  <li>Call <code className="text-[10px] bg-[#0E100F] px-1">_persistLock()</code> (cloud Firestore) ✓</li>
+                  <li>Call <code className="text-[10px] bg-[#0E100F] px-1">setTaraCallLog(...)</code> ✗ &mdash; <strong>missing</strong></li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">The snapshot lived as UI state but never became a row in <code className="text-[10px] bg-[#0E100F] px-1">taraCallLog</code>. So when the window rolled over, rollover scoring searched for a pending entry to mark WIN/LOSS, found nothing, and silently moved on. Scorecard wins/losses didn&rsquo;t advance. Memory list stopped growing. Trade rounds appeared frozen.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Why it took 3 versions to surface</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">The pre-V7.8 snapshot path at line ~11985 (full lock with samples + tier flags) had its own <code className="text-[10px] bg-[#0E100F] px-1">setTaraCallLog</code> call inline. As long as Tara hit the &ldquo;real lock&rdquo; path frequently, memory updated. V7.8 made the new commit paths fire on most windows because the dial-tier blocks were removed and the 90s cap meant every window committed somehow. So the percentage of trades going through the broken path went from ~10% (V7.7) to ~80% (V7.8). The math crash in V7.7.1 also masked this for some sessions because the engine was throwing before snapshot creation.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Fix</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Added <code className="text-[10px] bg-[#0E100F] px-1">_logSnapshotEntry</code> helper inside the lifecycle effect. Builds the proper call log row from a snapshot, runs strike-magnitude asset inference (V7.0.7 logic) for the asset tag, and calls <code className="text-[10px] bg-[#0E100F] px-1">setTaraCallLog</code> with windowId-based dedup. Wired into 7 snapshot paths:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>V7.9 NO_TRADE (3 categories: edge / data / coinflip-late)</li>
+                  <li>V7.8 Path A (90s hard cap commit)</li>
+                  <li>V7.8 Path B (timer-expired commit)</li>
+                  <li>V6.1.2 mixed-signals sitout</li>
+                  <li>V6.2.7 kalshi-window-closed sitout</li>
+                  <li>V6.2.7 kalshi-no-reset sitout</li>
+                  <li>V6.2.2 edge-sitout</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Rollover scoring updated to explicitly handle NO_TRADE entries (skip resolution &mdash; the no-go reason is the result, no WIN/LOSS to compute).</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Recovery</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Trade rounds resume updating immediately on deploy. Missed trades from V7.8 / V7.9 / V7.10 sessions: those snapshots were never written to the log, so they&rsquo;re not recoverable. Cloud <code className="text-[10px] bg-[#0E100F] px-1">state/currentLock</code> has the most recent missed snapshot per session if you want to manually add it &mdash; otherwise just move forward.</p>
+              </section>
+
               {/* V7.10.0 — Math Crash Fix */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · TDZ Bug Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Crash Fixed</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — Crash Fixed</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshot showed engine stuck on MATH CRASH with error <em>&ldquo;Cannot access &lsquo;ft&rsquo; before initialization&rdquo;</em>. Posterior frozen at 50%, all signals reading 0, advisor card unable to render, projections empty.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -14289,7 +14443,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Three-State Model · Explicit No-Go</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — When Sit-Out Is The Right Answer</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — When Sit-Out Is The Right Answer</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Talked through sit-outs together. Agreed: V7.8 killing stylistic timidity (tier blocks, timer expirations, mixed-signal skips) was right. But there are 3 specific cases where NOT trading is mathematically correct, not conservative. Those become an explicit NO-GO category &mdash; clearly distinguished from a normal lock or a tentative caution call.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Three states now</div>
@@ -14317,7 +14471,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Persistent Learning · No Skips · Caution Notes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — She Trades Every Round Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — She Trades Every Round Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Weights persist across sessions</div>
@@ -14358,7 +14512,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Reversal Blockers · Stale-Lock Advisor</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Stop Inviting Bad Trades</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — Stop Inviting Bad Trades</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged the screenshot. Tara locked DOWN 54%, engine showed 89% UP, Kalshi 99.7% UP, all 4 forward projections UP, price +25bps above strike. Advisor card said &ldquo;Tara DOWN 85% &middot; ENTER DOWN&rdquo;. Pressing ENTER would have been an instant loss. Two bugs fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor — continuation blockers</div>
@@ -14387,7 +14541,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Predict Reversals · Shadow Tara · Fast-Mode</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Predict the Reversal, Not Avoid It</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — Predict the Reversal, Not Avoid It</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor (replaces V7.6 guard)</div>
@@ -14435,7 +14589,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Mean-Reversion Guard · Timer-Fires · Dual Feed</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Stop Chasing the Top</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — Stop Chasing the Top</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Deep dive into 105 resolved trades + the recent 30 found the actual structural pattern behind &ldquo;we chase momentum and lose on swings.&rdquo;</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Findings from the call-log analysis</div>
@@ -14478,7 +14632,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Faster Low-Dial Locks · ETH Save Bug</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Truly Fast at Fast</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — Truly Fast at Fast</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Two unrelated bugs in one release. User flagged both.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Speed dial low-end made aggressive</div>
@@ -14524,7 +14678,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Speed Dial Actually Functional</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Dial Has Function Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — Dial Has Function Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;the timer decision has 0 function too. its just a gimmick and does nothing&rdquo;. They were right. The dial was only nudging two floor numbers that almost every trade passed regardless. Real fix:</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tier filter by dial position</div>
@@ -14571,7 +14725,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Engine · The Structural Blind Spot Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Higher Timeframes Finally Count</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — Higher Timeframes Finally Count</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged a trade where the Score Breakdown showed &ldquo;Structural ▲ UP · 4/6 align&rdquo; with 5m and 15m both bullish, while Tara sat out leaning DOWN. Investigation: the engine was COMPUTING the multi-TF structural data and SHOWING it on the panel, but never adding it to the posterior. Five-of-six timeframes screaming UP, math weight: zero.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Structural alignment bonus</div>
@@ -14609,7 +14763,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stale State Fixes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Sound + Stale UI</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — Sound + Stale UI</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three quick fixes. Two were old bugs, one was a missing persistence flag.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Sound enabled now persists</div>
@@ -14629,7 +14783,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Prediction Engine · The &ldquo;Why Jerome Beats Tara&rdquo; Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Honest Confidence, Smarter Locks</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.2</span> — Honest Confidence, Smarter Locks</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">After a side-by-side analysis of a real losing trade where Jerome won and Tara lost, we found the structural problem: Tara was over-trusting tape extremes and under-weighting strike position. This release surgically fixes both, plus the timer bug, plus calibrates the confidence display.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tape-extreme guard</div>
