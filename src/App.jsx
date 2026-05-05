@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v7.0.7-extractstrike-asset-agnostic';
+const BASELINE_VERSION='2026.05.05-v7.1.0-btc-eth-only-per-asset-calibration';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -261,11 +261,12 @@ const BASELINE_VERSION='2026.05.05-v7.0.7-extractstrike-asset-agnostic';
 //   - label: short user-facing label
 //   - icon: emoji/glyph for selector
 //   - color: brand accent for UI
+// V7.1: Tara is BTC + ETH only. SOL and DOGE removed entirely. Reason: Kalshi's strike
+//   data parsing for SOL/DOGE never reliably worked across the board, and we want
+//   per-asset calibration to be tight rather than spread across four uncalibrated assets.
 const ASSET_CONFIG={
   BTC:{kalshiPrefix:'KXBTC',kalshiSeriesTicker:'KXBTC',cb:'BTC-USD',bybit:'BTCUSDT',binance:'BTCUSDT',whaleFloor:100000,priceDecimals:2,tickStep:1,label:'BTC',icon:'₿',color:'#F7931A'},
   ETH:{kalshiPrefix:'KXETH',kalshiSeriesTicker:'KXETH',cb:'ETH-USD',bybit:'ETHUSDT',binance:'ETHUSDT',whaleFloor:50000,priceDecimals:2,tickStep:0.5,label:'ETH',icon:'Ξ',color:'#627EEA'},
-  SOL:{kalshiPrefix:'KXSOL',kalshiSeriesTicker:'KXSOL',cb:'SOL-USD',bybit:'SOLUSDT',binance:'SOLUSDT',whaleFloor:25000,priceDecimals:3,tickStep:0.01,label:'SOL',icon:'◎',color:'#14F195'},
-  DOGE:{kalshiPrefix:'KXDOGE',kalshiSeriesTicker:'KXDOGE',cb:'DOGE-USD',bybit:'DOGEUSDT',binance:'DOGEUSDT',whaleFloor:10000,priceDecimals:5,tickStep:0.0001,label:'DOGE',icon:'Ð',color:'#C2A633'},
 };
 const ASSET_KEYS=Object.keys(ASSET_CONFIG);
 const ASSET_DEFAULT='BTC';
@@ -1535,7 +1536,7 @@ const TV_INTERVAL_MAP={'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60
 const TradingViewChart=({resolution,onResolutionChange,asset})=>{
   const interval=TV_INTERVAL_MAP[resolution]||'1';
   // V7.0.2: per-asset TradingView symbol. Coinbase USD pairs.
-  const _tvSym={BTC:'BTCUSD',ETH:'ETHUSD',SOL:'SOLUSD',DOGE:'DOGEUSD'}[asset||'BTC']||'BTCUSD';
+  const _tvSym={BTC:'BTCUSD',ETH:'ETHUSD'}[asset||'BTC']||'BTCUSD';
   const src=[
     'https://www.tradingview.com/widgetembed/?frameElementId=tv_tara_101',
     `&symbol=COINBASE%3A${_tvSym}`,
@@ -6759,7 +6760,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>7.0.7</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>7.1.0</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6870,7 +6871,8 @@ function TaraApp(){
   // V7.0: Per-asset Discord webhooks. Each asset can broadcast to its own channel.
   //   Empty webhook = no broadcast for that asset (silently skipped).
   //   Migration: V6.5.8's single `taraV110Hook` is loaded into BTC's slot on first run.
-  const[discordWebhooks,setDiscordWebhooks]=useState({BTC:'',ETH:'',SOL:'',DOGE:''});
+  //   V7.1: BTC + ETH only. Existing SOL/DOGE webhook values are dropped on hydrate.
+  const[discordWebhooks,setDiscordWebhooks]=useState({BTC:'',ETH:''});
   // Legacy alias kept so existing UI bindings work — reads BTC's webhook.
   const discordWebhook=discordWebhooks.BTC||'';
   const setDiscordWebhook=(v)=>setDiscordWebhooks(prev=>({...prev,BTC:v}));
@@ -6903,7 +6905,7 @@ function TaraApp(){
   //   reuse the previous response if it's recent enough (≤90s old). 503s are usually
   //   transient — rate limiting or maintenance — and the strike doesn't change second-to-second.
   //   When the cache is older than 90s we let it expire so we don't show truly stale data.
-  const lastKalshiSuccessRef=useRef({BTC:{at:0,strike:null,yesPrice:null,activeMarket:null,debug:null},ETH:{at:0,strike:null,yesPrice:null,activeMarket:null,debug:null},SOL:{at:0,strike:null,yesPrice:null,activeMarket:null,debug:null},DOGE:{at:0,strike:null,yesPrice:null,activeMarket:null,debug:null}});
+  const lastKalshiSuccessRef=useRef({BTC:{at:0,strike:null,yesPrice:null,activeMarket:null,debug:null},ETH:{at:0,strike:null,yesPrice:null,activeMarket:null,debug:null}});
   // V3.0: The actual market ticker so we can re-find the same market at settlement time.
   const[kalshiActiveMarket,setKalshiActiveMarket]=useState(null);
   // V3.1.11: surface Kalshi extraction status in UI so user can diagnose without DevTools
@@ -7098,20 +7100,29 @@ function TaraApp(){
             resolved++;
           }
         }
-        // V7.0.5: Auto-fix asset tag from strike magnitude. Strikes are unambiguous:
-        //   BTC>=10K, ETH 100-10K, SOL 1-1000, DOGE <1. The V7.0.3 closure bug caused
-        //   some entries to be tagged with the wrong asset (e.g. SOL trade as ETH).
+        // V7.0.5: Auto-fix asset tag from strike magnitude.
+        // V7.1: BTC + ETH only. Strikes <$100 are legacy SOL/DOGE entries — drop them
+        //   silently from the log (their data was unreliable anyway).
         if(e.strike&&Number.isFinite(Number(e.strike))){
           const s=Number(e.strike);
+          if(s<100){
+            try{console.info('[V7.1] Dropping legacy SOL/DOGE entry — strike',s,'(below ETH range)');}catch(_){}
+            dropped++;
+            return;
+          }
           let _inferred=null;
           if(s>=10000)_inferred='BTC';
           else if(s>=100)_inferred='ETH';
-          else if(s>=1)_inferred='SOL';
-          else if(s>0)_inferred='DOGE';
           if(_inferred&&e.asset!==_inferred){
-            try{console.info('[V7.0.5] Migrating entry asset',e.asset||'(none)','→',_inferred,'(strike',s,')');}catch(_){}
+            try{console.info('[V7.1] Migrating entry asset',e.asset||'(none)','→',_inferred,'(strike',s,')');}catch(_){}
             e.asset=_inferred;
-            resolved++; // count as fix for the resolved tally
+            resolved++;
+          }
+          // Drop entries still tagged as SOL/DOGE even if strike doesn't disambiguate
+          if(e.asset==='SOL'||e.asset==='DOGE'){
+            try{console.info('[V7.1] Dropping legacy',e.asset,'entry');}catch(_){}
+            dropped++;
+            return;
           }
         }
         // Sanity check on strike/close ratio
@@ -7232,22 +7243,20 @@ function TaraApp(){
         //   makes the right asset unambiguous: BTC strikes are 10K+, ETH 100-10K, SOL 1-1000,
         //   DOGE under 1. If the entry's asset tag doesn't match the strike magnitude,
         //   correct it. Untagged entries (pre-V6.5.8) get the inferred asset.
+        // V7.1: BTC + ETH only.
         const _inferAssetFromStrike=(strike)=>{
           if(!strike||!Number.isFinite(Number(strike)))return null;
           const s=Number(strike);
           if(s>=10000)return'BTC';
           if(s>=100)return'ETH';
-          if(s>=1)return'SOL';
-          if(s>0)return'DOGE';
-          return null;
+          return null; // strikes <$100 are legacy SOL/DOGE — caller drops them
         };
         const _fixAsset=(e)=>{
           if(!e||!e.strike)return e;
           const _inferred=_inferAssetFromStrike(e.strike);
-          if(!_inferred)return e;
+          if(!_inferred)return null; // signal to drop (legacy SOL/DOGE entry)
           if(e.asset===_inferred)return e;
-          // Asset mismatch — correct it.
-          try{console.info('[V7.0.5] Fixing entry asset tag:',e.asset||'(none)','→',_inferred,'(strike',e.strike,')');}catch(_){}
+          try{console.info('[V7.1] Fixing entry asset tag:',e.asset||'(none)','→',_inferred,'(strike',e.strike,')');}catch(_){}
           return{...e,asset:_inferred};
         };
         const _autoResolve=(e)=>{
@@ -7270,6 +7279,7 @@ function TaraApp(){
           let f=_backfillCallLogId(e);
           if(!f||!f.windowId)return;
           f=_fixAsset(f);
+          if(!f)return; // V7.1: legacy SOL/DOGE entry — drop
           f=_autoResolve(f);
           if(_isCorrupt(f))return; // drop corrupt
           byKey.set(_key(f),f);
@@ -7279,10 +7289,11 @@ function TaraApp(){
           let e=_backfillCallLogId(raw);
           if(!e||!e.id||!e.windowId)return;
           const _withAsset=_fixAsset(e);
+          if(_withAsset===null){changed=true;return;} // V7.1: legacy SOL/DOGE — drop
           if(_withAsset!==e){e=_withAsset;changed=true;}
           const _resolved=_autoResolve(e);
           if(_resolved!==e){e=_resolved;changed=true;}
-          if(_isCorrupt(e)){changed=true;return;} // drop corrupt cloud entry, mark changed
+          if(_isCorrupt(e)){changed=true;return;}
           const k=_key(e);
           const existing=byKey.get(k);
           if(!existing){byKey.set(k,e);changed=true;}
@@ -7501,12 +7512,68 @@ function TaraApp(){
   const lastRegimeRef=useRef('RANGE-CHOP');
   const windowSignalDirRef=useRef(null); // tracks first FORMING direction this window — lock must match
   // ── TARA SELF-TRAINING STATE ──
-  const[adaptiveWeights,setAdaptiveWeights]=useState(()=>loadWeights());
-  const[regimeWeights,setRegimeWeights]=useState(()=>loadRegimeWeights());
+  // V7.1: Per-asset weights. Each asset gets its OWN adaptive weights and regime weights
+  //   so BTC trades don't pollute ETH calibration and vice versa. Both seed from the
+  //   same V144 prior at session start — they diverge as trades resolve in-session.
+  //   Backward-compat: `adaptiveWeights` and `regimeWeights` still expose the ACTIVE
+  //   asset's slice so all downstream consumers (signal scoring, regime mapping, learning
+  //   updates) work without modification. Setters wrap in a {asset → slice} update.
+  const[adaptiveWeightsByAsset,setAdaptiveWeightsByAsset]=useState(()=>{
+    const _seed=loadWeights();
+    return{BTC:{..._seed},ETH:{..._seed}};
+  });
+  const[regimeWeightsByAsset,setRegimeWeightsByAsset]=useState(()=>{
+    const _seed=loadRegimeWeights();
+    return{BTC:{..._seed},ETH:{..._seed}};
+  });
+  const adaptiveWeights=adaptiveWeightsByAsset[currentAsset]||adaptiveWeightsByAsset.BTC;
+  const regimeWeights=regimeWeightsByAsset[currentAsset]||regimeWeightsByAsset.BTC;
+  // V7.1: setAdaptiveWeights/setRegimeWeights default to the active asset's slice.
+  //   Optionally accept an explicit asset string ('BTC' or 'ETH') so that learning
+  //   updates from a resolved trade always target THAT trade's asset, even if the
+  //   user switched assets between lock and resolution.
+  const setAdaptiveWeights=(updaterOrValue,explicitAsset)=>{
+    setAdaptiveWeightsByAsset(prev=>{
+      const _asset=(explicitAsset==='BTC'||explicitAsset==='ETH')?explicitAsset:currentAsset;
+      const _curSlice=prev[_asset]||prev.BTC;
+      const _newSlice=typeof updaterOrValue==='function'?updaterOrValue(_curSlice):updaterOrValue;
+      return{...prev,[_asset]:_newSlice};
+    });
+  };
+  const setRegimeWeights=(updaterOrValue,explicitAsset)=>{
+    setRegimeWeightsByAsset(prev=>{
+      const _asset=(explicitAsset==='BTC'||explicitAsset==='ETH')?explicitAsset:currentAsset;
+      const _curSlice=prev[_asset]||prev.BTC;
+      const _newSlice=typeof updaterOrValue==='function'?updaterOrValue(_curSlice):updaterOrValue;
+      return{...prev,[_asset]:_newSlice};
+    });
+  };
+  const adaptiveWeightsByAssetRef=useRef(adaptiveWeightsByAsset);
+  adaptiveWeightsByAssetRef.current=adaptiveWeightsByAsset;
+  const regimeWeightsByAssetRef=useRef(regimeWeightsByAsset);
+  regimeWeightsByAssetRef.current=regimeWeightsByAsset;
+  // V7.1: Centralized learning helper. Use the TRADE's asset (not the active one)
+  //   to update both adaptive and regime weights. Filters newLog to same-asset trades
+  //   for updateWeights' rolling-window calculations.
+  const applyTradeLearning=(newLog,resolvedTrade,finalResult)=>{
+    if(!resolvedTrade||(finalResult!=='WIN'&&finalResult!=='LOSS'))return;
+    const _ta=resolvedTrade.asset||'BTC';
+    const _safe=(_ta==='BTC'||_ta==='ETH')?_ta:'BTC';
+    const _curW=(adaptiveWeightsByAssetRef.current||{})[_safe]||(adaptiveWeightsByAssetRef.current||{}).BTC;
+    const _curRW=(regimeWeightsByAssetRef.current||{})[_safe]||(regimeWeightsByAssetRef.current||{}).BTC;
+    const _assetLog=(newLog||[]).filter(t=>t&&(t.asset||'BTC')===_safe);
+    const _newW=updateWeights(_curW,_assetLog,finalResult);
+    const _newRW=updateRegimeWeights(_curRW,resolvedTrade,finalResult);
+    const _diffs=computeWeightDiff(_curW,_newW);
+    setAdaptiveWeightsByAsset(prev=>({...prev,[_safe]:_newW}));
+    setRegimeWeightsByAsset(prev=>({...prev,[_safe]:_newRW}));
+    if(_diffs.length>0)setLastLearningUpdate({result:finalResult,diffs:_diffs,at:Date.now()});
+  };
   const[tradeLog,setTradeLog]=useState(()=>loadTradeLog());
-  // Streak analysis — computed from tradeLog (declared above)
+  // Streak analysis — V7.1: per-asset. ETH and BTC have separate streak tracking.
   const streakData=useMemo(()=>{
-    const recent=tradeLog.filter(t=>t.result).slice(-10);
+    const _src=(tradeLog||[]).filter(t=>t&&(t.asset||'BTC')===currentAsset);
+    const recent=_src.filter(t=>t.result).slice(-10);
     if(recent.length<3)return{streak:0,type:'neutral',last5WR:null,warning:false,strongWarn:false,upBias:0,dnBias:0};
     let streak=0;
     const lastResult=recent[recent.length-1].result;
@@ -7521,7 +7588,7 @@ function TaraApp(){
     const strongWarn=lastResult==='LOSS'&&streak>=5;
     // V134: Per-direction bias correction
     // If recent UP calls have low WR and DOWN have high WR, tilt against UP
-    const recent20=tradeLog.filter(t=>t.result).slice(-20);
+    const recent20=_src.filter(t=>t.result).slice(-20);
     const recentUps=recent20.filter(t=>t.dir==='UP');
     const recentDns=recent20.filter(t=>t.dir==='DOWN');
     let upBias=0,dnBias=0;
@@ -7540,7 +7607,7 @@ function TaraApp(){
       else if(dnWR>0.75)dnBias=+5;
     }
     return{streak,type:lastResult==='WIN'?'hot':'cold',last5WR,warning,strongWarn,upBias,dnBias};
-  },[tradeLog]);
+  },[tradeLog,currentAsset]);
   const tradeLogRef=useRef([]);
   tradeLogRef.current=tradeLog;
   const pendingTradeRef=useRef(null);
@@ -7553,16 +7620,24 @@ function TaraApp(){
   const[discordEditingId,setDiscordEditingId]=useState(null); // for discord message edit
   const[discordEditText,setDiscordEditText]=useState('');
   const[discordStatusMsg,setDiscordStatusMsg]=useState('');
-  const calibration=useMemo(()=>buildCalibration(tradeLog),[tradeLog]);
-  const regimeDirWR=useMemo(()=>buildRegimeDirWR(tradeLog),[tradeLog]); // V134
-  const sessionRegimeThresh=useMemo(()=>buildSessionRegimeThresh(tradeLog),[tradeLog]); // V134
-  const signalAccuracy=useMemo(()=>buildSignalAccuracy(tradeLog),[tradeLog]);
-  const sessionPerf=useMemo(()=>buildSessionPerf(tradeLog),[tradeLog]);
-  const hourlyPerf=useMemo(()=>buildHourlyPerf(tradeLog),[tradeLog]);
+  // V7.1: Per-asset calibration. Each asset uses ONLY its own trades to build the
+  //   posterior calibration buckets, regime stats, signal accuracy, session/hourly
+  //   performance. ETH starts with empty data (will be SCANNING-heavy until 10-20
+  //   trades accumulate); BTC keeps its full history. Trades without an asset tag
+  //   (legacy pre-V7.1) default to BTC. Cross-asset pollution is now impossible.
+  const _tradeLogForCurrentAsset=useMemo(()=>{
+    return(tradeLog||[]).filter(t=>(t&&(t.asset||'BTC')===currentAsset));
+  },[tradeLog,currentAsset]);
+  const calibration=useMemo(()=>buildCalibration(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
+  const regimeDirWR=useMemo(()=>buildRegimeDirWR(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]); // V134
+  const sessionRegimeThresh=useMemo(()=>buildSessionRegimeThresh(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]); // V134
+  const signalAccuracy=useMemo(()=>buildSignalAccuracy(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
+  const sessionPerf=useMemo(()=>buildSessionPerf(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
+  const hourlyPerf=useMemo(()=>buildHourlyPerf(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.0.7 online — three real fixes that V7.0.5 and V7.0.6 missed. (1) STRIKE PRICING: the actual root cause was inside _extractStrike itself. It had n>1000 and \\d{4,7} BTC-range filters that rejected ALL SOL ($84) and DOGE ($0.45) strikes outright, even when Kalshi returned them in floor_strike. Now asset-agnostic — accepts any positive finite number; regex patterns accept any decimal. (2) DISCORD ON SWITCH: switching ETH → BTC could fire a broadcast carrying ETH price/strike to BTC\'s webhook because the broadcast effect re-runs on currentAsset change, and lingering whale flow from the old WebSocket could trigger before state stabilized. Added a 2.5s post-switch suppression in broadcastToDiscord itself — catches every broadcast path. EXIT/CLOSE bypass since they\'re explicitly user-driven. Plus reset of all broadcast cooldown refs in setCurrentAsset. (3) SOL → ETH ASSET TAG: user-forced and SIT_OUT entry creation paths had no asset field at all (defaulted to BTC display). Fixed. Plus belt-and-suspenders strike-magnitude validation at main lock entry: if currentAssetRef somehow has a stale value, the inferred-from-strike asset overrides and logs a console warning so the bug becomes visible if it persists.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.1.0 online — major restructure. SOL and DOGE removed entirely (broken Kalshi parsing was unfixable without per-asset Kalshi schemas Tara doesn\'t have). Tara is now BTC + ETH only. Per-asset calibration infrastructure: each asset has its own adaptive weights, regime weights, posterior calibration buckets, regime/dir WR, session perf, hourly perf, streak tracking, and direction bias correction. BTC and ETH cannot pollute each other in-session. Both seed from the same V144 prior at session start; ETH will diverge as it accumulates trades. Mid-trade asset switches are safe — learning targets the resolved trade\'s asset, not the active one.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7848,22 +7923,22 @@ function TaraApp(){
         try{localStorage.setItem('taraV110Score',JSON.stringify(BASELINE_RECORD));}catch(e){}
       }
       if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));
-      // V7.0: Per-asset webhooks. Try new format first, fall back to legacy single-webhook.
+      // V7.0: Per-asset webhooks. V7.1: BTC + ETH only.
       try{
         const _newHooks=localStorage.getItem('taraV70Hooks');
         if(_newHooks){
           const _parsed=JSON.parse(_newHooks);
-          if(_parsed&&typeof _parsed==='object')setDiscordWebhooks({BTC:_parsed.BTC||'',ETH:_parsed.ETH||'',SOL:_parsed.SOL||'',DOGE:_parsed.DOGE||''});
+          if(_parsed&&typeof _parsed==='object')setDiscordWebhooks({BTC:_parsed.BTC||'',ETH:_parsed.ETH||''});
         } else {
           // Legacy migration: copy single webhook into BTC slot
           const _old=localStorage.getItem('taraV110Hook');
-          if(_old)setDiscordWebhooks({BTC:_old,ETH:'',SOL:'',DOGE:''});
+          if(_old)setDiscordWebhooks({BTC:_old,ETH:''});
         }
       }catch(e){}
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.0.7'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.1.0'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -8133,7 +8208,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.7  |  signal'},
+        footer:{text:'Tara 7.1.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8147,7 +8222,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.0.7  |  stand-down'},
+        footer:{text:'Tara 7.1.0  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8161,7 +8236,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.0.7  |  search'},
+        footer:{text:'Tara 7.1.0  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8178,7 +8253,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.0.7  |  lock'},
+        footer:{text:'Tara 7.1.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8195,7 +8270,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.0.7  |  close'},
+          footer:{text:'Tara 7.1.0  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8216,7 +8291,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.0.7  |  exit'},
+        footer:{text:'Tara 7.1.0  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8237,7 +8312,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.7  |  scanning'},
+        footer:{text:'Tara 7.1.0  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8257,7 +8332,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.7  |  signal'},
+        footer:{text:'Tara 7.1.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8277,7 +8352,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.7  |  lock'},
+        footer:{text:'Tara 7.1.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8294,7 +8369,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.7  |  sit-out'},
+        footer:{text:'Tara 7.1.0  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8316,7 +8391,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.0.7  |  result'},
+          footer:{text:'Tara 7.1.0  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8353,12 +8428,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.0.7  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.1.0  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 7.0.7',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 7.1.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=_webhookForAsset.replace('https://discord.com/api/webhooks/','').split('/');
@@ -8377,7 +8452,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 7.0.7 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 7.1.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8741,7 +8816,9 @@ function TaraApp(){
             const finalResult=trade.localResultGuess||'LOSS';
             const newLog=tradeLogRef.current.map(t=>t.id===pending.tradeId?{...t,result:finalResult,kalshiResolutionFailed:true}:t);
             saveTradeLog(newLog);setTradeLog(newLog);
-            (()=>{const _newW=updateWeights(adaptiveWeights,newLog,finalResult);const _diffs=computeWeightDiff(adaptiveWeights,_newW);setAdaptiveWeights(_newW);if(_diffs.length>0)setLastLearningUpdate({result:finalResult,diffs:_diffs,at:Date.now()});})();
+            // V7.1: per-asset learning — uses trade.asset, not currentAsset
+            const _resolved=newLog.find(t=>t.id===pending.tradeId);
+            applyTradeLearning(newLog,_resolved,finalResult);
           }
           pendingResolutionRef.current=pendingResolutionRef.current.filter(p=>p.tradeId!==pending.tradeId);
           continue;
@@ -8824,8 +8901,9 @@ function TaraApp(){
                   kalshiClosingPrice:_kalshiSettlement,  // V3.0: canonical Kalshi-settled close
                 }:t);
                 saveTradeLog(newLog);setTradeLog(newLog);
-                (()=>{const _newW=updateWeights(adaptiveWeights,newLog,finalResult);const _diffs=computeWeightDiff(adaptiveWeights,_newW);setAdaptiveWeights(_newW);if(_diffs.length>0)setLastLearningUpdate({result:finalResult,diffs:_diffs,at:Date.now()});})();
-                setRegimeWeights(prev=>updateRegimeWeights(prev,{...trade,result:finalResult},finalResult));
+                // V7.1: per-asset learning. Replaces separate setAdaptiveWeights+setRegimeWeights.
+                const _resolved=newLog.find(t=>t.id===pending.tradeId);
+                applyTradeLearning(newLog,_resolved,finalResult);
               }
               pendingResolutionRef.current=pendingResolutionRef.current.filter(p=>p.tradeId!==pending.tradeId);
             }
@@ -8905,8 +8983,7 @@ function TaraApp(){
                 const resolvedTrade={...baseResolved,result};
                 const newLog=[...tradeLogRef.current,resolvedTrade];
                 saveTradeLog(newLog);setTradeLog(newLog);
-                (()=>{const _newW=updateWeights(adaptiveWeights,newLog,result);const _diffs=computeWeightDiff(adaptiveWeights,_newW);setAdaptiveWeights(_newW);if(_diffs.length>0)setLastLearningUpdate({result,diffs:_diffs,at:Date.now()});})();
-                setRegimeWeights(prev=>updateRegimeWeights(prev,resolvedTrade,result));
+                applyTradeLearning(newLog,resolvedTrade,result); // V7.1: per-asset
               }
               pendingTradeRef.current=null;
             }
@@ -11184,20 +11261,20 @@ function TaraApp(){
         //   ref update on every render) AND we have a strike, infer the right asset
         //   from strike magnitude. BTC>=10K, ETH 100-10K, SOL 1-100, DOGE <1.
         //   Logs when override triggers so this bug becomes visible if it persists.
+        //   V7.1: BTC + ETH only. If strike doesn't match (sub-$100), trust ref. Better
+        //   to keep the entry tagged with whatever the ref says than to drop it here.
         asset:(()=>{
           const _refAsset=currentAssetRef.current||currentAsset||'BTC';
           const _strike=Number(targetMargin||targetMarginRef.current||0);
-          if(_strike>0){
-            let _inferred=null;
-            if(_strike>=10000)_inferred='BTC';
-            else if(_strike>=100)_inferred='ETH';
-            else if(_strike>=1)_inferred='SOL';
-            else if(_strike>0)_inferred='DOGE';
-            if(_inferred&&_inferred!==_refAsset){
-              try{console.warn('[V7.0.7] Asset tag override at entry creation: ref says',_refAsset,'but strike',_strike,'inferred',_inferred,'— using inferred to prevent SOL→ETH bug');}catch(_){}
+          if(_strike>=100){
+            const _inferred=_strike>=10000?'BTC':'ETH';
+            if(_inferred!==_refAsset){
+              try{console.warn('[V7.1] Asset tag override at entry creation: ref says',_refAsset,'but strike',_strike,'inferred',_inferred);}catch(_){}
               return _inferred;
             }
           }
+          // Coerce SOL/DOGE refs to BTC (shouldn't happen in V7.1 but defensive)
+          if(_refAsset!=='BTC'&&_refAsset!=='ETH')return'BTC';
           return _refAsset;
         })(),
         result:null, // populated at rollover scoring
@@ -11326,13 +11403,13 @@ function TaraApp(){
     if(!taraBroadcastRef.current.sentScan&&elapsed>=30){
       taraBroadcastRef.current.sentScan=true;
     }
-    // SIGNAL: V5.5d — fires exactly ONCE per window. User: '1 of each message type'.
-    //   Old logic let SIGNAL fire again on direction flip — that's now disabled.
-    // V6.5.7: Hard guard — never broadcast SIGNAL if a snapshot exists (post-lock state).
-    //   Stops the screenshot bug where DOWN LOCKED + UP SIGNAL fired in the same window.
+    // SIGNAL: V7.0.8 — DISABLED per user request. Keep Discord clean: LOCK + EXIT/CLOSE
+    //   alerts only. Pre-lock signals were creating noise (one per window per direction)
+    //   that didn't actionably differ from the LOCK that follows. Flag still set so the
+    //   ref state stays consistent and we don't accidentally re-fire if logic changes.
     if(!taraBroadcastRef.current.sentSignal&&!taraCallSnapshotRef.current&&(tc.call==='UP'||tc.call==='DOWN')&&elapsed>=20){
       taraBroadcastRef.current.sentSignal=true;
-      broadcastToDiscord('TARA_SIGNAL',{...baseData,dir:tc.call,confidence:tc.confidence,reason:tc.reason});
+      // broadcastToDiscord('TARA_SIGNAL',...) — disabled V7.0.8
     }
     // LOCK: broadcast once per window after Tara's Call is snapshotted at endgame
     // V6.5.7: Use the SNAPSHOT for posterior/quality/fgt/regime — not current engine state.
@@ -11354,11 +11431,12 @@ function TaraApp(){
       };
       broadcastToDiscord('TARA_LOCK',{..._lockBaseData,dir:snap.call,confidence:snap.confidence,reason:snap.reason,gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0});
     }
-    // SITOUT: broadcast if Tara has been SIT_OUT for the bulk of the window AND we haven't broadcast a signal
-    // Fires at endgame freeze if she's still SIT_OUT and never had a directional call
+    // SITOUT: V7.0.8 — DISABLED per user request. SITOUT means Tara decided NOT to trade,
+    //   which is non-actionable noise in Discord. User wants lock + exit alerts only.
+    //   Flag still set for state consistency.
     if(!taraBroadcastRef.current.sentSitout&&!taraBroadcastRef.current.sentSignal&&analysis.isSystemLocked&&tc.call==='SIT_OUT'){
       taraBroadcastRef.current.sentSitout=true;
-      broadcastToDiscord('TARA_SITOUT',{...baseData,reason:tc.reason});
+      // broadcastToDiscord('TARA_SITOUT',...) — disabled V7.0.8
     }
   },[analysis?.rawProbAbove,taraCall.call,taraCall.confidence,taraCall.reason,analysis?.isSystemLocked,timeState.startWindow,timeState.nextWindow,timeState.minsRemaining,timeState.secsRemaining,discordWebhooks,currentAsset,windowType,taraScorecards,qualityGate?.score,targetMargin,currentPrice]);
 
@@ -11592,8 +11670,7 @@ function TaraApp(){
           resolvedTimestampISO:new Date().toISOString()};
         const newLog1=[...tradeLogRef.current,exitLog];
         saveTradeLog(newLog1);setTradeLog(newLog1);
-        (()=>{const _newW=updateWeights(adaptiveWeights,newLog1,'LOSS');const _diffs=computeWeightDiff(adaptiveWeights,_newW);setAdaptiveWeights(_newW);if(_diffs.length>0)setLastLearningUpdate({result:'LOSS',diffs:_diffs,at:Date.now()});})();
-        setRegimeWeights(prev=>updateRegimeWeights(prev,exitLog,'LOSS'));
+        applyTradeLearning(newLog1,exitLog,'LOSS'); // V7.1: per-asset
         updateScore(windowType,'losses',1);
         // Broadcast the LOSS for the trade being exited — before the new entry
         const gapBpsExit=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
@@ -11623,6 +11700,9 @@ function TaraApp(){
       const eng=lockedCallRef.current;
       pendingTradeRef.current={
         id:Date.now(),dir,
+        // V7.1: tag every trade with the asset (BTC or ETH) so calibration, weights, and
+        //   regime stats can split per-asset. Uses ref to avoid stale closure on switches.
+        asset:currentAssetRef.current||currentAsset||'BTC',
         posterior:eng?.lockedPosterior||analysis?.rawProbAbove||50, // calibrated posterior at lock
         rawPosterior:analysis?.rawPosterior||analysis?.rawProbAbove||50, // V145: pre-calibration posterior
         regime:lastRegimeRef.current,
@@ -11675,8 +11755,7 @@ function TaraApp(){
             resolvedTimestampISO:new Date().toISOString()};
           const newLog=[...tradeLogRef.current,resolvedTrade];
           saveTradeLog(newLog);setTradeLog(newLog);
-          (()=>{const _newW=updateWeights(adaptiveWeights,newLog,result);const _diffs=computeWeightDiff(adaptiveWeights,_newW);setAdaptiveWeights(_newW);if(_diffs.length>0)setLastLearningUpdate({result,diffs:_diffs,at:Date.now()});})();
-          setRegimeWeights(prev=>updateRegimeWeights(prev,resolvedTrade,result));
+          applyTradeLearning(newLog,resolvedTrade,result); // V7.1: per-asset
           recordPnL(result==='WIN',resolvedTrade);
           pendingTradeRef.current=null;
         }
@@ -11817,7 +11896,7 @@ function TaraApp(){
     setForceRender(p=>p+1);
   };
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.0.7...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.1.0...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -11918,7 +11997,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              7.0.7
+              7.1.0
             </span>
           </div>
 
@@ -12554,7 +12633,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.0.7</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.1.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -12867,7 +12946,9 @@ function TaraApp(){
                       if(oldTrade.result==='WIN'){updateScore(wType,'wins',-1);updateScore(wType,'losses',1);}
                       else{updateScore(wType,'losses',-1);updateScore(wType,'wins',1);}
                     }
-                    (()=>{const _newW=updateWeights(adaptiveWeights,newLog,newResult);const _diffs=computeWeightDiff(adaptiveWeights,_newW);setAdaptiveWeights(_newW);if(_diffs.length>0)setLastLearningUpdate({result:newResult,diffs:_diffs,at:Date.now()});})();
+                    // V7.1: per-asset — use the edited trade's asset (not currentAsset)
+                    const _editedTrade=newLog.find(t=>t.id===oldTrade?.id);
+                    applyTradeLearning(newLog,_editedTrade||oldTrade,newResult);
                     setSelectedTradeId(null);
                   };
                   const deleteTrade=(id)=>{
@@ -13210,7 +13291,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 7.0.7 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 7.1.0 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -13366,12 +13447,79 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 7.0.7 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 7.1.0 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
 
-              {/* V7.0.7 — Real fixes for SOL/DOGE strike, Discord switch, asset tag */}
+              {/* V7.1.0 — BTC + ETH only · per-asset calibration */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · BTC + ETH Only · Per-Asset Calibration</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.1.0</span> — Two Assets, Calibrated Properly</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">SOL and DOGE removed entirely. Calibration infrastructure split per asset. This is the version where Tara stops pretending to handle four crypto markets badly and starts handling two well.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · SOL and DOGE removed</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: &ldquo;remove SOL and DOGE completely. they are broken anyway.&rdquo; Done. Reasoning: Kalshi&rsquo;s strike data parsing for SOL/DOGE never reliably converged across all paths despite five attempts in V7.0.x. Better to have two well-calibrated markets than four poorly-calibrated ones.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">ASSET_CONFIG</code> reduced to BTC + ETH</li>
+                  <li>Discord webhooks state &mdash; SOL/DOGE slots dropped on hydrate</li>
+                  <li>Asset migration now drops legacy SOL/DOGE call log entries (strikes &lt; $100 or asset tag SOL/DOGE)</li>
+                  <li>If you had SOL or DOGE selected, app silently coerces back to BTC on load</li>
+                  <li>Asset selector renders 2 buttons instead of 4</li>
+                  <li>Strike inference: only BTC ($10K+) vs ETH ($100&ndash;$10K)</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Per-asset calibration infrastructure</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Every calibration data structure now splits per asset. BTC and ETH are structurally separated &mdash; cross-asset pollution is impossible:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Adaptive weights</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">{`{BTC: {...}, ETH: {...}}`}</code>. Active slice exposed for downstream consumers.</li>
+                  <li><strong>Regime weights</strong> &mdash; same pattern. ETH&rsquo;s TRENDING UP weights diverge from BTC&rsquo;s TRENDING UP weights.</li>
+                  <li><strong>Posterior calibration buckets</strong> &mdash; per-asset. ETH&rsquo;s 80%-conf trades calibrate against ETH&rsquo;s actual 80%-conf win rate, not BTC&rsquo;s.</li>
+                  <li><strong>Regime/Dir WR, signal accuracy, session perf, hourly perf</strong> &mdash; all derive from per-asset filtered trade log.</li>
+                  <li><strong>Streak data, direction bias correction</strong> &mdash; per-asset. A BTC losing streak doesn&rsquo;t penalize ETH and vice versa.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · Mid-trade switches are safe</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Every trade tags itself with the asset at lock time (<code className="text-[10px] bg-[#0E100F] px-1">pendingTradeRef.asset</code>). When the trade resolves &mdash; even if you&rsquo;ve switched assets in the meantime &mdash; the centralized <code className="text-[10px] bg-[#0E100F] px-1">applyTradeLearning</code> helper updates ONLY the trade&rsquo;s asset&rsquo;s weights. No more closure-stale-asset bugs in the 6 trade-resolution call sites.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">4 · Honest answer on &ldquo;perfectly calibrated&rdquo;</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Both BTC and ETH start the session from the same V144 calibration prior. The infrastructure is now correct &mdash; cross-asset contamination is impossible &mdash; but ETH&rsquo;s posterior buckets, weight tilts, and regime stats will only become genuinely ETH-specific as ETH trades accumulate. Practical guidance:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>BTC trade normally.</strong> Calibration has earned its keep over months.</li>
+                  <li><strong>ETH trade with awareness.</strong> First 10&ndash;20 ETH trades will be SCANNING-heavy as the streak/bias filters wait for data. Watch the edge-vs-Kalshi number for honest signal.</li>
+                  <li><strong>Don&rsquo;t expect ETH to perform like BTC immediately.</strong> ETH&rsquo;s patterns differ; calibration will learn over the coming week.</li>
+                </ul>
+              </section>
+
+              {/* V7.0.8 — Discord noise reduction */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Discord Lock + Alerts Only</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.0.8</span> — Discord Cleaner</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: keep lock and alerts only. Discord no longer fires SIGNAL or SITOUT messages.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What stays</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>LOCK</strong> &mdash; Tara commits a direction (the actionable moment)</li>
+                  <li><strong>EXIT/CLOSE</strong> &mdash; you closed a position or window resolved with WIN/LOSS</li>
+                  <li><strong>WHALE</strong> &mdash; significant flow alerts (cooldown-protected)</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">What&rsquo;s gone</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>TARA_SIGNAL</strong> &mdash; pre-lock direction forming. Redundant with LOCK that follows.</li>
+                  <li><strong>TARA_SITOUT</strong> &mdash; Tara decided not to trade. Non-actionable; channel doesn&rsquo;t need to know.</li>
+                  <li><strong>TARA_SCAN</strong> &mdash; was already disabled in V6.5.5.</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Internal flag tracking still runs (broadcast refs) so the state machine stays consistent. Just no Discord traffic from those events.</p>
+              </section>
+
+              {/* V7.0.7 — Strike, Discord on switch, asset tag */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · _extractStrike Asset-Agnostic · Discord Switch Suppression · Asset Tag Belt-and-Suspenders</span>
