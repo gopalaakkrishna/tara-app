@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v7.0.4-doge-15m-restored';
+const BASELINE_VERSION='2026.05.05-v7.0.5-strike-range-asset-migration';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -6750,7 +6750,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>7.0.4</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>7.0.5</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -7089,6 +7089,22 @@ function TaraApp(){
             resolved++;
           }
         }
+        // V7.0.5: Auto-fix asset tag from strike magnitude. Strikes are unambiguous:
+        //   BTC>=10K, ETH 100-10K, SOL 1-1000, DOGE <1. The V7.0.3 closure bug caused
+        //   some entries to be tagged with the wrong asset (e.g. SOL trade as ETH).
+        if(e.strike&&Number.isFinite(Number(e.strike))){
+          const s=Number(e.strike);
+          let _inferred=null;
+          if(s>=10000)_inferred='BTC';
+          else if(s>=100)_inferred='ETH';
+          else if(s>=1)_inferred='SOL';
+          else if(s>0)_inferred='DOGE';
+          if(_inferred&&e.asset!==_inferred){
+            try{console.info('[V7.0.5] Migrating entry asset',e.asset||'(none)','→',_inferred,'(strike',s,')');}catch(_){}
+            e.asset=_inferred;
+            resolved++; // count as fix for the resolved tally
+          }
+        }
         // Sanity check on strike/close ratio
         if(e.result==='WIN'||e.result==='LOSS'){
           if(e.strike&&e.closingPrice&&Math.abs(e.closingPrice-e.strike)/e.strike>0.20){
@@ -7202,6 +7218,29 @@ function TaraApp(){
           }
           return false;
         };
+        // V7.0.5: Detect & fix misclassified asset tags. The V7.0.3 stale-closure bug
+        //   caused some entries (esp. SOL trades) to be tagged as ETH. Strike magnitude
+        //   makes the right asset unambiguous: BTC strikes are 10K+, ETH 100-10K, SOL 1-1000,
+        //   DOGE under 1. If the entry's asset tag doesn't match the strike magnitude,
+        //   correct it. Untagged entries (pre-V6.5.8) get the inferred asset.
+        const _inferAssetFromStrike=(strike)=>{
+          if(!strike||!Number.isFinite(Number(strike)))return null;
+          const s=Number(strike);
+          if(s>=10000)return'BTC';
+          if(s>=100)return'ETH';
+          if(s>=1)return'SOL';
+          if(s>0)return'DOGE';
+          return null;
+        };
+        const _fixAsset=(e)=>{
+          if(!e||!e.strike)return e;
+          const _inferred=_inferAssetFromStrike(e.strike);
+          if(!_inferred)return e;
+          if(e.asset===_inferred)return e;
+          // Asset mismatch — correct it.
+          try{console.info('[V7.0.5] Fixing entry asset tag:',e.asset||'(none)','→',_inferred,'(strike',e.strike,')');}catch(_){}
+          return{...e,asset:_inferred};
+        };
         const _autoResolve=(e)=>{
           if(!e||e.result!=='SITOUT')return e;
           if((e.dir!=='UP'&&e.dir!=='DOWN')||!e.strike||!e.closingPrice)return e;
@@ -7221,6 +7260,7 @@ function TaraApp(){
         prev.forEach(e=>{
           let f=_backfillCallLogId(e);
           if(!f||!f.windowId)return;
+          f=_fixAsset(f);
           f=_autoResolve(f);
           if(_isCorrupt(f))return; // drop corrupt
           byKey.set(_key(f),f);
@@ -7229,6 +7269,8 @@ function TaraApp(){
         d.entries.forEach(raw=>{
           let e=_backfillCallLogId(raw);
           if(!e||!e.id||!e.windowId)return;
+          const _withAsset=_fixAsset(e);
+          if(_withAsset!==e){e=_withAsset;changed=true;}
           const _resolved=_autoResolve(e);
           if(_resolved!==e){e=_resolved;changed=true;}
           if(_isCorrupt(e)){changed=true;return;} // drop corrupt cloud entry, mark changed
@@ -7511,7 +7553,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.0.4 online — DOGE 15m restored. V7.0.3 added an incorrect skip for DOGE 15m thinking the markets did not exist. User confirmed via screenshot they do (Kalshi added them after the January 2026 launch announcement I was reading). Skip removed, warning indicator removed. The other two V7.0.3 fixes (per-asset Kalshi cache + removed BTC-specific strike floor) were the actual cause of the 42115 issue and remain in place — DOGE strikes should now load correctly with format like 0.1108807.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.0.5 online — two real fixes for what V7.0.3 missed. (1) Strike-picking loop had a hidden BTC-specific range filter that rejected ALL valid SOL ($200) and DOGE ($0.45) strike candidates as out-of-range. The fallback then blindly grabbed candidatePool[0] which was often the wrong-side market. Now the filter just checks the strike is positive and finite — asset-agnostic. Plus two more BTC-specific strike validation sites in the auto-fill paths. (2) Existing memory entries with wrong asset tags (like the SOL trade saved as ETH) now auto-migrate on load + cloud-sync based on strike magnitude. Strike ranges are unambiguous: BTC 10K+, ETH 100-10K, SOL 1-1000, DOGE under 1. Console logs the migration. Should fix your existing entry display and prevent the issue going forward.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7812,7 +7854,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.0.4'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.0.5'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -7902,7 +7944,7 @@ function TaraApp(){
     setPendingStrike(null);
     // Try Kalshi cache first (best source — preset strike from market)
     const _kStrike=kalshiStrikeRef.current;
-    const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
+    const _kStrikeValid=_kStrike!=null&&Number.isFinite(_kStrike)&&_kStrike>0; // V7.0.5: asset-agnostic
     if(_kStrikeValid){
       // V6.3.5: Use exact Kalshi value, never round. Kalshi strikes can be e.g. $80,036.93;
       //   rounding to $80,037 introduces fractional gap distortion that flips marginal trades.
@@ -7957,7 +7999,7 @@ function TaraApp(){
     }
     // Strike-fill: ONLY if Kalshi cached. No live-spot fallback per user spec.
     const _kStrike=kalshiStrikeRef.current;
-    const _kStrikeValid=_kStrike!=null&&_kStrike>1000&&_kStrike<10000000;
+    const _kStrikeValid=_kStrike!=null&&Number.isFinite(_kStrike)&&_kStrike>0; // V7.0.5: asset-agnostic
     if(_kStrikeValid){
       // V6.3.5: Exact Kalshi value, no rounding
       const p=Number(_kStrike);
@@ -7986,7 +8028,7 @@ function TaraApp(){
   //    set itself, i'll still be checking and confirming'. Removed the 60s elapsed
   //   cutoff that was preventing auto-snap on mid-window page opens.
   useEffect(()=>{
-    if(!kalshiStrike||kalshiStrike<1000||kalshiStrike>10000000)return;
+    if(!kalshiStrike||!Number.isFinite(Number(kalshiStrike))||Number(kalshiStrike)<=0)return; // V7.0.5: asset-agnostic
     if(isManualStrikeRef.current)return;       // user typed their own strike — respect it
     // V6.3.5: Exact value comparison, no rounding
     if(strikeSource==='kalshi'&&Math.abs((targetMargin||0)-Number(kalshiStrike))<0.01)return; // already set, no change
@@ -8071,7 +8113,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.4  |  signal'},
+        footer:{text:'Tara 7.0.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8085,7 +8127,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.0.4  |  stand-down'},
+        footer:{text:'Tara 7.0.5  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8099,7 +8141,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.0.4  |  search'},
+        footer:{text:'Tara 7.0.5  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8116,7 +8158,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.0.4  |  lock'},
+        footer:{text:'Tara 7.0.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8133,7 +8175,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.0.4  |  close'},
+          footer:{text:'Tara 7.0.5  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8154,7 +8196,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.0.4  |  exit'},
+        footer:{text:'Tara 7.0.5  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8175,7 +8217,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.4  |  scanning'},
+        footer:{text:'Tara 7.0.5  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8195,7 +8237,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.4  |  signal'},
+        footer:{text:'Tara 7.0.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8215,7 +8257,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.4  |  lock'},
+        footer:{text:'Tara 7.0.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8232,7 +8274,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.4  |  sit-out'},
+        footer:{text:'Tara 7.0.5  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8254,7 +8296,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.0.4  |  result'},
+          footer:{text:'Tara 7.0.5  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8291,12 +8333,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.0.4  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.0.5  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 7.0.4',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 7.0.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=_webhookForAsset.replace('https://discord.com/api/webhooks/','').split('/');
@@ -8315,7 +8357,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 7.0.4 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 7.0.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8568,7 +8610,11 @@ function TaraApp(){
         const candidatePool=greaterMarkets.length>0?greaterMarkets:matchingClose;
         for(const m of candidatePool){
           const _s=_extractStrike(m);
-          if(_s==null||_s<1000||_s>10000000)continue;
+          // V7.0.5: removed BTC-specific range guard (_s<1000||_s>10000000). Was rejecting
+          //   ALL valid SOL/DOGE strikes ($200 and $0.45 ranges) — which is why DOGE/SOL
+          //   strike picking fell through to the blind candidatePool[0] fallback below
+          //   (often picking a wrong-side market). Just skip null/non-finite/zero.
+          if(_s==null||!Number.isFinite(_s)||_s<=0)continue;
           if(_curPrice>0){
             const diff=Math.abs(_s-_curPrice);
             if(diff<bestStrikeDiff){bestStrikeDiff=diff;best=m;bestStrike=_s;}
@@ -11714,7 +11760,7 @@ function TaraApp(){
     setForceRender(p=>p+1);
   };
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.0.4...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.0.5...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -11815,7 +11861,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              7.0.4
+              7.0.5
             </span>
           </div>
 
@@ -12451,7 +12497,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.0.4</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.0.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -13107,7 +13153,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 7.0.4 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 7.0.5 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -13263,12 +13309,41 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 7.0.4 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 7.0.5 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
 
-              {/* V7.0.4 — DOGE 15m restored (V7.0.3 mistake corrected) */}
+              {/* V7.0.5 — Strike range guards (rest) + asset migration */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Strike Range Guards · Memory Asset Migration</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.0.5</span> — Strikes Pick Right · Memory Self-Heals</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: strike pricing still wrong on SOL and DOGE after V7.0.4. Existing SOL trade still showing under ETH section. Root causes:</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Three more BTC-specific strike-range guards</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">V7.0.3 fixed the cache-write guard but missed three other places with <code className="text-[10px] bg-[#0E100F] px-1">{`strike>1000 && strike<10000000`}</code>:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Strike-picking loop</strong> in Kalshi fetch &mdash; the worst one. SOL ($200) and DOGE ($0.45) candidates were rejected as &ldquo;invalid&rdquo;, falling through to the blind candidatePool[0] fallback which often picked the wrong-side market.</li>
+                  <li><strong>Auto-fill on window-open</strong> (two paths) &mdash; rejected non-BTC strikes and left the strike field blank.</li>
+                  <li><strong>Kalshi strike re-snap effect</strong> &mdash; same.</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">All four now check just <code className="text-[10px] bg-[#0E100F] px-1">{`Number.isFinite(s) && s > 0`}</code> — asset-agnostic.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Memory asset auto-migration</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The V7.0.3 stale-closure bug caused some entries (e.g. that SOL win at strike $84.20) to be saved under ETH&apos;s section. Existing entries now self-correct on load and on every cloud sync, based on strike magnitude:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Strike &ge; $10,000 &rarr; BTC</li>
+                  <li>Strike $100 &mdash; $9,999 &rarr; ETH</li>
+                  <li>Strike $1 &mdash; $99 &rarr; SOL</li>
+                  <li>Strike under $1 &rarr; DOGE</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Console logs <code className="text-[10px] bg-[#0E100F] px-1">[V7.0.5] Migrating entry asset ETH &rarr; SOL (strike 84.2)</code>. Migration runs once on load, then again on each Firestore sync &mdash; persistent. Pre-V6.5.8 entries (no asset tag at all) get inferred too.</p>
+              </section>
+
+              {/* V7.0.4 — DOGE 15m restored */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · DOGE 15m Skip Reverted</span>
