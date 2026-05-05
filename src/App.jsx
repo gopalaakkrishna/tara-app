@@ -4285,14 +4285,34 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               Hidden after commit or sit-out — at that point the call is locked one-way and these
               would do nothing useful. Primary button (gold) lowers floors temporarily; secondary
               text-button bypasses all gates with a confirmation dialog. */}
-        {/* V6.5.7: Speed dial with live ETA. Shows expected lock time at current dial position. */}
+        {/* V6.5.7: Speed dial with live ETA. Shows expected lock time at current dial position.
+            ETA is computed inline from window timing + dial setting so it's always available
+            even when engine hasn't run yet (early scan, search phase, etc). */}
         {!isCommittedSnap&&typeof setSpeedDial==='function'&&(()=>{
           const _d=Math.max(0,Math.min(100,speedDial||50));
           const _label=_d<=20?'⚡ FAST':_d<=40?'fast':_d<=60?'balanced':_d<=80?'patient':'🛡 PATIENT';
           const _color=_d<=30?'rgb(244,114,182)':_d<=70?T2_GOLD:'rgb(110,231,183)';
-          const _eta=taraCall?._ctx?.lockEtaSec;
-          const _etaStr=_eta==null?'—':_eta<=0?'now':_eta<60?`~${Math.round(_eta)}s`:`~${Math.round(_eta/60)}m ${Math.round(_eta%60)}s`;
-          const _tier=taraCall?._ctx?.tierLabel||'';
+          // Inline ETA computation — no engine dependency. Defends against null/undefined inputs.
+          const _smult=_d<=50?(0.3+(_d/50)*0.7):(1.0+((_d-50)/50)*1.0);
+          const _searchPhase=Math.max(3,Math.round(10*_smult));
+          const _totalSec=windowType==='15m'?900:300;
+          const _minsR=Number(timeState&&timeState.minsRemaining)||0;
+          const _secsR=Number(timeState&&timeState.secsRemaining)||0;
+          const _elapsed=Math.max(0,_totalSec-(_minsR*60+_secsR));
+          const _searchRem=Math.max(0,_searchPhase-_elapsed);
+          const _engSamples=taraCall&&taraCall._ctx&&typeof taraCall._ctx.samples==='number'?taraCall._ctx.samples:null;
+          const _engNeed=taraCall&&taraCall._ctx&&typeof taraCall._ctx.needSamples==='number'?taraCall._ctx.needSamples:null;
+          let _samplesRem;
+          let _tierLabel;
+          if(_engSamples!=null&&_engNeed!=null){
+            _samplesRem=Math.max(0,_engNeed-_engSamples);
+            _tierLabel=(taraCall&&taraCall._ctx&&taraCall._ctx.tierLabel)||'';
+          } else {
+            _samplesRem=Math.max(1,Math.round(30*_smult));
+            _tierLabel=taraCall&&taraCall.call==='SIT_OUT'?'scanning':'forming';
+          }
+          const _etaNum=Math.max(0,_searchRem+_samplesRem);
+          const _etaStr=_etaNum<=0?'now':_etaNum<60?`~${Math.round(_etaNum)}s`:`~${Math.floor(_etaNum/60)}m ${Math.round(_etaNum%60)}s`;
           return(
             <div className="border-t border-[#E8E9E4]/8 pt-2.5 mt-2.5">
               <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
@@ -4316,12 +4336,12 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 <span className="text-[#E8E9E4]/35">0 · faster</span>
                 <span className="text-[#E8E9E4]/35">100 · patient</span>
               </div>
-              <div className="mt-2 px-2 py-1.5 rounded-md flex items-center justify-between gap-2" style={{background:'rgba(232,233,228,0.04)',border:'1px solid rgba(232,233,228,0.08)'}}>
-                <div className="flex items-baseline gap-2 min-w-0 flex-wrap">
-                  <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold shrink-0">Lock ETA</span>
-                  {_tier&&<span className="text-[9px] uppercase text-[#E8E9E4]/30 tabular-nums">{_tier}</span>}
+              <div className="mt-2 px-2.5 py-2 rounded-md" style={{background:'rgba(232,233,228,0.05)',border:'1px solid rgba(232,233,228,0.10)'}}>
+                <div className="flex items-baseline justify-between gap-2 mb-0.5">
+                  <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold">Lock ETA</span>
+                  {_tierLabel&&<span className="text-[9px] uppercase text-[#E8E9E4]/35 tabular-nums">{_tierLabel}</span>}
                 </div>
-                <span className="text-[12px] font-bold tabular-nums tracking-tight" style={{color:_color}}>{_etaStr}</span>
+                <div className="text-[18px] font-bold tabular-nums tracking-tight leading-tight" style={{color:_color}}>{_etaStr||'—'}</div>
               </div>
               <span className="text-[9px] text-[#E8E9E4]/35 italic block mt-1.5 leading-snug">
                 {_d<=30?'Fast — fewer samples, lower thresholds':_d<=70?'Balanced cadence':'Patient — wait for high confidence'}
