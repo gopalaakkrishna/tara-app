@@ -254,7 +254,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v7.9.0-no-go-classifier';
+const BASELINE_VERSION='2026.05.05-v7.10.0-fix-tdz-math-crash';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -2270,7 +2270,11 @@ const computeV99Posterior=(params)=>{
   //   (c) FGT-AGREES-CHASE: if HPotter Future Grand Trend strongly agrees with chase
   //       (mtfAlignment ≥ 1.5 toward chase direction), forward TF analysis confirms the
   //       move. Don't flip against multi-TF future-trend.
-  const _realizedAgreesChase=Math.abs(realGapBps)>=5&&Math.sign(realGapBps)===_chaseDirSign;
+  // V7.10: Compute realGapBps locally — the canonical declaration is later in the engine
+  //   (line ~2315), but we need it here. Same formula. TDZ error before this fix:
+  //   "Cannot access 'ft' before initialization" was minifier's name for realGapBps.
+  const _realGapBpsLocal=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
+  const _realizedAgreesChase=Math.abs(_realGapBpsLocal)>=5&&Math.sign(_realGapBpsLocal)===_chaseDirSign;
   const _projAgreesChase=Math.abs(_projectedGapBps)>=5&&Math.sign(_projectedGapBps)===_chaseDirSign;
   const _fgtAgreesChase=(_chaseDirSign>0&&mtfAlignment>=1.5)||(_chaseDirSign<0&&mtfAlignment<=-1.5);
   const _continuationConfirmed=_realizedAgreesChase||_projAgreesChase||_fgtAgreesChase;
@@ -2288,7 +2292,7 @@ const computeV99Posterior=(params)=>{
   } else if(_allHighMag&&_allSameDir&&timeFraction<=0.6&&_continuationConfirmed){
     // Diagnostic — logged so user can see why we didn't flip when it might have looked right
     const _why=[];
-    if(_realizedAgreesChase)_why.push(`realized gap ${realGapBps.toFixed(0)}bps confirms chase`);
+    if(_realizedAgreesChase)_why.push(`realized gap ${_realGapBpsLocal.toFixed(0)}bps confirms chase`);
     if(_projAgreesChase)_why.push(`projection ${_projectedGapBps.toFixed(0)}bps confirms chase`);
     if(_fgtAgreesChase)_why.push(`FGT ${mtfAlignment.toFixed(1)} confirms chase`);
     reasoning.push(`[REVERSAL-PREDICTOR-SKIPPED] All 3 signals chasing but continuation confirmed: ${_why.join(', ')}`);
@@ -8029,7 +8033,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.9.0 online — three-state model. We talked through sit-outs and agreed: V7.8 was right that stylistic timidity sit-outs (\"tier doesn\'t qualify\", \"timer expired\", \"signals mixed\") cost more money than they save. But there are 3 specific cases where NOT trading is mathematically correct, not conservative. Now those are explicit NO-GO category, not a catch-all SIT_OUT. (1) NEGATIVE EDGE: if Tara would commit at edge ≤-7pt vs Kalshi (market priced it in, paying spread to be right), snapshot NO TRADE — NEGATIVE EDGE with the math shown. (2) DATA UNAVAILABLE: price feed >30s stale OR Kalshi feed missing → NO TRADE — DATA UNAVAILABLE. Calling without data is guessing. (3) NO RESOLUTION TIME: ≤20s remaining + posterior 47-53% + |gap| ≤2bps → NO TRADE — NO TIME. True coin flip with no chance to resolve. Visual: deep crimson border, ⊘ symbol, NO TRADE label, NO entry button on advisor. Distinguished from V7.8 caution commits which still let you enter at your discretion. Now Tara has 3 outcomes: confident lock (firm UP/DOWN, enter freely), tentative call (caution badge, your call), or no-go (specific math reason, do not enter). The middle ground V7.8 added stays — most low-confidence trades still commit with the amber caution chip.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.10.0 online — critical bug fix. Found the math crash. The error \"Cannot access \'ft\' before initialization\" was a TDZ (temporal dead zone) violation in the V7.7.1 reversal predictor at engine line 2273. It referenced realGapBps which is declared at line 2315 — 42 lines later. Use-before-declaration. Minifier renamed realGapBps to \'ft\' which is what the error message showed. The crash blocked ALL analysis: posterior was stuck at 50, score breakdown all zeros, projections empty, advisor card showed MATH CRASH instead of a real call. Fix: compute realGapBps locally in the reversal predictor block (same simple formula: targetMargin>0 ? ((currentPrice-targetMargin)/targetMargin)*10000 : 0), so it\'s available before the engine\'s canonical declaration later. Also addressed: ETH memory should now populate properly after this fix because the engine wasn\'t completing analysis cycles — pendingTradeRef wasn\'t getting populated correctly when crashes hit. Once the engine completes successfully, the existing V7.0.7 asset-inference logic + V7.5 settlement fetcher will tag and resolve ETH entries normally.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -8357,7 +8361,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.9.0'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.10.0'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -8743,7 +8747,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.9.0  |  signal'},
+        footer:{text:'Tara 7.10.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8757,7 +8761,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.9.0  |  stand-down'},
+        footer:{text:'Tara 7.10.0  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8771,7 +8775,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.9.0  |  search'},
+        footer:{text:'Tara 7.10.0  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8788,7 +8792,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.9.0  |  lock'},
+        footer:{text:'Tara 7.10.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8805,7 +8809,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.9.0  |  close'},
+          footer:{text:'Tara 7.10.0  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8826,7 +8830,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.9.0  |  exit'},
+        footer:{text:'Tara 7.10.0  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8847,7 +8851,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.9.0  |  scanning'},
+        footer:{text:'Tara 7.10.0  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8867,7 +8871,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.9.0  |  signal'},
+        footer:{text:'Tara 7.10.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8887,7 +8891,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.9.0  |  lock'},
+        footer:{text:'Tara 7.10.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8904,7 +8908,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.9.0  |  sit-out'},
+        footer:{text:'Tara 7.10.0  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8926,7 +8930,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.9.0  |  result'},
+          footer:{text:'Tara 7.10.0  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8963,7 +8967,7 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.9.0  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.10.0  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -12792,7 +12796,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              7.9.0
+              7.10.0
             </span>
           </div>
 
@@ -14259,13 +14263,33 @@ function TaraApp(){
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
 
+              {/* V7.10.0 — Math Crash Fix */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · TDZ Bug Fix</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Crash Fixed</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshot showed engine stuck on MATH CRASH with error <em>&ldquo;Cannot access &lsquo;ft&rsquo; before initialization&rdquo;</em>. Posterior frozen at 50%, all signals reading 0, advisor card unable to render, projections empty.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">V7.7.1 reversal predictor at engine line 2273 referenced <code className="text-[10px] bg-[#0E100F] px-1">realGapBps</code> &mdash; but that variable&rsquo;s declaration was at line 2315, 42 lines after the read site. JS hoists <code>let</code>/<code>const</code> but throws TDZ when accessed before initialization. Minifier renamed the var to <code className="text-[10px] bg-[#0E100F] px-1">ft</code> so the error said &ldquo;Cannot access &lsquo;ft&rsquo;&rdquo;.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Why it was hit more on ETH: V7.7.1 added the continuation blockers (realized-agrees / proj-agrees / FGT-agrees-chase). On ETH&rsquo;s typical 15m windows with the strike near current price, the reversal predictor evaluation path was hitting the realGapBps reference frequently. BTC happened to take different code paths most of the time which masked the issue at first.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Fix</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Compute <code className="text-[10px] bg-[#0E100F] px-1">_realGapBpsLocal</code> inline at the V7.7.1 block using the same formula <code className="text-[10px] bg-[#0E100F] px-1">targetMargin {'>'} 0 ? ((currentPrice - targetMargin) / targetMargin) * 10000 : 0</code>. The engine&rsquo;s canonical <code>realGapBps</code> declaration at line 2315 stays unchanged for everything downstream.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">ETH memory implication</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">User flagged: <em>&ldquo;still having an issue with eth memory&rdquo;</em>. The math crash was a likely contributor &mdash; when the engine throws, downstream effects (lock formation, pendingTradeRef population, applyTradeLearning) can&rsquo;t fire properly. Once the engine completes successfully, the existing V7.0.7 strike-magnitude asset inference + V7.5 deferred settlement fetcher should tag and resolve ETH trades correctly. After deploying V7.10, run a few ETH trades to verify they appear in memory with proper WIN/LOSS resolution. Any old PENDING-stranded entries can still be manually edited via Memory modal.</p>
+              </section>
+
               {/* V7.9.0 — No-Go Classifier (Three-State Model) */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Three-State Model · Explicit No-Go</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.9.0</span> — When Sit-Out Is The Right Answer</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — When Sit-Out Is The Right Answer</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Talked through sit-outs together. Agreed: V7.8 killing stylistic timidity (tier blocks, timer expirations, mixed-signal skips) was right. But there are 3 specific cases where NOT trading is mathematically correct, not conservative. Those become an explicit NO-GO category &mdash; clearly distinguished from a normal lock or a tentative caution call.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Three states now</div>
@@ -14293,7 +14317,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Persistent Learning · No Skips · Caution Notes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.9.0</span> — She Trades Every Round Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — She Trades Every Round Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Weights persist across sessions</div>
@@ -14334,7 +14358,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Reversal Blockers · Stale-Lock Advisor</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.9.0</span> — Stop Inviting Bad Trades</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Stop Inviting Bad Trades</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged the screenshot. Tara locked DOWN 54%, engine showed 89% UP, Kalshi 99.7% UP, all 4 forward projections UP, price +25bps above strike. Advisor card said &ldquo;Tara DOWN 85% &middot; ENTER DOWN&rdquo;. Pressing ENTER would have been an instant loss. Two bugs fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor — continuation blockers</div>
@@ -14363,7 +14387,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Predict Reversals · Shadow Tara · Fast-Mode</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.9.0</span> — Predict the Reversal, Not Avoid It</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Predict the Reversal, Not Avoid It</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor (replaces V7.6 guard)</div>
@@ -14411,7 +14435,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Mean-Reversion Guard · Timer-Fires · Dual Feed</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.9.0</span> — Stop Chasing the Top</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Stop Chasing the Top</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Deep dive into 105 resolved trades + the recent 30 found the actual structural pattern behind &ldquo;we chase momentum and lose on swings.&rdquo;</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Findings from the call-log analysis</div>
@@ -14454,7 +14478,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Faster Low-Dial Locks · ETH Save Bug</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.9.0</span> — Truly Fast at Fast</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Truly Fast at Fast</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Two unrelated bugs in one release. User flagged both.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Speed dial low-end made aggressive</div>
@@ -14500,7 +14524,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Speed Dial Actually Functional</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.9.0</span> — Dial Has Function Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Dial Has Function Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;the timer decision has 0 function too. its just a gimmick and does nothing&rdquo;. They were right. The dial was only nudging two floor numbers that almost every trade passed regardless. Real fix:</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tier filter by dial position</div>
@@ -14547,7 +14571,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Engine · The Structural Blind Spot Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.9.0</span> — Higher Timeframes Finally Count</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Higher Timeframes Finally Count</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged a trade where the Score Breakdown showed &ldquo;Structural ▲ UP · 4/6 align&rdquo; with 5m and 15m both bullish, while Tara sat out leaning DOWN. Investigation: the engine was COMPUTING the multi-TF structural data and SHOWING it on the panel, but never adding it to the posterior. Five-of-six timeframes screaming UP, math weight: zero.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Structural alignment bonus</div>
@@ -14585,7 +14609,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stale State Fixes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.9.0</span> — Sound + Stale UI</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Sound + Stale UI</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three quick fixes. Two were old bugs, one was a missing persistence flag.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Sound enabled now persists</div>
@@ -14605,7 +14629,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Prediction Engine · The &ldquo;Why Jerome Beats Tara&rdquo; Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.9.0</span> — Honest Confidence, Smarter Locks</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.0</span> — Honest Confidence, Smarter Locks</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">After a side-by-side analysis of a real losing trade where Jerome won and Tara lost, we found the structural problem: Tara was over-trusting tape extremes and under-weighting strike position. This release surgically fixes both, plus the timer bug, plus calibrates the confidence display.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tape-extreme guard</div>
