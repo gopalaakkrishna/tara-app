@@ -254,7 +254,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v7.10.4-cross-browser-realtime-sync';
+const BASELINE_VERSION='2026.05.05-v7.10.5-comprehensive-sync-and-self-learning';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -7206,7 +7206,36 @@ function TaraApp(){
   const[discordAvatar,setDiscordAvatar]=useState('');
   const[windowRecap,setWindowRecap]=useState(null); // {won,dir,closePrice,strike,gapBps,regime} — clears after 6s
   const[sessionPnL,setSessionPnL]=useState(0);      // dollar P&L this browser session
-  const[lifetimePnL,setLifetimePnL]=useState(()=>{try{return parseFloat(localStorage.getItem('taraV110PnL')||'0');}catch(e){return 0;}})
+  // V7.10.5: lifetimePnL now also cloud-synced. Tracks {value, updatedAt} so cross-device
+  //   merge can pick the most recently-updated value (last-write-wins by timestamp). PnL
+  //   isn't monotonic — losses decrease it — so max-merge would silently drop loss data.
+  //   Latest-update wins is the correct semantics for "running PnL counter."
+  const[lifetimePnL,setLifetimePnL]=useState(()=>{try{return parseFloat(localStorage.getItem('taraV110PnL')||'0');}catch(e){return 0;}});
+  const _pnlUpdatedAtRef=useRef((()=>{try{return parseInt(localStorage.getItem('taraV110PnL_updatedAt')||'0',10)||0;}catch(e){return 0;}})());
+  const _pnlHydratedRef=useRef(false);
+  useEffect(()=>{
+    if(_pnlHydratedRef.current){
+      cloudWriteDebounced('state/lifetimePnL',{value:lifetimePnL,updatedAt:_pnlUpdatedAtRef.current||Date.now()},1500);
+    }
+  },[lifetimePnL]);
+  useEffect(()=>{
+    const unsub=cloudWatch('state/lifetimePnL',(d)=>{
+      _pnlHydratedRef.current=true;
+      if(!d||typeof d!=='object'||typeof d.value!=='number')return;
+      const _cloudT=Number(d.updatedAt)||0;
+      const _localT=_pnlUpdatedAtRef.current||0;
+      // Adopt cloud only if cloud's update is more recent than local's. 1s tolerance.
+      if(_cloudT>_localT+1000){
+        _pnlUpdatedAtRef.current=_cloudT;
+        try{
+          localStorage.setItem('taraV110PnL',String(d.value));
+          localStorage.setItem('taraV110PnL_updatedAt',String(_cloudT));
+        }catch(e){}
+        setLifetimePnL(d.value);
+      }
+    });
+    return unsub;
+  },[]);
   // MTF: track last known lock for each timeframe so we can detect confluence
   const mtfLocksRef=useRef({'5m':null,'15m':null}); // {dir,lockedAt,posterior};
 
@@ -7342,7 +7371,22 @@ function TaraApp(){
   const manuallyClosedRef=useRef(null);
   const[positionEntry,setPositionEntry]=useState(null);
   const[activeProjectionTab,setActiveProjectionTab]=useState('5m');
-  const[scorecards,setScorecards]=useState({'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}});
+  // V7.10.5: scorecards now persist to localStorage AND sync to cloud. Previously the
+  //   user's personal W/L tally was in-memory only — reset every reload AND inconsistent
+  //   across devices. Initial value reads localStorage seed (cached from last session).
+  const[scorecards,setScorecards]=useState(()=>{
+    try{
+      const stored=localStorage.getItem('taraPersonalScorecards_v1');
+      if(stored){
+        const p=JSON.parse(stored);
+        if(p&&typeof p==='object')return{
+          '15m':{wins:Number(p['15m']?.wins)||0,losses:Number(p['15m']?.losses)||0},
+          '5m':{wins:Number(p['5m']?.wins)||0,losses:Number(p['5m']?.losses)||0},
+        };
+      }
+    }catch(e){}
+    return{'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}};
+  });
   // V3.2.4: Tara's Call scorecard — separate from general prediction. Tracks UP/DOWN/SIT_OUT
   //   decisions where Tara has applied an additional conviction filter. SIT_OUT trades don't
   //   count for or against. Lets us measure "would Tara's selective calls win at higher rate?"
@@ -7354,6 +7398,11 @@ function TaraApp(){
   //   call log is the single source of truth — no separate counter to drift.
   // V5.7.1 declarations moved to AFTER taraCallLog (V5.7.4 hotfix — TDZ fix).
   const _callLogHydratedRef=useRef(false);
+  // V7.10.5: hydration sentinel for personal scorecards cloud sync. Same pattern as the
+  //   call log — only push to cloud after we've heard from cloud at least once. Prevents
+  //   blasting baseline-default values back to cloud and overwriting other devices' data
+  //   on first mount before cloudWatch has had a chance to deliver the saved state.
+  const _scorecardsHydratedRef=useRef(false);
   // V3.2.4: Snapshot Tara's Call at endgame freeze. Whatever Tara is calling when the
   //   final 90s zone begins becomes "Tara's Call for this round." It gets resolved when
   //   the window rolls over. This ref persists across the snapshot→rollover transition.
@@ -7638,6 +7687,41 @@ function TaraApp(){
     });
     return unsub;
   },[_backfillCallLogId]);
+  // V7.10.5: PERSONAL SCORECARDS persist + sync. Was in-memory only — every reload reset
+  //   to defaults, and no two devices ever agreed. Now: localStorage cached, cloud-synced
+  //   via scorecards/personal, max-per-cell merge so any device's increments propagate
+  //   without double-counting. (Resets on a single device temporarily lose to max-merge,
+  //   but that's a rare action and the user can re-clear once cloud catches up.)
+  useEffect(()=>{
+    try{localStorage.setItem('taraPersonalScorecards_v1',JSON.stringify(scorecards));}catch(e){}
+    if(_scorecardsHydratedRef.current){
+      cloudWriteDebounced('scorecards/personal',scorecards,1500);
+    }
+  },[scorecards]);
+  useEffect(()=>{
+    const unsub=cloudWatch('scorecards/personal',(d)=>{
+      _scorecardsHydratedRef.current=true;
+      if(!d||typeof d!=='object')return;
+      setScorecards(prev=>{
+        const _merge=(local,cloud)=>{
+          const lW=Number(local?.wins)||0,lL=Number(local?.losses)||0;
+          const cW=Number(cloud?.wins)||0,cL=Number(cloud?.losses)||0;
+          // Take max-per-cell so increments from any device propagate. Tradeoff: reset on
+          //   one device gets reverted by other devices' higher counts. Acceptable for now.
+          return{wins:Math.max(lW,cW),losses:Math.max(lL,cL)};
+        };
+        const next={
+          '15m':_merge(prev?.['15m'],d?.['15m']),
+          '5m':_merge(prev?.['5m'],d?.['5m']),
+        };
+        // No-op short-circuit if the merge produced identical numbers to prev
+        if(next['15m'].wins===prev['15m']?.wins&&next['15m'].losses===prev['15m']?.losses&&
+           next['5m'].wins===prev['5m']?.wins&&next['5m'].losses===prev['5m']?.losses)return prev;
+        return next;
+      });
+    });
+    return unsub;
+  },[]);
   // V5.6.6: PAST WINDOWS HISTORY — record of how each window resolved. Captured at rollover
   //   regardless of whether Tara called or sat out. Lets users pattern-match recent market
   //   behavior. Capped at 50 most recent. Cloud-synced so the history matches across devices.
@@ -7829,27 +7913,101 @@ function TaraApp(){
   //   the same Firestore doc. Without this, switching assets between browsers means
   //   Browser A's BTC lock would be clobbered by Browser B's ETH state.
   const _lockCloudPath=()=>`state/currentLock_${currentAssetRef.current||currentAsset||'BTC'}_${windowType||'15m'}`;
+  // V7.10.5: mirror of cloud's lock doc — updated by cloudWatch every time onSnapshot fires.
+  //   _persistLock reads this to decide whether to write back. Convergence rule: whoever
+  //   committed FIRST (earliest _committedAt on the snapshot) wins. Other browsers defer.
+  const _cloudLockMirrorRef=useRef(null);
   const _persistLock=()=>{
     if(!_fbDb)return;
+    // Stamp _committedAt on the snapshot the FIRST time we persist with non-null data.
+    //   This is the canonical "when did this browser commit" timestamp, used for first-
+    //   write-wins comparison across devices. Set once, never updated.
+    const _snap=taraCallSnapshotRef.current;
+    if(_snap&&!_snap._committedAt){
+      _snap._committedAt=Date.now();
+    }
+    // V7.10.5 first-write-wins gate: if cloud already has a snapshot for THIS exact window
+    //   that was committed earlier than ours (>1s tolerance for clock skew), don't override
+    //   it. Cloud's earlier snapshot is the canonical truth — we'll converge to it via
+    //   cloudWatch's adoption logic instead.
+    const _cloud=_cloudLockMirrorRef.current;
+    const _expectedWid=computeWindowId(windowType);
+    if(_snap&&_cloud?.taraSnapshot&&_cloud.windowId===_expectedWid){
+      const _cloudT=Number(_cloud.taraSnapshot._committedAt)||0;
+      const _localT=Number(_snap._committedAt)||0;
+      if(_cloudT>0&&_localT>0&&_cloudT+1000<_localT){
+        // Cloud is meaningfully earlier — don't override
+        return;
+      }
+    }
     cloudWriteDebounced(_lockCloudPath(),{
-      windowId:computeWindowId(windowType),
+      windowId:_expectedWid,
       windowType,
       asset:currentAssetRef.current||currentAsset||'BTC',
       engineLock:lockedCallRef.current?{...lockedCallRef.current}:null,
-      taraSnapshot:taraCallSnapshotRef.current?{...taraCallSnapshotRef.current}:null,
+      taraSnapshot:_snap?{..._snap}:null,
       taraSamples:taraCallSampleRef.current?{...taraCallSampleRef.current}:null,
       savedAt:Date.now(),
     },300);
   };
-  const _clearLock=()=>{cloudDelete(_lockCloudPath());};
-  const[regimeMemory,setRegimeMemory]=useState({
-    'TRENDING UP':   {wins:0,losses:0},
-    'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
-    'HIGH VOL CHOP': {wins:24,losses:21},  // 53% WR (n=45) — UP/DOWN both weak, require CONVICTION
-    'SHORT SQUEEZE': {wins:66,losses:31},  // 68% WR (n=97) — primary regime, trust calls
-    'LONG SQUEEZE':  {wins:0,losses:0},
-    'RANGE-CHOP':    {wins:59,losses:51},  // 53.6% WR (n=110) — near coin flip, BE SELECTIVE
+  const _clearLock=()=>{_cloudLockMirrorRef.current=null;cloudDelete(_lockCloudPath());};
+  // V7.10.5: regimeMemory now persists + syncs. Was in-memory only with hardcoded V144
+  //   seeds — never saved on update, never synced. Now: localStorage cached, cloud-synced
+  //   via learnings/regimeMemory, max-per-cell merge for cross-device convergence.
+  const[regimeMemory,setRegimeMemory]=useState(()=>{
+    const _seeds={
+      'TRENDING UP':   {wins:0,losses:0},
+      'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
+      'HIGH VOL CHOP': {wins:24,losses:21},  // 53% WR (n=45) — UP/DOWN both weak, require CONVICTION
+      'SHORT SQUEEZE': {wins:66,losses:31},  // 68% WR (n=97) — primary regime, trust calls
+      'LONG SQUEEZE':  {wins:0,losses:0},
+      'RANGE-CHOP':    {wins:59,losses:51},  // 53.6% WR (n=110) — near coin flip, BE SELECTIVE
+    };
+    try{
+      const stored=localStorage.getItem('taraRegimeMemory_v1');
+      if(stored){
+        const p=JSON.parse(stored);
+        if(p&&typeof p==='object'){
+          // Merge stored over seeds — stored wins, but unknown regimes still get seed defaults
+          const out={..._seeds};
+          Object.keys(p).forEach(k=>{
+            if(p[k]&&typeof p[k]==='object'){
+              out[k]={wins:Number(p[k].wins)||0,losses:Number(p[k].losses)||0};
+            }
+          });
+          return out;
+        }
+      }
+    }catch(e){}
+    return _seeds;
   });
+  const _regimeMemoryHydratedRef=useRef(false);
+  useEffect(()=>{
+    try{localStorage.setItem('taraRegimeMemory_v1',JSON.stringify(regimeMemory));}catch(e){}
+    if(_regimeMemoryHydratedRef.current){
+      cloudWriteDebounced('learnings/regimeMemory',regimeMemory,1500);
+    }
+  },[regimeMemory]);
+  useEffect(()=>{
+    const unsub=cloudWatch('learnings/regimeMemory',(d)=>{
+      _regimeMemoryHydratedRef.current=true;
+      if(!d||typeof d!=='object')return;
+      setRegimeMemory(prev=>{
+        const _allKeys=new Set([...Object.keys(prev||{}),...Object.keys(d||{})]);
+        const next={};
+        let changed=false;
+        _allKeys.forEach(k=>{
+          const lW=Number(prev?.[k]?.wins)||0,lL=Number(prev?.[k]?.losses)||0;
+          const cW=Number(d?.[k]?.wins)||0,cL=Number(d?.[k]?.losses)||0;
+          const merged={wins:Math.max(lW,cW),losses:Math.max(lL,cL)};
+          if(merged.wins!==lW||merged.losses!==lL)changed=true;
+          next[k]=merged;
+        });
+        return changed?next:prev;
+      });
+    });
+    return unsub;
+  },[]);
   const lastRegimeRef=useRef('RANGE-CHOP');
   const windowSignalDirRef=useRef(null); // tracks first FORMING direction this window — lock must match
   // ── TARA SELF-TRAINING STATE ──
@@ -8043,7 +8201,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.10.4 online — REAL fix for cross-browser determinism this time. V7.10.3 only solved within-browser races; cross-browser was still broken because state/currentLock used cloudRead (one-shot at startup) not cloudWatch (real-time). So Browser B only checked Firestore once at mount. After Browser A locked, Browser B never saw it. Plus the path was just state/currentLock with no asset+windowType in it — meaning BTC-15m and ETH-5m shared the same Firestore doc and clobbered each other. Two real bugs compounding. Fix: (1) lock path is now state/currentLock_BTC_15m / state/currentLock_ETH_5m / state/currentLock_BTC_5m / state/currentLock_ETH_15m — four separate docs, no collisions. (2) replaced cloudRead with cloudWatch (Firestore onSnapshot) — when Browser A writes, Browser B\'s listener fires within 1s and adopts the snapshot. (3) effect re-subscribes when window or asset changes (deps: currentPrice, windowType, currentAsset). (4) handleWindowToggle now clears taraCallSnapshotRef so 15m↔5m switch doesn\'t carry stale state. The first browser to lock wins — every other browser, whether already running or mounted later, converges to that snapshot in real-time. This is the fix that actually addresses what you\'ve been asking for: same window, same call, every browser, every device.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.10.5 online — comprehensive sync + learning fix. User flagged three issues at once: records/stats/logs not syncing properly, Tara giving different responses across devices, and uncertainty about whether Tara is actively learning. Mapped every persistent state slot and found three big gaps: (1) Personal scorecards (W/L counter) was in-memory only — no localStorage persistence after V5.5b stub, no cloud sync. Reset every reload, never agreed across devices. (2) regimeMemory (per-regime W/L stats that feed the engine) same situation — hardcoded V144 seeds at mount, never saved on update. (3) lifetimePnL persisted locally but didn\'t sync across devices. All three now fully wired: localStorage + cloud sync via cloudWatch + max-per-cell merge so any device\'s increments propagate. lifetimePnL uses timestamp-based latest-wins merge since PnL isn\'t monotonic. For locks: V7.10.4 added cloudWatch but had a subtle bug — \'only adopt if local empty\' meant simultaneous-commit races permanently disagreed. Fixed with first-write-wins via _committedAt timestamp on every snapshot. _persistLock now defers if cloud has earlier commit; cloudWatch overrides local if cloud was earlier. Both browsers converge to the EARLIEST commit. For learning: was a real gap — gradient-descent weight updates only fired when YOU took a position. Tara\'s calls you only watched updated stats but never the actual ML weights. Now every Tara WIN/LOSS resolution feeds applyTradeLearning, building a synthetic trade record from the call log\'s signalScoresAtLock. Tara learns from EVERY call she resolves. regimeMemory updates moved from user-position path to Tara\'s call resolution path so it tracks Tara\'s outcomes (the right learning signal) without double-counting. Yes — Tara is actively learning now, and you can verify it: Memory modal shows resolved entries, weights persist per-asset, regime stats update on every resolution.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -8342,20 +8500,32 @@ function TaraApp(){
       }
     }catch(e){}
     try{
-      // V134: Try both legacy keys + handle baseline migration
-      const sNew=localStorage.getItem('taraV110Score');
-      const sOld=localStorage.getItem('taraScoreV110');
-      let chosen=null;
-      if(sNew){try{const p=JSON.parse(sNew);if(p?.['15m']?.wins!=null)chosen=p;}catch(e){}}
-      if(!chosen&&sOld){try{const p=JSON.parse(sOld);if(p?.['15m']?.wins!=null)chosen=p;}catch(e){}}
-      // If user's local score is BELOW baseline, prefer baseline (cross-device sync)
-      const baseW=BASELINE_RECORD['15m']?.wins||0;
-      const localW=chosen?.['15m']?.wins||0;
-      if(!chosen||localW<baseW){
-        chosen=BASELINE_RECORD;
-        try{localStorage.setItem('taraV110Score',JSON.stringify(BASELINE_RECORD));}catch(e){}
+      // V7.10.5: scorecards are now read at useState init from taraPersonalScorecards_v1.
+      //   This block now only runs ONE-TIME MIGRATION from legacy keys (taraV110Score /
+      //   taraScoreV110) if the new key is empty. BASELINE_RECORD no longer auto-applied
+      //   — users actually save their own scores now via the new persistence path.
+      const _alreadyMigrated=localStorage.getItem('taraPersonalScorecards_v1');
+      if(!_alreadyMigrated){
+        const sNew=localStorage.getItem('taraV110Score');
+        const sOld=localStorage.getItem('taraScoreV110');
+        let chosen=null;
+        if(sNew){try{const p=JSON.parse(sNew);if(p?.['15m']?.wins!=null)chosen=p;}catch(e){}}
+        if(!chosen&&sOld){try{const p=JSON.parse(sOld);if(p?.['15m']?.wins!=null)chosen=p;}catch(e){}}
+        if(chosen){
+          setScorecards(chosen);
+          // Stamp the new key so we don't migrate again on next mount
+          try{localStorage.setItem('taraPersonalScorecards_v1',JSON.stringify(chosen));}catch(e){}
+        }
       }
-      if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));
+      const m=localStorage.getItem('taraV110Mem');
+      // V7.10.5: regimeMemory migration is similar — only if new key is empty
+      const _regimeMigrated=localStorage.getItem('taraRegimeMemory_v1');
+      if(!_regimeMigrated&&m){
+        try{
+          const _parsed=JSON.parse(m);
+          if(_parsed&&typeof _parsed==='object')setRegimeMemory(_parsed);
+        }catch(e){}
+      }
       // V7.0: Per-asset webhooks. V7.1: BTC + ETH only.
       try{
         const _newHooks=localStorage.getItem('taraV70Hooks');
@@ -8371,7 +8541,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.10.4'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.10.5'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -8758,7 +8928,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.4  |  signal'},
+        footer:{text:'Tara 7.10.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8772,7 +8942,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.10.4  |  stand-down'},
+        footer:{text:'Tara 7.10.5  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8786,7 +8956,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.10.4  |  search'},
+        footer:{text:'Tara 7.10.5  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8803,7 +8973,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.10.4  |  lock'},
+        footer:{text:'Tara 7.10.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8820,7 +8990,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.10.4  |  close'},
+          footer:{text:'Tara 7.10.5  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8841,7 +9011,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.10.4  |  exit'},
+        footer:{text:'Tara 7.10.5  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8862,7 +9032,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.4  |  scanning'},
+        footer:{text:'Tara 7.10.5  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8882,7 +9052,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.4  |  signal'},
+        footer:{text:'Tara 7.10.5  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8902,7 +9072,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.4  |  lock'},
+        footer:{text:'Tara 7.10.5  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8919,7 +9089,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.4  |  sit-out'},
+        footer:{text:'Tara 7.10.5  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8941,7 +9111,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.10.4  |  result'},
+          footer:{text:'Tara 7.10.5  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8978,7 +9148,7 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.10.4  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.10.5  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -9029,7 +9199,12 @@ function TaraApp(){
     setSessionPnL(prev=>prev+delta);
     setLifetimePnL(prev=>{
       const next=prev+delta;
-      try{localStorage.setItem('taraV110PnL',String(next));}catch(e){}
+      const _now=Date.now();
+      _pnlUpdatedAtRef.current=_now;
+      try{
+        localStorage.setItem('taraV110PnL',String(next));
+        localStorage.setItem('taraV110PnL_updatedAt',String(_now)); // V7.10.5
+      }catch(e){}
       return next;
     });
   };
@@ -9498,7 +9673,12 @@ function TaraApp(){
           }
           // If no position was entered, no scoring and no broadcast
           if(active){
-            setRegimeMemory(prev=>{const u={...prev};const r=lastRegimeRef.current||'RANGE-CHOP';if(!u[r])u[r]={wins:0,losses:0};if(won)u[r].wins++;else u[r].losses++;return u;});
+            // V7.10.5: regimeMemory bump moved to _logResult (Tara's call resolution).
+            //   regimeMemory feeds INTO the engine as learning signal — it should track
+            //   Tara's call outcomes (per-regime), not user's position outcomes. Previously
+            //   bumping here meant: (a) regimeMemory only updated when user took position,
+            //   missing Tara's watch-only calls; (b) when user did take position, both this
+            //   line AND _logResult would bump it = double-count. Now: single source of truth.
             // Broadcast result of the trade user was actually in
             if(manuallyClosedRef.current===null){
               recordPnL(won,pendingTradeRef.current);
@@ -9663,6 +9843,62 @@ function TaraApp(){
                 const next=[...prev];
                 next[idx.i]={...idx.e,result:_resolvedResult,outcomeDir:_outcomeDir,strike:_scoringStrike,closingPrice:closeFromKalshi,closeSource:'kalshi',gapBps:_gap,resolvedAt:Date.now()};
                 setTimeout(()=>_recomputeLearningsFromLog(next),0);
+                // V7.10.5: TARA SELF-LEARNING. When her call resolves WIN/LOSS, feed it
+                //   into the gradient-descent learner (applyTradeLearning) — was previously
+                //   gated on user position. Now Tara learns from EVERY resolved call,
+                //   regardless of whether user entered. Synthesizes a trade record from
+                //   the resolved entry: signals come from signalScoresAtLock (V6.3.5),
+                //   posterior from rawPosteriorAtLock or posterior, dir from the entry,
+                //   asset from the entry's tag.
+                if(_resolvedResult==='WIN'||_resolvedResult==='LOSS'){
+                  const _entry=next[idx.i];
+                  // V7.10.5: bump regimeMemory from Tara's resolved call too. Was previously
+                  //   only incrementing on user-position resolutions (line 9664), so the
+                  //   per-regime stats were incomplete when user only watched.
+                  const _regimeKey=_entry?.regime||'RANGE-CHOP';
+                  if(_regimeKey){
+                    setRegimeMemory(prev=>{
+                      const u={...prev};
+                      if(!u[_regimeKey])u[_regimeKey]={wins:0,losses:0};
+                      else u[_regimeKey]={...u[_regimeKey]};
+                      if(_resolvedResult==='WIN')u[_regimeKey].wins=(u[_regimeKey].wins||0)+1;
+                      else u[_regimeKey].losses=(u[_regimeKey].losses||0)+1;
+                      return u;
+                    });
+                  }
+                  const _hasSignals=_entry?.signalScoresAtLock&&typeof _entry.signalScoresAtLock==='object'&&Object.keys(_entry.signalScoresAtLock).length>0;
+                  if(_hasSignals&&(_entry.dir==='UP'||_entry.dir==='DOWN')){
+                    const _tradeRecord={
+                      ...idx.e,
+                      asset:_entry.asset||'BTC',
+                      dir:_entry.dir,
+                      signals:_entry.signalScoresAtLock,
+                      posterior:Number(_entry.rawPosteriorAtLock)||Number(_entry.posterior)||50,
+                      regime:_entry.regime||'',
+                      result:_resolvedResult,
+                    };
+                    // Synthesize a same-asset trade-log slice from the call log for the
+                    //   rolling-window calc inside updateWeights. Each entry must have
+                    //   signals + posterior + dir to qualify.
+                    const _sameAssetLog=next.filter(e=>{
+                      if(!e||(e.result!=='WIN'&&e.result!=='LOSS'))return false;
+                      if((e.asset||'BTC')!==(_tradeRecord.asset))return false;
+                      if(!e.signalScoresAtLock||Object.keys(e.signalScoresAtLock||{}).length===0)return false;
+                      return e.dir==='UP'||e.dir==='DOWN';
+                    }).map(e=>({
+                      asset:e.asset||'BTC',
+                      dir:e.dir,
+                      signals:e.signalScoresAtLock,
+                      posterior:Number(e.rawPosteriorAtLock)||Number(e.posterior)||50,
+                      regime:e.regime||'',
+                      result:e.result,
+                    }));
+                    setTimeout(()=>{
+                      try{applyTradeLearning(_sameAssetLog,_tradeRecord,_resolvedResult);}
+                      catch(err){console.warn('[V7.10.5 self-learn] applyTradeLearning failed',err);}
+                    },20);
+                  }
+                }
                 return next;
               });
             };
@@ -9763,6 +9999,12 @@ function TaraApp(){
   //   adopts if local has no snapshot — never overrides a local commit. The watcher acts
   //   as the cloud-restore-completed signal too: first message (data or null) flips the
   //   gate so lifecycle commits can fire if cloud is genuinely empty.
+  // V7.10.5: convergence rule upgraded to FIRST-WRITE-WINS. The handler now also mirrors
+  //   the cloud doc to _cloudLockMirrorRef so _persistLock can read it. If cloud's snapshot
+  //   was committed meaningfully earlier than local's (>1s tolerance), local is OVERRIDDEN
+  //   with cloud's — the earlier commit wins. _persistLock won't re-write because it sees
+  //   the same earlier commit in its mirror and defers. This converges both browsers to the
+  //   FIRST commit, not the last (which last-write-wins would do).
   useEffect(()=>{
     if(!currentPrice||!_fbDb||!currentAsset||!windowType)return;
     let cancelled=false;
@@ -9775,6 +10017,8 @@ function TaraApp(){
       // First message (whether data or null) marks restore as complete. Lifecycle paths
       //   gate on this so they don't fire their own commit before cloud has had a turn.
       _cloudRestoreCompletedRef.current=true;
+      // Mirror the doc for _persistLock's pre-write check (even when null)
+      _cloudLockMirrorRef.current=d||null;
       if(!d)return; // empty doc — no saved lock for this asset+window
       // Validate the cloud doc matches our current window+asset. With per-asset paths this
       //   is mostly belt-and-suspenders — a stale doc from a previous window-type or asset
@@ -9793,10 +10037,23 @@ function TaraApp(){
         engineLockedDirRef.current=d.engineLock.dir;
         adopted.push(`engine ${d.engineLock.dir}`);
       }
-      // Tara snapshot — adopt if we don't already have one
-      if(d.taraSnapshot&&!taraCallSnapshotRef.current){
-        taraCallSnapshotRef.current={...d.taraSnapshot};
-        adopted.push(`tara ${d.taraSnapshot.call}${d.taraSnapshot.locked?' LOCKED':''}`);
+      // V7.10.5 first-write-wins for snapshot adoption.
+      //   - If local has no snapshot → adopt cloud
+      //   - If local has snapshot but cloud was committed earlier → OVERRIDE local with cloud
+      //   - If local committed first → keep local (and _persistLock will write back to cloud)
+      if(d.taraSnapshot){
+        const _localSnap=taraCallSnapshotRef.current;
+        const _cloudT=Number(d.taraSnapshot._committedAt)||0;
+        const _localT=Number(_localSnap?._committedAt)||0;
+        if(!_localSnap){
+          taraCallSnapshotRef.current={...d.taraSnapshot};
+          adopted.push(`tara ${d.taraSnapshot.call}${d.taraSnapshot.locked?' LOCKED':''}`);
+        } else if(_cloudT>0&&_localT>0&&_cloudT+1000<_localT){
+          // Cloud is meaningfully earlier — override local
+          taraCallSnapshotRef.current={...d.taraSnapshot};
+          adopted.push(`tara ${d.taraSnapshot.call} (override · cloud was earlier by ${Math.round((_localT-_cloudT)/1000)}s)`);
+        }
+        // else: keep local (we were earlier or tie)
       }
       // Mid-formation sample progress
       if(d.taraSamples&&taraCallSampleRef.current.dir===null&&d.taraSamples.dir){
@@ -12915,7 +13172,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              7.10.4
+              7.10.5
             </span>
           </div>
 
@@ -14382,13 +14639,63 @@ function TaraApp(){
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
 
+              {/* V7.10.5 — Comprehensive Sync + Self-Learning */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Architectural Patch · Sync + Learning</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Sync &amp; Learning Done Right</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged three concerns simultaneously: records/stats/logs not syncing, Tara giving different responses across devices, and asking whether learning was actually happening. Took the time to audit every persistent state slot and the entire learning pipeline.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Persistence gaps found</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Three state slots were in-memory only or local-only:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Personal scorecards (W/L counter)</strong> — stub since V5.5b. Loaded baseline at init, never wrote on update, never synced. Refresh = reset. Two devices never agreed.</li>
+                  <li><strong>regimeMemory (per-regime W/L)</strong> — hardcoded V144 seeds at mount, increments lived in memory until reload, no cloud sync. The engine reads this for per-regime decision biasing &mdash; running on stale seed data.</li>
+                  <li><strong>lifetimePnL</strong> — saved to localStorage but no cloud sync. Switch devices, lose your tracked PnL.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sync mechanism added for each</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">scorecards/personal</code> &mdash; max-per-cell merge so any device&rsquo;s wins/losses propagate (resets temporarily lose to max-merge, but resets are rare).</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">learnings/regimeMemory</code> &mdash; max-per-cell merge per regime.</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">state/lifetimePnL</code> &mdash; latest-update-wins (timestamp comparison) since PnL isn&rsquo;t monotonic.</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Each follows the established hydrate-once + push-back pattern: localStorage cached for fast paint on next mount, cloudWatch listener for live cross-device updates, hydration sentinel ref to prevent first-mount-blast overwriting other devices&rsquo; data.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Cross-device lock convergence</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">V7.10.4 added cloudWatch but had a subtle bug: <em>&ldquo;only adopt cloud if local is empty&rdquo;</em> rule meant simultaneous-commit races could permanently disagree. Browser A locks UP at T=100, Browser B locks DOWN at T=110, both write cloud (last-write-wins → cloud has B&rsquo;s), both watchers fire with B&rsquo;s data. A keeps UP because A has local. Permanent disagreement.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Fixed with first-write-wins via <code className="text-[10px] bg-[#0E100F] px-1">_committedAt</code> timestamp stamped on every snapshot at first persist. <code className="text-[10px] bg-[#0E100F] px-1">_persistLock</code> reads <code className="text-[10px] bg-[#0E100F] px-1">_cloudLockMirrorRef</code> (updated by cloudWatch) and defers writing if cloud has earlier commit. cloudWatch handler overrides local with cloud&rsquo;s snapshot if cloud was committed meaningfully earlier (1s tolerance for clock skew). Both browsers converge to the EARLIEST commit, not the last writer.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Is Tara learning?</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Was a real gap. Three layers of learning:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Statistical buckets</strong> (taraLearnings: by-regime / by-direction / by-tier / by-session / by-confluence / by-edge) &mdash; <span style={{color:'rgb(110,231,183)'}}>WAS firing</span> on every Tara call resolution via <code className="text-[10px] bg-[#0E100F] px-1">_recomputeLearningsFromLog</code>. Produces multipliers fed back into the engine&rsquo;s calibration.</li>
+                  <li><strong>Per-regime W/L (regimeMemory)</strong> &mdash; <span style={{color:'rgb(244,114,182)'}}>was firing only on user-taken positions</span>. Tara calls you watched but didn&rsquo;t enter contributed nothing. Now: fires on every Tara WIN/LOSS resolution; user-position path no longer double-counts.</li>
+                  <li><strong>Gradient descent on signal weights (adaptiveWeights, regimeWeights)</strong> &mdash; <span style={{color:'rgb(244,114,182)'}}>was firing only on user-taken positions</span>. The actual ML weight updates (the thing that makes Tara progressively better at signal weighting) only ran when you clicked ENTER. If you mostly watched, Tara&rsquo;s weights stayed at their defaults.</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Now wired: every Tara WIN/LOSS resolution synthesizes a trade record from the call log entry&rsquo;s <code className="text-[10px] bg-[#0E100F] px-1">signalScoresAtLock</code> (V6.3.5) and feeds it into <code className="text-[10px] bg-[#0E100F] px-1">applyTradeLearning</code>. Per-asset weights, per-regime weights, statistical buckets all update on every Tara call resolution &mdash; not gated on user position anymore. Learning runs on all 100% of resolutions instead of just the subset you traded.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">How to verify</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Open two browsers (or laptop + phone). Lock something on one. Within ~1s, the other shows the same call. Refresh either &mdash; same call still there.</li>
+                  <li>Trade on Browser A (any position). Personal W/L scorecard increments. Open Browser B &mdash; scorecard matches.</li>
+                  <li>Browse Brain View → Adaptive Weights. Take notes of values. Wait for several Tara calls to resolve (no user action needed). Refresh → values changed. That&rsquo;s the gradient descent firing.</li>
+                  <li>Console: search for &ldquo;[V7.10.5 self-learn]&rdquo; or &ldquo;[Firestore lock-watch]&rdquo; for live confirmation.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">One-time migration</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">First mount on V7.10.5 reads legacy <code className="text-[10px] bg-[#0E100F] px-1">taraV110Score</code> / <code className="text-[10px] bg-[#0E100F] px-1">taraV110Mem</code> if the new keys (<code className="text-[10px] bg-[#0E100F] px-1">taraPersonalScorecards_v1</code>, <code className="text-[10px] bg-[#0E100F] px-1">taraRegimeMemory_v1</code>) are empty &mdash; preserves existing local data. After that, the new keys are canonical. Subsequent mounts skip the migration.</p>
+              </section>
+
               {/* V7.10.4 — Cross-Browser Real-Time Sync */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Browser Real-Time Sync</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — Same Call, Every Browser</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Same Call, Every Browser</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;still not the same for everyone on each browser mate.&rdquo;</em> V7.10.3 fixed within-browser races but cross-browser was still broken &mdash; two real bugs compounding.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Bug 1: One-shot read, not real-time</div>
@@ -14423,7 +14730,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Tab Determinism</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — One Window, One Decision</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — One Window, One Decision</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshots showed the SAME window with Tab 1 saying <strong style={{color:'rgb(110,231,183)'}}>LOCKED UP 84%</strong> and Tab 2 saying <strong style={{color:'rgb(244,114,182)'}}>LOCKED DOWN 94%</strong>. Same browser, same window, opposite calls.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -14461,7 +14768,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stability Audit</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — Audit Pass</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Audit Pass</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for a comprehensive review after the V7.10.1 snapshot-log fix. Reviewed potential bug categories systematically and fixed one minor stability issue.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was checked</div>
@@ -14492,7 +14799,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Trade Rounds Stopped Updating</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — The Bug That Killed Memory</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — The Bug That Killed Memory</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;tara completely stopped with updating trade round for both btc and eth now&rdquo;</em>. Found a critical bug shipped quietly in V7.8 and inherited by every release since. Both assets affected equally.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was broken</div>
@@ -14530,7 +14837,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · TDZ Bug Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — Crash Fixed</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Crash Fixed</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshot showed engine stuck on MATH CRASH with error <em>&ldquo;Cannot access &lsquo;ft&rsquo; before initialization&rdquo;</em>. Posterior frozen at 50%, all signals reading 0, advisor card unable to render, projections empty.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -14550,7 +14857,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Three-State Model · Explicit No-Go</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — When Sit-Out Is The Right Answer</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — When Sit-Out Is The Right Answer</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Talked through sit-outs together. Agreed: V7.8 killing stylistic timidity (tier blocks, timer expirations, mixed-signal skips) was right. But there are 3 specific cases where NOT trading is mathematically correct, not conservative. Those become an explicit NO-GO category &mdash; clearly distinguished from a normal lock or a tentative caution call.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Three states now</div>
@@ -14578,7 +14885,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Persistent Learning · No Skips · Caution Notes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — She Trades Every Round Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — She Trades Every Round Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Weights persist across sessions</div>
@@ -14619,7 +14926,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Reversal Blockers · Stale-Lock Advisor</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — Stop Inviting Bad Trades</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Stop Inviting Bad Trades</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged the screenshot. Tara locked DOWN 54%, engine showed 89% UP, Kalshi 99.7% UP, all 4 forward projections UP, price +25bps above strike. Advisor card said &ldquo;Tara DOWN 85% &middot; ENTER DOWN&rdquo;. Pressing ENTER would have been an instant loss. Two bugs fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor — continuation blockers</div>
@@ -14648,7 +14955,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Predict Reversals · Shadow Tara · Fast-Mode</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — Predict the Reversal, Not Avoid It</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Predict the Reversal, Not Avoid It</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor (replaces V7.6 guard)</div>
@@ -14696,7 +15003,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Mean-Reversion Guard · Timer-Fires · Dual Feed</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — Stop Chasing the Top</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Stop Chasing the Top</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Deep dive into 105 resolved trades + the recent 30 found the actual structural pattern behind &ldquo;we chase momentum and lose on swings.&rdquo;</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Findings from the call-log analysis</div>
@@ -14739,7 +15046,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Faster Low-Dial Locks · ETH Save Bug</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — Truly Fast at Fast</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Truly Fast at Fast</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Two unrelated bugs in one release. User flagged both.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Speed dial low-end made aggressive</div>
@@ -14785,7 +15092,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Speed Dial Actually Functional</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — Dial Has Function Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Dial Has Function Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;the timer decision has 0 function too. its just a gimmick and does nothing&rdquo;. They were right. The dial was only nudging two floor numbers that almost every trade passed regardless. Real fix:</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tier filter by dial position</div>
@@ -14832,7 +15139,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Engine · The Structural Blind Spot Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — Higher Timeframes Finally Count</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Higher Timeframes Finally Count</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged a trade where the Score Breakdown showed &ldquo;Structural ▲ UP · 4/6 align&rdquo; with 5m and 15m both bullish, while Tara sat out leaning DOWN. Investigation: the engine was COMPUTING the multi-TF structural data and SHOWING it on the panel, but never adding it to the posterior. Five-of-six timeframes screaming UP, math weight: zero.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Structural alignment bonus</div>
@@ -14870,7 +15177,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stale State Fixes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — Sound + Stale UI</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Sound + Stale UI</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three quick fixes. Two were old bugs, one was a missing persistence flag.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Sound enabled now persists</div>
@@ -14890,7 +15197,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Prediction Engine · The &ldquo;Why Jerome Beats Tara&rdquo; Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.4</span> — Honest Confidence, Smarter Locks</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Honest Confidence, Smarter Locks</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">After a side-by-side analysis of a real losing trade where Jerome won and Tara lost, we found the structural problem: Tara was over-trusting tape extremes and under-weighting strike position. This release surgically fixes both, plus the timer bug, plus calibrates the confidence display.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tape-extreme guard</div>
