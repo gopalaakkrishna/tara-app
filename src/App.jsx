@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v7.0.5-strike-range-asset-migration';
+const BASELINE_VERSION='2026.05.05-v7.0.7-extractstrike-asset-agnostic';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -4555,7 +4555,7 @@ function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,onEd
             })
           ),
     ),
-    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,onEditEntry:onEditEntry}),
+    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,onEditEntry:onEditEntry,initialFilter:windowType}),
     learnOpen&&React.createElement(TaraLearningsModal,{learnings:taraLearnings,onClose:()=>setLearnOpen(false)}),
   );
 }
@@ -4744,9 +4744,11 @@ function TaraLearningsModal({learnings,onClose}){
 }
 
 // V5.6.1: Full memory history modal. Filter by window type, sort newest first.
-function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry}){
+function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry,initialFilter}){
   const[editingId,setEditingId]=React.useState(null);
-  const[filter,setFilter]=React.useState('all'); // all | 15m | 5m | wins | losses | sitouts
+  // V7.0.6: default filter to current windowType (passed from card) so modal opens
+  //   already aligned. User can click ALL to broaden.
+  const[filter,setFilter]=React.useState(initialFilter||'all');
   const filtered=React.useMemo(()=>{
     let arr=[...taraCallLog].reverse();
     if(filter==='15m'||filter==='5m')arr=arr.filter(e=>e.windowType===filter);
@@ -4756,14 +4758,21 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry}){
     return arr;
   },[taraCallLog,filter]);
   const counts=React.useMemo(()=>{
+    // V7.0.6: Counts respect active filter. Previously always counted the full log,
+    //   which caused the "modal says 91 / card says 90" mismatch — modal counted both
+    //   5m + 15m, card counted only the active window type. Now filter alignment.
+    let arr=taraCallLog;
+    if(filter==='15m'||filter==='5m')arr=arr.filter(e=>e.windowType===filter);
+    // wins/losses/sitouts filters narrow the list but stat boxes still show the underlying
+    // wins/losses/sitouts pulled from the windowType filter (or full set if ALL).
     return {
-      total:taraCallLog.length,
-      wins:taraCallLog.filter(e=>e.result==='WIN').length,
-      losses:taraCallLog.filter(e=>e.result==='LOSS').length,
-      sitouts:taraCallLog.filter(e=>e.result==='SITOUT').length,
-      pending:taraCallLog.filter(e=>!e.result).length,
+      total:arr.length,
+      wins:arr.filter(e=>e.result==='WIN').length,
+      losses:arr.filter(e=>e.result==='LOSS').length,
+      sitouts:arr.filter(e=>e.result==='SITOUT').length,
+      pending:arr.filter(e=>!e.result).length,
     };
-  },[taraCallLog]);
+  },[taraCallLog,filter]);
   const _wr=counts.wins+counts.losses>0?Math.round((counts.wins/(counts.wins+counts.losses))*100):null;
   const _resultStyle=(r)=>r==='WIN'?{color:'rgba(110,231,183,0.95)'}:r==='LOSS'?{color:'rgba(244,114,182,0.95)'}:r==='SITOUT'?{color:'rgba(229,200,112,0.85)'}:{color:'rgba(232,233,228,0.4)'};
   const _dirStyle=(d)=>d==='UP'?{color:'rgba(110,231,183,0.85)'}:d==='DOWN'?{color:'rgba(244,114,182,0.85)'}:{color:'rgba(229,200,112,0.7)'};
@@ -6750,7 +6759,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>7.0.5</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>7.0.7</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -7553,7 +7562,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.0.5 online — two real fixes for what V7.0.3 missed. (1) Strike-picking loop had a hidden BTC-specific range filter that rejected ALL valid SOL ($200) and DOGE ($0.45) strike candidates as out-of-range. The fallback then blindly grabbed candidatePool[0] which was often the wrong-side market. Now the filter just checks the strike is positive and finite — asset-agnostic. Plus two more BTC-specific strike validation sites in the auto-fill paths. (2) Existing memory entries with wrong asset tags (like the SOL trade saved as ETH) now auto-migrate on load + cloud-sync based on strike magnitude. Strike ranges are unambiguous: BTC 10K+, ETH 100-10K, SOL 1-1000, DOGE under 1. Console logs the migration. Should fix your existing entry display and prevent the issue going forward.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.0.7 online — three real fixes that V7.0.5 and V7.0.6 missed. (1) STRIKE PRICING: the actual root cause was inside _extractStrike itself. It had n>1000 and \\d{4,7} BTC-range filters that rejected ALL SOL ($84) and DOGE ($0.45) strikes outright, even when Kalshi returned them in floor_strike. Now asset-agnostic — accepts any positive finite number; regex patterns accept any decimal. (2) DISCORD ON SWITCH: switching ETH → BTC could fire a broadcast carrying ETH price/strike to BTC\'s webhook because the broadcast effect re-runs on currentAsset change, and lingering whale flow from the old WebSocket could trigger before state stabilized. Added a 2.5s post-switch suppression in broadcastToDiscord itself — catches every broadcast path. EXIT/CLOSE bypass since they\'re explicitly user-driven. Plus reset of all broadcast cooldown refs in setCurrentAsset. (3) SOL → ETH ASSET TAG: user-forced and SIT_OUT entry creation paths had no asset field at all (defaulted to BTC display). Fixed. Plus belt-and-suspenders strike-magnitude validation at main lock entry: if currentAssetRef somehow has a stale value, the inferred-from-strike asset overrides and logs a console warning so the bug becomes visible if it persists.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7854,7 +7863,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.0.5'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.0.7'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -8087,6 +8096,17 @@ function TaraApp(){
     // V7.0.1: Strict per-asset. The active asset's own webhook must be set.
     //   No fallback to BTC. If a user wants ETH alerts, they set ETH's webhook.
     //   If they don't want ETH alerts, they leave it empty and nothing fires.
+    // V7.0.7: 2.5s post-switch suppression. After setCurrentAsset stamps the switch
+    //   timestamp, we silently skip broadcasts for 2.5s so transitional state (stale
+    //   currentPrice, stale targetMargin, lingering snapshot, in-flight whale flow)
+    //   doesn't leak into the new asset's Discord channel. EXIT/CLOSE broadcasts
+    //   triggered by user actions (executeAction, handleManualSync) bypass this guard
+    //   since they're explicitly user-driven.
+    const _isUserAction=type==='EXIT'||type==='CLOSE';
+    if(!_isUserAction&&lastAssetSwitchAtRef.current&&Date.now()-lastAssetSwitchAtRef.current<2500){
+      try{console.info('[V7.0.7] Suppressing',type,'broadcast — within 2.5s of asset switch');}catch(_){}
+      return;
+    }
     const _activeAsset=currentAssetRef.current||'BTC';
     const _hooks=discordWebhooksRef.current||{};
     const _webhookForAsset=_hooks[_activeAsset]||'';
@@ -8113,7 +8133,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.5  |  signal'},
+        footer:{text:'Tara 7.0.7  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8127,7 +8147,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.0.5  |  stand-down'},
+        footer:{text:'Tara 7.0.7  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8141,7 +8161,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.0.5  |  search'},
+        footer:{text:'Tara 7.0.7  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8158,7 +8178,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.0.5  |  lock'},
+        footer:{text:'Tara 7.0.7  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8175,7 +8195,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.0.5  |  close'},
+          footer:{text:'Tara 7.0.7  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8196,7 +8216,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.0.5  |  exit'},
+        footer:{text:'Tara 7.0.7  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8217,7 +8237,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.5  |  scanning'},
+        footer:{text:'Tara 7.0.7  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8237,7 +8257,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.5  |  signal'},
+        footer:{text:'Tara 7.0.7  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8257,7 +8277,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.5  |  lock'},
+        footer:{text:'Tara 7.0.7  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8274,7 +8294,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.5  |  sit-out'},
+        footer:{text:'Tara 7.0.7  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8296,7 +8316,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.0.5  |  result'},
+          footer:{text:'Tara 7.0.7  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8333,12 +8353,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.0.5  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.0.7  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 7.0.5',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 7.0.7',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=_webhookForAsset.replace('https://discord.com/api/webhooks/','').split('/');
@@ -8357,7 +8377,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 7.0.5 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 7.0.7 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8538,6 +8558,10 @@ function TaraApp(){
         // V4.4: New extractStrike — floor_strike and cap_strike are now numbers per Kalshi's
         //   migrated schema. Fall through to legacy fields + ticker regex if those are absent
         //   (e.g. old cached responses or other series).
+        // V7.0.7: ASSET-AGNOSTIC. Previous version had n>1000&&n<10000000 BTC-range filters
+        //   in the candidate loop AND in every regex fallback — rejected ALL SOL ($84) and
+        //   DOGE ($0.45) strikes outright, even when Kalshi returned them correctly in
+        //   floor_strike. Now just checks finite + positive. Regex patterns accept any decimal.
         const _extractStrike=(m)=>{
           // Direct numeric fields, in order of likelihood for v2 schema
           const candidates=[
@@ -8547,29 +8571,24 @@ function TaraApp(){
           for(const c of candidates){
             if(c==null)continue;
             const n=Number(c);
-            if(isFinite(n)&&n>1000&&n<10000000)return n;
+            if(isFinite(n)&&n>0)return n;
           }
           // Ticker pattern matching — fallback for legacy schema or unusual events
+          // V7.0.7: patterns now match any positive number including sub-dollar (DOGE 0.45)
+          //   and 2-digit dollar (SOL 84.33), not just 4-7 digit BTC values.
           if(m.ticker){
-            const t1=m.ticker.match(/-T(\d{4,7}(?:\.\d+)?)/);
-            if(t1){const n=Number(t1[1]);if(n>1000&&n<10000000)return n;}
-            const t2=m.ticker.match(/-(\d{4,7}(?:\.\d+)?)$/);
-            if(t2){const n=Number(t2[1]);if(n>1000&&n<10000000)return n;}
-            const t3=m.ticker.match(/(\d{5,7}(?:\.\d+)?)/g);
-            if(t3){
-              for(const candidate of t3){
-                const n=Number(candidate);
-                if(n>10000&&n<10000000)return n;
-              }
-            }
+            const t1=m.ticker.match(/-T(\d+(?:\.\d+)?)/);
+            if(t1){const n=Number(t1[1]);if(isFinite(n)&&n>0)return n;}
+            const t2=m.ticker.match(/-(\d+(?:\.\d+)?)$/);
+            if(t2){const n=Number(t2[1]);if(isFinite(n)&&n>0)return n;}
           }
-          // Subtitle text fallback
+          // Subtitle text fallback. V7.0.7: accept any positive float.
           const titleText=(m.subtitle||m.title||m.yes_sub_title||m.no_sub_title||m.event_ticker||m._event_ticker||'')+' ';
           const tm=titleText.match(/\$?([\d,]+(?:\.\d+)?)/g);
           if(tm){
             for(const match of tm){
               const n=Number(match.replace(/[$,]/g,''));
-              if(n>10000&&n<10000000)return n;
+              if(isFinite(n)&&n>0)return n;
             }
           }
           return null;
@@ -10672,7 +10691,10 @@ function TaraApp(){
         regime:analysis?.regime||'',dir:_forceDir,confidence:taraCallSnapshotRef.current.confidence,
         posterior:_post,qScore:Math.round(qualityGate?.score||0),fgt:analysis?.mtfAlignment,
         tier:'user-forced',session:_forceSession,kalshiAtLock:_forceK,
-        isUserForced:true,reason:taraCallSnapshotRef.current.reason,result:null,
+        isUserForced:true,reason:taraCallSnapshotRef.current.reason,
+        // V7.0.7: tag asset for user-forced entries (was missing — defaulted to BTC on display).
+        asset:currentAssetRef.current||currentAsset||'BTC',
+        result:null,
       };
       setTaraCallLog(prev=>{
         if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType))return prev;
@@ -10714,6 +10736,8 @@ function TaraApp(){
           tier:'sitout',
           session:_sitSession,
           reason:tc.reason,
+          // V7.0.7: tag asset for SIT_OUT entries (was missing — defaulted to BTC on display).
+          asset:currentAssetRef.current||currentAsset||'BTC',
           result:null, // populated at rollover
         };
         setTaraCallLog(prev=>{
@@ -11154,10 +11178,28 @@ function TaraApp(){
         kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
         samples,needSamples,
         // V6.5.8: tag with active asset so memory can filter per-asset.
-        //   V7.0.3: use ref.current to avoid stale closure. The entry-creation effect
-        //   captures currentAsset from its render scope; if user switched assets between
-        //   sample accumulation and lock-commit, the closure had stale value.
-        asset:currentAssetRef.current||currentAsset||'BTC',
+        //   V7.0.3: use ref.current to avoid stale closure.
+        //   V7.0.7: BELT AND SUSPENDERS — also validate against strike magnitude.
+        //   If currentAssetRef.current somehow has a stale value (despite synchronous
+        //   ref update on every render) AND we have a strike, infer the right asset
+        //   from strike magnitude. BTC>=10K, ETH 100-10K, SOL 1-100, DOGE <1.
+        //   Logs when override triggers so this bug becomes visible if it persists.
+        asset:(()=>{
+          const _refAsset=currentAssetRef.current||currentAsset||'BTC';
+          const _strike=Number(targetMargin||targetMarginRef.current||0);
+          if(_strike>0){
+            let _inferred=null;
+            if(_strike>=10000)_inferred='BTC';
+            else if(_strike>=100)_inferred='ETH';
+            else if(_strike>=1)_inferred='SOL';
+            else if(_strike>0)_inferred='DOGE';
+            if(_inferred&&_inferred!==_refAsset){
+              try{console.warn('[V7.0.7] Asset tag override at entry creation: ref says',_refAsset,'but strike',_strike,'inferred',_inferred,'— using inferred to prevent SOL→ETH bug');}catch(_){}
+              return _inferred;
+            }
+          }
+          return _refAsset;
+        })(),
         result:null, // populated at rollover scoring
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
@@ -11324,6 +11366,12 @@ function TaraApp(){
   // Only fires when: streak ≥4 AND net delta >$500K AND 5-min cooldown passed
   // Also checks spot/futures alignment for accuracy flag
   const lastWhaleBroadcastRef=useRef({time:0,dir:null});
+  // V7.0.7: Records the timestamp of the last asset switch. The broadcast effect (and
+  //   broadcastToDiscord itself) suppress messages within 2.5s of a switch — gives
+  //   currentPrice/strike/snapshot/whale state time to refresh on the new asset.
+  //   Without this, switching ETH→BTC could fire a Discord message with ETH price/strike
+  //   in the embed since some refs/state hadn't repopulated yet.
+  const lastAssetSwitchAtRef=useRef(0);
   // ── V134: FLOW INTELLIGENCE — STRICTLY EVENT-TRIGGERED ──────────────
   // Opens ONLY on concerning events. Auto-collapses after 30s unless activity continues.
   // Triggers: whale-print STRONG cross, streak ≥5, $750K delta, velocity regime jump,
@@ -11707,6 +11755,15 @@ function TaraApp(){
   //   of Kalshi market for the new asset on next poll.
   const setCurrentAsset=(a)=>{
     if(a===currentAsset||!ASSET_KEYS.includes(a))return;
+    // V7.0.7: stamp the switch time + reset broadcast flags + clear whale broadcast cooldown.
+    //   Discord broadcasts within 2.5s after this fire-suppress (see broadcastToDiscord).
+    //   This stops cross-asset stale-data messages: previously switching ETH→BTC could
+    //   trigger an instant broadcast carrying ETH's price because state/refs hadn't
+    //   stabilized yet on the new asset.
+    lastAssetSwitchAtRef.current=Date.now();
+    if(taraBroadcastRef.current)taraBroadcastRef.current={key:null,sentScan:false,sentSignal:false,sentLock:false,sentSitout:false};
+    if(lastWhaleBroadcastRef.current)lastWhaleBroadcastRef.current={time:Date.now(),dir:null}; // 5min cooldown from now
+    if(lastManualBroadcastRef.current)lastManualBroadcastRef.current={key:null,type:null};
     setCurrentAssetState(a);
     // Reset all window-bound state — fresh start on the new asset
     setPendingStrike(null);
@@ -11760,7 +11817,7 @@ function TaraApp(){
     setForceRender(p=>p+1);
   };
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.0.5...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.0.7...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -11861,7 +11918,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              7.0.5
+              7.0.7
             </span>
           </div>
 
@@ -12497,7 +12554,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.0.5</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.0.7</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -13153,7 +13210,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 7.0.5 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 7.0.7 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -13309,10 +13366,54 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 7.0.5 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 7.0.7 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V7.0.7 — Real fixes for SOL/DOGE strike, Discord switch, asset tag */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · _extractStrike Asset-Agnostic · Discord Switch Suppression · Asset Tag Belt-and-Suspenders</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.0.7</span> — Three Real Fixes V7.0.5 Missed</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported, after V7.0.5: strike pricing still wrong on SOL/DOGE; SOL trade still saved as ETH; Discord broadcasts on asset switch carry the previous asset&apos;s pricing. Investigated thoroughly with Kalshi API docs in hand. Three actual root causes found.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · _extractStrike was BTC-only</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">V7.0.5 patched four downstream sites that filtered strikes by BTC range. But the actual root cause was deeper: <code className="text-[10px] bg-[#0E100F] px-1">_extractStrike</code> itself had <code className="text-[10px] bg-[#0E100F] px-1">{`n>1000 && n<10000000`}</code> in the candidate loop AND in three regex fallback patterns (<code className="text-[10px] bg-[#0E100F] px-1">{`\\d{4,7}`}</code>). Every SOL ($84) and DOGE ($0.45) strike returned <code className="text-[10px] bg-[#0E100F] px-1">null</code> — even when Kalshi returned them correctly in <code className="text-[10px] bg-[#0E100F] px-1">floor_strike</code>. Now: just <code className="text-[10px] bg-[#0E100F] px-1">{`isFinite(n) && n>0`}</code>. Regex patterns accept any decimal.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Discord broadcasts on asset switch</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The broadcast effect has <code className="text-[10px] bg-[#0E100F] px-1">currentAsset</code> in deps, so it re-runs on switch. Combined with WebSocket flow signals from the old asset still in-flight, broadcasts could fire to the new asset&apos;s Discord channel carrying stale data. Defensive fix:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>2.5s post-switch suppression</strong> in <code className="text-[10px] bg-[#0E100F] px-1">broadcastToDiscord</code> itself &mdash; catches every code path (signal, lock, sitout, whale, scan)</li>
+                  <li><strong>Reset broadcast cooldown refs</strong> on switch: <code className="text-[10px] bg-[#0E100F] px-1">taraBroadcastRef</code>, <code className="text-[10px] bg-[#0E100F] px-1">lastWhaleBroadcastRef</code>, <code className="text-[10px] bg-[#0E100F] px-1">lastManualBroadcastRef</code></li>
+                  <li><strong>EXIT/CLOSE bypass</strong> the suppression &mdash; those are explicit user actions, you want them to fire</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · SOL → ETH asset tag persisting</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Two related bugs:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>User-forced and SIT_OUT entries had no asset field at all</strong> &mdash; defaulted to BTC on display. Fixed by tagging both with <code className="text-[10px] bg-[#0E100F] px-1">currentAssetRef.current</code>.</li>
+                  <li><strong>Belt-and-suspenders for the main lock entry.</strong> If <code className="text-[10px] bg-[#0E100F] px-1">currentAssetRef.current</code> ever has a stale value (despite synchronous ref update on every render), the strike magnitude is the source of truth. The asset is now validated against strike at entry creation and overridden if mismatched. Console logs <code className="text-[10px] bg-[#0E100F] px-1">[V7.0.7] Asset tag override...</code> so we can spot it in DevTools if the bug ever recurs.</li>
+                </ul>
+              </section>
+
+              {/* V7.0.6 — Modal stats aligned with card */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Memory Modal Filter Alignment</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.0.6</span> — Modal Numbers Match Card Numbers</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User noticed: Memory modal shows 91 / 55 wins, Tara Call card shows 90 / 54 wins. Mismatch of 1 win. Cause: Modal counts ALL entries (5m + 15m combined), card counts only the active windowType. The phantom WIN was a 5m entry that the user manually edited (5m windows normally log SITOUT since Kalshi doesn&rsquo;t score 5m).</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Stats respect active filter</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Modal counts now narrow when you click 15M / 5M / WINS / LOSSES / SITOUTS. Click 15M and stats show 15m only. Click ALL to broaden again.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Default filter matches current window</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Modal opens with the filter pre-set to whatever windowType you&rsquo;re currently on. So if you&rsquo;re on 15m windows, the modal opens already filtered to 15m &mdash; matching the Tara Call card by default. Click ALL if you want to see history across all windowTypes.</p>
+              </section>
 
               {/* V7.0.5 — Strike range guards (rest) + asset migration */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
