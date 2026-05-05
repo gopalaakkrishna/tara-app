@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.04-v7.0.3-asset-cache-doge-skip';
+const BASELINE_VERSION='2026.05.05-v7.0.4-doge-15m-restored';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -6750,7 +6750,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>7.0.3</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>7.0.4</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -7511,7 +7511,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.0.3 online — three asset bugs fixed. (1) SOL trade tagged as ETH bug: entry creation was reading currentAsset from a stale closure. Now uses currentAssetRef.current so the asset tag always matches the live state at lock-time. (2) SOL/DOGE strikes showing 42115: the Kalshi cache was a single shared object across all assets. When SOL/DOGE fetch failed (or was rejected by the >1000 strike floor that only made sense for BTC), fallback returned BTC\'s cached strike. Now per-asset cache slots; SOL gets cached SOL strike, DOGE gets cached DOGE strike (when applicable). (3) DOGE 15m markets do not exist on Kalshi — only hourly+. Added explicit skip + warning indicator on the DOGE selector button when 15m is active. Engine still runs on price/tape but Kalshi reference disabled.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.0.4 online — DOGE 15m restored. V7.0.3 added an incorrect skip for DOGE 15m thinking the markets did not exist. User confirmed via screenshot they do (Kalshi added them after the January 2026 launch announcement I was reading). Skip removed, warning indicator removed. The other two V7.0.3 fixes (per-asset Kalshi cache + removed BTC-specific strike floor) were the actual cause of the 42115 issue and remain in place — DOGE strikes should now load correctly with format like 0.1108807.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7812,7 +7812,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.0.3'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.0.4'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -8071,7 +8071,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.3  |  signal'},
+        footer:{text:'Tara 7.0.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8085,7 +8085,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.0.3  |  stand-down'},
+        footer:{text:'Tara 7.0.4  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8099,7 +8099,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.0.3  |  search'},
+        footer:{text:'Tara 7.0.4  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8116,7 +8116,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.0.3  |  lock'},
+        footer:{text:'Tara 7.0.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8133,7 +8133,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.0.3  |  close'},
+          footer:{text:'Tara 7.0.4  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8154,7 +8154,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.0.3  |  exit'},
+        footer:{text:'Tara 7.0.4  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8175,7 +8175,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.3  |  scanning'},
+        footer:{text:'Tara 7.0.4  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8195,7 +8195,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.3  |  signal'},
+        footer:{text:'Tara 7.0.4  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8215,7 +8215,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.3  |  lock'},
+        footer:{text:'Tara 7.0.4  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8232,7 +8232,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0.3  |  sit-out'},
+        footer:{text:'Tara 7.0.4  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8254,7 +8254,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.0.3  |  result'},
+          footer:{text:'Tara 7.0.4  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8291,12 +8291,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.0.3  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.0.4  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 7.0.3',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 7.0.4',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=_webhookForAsset.replace('https://discord.com/api/webhooks/','').split('/');
@@ -8315,7 +8315,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 7.0.3 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 7.0.4 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8366,12 +8366,6 @@ function TaraApp(){
     //   15m windows are what we trade primarily; 5m falls back to live spot.
     if(windowType!=='15m'){
       setKalshiDebug({ok:null,reason:'5m window — Kalshi disabled (15m only)',totalMarkets:0,matchingClose:0,bestStrike:null,sampleFields:[]});
-      return;
-    }
-    // V7.0.3: DOGE has NO 15-minute markets on Kalshi (only hourly and longer). Skip fetch
-    //   entirely for DOGE 15m windows. Engine still runs on price/tape but no Kalshi reference.
-    if(currentAsset==='DOGE'){
-      setKalshiDebug({ok:null,reason:'DOGE has no 15-minute markets on Kalshi (only hourly+). Engine runs without Kalshi reference.',totalMarkets:0,matchingClose:0,bestStrike:null,sampleFields:[]});
       return;
     }
     // V3.2.2: Helper to retry the Kalshi fetch up to 3 times with backoff on 503/transient errors
@@ -8696,12 +8690,6 @@ function TaraApp(){
           pending.attempts++;
           // V4.4: Use /events endpoint (smaller payload, different rate-limit bucket)
           const _assetCfgS=ASSET_CONFIG[currentAssetRef.current]||ASSET_CONFIG.BTC;
-          // V7.0.3: DOGE has no 15m markets — log SITOUT immediately, don't try to fetch
-          if(currentAssetRef.current==='DOGE'){
-            try{console.info('[V7.0.3] DOGE has no 15m markets on Kalshi — logging SITOUT for window');}catch(_){}
-            _logResult('SITOUT');
-            return true;
-          }
           const _settleUrl=`https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=${_assetCfgS.kalshiSeriesTicker}15M&with_nested_markets=true&status=settled&limit=50`;
           // V3.2.3: Use CORS proxy first to avoid 503 throttling, fall back to direct
           let r=await fetch(
@@ -11726,7 +11714,7 @@ function TaraApp(){
     setForceRender(p=>p+1);
   };
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.0.3...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.0.4...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -11827,7 +11815,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              7.0.3
+              7.0.4
             </span>
           </div>
 
@@ -11845,25 +11833,21 @@ function TaraApp(){
           {/* Spacer */}
           <div className="flex-1"/>
 
-          {/* V6.5.8: Asset selector — BTC/ETH/SOL/DOGE. Click switches asset and resets state.
-              V7.0.3: DOGE shown but flagged — no 15m markets on Kalshi (only hourly+). */}
+          {/* V6.5.8: Asset selector — BTC/ETH/SOL/DOGE. Click switches asset and resets state. */}
           <div className={'flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0'}>
             {ASSET_KEYS.map(k=>{
               const _c=ASSET_CONFIG[k];
               const _active=currentAsset===k;
-              const _isDoge=k==='DOGE';
-              const _isDogeOn15m=_isDoge&&windowType==='15m';
               return(
                 <button
                   key={k}
                   onClick={()=>setCurrentAsset(k)}
                   className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all flex items-center gap-1 ${_active?'shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
                   style={_active?{background:_c.color+'22',color:_c.color,border:'1px solid '+_c.color+'66'}:{}}
-                  title={_isDoge?`${_c.label} — no 15m markets on Kalshi (hourly+ only)`:_c.label}
+                  title={_c.label}
                 >
                   <span className="text-sm leading-none" style={{color:_active?_c.color:'inherit'}}>{_c.icon}</span>
                   <span className="hidden sm:inline text-[10px]">{_c.label}</span>
-                  {_isDogeOn15m&&<span className="text-[8px] opacity-60" title="DOGE has no 15m Kalshi market — switch to 5m or use other asset">⚠</span>}
                 </button>
               );
             })}
@@ -12467,7 +12451,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.0.3</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.0.4</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -13123,7 +13107,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 7.0.3 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 7.0.4 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -13279,12 +13263,24 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 7.0.3 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 7.0.4 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
 
-              {/* V7.0.3 — Asset cache + DOGE 15m skip + asset tag closure */}
+              {/* V7.0.4 — DOGE 15m restored (V7.0.3 mistake corrected) */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · DOGE 15m Skip Reverted</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.0.4</span> — DOGE 15m Markets Do Exist</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">V7.0.3 incorrectly added a skip for DOGE 15m windows based on outdated info from a January 2026 launch announcement that listed BTC/ETH/SOL only. Kalshi has added DOGE 15m markets since then. User confirmed live via screenshot.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Reverted: the DOGE-specific fetch skip, settled-events skip, and selector warning indicator. DOGE 15m now fetches normally with the same logic as BTC/ETH/SOL.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">The other V7.0.3 fixes &mdash; <strong>per-asset Kalshi cache</strong> and <strong>removed BTC-specific strike floor</strong> &mdash; remain in place. Those were the actual causes of the <code className="text-[10px] bg-[#0E100F] px-1">42115</code> stale-strike bug, not the (nonexistent) market issue.</p>
+              </section>
+
+              {/* V7.0.3 — Asset cache + asset tag closure */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Per-Asset Cache · Stale Asset Tag · DOGE 15m Skip</span>
