@@ -254,7 +254,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v7.10.5-comprehensive-sync-and-self-learning';
+const BASELINE_VERSION='2026.05.05-v7.10.6-market-context-and-records-cleanup';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -987,6 +987,216 @@ const getMacroEventState=(now=new Date())=>{
     if(diffMins<0&&Math.abs(diffMins)<=ev.postMin)return{state:'ENHANCED',event:ev,minutesUntil:diffMins};
   }
   return{state:'CLEAR',event:null,minutesUntil:null};
+};
+
+// ── V7.10.6: MARKET CONTEXT SYSTEM ──────────────────────────────────────────
+// UTC-anchored intraday phases. Each phase has a stable character profile derived from
+// historical liquidity / volatility / participant analysis. Boundaries chosen to align
+// with major trading-desk shift changes (Frankfurt open, NY pre-market, NY open, etc.)
+// and the well-documented "lunch lull" that compresses vol around 16:00-17:00 UTC.
+const PHASE_PROFILES={
+  ASIA_OPEN:{      // 22:00-04:00 UTC
+    label:'Asia Open',flag:'🌏',color:'rgba(252,211,77,0.85)',
+    liquidity:'MED',vol:'STEADY',
+    character:'Tokyo + Sydney active. Range-bound moves typical, JPY-driven flows.',
+    cautions:['Avoid breakout chasing — false breaks common in Asia','Watch for sudden moves on Japanese news prints'],
+    bestFor:'Mean-reversion, range plays',
+  },
+  ASIA_LATE:{      // 04:00-07:00 UTC
+    label:'Asia Late',flag:'🌒',color:'rgba(180,180,180,0.8)',
+    liquidity:'LOW',vol:'COMPRESSING',
+    character:'Tokyo winding down, Europe not yet awake. Thinnest liquidity of the day.',
+    cautions:['Wide spreads — orders can slip badly','Stop hunts common in this window','One whale can move price disproportionately'],
+    bestFor:'Patience until EU open',
+  },
+  EU_PREOPEN:{     // 07:00-08:00 UTC
+    label:'EU Pre-Open',flag:'🌅',color:'rgba(147,197,253,0.85)',
+    liquidity:'MED',vol:'EXPANDING',
+    character:'Frankfurt warming up. First directional pulse of European day.',
+    cautions:['Don\'t fade the first move — EU desks set tone','Volume picking up rapidly'],
+    bestFor:'Breakout setups starting to form',
+  },
+  EU_OPEN:{        // 08:00-12:00 UTC
+    label:'EU Open',flag:'🌍',color:'rgba(96,165,250,0.9)',
+    liquidity:'HIGH',vol:'EXPANDING',
+    character:'London + Frankfurt + Paris fully active. Cleanest breakouts of the day.',
+    cautions:['News-driven spikes possible','ECB / BOE comments can cause sudden reversals'],
+    bestFor:'Trend-following, breakout trades',
+  },
+  NY_PREMARKET:{   // 12:00-13:30 UTC
+    label:'NY Pre-Market',flag:'⏳',color:'rgba(229,200,112,0.85)',
+    liquidity:'MED',vol:'COMPRESSING',
+    character:'Calm before the storm. Coiling action ahead of NY open.',
+    cautions:['Wait for NY open before sizing up','Pre-market moves often reverse at the open'],
+    bestFor:'Observation, small probes only',
+  },
+  NY_OPEN:{        // 13:30-14:30 UTC
+    label:'NY Open',flag:'🚀',color:'rgba(110,231,183,0.95)',
+    liquidity:'EXTREME',vol:'EXPANDING',
+    character:'Highest volatility window of the day. Major directional moves common.',
+    cautions:['WIDER stops needed — normal stops will get hit','False breakouts then reversals frequent in first 15-20 min','Don\'t overcommit on first move'],
+    bestFor:'High-conviction directional trades',
+  },
+  NY_MORNING:{     // 14:30-16:00 UTC
+    label:'NY Morning',flag:'☀️',color:'rgba(110,231,183,0.85)',
+    liquidity:'HIGH',vol:'STEADY',
+    character:'Strong directional follow-through after open establishes.',
+    cautions:['Watch for ~15:30 UTC extension fading','Trend exhaustion signs appear here'],
+    bestFor:'Trend-following continuation',
+  },
+  NY_LUNCH:{       // 16:00-17:00 UTC
+    label:'NY Lunch',flag:'🍽️',color:'rgba(229,200,112,0.85)',
+    liquidity:'MED',vol:'COMPRESSING',
+    character:'Lunch lull. Chop period with mean reversion to VWAP.',
+    cautions:['Avoid breakout chasing — they fail here','Range-bound — fade extremes instead'],
+    bestFor:'Mean-reversion, fading extremes',
+  },
+  NY_AFTERNOON:{   // 17:00-20:00 UTC
+    label:'NY Afternoon',flag:'🌤️',color:'rgba(110,231,183,0.85)',
+    liquidity:'HIGH',vol:'STEADY',
+    character:'Second wind. Often establishes the daily close direction.',
+    cautions:['Watch for 19:30 UTC position-squaring','3pm ET reversals are a known pattern'],
+    bestFor:'Continuation plays, late-day setups',
+  },
+  NY_CLOSE:{       // 20:00-21:00 UTC
+    label:'NY Close',flag:'🌆',color:'rgba(229,200,112,0.85)',
+    liquidity:'HIGH',vol:'STEADY',
+    character:'Position-squaring distorts signals. Algo-heavy.',
+    cautions:['Late-day reversals common','Avoid initiating new positions','Funds rebalancing creates artificial flow'],
+    bestFor:'Cautious follow-through only',
+  },
+  AFTERHOURS:{     // 21:00-22:00 UTC
+    label:'After Hours',flag:'🌙',color:'rgba(180,180,180,0.7)',
+    liquidity:'LOW',vol:'COMPRESSING',
+    character:'NY closed, Asia not yet open. Thin liquidity zone.',
+    cautions:['One whale can move price','Stop hunts common','Wide spreads'],
+    bestFor:'Patience until Asia',
+  },
+};
+
+// Returns the phase key for a given UTC hour:minute
+const getPhaseKey=(hUTC,mUTC)=>{
+  const minOfDay=hUTC*60+mUTC;
+  if(minOfDay>=22*60||minOfDay<4*60)return'ASIA_OPEN';
+  if(minOfDay<7*60)return'ASIA_LATE';
+  if(minOfDay<8*60)return'EU_PREOPEN';
+  if(minOfDay<12*60)return'EU_OPEN';
+  if(minOfDay<13*60+30)return'NY_PREMARKET';
+  if(minOfDay<14*60+30)return'NY_OPEN';
+  if(minOfDay<16*60)return'NY_MORNING';
+  if(minOfDay<17*60)return'NY_LUNCH';
+  if(minOfDay<20*60)return'NY_AFTERNOON';
+  if(minOfDay<21*60)return'NY_CLOSE';
+  return'AFTERHOURS';
+};
+
+// Returns minutes until next phase transition + the next phase key.
+const getNextPhaseTransition=(hUTC,mUTC)=>{
+  const minOfDay=hUTC*60+mUTC;
+  const boundaries=[
+    {at:4*60,phase:'ASIA_LATE'},
+    {at:7*60,phase:'EU_PREOPEN'},
+    {at:8*60,phase:'EU_OPEN'},
+    {at:12*60,phase:'NY_PREMARKET'},
+    {at:13*60+30,phase:'NY_OPEN'},
+    {at:14*60+30,phase:'NY_MORNING'},
+    {at:16*60,phase:'NY_LUNCH'},
+    {at:17*60,phase:'NY_AFTERNOON'},
+    {at:20*60,phase:'NY_CLOSE'},
+    {at:21*60,phase:'AFTERHOURS'},
+    {at:22*60,phase:'ASIA_OPEN'},
+  ];
+  for(const b of boundaries){
+    if(b.at>minOfDay)return{phase:b.phase,minutesUntil:b.at-minOfDay};
+  }
+  // Past 22:00 UTC, next is tomorrow's 04:00 (ASIA_LATE)
+  return{phase:'ASIA_LATE',minutesUntil:(24*60-minOfDay)+(4*60)};
+};
+
+// ── COMPREHENSIVE MARKET CONTEXT ──
+// Bundles phase, sessions, weekend status, funding timing, macro events into one object.
+// Updates should fire at most once per minute since most fields are minute-grained.
+const getMarketContext=(now=new Date())=>{
+  const hUTC=now.getUTCHours();
+  const mUTC=now.getUTCMinutes();
+  const dayUTC=now.getUTCDay(); // 0=Sun..6=Sat
+  const phaseKey=getPhaseKey(hUTC,mUTC);
+  const phase=PHASE_PROFILES[phaseKey];
+  const next=getNextPhaseTransition(hUTC,mUTC);
+  const nextPhase=PHASE_PROFILES[next.phase];
+  const sessions=getMarketSessions();
+  const macro=getMacroEventState(now);
+  // Weekend detection (crypto trades 24/7 but liquidity drops, news absorbers thin)
+  // Friday 22:00 UTC → Sunday 22:00 UTC = weekend zone
+  const isWeekend=(dayUTC===6)||(dayUTC===0)||(dayUTC===5&&hUTC>=22)||(dayUTC===0&&hUTC<22);
+  const weekendApproaching=(dayUTC===5&&hUTC>=18&&hUTC<22); // Friday evening
+  const sundayWindDown=(dayUTC===0&&hUTC>=18&&hUTC<22); // Sunday before Asia open
+  // Binance perpetual funding reset: 00:00, 08:00, 16:00 UTC every 8h
+  // Brief vol blip ~5 min before/after as funding pays out
+  const minOfDay=hUTC*60+mUTC;
+  const fundingTimes=[0,8*60,16*60,24*60];
+  let fundingMinsUntil=Infinity;
+  for(const ft of fundingTimes){
+    const d=ft-minOfDay;
+    if(d>=0&&d<fundingMinsUntil)fundingMinsUntil=d;
+  }
+  if(!Number.isFinite(fundingMinsUntil))fundingMinsUntil=Math.min(...fundingTimes.map(ft=>(ft-minOfDay+24*60)%(24*60)).filter(d=>d>0));
+  const fundingResetSoon=fundingMinsUntil<=10;
+  const fundingResetActive=fundingMinsUntil<=2; // within 2 min of reset
+  // Build the active cautions list, prioritized: macro > funding > weekend > phase-specific
+  const cautions=[];
+  if(macro.state==='BLACKOUT'){
+    cautions.push({severity:'critical',text:`${macro.event.name} releases in ${macro.minutesUntil}m — ${macro.event.impact} impact`});
+    cautions.push({severity:'critical',text:'Avoid new positions — vol spike imminent'});
+  } else if(macro.state==='OBSERVE'){
+    cautions.push({severity:'critical',text:`${macro.event.name} releasing NOW — observe only, no trades`});
+  } else if(macro.state==='ENHANCED'){
+    cautions.push({severity:'warning',text:`${macro.event.name} just released — extreme vol expected for ~${Math.abs(macro.minutesUntil)}m`});
+  }
+  if(fundingResetActive){
+    cautions.push({severity:'warning',text:`Funding rate reset NOW — brief vol blip likely`});
+  } else if(fundingResetSoon){
+    cautions.push({severity:'info',text:`Funding reset in ${fundingMinsUntil}m`});
+  }
+  if(weekendApproaching){
+    cautions.push({severity:'warning',text:'Weekend approaching — gap risk increasing, position-squaring distorts signals'});
+  }
+  if(sundayWindDown){
+    cautions.push({severity:'info',text:'Asia open in <4h — pre-positioning may begin'});
+  }
+  if(isWeekend&&!weekendApproaching&&!sundayWindDown){
+    cautions.push({severity:'warning',text:'Weekend — thin liquidity, surprise news moves possible'});
+  }
+  // Phase-specific cautions if no higher-priority alert is active
+  if(cautions.length<2&&phase.cautions){
+    phase.cautions.slice(0,2).forEach(c=>cautions.push({severity:'info',text:c}));
+  }
+  return{
+    phaseKey,
+    phase,
+    nextPhase:{...nextPhase,key:next.phase,minutesUntil:next.minutesUntil},
+    sessions,
+    macro,
+    isWeekend,
+    weekendApproaching,
+    sundayWindDown,
+    fundingMinsUntil,
+    fundingResetSoon,
+    fundingResetActive,
+    cautions,
+    dayName:['SUN','MON','TUE','WED','THU','FRI','SAT'][dayUTC],
+  };
+};
+
+// Phase inference for legacy log entries that lack a session/phase tag.
+//   Used by the Memory modal to backfill display data without mutating the entry.
+const inferPhaseFromTimestamp=(timestamp)=>{
+  if(!timestamp||!Number.isFinite(Number(timestamp)))return null;
+  try{
+    const d=new Date(Number(timestamp));
+    if(isNaN(d.getTime()))return null;
+    return getPhaseKey(d.getUTCHours(),d.getUTCMinutes());
+  }catch(e){return null;}
 };
 
 // ═══════════════════════════════════════
@@ -4790,6 +5000,127 @@ function PastWindowsPill({pastWindows,windowType}){
   );
 }
 
+// ── V7.10.6: MARKET CONTEXT STRIP ─────────────────────────────────────────
+// Shows current trading phase + cautions + next transition countdown.
+// Subtle, contextual — designed to inform without dominating the UI.
+function MarketContextStrip({useLocalTime}){
+  const[ctx,setCtx]=React.useState(()=>getMarketContext(new Date()));
+  const[expanded,setExpanded]=React.useState(false);
+  React.useEffect(()=>{
+    // Tick every 30s — phase boundaries are minute-grained but funding/macro countdown
+    //   feels stale if it only updates every 60s.
+    const tick=()=>setCtx(getMarketContext(new Date()));
+    tick();
+    const iv=setInterval(tick,30000);
+    return()=>clearInterval(iv);
+  },[]);
+  if(!ctx||!ctx.phase)return null;
+  const _criticalCount=ctx.cautions.filter(c=>c.severity==='critical').length;
+  const _warningCount=ctx.cautions.filter(c=>c.severity==='warning').length;
+  const _hasUrgent=_criticalCount>0;
+  // Top-level border tint by severity
+  const _borderColor=_criticalCount>0?'rgba(244,114,182,0.35)':_warningCount>0?'rgba(229,200,112,0.30)':'rgba(232,233,228,0.10)';
+  const _bgGradient=_criticalCount>0
+    ?'linear-gradient(90deg, rgba(244,114,182,0.06) 0%, rgba(244,114,182,0.02) 100%)'
+    :_warningCount>0
+    ?'linear-gradient(90deg, rgba(229,200,112,0.05) 0%, rgba(229,200,112,0.01) 100%)'
+    :'linear-gradient(90deg, rgba(232,233,228,0.02) 0%, rgba(232,233,228,0.005) 100%)';
+  // Format the countdown to next phase
+  const _nextLabel=ctx.nextPhase.minutesUntil<60
+    ?`${ctx.nextPhase.minutesUntil}m`
+    :`${Math.floor(ctx.nextPhase.minutesUntil/60)}h${ctx.nextPhase.minutesUntil%60>0?(ctx.nextPhase.minutesUntil%60)+'m':''}`;
+  // Pick top caution to highlight (highest severity wins)
+  const _topCaution=ctx.cautions.sort((a,b)=>{
+    const _o={critical:0,warning:1,info:2};
+    return(_o[a.severity]||3)-(_o[b.severity]||3);
+  })[0];
+  return React.createElement('div',{
+    className:'rounded-lg overflow-hidden mb-2 sm:mb-3',
+    style:{
+      border:'1px solid '+_borderColor,
+      background:_bgGradient,
+      transition:'border-color 0.3s ease',
+    },
+  },
+    // Always-visible top row
+    React.createElement('div',{
+      className:'flex items-center justify-between gap-2 sm:gap-3 px-3 sm:px-4 py-2 cursor-pointer hover:bg-[#E8E9E4]/3',
+      onClick:()=>setExpanded(p=>!p),
+    },
+      // Left: phase identity
+      React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
+        React.createElement('span',{className:'text-base shrink-0',style:{lineHeight:1}},ctx.phase.flag),
+        React.createElement('span',{className:'text-[11px] sm:text-xs uppercase font-bold tracking-[0.14em] shrink-0',style:{color:ctx.phase.color}},ctx.phase.label),
+        // Liquidity + vol pills
+        React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded',style:{
+          color:ctx.phase.liquidity==='EXTREME'?'rgb(110,231,183)':ctx.phase.liquidity==='HIGH'?'rgb(110,231,183)':ctx.phase.liquidity==='MED'?'rgba(229,200,112,0.85)':'rgba(244,114,182,0.7)',
+          background:'rgba(232,233,228,0.05)',
+        }},`liq: ${ctx.phase.liquidity}`),
+        React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded hidden sm:inline-block',style:{
+          color:ctx.phase.vol==='EXPANDING'?'rgba(244,114,182,0.85)':ctx.phase.vol==='COMPRESSING'?'rgba(147,197,253,0.85)':'rgba(232,233,228,0.55)',
+          background:'rgba(232,233,228,0.05)',
+        }},`vol: ${ctx.phase.vol.toLowerCase()}`),
+        // Top caution if present (collapsed view)
+        !expanded&&_topCaution&&React.createElement('span',{className:'text-[10px] truncate min-w-0',style:{
+          color:_topCaution.severity==='critical'?'rgba(244,114,182,0.95)':_topCaution.severity==='warning'?'rgba(229,200,112,0.85)':'rgba(232,233,228,0.55)',
+        }},_topCaution.severity==='critical'?'⚠ ':_topCaution.severity==='warning'?'⚠ ':'· ',_topCaution.text),
+      ),
+      // Right: next transition countdown + expand chevron
+      React.createElement('div',{className:'flex items-center gap-2 shrink-0'},
+        React.createElement('div',{className:'text-right'},
+          React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/35 leading-tight'},'Next'),
+          React.createElement('div',{className:'text-[10px] sm:text-[11px] font-bold tabular-nums tracking-tight leading-tight',style:{color:'rgba(232,233,228,0.75)'}},
+            ctx.nextPhase.label,' · ',_nextLabel,
+          ),
+        ),
+        React.createElement('span',{className:'text-[#E8E9E4]/30 text-xs',style:{transition:'transform 0.2s',transform:expanded?'rotate(180deg)':'rotate(0deg)'}},'▾'),
+      ),
+    ),
+    // Expanded detail panel
+    expanded&&React.createElement('div',{className:'border-t border-[#E8E9E4]/5 px-3 sm:px-4 py-3 space-y-2.5 text-[11px]'},
+      // Character description
+      React.createElement('div',{className:'flex items-baseline gap-2'},
+        React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/30 shrink-0 mt-0.5'},'Character'),
+        React.createElement('span',{className:'text-[#E8E9E4]/75 leading-relaxed'},ctx.phase.character),
+      ),
+      // Best for
+      ctx.phase.bestFor&&React.createElement('div',{className:'flex items-baseline gap-2'},
+        React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/30 shrink-0 mt-0.5'},'Best for'),
+        React.createElement('span',{className:'text-[#E8E9E4]/65'},ctx.phase.bestFor),
+      ),
+      // Cautions list
+      ctx.cautions.length>0&&React.createElement('div',{className:'flex items-baseline gap-2'},
+        React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/30 shrink-0 mt-0.5'},'Cautions'),
+        React.createElement('div',{className:'flex-1 space-y-1'},
+          ctx.cautions.map((c,i)=>React.createElement('div',{key:i,className:'flex items-baseline gap-1.5'},
+            React.createElement('span',{className:'shrink-0',style:{
+              color:c.severity==='critical'?'rgba(244,114,182,0.95)':c.severity==='warning'?'rgba(229,200,112,0.85)':'rgba(232,233,228,0.4)',
+            }},c.severity==='critical'?'⚠':c.severity==='warning'?'!':'·'),
+            React.createElement('span',{style:{
+              color:c.severity==='critical'?'rgba(244,114,182,0.85)':c.severity==='warning'?'rgba(229,200,112,0.75)':'rgba(232,233,228,0.6)',
+            }},c.text),
+          )),
+        ),
+      ),
+      // Macro event detail if active
+      ctx.macro.state!=='CLEAR'&&ctx.macro.event&&React.createElement('div',{className:'flex items-baseline gap-2 pt-1 border-t border-[#E8E9E4]/5'},
+        React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 mt-0.5',style:{color:'rgba(244,114,182,0.85)'}},'Macro'),
+        React.createElement('span',{style:{color:'rgba(244,114,182,0.85)'}},
+          ctx.macro.event.name,' · ',ctx.macro.event.impact,' impact · state: ',ctx.macro.state,
+          ctx.macro.minutesUntil!=null&&React.createElement('span',{className:'text-[#E8E9E4]/55 ml-2'},
+            ctx.macro.minutesUntil>0?`in ${ctx.macro.minutesUntil}m`:`${Math.abs(ctx.macro.minutesUntil)}m ago`,
+          ),
+        ),
+      ),
+      // Footer: dominant session + day rating
+      React.createElement('div',{className:'flex items-baseline justify-between gap-2 pt-1.5 border-t border-[#E8E9E4]/5 text-[9px] text-[#E8E9E4]/35 uppercase tracking-wider'},
+        React.createElement('span',null,ctx.dayName,' · ',ctx.sessions.dominant,' DOMINANT · DAY×SESS RATING ',ctx.sessions.dsRating),
+        React.createElement('span',null,'ALL TIMES UTC'),
+      ),
+    ),
+  );
+}
+
 // V5.6.1: Tara's Memory — compact strip showing the most recent calls inline in the
 //   Tara card. Click "all" to open a fuller paged view. The strip + modal both source
 //   from taraCallLog (cloud-synced array of every call she's made).
@@ -5316,80 +5647,153 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry,initialFi
         : React.createElement('div',{className:'bg-[#181A19] border border-[#E8E9E4]/8 rounded-xl overflow-hidden'},
         filtered.length===0
           ? React.createElement('div',{className:'p-8 text-center text-[#E8E9E4]/40 italic'},'No calls match this filter yet.')
-          : React.createElement('div',{className:'divide-y divide-[#E8E9E4]/5 max-h-[60vh] overflow-y-auto'},
-              filtered.map((e)=>{
-                const _period=_periodFromWindowId(e.windowId,e.windowType);
-                const _strikeFmt=_fmtPrice(e.strike);
-                const _closeFmt=_fmtPrice(e.closingPrice);
-                const _dateLabel=new Date(e.time).toLocaleString('en-US',{..._tzOpt,month:'short',day:'numeric'});
-                const _timeLabel=new Date(e.time).toLocaleTimeString('en-US',{..._tzOpt,hour:'2-digit',minute:'2-digit',hour12:false});
-                const _dirLabel=e.dir==='UP'?'▲ UP':e.dir==='DOWN'?'▼ DOWN':'· SIT OUT';
-                return(
-                React.createElement('div',{key:e.id,className:'px-3 sm:px-4 py-3 hover:bg-[#E8E9E4]/3'},
-                  // Header row: date + time · windowType · period · result badge
-                  React.createElement('div',{className:'flex items-center justify-between gap-3 mb-2'},
-                    React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
-                      React.createElement('span',{className:'tabular-nums text-[11px] text-[#E8E9E4]/55 font-bold shrink-0'},_dateLabel),
-                      React.createElement('span',{className:'tabular-nums text-[10px] text-[#E8E9E4]/35 shrink-0'},_timeLabel),
-                      React.createElement('span',{className:'tabular-nums text-[9px] text-[#E8E9E4]/30 shrink-0 px-1.5 py-0.5 rounded',style:{background:'rgba(232,233,228,0.05)'}},(e.windowType||'').toUpperCase()),
-                      _period&&React.createElement('span',{className:'tabular-nums text-[10px] text-[#E8E9E4]/65 shrink-0 font-medium',style:T2_MONO_STYLE},_period),
+          : (()=>{
+              // V7.10.6: Group entries by date for cleaner display with sticky headers.
+              //   Within each date group: entries appear newest-first (filtered is already
+              //   reversed). Date label uses the selected timezone (local or NY).
+              const _dayKeyFor=(t)=>{
+                try{return new Date(t).toLocaleDateString('en-US',{..._tzOpt,year:'numeric',month:'2-digit',day:'2-digit'});}
+                catch(e){return'unknown';}
+              };
+              const _byDay=new Map();
+              filtered.forEach(e=>{
+                if(!e||!e.time)return;
+                const k=_dayKeyFor(e.time);
+                if(!_byDay.has(k))_byDay.set(k,[]);
+                _byDay.get(k).push(e);
+              });
+              const _days=Array.from(_byDay.entries());
+              return React.createElement('div',{className:'max-h-[60vh] overflow-y-auto'},
+                _days.map(([_dayKey,_entries])=>{
+                  // Day header info
+                  const _firstEntry=_entries[0];
+                  const _dayDate=new Date(_firstEntry.time);
+                  const _dayLabel=_dayDate.toLocaleDateString('en-US',{..._tzOpt,weekday:'short',month:'short',day:'numeric'});
+                  // Day-level WR
+                  const _wins=_entries.filter(e=>e.result==='WIN').length;
+                  const _losses=_entries.filter(e=>e.result==='LOSS').length;
+                  const _sitouts=_entries.filter(e=>e.result==='SITOUT').length;
+                  const _resolved=_wins+_losses;
+                  const _wr=_resolved>0?Math.round((_wins/_resolved)*100):null;
+                  const _wrColor=_wr==null?'rgba(232,233,228,0.4)':_wr>=70?'rgb(110,231,183)':_wr>=55?'rgba(232,233,228,0.85)':_wr>=45?'rgba(229,200,112,0.85)':'rgb(244,114,182)';
+                  return React.createElement('div',{key:_dayKey},
+                    // Sticky day header
+                    React.createElement('div',{
+                      className:'sticky top-0 z-10 px-3 sm:px-4 py-2 flex items-baseline justify-between gap-2 backdrop-blur-md',
+                      style:{
+                        background:'rgba(14,16,15,0.92)',
+                        borderBottom:'1px solid rgba(232,233,228,0.06)',
+                        borderTop:'1px solid rgba(232,233,228,0.04)',
+                      },
+                    },
+                      React.createElement('div',{className:'flex items-baseline gap-2'},
+                        React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.14em]',style:{color:T2_GOLD}},_dayLabel),
+                        React.createElement('span',{className:'text-[9px] tabular-nums text-[#E8E9E4]/35'},_entries.length,' call',_entries.length===1?'':'s'),
+                      ),
+                      _wr!=null&&React.createElement('div',{className:'flex items-baseline gap-2 text-[10px] tabular-nums'},
+                        React.createElement('span',{style:{color:_wrColor},className:'font-bold'},_wr,'% WR'),
+                        React.createElement('span',{className:'text-[#E8E9E4]/35'},_wins,'W·',_losses,'L',_sitouts>0?'·'+_sitouts+'so':''),
+                      ),
                     ),
-                    editingId===e.id&&onEditEntry
-                      ? React.createElement('div',{className:'flex items-center gap-1 shrink-0'},
-                          ['WIN','LOSS','SITOUT'].map(opt=>(
-                            React.createElement('button',{
-                              key:opt,
-                              onClick:()=>{onEditEntry(e.id,opt);setEditingId(null);},
-                              className:'px-2 py-0.5 rounded text-[9px] uppercase font-bold tabular-nums tracking-wider transition-colors',
-                              style:{
-                                color:opt==='WIN'?'rgb(110,231,183)':opt==='LOSS'?'rgb(244,114,182)':T2_GOLD,
-                                background:e.result===opt?(opt==='WIN'?'rgba(110,231,183,0.18)':opt==='LOSS'?'rgba(244,114,182,0.18)':'rgba(229,200,112,0.18)'):'rgba(232,233,228,0.04)',
-                                border:e.result===opt?'1px solid currentColor':'1px solid rgba(232,233,228,0.10)',
-                              },
-                            },opt)
-                          )),
-                          React.createElement('button',{onClick:()=>setEditingId(null),className:'px-1.5 py-0.5 rounded text-[10px] text-[#E8E9E4]/35 hover:text-[#E8E9E4]/70',title:'Cancel'},'✕'),
+                    // Entries for this day
+                    React.createElement('div',{className:'divide-y divide-[#E8E9E4]/5'},
+                      _entries.map((e)=>{
+                        const _period=_periodFromWindowId(e.windowId,e.windowType);
+                        const _strikeFmt=_fmtPrice(e.strike);
+                        const _closeFmt=_fmtPrice(e.closingPrice);
+                        const _timeLabel=new Date(e.time).toLocaleTimeString('en-US',{..._tzOpt,hour:'2-digit',minute:'2-digit',hour12:false});
+                        const _dirLabel=e.dir==='UP'?'▲ UP':e.dir==='DOWN'?'▼ DOWN':e.dir==='NO_TRADE'?'⊘ NO TRADE':'· SIT OUT';
+                        // V7.10.6: Phase badge — backfilled from timestamp if entry lacks session
+                        const _phaseKey=e.phase||(typeof inferPhaseFromTimestamp==='function'?inferPhaseFromTimestamp(e.time):null);
+                        const _phaseProfile=_phaseKey&&typeof PHASE_PROFILES!=='undefined'?PHASE_PROFILES[_phaseKey]:null;
+                        return(
+                        React.createElement('div',{key:e.id,className:'px-3 sm:px-4 py-3 hover:bg-[#E8E9E4]/3 transition-colors'},
+                          // Header row: time · windowType · period · session · result badge
+                          React.createElement('div',{className:'flex items-center justify-between gap-3 mb-2'},
+                            React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
+                              React.createElement('span',{className:'tabular-nums text-[11px] text-[#E8E9E4]/65 font-bold shrink-0'},_timeLabel),
+                              React.createElement('span',{className:'tabular-nums text-[9px] text-[#E8E9E4]/30 shrink-0 px-1.5 py-0.5 rounded',style:{background:'rgba(232,233,228,0.05)'}},(e.windowType||'').toUpperCase()),
+                              _period&&React.createElement('span',{className:'tabular-nums text-[10px] text-[#E8E9E4]/55 shrink-0',style:T2_MONO_STYLE},_period),
+                              // Phase / session badge
+                              _phaseProfile&&React.createElement('span',{
+                                className:'text-[8px] uppercase font-bold tracking-[0.12em] shrink-0 px-1.5 py-0.5 rounded inline-flex items-center gap-1',
+                                style:{background:'rgba(232,233,228,0.04)',color:_phaseProfile.color},
+                                title:_phaseProfile.character,
+                              },_phaseProfile.flag,' ',_phaseProfile.label),
+                              // Asset chip if present
+                              e.asset&&React.createElement('span',{
+                                className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded',
+                                style:{
+                                  background:e.asset==='BTC'?'rgba(247,147,26,0.1)':'rgba(98,126,234,0.1)',
+                                  color:e.asset==='BTC'?'rgba(247,147,26,0.8)':'rgba(98,126,234,0.8)',
+                                  border:e.asset==='BTC'?'1px solid rgba(247,147,26,0.2)':'1px solid rgba(98,126,234,0.2)',
+                                },
+                              },e.asset),
+                            ),
+                            editingId===e.id&&onEditEntry
+                              ? React.createElement('div',{className:'flex items-center gap-1 shrink-0'},
+                                  ['WIN','LOSS','SITOUT'].map(opt=>(
+                                    React.createElement('button',{
+                                      key:opt,
+                                      onClick:()=>{onEditEntry(e.id,opt);setEditingId(null);},
+                                      className:'px-2 py-0.5 rounded text-[9px] uppercase font-bold tabular-nums tracking-wider transition-colors',
+                                      style:{
+                                        color:opt==='WIN'?'rgb(110,231,183)':opt==='LOSS'?'rgb(244,114,182)':T2_GOLD,
+                                        background:e.result===opt?(opt==='WIN'?'rgba(110,231,183,0.18)':opt==='LOSS'?'rgba(244,114,182,0.18)':'rgba(229,200,112,0.18)'):'rgba(232,233,228,0.04)',
+                                        border:e.result===opt?'1px solid currentColor':'1px solid rgba(232,233,228,0.10)',
+                                      },
+                                    },opt)
+                                  )),
+                                  React.createElement('button',{onClick:()=>setEditingId(null),className:'px-1.5 py-0.5 rounded text-[10px] text-[#E8E9E4]/35 hover:text-[#E8E9E4]/70',title:'Cancel'},'✕'),
+                                )
+                              : React.createElement('div',{className:'flex items-center gap-1.5 shrink-0'},
+                                  e.manualEdit&&React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/35',title:'Manually edited'},'✎'),
+                                  React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider px-2 py-0.5 rounded shrink-0',style:{..._resultStyle(e.result),background:e.result==='WIN'?'rgba(110,231,183,0.10)':e.result==='LOSS'?'rgba(244,114,182,0.10)':e.result==='SITOUT'?'rgba(229,200,112,0.10)':e.result==='NO_TRADE'?'rgba(180,180,180,0.08)':'rgba(232,233,228,0.05)'}},e.result==='NO_TRADE'?'no trade':e.result||'pending'),
+                                  onEditEntry&&React.createElement('button',{
+                                    onClick:()=>setEditingId(e.id),
+                                    className:'p-1 rounded text-[#E8E9E4]/30 hover:text-[#E8E9E4]/70 hover:bg-[#E8E9E4]/5 transition-colors',
+                                    title:'Override result',
+                                    style:{fontSize:11,lineHeight:1},
+                                  },'✎'),
+                                ),
+                          ),
+                          // Mid row: direction + confidence + posterior
+                          React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 mb-1.5'},
+                            React.createElement('span',{className:'font-bold text-sm tabular-nums shrink-0',style:_dirStyle(e.dir)},_dirLabel),
+                            e.confidence>0&&React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/55 tabular-nums shrink-0'},Math.min(99,Math.round(e.confidence)),'% conf'),
+                            e.posterior!=null&&e.dir!=='SIT_OUT'&&e.dir!=='NO_TRADE'&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40 tabular-nums shrink-0'},'· post ',Math.round(e.posterior),'%'),
+                            // Show caution note if present (V7.8 commits)
+                            e.caution&&React.createElement('span',{className:'text-[10px] shrink-0',style:{color:'rgba(229,200,112,0.7)'}},'· ',e.caution),
+                          ),
+                          // Strike → Close + gap + meta footer
+                          (_strikeFmt||e.regime||e.tier)&&React.createElement('div',{className:'flex items-center justify-between gap-2 text-[10px] text-[#E8E9E4]/55 flex-wrap'},
+                            React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 flex-wrap min-w-0',style:T2_MONO_STYLE},
+                              _strikeFmt&&React.createElement('span',{className:'tabular-nums shrink-0'},
+                                React.createElement('span',{className:'text-[#E8E9E4]/35 mr-1'},'Strike'),
+                                _strikeFmt,
+                              ),
+                              _closeFmt&&React.createElement('span',{className:'tabular-nums shrink-0'},
+                                React.createElement('span',{className:'text-[#E8E9E4]/35 mr-1'},'→'),
+                                _closeFmt,
+                              ),
+                              e.gapBps!=null&&e.result!=='SITOUT'&&e.result!=='NO_TRADE'&&React.createElement('span',{className:'text-[10px] tabular-nums shrink-0',style:{color:e.gapBps>=0?'rgba(110,231,183,0.85)':'rgba(244,114,182,0.85)'}},formatSignedInt(e.gapBps)+' bps'),
+                            ),
+                            React.createElement('div',{className:'flex items-baseline gap-2 text-[#E8E9E4]/35 shrink-0',style:{fontSize:9}},
+                              e.regime&&React.createElement('span',null,e.regime),
+                              e.qScore!=null&&React.createElement('span',null,'q',e.qScore),
+                              e.tier&&React.createElement('span',null,e.tier),
+                              e.closeSource==='kalshi'&&React.createElement('span',{className:'italic'},'kalshi-settled'),
+                            ),
+                          ),
+                          // Reason text on its own line if present (often informative for no-go entries)
+                          e.reason&&(e.dir==='NO_TRADE'||e.result==='NO_TRADE')&&React.createElement('div',{className:'mt-1.5 text-[10px] italic',style:{color:'rgba(232,233,228,0.45)'}},e.reason),
                         )
-                      : React.createElement('div',{className:'flex items-center gap-1.5 shrink-0'},
-                          e.manualEdit&&React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/35',title:'Manually edited'},'✎'),
-                          React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider px-2 py-0.5 rounded shrink-0',style:{..._resultStyle(e.result),background:e.result==='WIN'?'rgba(110,231,183,0.10)':e.result==='LOSS'?'rgba(244,114,182,0.10)':e.result==='SITOUT'?'rgba(229,200,112,0.10)':'rgba(232,233,228,0.05)'}},e.result||'pending'),
-                          onEditEntry&&React.createElement('button',{
-                            onClick:()=>setEditingId(e.id),
-                            className:'p-1 rounded text-[#E8E9E4]/30 hover:text-[#E8E9E4]/70 hover:bg-[#E8E9E4]/5 transition-colors',
-                            title:'Override result',
-                            style:{fontSize:11,lineHeight:1},
-                          },'✎'),
-                        ),
-                  ),
-                  // Mid row: direction + confidence + reason
-                  React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 mb-1.5'},
-                    React.createElement('span',{className:'font-bold text-sm tabular-nums shrink-0',style:_dirStyle(e.dir)},_dirLabel),
-                    e.confidence>0&&React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/55 tabular-nums shrink-0'},Math.min(99,Math.round(e.confidence)),'% conf'),
-                    e.posterior!=null&&e.dir!=='SIT_OUT'&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40 tabular-nums shrink-0'},'· post ',Math.round(e.posterior),'%'),
-                  ),
-                  // Strike → Close + gap row
-                  (_strikeFmt||e.regime)&&React.createElement('div',{className:'flex items-center justify-between gap-2 text-[10px] text-[#E8E9E4]/55 flex-wrap'},
-                    React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 flex-wrap min-w-0',style:T2_MONO_STYLE},
-                      _strikeFmt&&React.createElement('span',{className:'tabular-nums shrink-0'},
-                        React.createElement('span',{className:'text-[#E8E9E4]/35 mr-1'},'Strike'),
-                        _strikeFmt,
-                      ),
-                      _closeFmt&&React.createElement('span',{className:'tabular-nums shrink-0'},
-                        React.createElement('span',{className:'text-[#E8E9E4]/35 mr-1'},'→ Close'),
-                        _closeFmt,
-                      ),
-                      e.gapBps!=null&&e.result!=='SITOUT'&&React.createElement('span',{className:'text-[10px] tabular-nums shrink-0',style:{color:e.gapBps>=0?'rgba(110,231,183,0.85)':'rgba(244,114,182,0.85)'}},formatSignedInt(e.gapBps)+' bps'),
+                      );})
                     ),
-                    React.createElement('div',{className:'flex items-baseline gap-2 text-[#E8E9E4]/35 shrink-0',style:{fontSize:9}},
-                      e.regime&&React.createElement('span',null,e.regime),
-                      e.qScore!=null&&React.createElement('span',null,'q',e.qScore),
-                      e.tier&&React.createElement('span',null,e.tier),
-                      e.closeSource==='kalshi'&&React.createElement('span',{className:'italic'},'kalshi-settled'),
-                    ),
-                  ),
-                )
-              );})
-            ),
+                  );
+                }),
+              );
+            })(),
       ),
       React.createElement('div',{className:'mt-4 text-[10px] text-[#E8E9E4]/40 leading-relaxed'},'Memory is cloud-synced — same record across devices. Showing ',filtered.length,' of ',taraCallLog.length,' total. Capped at 500 most recent.'),
     ),
@@ -8201,7 +8605,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.10.5 online — comprehensive sync + learning fix. User flagged three issues at once: records/stats/logs not syncing properly, Tara giving different responses across devices, and uncertainty about whether Tara is actively learning. Mapped every persistent state slot and found three big gaps: (1) Personal scorecards (W/L counter) was in-memory only — no localStorage persistence after V5.5b stub, no cloud sync. Reset every reload, never agreed across devices. (2) regimeMemory (per-regime W/L stats that feed the engine) same situation — hardcoded V144 seeds at mount, never saved on update. (3) lifetimePnL persisted locally but didn\'t sync across devices. All three now fully wired: localStorage + cloud sync via cloudWatch + max-per-cell merge so any device\'s increments propagate. lifetimePnL uses timestamp-based latest-wins merge since PnL isn\'t monotonic. For locks: V7.10.4 added cloudWatch but had a subtle bug — \'only adopt if local empty\' meant simultaneous-commit races permanently disagreed. Fixed with first-write-wins via _committedAt timestamp on every snapshot. _persistLock now defers if cloud has earlier commit; cloudWatch overrides local if cloud was earlier. Both browsers converge to the EARLIEST commit. For learning: was a real gap — gradient-descent weight updates only fired when YOU took a position. Tara\'s calls you only watched updated stats but never the actual ML weights. Now every Tara WIN/LOSS resolution feeds applyTradeLearning, building a synthetic trade record from the call log\'s signalScoresAtLock. Tara learns from EVERY call she resolves. regimeMemory updates moved from user-position path to Tara\'s call resolution path so it tracks Tara\'s outcomes (the right learning signal) without double-counting. Yes — Tara is actively learning now, and you can verify it: Memory modal shows resolved entries, weights persist per-asset, regime stats update on every resolution.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.10.6 online — added time-aware market context system + Memory cleanup. New strip below the tape shows current trading phase (Asia Open / EU Open / NY Open / NY Lunch / etc.) with liquidity + vol expectations, character description, and active cautions. Click to expand for full detail. Phases are UTC-anchored (12 of them across the day) with severity-coded cautions: critical (macro events like CPI/FOMC pre-blackout), warning (funding resets, weekend gap risk), info (phase-specific tips like \'avoid breakout chasing in NY Lunch\'). Countdown to next phase transition shown on the right. Macro event integration ties into the existing CPI/NFP/FOMC blackout windows. For Memory: entries now grouped by date with sticky day headers showing per-day WR. Each entry carries its market phase as a context badge (so you can see \'oh that loss was in NY Lunch chop\' at a glance). Asset chips (BTC orange / ETH blue) inline. Cleaner formatting: time + window + period + phase + asset all in the header row, dir + conf + posterior + caution in the second, strike→close + meta in the footer. Reason text shown below for NO_TRADE entries. Legacy entries get phase inferred from their timestamp via inferPhaseFromTimestamp helper — no data lost, just enriched at display time. Future entries embed phase explicitly so all new calls carry their context for free. No bugs, no breaking changes — verified: parse OK at 17661 lines, all references resolved, three new module-level functions (PHASE_PROFILES, getPhaseKey, getMarketContext, inferPhaseFromTimestamp) available everywhere they\'re needed.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -8541,7 +8945,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.10.5'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.10.6'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -8928,7 +9332,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.5  |  signal'},
+        footer:{text:'Tara 7.10.6  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8942,7 +9346,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.10.5  |  stand-down'},
+        footer:{text:'Tara 7.10.6  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8956,7 +9360,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.10.5  |  search'},
+        footer:{text:'Tara 7.10.6  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8973,7 +9377,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.10.5  |  lock'},
+        footer:{text:'Tara 7.10.6  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8990,7 +9394,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.10.5  |  close'},
+          footer:{text:'Tara 7.10.6  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -9011,7 +9415,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.10.5  |  exit'},
+        footer:{text:'Tara 7.10.6  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -9032,7 +9436,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.5  |  scanning'},
+        footer:{text:'Tara 7.10.6  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -9052,7 +9456,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.5  |  signal'},
+        footer:{text:'Tara 7.10.6  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -9072,7 +9476,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.5  |  lock'},
+        footer:{text:'Tara 7.10.6  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -9089,7 +9493,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.5  |  sit-out'},
+        footer:{text:'Tara 7.10.6  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -9111,7 +9515,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.10.5  |  result'},
+          footer:{text:'Tara 7.10.6  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -9148,7 +9552,7 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.10.5  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.10.6  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -11698,6 +12102,8 @@ function TaraApp(){
         lockedAt:Date.now(),
         windowOpenedAt:windowOpenTimeRef.current||null,
         secondsIntoWindow:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
+        // V7.10.6: market phase stamp
+        phase:(typeof getPhaseKey==='function'?getPhaseKey(new Date().getUTCHours(),new Date().getUTCMinutes()):null),
         regime:analysis?.regime||'',dir:_forceDir,confidence:taraCallSnapshotRef.current.confidence,
         posterior:_post,qScore:Math.round(qualityGate?.score||0),fgt:analysis?.mtfAlignment,
         tier:'user-forced',session:_forceSession,kalshiAtLock:_forceK,
@@ -11745,6 +12151,8 @@ function TaraApp(){
           fgt:analysis?.mtfAlignment,
           tier:'sitout',
           session:_sitSession,
+          // V7.10.6: market phase stamp
+          phase:(typeof getPhaseKey==='function'?getPhaseKey(new Date().getUTCHours(),new Date().getUTCMinutes()):null),
           reason:tc.reason,
           // V7.0.7: tag asset for SIT_OUT entries (was missing — defaulted to BTC on display).
           asset:currentAssetRef.current||currentAsset||'BTC',
@@ -11879,6 +12287,10 @@ function TaraApp(){
           qScore:snapshot.qScore||Math.round(qualityGate?.score||0),
           fgt:snapshot.fgt||analysis?.mtfAlignment,
           tier:snapshot.tier||'unknown',
+          // V7.10.6: stamp the current market phase on every entry. Future memory views
+          //   show this as a context badge so each call carries the trading-environment
+          //   context it was made in. Inference fallback for legacy entries via timestamp.
+          phase:(typeof getPhaseKey==='function'?getPhaseKey(new Date().getUTCHours(),new Date().getUTCMinutes()):null),
           session:snapshot.session||(typeof getMarketSessions==='function'?getMarketSessions():{})?.dominant||'UNKNOWN',
           reason:snapshot.reason||'',
           earlyLock:false,
@@ -12366,6 +12778,8 @@ function TaraApp(){
         lockedAt:Date.now(),
         windowOpenedAt:windowOpenTimeRef.current||null,
         secondsIntoWindow:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
+        // V7.10.6: market phase stamp for context-aware Memory display
+        phase:(typeof getPhaseKey==='function'?getPhaseKey(new Date().getUTCHours(),new Date().getUTCMinutes()):null),
         regime:analysis?.regime||'',
         dir:_committedCall,confidence:tc.confidence,
         posterior:analysis?.rawProbAbove,
@@ -13172,7 +13586,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              7.10.5
+              7.10.6
             </span>
           </div>
 
@@ -13467,6 +13881,9 @@ function TaraApp(){
 
         {/* V3.1: Tape strip — sliding-window buy/sell pressure */}
         <TapeStrip tapeWindows={tapeWindows} whaleLog={whaleLog}/>
+
+        {/* V7.10.6: Market context strip — current phase, cautions, next transition */}
+        <MarketContextStrip useLocalTime={useLocalTime}/>
 
         {/* MOBILE TAB NAV */}
         <div className={'flex lg:hidden bg-[#181A19] border border-[#E8E9E4]/10 rounded-xl p-1 gap-1 shrink-0'}>
@@ -14639,13 +15056,58 @@ function TaraApp(){
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
 
+              {/* V7.10.6 — Market Context + Memory Cleanup */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Feature · Time-Aware Context · Memory Polish</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Phase Context + Memory Cleanup</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for time-specific alerts/disclaimers (what kind of market we&rsquo;re in, what we&rsquo;re entering, what to watch for) and to clean up + format previous records. Both in this release.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Market Context Strip</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">New strip below the tape, above the prediction columns. Shows:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Current phase</strong> with flag emoji, label, liquidity level (LOW/MED/HIGH/EXTREME), expected vol (EXPANDING/STEADY/COMPRESSING).</li>
+                  <li><strong>Top caution</strong> inline (collapsed) — highest severity active warning.</li>
+                  <li><strong>Next transition</strong> on the right with countdown (e.g., &ldquo;NY Open · 22m&rdquo;).</li>
+                  <li><strong>Click to expand</strong> for full detail: character description, &ldquo;best for&rdquo; trade types, full cautions list, macro event status, dominant session + day×session rating.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">12 phases (UTC-anchored)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">ASIA_OPEN · ASIA_LATE · EU_PREOPEN · EU_OPEN · NY_PREMARKET · NY_OPEN · NY_MORNING · NY_LUNCH · NY_AFTERNOON · NY_CLOSE · AFTERHOURS · ASIA_OPEN. Each has stable character profile (e.g., &ldquo;NY Lunch: chop period, mean reversion to VWAP, avoid breakout chasing&rdquo;). Phase boundaries match major trading-desk shift changes (Frankfurt open, NY pre-market, NY open, lunch lull at 16-17 UTC).</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Caution severity</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong style={{color:'rgb(244,114,182)'}}>Critical</strong> &mdash; CPI/NFP/FOMC pre-blackout, &ldquo;observe only&rdquo; during release. Border tints rose.</li>
+                  <li><strong style={{color:'rgba(229,200,112,0.95)'}}>Warning</strong> &mdash; funding rate reset within 10m, weekend approaching, post-event extreme vol. Border tints amber.</li>
+                  <li><strong style={{color:'rgba(232,233,228,0.65)'}}>Info</strong> &mdash; phase-specific tips like &ldquo;avoid breakout chasing in NY Lunch&rdquo; or &ldquo;wider stops needed at NY Open&rdquo;. Subtle.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Memory cleanup + formatting</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Date grouping</strong> &mdash; entries now grouped by day with sticky headers showing per-day WR (e.g., &ldquo;Tue, May 5 · 67% WR · 4W·2L&rdquo;).</li>
+                  <li><strong>Phase badge per entry</strong> &mdash; each row shows what phase the call was made in (e.g., &ldquo;🚀 NY Open&rdquo;). Legacy entries without phase get it inferred from timestamp via <code className="text-[10px] bg-[#0E100F] px-1">inferPhaseFromTimestamp</code> &mdash; no migration needed, no data lost.</li>
+                  <li><strong>Asset chips</strong> &mdash; BTC orange / ETH blue inline so you can scan asset breakdown visually.</li>
+                  <li><strong>Reason inline</strong> &mdash; NO_TRADE entries show their no-go reason directly under the row so you can see why Tara passed.</li>
+                  <li><strong>Caution surfaces</strong> &mdash; V7.8 caution-level commits (e.g., &ldquo;tentative call &mdash; confidence 58%&rdquo;) now visible on the row.</li>
+                  <li><strong>Cleaner header line</strong> &mdash; time + window + period + phase + asset; no duplicate date label per entry (date is now in the day header).</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Phase stamp on new entries</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Every new call log entry now stamps the current market phase at creation (4 sites: main lock path, snapshot helper, user-forced, SIT_OUT). Future memory views show phase as a context badge for free. Legacy entries fall back to timestamp inference at display time.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">Verified clean</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Parse OK at 17661 lines. All new module-level functions (PHASE_PROFILES, getPhaseKey, getNextPhaseTransition, getMarketContext, inferPhaseFromTimestamp) defined before any consumer. The MarketContextStrip component is pure (no side effects beyond a 30s tick interval, properly cleaned up on unmount). No new state slots that need cloud sync. No regressions to V7.10.5&rsquo;s sync + learning fixes.</p>
+              </section>
+
               {/* V7.10.5 — Comprehensive Sync + Self-Learning */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Architectural Patch · Sync + Learning</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Sync &amp; Learning Done Right</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Sync &amp; Learning Done Right</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged three concerns simultaneously: records/stats/logs not syncing, Tara giving different responses across devices, and asking whether learning was actually happening. Took the time to audit every persistent state slot and the entire learning pipeline.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Persistence gaps found</div>
@@ -14695,7 +15157,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Browser Real-Time Sync</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Same Call, Every Browser</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Same Call, Every Browser</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;still not the same for everyone on each browser mate.&rdquo;</em> V7.10.3 fixed within-browser races but cross-browser was still broken &mdash; two real bugs compounding.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Bug 1: One-shot read, not real-time</div>
@@ -14730,7 +15192,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Tab Determinism</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — One Window, One Decision</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — One Window, One Decision</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshots showed the SAME window with Tab 1 saying <strong style={{color:'rgb(110,231,183)'}}>LOCKED UP 84%</strong> and Tab 2 saying <strong style={{color:'rgb(244,114,182)'}}>LOCKED DOWN 94%</strong>. Same browser, same window, opposite calls.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -14768,7 +15230,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stability Audit</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Audit Pass</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Audit Pass</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for a comprehensive review after the V7.10.1 snapshot-log fix. Reviewed potential bug categories systematically and fixed one minor stability issue.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was checked</div>
@@ -14799,7 +15261,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Trade Rounds Stopped Updating</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — The Bug That Killed Memory</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — The Bug That Killed Memory</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;tara completely stopped with updating trade round for both btc and eth now&rdquo;</em>. Found a critical bug shipped quietly in V7.8 and inherited by every release since. Both assets affected equally.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was broken</div>
@@ -14837,7 +15299,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · TDZ Bug Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Crash Fixed</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Crash Fixed</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshot showed engine stuck on MATH CRASH with error <em>&ldquo;Cannot access &lsquo;ft&rsquo; before initialization&rdquo;</em>. Posterior frozen at 50%, all signals reading 0, advisor card unable to render, projections empty.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -14857,7 +15319,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Three-State Model · Explicit No-Go</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — When Sit-Out Is The Right Answer</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — When Sit-Out Is The Right Answer</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Talked through sit-outs together. Agreed: V7.8 killing stylistic timidity (tier blocks, timer expirations, mixed-signal skips) was right. But there are 3 specific cases where NOT trading is mathematically correct, not conservative. Those become an explicit NO-GO category &mdash; clearly distinguished from a normal lock or a tentative caution call.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Three states now</div>
@@ -14885,7 +15347,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Persistent Learning · No Skips · Caution Notes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — She Trades Every Round Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — She Trades Every Round Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Weights persist across sessions</div>
@@ -14926,7 +15388,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Reversal Blockers · Stale-Lock Advisor</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Stop Inviting Bad Trades</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Stop Inviting Bad Trades</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged the screenshot. Tara locked DOWN 54%, engine showed 89% UP, Kalshi 99.7% UP, all 4 forward projections UP, price +25bps above strike. Advisor card said &ldquo;Tara DOWN 85% &middot; ENTER DOWN&rdquo;. Pressing ENTER would have been an instant loss. Two bugs fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor — continuation blockers</div>
@@ -14955,7 +15417,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Predict Reversals · Shadow Tara · Fast-Mode</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Predict the Reversal, Not Avoid It</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Predict the Reversal, Not Avoid It</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor (replaces V7.6 guard)</div>
@@ -15003,7 +15465,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Mean-Reversion Guard · Timer-Fires · Dual Feed</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Stop Chasing the Top</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Stop Chasing the Top</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Deep dive into 105 resolved trades + the recent 30 found the actual structural pattern behind &ldquo;we chase momentum and lose on swings.&rdquo;</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Findings from the call-log analysis</div>
@@ -15046,7 +15508,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Faster Low-Dial Locks · ETH Save Bug</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Truly Fast at Fast</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Truly Fast at Fast</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Two unrelated bugs in one release. User flagged both.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Speed dial low-end made aggressive</div>
@@ -15092,7 +15554,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Speed Dial Actually Functional</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Dial Has Function Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Dial Has Function Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;the timer decision has 0 function too. its just a gimmick and does nothing&rdquo;. They were right. The dial was only nudging two floor numbers that almost every trade passed regardless. Real fix:</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tier filter by dial position</div>
@@ -15139,7 +15601,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Engine · The Structural Blind Spot Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Higher Timeframes Finally Count</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Higher Timeframes Finally Count</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged a trade where the Score Breakdown showed &ldquo;Structural ▲ UP · 4/6 align&rdquo; with 5m and 15m both bullish, while Tara sat out leaning DOWN. Investigation: the engine was COMPUTING the multi-TF structural data and SHOWING it on the panel, but never adding it to the posterior. Five-of-six timeframes screaming UP, math weight: zero.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Structural alignment bonus</div>
@@ -15177,7 +15639,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stale State Fixes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Sound + Stale UI</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Sound + Stale UI</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three quick fixes. Two were old bugs, one was a missing persistence flag.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Sound enabled now persists</div>
@@ -15197,7 +15659,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Prediction Engine · The &ldquo;Why Jerome Beats Tara&rdquo; Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.5</span> — Honest Confidence, Smarter Locks</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.10.6</span> — Honest Confidence, Smarter Locks</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">After a side-by-side analysis of a real losing trade where Jerome won and Tara lost, we found the structural problem: Tara was over-trusting tape extremes and under-weighting strike position. This release surgically fixes both, plus the timer bug, plus calibrates the confidence display.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tape-extreme guard</div>
