@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v7.2.0-prediction-improvements';
+const BASELINE_VERSION='2026.05.05-v7.4.0-speed-dial-real-function';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -2177,6 +2177,25 @@ const computeV99Posterior=(params)=>{
   if(_structDir!=='NEUTRAL'&&_structAlignment>=3){
     reasoning.push(`[STRUCT] ${_structAlignment}/6 align ${_structDir} (${_tcUpCount+_gtUpCount}↑ vs ${_tcDnCount+_gtDnCount}↓)`);
   }
+  // V7.3: STRUCTURAL ALIGNMENT BONUS to totalScore. Previously the multi-TF Grand Trend
+  //   + Trend Channel data (5m/15m structural reading) was COMPUTED and LOGGED but never
+  //   added to the engine posterior. It only gated the structural-led tier and was shown
+  //   in the Score Breakdown UI. Result: Tara's posterior was driven by 1m candle action
+  //   and tape, while the larger trend (which was often correctly UP/DOWN) had zero weight.
+  //   Now: 4/6 aligned TFs → ±8, 5/6 → ±14, 6/6 → ±20. Damped by remaining time — boost
+  //   has full effect when >60% time remains (long-horizon signals matter most when there's
+  //   still time for them to play out), tapers to half effect by <25% time remaining (gap
+  //   signal becomes dominant late in window).
+  if(_structDir!=='NEUTRAL'&&_structAlignment>=4){
+    let _structBoost=_structAlignment>=6?20:_structAlignment>=5?14:8;
+    // Time damping: full when >60% remaining, half when <25% remaining
+    const _structTimeMult=timeFraction<=0.4?1.0:timeFraction<=0.75?(1.0-(timeFraction-0.4)*1.0):0.5;
+    _structBoost=Math.round(_structBoost*_structTimeMult)*(_structDir==='UP'?1:-1);
+    if(_structBoost!==0){
+      totalScore+=_structBoost;
+      reasoning.push(`[STRUCT-BOOST] ${_structAlignment}/6 ${_structDir} → ${_structBoost>0?'+':''}${_structBoost} (×${_structTimeMult.toFixed(2)} time-damp)`);
+    }
+  }
   // V134: FORECAST-STICKY removed — replaced by HPotter FGT (more rigorous)
   // Also: pure trajectory without strike (for early-window calls when strike not set yet)
   if(targetMargin<=0&&Math.abs(_v5sNum)>0.3){
@@ -3255,8 +3274,12 @@ function PredictionContent(props){
 
   // ── Mode 3: Full prediction display ──
   // Build lock price status (extracted from IIFE)
+  // V7.2.1: Only show when user has actually entered a position. analysis.lockInfo reflects
+  //   the engine's internal lock — without this guard the user saw "Locked at X — Now Y ·
+  //   IN PROFIT" even when they were sitting the trade out, which read as if they had a
+  //   position they didn't have.
   let lockPriceStatus=null;
-  if(analysis.lockInfo&&currentPrice){
+  if(userPosition&&analysis.lockInfo&&currentPrice){
     const lp=analysis.lockInfo.lockPrice;
     const dir=analysis.lockInfo.dir;
     const winning=(dir==='DOWN'&&currentPrice<lp)||(dir==='UP'&&currentPrice>lp);
@@ -4113,20 +4136,38 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
         {/* V6.2.8: When sitting out, show what direction Tara would have leaned if forced.
              Lets the user see her implicit read even when she's not committing. Helps them
              make their own manual call when they have an external read that disagrees with
-             the sit-out reasoning (e.g. Kalshi pricing was the blocker, not the direction). */}
+             the sit-out reasoning (e.g. Kalshi pricing was the blocker, not the direction).
+             V7.3: LIVE update. Previously this read snap.atPosterior (frozen at moment of
+             sit-out decision). When market reversed after Tara sat out, the displayed lean
+             stayed stale. Now uses analysis.rawProbAbove (live posterior) so the user sees
+             Tara's CURRENT view of the market, with a "(was X% at sit-out)" sub-line if
+             the lean has flipped direction since. */}
         {isSatOutSnap&&(()=>{
-          const _post=snap?.atPosterior;
+          const _liveProb=typeof analysis?.rawProbAbove==='number'?analysis.rawProbAbove:null;
+          const _frozenProb=snap?.atPosterior;
+          const _post=_liveProb!=null?_liveProb:_frozenProb;
           if(_post==null)return null;
           const _impliedDir=_post>=50?'UP':'DOWN';
           const _impliedConf=Math.round(_impliedDir==='UP'?_post:(100-_post));
-          // Only meaningful if she had any directional lean (≥55%)
+          // Only meaningful if she has any directional lean (≥55%)
           if(_impliedConf<55)return null;
           const _arrow=_impliedDir==='UP'?'▲':'▼';
           const _color=_impliedDir==='UP'?'text-emerald-400/70':'text-rose-400/70';
+          // Detect direction flip vs frozen snap to surface the change to the user
+          const _frozenDir=_frozenProb!=null?(_frozenProb>=50?'UP':'DOWN'):null;
+          const _flipped=_frozenDir&&_frozenDir!==_impliedDir;
+          const _frozenConf=_frozenProb!=null?Math.round(_frozenDir==='UP'?_frozenProb:(100-_frozenProb)):null;
           return(
-            <div className={`text-[11px] ${_color} font-medium mb-2 flex items-baseline gap-1.5`}>
-              <span>{_arrow}</span>
-              <span>Would have leaned <span className="font-bold">{_impliedDir} {_impliedConf}%</span> if not blocked</span>
+            <div className={`text-[11px] ${_color} font-medium mb-2 leading-snug`}>
+              <div className="flex items-baseline gap-1.5">
+                <span>{_arrow}</span>
+                <span>{_flipped?'Now leans':'Would have leaned'} <span className="font-bold">{_impliedDir} {_impliedConf}%</span>{!_flipped?' if not blocked':''}</span>
+              </div>
+              {_flipped&&_frozenConf!=null&&(
+                <div className="text-[10px] text-[#E8E9E4]/35 italic mt-0.5">
+                  was {_frozenDir} {_frozenConf}% at sit-out — market reversed
+                </div>
+              )}
             </div>
           );
         })()}
@@ -4395,7 +4436,36 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           }
           const _etaNum=_samplesRem==null?null:Math.max(0,_searchRem+_samplesRem);
           // V7.2: when ETA can't be computed (stalled or pure scanning), show "—" instead of fake "~1s".
-          const _etaStr=_etaNum==null?'—':_etaNum<=0?'now':_etaNum<60?`~${Math.round(_etaNum)}s`:`~${Math.floor(_etaNum/60)}m ${Math.round(_etaNum%60)}s`;
+          // V7.4: when ETA is "—", show the actual blocker so user knows WHY there's no ETA.
+          let _etaStr;
+          let _blockerLine=null;
+          if(_etaNum==null){
+            // Stalled or pure scanning — surface the blocker.
+            const _engQ=taraCall&&taraCall._ctx&&typeof taraCall._ctx.q==='number'?taraCall._ctx.q:null;
+            const _engConv=taraCall&&taraCall._ctx&&typeof taraCall._ctx.conviction==='number'?taraCall._ctx.conviction:null;
+            const _qBaseUI=Math.round(30*_smult);
+            const _convBaseUI=Math.max(1,Math.round(7*_smult));
+            if(_isStalled){
+              _etaStr='—';
+              if(_engConv!=null&&_engConv<_convBaseUI){
+                _blockerLine=`conviction ${_engConv.toFixed(0)} / need ${_convBaseUI}`;
+              } else if(_engQ!=null&&_engQ<_qBaseUI){
+                _blockerLine=`quality ${_engQ.toFixed(0)} / need ${_qBaseUI}`;
+              } else {
+                _blockerLine='conviction not firm';
+              }
+            } else {
+              _etaStr='—';
+              _blockerLine='no direction yet';
+            }
+          } else {
+            _etaStr=_etaNum<=0?'now':_etaNum<60?`~${Math.round(_etaNum)}s`:`~${Math.floor(_etaNum/60)}m ${Math.round(_etaNum%60)}s`;
+          }
+          // V7.4: Effective gates from current dial position.
+          const _qFloor=Math.max(10,Math.round(30*_smult));
+          const _cFloor=Math.max(1,Math.round(7*_smult));
+          // V7.4: Allowed tiers — what does this dial position permit?
+          const _allowedTiers=_d>=80?'super-confluence + structural-led only':_d>=50?'confluence and higher':_d>=30?'any tier (no single-signal)':'all setups';
           return(
             <div className="border-t border-[#E8E9E4]/8 pt-2.5 mt-2.5">
               <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
@@ -4419,12 +4489,28 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 <span className="text-[#E8E9E4]/35">0 · faster</span>
                 <span className="text-[#E8E9E4]/35">100 · patient</span>
               </div>
+              {/* V7.4: Effective gates from current dial — live, no need to lock to see */}
+              <div className="mt-2 px-2.5 py-2 rounded-md" style={{background:'rgba(232,233,228,0.04)',border:'1px solid rgba(232,233,228,0.08)'}}>
+                <div className="text-[8px] uppercase tracking-[0.18em] text-[#E8E9E4]/45 font-bold mb-1">Effective gates</div>
+                <div className="flex items-center justify-between gap-2 tabular-nums text-[10px] mb-1">
+                  <span className="text-[#E8E9E4]/65">Quality floor</span>
+                  <span className="text-white font-bold">≥ {_qFloor}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 tabular-nums text-[10px] mb-1.5">
+                  <span className="text-[#E8E9E4]/65">Conviction floor</span>
+                  <span className="text-white font-bold">≥ {_cFloor}</span>
+                </div>
+                <div className="text-[9px] text-[#E8E9E4]/55 leading-snug border-t border-[#E8E9E4]/8 pt-1.5">
+                  Allowed: <span style={{color:_color}}>{_allowedTiers}</span>
+                </div>
+              </div>
               <div className="mt-2 px-2.5 py-2 rounded-md" style={{background:'rgba(232,233,228,0.05)',border:'1px solid rgba(232,233,228,0.10)'}}>
                 <div className="flex items-baseline justify-between gap-2 mb-0.5">
                   <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold">Lock ETA</span>
                   {_tierLabel&&<span className="text-[9px] uppercase text-[#E8E9E4]/35 tabular-nums">{_tierLabel}</span>}
                 </div>
-                <div className="text-[18px] font-bold tabular-nums tracking-tight leading-tight" style={{color:_color}}>{_etaStr||'—'}</div>
+                <div className="text-[18px] font-bold tabular-nums tracking-tight leading-tight" style={{color:_color}}>{_etaStr}</div>
+                {_blockerLine&&<div className="text-[9px] text-[#E8E9E4]/45 italic mt-0.5 tabular-nums">{_blockerLine}</div>}
               </div>
               <span className="text-[9px] text-[#E8E9E4]/35 italic block mt-1.5 leading-snug">
                 {_d<=30?'Fast — fewer samples, lower thresholds':_d<=70?'Balanced cadence':'Patient — wait for high confidence'}
@@ -7715,15 +7801,42 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.2.0 online — prediction engine improvements. Honest analysis of why Tara was losing trades Jerome was winning, then fixed it. Five changes: (1) TAPE-EXTREME GUARD blocks tape-led locks when tape is at flush extremes (≥95% one direction) — those are exhaustion points, not continuation. (2) GAP-NOT-MARGINAL requires ≥3 bps in lock direction for tape-led tier — no more locking against price action when price is sitting on the strike. (3) STRIKE-POSITION DOMINANT OVERRIDE adds up to ±20 boost to gap signal when price is clearly drifted (≥3 bps) with ≥40% time remaining — Jerome\'s edge captured. (4) CONFIDENCE CEILING at 85% — actual peak WR is ~80%, no more 99% theater. (5) Lock ETA timer fixed — shows \"—\" when stalled or scanning instead of fake \"~1s\". CONV_FLOOR base 5→7 for slight overall selectivity bump. Combined effect: Tara should miss fewer Jerome-style early gap trades AND lose fewer tape-extreme reversal traps.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.4.0 online — speed dial finally has function. User reported \"the timer decision has 0 function too. its just a gimmick and does nothing\" and they were right. Previously the dial only nudged Q_FLOOR and CONV_FLOOR — for most trades, both pass at any dial setting, so dial position rarely changed Tara\'s decision. Three changes: (1) TIER FILTER BY DIAL: dial ≥80 (patient/strict) → only super-confluence and structural-led trades; dial 50-79 (balanced) → also confluence; dial 30-49 → any tier flag (no single-signal); dial <30 (fast) → all setups. The dial now actively SITS OUT lower-tier trades at higher dial positions. (2) LIVE EFFECTIVE GATES displayed in the dial card — Q floor, conviction floor, and which tiers are allowed at the current setting. Move the slider, see the gates change in real time. (3) BLOCKER LINE — when ETA shows \"—\", a sub-line now explains why (\"quality 22 / need 39\", \"conviction 4 / need 9\", \"no direction yet\") so the user knows what\'s preventing a lock. Combined with V7.2.0\'s per-tier WR audit, you can now move dial to patient and confirm Tara skips the tape-led tier (which historically had lower WR) entirely.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
   const[showHelp,setShowHelp]=useState(false);
-  const[soundEnabled,setSoundEnabled]=useState(false);
+  const[soundEnabled,setSoundEnabled]=useState(()=>{
+    try{const s=localStorage.getItem('taraSoundEnabled');return s==='1';}catch(e){return false;}
+  });
   const audioCtxRef=useRef(null);
   const soundEnabledRef=useRef(false);
   soundEnabledRef.current=soundEnabled;
+  useEffect(()=>{try{localStorage.setItem('taraSoundEnabled',soundEnabled?'1':'0');}catch(e){}},[soundEnabled]);
+  // V7.2.1: When sound was persisted as enabled but no AudioContext exists yet (next page
+  //   load), wait for the FIRST user interaction to bootstrap audio. Browsers require a
+  //   user gesture to unlock audio. Without this, sounds fire silently into a suspended
+  //   context and never play.
+  useEffect(()=>{
+    if(!soundEnabled)return;
+    if(audioCtxRef.current)return;
+    const _bootAudio=()=>{
+      try{
+        const Ctx=window.AudioContext||window.webkitAudioContext;
+        if(!Ctx)return;
+        audioCtxRef.current=new Ctx();
+        if(audioCtxRef.current.state==='suspended')audioCtxRef.current.resume();
+      }catch(e){}
+      window.removeEventListener('pointerdown',_bootAudio,true);
+      window.removeEventListener('keydown',_bootAudio,true);
+    };
+    window.addEventListener('pointerdown',_bootAudio,true);
+    window.addEventListener('keydown',_bootAudio,true);
+    return()=>{
+      window.removeEventListener('pointerdown',_bootAudio,true);
+      window.removeEventListener('keydown',_bootAudio,true);
+    };
+  },[soundEnabled]);
   // V6.0: master alert volume (0..1), persisted to localStorage. UI exposes slider next to
   //   the sound button when sound is on. Default 0.7 — audible but not startling.
   const[alertVolume,setAlertVolume]=useState(()=>{
@@ -8016,7 +8129,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.2.0'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.4.0'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -8286,7 +8399,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.2.0  |  signal'},
+        footer:{text:'Tara 7.4.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8300,7 +8413,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.2.0  |  stand-down'},
+        footer:{text:'Tara 7.4.0  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8314,7 +8427,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.2.0  |  search'},
+        footer:{text:'Tara 7.4.0  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8331,7 +8444,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.2.0  |  lock'},
+        footer:{text:'Tara 7.4.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8348,7 +8461,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.2.0  |  close'},
+          footer:{text:'Tara 7.4.0  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8369,7 +8482,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.2.0  |  exit'},
+        footer:{text:'Tara 7.4.0  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8390,7 +8503,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.2.0  |  scanning'},
+        footer:{text:'Tara 7.4.0  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8410,7 +8523,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.2.0  |  signal'},
+        footer:{text:'Tara 7.4.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8430,7 +8543,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.2.0  |  lock'},
+        footer:{text:'Tara 7.4.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8447,7 +8560,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.2.0  |  sit-out'},
+        footer:{text:'Tara 7.4.0  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8469,7 +8582,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.2.0  |  result'},
+          footer:{text:'Tara 7.4.0  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8506,7 +8619,7 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.2.0  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.4.0  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -9964,25 +10077,36 @@ function TaraApp(){
       //   displayed activePrediction stays committed. The only exception: if internal
       //   state shows the OPPOSITE direction is now CONFIRMED, show EXIT WARNING — never
       //   flip the call. Capture first commit so subsequent renders enforce stickiness.
-      if(engineLockedDirRef.current===null){
-        if(activePrediction==='UP - CONFIRMED')engineLockedDirRef.current='UP';
-        else if(activePrediction==='DOWN - CONFIRMED')engineLockedDirRef.current='DOWN';
-      } else if(engineLockedDirRef.current==='UP'){
-        if(activePrediction.includes('DOWN - CONFIRMED')||activePrediction.includes('DOWN (FORMING)')){
-          activePrediction='UP - EXIT WARNING'; // engine reversed, alert user but don't flip
-        } else if(activePrediction.includes('CLOSED')||activePrediction.includes('SIT OUT')){
-          // Allow CLOSED/SIT OUT — these are user-initiated terminal states
-        } else {
-          activePrediction='UP - CONFIRMED'; // anything else (FORMING/CLEARED/ANALYZING) — stay committed
+      // V7.2.1: ONLY enforce stickiness when the user actually has a position. Without a
+      //   position, the user wants live updates of Tara's current view — they're not
+      //   committed to anything, so "EXIT WARNING" is meaningless and confusing. The
+      //   previous behavior was: engine briefly confirms UP, captures stickiness, then
+      //   flips to DOWN → display shows "UP - EXIT WARNING" while header says SITTING OUT.
+      if(userPosition){
+        if(engineLockedDirRef.current===null){
+          if(activePrediction==='UP - CONFIRMED')engineLockedDirRef.current='UP';
+          else if(activePrediction==='DOWN - CONFIRMED')engineLockedDirRef.current='DOWN';
+        } else if(engineLockedDirRef.current==='UP'){
+          if(activePrediction.includes('DOWN - CONFIRMED')||activePrediction.includes('DOWN (FORMING)')){
+            activePrediction='UP - EXIT WARNING'; // engine reversed, alert user but don't flip
+          } else if(activePrediction.includes('CLOSED')||activePrediction.includes('SIT OUT')){
+            // Allow CLOSED/SIT OUT — these are user-initiated terminal states
+          } else {
+            activePrediction='UP - CONFIRMED'; // anything else (FORMING/CLEARED/ANALYZING) — stay committed
+          }
+        } else if(engineLockedDirRef.current==='DOWN'){
+          if(activePrediction.includes('UP - CONFIRMED')||activePrediction.includes('UP (FORMING)')){
+            activePrediction='DOWN - EXIT WARNING';
+          } else if(activePrediction.includes('CLOSED')||activePrediction.includes('SIT OUT')){
+            // Allow terminal states
+          } else {
+            activePrediction='DOWN - CONFIRMED';
+          }
         }
-      } else if(engineLockedDirRef.current==='DOWN'){
-        if(activePrediction.includes('UP - CONFIRMED')||activePrediction.includes('UP (FORMING)')){
-          activePrediction='DOWN - EXIT WARNING';
-        } else if(activePrediction.includes('CLOSED')||activePrediction.includes('SIT OUT')){
-          // Allow terminal states
-        } else {
-          activePrediction='DOWN - CONFIRMED';
-        }
+      } else {
+        // V7.2.1: User has no position. Drop any stale stickiness so a fresh window
+        //   doesn't display a phantom EXIT WARNING from a prior engine commit.
+        engineLockedDirRef.current=null;
       }
       let textColor='text-zinc-500';
       if(activePrediction.includes('UP - CONFIRMED'))textColor='text-emerald-400';
@@ -10523,6 +10647,40 @@ function TaraApp(){
     //   dip below 70%. The 3/4 threshold was too permissive for high-WR target.
     const isRisingConfluence=!isConfluent&&_risingScore>=4&&!tapeOpposes&&!kalshiDisagrees;
     const _dirLead=`${dir} lean (${conviction.toFixed(0)}pt)`;
+    // V7.4: SPEED DIAL TIER FILTER. The dial now determines the MINIMUM tier that can lock.
+    //   Previously the dial only adjusted Q_FLOOR / CONV_FLOOR / sample-count multipliers —
+    //   too subtle to feel. Now patient mode actively sits out lower-tier trades:
+    //     dial >=80 (patient/strict): only super-confluence + structural-led (~20-30% of setups)
+    //     dial 50-79 (balanced):       also allows confluence (skips tape-led + rising)
+    //     dial 30-49 (mid-fast):       also allows tape-led + rising
+    //     dial <30  (fast):            all tiers including single-signal (current behavior)
+    //   Per-tier WR audit (V7.2) showed super and structural have meaningfully higher WR than
+    //   tape-led — so patient mode trading those trades only should lift WR materially.
+    const _dialFilter=Math.max(0,Math.min(100,speedDialRef.current||50));
+    let _dialBlockReason=null;
+    if(_dialFilter>=80){
+      // Patient/strict: super-confluence or structural-led only
+      if(!isSuperConfluent&&!isStructuralLed){
+        const _curTier=isConfluent?'confluence':isTapeLed?'tape-led':isRisingConfluence?'rising':'single-signal';
+        _dialBlockReason=`Patient mode (dial ${_dialFilter}) only takes super-confluence or structural-led — ${_curTier} blocked`;
+      }
+    } else if(_dialFilter>=50){
+      // Balanced: confluence or higher
+      if(!isSuperConfluent&&!isStructuralLed&&!isConfluent){
+        const _curTier=isTapeLed?'tape-led':isRisingConfluence?'rising':'single-signal';
+        _dialBlockReason=`Balanced mode (dial ${_dialFilter}) requires confluence or higher — ${_curTier} blocked`;
+      }
+    } else if(_dialFilter>=30){
+      // Mid-fast: any tier flag (no pure single-signal)
+      const _hasTier=isSuperConfluent||isStructuralLed||isConfluent||isTapeLed||isRisingConfluence;
+      if(!_hasTier){
+        _dialBlockReason=`Dial ${_dialFilter} requires a tier — single-signal blocked (move dial below 30 to allow)`;
+      }
+    }
+    // dial <30: no tier filter — all setups can lock if Q/CONV floors pass
+    if(_dialBlockReason){
+      return{call:'SIT_OUT',reason:_dialBlockReason,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    }
     // Gate 1: quality floor
     // V6.0.7: tape-led bypass. When tape is super-strong agreeing, q-floor is irrelevant —
     //   raw order flow is direct evidence; quality score is a lagging aggregate.
@@ -10713,6 +10871,12 @@ function TaraApp(){
   //   Refs read at render time — same data the lifecycle effect uses.
   taraCall.samples=taraCallSampleRef.current?.count||0;
   taraCall.snapshot=taraCallSnapshotRef.current||null;
+  // V7.4: Ensure _ctx exists and has q + conviction so the speed-dial UI can surface
+  //   the live blocker (e.g., "quality 22 / need 39"). Most SIT_OUT returns from the
+  //   lock callback omit _ctx, leaving the UI without a way to read these.
+  if(!taraCall._ctx)taraCall._ctx={};
+  if(taraCall._ctx.q==null)taraCall._ctx.q=qualityGate?.score||0;
+  if(taraCall._ctx.conviction==null)taraCall._ctx.conviction=Math.abs((analysis?.rawProbAbove||50)-50);
   // V5.5d: Compute needSamples for display — mirrors lifecycle (clean=1, good=2, default=3,
   //   hostile=5) with per-60s time-decay.
   (()=>{
@@ -12103,7 +12267,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              7.2.0
+              7.4.0
             </span>
           </div>
 
@@ -13558,13 +13722,118 @@ function TaraApp(){
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
 
+              {/* V7.4.0 — Speed Dial Real Function */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Speed Dial Actually Functional</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.4.0</span> — Dial Has Function Now</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;the timer decision has 0 function too. its just a gimmick and does nothing&rdquo;. They were right. The dial was only nudging two floor numbers that almost every trade passed regardless. Real fix:</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tier filter by dial position</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The dial now determines the MINIMUM tier that can lock:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Dial ≥ 80 (patient/strict):</strong> only ★ super-confluence and ◈ structural-led — historically the highest WR tiers</li>
+                  <li><strong>Dial 50&ndash;79 (balanced):</strong> also allows ★ confluence — skips ⚡ tape-led, ↗ rising, single-signal</li>
+                  <li><strong>Dial 30&ndash;49 (mid-fast):</strong> any tier flag — skips pure single-signal</li>
+                  <li><strong>Dial &lt; 30 (fast):</strong> all setups including single-signal</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">When dial position blocks the current setup, Tara sits out with a clear reason: &ldquo;<em>Patient mode (dial 85) only takes super-confluence or structural-led — tape-led blocked</em>&rdquo;. Logged to memory like any other sit-out so per-tier WR audit (V7.2) can show the impact.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Live effective gates in dial card</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">New panel in the speed dial card shows the EFFECTIVE thresholds at the current dial position, updating in real time as you slide:</p>
+                <div className="text-[11px] mb-2 px-3 py-2 rounded font-mono" style={{background:'rgba(232,233,228,0.04)',border:'1px solid rgba(232,233,228,0.08)'}}>
+                  <div className="text-[10px] uppercase tracking-wider text-[#E8E9E4]/45 font-bold mb-1">EFFECTIVE GATES</div>
+                  <div className="flex justify-between"><span className="text-[#E8E9E4]/65">Quality floor</span><span className="text-white font-bold">≥ 60</span></div>
+                  <div className="flex justify-between"><span className="text-[#E8E9E4]/65">Conviction floor</span><span className="text-white font-bold">≥ 14</span></div>
+                  <div className="text-[9px] text-[#E8E9E4]/55 border-t border-[#E8E9E4]/8 pt-1.5 mt-1.5">Allowed: <span style={{color:'rgb(110,231,183)'}}>super-confluence + structural-led only</span></div>
+                </div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Move the slider — gates change before your eyes. No need to wait for a trade to see what the dial does.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · Blocker line on Lock ETA</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">When ETA shows &ldquo;—&rdquo; (stalled or scanning, no useful estimate), a sub-line now explains the actual blocker:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">quality 22 / need 39</code> — quality below floor</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">conviction 4 / need 9</code> — too close to coin flip</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">no direction yet</code> — engine still searching</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">conviction not firm</code> — generic stalled (samples not advancing)</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">How to use this</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>If you&rsquo;re losing on tape-led trades</strong> &mdash; slide dial to 80+. Tara will sit out tape-led and only take super-confluence + structural-led trades.</li>
+                  <li><strong>If you&rsquo;re missing trades</strong> &mdash; slide dial to 30 or below. Tara will take more setups including single-signal.</li>
+                  <li><strong>If you want to see the per-tier impact</strong> &mdash; check the Win Rate by Tier panel in memory after 20-30 trades at your chosen dial position.</li>
+                  <li><strong>The dial persists across reloads</strong> &mdash; set it once, it stays.</li>
+                </ul>
+              </section>
+
+              {/* V7.3.0 — Structural Prior + Live Lean */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Engine · The Structural Blind Spot Fix</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.4.0</span> — Higher Timeframes Finally Count</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged a trade where the Score Breakdown showed &ldquo;Structural ▲ UP · 4/6 align&rdquo; with 5m and 15m both bullish, while Tara sat out leaning DOWN. Investigation: the engine was COMPUTING the multi-TF structural data and SHOWING it on the panel, but never adding it to the posterior. Five-of-six timeframes screaming UP, math weight: zero.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Structural alignment bonus</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The Trend Channel + Grand Trend readings across 1m / 5m / 15m (6 signals total) now contribute directly to <code className="text-[10px] bg-[#0E100F] px-1">totalScore</code>:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>4/6 aligned → ±8</li>
+                  <li>5/6 aligned → ±14</li>
+                  <li>6/6 aligned → ±20</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Time-damped: full effect when &gt;60% time remains (long-horizon signals matter most when there&rsquo;s still time for them to play out), tapers to 0.5× when &lt;25% remains (gap signal becomes dominant late). Logged as <code className="text-[10px] bg-[#0E100F] px-1">[STRUCT-BOOST]</code> in reasoning.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2 italic">This was the missing piece. Tara was structurally a momentum trader masquerading as a multi-TF analyst. Now the analyst part actually shows up in the math.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Live &ldquo;Would have leaned&rdquo;</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">When Tara sits out, the &ldquo;Would have leaned UP/DOWN X%&rdquo; line below the call now reads from current posterior, not the frozen value at sit-out moment. If direction has flipped since sit-out, displays:</p>
+                <div className="text-[11px] mt-1 mb-2 px-3 py-2 rounded" style={{background:'rgba(232,233,228,0.04)',border:'1px solid rgba(232,233,228,0.08)'}}>
+                  <div className="text-emerald-400/70">▲ <strong>Now leans UP 88%</strong></div>
+                  <div className="text-[10px] text-[#E8E9E4]/35 italic mt-0.5">was DOWN 79% at sit-out — market reversed</div>
+                </div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Lets you see when conditions have shifted since Tara&rsquo;s sit-out decision &mdash; the screen no longer lies about her current view.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">What changed in practice</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Tara now leans with the bigger trend</strong> instead of getting flipped by 1m chop. When 5m/15m are UP, 1m flushes don&rsquo;t turn her DOWN as easily.</li>
+                  <li><strong>Posterior reflects what you see in Score Breakdown</strong> &mdash; the &ldquo;Structural &middot; UP &middot; 4/6 align&rdquo; line is now actually an input, not just decoration.</li>
+                  <li><strong>Sit-out displays now honest</strong> &mdash; if Tara sat out leaning DOWN and market reversed, you see her current UP lean immediately.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">What this doesn&rsquo;t do</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Tara still can&rsquo;t actually predict 15 min into the future &mdash; no signal can. But she now WEIGHTS the more forward-looking signals (gap, structure, higher TFs) appropriately instead of letting 1m noise drown them out. Combined with V7.2&rsquo;s strike-position dominant override and tape-extreme guard, the full picture is closer to &ldquo;take the trend&rsquo;s side and hold through chop&rdquo; than &ldquo;chase whatever the 1m candle just did.&rdquo;</p>
+              </section>
+
+              {/* V7.2.1 — Stale State Fixes */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stale State Fixes</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.4.0</span> — Sound + Stale UI</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three quick fixes. Two were old bugs, one was a missing persistence flag.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Sound enabled now persists</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">The bell icon was silently resetting to OFF on every page reload. Now stored in <code className="text-[10px] bg-[#0E100F] px-1">localStorage.taraSoundEnabled</code>. Plus: when the page loads with sound persisted as ON, the first user click anywhere on the page bootstraps the AudioContext &mdash; otherwise sounds were firing into a browser-suspended context and dying silently.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · &ldquo;UP &mdash; EXIT WARNING&rdquo; ghost text fixed</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Bug: engine briefly confirms UP &rarr; captures stickiness ref. Engine then flips to DOWN. Display shows <strong>&ldquo;UP &mdash; EXIT WARNING&rdquo;</strong> with amber pulsing animation, while the header says <strong>&ldquo;TARA &middot; SITTING OUT&rdquo;</strong>. Pure contradiction.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Fix: engine stickiness logic now only fires when <code className="text-[10px] bg-[#0E100F] px-1">userPosition</code> is set. Without a position, Tara reflects her current view live. The stickiness ref is also auto-cleared whenever the user is out of position, so the next time you enter a trade you start fresh.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · &ldquo;Locked at X &mdash; Now Y&rdquo; phantom display fixed</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Same root cause family. The lock-price status row was showing the engine&rsquo;s INTERNAL commit price (when Tara internally decided UP/DOWN) regardless of whether the user had actually entered. Confusing because it read like &ldquo;you&rsquo;re in a trade and it&rsquo;s in profit&rdquo; even when you weren&rsquo;t. Now gated on <code className="text-[10px] bg-[#0E100F] px-1">userPosition</code>.</p>
+              </section>
+
               {/* V7.2.0 — Prediction Engine Improvements */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Prediction Engine · The &ldquo;Why Jerome Beats Tara&rdquo; Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.2.0</span> — Honest Confidence, Smarter Locks</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.4.0</span> — Honest Confidence, Smarter Locks</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">After a side-by-side analysis of a real losing trade where Jerome won and Tara lost, we found the structural problem: Tara was over-trusting tape extremes and under-weighting strike position. This release surgically fixes both, plus the timer bug, plus calibrates the confidence display.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tape-extreme guard</div>
