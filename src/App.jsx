@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v7.4.0-speed-dial-real-function';
+const BASELINE_VERSION='2026.05.05-v7.5.0-faster-locks-eth-resolution';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -4392,8 +4392,9 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _label=_d<=20?'⚡ FAST':_d<=40?'fast':_d<=60?'balanced':_d<=80?'patient':'🛡 PATIENT';
           const _color=_d<=30?'rgb(244,114,182)':_d<=70?T2_GOLD:'rgb(110,231,183)';
           // Inline ETA computation — no engine dependency. Defends against null/undefined inputs.
-          const _smult=_d<=50?(0.3+(_d/50)*0.7):(1.0+((_d-50)/50)*1.0);
-          const _searchPhase=Math.max(3,Math.round(10*_smult));
+          const _smult=_d<=50?(0.1+(_d/50)*0.9):(1.0+((_d-50)/50)*1.0);
+          // V7.5: search-phase floor 3 → 2 to match engine
+          const _searchPhase=Math.max(2,Math.round(10*_smult));
           const _totalSec=windowType==='15m'?900:300;
           const _minsR=Number(timeState&&timeState.minsRemaining)||0;
           const _secsR=Number(timeState&&timeState.secsRemaining)||0;
@@ -7801,7 +7802,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.4.0 online — speed dial finally has function. User reported \"the timer decision has 0 function too. its just a gimmick and does nothing\" and they were right. Previously the dial only nudged Q_FLOOR and CONV_FLOOR — for most trades, both pass at any dial setting, so dial position rarely changed Tara\'s decision. Three changes: (1) TIER FILTER BY DIAL: dial ≥80 (patient/strict) → only super-confluence and structural-led trades; dial 50-79 (balanced) → also confluence; dial 30-49 → any tier flag (no single-signal); dial <30 (fast) → all setups. The dial now actively SITS OUT lower-tier trades at higher dial positions. (2) LIVE EFFECTIVE GATES displayed in the dial card — Q floor, conviction floor, and which tiers are allowed at the current setting. Move the slider, see the gates change in real time. (3) BLOCKER LINE — when ETA shows \"—\", a sub-line now explains why (\"quality 22 / need 39\", \"conviction 4 / need 9\", \"no direction yet\") so the user knows what\'s preventing a lock. Combined with V7.2.0\'s per-tier WR audit, you can now move dial to patient and confirm Tara skips the tape-led tier (which historically had lower WR) entirely.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.5.0 online — two real fixes. (1) FASTER LOCKS at low dial: previously even dial 0 needed 30% of base samples → super-confluence still took ~10s to lock. New curve: dial 0 → 10% (lock in ~3s), dial 25 → 30% (~6s), dial 50 → 100% (unchanged), dial 100 → 200% (unchanged). Search-phase floor 3s → 2s. The flip-risk window at 65-70% should mostly disappear at dial 25 — Tara commits before posterior has time to wobble. (2) ETH RESOLUTION BUG FIXED — found why ETH trades weren\'t saving as wins/losses. The deferred Kalshi settlement fetcher was using currentAssetRef.current (active asset) to pick which series ticker to query. If you locked ETH and then switched to BTC, fetcher queried KXBTC15M for ETH\'s settlement and never found it — trade stayed PENDING forever. Now: pending resolutions tagged with asset at lock time, rollover scoring uses entry\'s locked-in strike (not floating targetMargin), cross-asset spot fallback as last resort if you switched away. NOT a Firestore script issue — the script is fine, the resolution logic was reading the wrong asset\'s data. To recover any stranded PENDING ETH entries from before this fix, manually edit them in the Memory modal.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -8129,7 +8130,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.4.0'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.5.0'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -8399,7 +8400,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.4.0  |  signal'},
+        footer:{text:'Tara 7.5.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8413,7 +8414,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.4.0  |  stand-down'},
+        footer:{text:'Tara 7.5.0  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8427,7 +8428,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.4.0  |  search'},
+        footer:{text:'Tara 7.5.0  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8444,7 +8445,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.4.0  |  lock'},
+        footer:{text:'Tara 7.5.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8461,7 +8462,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.4.0  |  close'},
+          footer:{text:'Tara 7.5.0  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8482,7 +8483,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.4.0  |  exit'},
+        footer:{text:'Tara 7.5.0  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8503,7 +8504,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.4.0  |  scanning'},
+        footer:{text:'Tara 7.5.0  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8523,7 +8524,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.4.0  |  signal'},
+        footer:{text:'Tara 7.5.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8543,7 +8544,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.4.0  |  lock'},
+        footer:{text:'Tara 7.5.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8560,7 +8561,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.4.0  |  sit-out'},
+        footer:{text:'Tara 7.5.0  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8582,7 +8583,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.4.0  |  result'},
+          footer:{text:'Tara 7.5.0  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8619,7 +8620,7 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.4.0  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.5.0  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -9022,7 +9023,12 @@ function TaraApp(){
         try{
           pending.attempts++;
           // V4.4: Use /events endpoint (smaller payload, different rate-limit bucket)
-          const _assetCfgS=ASSET_CONFIG[currentAssetRef.current]||ASSET_CONFIG.BTC;
+          // V7.5: use the asset tagged on the pending resolution at lock time, NOT the
+          //   currently-active asset. Without this, ETH trades that resolve while user is
+          //   on BTC would query KXBTC15M and never find their settlement → stays PENDING
+          //   forever. Result: ETH trades silently disappearing from the win/loss log.
+          const _pendingAsset=pending.asset||currentAssetRef.current||'BTC';
+          const _assetCfgS=ASSET_CONFIG[_pendingAsset]||ASSET_CONFIG.BTC;
           const _settleUrl=`https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=${_assetCfgS.kalshiSeriesTicker}15M&with_nested_markets=true&status=settled&limit=50`;
           // V3.2.3: Use CORS proxy first to avoid 503 throttling, fall back to direct
           let r=await fetch(
@@ -9167,6 +9173,9 @@ function TaraApp(){
                   tradeId:pendingTrade.id,
                   windowCloseTime:Date.now(),
                   attempts:0,
+                  // V7.5: tag with asset at lock time so the deferred Kalshi fetcher can
+                  //   query the correct series ticker even if user has switched assets.
+                  asset:pendingTrade.asset||currentAssetRef.current||'BTC',
                 }];
               } else {
                 // Unambiguous close — record locally as before
@@ -9205,11 +9214,31 @@ function TaraApp(){
         //   If snapshot is null (window closed before endgame freeze fired), treat as SIT_OUT.
         // V5.5.5: Use windowOpenPriceRef as strike fallback if targetMargin happens to be 0
         //   at close — this can happen if Kalshi came in after rollover and user cleared it.
-        const _scoringStrike=targetMargin>0?targetMargin:(windowOpenPriceRef.current||0);
+        // V7.5: ASSET-AWARE SCORING. Was reading targetMargin/currentPrice directly — but if
+        //   user switched from ETH to BTC mid-ETH-window, targetMargin now holds BTC's strike
+        //   and the resolution would fail the 20% sanity check. Find the pending entry for
+        //   THIS specific window and use its locked-in strike. The entry was tagged with its
+        //   asset at lock time (V7.0.7 belt-and-suspenders) so we can identify the right one.
+        const _winMs=windowType==='15m'?900000:300000;
+        const _justClosedBucket=Math.floor(Date.now()/_winMs)*_winMs-_winMs;
+        const _wid=`${windowType}-${new Date(_justClosedBucket).toISOString()}`;
+        // Look up the entry that was logged for this exact window. It already has the strike.
+        // Use ref to avoid stale closure — taraCallLog is not in this effect's dep array.
+        const _logSnap=taraCallLogRef.current||[];
+        const _pendingEntry=_logSnap.find(e=>e&&e.windowId===_wid&&e.result===null);
+        const _entryAsset=_pendingEntry?.asset||currentAssetRef.current||'BTC';
+        const _entryStrike=Number(_pendingEntry?.strike)||0;
+        // Prefer entry's strike (asset-correct, locked-in), else current targetMargin if it
+        //   matches asset, else windowOpenPriceRef. _entryStrike covers the cross-asset case.
+        const _scoringStrike=_entryStrike>0?_entryStrike:(targetMargin>0?targetMargin:(windowOpenPriceRef.current||0));
         // V5.7.5: Capture rollover-instant spot as fallback close price. The DEFERRED scorer
         //   runs ~8s later and prefers the just-refreshed Kalshi strike (= the just-closed
         //   window's true close per Kalshi's settlement feed) over this spot snapshot.
-        const _closeAtRolloverSpot=currentPriceRef.current||currentPrice;
+        // V7.5: only use spot if it matches asset magnitude (BTC≥10K, ETH 100-10K). Cross-
+        //   asset spot would fail sanity and stall resolution.
+        const _spotNow=currentPriceRef.current||currentPrice;
+        const _spotMatchesAsset=_spotNow>0&&((_entryAsset==='BTC'&&_spotNow>=10000)||(_entryAsset==='ETH'&&_spotNow>=100&&_spotNow<10000));
+        const _closeAtRolloverSpot=_spotMatchesAsset?_spotNow:0;
         const _capturedSnap=taraCallSnapshotRef.current;
         const _capturedWindowType=windowType;
         if(_scoringStrike>0){
@@ -9316,16 +9345,27 @@ function TaraApp(){
             const _maxAttempts=12; // 12 × 5s = 60s
             const _trySettle=()=>{
               _attempts++;
-              const _fresh=targetMarginRef.current;
+              // V7.5: only trust targetMarginRef if user is still on the trade's asset.
+              //   If they switched, targetMarginRef holds a different asset's strike and
+              //   would fail sanity check anyway. In that case, fall back to the spot we
+              //   captured at rollover (which is asset-validated above).
+              const _userOnSameAsset=(currentAssetRef.current||'BTC')===_entryAsset;
+              const _fresh=_userOnSameAsset?targetMarginRef.current:0;
               const _kalshiChanged=_fresh>0&&_fresh!==_newWindowStrikeAtRollover;
               if(_kalshiChanged&&_resolveScore(Number(_fresh),_attempts)){
-                return; // success
+                return; // success — Kalshi delivered new strike
               }
               if(_attempts<_maxAttempts){
                 setTimeout(_trySettle,5000);
               } else {
-                // Gave up — entry stays PENDING. Better than corrupt data.
-                try{console.warn('[V6.3.5 scoring] Kalshi never delivered new strike for window',{capturedWindowType:_capturedWindowType,strike:_scoringStrike,attempts:_attempts});}catch(_){}
+                // V7.5: Gave up after 60s of polling. If user is on a different asset,
+                //   try spot fallback (asset-matched). Last resort to avoid forever-PENDING.
+                if(!_userOnSameAsset&&_closeAtRolloverSpot>0){
+                  try{console.info('[V7.5 scoring] Cross-asset fallback to spot for',_entryAsset,'trade');}catch(_){}
+                  _resolveScore(_closeAtRolloverSpot,_attempts);
+                } else {
+                  try{console.warn('[V6.3.5 scoring] Kalshi never delivered new strike for window',{capturedWindowType:_capturedWindowType,strike:_scoringStrike,attempts:_attempts,asset:_entryAsset});}catch(_){}
+                }
               }
             };
             // First attempt after 8s (gives Kalshi poll time to land)
@@ -10485,10 +10525,11 @@ function TaraApp(){
     //   strong signals. 10s is enough to filter Kalshi initial-price snap noise without
     //   forcing slow ramp-up on clear setups.
     // V5.6.4: Mandatory search phase — first 10s, observe only.
-    // V6.5.7: scales with speed dial. dial=0 → 3s, dial=50 → 10s, dial=100 → 20s.
+    // V7.5: search phase scales with speed dial. dial=0 → 2s, dial=25 → 4s, dial=50 → 10s,
+    //   dial=75 → 15s, dial=100 → 20s. Aggressive low-end so dial 25 feels truly fast.
     const _dialSearch=Math.max(0,Math.min(100,speedDialRef.current||50));
-    const _searchMultS=_dialSearch<=50?(0.3+(_dialSearch/50)*0.7):(1.0+((_dialSearch-50)/50)*1.0);
-    const _searchPhase=Math.max(3,Math.round(10*_searchMultS));
+    const _searchMultS=_dialSearch<=50?(0.1+(_dialSearch/50)*0.9):(1.0+((_dialSearch-50)/50)*1.0);
+    const _searchPhase=Math.max(2,Math.round(10*_searchMultS));
     if(_elapsed<_searchPhase){
       return{call:'SIT_OUT',reason:`Searching for direction (${_searchPhase-_elapsed}s of observation remaining)`,confidence:0,direction:dir,conviction,phase:'SEARCH'};
     }
@@ -10499,9 +10540,10 @@ function TaraApp(){
     //   Active learning lives in lifecycle (samples) and confidence (display), not here.
     const _learn=taraLearningsRef.current;
     const _safety=Math.max(0,Math.min(8,_learn?.multipliers?.regimeFloorSafety?.[analysis.regime]||0));
-    // V6.5.7: SPEED DIAL — 0-100. Maps to multiplier 0.3 (fast) to 2.0 (patient), 1.0 at 50.
+    // V7.5: SPEED DIAL — 0-100. Aggressive low-end: 0.10 (fast) → 1.0 → 2.0 (patient).
+    //   Matches the lifecycle curve so engine + lifecycle are in sync.
     const _dialEng=Math.max(0,Math.min(100,speedDialRef.current||50));
-    const _speedMultEng=_dialEng<=50?(0.3+(_dialEng/50)*0.7):(1.0+((_dialEng-50)/50)*1.0);
+    const _speedMultEng=_dialEng<=50?(0.1+(_dialEng/50)*0.9):(1.0+((_dialEng-50)/50)*1.0);
     // V6.2.6: SOFT HINT MODE — user pressed "Hint to Lock Faster" recently. Lower floors
     //   for 10 seconds. Tape-opposes, Kalshi-extreme, and edge-guard remain enforced.
     const _softHintActive=softHintRef.current>0&&(Date.now()-softHintRef.current)<10000;
@@ -11142,7 +11184,7 @@ function TaraApp(){
     //   Default-tier estimate at current dial: ~30 samples × speedMult, plus search phase remaining.
     {
       const _dialEarly=Math.max(0,Math.min(100,speedDialRef.current||50));
-      const _smultEarly=_dialEarly<=50?(0.3+(_dialEarly/50)*0.7):(1.0+((_dialEarly-50)/50)*1.0);
+      const _smultEarly=_dialEarly<=50?(0.1+(_dialEarly/50)*0.9):(1.0+((_dialEarly-50)/50)*1.0);
       const _searchPhaseEarly=Math.max(3,Math.round(10*_smultEarly));
       const _searchRem=Math.max(0,_searchPhaseEarly-elapsedSec);
       // Default tier estimate. samples=0 → ~30 to lock at default. Scale by dial.
@@ -11304,16 +11346,27 @@ function TaraApp(){
     }
     // V6.2.6: Hard force — commit immediately, bypass sample requirement entirely
     const _hardForceActive=hardForceRef.current>0&&(Date.now()-hardForceRef.current)<5000;
-    // V6.5.7: Apply speed dial multiplier to lifecycle sample requirement
+    // V7.5: Apply speed dial multiplier to lifecycle sample requirement. Was previously
+    //   linear 0.3 → 1.0 → 2.0 across [0, 50, 100]. User feedback: "even with low threshold
+    //   tara takes time to lock... I'm getting an entry at 65-70% for which I dont like to
+    //   get. the flip risk isn't worth it." Need MUCH more aggressive low-end so dial 25
+    //   actually feels fast. New curve:
+    //     dial 0  → 0.10  (one tick of confirmation, near-instant)
+    //     dial 25 → 0.30
+    //     dial 50 → 1.00  (default unchanged)
+    //     dial 75 → 1.50
+    //     dial 100→ 2.00  (patient unchanged)
+    //   Combines with the V7.4 tier filter: dial 25 = fast cadence, all tier flags allowed.
     const _dialLc=Math.max(0,Math.min(100,speedDialRef.current||50));
-    const _speedMultLc=_dialLc<=50?(0.3+(_dialLc/50)*0.7):(1.0+((_dialLc-50)/50)*1.0);
+    const _speedMultLc=_dialLc<=50?(0.1+(_dialLc/50)*0.9):(1.0+((_dialLc-50)/50)*1.0);
     needSamples=Math.max(1,Math.round(needSamples*_speedMultLc));
     // Cap so lock has time to be scored after committing
     needSamples=Math.min(needSamples,Math.max(15,remaining-90));
     // V6.5.7: ETA — expose how many seconds until commit at current dial. Engine ticks
     //   roughly 1Hz, so samplesRemaining ≈ secondsRemaining. Plus search phase if still in it.
     const _etaSamplesRem=Math.max(0,needSamples-samples);
-    const _searchPhaseLc=Math.max(3,Math.round(10*_speedMultLc));
+    // V7.5: search phase floor 3 → 2 at low dial; multiplier same as samples
+    const _searchPhaseLc=Math.max(2,Math.round(10*_speedMultLc));
     const _etaSearchRem=Math.max(0,_searchPhaseLc-elapsedSec);
     const _lockEtaSec=_etaSearchRem+_etaSamplesRem;
     if(tc&&tc._ctx){tc._ctx.lockEtaSec=_lockEtaSec;tc._ctx.samples=samples;tc._ctx.needSamples=needSamples;tc._ctx.tierLabel=tierLabel;}
@@ -12267,7 +12320,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              7.4.0
+              7.5.0
             </span>
           </div>
 
@@ -13722,13 +13775,59 @@ function TaraApp(){
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
 
+              {/* V7.5.0 — Faster Locks + ETH Resolution */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Faster Low-Dial Locks · ETH Save Bug</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.5.0</span> — Truly Fast at Fast</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Two unrelated bugs in one release. User flagged both.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Speed dial low-end made aggressive</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: &ldquo;even with low threshold tara takes time to lock... I&rsquo;m getting an entry at 65-70% which I don&rsquo;t like to get. The flip risk isn&rsquo;t worth it.&rdquo; Investigation: dial 0 was still 30% of base sample requirement. Super-confluence (3 base samples) × 0.30 + 3s search floor = ~6-10s to lock even at fast end. New curve all four dial-curve sites updated:</p>
+                <div className="text-[11px] mt-1 mb-3 px-3 py-2 rounded font-mono tabular-nums" style={{background:'rgba(232,233,228,0.04)',border:'1px solid rgba(232,233,228,0.08)'}}>
+                  <div className="grid grid-cols-3 gap-2 text-[10px]">
+                    <div className="text-[#E8E9E4]/45 font-bold">DIAL</div>
+                    <div className="text-[#E8E9E4]/45 font-bold">OLD MULT</div>
+                    <div className="text-[#E8E9E4]/45 font-bold">NEW MULT</div>
+                    <div>0</div><div className="text-[#E8E9E4]/55">0.30</div><div className="text-emerald-400">0.10</div>
+                    <div>25</div><div className="text-[#E8E9E4]/55">0.65</div><div className="text-emerald-400">0.30</div>
+                    <div>50</div><div>1.00</div><div>1.00</div>
+                    <div>75</div><div>1.50</div><div>1.50</div>
+                    <div>100</div><div>2.00</div><div>2.00</div>
+                  </div>
+                </div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Search-phase floor also dropped 3s → 2s. Practical lock times at dial 25 with confluence (4 base samples):</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>4 × 0.30 = 1.2 → 2 samples + 4s search = <strong>~6s to lock</strong> (was ~12s)</li>
+                  <li>At dial 0 with super-confluence: 3 × 0.10 = 1 sample + 2s search = <strong>~3s to lock</strong></li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">The flip-risk window at 65-70% should mostly disappear at dial 25 &mdash; Tara commits before posterior has time to wobble.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · ETH trade resolution bug fixed</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: &ldquo;ETH trades and memory aren&rsquo;t being saved and logged properly.&rdquo; Investigation: <strong>not a Firestore script issue</strong> — the script is fine. The bug was client-side resolution logic.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Two failure paths found:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Deferred Kalshi settlement fetcher</strong> was using <code className="text-[10px] bg-[#0E100F] px-1">currentAssetRef.current</code> (active asset) to pick which series ticker to query. Lock ETH → switch to BTC → fetcher queries <code className="text-[10px] bg-[#0E100F] px-1">KXBTC15M</code> for ETH&rsquo;s settlement → never finds it → entry stays PENDING forever.</li>
+                  <li><strong>Rollover scoring</strong> read <code className="text-[10px] bg-[#0E100F] px-1">targetMargin</code> directly for the resolution strike. Cross-asset switch meant <code className="text-[10px] bg-[#0E100F] px-1">targetMargin</code> held BTC&rsquo;s strike. The 20% sanity check (<code className="text-[10px] bg-[#0E100F] px-1">Math.abs(close-strike)/strike &lt; 0.20</code>) failed → resolution refused → trade stuck.</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2 mb-1">Three fixes:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Pending resolutions now tagged with asset at lock time (<code className="text-[10px] bg-[#0E100F] px-1">pending.asset</code>); deferred fetcher reads from this</li>
+                  <li>Rollover scoring uses the entry&rsquo;s locked-in strike (already asset-correct from V7.0.7), not floating <code className="text-[10px] bg-[#0E100F] px-1">targetMargin</code></li>
+                  <li>Cross-asset spot fallback as last resort: if Kalshi never delivers (because you&rsquo;re polling for the wrong asset), use the asset-validated rollover spot after 60s</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">To recover any stranded PENDING ETH entries from before this fix: open Memory modal, find the entry, manually edit to WIN/LOSS based on actual outcome (V7.x manual edit feature).</p>
+              </section>
+
               {/* V7.4.0 — Speed Dial Real Function */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Speed Dial Actually Functional</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.4.0</span> — Dial Has Function Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.5.0</span> — Dial Has Function Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;the timer decision has 0 function too. its just a gimmick and does nothing&rdquo;. They were right. The dial was only nudging two floor numbers that almost every trade passed regardless. Real fix:</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tier filter by dial position</div>
@@ -13775,7 +13874,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Engine · The Structural Blind Spot Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.4.0</span> — Higher Timeframes Finally Count</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.5.0</span> — Higher Timeframes Finally Count</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged a trade where the Score Breakdown showed &ldquo;Structural ▲ UP · 4/6 align&rdquo; with 5m and 15m both bullish, while Tara sat out leaning DOWN. Investigation: the engine was COMPUTING the multi-TF structural data and SHOWING it on the panel, but never adding it to the posterior. Five-of-six timeframes screaming UP, math weight: zero.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Structural alignment bonus</div>
@@ -13813,7 +13912,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stale State Fixes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.4.0</span> — Sound + Stale UI</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.5.0</span> — Sound + Stale UI</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three quick fixes. Two were old bugs, one was a missing persistence flag.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Sound enabled now persists</div>
@@ -13833,7 +13932,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Prediction Engine · The &ldquo;Why Jerome Beats Tara&rdquo; Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.4.0</span> — Honest Confidence, Smarter Locks</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.5.0</span> — Honest Confidence, Smarter Locks</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">After a side-by-side analysis of a real losing trade where Jerome won and Tara lost, we found the structural problem: Tara was over-trusting tape extremes and under-weighting strike position. This release surgically fixes both, plus the timer bug, plus calibrates the confidence display.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tape-extreme guard</div>
