@@ -245,7 +245,30 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.04-v6.5.7-inversion-release-eta-dial';
+const BASELINE_VERSION='2026.05.04-v7.0-multi-asset-per-asset-discord';
+
+// V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
+//   through V6.5.7. This table parameterizes everything that changes per asset:
+//   - kalshiPrefix: market ticker prefix (e.g., 'KXBTC' → KXBTC-26MAY04-80100)
+//   - kalshiSeriesTicker: events endpoint series_ticker filter
+//   - cb: Coinbase product_id (REST + WebSocket)
+//   - bybit: Bybit linear perpetual symbol (WebSocket)
+//   - binance: Binance perp symbol (REST + WebSocket)
+//   - whaleFloor: USD threshold for "whale print" alerts. Per-asset because BTC's
+//     $100K floor would never fire on DOGE.
+//   - priceDecimals: decimals for $ display. BTC/ETH ~2, SOL ~2, DOGE ~5
+//   - tickStep: typical price tick size (for spread / depth charts)
+//   - label: short user-facing label
+//   - icon: emoji/glyph for selector
+//   - color: brand accent for UI
+const ASSET_CONFIG={
+  BTC:{kalshiPrefix:'KXBTC',kalshiSeriesTicker:'KXBTC',cb:'BTC-USD',bybit:'BTCUSDT',binance:'BTCUSDT',whaleFloor:100000,priceDecimals:2,tickStep:1,label:'BTC',icon:'₿',color:'#F7931A'},
+  ETH:{kalshiPrefix:'KXETH',kalshiSeriesTicker:'KXETH',cb:'ETH-USD',bybit:'ETHUSDT',binance:'ETHUSDT',whaleFloor:50000,priceDecimals:2,tickStep:0.5,label:'ETH',icon:'Ξ',color:'#627EEA'},
+  SOL:{kalshiPrefix:'KXSOL',kalshiSeriesTicker:'KXSOL',cb:'SOL-USD',bybit:'SOLUSDT',binance:'SOLUSDT',whaleFloor:25000,priceDecimals:3,tickStep:0.01,label:'SOL',icon:'◎',color:'#14F195'},
+  DOGE:{kalshiPrefix:'KXDOGE',kalshiSeriesTicker:'KXDOGE',cb:'DOGE-USD',bybit:'DOGEUSDT',binance:'DOGEUSDT',whaleFloor:10000,priceDecimals:5,tickStep:0.0001,label:'DOGE',icon:'Ð',color:'#C2A633'},
+};
+const ASSET_KEYS=Object.keys(ASSET_CONFIG);
+const ASSET_DEFAULT='BTC';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -961,7 +984,7 @@ const getMacroEventState=(now=new Date())=>{
 // ═══════════════════════════════════════
 const useVelocity=(tickH,price,target)=>{const ref=useRef({v1s:0,v5s:0,v15s:0,v30s:0,accel:0,jerk:0,peakPnL:0,troughPnL:0,pnlSlope:0});const pnlH=useRef([]);useEffect(()=>{const iv=setInterval(()=>{if(!price||!target)return;const now=Date.now(),ticks=tickH.current||[];const ga=(ms)=>{const r=ticks.filter(t=>Math.abs((now-t.time)-ms)<2000);return r.length>0?r.reduce((a,b)=>a+b.p,0)/r.length:null;};const p1=ga(1000),p5=ga(5000),p15=ga(15000),p30=ga(30000);const v1s=p1?(price-p1):0,v5s=p5?(price-p5)/5:0,v15s=p15?(price-p15)/15:0,v30s=p30?(price-p30)/30:0;const cpnl=target>0?((price-target)/target)*10000:0;pnlH.current.push({pnl:cpnl,time:now});pnlH.current=pnlH.current.filter(p=>now-p.time<120000);const peakPnL=Math.max(...pnlH.current.map(p=>p.pnl),cpnl);const troughPnL=Math.min(...pnlH.current.map(p=>p.pnl),cpnl);const recent=pnlH.current.filter(p=>now-p.time<10000);const pnlSlope=recent.length>=3?recent[recent.length-1].pnl-recent[0].pnl:0;ref.current={v1s,v5s,v15s,v30s,accel:v5s-v15s,jerk:v1s-v5s,peakPnL,troughPnL,pnlSlope};},500);return()=>clearInterval(iv);},[price,target]);return ref;};
 
-const useGlobalTape=()=>{
+const useGlobalTape=(asset)=>{
   const tapeRef=useRef({coinbase:{buys:0,sells:0},binanceFutures:{buys:0,sells:0},bybit:{buys:0,sells:0},globalBuys:0,globalSells:0,globalImbalance:1,cbFlow:0,bnFlow:0,byFlow:0,divergence:0,whaleAlerts:[],binancePrice:0,bybitPrice:0});
   const ticksRef=useRef([]);
   const streakRef=useRef({dir:null,count:0,startTime:Date.now(),totalUSD:0,trades:[]}); // consecutive whale prints
@@ -1012,7 +1035,10 @@ const useGlobalTape=()=>{
     };
 
     try{
-      wsBN=new WebSocket('wss://fstream.binance.com/ws/btcusdt@aggTrade');
+      const _cfg=ASSET_CONFIG[asset]||ASSET_CONFIG.BTC;
+      const _bnSym=String(_cfg.binance||'BTCUSDT').toLowerCase();
+      const _whaleFloor=Number(_cfg.whaleFloor)||100000;
+      wsBN=new WebSocket(`wss://fstream.binance.com/ws/${_bnSym}@aggTrade`);
       wsBN.onopen=()=>{feedCount++;};
       wsBN.onmessage=(e)=>{
         try{
@@ -1020,7 +1046,7 @@ const useGlobalTape=()=>{
           const price=parseFloat(d.p),qty=parseFloat(d.q),usd=price*qty,isBuy=!d.m,now=Date.now();
           ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'bn',time:now});
           tapeRef.current.binancePrice=price;
-          if(usd>100000){
+          if(usd>_whaleFloor){
             const alert={src:'Binance',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};
             tapeRef.current.whaleAlerts.push(alert);
             tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);
@@ -1032,17 +1058,21 @@ const useGlobalTape=()=>{
     }catch(e){}
 
     try{
+      const _cfg2=ASSET_CONFIG[asset]||ASSET_CONFIG.BTC;
+      const _bySym=_cfg2.bybit||'BTCUSDT';
+      const _whaleFloor2=Number(_cfg2.whaleFloor)||100000;
+      const _topic=`publicTrade.${_bySym}`;
       wsBY=new WebSocket('wss://stream.bybit.com/v5/public/linear');
-      wsBY.onopen=()=>{feedCount++;wsBY.send(JSON.stringify({op:'subscribe',args:['publicTrade.BTCUSDT']}));};
+      wsBY.onopen=()=>{feedCount++;wsBY.send(JSON.stringify({op:'subscribe',args:[_topic]}));};
       wsBY.onmessage=(e)=>{
         try{
           const msg=JSON.parse(e.data);
-          if(msg.topic==='publicTrade.BTCUSDT'&&msg.data){
+          if(msg.topic===_topic&&msg.data){
             msg.data.forEach(trade=>{
               const price=parseFloat(trade.p),qty=parseFloat(trade.v),usd=price*qty,isBuy=trade.S==='Buy',now=Date.now();
               ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'by',time:now});
               tapeRef.current.bybitPrice=price;
-              if(usd>100000){
+              if(usd>_whaleFloor2){
                 const alert={src:'Bybit',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};
                 tapeRef.current.whaleAlerts.push(alert);
                 tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);
@@ -1150,7 +1180,7 @@ const useGlobalTape=()=>{
       if(wsBN?.readyState===1)wsBN.close();
       if(wsBY?.readyState===1)wsBY.close();
     };
-  },[]);
+  },[asset]);
 
   return{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal,tapeWindows};
 };
@@ -1394,15 +1424,18 @@ const computeVolumeProfile=(history)=>{
 // This hook only fetches the depth endpoint, which is the time-critical one.
 // V134: Fetch candles at 1m, 3m, 5m, 15m for HPotter FGT analysis
 // Returns { c1m: [...], c3m: [...], c5m: [...], c15m: [...] }
-const useMultiTFCandles=()=>{
+const useMultiTFCandles=(asset)=>{
   const[tfCandles,setTfCandles]=useState({c1m:[],c3m:[],c5m:[],c15m:[]});
   useEffect(()=>{
     if(typeof window==='undefined')return;
     let mounted=true;
+    const _cfg=ASSET_CONFIG[asset]||ASSET_CONFIG.BTC;
+    const _cbSym=_cfg.cb||'BTC-USD';
+    const _bnSym=_cfg.binance||'BTCUSDT';
     const fetchInterval=async(label,gran)=>{
       try{
         // Coinbase first (more permissive CORS)
-        const r=await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`,{cache:'no-store'});
+        const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/candles?granularity=${gran}`,{cache:'no-store'});
         if(!r.ok)throw new Error('CB '+r.status);
         const d=await r.json();
         if(!Array.isArray(d))throw new Error('bad shape');
@@ -1412,7 +1445,7 @@ const useMultiTFCandles=()=>{
         try{
           const ivMap={60:'1m',180:'3m',300:'5m',900:'15m'};
           const iv=ivMap[gran]||'1m';
-          const r2=await fetch(`https://api.binance.com/api/v3/uiKlines?symbol=BTCUSDT&interval=${iv}&limit=300`);
+          const r2=await fetch(`https://api.binance.com/api/v3/uiKlines?symbol=${_bnSym}&interval=${iv}&limit=300`);
           const d2=await r2.json();
           if(!Array.isArray(d2))throw new Error('binance bad');
           return d2.map(d=>({time:d[0]/1000,o:parseFloat(d[1]),h:parseFloat(d[2]),l:parseFloat(d[3]),c:parseFloat(d[4]),v:parseFloat(d[5])})).reverse();
@@ -1429,9 +1462,9 @@ const useMultiTFCandles=()=>{
       if(mounted)setTfCandles({c1m,c3m,c5m,c15m});
     };
     fetchAll();
-    const iv=setInterval(fetchAll,30000); // refresh every 30s
+    const iv=setInterval(fetchAll,30000);
     return()=>{mounted=false;clearInterval(iv);};
-  },[]);
+  },[asset]);
   return tfCandles;
 };
 
@@ -3182,7 +3215,7 @@ function PredictionContent(props){
     return(
       <div className="flex-1 flex flex-col items-center justify-center gap-2">
         <div className={'text-xs uppercase tracking-widest text-indigo-400/70 font-bold animate-pulse'}>Enter strike price</div>
-        <div className="text-2xl font-serif text-white">${targetMargin.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+        <div className="text-2xl font-serif text-white">${(()=>{const _d=targetMargin>=1000?0:targetMargin>=10?2:targetMargin>=1?3:5;return targetMargin.toLocaleString(undefined,{minimumFractionDigits:_d,maximumFractionDigits:_d});})()}</div>
         <div className={'text-xs text-[#E8E9E4]/30'}>Press OK or Enter to confirm · Tara will scan after</div>
       </div>
     );
@@ -4740,7 +4773,13 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry}){
       return`${_f(start)}–${_f(end)}`;
     }catch(e){return null;}
   };
-  const _fmtPrice=(p)=>p?'$'+Math.round(p).toLocaleString():null;
+  const _fmtPrice=(p)=>{
+    if(p==null||!Number.isFinite(Number(p)))return null;
+    const _n=Number(p);
+    // Auto-decimals by magnitude: large = no decimals, mid = 2dp, small = up to 5dp
+    const _decimals=_n>=1000?0:_n>=10?2:_n>=1?3:5;
+    return'$'+_n.toLocaleString(undefined,{minimumFractionDigits:_decimals,maximumFractionDigits:_decimals});
+  };
   return React.createElement('div',{
     className:'fixed inset-0 z-50 bg-[#0E100F]/95 backdrop-blur-md overflow-y-auto',
     onClick:(e)=>{if(e.target===e.currentTarget)onClose();},
@@ -6701,7 +6740,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>6.5.7</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>7.0</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -6809,7 +6848,15 @@ function TaraApp(){
   const[showWhaleAlerts,setShowWhaleAlerts]=useState(true);
   const[showRugPullAlerts,setShowRugPullAlerts]=useState(true);
   const[showSettings,setShowSettings]=useState(false);
-  const[discordWebhook,setDiscordWebhook]=useState('');
+  // V7.0: Per-asset Discord webhooks. Each asset can broadcast to its own channel.
+  //   Empty webhook = no broadcast for that asset (silently skipped).
+  //   Migration: V6.5.8's single `taraV110Hook` is loaded into BTC's slot on first run.
+  const[discordWebhooks,setDiscordWebhooks]=useState({BTC:'',ETH:'',SOL:'',DOGE:''});
+  // Legacy alias kept so existing UI bindings work — reads BTC's webhook.
+  const discordWebhook=discordWebhooks.BTC||'';
+  const setDiscordWebhook=(v)=>setDiscordWebhooks(prev=>({...prev,BTC:v}));
+  const discordWebhooksRef=useRef(discordWebhooks);
+  discordWebhooksRef.current=discordWebhooks;
   const[discordUsername,setDiscordUsername]=useState('Tara Terminal V110');
   const[discordAvatar,setDiscordAvatar]=useState('');
   const[windowRecap,setWindowRecap]=useState(null); // {won,dir,closePrice,strike,gapBps,regime} — clears after 6s
@@ -6844,6 +6891,16 @@ function TaraApp(){
   const[kalshiDebug,setKalshiDebug]=useState({ok:null,reason:'not yet polled',totalMarkets:0,matchingClose:0,bestStrike:null,sampleFields:[]});
   // streakData moved below tradeLog declaration
   const[useLocalTime,setUseLocalTime]=useState(true);
+  // V6.5.8: ASSET — which crypto Tara is monitoring. Default BTC. Persists.
+  //   Switching asset resets price history, locks, window data, and re-subscribes
+  //   to the new asset's exchange feeds.
+  const[currentAsset,setCurrentAssetState]=useState(()=>{
+    try{const v=localStorage.getItem('tara_current_asset')||ASSET_DEFAULT;return ASSET_KEYS.includes(v)?v:ASSET_DEFAULT;}catch(e){return ASSET_DEFAULT;}
+  });
+  const assetCfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG[ASSET_DEFAULT];
+  const currentAssetRef=useRef(currentAsset);
+  currentAssetRef.current=currentAsset;
+  useEffect(()=>{try{localStorage.setItem('tara_current_asset',currentAsset);}catch(e){}},[currentAsset]);
   // V6.5.7: SPEED DIAL — 0-100, 50 default. Lower = faster lock (fewer samples,
   //   shorter search phase, lower thresholds). Higher = more patient. Persists.
   const[speedDial,setSpeedDial]=useState(()=>{
@@ -7431,7 +7488,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 6.5.7 online — Real fixes for the held-through-flip bug. (1) When my early lean strongly opposes current tape (>=70% the other way) and FGT no longer agrees, I now release the claim and re-form. The old behavior locked the original direction even after conditions inverted, which is what produced the wrong DOWN call you saw. (2) LOCK Discord broadcast now uses snapshot values from the moment of lock — no more contradictory "DOWN LOCKED · Posterior 89% UP" messages. (3) SIGNAL broadcast hard-blocked after LOCK in the same window. No more DOWN LOCKED + UP SIGNAL pairs. (4) SPEED DIAL is back, with live ETA. The Tara Call panel shows expected lock time at current dial setting. Slide left for faster, right for patient. Hard force is now a true instant lock — pressed = commit NOW with any directional lean. (5) Session status modal no longer auto-opens on refresh — the 📋 button glows green for attention. (6) Flow Intelligence panel auto-closes after 25s flat. (7) Scan broadcasts to Discord stay disabled.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.0 online — major version. Multi-asset support: header now has BTC · ETH · SOL · DOGE buttons. Click any to switch and Tara fully reconfigures (price feeds, Kalshi market, whale thresholds, chart, decimals). Per-asset whale floors: BTC $100K+, ETH $50K+, SOL $25K+, DOGE $10K+. Strike formatting auto-adjusts decimals up to 5dp for DOGE. NEW IN 7.0: per-asset Discord webhooks. Settings → Discord Integration now shows four input fields, one per asset. Set them separately to keep channels clean (BTC alerts go to #btc-trade-chat, ETH to #eth-trade-chat, etc). Empty slots fall back to BTC\'s webhook so old setups keep working. Discord embeds tagged with asset name and icon. Engine completely unchanged — all V6.5.7 fixes intact (inversion release, lock-broadcast snapshot, no signal after lock, ETA dial). Per-asset scorecards and learnings still pooled — coming in V7.1.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7646,8 +7703,8 @@ function TaraApp(){
   const velocityRef=useVelocity(tickHistoryRef,currentPrice,targetMargin);
   const bloomberg=useBloomberg();
   const depthFlash=useDepthFlash(); // V134: 2.5s order book polling
-  const tfCandles=useMultiTFCandles(); // V134: HPotter FGT multi-timeframe data
-  const{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal,tapeWindows}=useGlobalTape();
+  const tfCandles=useMultiTFCandles(currentAsset); // V134: HPotter FGT multi-timeframe data
+  const{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal,tapeWindows}=useGlobalTape(currentAsset);
   const marketSessions=useMemo(()=>getMarketSessions(),[timeState.currentHour]);
   const[klines,setKlines]=useState([]);
 
@@ -7716,17 +7773,38 @@ function TaraApp(){
         chosen=BASELINE_RECORD;
         try{localStorage.setItem('taraV110Score',JSON.stringify(BASELINE_RECORD));}catch(e){}
       }
-      if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));const w=localStorage.getItem('taraV110Hook');if(w)setDiscordWebhook(w);const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
+      if(chosen)setScorecards(chosen);const m=localStorage.getItem('taraV110Mem');if(m)setRegimeMemory(JSON.parse(m));
+      // V7.0: Per-asset webhooks. Try new format first, fall back to legacy single-webhook.
+      try{
+        const _newHooks=localStorage.getItem('taraV70Hooks');
+        if(_newHooks){
+          const _parsed=JSON.parse(_newHooks);
+          if(_parsed&&typeof _parsed==='object')setDiscordWebhooks({BTC:_parsed.BTC||'',ETH:_parsed.ETH||'',SOL:_parsed.SOL||'',DOGE:_parsed.DOGE||''});
+        } else {
+          // Legacy migration: copy single webhook into BTC slot
+          const _old=localStorage.getItem('taraV110Hook');
+          if(_old)setDiscordWebhooks({BTC:_old,ETH:'',SOL:'',DOGE:''});
+        }
+      }catch(e){}
+      const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 6.5.7'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.0'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
   // V5.5b: Personal scorecard (taraV110Score) and regime memory (taraV110Mem) no longer
   //   persist — they're derived from user trades, which user wants excluded from saved
   //   stats/training. Discord settings (preference, not trade data) still persist.
-  useEffect(()=>{if(!isMounted)return;try{localStorage.setItem('taraV110Hook',discordWebhook);localStorage.setItem('taraV110TZ',String(useLocalTime));localStorage.setItem('taraV110DU',discordUsername);localStorage.setItem('taraV110DA',discordAvatar);}catch(e){};},[discordWebhook,useLocalTime,discordUsername,discordAvatar,isMounted]);
+  useEffect(()=>{if(!isMounted)return;try{
+    // V7.0: per-asset webhooks
+    localStorage.setItem('taraV70Hooks',JSON.stringify(discordWebhooks));
+    // Legacy back-compat: keep taraV110Hook synced to BTC's webhook
+    localStorage.setItem('taraV110Hook',discordWebhooks.BTC||'');
+    localStorage.setItem('taraV110TZ',String(useLocalTime));
+    localStorage.setItem('taraV110DU',discordUsername);
+    localStorage.setItem('taraV110DA',discordAvatar);
+  }catch(e){};},[discordWebhooks,useLocalTime,discordUsername,discordAvatar,isMounted]);
 
   useEffect(()=>{if(!currentPrice)return;const iv=setInterval(()=>{priceMemoryRef.current.push({p:currentPrice,time:Date.now()});priceMemoryRef.current=priceMemoryRef.current.filter(t=>Date.now()-t.time<600000);},2000);return()=>clearInterval(iv);},[currentPrice]);
   // V6.4: Regime history sampler. Records {atrBps, regime, rangeBps, timestamp} every 5s.
@@ -7764,15 +7842,18 @@ function TaraApp(){
 
   // Kline fetch with dual fallback
   useEffect(()=>{
-    const fetch_=async()=>{try{const cbMap={'1m':60,'3m':60,'5m':300,'15m':900,'30m':900,'1h':3600};const gran=cbMap[chartRes]||60;const r=await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`);if(!r.ok)throw new Error('CB fail');const d=await r.json();const f=d.map(c=>({time:c[0],o:parseFloat(c[3]),h:parseFloat(c[2]),l:parseFloat(c[1]),c:parseFloat(c[4]),v:parseFloat(c[5])})).reverse();setKlines(f);}catch(e){try{const r2=await fetch(`https://api.binance.com/api/v3/uiKlines?symbol=BTCUSDT&interval=${chartRes}&limit=200`);const d2=await r2.json();setKlines(d2.map(d=>({time:d[0]/1000,o:parseFloat(d[1]),h:parseFloat(d[2]),l:parseFloat(d[3]),c:parseFloat(d[4]),v:parseFloat(d[5])})));}catch(e2){console.warn('All chart APIs blocked');}}};
+    const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;
+    const _cbSym=_cfg.cb||'BTC-USD';
+    const _bnSym=_cfg.binance||'BTCUSDT';
+    const fetch_=async()=>{try{const cbMap={'1m':60,'3m':60,'5m':300,'15m':900,'30m':900,'1h':3600};const gran=cbMap[chartRes]||60;const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/candles?granularity=${gran}`);if(!r.ok)throw new Error('CB fail');const d=await r.json();const f=d.map(c=>({time:c[0],o:parseFloat(c[3]),h:parseFloat(c[2]),l:parseFloat(c[1]),c:parseFloat(c[4]),v:parseFloat(c[5])})).reverse();setKlines(f);}catch(e){try{const r2=await fetch(`https://api.binance.com/api/v3/uiKlines?symbol=${_bnSym}&interval=${chartRes}&limit=200`);const d2=await r2.json();setKlines(d2.map(d=>({time:d[0]/1000,o:parseFloat(d[1]),h:parseFloat(d[2]),l:parseFloat(d[3]),c:parseFloat(d[4]),v:parseFloat(d[5])})));}catch(e2){console.warn('All chart APIs blocked');}}};
     fetch_();const iv=setInterval(fetch_,10000);return()=>clearInterval(iv);
-  },[chartRes]);
+  },[chartRes,currentAsset]);
 
   // Live price
-  useEffect(()=>{let last=0;const f=async()=>{try{const r=await fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker');if(!r.ok)return;const d=await r.json();if(d.price){const p=parseFloat(d.price),now=Date.now();currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}tickHistoryRef.current.push({p,s:parseFloat(d.size||0.1),t:'B',time:Date.now(),ex:'CB'});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);},[]);
+  useEffect(()=>{let last=0;const _cbSym=ASSET_CONFIG[currentAsset]?.cb||'BTC-USD';const f=async()=>{try{const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/ticker`);if(!r.ok)return;const d=await r.json();if(d.price){const p=parseFloat(d.price),now=Date.now();currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}tickHistoryRef.current.push({p,s:parseFloat(d.size||0.1),t:'B',time:Date.now(),ex:'CB'});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);},[currentAsset]);
 
   // Heavy data
-  useEffect(()=>{const f=async()=>{try{const gran=windowType==='15m'?900:300;const r=await fetch(`https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${gran}`);if(r.ok){const d=await r.json();if(Array.isArray(d))setHistory(d.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])})));}const r2=await fetch('https://api.exchange.coinbase.com/products/BTC-USD/book?level=2');if(r2.ok){const d2=await r2.json();if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-150)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+150)ls+=parseFloat(s);});setOrderBook({localBuy:lb,localSell:ls,imbalance:ls===0?1:lb/ls});}}setIsLoading(false);}catch(e){setIsLoading(false);}};f();const iv=setInterval(f,5000);return()=>clearInterval(iv);},[targetMargin,windowType]);
+  useEffect(()=>{const _cbSym=ASSET_CONFIG[currentAsset]?.cb||'BTC-USD';const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const f=async()=>{try{const gran=windowType==='15m'?900:300;const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/candles?granularity=${gran}`);if(r.ok){const d=await r.json();if(Array.isArray(d))setHistory(d.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])})));}const r2=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/book?level=2`);if(r2.ok){const d2=await r2.json();if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});setOrderBook({localBuy:lb,localSell:ls,imbalance:ls===0?1:lb/ls});}}setIsLoading(false);}catch(e){setIsLoading(false);}};f();const iv=setInterval(f,5000);return()=>clearInterval(iv);},[targetMargin,windowType,currentAsset]);
 
   // ── AUTO-STRIKE: Kalshi (15m) / Polymarket (5m) / Coinbase fallback ──
   const[strikeSource,setStrikeSource]=useState('auto');
@@ -7938,8 +8019,19 @@ function TaraApp(){
   const[discordLog,setDiscordLog]=useState([]); // {id, type, label, ts, messageId, webhookId, webhookToken}
 
   const broadcastToDiscord=async(type,data)=>{
-    if(!discordWebhook||!discordWebhook.startsWith('http'))return;
+    // V7.0: Pick webhook for the currently-active asset. Fall back to BTC if asset's
+    //   own webhook isn't set, so the user gets broadcasts even if they only configured
+    //   one slot. If BTC is also empty, silently skip.
+    const _activeAsset=currentAssetRef.current||'BTC';
+    const _hooks=discordWebhooksRef.current||{};
+    const _webhookForAsset=_hooks[_activeAsset]||_hooks.BTC||'';
+    if(!_webhookForAsset||!_webhookForAsset.startsWith('http'))return;
     try{
+      // V6.5.8: tag every Discord embed with the asset. So when ETH and BTC are both
+      //   firing on different chats, you can tell at a glance which asset's signal it is.
+      const _assetLabel=ASSET_CONFIG[currentAssetRef.current]?.label||'BTC';
+      const _assetIcon=ASSET_CONFIG[currentAssetRef.current]?.icon||'₿';
+      const _assetTag=`${_assetIcon} ${_assetLabel}`;
       let embed={};
 
       if(type==='SIGNAL')embed={
@@ -7956,7 +8048,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.7  |  signal'},
+        footer:{text:'Tara 7.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -7970,12 +8062,12 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.5.7  |  stand-down'},
+        footer:{text:'Tara 7.0  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
       else if(type==='SEARCH')embed={
-        title:`TARA — SEARCHING`,
+        title:`TARA · ${_assetTag} — SEARCHING`,
         color:6710886,
         description:data.summary||'No clear edge yet.',
         fields:[
@@ -7984,7 +8076,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 6.5.7  |  search'},
+        footer:{text:'Tara 7.0  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8001,7 +8093,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 6.5.7  |  lock'},
+        footer:{text:'Tara 7.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8018,7 +8110,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 6.5.7  |  close'},
+          footer:{text:'Tara 7.0  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8039,7 +8131,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 6.5.7  |  exit'},
+        footer:{text:'Tara 7.0  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8048,7 +8140,7 @@ function TaraApp(){
       //   (SIGNAL/LOCK above) is now manual-only. These four are Tara talking, distinct from
       //   the engine's general lock state.
       else if(type==='TARA_SCAN')embed={
-        title:`TARA  ·  SCANNING`,
+        title:`TARA · ${_assetTag} · SCANNING`,
         color:6710886,
         description:data.summary||'No commitment yet — observing.',
         fields:[
@@ -8060,12 +8152,12 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.7  |  scanning'},
+        footer:{text:'Tara 7.0  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
       else if(type==='TARA_SIGNAL')embed={
-        title:`TARA  ·  ${data.dir} SIGNAL`,
+        title:`TARA · ${_assetTag} · ${data.dir} SIGNAL`,
         color:data.dir==='UP'?3404125:16478549,
         description:data.reason||`Forming ${data.dir}. Not yet locked.`,
         fields:[
@@ -8080,12 +8172,12 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.7  |  signal'},
+        footer:{text:'Tara 7.0  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
       else if(type==='TARA_LOCK')embed={
-        title:`TARA  ·  ${data.dir} LOCKED`,
+        title:`TARA · ${_assetTag} · ${data.dir} LOCKED`,
         color:data.dir==='UP'?3404125:16478549,
         description:data.reason||`Committed ${data.dir} for this round.`,
         fields:[
@@ -8100,12 +8192,12 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.7  |  lock'},
+        footer:{text:'Tara 7.0  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
       else if(type==='TARA_SITOUT')embed={
-        title:`TARA  ·  SITTING OUT`,
+        title:`TARA · ${_assetTag} · SITTING OUT`,
         color:14935562, // amber
         description:data.reason||'Conditions don\'t support a confident call.',
         fields:[
@@ -8117,7 +8209,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 6.5.7  |  sit-out'},
+        footer:{text:'Tara 7.0  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8126,7 +8218,7 @@ function TaraApp(){
         const isWin=data.result==='WIN';
         const isSitout=data.result==='SITOUT';
         embed={
-          title:`TARA  ·  ${isSitout?'SAT OUT':isWin?'WIN':'LOSS'}  ·  ${data.window||windowType}`,
+          title:`TARA · ${_assetTag} · ${isSitout?'SAT OUT':isWin?'WIN':'LOSS'} · ${data.window||windowType}`,
           color:isSitout?6710886:isWin?3404125:16478549,
           description:isSitout
             ? `Tara passed on this round.${data.outcomeDir?` Actual outcome: ${data.outcomeDir}.`:''}`
@@ -8139,7 +8231,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 6.5.7  |  result'},
+          footer:{text:'Tara 7.0  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8163,7 +8255,7 @@ function TaraApp(){
           advisoryLine=`\n**${tag}**  ·  position ${data.userPosition}\n${a.reason}\n`;
         }
         embed={
-          title:`TARA — WHALE PRESSURE: ${isBuy?'BUY':'SELL'}`,
+          title:`TARA · ${_assetTag} — WHALE PRESSURE: ${isBuy?'BUY':'SELL'}`,
           color:isBuy?3404125:16478549,
           description:[
             `$${(data.totalVol/1000).toFixed(0)}K  |  ${data.tradeCount||'?'} prints  |  ${data.exchangeCount||1} exchange${data.exchangeCount!==1?'s':''}`,
@@ -8176,16 +8268,16 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 6.5.7  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.0  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(discordWebhook+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 6.5.7',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 7.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
-        const parts=discordWebhook.replace('https://discord.com/api/webhooks/','').split('/');
-        const entry={id:Date.now(),type,label:embed.title||type,ts:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}),messageId:msg.id,webhookId:parts[0],webhookToken:parts[1],embed};
+        const parts=_webhookForAsset.replace('https://discord.com/api/webhooks/','').split('/');
+        const entry={id:Date.now(),type,label:embed.title||type,ts:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}),messageId:msg.id,webhookId:parts[0],webhookToken:parts[1],embed,asset:_activeAsset};
         setDiscordLog(prev=>[entry,...prev].slice(0,50));
       }
     }catch(e){}
@@ -8200,7 +8292,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 6.5.7 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 7.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -8313,8 +8405,9 @@ function TaraApp(){
         //   Field names also migrated: yes_bid_dollars (string like "0.5600"), floor_strike
         //   (number, the actual strike value), cap_strike. Old yes_ask/yes_bid/last_price are
         //   deprecated. floor_strike IS the strike — no ticker regex needed.
-        // V4.2: Always KXBTC15M (this effect only runs on 15m windows now)
-        const _seriesTicker='KXBTC15M';
+        // V6.5.8: per-asset series ticker — KXBTC15M / KXETH15M / KXSOL15M / KXDOGE15M
+        const _assetCfg=ASSET_CONFIG[currentAssetRef.current]||ASSET_CONFIG.BTC;
+        const _seriesTicker=`${_assetCfg.kalshiSeriesTicker}15M`;
         // min_close_ts: events with at least one market closing after (now - 5min). Captures
         //   the active window plus a buffer for clock skew between us and Kalshi.
         const _minCloseTs=Math.floor(Date.now()/1000)-300;
@@ -8530,7 +8623,7 @@ function TaraApp(){
     const onVisible=()=>{if(document.visibilityState==='visible')fetchKalshi();};
     document.addEventListener('visibilitychange',onVisible);
     return()=>{clearInterval(iv);document.removeEventListener('visibilitychange',onVisible);triggerKalshiFetchRef.current=null;};
-  },[windowType,timeState.nextWindow]);
+  },[windowType,timeState.nextWindow,currentAsset]);
 
   // V2.6: Kalshi settlement resolver for marginal trades.
   //   Trades with |closingGapBps| < 10 are queued for verification because Tara's local price
@@ -8567,7 +8660,8 @@ function TaraApp(){
         try{
           pending.attempts++;
           // V4.4: Use /events endpoint (smaller payload, different rate-limit bucket)
-          const _settleUrl=`https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=KXBTC15M&with_nested_markets=true&status=settled&limit=50`;
+          const _assetCfgS=ASSET_CONFIG[currentAssetRef.current]||ASSET_CONFIG.BTC;
+          const _settleUrl=`https://api.elections.kalshi.com/trade-api/v2/events?series_ticker=${_assetCfgS.kalshiSeriesTicker}15M&with_nested_markets=true&status=settled&limit=50`;
           // V3.2.3: Use CORS proxy first to avoid 503 throttling, fall back to direct
           let r=await fetch(
             `https://corsproxy.io/?url=${encodeURIComponent(_settleUrl)}`,
@@ -10984,6 +11078,9 @@ function TaraApp(){
         //   already priced in.
         kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
         samples,needSamples,
+        // V6.5.8: tag with active asset so memory can filter per-asset in V6.5.9.
+        //   Entries from before V6.5.8 default to BTC on read.
+        asset:currentAsset,
         result:null, // populated at rollover scoring
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
@@ -11075,7 +11172,10 @@ function TaraApp(){
   // (committed call), or SITOUT (explicit pass). Each fires at most once per window.
   const taraBroadcastRef=useRef({key:null,sentScan:false,sentSignal:false,sentLock:false,sentSitout:false});
   useEffect(()=>{
-    if(!analysis||!discordWebhook||!discordWebhook.startsWith('http'))return;
+    // V7.0: gate on the active asset's webhook (with BTC fallback) — same logic as broadcastToDiscord
+    const _activeAssetGate=currentAssetRef.current||'BTC';
+    const _hookForGate=discordWebhooks[_activeAssetGate]||discordWebhooks.BTC||'';
+    if(!analysis||!_hookForGate||!_hookForGate.startsWith('http'))return;
     const winKey=timeState.startWindow||timeState.nextWindow;
     if(!winKey)return;
     // Reset broadcast flags on window change
@@ -11141,7 +11241,7 @@ function TaraApp(){
       taraBroadcastRef.current.sentSitout=true;
       broadcastToDiscord('TARA_SITOUT',{...baseData,reason:tc.reason});
     }
-  },[analysis?.rawProbAbove,taraCall.call,taraCall.confidence,taraCall.reason,analysis?.isSystemLocked,timeState.startWindow,timeState.nextWindow,timeState.minsRemaining,timeState.secsRemaining,discordWebhook,windowType,taraScorecards,qualityGate?.score,targetMargin,currentPrice]);
+  },[analysis?.rawProbAbove,taraCall.call,taraCall.confidence,taraCall.reason,analysis?.isSystemLocked,timeState.startWindow,timeState.nextWindow,timeState.minsRemaining,timeState.secsRemaining,discordWebhooks,currentAsset,windowType,taraScorecards,qualityGate?.score,targetMargin,currentPrice]);
 
   // ── WHALE AUTO-BROADCAST ─────────────────────────────────────────────────
   // Only fires when: streak ≥4 AND net delta >$500K AND 5-min cooldown passed
@@ -11525,8 +11625,52 @@ function TaraApp(){
   const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast`;setChatLog([...log,{role:'tara',text:r}]);},400);};
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false; /* V5.6: allow restore for new window-type */ setForceRender(p=>p+1);};
+  // V6.5.8: Asset switch handler. Same state-reset pattern as window toggle, plus
+  //   clears price history (since BTC ticks are useless for ETH). Triggers re-fetch
+  //   of Kalshi market for the new asset on next poll.
+  const setCurrentAsset=(a)=>{
+    if(a===currentAsset||!ASSET_KEYS.includes(a))return;
+    setCurrentAssetState(a);
+    // Reset all window-bound state — fresh start on the new asset
+    setPendingStrike(null);
+    setCurrentPrice(null);
+    setLiveHistory([]);
+    setKalshiStrike(null);
+    setKalshiYesPrice(null);
+    setUserPosition(null);
+    setPositionEntry(null);
+    setManualAction(null);
+    setCurrentOffer('');
+    setBetAmount(0);
+    setMaxPayout(0);
+    taraAdviceRef.current='SEARCHING...';
+    engineLockedDirRef.current=null;
+    lockedCallRef.current=null;
+    lockReleasedAtRef.current=0;
+    posteriorHistoryRef.current=[];
+    biasCountRef.current={UP:0,DOWN:0};
+    hasReversedRef.current=false;
+    manuallyClosedRef.current=null;
+    windowSignalDirRef.current=null;
+    softHintRef.current=0;
+    hardForceRef.current=0;
+    kalshiWasBelowThreshUpRef.current=false;
+    kalshiWasBelowThreshDownRef.current=false;
+    kalshiLastBelowThreshUpRef.current=0;
+    kalshiLastBelowThreshDownRef.current=0;
+    isManualStrikeRef.current=false;
+    hasSetInitialMargin.current=false;
+    if(tickHistoryRef.current)tickHistoryRef.current=[];
+    if(taraCallSampleRef.current)taraCallSampleRef.current={dir:null,count:0};
+    if(taraCallSnapshotRef.current!==undefined)taraCallSnapshotRef.current=null;
+    if(kalshiStrikeRef)kalshiStrikeRef.current=null;
+    lastWindowRef.current='';
+    peakOfferRef.current=0;
+    _hasRestoredLockRef.current=false;
+    setForceRender(p=>p+1);
+  };
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 6.5.7...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.0...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -11644,6 +11788,26 @@ function TaraApp(){
 
           {/* Spacer */}
           <div className="flex-1"/>
+
+          {/* V6.5.8: Asset selector — BTC/ETH/SOL/DOGE. Click switches asset and resets state. */}
+          <div className={'flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0'}>
+            {ASSET_KEYS.map(k=>{
+              const _c=ASSET_CONFIG[k];
+              const _active=currentAsset===k;
+              return(
+                <button
+                  key={k}
+                  onClick={()=>setCurrentAsset(k)}
+                  className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all flex items-center gap-1 ${_active?'shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
+                  style={_active?{background:_c.color+'22',color:_c.color,border:'1px solid '+_c.color+'66'}:{}}
+                  title={_c.label}
+                >
+                  <span className="text-sm leading-none" style={{color:_active?_c.color:'inherit'}}>{_c.icon}</span>
+                  <span className="hidden sm:inline text-[10px]">{_c.label}</span>
+                </button>
+              );
+            })}
+          </div>
 
           {/* Window toggle */}
           <div className={'flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0'}>
@@ -12112,8 +12276,31 @@ function TaraApp(){
                 <button onClick={()=>{setShowSettings(false);setDiscordEditingId(null);setDiscordEditText('');setDiscordStatusMsg('');}} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
               </div>
 
-              <p className={'text-xs text-[#E8E9E4]/60 mb-3 leading-relaxed'}>Tara broadcasts lock signals, round closures, and entries to your Discord channel.</p>
-              <input type="password" value={discordWebhook} onChange={e=>setDiscordWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." className={'w-full bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-400 text-white font-mono mb-3'}/>
+              <p className={'text-xs text-[#E8E9E4]/60 mb-3 leading-relaxed'}>Tara broadcasts lock signals, round closures, and entries to Discord. <strong className="text-[#E8E9E4]/80">V7.0:</strong> set a separate webhook per asset to keep channels clean. Leave a slot empty and that asset will fall back to BTC&rsquo;s webhook.</p>
+
+              {/* V7.0: Per-asset webhooks — one input per asset, color-coded */}
+              <div className="space-y-2 mb-4">
+                {ASSET_KEYS.map(k=>{
+                  const _c=ASSET_CONFIG[k];
+                  const _val=discordWebhooks[k]||'';
+                  return(
+                    <div key={k} className="flex items-stretch gap-2">
+                      <div className="flex items-center justify-center px-3 rounded-lg shrink-0 font-bold text-sm border" style={{background:_c.color+'15',color:_c.color,borderColor:_c.color+'44',minWidth:64}}>
+                        <span className="mr-1.5">{_c.icon}</span>
+                        <span className="text-[10px] uppercase tracking-wider">{_c.label}</span>
+                      </div>
+                      <input
+                        type="password"
+                        value={_val}
+                        onChange={e=>setDiscordWebhooks(prev=>({...prev,[k]:e.target.value}))}
+                        placeholder={k==='BTC'?'https://discord.com/api/webhooks/...':`Optional — falls back to BTC webhook if empty`}
+                        className={'flex-1 bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-400 text-white font-mono'}
+                        style={_val?{borderColor:_c.color+'66'}:{}}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
 
               {/* Bot name + avatar */}
               <div className="grid grid-cols-2 gap-2 mb-3">
@@ -12220,7 +12407,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 6.5.7</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -12876,7 +13063,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 6.5.7 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 7.0 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -13032,10 +13219,56 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 6.5.7 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 7.0 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V7.0 — Multi-asset + per-asset Discord webhooks */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major Release · Multi-Asset · Per-Asset Webhooks</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.04</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.0</span> — Four Pairs, Four Channels</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Tara was BTC-only through 6.x. The reasoning for going multi-asset: BTC&apos;s whale concentration was killing some windows even when signal was clean. ETH/SOL/DOGE have smaller whale footprints relative to depth, so the tape signal is more honest. Adding all four lets you compound wins across multiple markets while keeping BTC for the high-edge moments. Plus: separate Discord channels per asset so your alerts don&apos;t mix.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Asset selector</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Header now shows <strong>₿ BTC · Ξ ETH · ◎ SOL · Ð DOGE</strong>. Click any to switch. Price feeds, Kalshi market, chart, whale thresholds all reload for the new asset. Selection persists.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Per-asset configuration</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Whale floors:</strong> BTC $100K · ETH $50K · SOL $25K · DOGE $10K. Otherwise BTC&apos;s floor on DOGE would mean zero whale alerts ever fire.</li>
+                  <li><strong>Price decimals:</strong> BTC integer, ETH/SOL 2-3dp, DOGE 5dp. Strike <code className="text-[10px] bg-[#0E100F] px-1">$0.45123</code> renders correctly.</li>
+                  <li><strong>Kalshi tickers:</strong> <code className="text-[10px] bg-[#0E100F] px-1">KXBTC15M</code>, <code className="text-[10px] bg-[#0E100F] px-1">KXETH15M</code>, <code className="text-[10px] bg-[#0E100F] px-1">KXSOL15M</code>, <code className="text-[10px] bg-[#0E100F] px-1">KXDOGE15M</code>.</li>
+                  <li><strong>Exchange feeds:</strong> Coinbase BTC-USD/ETH-USD/SOL-USD/DOGE-USD; Bybit + Binance perp BTCUSDT/ETHUSDT/SOLUSDT/DOGEUSDT. WebSockets reconnect on asset switch.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · Per-asset Discord webhooks</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Settings &rarr; Discord Integration now shows <strong>four webhook inputs</strong>, color-coded per asset. Each webhook can point to a different Discord channel.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Set all four &rarr; each asset broadcasts to its own channel</li>
+                  <li>Set just BTC &rarr; all assets fall back to BTC&apos;s webhook (old behavior)</li>
+                  <li>Set BTC + ETH only &rarr; BTC goes to its channel, ETH to its channel, SOL/DOGE fall back to BTC</li>
+                  <li>Empty across the board &rarr; no broadcasts</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Migration: existing webhook from 6.x is auto-copied into the BTC slot on first 7.0 load. Nothing breaks.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">4 · Discord embeds tagged</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Every embed prefixed with the asset: <code className="text-[10px] bg-[#0E100F] px-1">TARA · Ξ ETH · DOWN LOCKED</code> instead of just <code className="text-[10px] bg-[#0E100F] px-1">TARA · DOWN LOCKED</code>. Useful even if all webhooks point to the same channel.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">5 · Engine unchanged</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">All prediction logic preserved. V6.5.7 fixes (inversion release, lock-broadcast snapshot, no signal after lock, ETA dial) all intact. Engine learnings adapt per-asset over time as memory accumulates.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">What&apos;s deferred to V7.1</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Per-asset scorecards (currently shared)</li>
+                  <li>Per-asset learnings (currently shared)</li>
+                  <li>Cross-asset performance view in Memory</li>
+                  <li>Per-asset Bloomberg/funding/OI feeds (currently still BTC ambient context)</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic mt-2">Memory entries are tagged with their asset starting now, so V7.1 has the data to split them.</p>
+              </section>
 
               {/* V6.5.7 — Inversion release + lock broadcast fix + ETA dial */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
