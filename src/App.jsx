@@ -245,7 +245,7 @@ const saveWeights=(w)=>{};
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.04-v7.0-multi-asset-per-asset-discord';
+const BASELINE_VERSION='2026.05.04-v7.0.2-asset-isolation';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -1532,11 +1532,13 @@ const generateSyntheticBTC=(basePrice=84000,candles=120,intervalSec=60)=>{
 // ═══════════════════════════════════════
 const TV_INTERVAL_MAP={'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60'};
 
-const TradingViewChart=({resolution,onResolutionChange})=>{
+const TradingViewChart=({resolution,onResolutionChange,asset})=>{
   const interval=TV_INTERVAL_MAP[resolution]||'1';
+  // V7.0.2: per-asset TradingView symbol. Coinbase USD pairs.
+  const _tvSym={BTC:'BTCUSD',ETH:'ETHUSD',SOL:'SOLUSD',DOGE:'DOGEUSD'}[asset||'BTC']||'BTCUSD';
   const src=[
     'https://www.tradingview.com/widgetembed/?frameElementId=tv_tara_101',
-    `&symbol=COINBASE%3ABTCUSD`,
+    `&symbol=COINBASE%3A${_tvSym}`,
     `&interval=${interval}`,
     '&hidesidetoolbar=1',
     '&hidetoptoolbar=0',
@@ -1568,9 +1570,9 @@ const TradingViewChart=({resolution,onResolutionChange})=>{
         <span className={'text-xs text-[#E8E9E4]/25 hidden sm:inline font-mono'}>COINBASE:BTCUSD · TradingView</span>
       </div>
 
-      {/* iframe — key={resolution} forces clean remount on interval change */}
+      {/* iframe — key={resolution+asset} forces clean remount on interval OR asset change */}
       <iframe
-        key={resolution}
+        key={`${resolution}-${asset||'BTC'}`}
         src={src}
         className="tv-chart-container"
         style={{
@@ -4338,10 +4340,18 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           let _samplesRem;
           let _tierLabel;
           if(_engSamples!=null&&_engNeed!=null){
+            // Engine is actively forming — use real samples count
             _samplesRem=Math.max(0,_engNeed-_engSamples);
             _tierLabel=(taraCall&&taraCall._ctx&&taraCall._ctx.tierLabel)||'';
           } else {
-            _samplesRem=Math.max(1,Math.round(30*_smult));
+            // V7.0.1: SCANNING — virtually tick samplesRem down based on elapsed-since-search.
+            //   Otherwise the ETA freezes at 30s once we pass the search phase. By assuming
+            //   the engine will start forming after search phase, samples virtually accumulate
+            //   at ~1/sec. So the user sees the ETA count down second by second.
+            //   When engine actually starts forming, this switches to real samples (above branch).
+            const _baseSamples=Math.max(1,Math.round(30*_smult));
+            const _virtualElapsedInForming=Math.max(0,_elapsed-_searchPhase);
+            _samplesRem=Math.max(1,_baseSamples-_virtualElapsedInForming);
             _tierLabel=taraCall&&taraCall.call==='SIT_OUT'?'scanning':'forming';
           }
           const _etaNum=Math.max(0,_searchRem+_samplesRem);
@@ -6380,7 +6390,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
 }
 
 // ── V111: ChartBottomCard - TradingView at bottom, full width ──
-function ChartBottomCard({mobileTab,resolution,setResolution}){
+function ChartBottomCard({mobileTab,resolution,setResolution,asset}){
   return(
     <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
       <div className="flex justify-between items-center mb-2 shrink-0">
@@ -6394,7 +6404,7 @@ function ChartBottomCard({mobileTab,resolution,setResolution}){
         </div>
       </div>
       <div className="flex-1 min-h-[280px] sm:min-h-[360px] lg:min-h-[440px]">
-        <TradingViewChart resolution={resolution} onResolutionChange={setResolution}/>
+        <TradingViewChart resolution={resolution} onResolutionChange={setResolution} asset={asset}/>
       </div>
     </div>
   );
@@ -6740,7 +6750,7 @@ function SessionStartCheck({open,onClose,windowType,scorecards,tradeLog,regime,v
                 <span className="text-[9px] uppercase font-bold tracking-[0.18em]" style={{color:'#E5C870'}}>Visual Refresh</span>
                 <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.01</span>
               </div>
-              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>7.0</span></div>
+              <div className="font-serif text-2xl text-white mb-2 tracking-tight">Tara <span style={{color:'#E5C870'}}>7.0.2</span></div>
               <div className="text-xs text-[#E8E9E4]/75 mb-3 leading-relaxed">
                 Direction C visual reset — two-tone gold/copper palette, hero-promoted prediction card, terminal-style status strip, panel corner stamps. Engine unchanged from 2.0. Choose how to start:
               </div>
@@ -7116,10 +7126,14 @@ function TaraApp(){
   //   into 2 (PC bumped 3→4 + synced, tab synced to 4 + bumped its copy to 5, both end at 5).
   //   With derive-from-log, the dedup'd log is the single source of truth — no counter to
   //   drift. Declaration order matters: this MUST be after the taraCallLog useState.
+  // V7.0.2: filter by currentAsset. Memory entries tagged with `asset` since V6.5.8.
+  //   Pre-V6.5.8 entries default to BTC (since BTC was the only asset before then).
   const taraScorecards=React.useMemo(()=>{
     const out={'15m':{wins:0,losses:0,sitouts:0},'5m':{wins:0,losses:0,sitouts:0}};
     (taraCallLog||[]).forEach(e=>{
       if(!e||!e.windowType||!e.result)return;
+      const _entryAsset=e.asset||'BTC';
+      if(_entryAsset!==currentAsset)return; // filter to current asset
       const wt=e.windowType;
       if(!out[wt])out[wt]={wins:0,losses:0,sitouts:0};
       if(e.result==='WIN')out[wt].wins++;
@@ -7127,7 +7141,16 @@ function TaraApp(){
       else if(e.result==='SITOUT')out[wt].sitouts++;
     });
     return out;
-  },[taraCallLog]);
+  },[taraCallLog,currentAsset]);
+  // V7.0.2: per-asset call log shown in Memory modal + cards. Engine still reads full log
+  //   for learnings — filtering only happens at display layer.
+  const displayedCallLog=React.useMemo(()=>{
+    return(taraCallLog||[]).filter(e=>{
+      if(!e)return false;
+      const _entryAsset=e.asset||'BTC';
+      return _entryAsset===currentAsset;
+    });
+  },[taraCallLog,currentAsset]);
   // V5.7.1: scorecards/tara cloud doc is legacy. Local-only — no setTaraScorecards exists.
   //   localStorage cached for fast paint on next mount.
   React.useEffect(()=>{
@@ -7488,7 +7511,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.0 online — major version. Multi-asset support: header now has BTC · ETH · SOL · DOGE buttons. Click any to switch and Tara fully reconfigures (price feeds, Kalshi market, whale thresholds, chart, decimals). Per-asset whale floors: BTC $100K+, ETH $50K+, SOL $25K+, DOGE $10K+. Strike formatting auto-adjusts decimals up to 5dp for DOGE. NEW IN 7.0: per-asset Discord webhooks. Settings → Discord Integration now shows four input fields, one per asset. Set them separately to keep channels clean (BTC alerts go to #btc-trade-chat, ETH to #eth-trade-chat, etc). Empty slots fall back to BTC\'s webhook so old setups keep working. Discord embeds tagged with asset name and icon. Engine completely unchanged — all V6.5.7 fixes intact (inversion release, lock-broadcast snapshot, no signal after lock, ETA dial). Per-asset scorecards and learnings still pooled — coming in V7.1.'}]);
+  const[chatLog,setChatLog]=useState([{role:'tara',text:'Tara 7.0.2 online — three asset-isolation fixes after V7.0.1. (1) Tara record + scorecard now filtered by current asset. Switching to ETH shows 0W/0L/0SAT initially since memory entries are tagged with asset starting V6.5.8. Engine still uses full log for learnings, but display layer is per-asset. (2) Live Chart TradingView widget now switches symbol with the asset. BTC shows BTCUSD, ETH ETHUSD, SOL SOLUSD, DOGE DOGEUSD. iframe key includes asset so widget fully remounts on switch. (3) Asset switch now properly clears strike, history, window high/low/open refs, velocity ref, currentPrice ref. Previous behavior left stale BTC strike (e.g. 42045) showing on DOGE which the engine then read as a catastrophic gap and triggered RUG PULL alerts.'}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -7789,7 +7812,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.0'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.0.2'; // no regex literal — esbuild safe
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -8019,12 +8042,12 @@ function TaraApp(){
   const[discordLog,setDiscordLog]=useState([]); // {id, type, label, ts, messageId, webhookId, webhookToken}
 
   const broadcastToDiscord=async(type,data)=>{
-    // V7.0: Pick webhook for the currently-active asset. Fall back to BTC if asset's
-    //   own webhook isn't set, so the user gets broadcasts even if they only configured
-    //   one slot. If BTC is also empty, silently skip.
+    // V7.0.1: Strict per-asset. The active asset's own webhook must be set.
+    //   No fallback to BTC. If a user wants ETH alerts, they set ETH's webhook.
+    //   If they don't want ETH alerts, they leave it empty and nothing fires.
     const _activeAsset=currentAssetRef.current||'BTC';
     const _hooks=discordWebhooksRef.current||{};
-    const _webhookForAsset=_hooks[_activeAsset]||_hooks.BTC||'';
+    const _webhookForAsset=_hooks[_activeAsset]||'';
     if(!_webhookForAsset||!_webhookForAsset.startsWith('http'))return;
     try{
       // V6.5.8: tag every Discord embed with the asset. So when ETH and BTC are both
@@ -8048,7 +8071,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0  |  signal'},
+        footer:{text:'Tara 7.0.2  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8062,7 +8085,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.0  |  stand-down'},
+        footer:{text:'Tara 7.0.2  |  stand-down'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8076,7 +8099,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.0  |  search'},
+        footer:{text:'Tara 7.0.2  |  search'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8093,7 +8116,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.0  |  lock'},
+        footer:{text:'Tara 7.0.2  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8110,7 +8133,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.0  |  close'},
+          footer:{text:'Tara 7.0.2  |  close'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8131,7 +8154,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.0  |  exit'},
+        footer:{text:'Tara 7.0.2  |  exit'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8152,7 +8175,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0  |  scanning'},
+        footer:{text:'Tara 7.0.2  |  scanning'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8172,7 +8195,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0  |  signal'},
+        footer:{text:'Tara 7.0.2  |  signal'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8192,7 +8215,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0  |  lock'},
+        footer:{text:'Tara 7.0.2  |  lock'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8209,7 +8232,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.0  |  sit-out'},
+        footer:{text:'Tara 7.0.2  |  sit-out'},
         timestamp:new Date().toISOString(),
       };
 
@@ -8231,7 +8254,7 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.0  |  result'},
+          footer:{text:'Tara 7.0.2  |  result'},
           timestamp:new Date().toISOString(),
         };
       }
@@ -8268,12 +8291,12 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.0  |  futures tape  |  not financial advice'},
+          footer:{text:'Tara 7.0.2  |  futures tape  |  not financial advice'},
           timestamp:new Date().toISOString(),
         };
       }
 
-      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 7.0',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara 7.0.2',avatar_url:discordAvatar||undefined,embeds:[embed]})});
       if(res.ok){
         const msg=await res.json();
         const parts=_webhookForAsset.replace('https://discord.com/api/webhooks/','').split('/');
@@ -8292,7 +8315,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara 7.0 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara 7.0.2 · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -11172,9 +11195,9 @@ function TaraApp(){
   // (committed call), or SITOUT (explicit pass). Each fires at most once per window.
   const taraBroadcastRef=useRef({key:null,sentScan:false,sentSignal:false,sentLock:false,sentSitout:false});
   useEffect(()=>{
-    // V7.0: gate on the active asset's webhook (with BTC fallback) — same logic as broadcastToDiscord
+    // V7.0.1: strict per-asset — only proceed if THIS asset's webhook is set
     const _activeAssetGate=currentAssetRef.current||'BTC';
-    const _hookForGate=discordWebhooks[_activeAssetGate]||discordWebhooks.BTC||'';
+    const _hookForGate=discordWebhooks[_activeAssetGate]||'';
     if(!analysis||!_hookForGate||!_hookForGate.startsWith('http'))return;
     const winKey=timeState.startWindow||timeState.nextWindow;
     if(!winKey)return;
@@ -11635,8 +11658,11 @@ function TaraApp(){
     setPendingStrike(null);
     setCurrentPrice(null);
     setLiveHistory([]);
+    setHistory([]);
     setKalshiStrike(null);
     setKalshiYesPrice(null);
+    setTargetMargin(0); // V7.0.2: critical — strike was bleeding through
+    setStrikeConfirmed(false);
     setUserPosition(null);
     setPositionEntry(null);
     setManualAction(null);
@@ -11661,16 +11687,26 @@ function TaraApp(){
     isManualStrikeRef.current=false;
     hasSetInitialMargin.current=false;
     if(tickHistoryRef.current)tickHistoryRef.current=[];
+    if(ticksRef&&ticksRef.current)ticksRef.current=[];
     if(taraCallSampleRef.current)taraCallSampleRef.current={dir:null,count:0};
     if(taraCallSnapshotRef.current!==undefined)taraCallSnapshotRef.current=null;
     if(kalshiStrikeRef)kalshiStrikeRef.current=null;
+    if(targetMarginRef)targetMarginRef.current=0;
+    if(windowOpenPriceRef)windowOpenPriceRef.current=0;
+    if(windowHighRef)windowHighRef.current=0;
+    if(windowLowRef)windowLowRef.current=0;
+    if(windowHighTimeRef)windowHighTimeRef.current=0;
+    if(windowLowTimeRef)windowLowTimeRef.current=0;
+    if(windowOpenTimeRef)windowOpenTimeRef.current=0;
+    if(currentPriceRef)currentPriceRef.current=null;
+    if(velocityRef&&velocityRef.current)velocityRef.current={v1s:0,v5s:0,v15s:0,v30s:0,accel:0,jerk:0,peakPnL:0,troughPnL:0,pnlSlope:0};
     lastWindowRef.current='';
     peakOfferRef.current=0;
     _hasRestoredLockRef.current=false;
     setForceRender(p=>p+1);
   };
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.0...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.0.2...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -11684,7 +11720,7 @@ function TaraApp(){
       
       {/* V134: Session-start status check */}
       <SessionStartCheck open={showSessionStart} onClose={()=>setShowSessionStart(false)} windowType={windowType} scorecards={scorecards} tradeLog={tradeLog} regime={analysis?.regime} velocityRegime={analysis?.velocityRegime} calibration={calibration} baselineDrift={baselineDrift} resetToLatestBaseline={resetToLatestBaseline} runSyncWithProgress={runSyncWithProgress} syncState={syncState} resetDirectionalBias={resetDirectionalBias} resetFreshStart={resetFreshStart}/>
-      {showStats&&<StatsView tradeLog={tradeLog} scorecards={scorecards} taraCallLog={taraCallLog} onClose={()=>setShowStats(false)}/>}
+      {showStats&&<StatsView tradeLog={tradeLog} scorecards={scorecards} taraCallLog={displayedCallLog} onClose={()=>setShowStats(false)}/>}
       {showBrain&&<BrainView analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>setShowBrain(false)}/>}
 
       {/* V134: Sync progress overlay */}
@@ -11771,7 +11807,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              6.5.3
+              7.0.2
             </span>
           </div>
 
@@ -12248,20 +12284,20 @@ function TaraApp(){
 
             {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab.
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
-            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
+            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
 
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab}/>
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
-        <ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution}/>
+        <ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution} asset={currentAsset}/>
 
       {/* ── FLOW INTELLIGENCE PANEL ── */}
       <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState}/>
@@ -12276,9 +12312,9 @@ function TaraApp(){
                 <button onClick={()=>{setShowSettings(false);setDiscordEditingId(null);setDiscordEditText('');setDiscordStatusMsg('');}} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
               </div>
 
-              <p className={'text-xs text-[#E8E9E4]/60 mb-3 leading-relaxed'}>Tara broadcasts lock signals, round closures, and entries to Discord. <strong className="text-[#E8E9E4]/80">V7.0:</strong> set a separate webhook per asset to keep channels clean. Leave a slot empty and that asset will fall back to BTC&rsquo;s webhook.</p>
+              <p className={'text-xs text-[#E8E9E4]/60 mb-3 leading-relaxed'}>Tara broadcasts lock signals, round closures, and entries to Discord. <strong className="text-[#E8E9E4]/80">V7.0:</strong> set a separate webhook per asset to keep channels clean. Leave a slot empty and that asset broadcasts nothing &mdash; each asset is fully independent.</p>
 
-              {/* V7.0: Per-asset webhooks — one input per asset, color-coded */}
+              {/* V7.0.1: Per-asset webhooks — strict, no fallback */}
               <div className="space-y-2 mb-4">
                 {ASSET_KEYS.map(k=>{
                   const _c=ASSET_CONFIG[k];
@@ -12293,7 +12329,7 @@ function TaraApp(){
                         type="password"
                         value={_val}
                         onChange={e=>setDiscordWebhooks(prev=>({...prev,[k]:e.target.value}))}
-                        placeholder={k==='BTC'?'https://discord.com/api/webhooks/...':`Optional — falls back to BTC webhook if empty`}
+                        placeholder={_val?'':'Optional · empty = no broadcasts for this asset'}
                         className={'flex-1 bg-[#111312] border border-[#E8E9E4]/20 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-400 text-white font-mono'}
                         style={_val?{borderColor:_c.color+'66'}:{}}
                       />
@@ -12407,7 +12443,7 @@ function TaraApp(){
       <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+            <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.0.2</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#111312]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
@@ -13063,7 +13099,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 7.0 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 7.0.2 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -13219,10 +13255,55 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 7.0 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 7.0.2 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V7.0.2 — Asset isolation: scorecard, chart, strike reset */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Asset Isolation Fixes</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.04</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.0.2</span> — Switching Assets Actually Switches Everything</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: switching to DOGE still showed 54W/30L (BTC&rsquo;s record), still showed BTC chart, and the strike field showed <code className="text-[10px] bg-[#0E100F] px-1">42045</code> (BTC strike value bleeding through). Three actual fixes:</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tara record + memory filtered per-asset</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Memory entries have been tagged with their <code className="text-[10px] bg-[#0E100F] px-1">asset</code> field since V6.5.8. The display layer now filters all stats (Tara&apos;s record, scorecards, memory list, learnings count) by <code className="text-[10px] bg-[#0E100F] px-1">currentAsset</code>. Pre-V6.5.8 entries default to BTC for back-compat. Engine still reads the full log for cross-asset learning so nothing is lost.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Live Chart switches with asset</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">TradingView widget symbol parameterized by asset (<code className="text-[10px] bg-[#0E100F] px-1">COINBASE:BTCUSD</code> &rarr; <code className="text-[10px] bg-[#0E100F] px-1">COINBASE:ETHUSD</code> / <code className="text-[10px] bg-[#0E100F] px-1">SOLUSD</code> / <code className="text-[10px] bg-[#0E100F] px-1">DOGEUSD</code>). iframe <code className="text-[10px] bg-[#0E100F] px-1">key</code> now includes the asset so the widget fully remounts on switch &mdash; Tradingview&apos;s embed sometimes ignores symbol prop changes without remount.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · Strike + history actually reset on switch</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The <code className="text-[10px] bg-[#0E100F] px-1">setCurrentAsset</code> handler in V6.5.8 missed several state slots. Now also resets:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">targetMargin</code> &mdash; the strike field. Was the main bug (stale BTC strike on DOGE).</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">history</code> &mdash; candle history</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">windowHigh/Low/HighTime/LowTime/OpenPrice/OpenTime</code> refs &mdash; structural anchors</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">velocityRef</code>, <code className="text-[10px] bg-[#0E100F] px-1">currentPriceRef</code>, <code className="text-[10px] bg-[#0E100F] px-1">ticksRef</code> &mdash; engine inputs</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">strikeConfirmed</code> &mdash; gating flag</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Without these, switching to DOGE meant engine read DOGE price ($0.11) against a stale BTC strike ($42045), saw a -38000bps gap, and triggered RUG PULL alerts. Now strike clears properly and re-fetches from Kalshi for the new asset.</p>
+              </section>
+
+              {/* V7.0.1 — ETA countdown + strict per-asset webhooks + version pill fix */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · ETA Countdown · Strict Webhooks · Version Pill</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.04</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>7.0.1</span> — Three Fast Fixes</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · ETA actually counts down</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">User feedback: ETA showed seconds but they didn&rsquo;t move. Search-phase remaining ticked down (10s &rarr; 0) but samplesRem was a constant <code className="text-[10px] bg-[#0E100F] px-1">30 &times; speedMult</code> that froze. Fix: while scanning, virtually tick samplesRem down based on elapsed-since-search. ETA visibly counts down at ~1/sec. When engine actually populates real <code className="text-[10px] bg-[#0E100F] px-1">_ctx.samples</code>, the calculation switches to real values for accuracy.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">2 · Strict per-asset webhooks (no fallback)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">User feedback: don&rsquo;t fall back to BTC if asset webhook is empty &mdash; just don&rsquo;t broadcast. V7.0 had ETH/SOL/DOGE fall through to BTC&rsquo;s webhook if empty, which surprised users who didn&rsquo;t want broadcasts on those assets yet. Now: each asset&rsquo;s webhook is independent. Empty = no broadcasts for that asset, period. Settings UI updated to reflect this.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · Version pill bug</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Header version pill was hardcoded as <code className="text-[10px] bg-[#0E100F] px-1">6.5.3</code> in JSX text and never got swept by the version-bump script (which only updates spans). Now reads from the BASELINE_VERSION marker properly. Worth doing this once: future bumps won&rsquo;t miss it.</p>
+              </section>
 
               {/* V7.0 — Multi-asset + per-asset Discord webhooks */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
@@ -13245,11 +13326,10 @@ function TaraApp(){
                 </ul>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-4 mb-2">3 · Per-asset Discord webhooks</div>
-                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Settings &rarr; Discord Integration now shows <strong>four webhook inputs</strong>, color-coded per asset. Each webhook can point to a different Discord channel.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Settings &rarr; Discord Integration now shows <strong>four webhook inputs</strong>, color-coded per asset. Each webhook points to its own Discord channel. <strong>Strict per-asset</strong> — empty slot means no broadcasts for that asset. No fallbacks, no surprise messages.</p>
                 <ul className="list-disc pl-4 space-y-1 text-[11px]">
                   <li>Set all four &rarr; each asset broadcasts to its own channel</li>
-                  <li>Set just BTC &rarr; all assets fall back to BTC&apos;s webhook (old behavior)</li>
-                  <li>Set BTC + ETH only &rarr; BTC goes to its channel, ETH to its channel, SOL/DOGE fall back to BTC</li>
+                  <li>Set just BTC &rarr; only BTC broadcasts; ETH/SOL/DOGE silent until configured</li>
                   <li>Empty across the board &rarr; no broadcasts</li>
                 </ul>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mt-2">Migration: existing webhook from 6.x is auto-copied into the BTC slot on first 7.0 load. Nothing breaks.</p>
