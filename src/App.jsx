@@ -111,11 +111,47 @@ const cloudWatch=(path,callback)=>{
 };
 // Coalesces rapid updates per-path into a single Firestore write (saves quota + bandwidth).
 const _writeQueue=new Map();
-const cloudWriteDebounced=(path,data,delayMs=1500)=>{
+// V8.1: Track latest pending data per path so we can synchronously flush on tab close.
+//   Map of path → most recent data, separate from the timeout map.
+const _writePending=new Map();
+const cloudWriteDebounced=(path,data,delayMs=300)=>{
   if(_writeQueue.has(path))clearTimeout(_writeQueue.get(path));
-  const tid=setTimeout(()=>{cloudWrite(path,data);_writeQueue.delete(path);},delayMs);
+  _writePending.set(path,data);
+  const tid=setTimeout(()=>{
+    cloudWrite(path,data);
+    _writeQueue.delete(path);
+    _writePending.delete(path);
+  },delayMs);
   _writeQueue.set(path,tid);
 };
+// V8.1: Synchronously fire all pending debounced writes. Called on pagehide/beforeunload
+//   so trades made just before tab close don't get lost in the 300ms debounce window.
+//   Returns the count of writes flushed.
+const cloudFlushAll=()=>{
+  let flushed=0;
+  for(const[path,tid]of _writeQueue.entries()){
+    clearTimeout(tid);
+    const data=_writePending.get(path);
+    if(data!=null){
+      // Fire-and-forget — no await. Modern browsers respect the in-flight fetch
+      //   on pagehide for a brief grace period. Firestore writes use fetch internally.
+      try{cloudWrite(path,data);flushed++;}catch(_){}
+    }
+  }
+  _writeQueue.clear();
+  _writePending.clear();
+  return flushed;
+};
+// V8.1: Wire flush to tab visibility change events. Browsers fire pagehide reliably
+//   on real tab close + navigation; visibilitychange covers tab switch/minimize.
+if(typeof window!=='undefined'){
+  const _onLeave=()=>{try{cloudFlushAll();}catch(_){}};
+  window.addEventListener('pagehide',_onLeave);
+  window.addEventListener('beforeunload',_onLeave);
+  window.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='hidden')_onLeave();
+  });
+}
 // Deterministic ID for the current trading window (UTC ISO of window-open boundary).
 // Refresh during the same window → same ID → restore the same lock.
 const computeWindowId=(windowType)=>{
@@ -254,7 +290,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v8.0.1-tdz-fix-conviction-tracker';
+const BASELINE_VERSION='2026.05.05-v8.2-profit-trader-toolkit';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -1442,6 +1478,132 @@ const useGlobalTape=(asset)=>{
   },[asset]);
 
   return{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal,tapeWindows};
+};
+
+// ── V8.1: useMovementRisk — REAL-TIME RISK PULSE ─────────────────────────────
+// Combines vol acceleration, volume spikes, tape imbalance, whale density into a 0-100
+// risk score. Updates every 2s. All inputs are existing refs — no new data fetches.
+// Returns: { level: 'CALM'|'NORMAL'|'ELEVATED'|'EXTREME', score: 0-100,
+//            dirBias: 'UP'|'DOWN'|null, reasons: [{tag, weight}], predictive: '...' }
+const useMovementRisk=(velocityRef,tapeRef,ticksRef,whaleLog,regimeRef)=>{
+  const ref=useRef({level:'CALM',score:0,dirBias:null,reasons:[],predictive:null});
+  const baselineRef=useRef({accel:0.5,volume:0,sampleAt:0});
+  const[snapshot,setSnapshot]=React.useState({level:'CALM',score:0,dirBias:null,reasons:[],predictive:null});
+  React.useEffect(()=>{
+    const tick=()=>{
+      try{
+        const now=Date.now();
+        const v=velocityRef?.current||{};
+        const tape=tapeRef?.current||{};
+        const ticks=ticksRef?.current||[];
+        const whales=whaleLog||[];
+        let score=0;
+        const reasons=[];
+        let dirBias=null;
+        // ── Vol acceleration vs rolling baseline ──
+        // Baseline = exponentially-weighted moving avg of |accel|. Updated each tick at 0.05 weight.
+        const _accel=Math.abs(Number(v.accel)||0);
+        if(now-baselineRef.current.sampleAt>1500){
+          baselineRef.current.accel=baselineRef.current.accel*0.95+_accel*0.05;
+          baselineRef.current.sampleAt=now;
+        }
+        const _accelBase=Math.max(0.5,baselineRef.current.accel);
+        const _accelRatio=_accel/_accelBase;
+        if(_accelRatio>=2.5){
+          score+=30;
+          reasons.push({tag:`accel ${_accelRatio.toFixed(1)}x baseline`,weight:30});
+        } else if(_accelRatio>=1.8){
+          score+=18;
+          reasons.push({tag:`accel ${_accelRatio.toFixed(1)}x`,weight:18});
+        } else if(_accelRatio<=0.4){
+          // Compression: low vol relative to baseline. Often precedes breakouts.
+          score+=10;
+          reasons.push({tag:`compressed ${_accelRatio.toFixed(2)}x`,weight:10});
+        }
+        // ── Volume spike: last 30s vs last 5min average ──
+        const _last30s=ticks.filter(t=>now-t.time<30000);
+        const _last5min=ticks.filter(t=>now-t.time<300000);
+        if(_last30s.length>=5&&_last5min.length>=20){
+          const _vol30=_last30s.reduce((s,t)=>s+(t.usd||t.sz||1),0);
+          const _vol5min=_last5min.reduce((s,t)=>s+(t.usd||t.sz||1),0);
+          const _per30=_vol30;
+          const _avg30=_vol5min/(300/30); // expected 30s slice of 5min total
+          if(_avg30>0){
+            const _volRatio=_per30/_avg30;
+            if(_volRatio>=3){
+              score+=25;
+              reasons.push({tag:`volume spike ${_volRatio.toFixed(1)}x`,weight:25});
+            } else if(_volRatio>=2){
+              score+=15;
+              reasons.push({tag:`volume ${_volRatio.toFixed(1)}x avg`,weight:15});
+            }
+          }
+        }
+        // ── Tape imbalance ──
+        const _imb=Number(tape.globalImbalance)||1;
+        if(_imb>=3){
+          score+=20;
+          dirBias='UP';
+          reasons.push({tag:`buy pressure ${_imb.toFixed(1)}x`,weight:20});
+        } else if(_imb<=0.33){
+          score+=20;
+          dirBias='DOWN';
+          reasons.push({tag:`sell pressure ${(1/_imb).toFixed(1)}x`,weight:20});
+        } else if(_imb>=2){
+          score+=10;
+          dirBias='UP';
+          reasons.push({tag:`buy lean ${_imb.toFixed(1)}x`,weight:10});
+        } else if(_imb<=0.5){
+          score+=10;
+          dirBias='DOWN';
+          reasons.push({tag:`sell lean ${(1/_imb).toFixed(1)}x`,weight:10});
+        }
+        // ── Whale density: prints in last 60s vs last 10min baseline ──
+        const _whale60s=whales.filter(w=>now-w.time<60000);
+        const _whale10min=whales.filter(w=>now-w.time<600000);
+        if(_whale60s.length>=2){
+          const _per60=_whale60s.length;
+          const _avg60=_whale10min.length/(600/60);
+          if(_avg60>0&&_per60/_avg60>=2.5){
+            score+=15;
+            reasons.push({tag:`${_per60} whales in 60s`,weight:15});
+            // Whale directional cluster
+            const _whaleBuys=_whale60s.filter(w=>w.side==='BUY').length;
+            const _whaleSells=_whale60s.filter(w=>w.side==='SELL').length;
+            if(_whaleBuys>=_whaleSells*2)dirBias=dirBias||'UP';
+            else if(_whaleSells>=_whaleBuys*2)dirBias=dirBias||'DOWN';
+          }
+        }
+        // ── Choppy regime amplifier ──
+        const regime=regimeRef?.current||null;
+        if((regime==='RANGE_BOUND'||regime==='CHOP'||regime==='RANGE'||regime==='RANGE-CHOP')&&score>=40){
+          score+=8;
+          reasons.push({tag:'chop amplifies risk',weight:8});
+        }
+        // ── Predictive readout ──
+        let predictive=null;
+        if(score>=60&&dirBias){
+          predictive=`${dirBias} move likely next 30-60s`;
+        } else if(_accelRatio<=0.5&&_imb>1.5&&_imb<2&&score<40){
+          predictive='compressed — breakout watch';
+        } else if(score>=70){
+          predictive='extreme conditions — stand back';
+        } else if(score<=15){
+          predictive='calm — favorable for normal positions';
+        }
+        // ── Level classification ──
+        score=Math.min(100,Math.max(0,score));
+        const level=score<20?'CALM':score<45?'NORMAL':score<70?'ELEVATED':'EXTREME';
+        const next={level,score:Math.round(score),dirBias,reasons,predictive};
+        ref.current=next;
+        setSnapshot(next);
+      }catch(_){}
+    };
+    tick();
+    const iv=setInterval(tick,2000);
+    return()=>clearInterval(iv);
+  },[velocityRef,tapeRef,ticksRef,whaleLog,regimeRef]);
+  return snapshot;
 };
 
 // V134: HPotter Future Grand Trend — multi-timeframe forecast
@@ -4344,7 +4506,7 @@ function TaraAdvisorPanel({advisor,executeAction}){
 // Renders inside TaraCallCard. Surfaces FOUR signals that should change how user
 // trades the current window: conviction trajectory, edge vs Kalshi, suggested
 // position size, and cooldown after loss.
-function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayData,analysis}){
+function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayData,analysis,movementRisk,bestWindowsToday}){
   if(!taraCall)return null;
   const _post=Number(taraCall.posterior||0);
   const _hasPost=Number.isFinite(_post)&&_post>0;
@@ -4359,16 +4521,24 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
     _edgeColor=_edge>=15?'rgb(110,231,183)':_edge>=5?'rgba(110,231,183,0.85)':_edge>=-5?'rgba(229,200,112,0.85)':'rgba(244,114,182,0.95)';
     _edgeLabel=_edge>=15?'BIG EDGE':_edge>=5?'GOOD EDGE':_edge>=-5?'TIGHT':'LATE';
   }
-  // ── Position size hint ── Combine regime vol + tilt status + edge into a recommendation
+  // ── Position size hint ── Combine regime vol + tilt status + edge + time-of-day into recommendation
   let _sizeHint=null,_sizeColor=null,_sizeReason=null;
+  // V8.2: Time-of-day scaling — find current UTC hour entry from bestWindowsToday
+  const _curUtcH=new Date().getUTCHours();
+  const _curHourEntry=bestWindowsToday?.best?.find(h=>h.hour===_curUtcH);
+  const _isInBestHour=_curHourEntry&&_curHourEntry.wr>=70&&_curHourEntry.total>=4;
   if(todayData?.strongTilt){
     _sizeHint='SKIP';_sizeColor='rgb(244,114,182)';_sizeReason='5+ losses in a row';
   } else if(todayData?.tilt){
     _sizeHint='HALF';_sizeColor='rgba(244,114,182,0.85)';_sizeReason='3+ loss streak';
   } else if(_edge!=null&&_edge<-5){
     _sizeHint='SKIP';_sizeColor='rgba(244,114,182,0.85)';_sizeReason='negative edge vs Kalshi';
+  } else if(_edge!=null&&_edge>=15&&_isInBestHour&&_isLocked){
+    _sizeHint='LARGE';_sizeColor='rgb(110,231,183)';_sizeReason=`big edge + ${_curHourEntry.wr}% historical hour`;
   } else if(_edge!=null&&_edge>=15&&_isLocked){
     _sizeHint='FULL';_sizeColor='rgb(110,231,183)';_sizeReason='big edge';
+  } else if(_isInBestHour&&_isLocked&&_edge!=null&&_edge>=5){
+    _sizeHint='FULL';_sizeColor='rgba(110,231,183,0.85)';_sizeReason=`good edge + ${_curHourEntry.wr}% historical hour`;
   } else if(analysis?.regime==='HIGH_VOL'||analysis?.regime==='EXTREME_VOL'){
     _sizeHint='HALF';_sizeColor='rgba(229,200,112,0.85)';_sizeReason='vol regime';
   } else if(_isLocked){
@@ -4380,8 +4550,10 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   const _showTrajectory=_isLocked&&convictionTrajectory&&convictionTrajectory.state!=='UNKNOWN';
   const _trajColor=convictionTrajectory?.state==='BUILDING'?'rgba(110,231,183,0.85)':convictionTrajectory?.state==='FADING'?'rgba(244,114,182,0.85)':'rgba(232,233,228,0.55)';
   const _trajIcon=convictionTrajectory?.state==='BUILDING'?'↗':convictionTrajectory?.state==='FADING'?'↘':'→';
+  // V8.1: Movement risk chip activates this overlay too (only at ELEVATED+)
+  const _showRiskChip=movementRisk&&(movementRisk.level==='ELEVATED'||movementRisk.level==='EXTREME');
   // Don't render if nothing meaningful to show
-  if(!_edgeLabel&&!_sizeHint&&!_showCooldown&&!_showTrajectory)return null;
+  if(!_edgeLabel&&!_sizeHint&&!_showCooldown&&!_showTrajectory&&!_showRiskChip)return null;
   return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#E8E9E4]/5'},
     React.createElement('div',{className:'flex items-center justify-between gap-2 flex-wrap'},
       React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 flex-wrap'},
@@ -4414,10 +4586,34 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
           React.createElement('span',{className:'text-[11px] font-bold leading-none',style:{color:_trajColor}},_trajIcon),
           React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold',style:{color:_trajColor}},convictionTrajectory.state),
         ),
+        // V8.1: Movement risk chip — only when ELEVATED or higher (clutter avoidance)
+        movementRisk&&(movementRisk.level==='ELEVATED'||movementRisk.level==='EXTREME')&&React.createElement('div',{
+          className:'flex items-baseline gap-1 px-1.5 py-0.5 rounded',
+          style:{
+            background:movementRisk.level==='EXTREME'?'rgba(244,114,182,0.08)':'rgba(229,200,112,0.06)',
+            border:'1px solid '+(movementRisk.level==='EXTREME'?'rgba(244,114,182,0.30)':'rgba(229,200,112,0.22)'),
+          },
+          title:[
+            `Movement risk: ${movementRisk.level} (${movementRisk.score}/100)`,
+            movementRisk.predictive?`→ ${movementRisk.predictive}`:null,
+            ...movementRisk.reasons.slice(0,4).map(r=>`· ${r.tag}`),
+          ].filter(Boolean).join('\n'),
+        },
+          React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold text-[#E8E9E4]/40'},'Risk'),
+          React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider',style:{color:movementRisk.level==='EXTREME'?'rgb(244,114,182)':'rgba(229,200,112,0.95)'}},movementRisk.level),
+          movementRisk.dirBias&&React.createElement('span',{className:'text-[10px] font-bold leading-none',style:{color:movementRisk.level==='EXTREME'?'rgb(244,114,182)':'rgba(229,200,112,0.95)'}},movementRisk.dirBias==='UP'?'↑':'↓'),
+        ),
+      ),
+      // V8.1: Predictive readout strip (only when notable signal)
+      movementRisk&&movementRisk.predictive&&movementRisk.score>=45&&React.createElement('div',{
+        className:'mt-2 text-[10px] italic',
+        style:{color:movementRisk.level==='EXTREME'?'rgba(244,114,182,0.85)':'rgba(229,200,112,0.85)'},
+      },
+        React.createElement('span',null,'→ ',movementRisk.predictive),
       ),
       // Cooldown indicator
       _showCooldown&&React.createElement('div',{
-        className:'text-[10px] flex items-baseline gap-1.5 px-1.5 py-0.5 rounded',
+        className:'text-[10px] flex items-baseline gap-1.5 px-1.5 py-0.5 rounded mt-1.5',
         style:{background:'rgba(229,200,112,0.05)',border:'1px solid rgba(229,200,112,0.18)',color:'rgba(229,200,112,0.85)'},
       },
         React.createElement('span',null,'⧗'),
@@ -4427,7 +4623,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   );
 }
 
-function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData}){
+function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday}){
   if(!taraCall)return null;
     const tc=taraCall;
     const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
@@ -5066,6 +5262,8 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           convictionTrajectory={convictionTrajectory}
           todayData={todayData}
           analysis={analysis}
+          movementRisk={movementRisk}
+          bestWindowsToday={bestWindowsToday}
         />
 
         {/* V5.6.1: Tara's Memory — last 6 calls with results. Synced to Firestore so it
@@ -5135,25 +5333,543 @@ function PastWindowsPill({pastWindows,windowType}){
   );
 }
 
+// ── V8.2: TRADING SETTINGS MODAL ────────────────────────────────────────────
+// Configure bet size, win payout, anti-tilt cooldown, Discord alert filter,
+// take-profit/cut-loss rules. All localStorage-only, per-device prefs.
+function TradingSettingsModal({open,onClose,settings,setSettings}){
+  if(!open)return null;
+  const _update=(k,v)=>setSettings(prev=>({...prev,[k]:v}));
+  const _num=(s,fallback)=>{const n=Number(s);return Number.isFinite(n)?n:fallback;};
+  return React.createElement('div',{
+    className:'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm overflow-y-auto',
+    onClick:onClose,
+  },
+    React.createElement('div',{
+      className:'bg-[#181A19] border border-[#E8E9E4]/15 rounded-xl shadow-2xl max-w-md w-full p-5 my-8',
+      onClick:(e)=>e.stopPropagation(),
+      style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(229,200,112,0.06)'},
+    },
+      React.createElement('div',{className:'flex justify-between items-baseline mb-4'},
+        React.createElement('div',null,
+          React.createElement('h2',{className:'text-lg font-serif text-white tracking-tight'},'Trading Settings'),
+          React.createElement('p',{className:'text-[10px] uppercase tracking-wider text-[#E8E9E4]/45 mt-0.5'},'per-device · localStorage'),
+        ),
+        React.createElement('button',{onClick:onClose,className:'text-[#E8E9E4]/40 hover:text-white text-xl leading-none'},'×'),
+      ),
+      // Bet size + win payout
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8'},
+        React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-2'},'Position Sizing'),
+        React.createElement('div',{className:'grid grid-cols-2 gap-3'},
+          React.createElement('label',{className:'block'},
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Bet size ($)'),
+            React.createElement('input',{
+              type:'number',min:0.01,step:0.01,value:settings.betSize,
+              onChange:(e)=>_update('betSize',_num(e.target.value,10)),
+              className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+            }),
+          ),
+          React.createElement('label',{className:'block'},
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Win payout ($)'),
+            React.createElement('input',{
+              type:'number',min:0.01,step:0.01,value:settings.winPayout,
+              onChange:(e)=>_update('winPayout',_num(e.target.value,8.5)),
+              className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+            }),
+          ),
+        ),
+        React.createElement('div',{className:'mt-2 text-[10px] text-[#E8E9E4]/45'},
+          'Net per win: +$',(settings.winPayout||0).toFixed(2),' · per loss: -$',(settings.betSize||0).toFixed(2),
+          '. Required WR for breakeven: ',(settings.winPayout&&settings.betSize?Math.round((settings.betSize/(settings.winPayout+settings.betSize))*100):0),'%',
+        ),
+      ),
+      // Anti-tilt
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8'},
+        React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
+          React.createElement('div',null,
+            React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-0.5'},'Anti-tilt cooldown'),
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Block new locks after a losing streak'),
+          ),
+          React.createElement('input',{type:'checkbox',checked:settings.antiTiltEnabled,onChange:(e)=>_update('antiTiltEnabled',e.target.checked),className:'ml-2'}),
+        ),
+        settings.antiTiltEnabled&&React.createElement('div',{className:'mt-3 grid grid-cols-2 gap-3'},
+          React.createElement('label',{className:'block'},
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Trigger after N losses'),
+            React.createElement('input',{
+              type:'number',min:3,max:10,step:1,value:settings.antiTiltStreakLen,
+              onChange:(e)=>_update('antiTiltStreakLen',Math.max(3,Math.min(10,_num(e.target.value,4)))),
+              className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+            }),
+          ),
+          React.createElement('label',{className:'block'},
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Cooldown duration (min)'),
+            React.createElement('input',{
+              type:'number',min:1,max:120,step:1,value:settings.antiTiltMinutes,
+              onChange:(e)=>_update('antiTiltMinutes',Math.max(1,Math.min(120,_num(e.target.value,15)))),
+              className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+            }),
+          ),
+        ),
+      ),
+      // High-edge Discord filter
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8'},
+        React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
+          React.createElement('div',null,
+            React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-0.5'},'Discord: high-edge alerts only'),
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Filter LOCK alerts to high-edge calls vs Kalshi'),
+          ),
+          React.createElement('input',{type:'checkbox',checked:settings.highEdgeAlertOnly,onChange:(e)=>_update('highEdgeAlertOnly',e.target.checked),className:'ml-2'}),
+        ),
+        settings.highEdgeAlertOnly&&React.createElement('div',{className:'mt-3'},
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Min edge (pp vs Kalshi)'),
+          React.createElement('input',{
+            type:'number',min:5,max:40,step:1,value:settings.highEdgeMinPp,
+            onChange:(e)=>_update('highEdgeMinPp',Math.max(5,Math.min(40,_num(e.target.value,15)))),
+            className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+          }),
+        ),
+      ),
+      // TP / SL rules
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8'},
+        React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-2'},'Auto exit suggestions'),
+        React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer mb-2'},
+          React.createElement('div',null,
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65'},'Take-profit: suggest exit when offer ≥'),
+          ),
+          React.createElement('input',{type:'checkbox',checked:settings.takeProfitEnabled,onChange:(e)=>_update('takeProfitEnabled',e.target.checked),className:'ml-2'}),
+        ),
+        settings.takeProfitEnabled&&React.createElement('div',{className:'mb-3'},
+          React.createElement('input',{
+            type:'number',min:0.5,max:0.99,step:0.01,value:settings.takeProfitOffer,
+            onChange:(e)=>_update('takeProfitOffer',Math.max(0.5,Math.min(0.99,_num(e.target.value,0.85)))),
+            className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+          }),
+        ),
+        React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
+          React.createElement('div',null,
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65'},'Cut-loss: suggest exit after N min in loss'),
+          ),
+          React.createElement('input',{type:'checkbox',checked:settings.cutLossEnabled,onChange:(e)=>_update('cutLossEnabled',e.target.checked),className:'ml-2'}),
+        ),
+        settings.cutLossEnabled&&React.createElement('div',{className:'mt-2'},
+          React.createElement('input',{
+            type:'number',min:1,max:14,step:0.5,value:settings.cutLossMinutes,
+            onChange:(e)=>_update('cutLossMinutes',Math.max(1,Math.min(14,_num(e.target.value,3)))),
+            className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+          }),
+        ),
+      ),
+      React.createElement('button',{
+        onClick:onClose,
+        className:'w-full px-4 py-2 rounded text-[11px] uppercase font-bold tracking-wider transition-colors',
+        style:{background:'rgba(229,200,112,0.12)',color:T2_GOLD,border:'1px solid rgba(229,200,112,0.3)'},
+      },'Done'),
+    ),
+  );
+}
+
+// ── V8.2: ANTI-TILT COOLDOWN BANNER ──────────────────────────────────────────
+function AntiTiltCooldownBanner({tiltLockUntil,setTiltLockUntil,settings,onOverride}){
+  const[now,setNow]=React.useState(Date.now());
+  React.useEffect(()=>{
+    if(!tiltLockUntil||tiltLockUntil<=Date.now())return;
+    const iv=setInterval(()=>setNow(Date.now()),1000);
+    return()=>clearInterval(iv);
+  },[tiltLockUntil]);
+  if(!tiltLockUntil||tiltLockUntil<=now)return null;
+  const _msLeft=tiltLockUntil-now;
+  const _minLeft=Math.floor(_msLeft/60000);
+  const _secLeft=Math.floor((_msLeft%60000)/1000);
+  return React.createElement('div',{
+    className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2.5 animate-pulse',
+    style:{
+      border:'1px solid rgba(244,114,182,0.50)',
+      background:'linear-gradient(90deg, rgba(244,114,182,0.10) 0%, rgba(244,114,182,0.04) 100%)',
+    },
+  },
+    React.createElement('div',{className:'flex items-baseline justify-between gap-3 flex-wrap'},
+      React.createElement('div',{className:'flex items-baseline gap-2 min-w-0 flex-1'},
+        React.createElement('span',{className:'text-base shrink-0'},'⛔'),
+        React.createElement('div',{className:'min-w-0 flex-1'},
+          React.createElement('div',{className:'text-[11px] uppercase font-bold tracking-wider',style:{color:'rgb(244,114,182)'}},'TILT COOLDOWN ACTIVE'),
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mt-0.5'},
+            settings.antiTiltStreakLen,'+ losses in a row · new locks blocked for ',
+            React.createElement('span',{className:'tabular-nums font-bold'},_minLeft,':',String(_secLeft).padStart(2,'0')),
+            ' · take a break, review the recent losses',
+          ),
+        ),
+      ),
+      React.createElement('button',{
+        onClick:()=>{
+          if(window.confirm('Override tilt cooldown? Tilt entries are statistically the worst trades. Are you sure?')){
+            setTiltLockUntil(0);
+            if(typeof onOverride==='function')onOverride();
+          }
+        },
+        className:'px-2 py-1 rounded text-[9px] uppercase font-bold tracking-wider hover:bg-[#E8E9E4]/8 shrink-0',
+        style:{color:'rgba(244,114,182,0.7)',border:'1px solid rgba(244,114,182,0.25)'},
+      },'Override'),
+    ),
+  );
+}
+
+// ── V8.2: ASSET ROTATION HINT ────────────────────────────────────────────────
+function AssetRotationHint({rotation,onSwitch}){
+  if(!rotation)return null;
+  return React.createElement('div',{
+    className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2',
+    style:{
+      border:'1px solid rgba(147,197,253,0.30)',
+      background:'rgba(147,197,253,0.04)',
+    },
+  },
+    React.createElement('div',{className:'flex items-baseline justify-between gap-3 flex-wrap'},
+      React.createElement('div',{className:'flex items-baseline gap-2 min-w-0 flex-1 flex-wrap'},
+        React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:'rgba(147,197,253,0.85)'}},'Asset hint'),
+        React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/75'},
+          rotation.suggest,' has won ',rotation.othWR,'% of last ',rotation.othN,' (vs current ',rotation.curWR,'%, ',rotation.curN,' calls)',
+        ),
+      ),
+      onSwitch&&React.createElement('button',{
+        onClick:()=>onSwitch(rotation.suggest),
+        className:'px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider shrink-0',
+        style:{color:'rgba(147,197,253,0.95)',border:'1px solid rgba(147,197,253,0.30)',background:'rgba(147,197,253,0.05)'},
+      },`Switch to ${rotation.suggest}`),
+    ),
+  );
+}
+
+// ── V8.2: PRE-WINDOW PREP CARD ────────────────────────────────────────────────
+// Appears 30s before next window opens. Shows hour-WR for this day-of-week,
+// today's streak, macro status. Auto-hides when window starts.
+function PreWindowPrepCard({timeState,bestWindowsToday,todayData,marketCtx}){
+  const _secLeft=(timeState?.minsRemaining||0)*60+(timeState?.secsRemaining||0);
+  const _winSec=15*60; // 15min windows
+  const _showFrom=30,_showTo=2;
+  if(_secLeft>_showFrom||_secLeft<_showTo)return null;
+  // Find the upcoming hour from bestWindowsToday's schedule
+  const _curUtcH=new Date().getUTCHours();
+  const _nextH=(_curUtcH+1)%24;
+  const _bestEntry=bestWindowsToday?.best?.find(b=>b.hour===_nextH);
+  const _isMacroSoon=marketCtx?.macro?.state==='BLACKOUT'||marketCtx?.macro?.state==='OBSERVE';
+  return React.createElement('div',{
+    className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2',
+    style:{
+      border:'1px solid rgba(229,200,112,0.30)',
+      background:'rgba(229,200,112,0.04)',
+    },
+  },
+    React.createElement('div',{className:'flex items-baseline justify-between gap-2 flex-wrap'},
+      React.createElement('div',{className:'flex items-baseline gap-2 flex-wrap min-w-0'},
+        React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:T2_GOLD}},'Next window in'),
+        React.createElement('span',{className:'text-[11px] tabular-nums font-bold text-white'},_secLeft,'s'),
+        _bestEntry&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/65'},'· this hour historical: ',_bestEntry.wr,'% (',_bestEntry.total,' trades)'),
+        todayData?.streak>=2&&React.createElement('span',{className:'text-[10px]',style:{color:todayData.streakType==='hot'?'rgba(110,231,183,0.85)':'rgba(229,200,112,0.85)'}},
+          '· today: ',todayData.streak,todayData.streakType==='hot'?'W':'L',' streak',
+        ),
+        _isMacroSoon&&React.createElement('span',{className:'text-[10px] font-bold',style:{color:'rgba(244,114,182,0.85)'}},'· ⚠ macro event imminent'),
+      ),
+    ),
+  );
+}
+
+// ── V8.2: LAST LOSS POST-MORTEM ─────────────────────────────────────────────
+// After a fresh LOSS, shows a small dismissable card explaining what disagreed.
+// Auto-dismisses 60s after appearing. User can also dismiss with X.
+function LastLossPostmortem({todayData,taraCallLog,currentAsset}){
+  const[dismissedId,setDismissedId]=React.useState(null);
+  const _src=(taraCallLog||[]).filter(e=>e&&(e.asset||'BTC')===currentAsset&&e.result==='LOSS');
+  const _lastLoss=_src.length>0?_src[_src.length-1]:null;
+  if(!_lastLoss)return null;
+  if(dismissedId===_lastLoss.id)return null;
+  // Only show if loss was within last 5 min
+  const _ageSec=(Date.now()-_lastLoss.time)/1000;
+  if(_ageSec>300)return null;
+  // Surface the strongest dissenting signal that was right
+  const _signals=_lastLoss.signals||{};
+  const _outcomeDir=_lastLoss.outcomeDir||(_lastLoss.dir==='UP'?'DOWN':'UP'); // since LOSS, opposite was right
+  const _outcomeSign=_outcomeDir==='UP'?1:-1;
+  let _dissenter=null,_dissenterScore=-Infinity;
+  Object.entries(_signals).forEach(([k,v])=>{
+    if(typeof v!=='number')return;
+    if(Math.sign(v)===_outcomeSign&&Math.abs(v)>1){ // signal pointed toward winner
+      if(Math.abs(v)>_dissenterScore){_dissenter=k;_dissenterScore=Math.abs(v);}
+    }
+  });
+  return React.createElement('div',{
+    className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2',
+    style:{
+      border:'1px solid rgba(244,114,182,0.25)',
+      background:'rgba(244,114,182,0.04)',
+    },
+  },
+    React.createElement('div',{className:'flex items-baseline justify-between gap-2 flex-wrap'},
+      React.createElement('div',{className:'flex items-baseline gap-2 flex-wrap min-w-0 flex-1'},
+        React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:'rgba(244,114,182,0.95)'}},'Loss recap'),
+        React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/75'},
+          _lastLoss.dir,' · ',_lastLoss.regime||'no regime',' · ',Math.round(_lastLoss.confidence||0),'% conf · closed ',_outcomeDir,
+        ),
+        _dissenter&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/55'},
+          '· ',_dissenter,' (',_dissenterScore.toFixed(1),') saw it right',
+        ),
+      ),
+      React.createElement('button',{
+        onClick:()=>setDismissedId(_lastLoss.id),
+        className:'text-[#E8E9E4]/35 hover:text-[#E8E9E4]/70 text-xs leading-none px-1 shrink-0',
+        title:'Dismiss',
+      },'×'),
+    ),
+  );
+}
+
+// ── V8.2: DAILY INSIGHT CARD ─────────────────────────────────────────────────
+// Once-per-day actionable observation. Computed from today's call log + scorecards.
+function DailyInsightCard({todayData,bestWindowsToday}){
+  const[dismissedAt,setDismissedAt]=React.useState(()=>{
+    try{return Number(localStorage.getItem('taraDailyInsightDismissedAt_v1')||'0');}catch(_){return 0;}
+  });
+  const _now=Date.now();
+  const _today=new Date().toLocaleDateString('en-US',{year:'numeric',month:'2-digit',day:'2-digit'});
+  const _dismissedToday=dismissedAt>0&&new Date(dismissedAt).toLocaleDateString('en-US',{year:'numeric',month:'2-digit',day:'2-digit'})===_today;
+  if(_dismissedToday)return null;
+  if(!todayData||(todayData.wins+todayData.losses)<3)return null;
+  // Compute the most actionable insight
+  let insight=null;
+  // 1. Edge bucket pattern
+  const _eb=todayData.edgeBuckets||{};
+  const _tightTotal=(_eb.tight?.wins||0)+(_eb.tight?.losses||0);
+  const _tightWR=_tightTotal>0?(_eb.tight.wins/_tightTotal):0;
+  const _bigTotal=(_eb['big-edge']?.wins||0)+(_eb['big-edge']?.losses||0);
+  const _bigWR=_bigTotal>0?(_eb['big-edge'].wins/_bigTotal):0;
+  if(_tightTotal>=8&&_tightWR<0.5&&_bigTotal>=5&&_bigWR>0.65){
+    insight={text:`TIGHT-edge calls are at ${Math.round(_tightWR*100)}% (${_tightTotal} trades). BIG-edge are at ${Math.round(_bigWR*100)}%. Skip TIGHT entries — wait for clear edge.`};
+  }
+  // 2. Streak-based insight
+  if(!insight&&todayData.strongTilt){
+    insight={text:`Tilt warning: ${todayData.streak} consecutive losses today. Step away for 15-30 min before next entry.`};
+  } else if(!insight&&todayData.heater){
+    insight={text:`Heater: ${todayData.streak}-win streak. Trust the read but don't size up beyond plan — mean reversion is real.`};
+  }
+  // 3. Best-windows reminder
+  if(!insight&&bestWindowsToday?.nextBest&&bestWindowsToday.nextBest.minsUntil<120){
+    insight={text:`Your best ${bestWindowsToday.dayName} hour (${String(bestWindowsToday.nextBest.hour).padStart(2,'0')}:00 UTC, ${bestWindowsToday.nextBest.wr}% WR) starts in ${bestWindowsToday.nextBest.minsUntil}m.`};
+  }
+  // 4. Walk-forward divergence
+  if(!insight&&todayData.wr7d?.wr!=null&&todayData.wrLifetime?.wr!=null&&todayData.wr7d.total>=15&&todayData.wrLifetime.total>=50){
+    const _diff=todayData.wr7d.wr-todayData.wrLifetime.wr;
+    if(_diff<=-12){
+      insight={text:`7-day WR (${todayData.wr7d.wr}%) is ${Math.abs(_diff)}pp below lifetime (${todayData.wrLifetime.wr}%). Recent regime may not match learned weights.`};
+    } else if(_diff>=12){
+      insight={text:`7-day WR (${todayData.wr7d.wr}%) is ${_diff}pp above lifetime (${todayData.wrLifetime.wr}%). Tara is in a hot streak — current regime fits her well.`};
+    }
+  }
+  if(!insight)return null;
+  const _dismiss=()=>{
+    setDismissedAt(_now);
+    try{localStorage.setItem('taraDailyInsightDismissedAt_v1',String(_now));}catch(_){}
+  };
+  return React.createElement('div',{
+    className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2',
+    style:{
+      border:'1px solid rgba(229,200,112,0.30)',
+      background:'rgba(229,200,112,0.04)',
+    },
+  },
+    React.createElement('div',{className:'flex items-baseline justify-between gap-2 flex-wrap'},
+      React.createElement('div',{className:'flex items-baseline gap-2 flex-wrap min-w-0 flex-1'},
+        React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:T2_GOLD}},'★ insight'),
+        React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/80'},insight.text),
+      ),
+      React.createElement('button',{
+        onClick:_dismiss,
+        className:'text-[#E8E9E4]/35 hover:text-[#E8E9E4]/70 text-xs leading-none px-1 shrink-0',
+        title:'Dismiss for today',
+      },'×'),
+    ),
+  );
+}
+
+// ── V8.2: PERFORMANCE CARD ─────────────────────────────────────────────────
+// Walk-forward WR (7d/30d/lifetime) + edge-bucket breakdown + Kelly hint.
+// Collapsible, lives below TodayCard.
+function PerformanceCard({todayData,settings}){
+  const[expanded,setExpanded]=React.useState(()=>{
+    try{return localStorage.getItem('taraPerformanceCardExpanded_v1')!=='false';}catch(_){return true;}
+  });
+  const _toggle=()=>setExpanded(p=>{const n=!p;try{localStorage.setItem('taraPerformanceCardExpanded_v1',String(n));}catch(_){}return n;});
+  if(!todayData||!todayData.wrLifetime||todayData.wrLifetime.total<5)return null;
+  const{wr7d,wr30d,wrLifetime,edgeBuckets,kelly}=todayData;
+  const _wrColor=(wr,total)=>{
+    if(wr==null||total<5)return'rgba(232,233,228,0.4)';
+    return wr>=70?'rgb(110,231,183)':wr>=55?'rgba(232,233,228,0.85)':wr>=45?'rgba(229,200,112,0.85)':'rgb(244,114,182)';
+  };
+  return React.createElement('div',{
+    className:'rounded-lg overflow-hidden mb-2 sm:mb-3',
+    style:{border:'1px solid rgba(232,233,228,0.10)',background:'rgba(232,233,228,0.015)'},
+  },
+    React.createElement('div',{
+      className:'flex items-center justify-between gap-2 sm:gap-3 px-3 sm:px-4 py-2 cursor-pointer hover:bg-[#E8E9E4]/3',
+      onClick:_toggle,
+    },
+      React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
+        React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:T2_GOLD}},'Performance'),
+        React.createElement('span',{className:'text-[10px] tabular-nums',style:{color:_wrColor(wr7d.wr,wr7d.total)}},'7d ',wr7d.wr??'-','%'),
+        React.createElement('span',{className:'text-[10px] tabular-nums',style:{color:_wrColor(wr30d.wr,wr30d.total)}},'30d ',wr30d.wr??'-','%'),
+        React.createElement('span',{className:'text-[10px] tabular-nums',style:{color:_wrColor(wrLifetime.wr,wrLifetime.total)}},'all ',wrLifetime.wr??'-','%'),
+      ),
+      React.createElement('span',{className:'text-[#E8E9E4]/30 text-xs',style:{transition:'transform 0.2s',transform:expanded?'rotate(180deg)':'rotate(0deg)'}},'▾'),
+    ),
+    expanded&&React.createElement('div',{className:'border-t border-[#E8E9E4]/5 px-3 sm:px-4 py-3 space-y-3'},
+      // Walk-forward detail
+      React.createElement('div',null,
+        React.createElement('div',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/40 mb-1.5'},'Win rate by recency'),
+        React.createElement('div',{className:'grid grid-cols-3 gap-2'},
+          [{label:'Last 7d',d:wr7d},{label:'Last 30d',d:wr30d},{label:'All-time',d:wrLifetime}].map(({label,d})=>(
+            React.createElement('div',{key:label,className:'p-2 rounded',style:{background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.06)'}},
+              React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/40 mb-1'},label),
+              React.createElement('div',{className:'flex items-baseline gap-1.5'},
+                React.createElement('span',{className:'text-base font-bold tabular-nums',style:{color:_wrColor(d.wr,d.total)}},d.wr==null?'—':`${d.wr}%`),
+                React.createElement('span',{className:'text-[9px] tabular-nums text-[#E8E9E4]/40'},`${d.wins}W·${d.losses}L`),
+              ),
+            )
+          )),
+        ),
+      ),
+      // Edge bucket WR
+      edgeBuckets&&React.createElement('div',null,
+        React.createElement('div',{className:'flex items-baseline justify-between mb-1.5'},
+          React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/40'},'WR by edge vs Kalshi'),
+          React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/30'},'higher edge = harder to lose'),
+        ),
+        React.createElement('div',{className:'space-y-1'},
+          [
+            {key:'big-edge',label:'BIG (+15+ pp)',color:'rgb(110,231,183)'},
+            {key:'good-edge',label:'GOOD (+5 to +15)',color:'rgba(110,231,183,0.75)'},
+            {key:'tight',label:'TIGHT (-5 to +5)',color:'rgba(229,200,112,0.85)'},
+            {key:'late',label:'LATE (worse than Kalshi)',color:'rgba(244,114,182,0.85)'},
+          ].map(({key,label,color})=>{
+            const b=edgeBuckets[key]||{wins:0,losses:0};
+            const total=b.wins+b.losses;
+            const wr=total>0?Math.round((b.wins/total)*100):null;
+            const _barW=Math.max(2,Math.min(100,total/Math.max(1,Object.values(edgeBuckets).reduce((s,v)=>Math.max(s,v.wins+v.losses),1))*100));
+            return React.createElement('div',{key,className:'flex items-baseline gap-2'},
+              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider tabular-nums shrink-0 w-32',style:{color}},label),
+              React.createElement('div',{className:'flex-1 h-2 rounded-sm overflow-hidden',style:{background:'rgba(232,233,228,0.04)'}},
+                total>0&&React.createElement('div',{style:{width:_barW+'%',height:'100%',background:color,opacity:0.55}}),
+              ),
+              React.createElement('span',{className:'text-[9px] tabular-nums shrink-0 w-12 text-right',style:{color:wr==null?'rgba(232,233,228,0.4)':wr>=60?'rgb(110,231,183)':wr>=45?'rgba(232,233,228,0.7)':'rgba(244,114,182,0.85)'}},wr==null?'—':`${wr}%`),
+              React.createElement('span',{className:'text-[8px] tabular-nums text-[#E8E9E4]/35 shrink-0 w-12 text-right'},`${b.wins}W·${b.losses}L`),
+            );
+          }),
+        ),
+        React.createElement('div',{className:'mt-1.5 text-[10px] text-[#E8E9E4]/45 italic'},'Skip TIGHT and LATE buckets if their WR is below breakeven — that\'s the highest-impact filter.'),
+      ),
+      // Kelly hint
+      kelly&&React.createElement('div',{className:'pt-1.5 border-t border-[#E8E9E4]/5'},
+        React.createElement('div',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/40 mb-1'},'Kelly criterion (¼-Kelly · safety standard)'),
+        kelly.edge
+          ?React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/75'},
+              `Optimal bet: `,
+              React.createElement('span',{className:'tabular-nums font-bold',style:{color:T2_GOLD}},kelly.suggestPct,'%'),
+              ' of bankroll · full-Kelly ',kelly.fullF,'% (more aggressive). Source: ',kelly.sourceLabel,', ',kelly.sourceN,' trades.',
+            )
+          :React.createElement('div',{className:'text-[11px]',style:{color:'rgba(244,114,182,0.85)'}},
+              'Kelly says ',React.createElement('strong',null,'no edge'),' at current WR vs win/loss ratio. Consider higher-quality entries or larger win payout.',
+            ),
+        React.createElement('div',{className:'mt-1 text-[9px] text-[#E8E9E4]/40 italic'},
+          'Quarter-Kelly: industry-standard safety multiplier. Full-Kelly maximizes geometric growth but accepts huge drawdowns.',
+        ),
+      ),
+    ),
+  );
+}
+
+// ── V8.2: TAKE-PROFIT / CUT-LOSS BANNER ────────────────────────────────────
+// Surfaces when user has an active position and TP or SL trigger condition is met.
+function TPSLBanner({settings,userPosition,currentOffer,positionStatus,positionOpenTime}){
+  if(!settings)return null;
+  if(!userPosition)return null;
+  const _offerVal=parseFloat(currentOffer)||0;
+  const _ageMin=positionOpenTime?(Date.now()-positionOpenTime)/60000:0;
+  const _hitTP=settings.takeProfitEnabled&&_offerVal>=Number(settings.takeProfitOffer);
+  const _hitSL=settings.cutLossEnabled&&positionStatus?.pnlPct<0&&_ageMin>=Number(settings.cutLossMinutes);
+  if(!_hitTP&&!_hitSL)return null;
+  const _msg=_hitTP
+    ?`Take-profit hit · offer $${_offerVal.toFixed(2)} ≥ $${Number(settings.takeProfitOffer).toFixed(2)} · consider exit`
+    :`Cut-loss · in loss for ${Math.round(_ageMin)}min · consider exit`;
+  return React.createElement('div',{
+    className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2 animate-pulse',
+    style:{
+      border:'1px solid '+(_hitTP?'rgba(110,231,183,0.45)':'rgba(244,114,182,0.45)'),
+      background:_hitTP?'rgba(110,231,183,0.05)':'rgba(244,114,182,0.05)',
+    },
+  },
+    React.createElement('div',{className:'flex items-baseline gap-2'},
+      React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-wider shrink-0',style:{color:_hitTP?'rgb(110,231,183)':'rgb(244,114,182)'}},_hitTP?'⚑ take profit':'⚑ cut loss'),
+      React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/80'},_msg),
+    ),
+  );
+}
+
+// ── V8.1: MOVEMENT RISK PILL — REAL-TIME RISK PULSE ─────────────────────────
+// Header pill showing current market risk level, directional bias, and predictive readout.
+// Color/animation graded by level. Hover for full reason list + predictive text.
+function MovementRiskPill({movementRisk}){
+  if(!movementRisk||movementRisk.level==='CALM'&&movementRisk.score<5)return null;
+  const{level,score,dirBias,reasons,predictive}=movementRisk;
+  let _color,_bg,_border,_label,_pulse=false;
+  if(level==='EXTREME'){
+    _color='rgb(244,114,182)';_bg='rgba(244,114,182,0.12)';_border='rgba(244,114,182,0.45)';
+    _label='RISK · EXTREME';_pulse=true;
+  } else if(level==='ELEVATED'){
+    _color='rgba(229,200,112,0.95)';_bg='rgba(229,200,112,0.08)';_border='rgba(229,200,112,0.32)';
+    _label='RISK · ELEVATED';
+  } else if(level==='NORMAL'){
+    _color='rgba(232,233,228,0.7)';_bg='rgba(232,233,228,0.04)';_border='rgba(232,233,228,0.10)';
+    _label='RISK · NORMAL';
+  } else {
+    _color='rgba(110,231,183,0.85)';_bg='rgba(110,231,183,0.06)';_border='rgba(110,231,183,0.20)';
+    _label='CALM';
+  }
+  const _arrow=dirBias==='UP'?'↑':dirBias==='DOWN'?'↓':'';
+  const _title=[
+    `Movement risk: ${level} (${score}/100)`,
+    predictive?`→ ${predictive}`:null,
+    reasons.length>0?'\nReasons:':null,
+    ...reasons.map(r=>`  · ${r.tag}`),
+  ].filter(Boolean).join('\n');
+  return React.createElement('div',{
+    className:'flex items-baseline gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-md shrink-0'+(_pulse?' animate-pulse':''),
+    style:{background:_bg,border:'1px solid '+_border},
+    title:_title,
+  },
+    React.createElement('span',{className:'text-[9px] sm:text-[10px] uppercase font-bold tracking-wider tabular-nums',style:{color:_color}},_label),
+    _arrow&&React.createElement('span',{className:'text-[11px] font-bold leading-none',style:{color:_color}},_arrow),
+    score>=45&&React.createElement('span',{className:'text-[9px] tabular-nums hidden md:inline',style:{color:_color,opacity:0.7}},score),
+  );
+}
+
 // ── V8.0: HEADER PILLS — TODAY P&L + STREAK/TILT AWARENESS ────────────────
 // Two small pills designed to fit in the header row. Both source from todayData
 // (cloud-persisted, survives reload). Visible psychological anchors so user knows
 // emotional state at a glance.
-function TodayPnLPill({todayData}){
+function TodayPnLPill({todayData,onClick}){
   if(!todayData||(todayData.wins+todayData.losses)===0)return null;
-  const{wins,losses,wr,resolved}=todayData;
+  const{wins,losses,wr,resolved,dollarPnL}=todayData;
   const _net=wins-losses;
   const _color=_net>=2?'rgba(110,231,183,0.95)':_net>=0?'rgba(229,200,112,0.85)':'rgba(244,114,182,0.85)';
   const _bg=_net>=2?'rgba(110,231,183,0.08)':_net>=0?'rgba(229,200,112,0.06)':'rgba(244,114,182,0.06)';
   const _border=_net>=2?'rgba(110,231,183,0.25)':_net>=0?'rgba(229,200,112,0.22)':'rgba(244,114,182,0.25)';
+  const _dollarLabel=dollarPnL!=null?(dollarPnL>=0?'+$':'-$')+Math.abs(dollarPnL).toFixed(2):null;
   return React.createElement('div',{
-    className:'flex items-baseline gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-md shrink-0',
+    className:'flex items-baseline gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-md shrink-0'+(onClick?' cursor-pointer hover:bg-[#E8E9E4]/3':''),
     style:{background:_bg,border:'1px solid '+_border},
-    title:`Today: ${wins}W ${losses}L${todayData.sitouts>0?' '+todayData.sitouts+'so':''}${todayData.pending>0?' ('+todayData.pending+' pending)':''}`,
+    title:`Today: ${wins}W ${losses}L${todayData.sitouts>0?' '+todayData.sitouts+'so':''}${todayData.pending>0?' ('+todayData.pending+' pending)':''}${_dollarLabel?' · '+_dollarLabel:''}${onClick?' · click to configure bet size':''}`,
+    onClick,
   },
     React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-wider text-[#E8E9E4]/40'},'Today'),
     React.createElement('span',{className:'text-[10px] sm:text-[11px] tabular-nums font-bold',style:{color:_color}},`${wins}W·${losses}L`),
-    wr!=null&&React.createElement('span',{className:'text-[9px] sm:text-[10px] tabular-nums hidden md:inline',style:{color:_color,opacity:0.75}},`${wr}%`),
+    _dollarLabel&&React.createElement('span',{className:'text-[10px] sm:text-[11px] tabular-nums font-bold hidden sm:inline',style:{color:_color}},_dollarLabel),
+    wr!=null&&React.createElement('span',{className:'text-[9px] sm:text-[10px] tabular-nums hidden lg:inline',style:{color:_color,opacity:0.75}},`${wr}%`),
   );
 }
 
@@ -6197,7 +6913,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry,initialFi
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -6215,7 +6931,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
           V6.2.3: hidden lg:block (was md:block). */}
-      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} className="hidden lg:block"/>
+      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} className="hidden lg:block"/>
 
       <div className="flex items-center justify-between mb-3 shrink-0">
         <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
@@ -8080,6 +8796,44 @@ function TaraApp(){
     try{const v=parseInt(localStorage.getItem('tara_speed_dial')||'50',10);return Number.isFinite(v)?Math.max(0,Math.min(100,v)):50;}catch(e){return 50;}
   });
   useEffect(()=>{try{localStorage.setItem('tara_speed_dial',String(speedDial));}catch(e){}},[speedDial]);
+  // ── V8.2: TRADING SETTINGS ──────────────────────────────────────────────
+  // Bet size, win payout, anti-tilt cooldown enable, Discord alert filter, TP/SL rules.
+  // All localStorage-only (per-device prefs, no need to sync). Defaults match typical
+  // Kalshi 15m crypto trade: $10 bet → ~$8.50 net win after fees on 50% YES contracts.
+  const[tradingSettings,setTradingSettings]=useState(()=>{
+    try{
+      const v=JSON.parse(localStorage.getItem('taraTradingSettings_v1')||'{}');
+      return{
+        betSize:Number(v.betSize)>0?Number(v.betSize):10,
+        winPayout:Number(v.winPayout)>0?Number(v.winPayout):8.5,
+        antiTiltEnabled:v.antiTiltEnabled!==false, // default ON
+        antiTiltMinutes:Number(v.antiTiltMinutes)>0?Number(v.antiTiltMinutes):15,
+        antiTiltStreakLen:Number(v.antiTiltStreakLen)>=3?Number(v.antiTiltStreakLen):4,
+        highEdgeAlertOnly:!!v.highEdgeAlertOnly, // default OFF (all alerts)
+        highEdgeMinPp:Number(v.highEdgeMinPp)>=5?Number(v.highEdgeMinPp):15,
+        takeProfitEnabled:!!v.takeProfitEnabled,
+        takeProfitOffer:Number(v.takeProfitOffer)>0?Number(v.takeProfitOffer):0.85,
+        cutLossEnabled:!!v.cutLossEnabled,
+        cutLossMinutes:Number(v.cutLossMinutes)>0?Number(v.cutLossMinutes):3,
+      };
+    }catch(_){return{betSize:10,winPayout:8.5,antiTiltEnabled:true,antiTiltMinutes:15,antiTiltStreakLen:4,highEdgeAlertOnly:false,highEdgeMinPp:15,takeProfitEnabled:false,takeProfitOffer:0.85,cutLossEnabled:false,cutLossMinutes:3};}
+  });
+  useEffect(()=>{try{localStorage.setItem('taraTradingSettings_v1',JSON.stringify(tradingSettings));}catch(_){}},[tradingSettings]);
+  const[showTradingSettings,setShowTradingSettings]=useState(false);
+  // V8.2: Anti-tilt cooldown state — set when streak reaches threshold, blocks new entries
+  //   for tradingSettings.antiTiltMinutes. Cleared on first WIN. Persists across reloads.
+  const[tiltLockUntil,setTiltLockUntil]=useState(()=>{
+    try{
+      const v=Number(localStorage.getItem('taraTiltLockUntil_v1')||'0');
+      return v>Date.now()?v:0;
+    }catch(_){return 0;}
+  });
+  useEffect(()=>{
+    try{
+      if(tiltLockUntil>Date.now())localStorage.setItem('taraTiltLockUntil_v1',String(tiltLockUntil));
+      else localStorage.removeItem('taraTiltLockUntil_v1');
+    }catch(_){}
+  },[tiltLockUntil]);
   // V138: Premium Mode removed entirely. The asymmetric blocks it carried (US session skip,
   //       weak RC skip, SS/HVC DOWN block, MTF Confluence cross-window veto) were over-filtering.
   //       Score math is now the only directional bias.
@@ -8373,10 +9127,18 @@ function TaraApp(){
   },[taraScorecards]);
   const taraCallLogRef=useRef(taraCallLog);
   taraCallLogRef.current=taraCallLog;
+  // V8.1: Track if we have user-action writes pending pre-hydration. If true, force a
+  //   write the moment cloudWatch hydrates so those entries don't get silently dropped.
+  const _logWritePendingRef=useRef(false);
   useEffect(()=>{
     try{localStorage.setItem('taraCallLog_v1',JSON.stringify(taraCallLog.slice(-500)));}catch(e){}
     if(_callLogHydratedRef.current){
-      cloudWriteDebounced('memory/taraCallLog',{entries:taraCallLog.slice(-500)},1500);
+      // V8.1: 300ms debounce instead of 1500ms — call log writes happen at most once per
+      //   ~5min so heavy debouncing is unnecessary, and tab close mid-debounce was losing trades.
+      cloudWriteDebounced('memory/taraCallLog',{entries:taraCallLog.slice(-500)},300);
+    } else if(taraCallLog.length>0){
+      // Pre-hydration but we have data → mark pending. Once cloudWatch fires we'll flush.
+      _logWritePendingRef.current=true;
     }
   },[taraCallLog]);
   // V5.6.2: Real-time listener for the call log. Merges by id — cloud entries that local
@@ -8483,6 +9245,59 @@ function TaraApp(){
         if(!changed)return prev;
         return Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-500);
       });
+      // V8.1: Force-flush any pending pre-hydration writes. Without this, calls made
+      //   during the first 1-3s of page load (before cloudWatch hydrates) were silently
+      //   lost — never written to cloud.
+      if(_logWritePendingRef.current){
+        _logWritePendingRef.current=false;
+        // Fire after the setState above commits — small timeout to let React flush.
+        setTimeout(()=>{
+          try{
+            const _curr=taraCallLogRef.current||[];
+            if(_curr.length>0){
+              cloudWrite('memory/taraCallLog',{entries:_curr.slice(-500)});
+            }
+          }catch(_){}
+        },100);
+      }
+      // V8.1: Stale-pending resolver. On hydration, scan for entries that should have been
+      //   resolved by now (window closed >15min ago, still pending). Queues them for the
+      //   settlement fetcher. Fixes the 13-hour-old pending entries from user's call log.
+      try{
+        const _now=Date.now();
+        const _stale=(taraCallLogRef.current||[]).filter(e=>{
+          if(!e||e.result)return false;
+          if(e.dir==='NO_TRADE')return false; // explicit no-go, never had a result expected
+          const _winMs=e.windowType==='15m'?900000:300000;
+          if(!e.windowId)return false;
+          const _winStart=e.windowId.match(/-(.+)$/)?.[1];
+          if(!_winStart)return false;
+          const _closeTime=new Date(_winStart).getTime()+_winMs;
+          return _now-_closeTime>15*60*1000; // >15min stale
+        });
+        if(_stale.length>0&&pendingResolutionRef.current){
+          // Add to settlement queue if not already there
+          _stale.forEach(e=>{
+            const _winStart=e.windowId.match(/-(.+)$/)?.[1];
+            if(!_winStart)return;
+            const _winMs=e.windowType==='15m'?900000:300000;
+            const _closeTime=new Date(_winStart).getTime()+_winMs;
+            if(!pendingResolutionRef.current.some(p=>p.tradeId===e.id)){
+              pendingResolutionRef.current.push({
+                tradeId:e.id,
+                windowCloseTime:_closeTime,
+                attempts:0,
+                asset:e.asset||'BTC',
+                windowType:e.windowType,
+                strike:e.strike,
+                dir:e.dir,
+                _v8_1_stalePending:true,
+              });
+            }
+          });
+          try{console.info('[V8.1] Queued',_stale.length,'stale pending entries for re-resolve');}catch(_){}
+        }
+      }catch(_){}
     });
     return unsub;
   },[_backfillCallLogId]);
@@ -8977,6 +9792,8 @@ function TaraApp(){
   // Everything below derives from taraCallLog (Firestore-synced, survives reloads).
   //   tradeLog above is in-memory only post-V5.5b → unreliable for cross-session views.
   // todayData: per-asset slice of today's calls + W/L/P&L/streak/heatmap/hourly.
+  // V8.2: extended with dollar P&L, walk-forward WR (7d/30d/lifetime), edge bucket WR,
+  //   asset-rotation divergence, Kelly fraction.
   const todayData=useMemo(()=>{
     const _now=new Date();
     const _todayKey=_now.toLocaleDateString('en-US',{year:'numeric',month:'2-digit',day:'2-digit'});
@@ -8992,6 +9809,10 @@ function TaraApp(){
     const pending=todayCalls.filter(e=>!e.result&&e.dir!=='NO_TRADE').length;
     const resolved=wins+losses;
     const wr=resolved>0?Math.round((wins/resolved)*100):null;
+    // V8.2: Dollar P&L. Net per win = winPayout. Net per loss = -betSize. Sitouts/no-trades = 0.
+    const _bet=Number(tradingSettings?.betSize)||10;
+    const _payout=Number(tradingSettings?.winPayout)||8.5;
+    const dollarPnL=Math.round(((wins*_payout)-(losses*_bet))*100)/100;
     // Streak from RESOLVED calls only — newest first, walk back
     const _resolvedAll=_src.filter(e=>e.result==='WIN'||e.result==='LOSS').slice(-30);
     let streak=0,streakType='neutral',lastResult=null;
@@ -9027,15 +9848,110 @@ function TaraApp(){
         hourlyBuckets[h][e.result==='WIN'?'wins':'losses']+=1;
       }catch(_){}
     });
+    // ── V8.2: Walk-forward WR by recency window ──
+    const _allResolved=(taraCallLog||[]).filter(e=>e&&(e.asset||'BTC')===currentAsset&&(e.result==='WIN'||e.result==='LOSS'));
+    const _windowWR=(daysBack)=>{
+      const cutoff=_now.getTime()-daysBack*24*60*60*1000;
+      const inWindow=_allResolved.filter(e=>e.time>=cutoff);
+      const w=inWindow.filter(e=>e.result==='WIN').length;
+      const total=inWindow.length;
+      return{wr:total>0?Math.round((w/total)*100):null,wins:w,losses:total-w,total};
+    };
+    const wr7d=_windowWR(7);
+    const wr30d=_windowWR(30);
+    const wrLifetime={
+      wr:_allResolved.length>0?Math.round((_allResolved.filter(e=>e.result==='WIN').length/_allResolved.length)*100):null,
+      wins:_allResolved.filter(e=>e.result==='WIN').length,
+      losses:_allResolved.filter(e=>e.result==='LOSS').length,
+      total:_allResolved.length,
+    };
+    // ── V8.2: Edge-bucket WR — from per-call edge vs Kalshi at lock time ──
+    //   big-edge: +15+ vs Kalshi · good-edge: +5..+15 · tight: -5..+5 · late: < -5
+    const edgeBuckets={'big-edge':{wins:0,losses:0},'good-edge':{wins:0,losses:0},'tight':{wins:0,losses:0},'late':{wins:0,losses:0}};
+    _allResolved.forEach(e=>{
+      if(e.kalshiAtLock==null||e.posterior==null)return;
+      const _taraDirConf=e.dir==='UP'?Number(e.posterior):(100-Number(e.posterior));
+      const _kalshiDirConf=e.dir==='UP'?Number(e.kalshiAtLock):(100-Number(e.kalshiAtLock));
+      const _edge=_taraDirConf-_kalshiDirConf;
+      const _bkt=_edge>=15?'big-edge':_edge>=5?'good-edge':_edge>=-5?'tight':'late';
+      edgeBuckets[_bkt][e.result==='WIN'?'wins':'losses']+=1;
+    });
+    // ── V8.2: Per-asset recent-WR for asset-rotation hint ──
+    const _otherAsset=currentAsset==='BTC'?'ETH':'BTC';
+    const _recent24h=(taraCallLog||[]).filter(e=>e&&e.time&&(_now.getTime()-e.time)<24*60*60*1000&&(e.result==='WIN'||e.result==='LOSS'));
+    const _curRecent=_recent24h.filter(e=>(e.asset||'BTC')===currentAsset);
+    const _otherRecent=_recent24h.filter(e=>(e.asset||'BTC')===_otherAsset);
+    let assetRotation=null;
+    if(_curRecent.length>=4&&_otherRecent.length>=4){
+      const _curWR=_curRecent.filter(e=>e.result==='WIN').length/_curRecent.length;
+      const _othWR=_otherRecent.filter(e=>e.result==='WIN').length/_otherRecent.length;
+      const _diff=(_othWR-_curWR)*100;
+      if(_diff>=15){
+        assetRotation={
+          suggest:_otherAsset,
+          curWR:Math.round(_curWR*100),
+          curN:_curRecent.length,
+          othWR:Math.round(_othWR*100),
+          othN:_otherRecent.length,
+          diff:Math.round(_diff),
+        };
+      }
+    }
+    // ── V8.2: Kelly criterion (quarter-Kelly for safety) ──
+    //   kelly_f = (WR * b - (1-WR)) / b   where b = winPayout / betSize (odds received)
+    let kelly=null;
+    const _kSrc=wr7d.total>=20?wr7d:wr30d.total>=20?wr30d:wrLifetime;
+    if(_kSrc.total>=15&&_kSrc.wr!=null){
+      const _p=_kSrc.wr/100;
+      const _b=_payout/_bet;
+      const _f=(_p*_b-(1-_p))/_b;
+      const _qK=_f/4; // quarter-Kelly is industry standard for safety
+      const _suggestBet=Math.max(0,_qK*100); // express as % of bankroll
+      kelly={
+        fullF:Math.round(_f*1000)/10, // %
+        quarterF:Math.round(_qK*1000)/10, // %
+        suggestPct:Math.round(_suggestBet*10)/10, // % of bankroll
+        sourceN:_kSrc.total,
+        sourceLabel:_kSrc===wr7d?'last 7d':_kSrc===wr30d?'last 30d':'lifetime',
+        edge:_f>0,
+      };
+    }
     return{
       todayCalls,wins,losses,sitouts,pending,resolved,wr,
+      dollarPnL,
       streak,streakType,lastResult,tilt,strongTilt,heater,
       cooldownMinSinceLoss,inCooldown,
       recentForHeatmap,hourlyBuckets,
+      // V8.2 additions
+      wr7d,wr30d,wrLifetime,
+      edgeBuckets,
+      assetRotation,
+      kelly,
     };
-  },[taraCallLog,currentAsset]);
+  },[taraCallLog,currentAsset,tradingSettings]);
   // Best windows hint — for the day-of-week we're in, find the user's best historical hours
   //   from the personal scorecards (hour×day grid). Helps user time their sessions.
+  // ── V8.2: TILT COOLDOWN AUTO-TRIGGER ───────────────────────────────────
+  // When streak reaches user-configured threshold (default 4 losses), set tiltLockUntil
+  // for the configured duration. Cleared automatically when next WIN arrives.
+  useEffect(()=>{
+    if(!todayData)return;
+    if(!tradingSettings.antiTiltEnabled)return;
+    // Trigger on streak reaching threshold
+    if(todayData.lastResult==='LOSS'&&todayData.streak>=tradingSettings.antiTiltStreakLen){
+      const _now=Date.now();
+      const _newUntil=_now+tradingSettings.antiTiltMinutes*60*1000;
+      // Only trigger fresh — don't re-trigger if already in cooldown
+      if(tiltLockUntil<_now){
+        setTiltLockUntil(_newUntil);
+        try{console.warn('[V8.2] Tilt cooldown engaged:',todayData.streak,'losses · until',new Date(_newUntil).toLocaleTimeString());}catch(_){}
+      }
+    }
+    // Clear on first win after cooldown started
+    if(todayData.lastResult==='WIN'&&tiltLockUntil>0){
+      setTiltLockUntil(0);
+    }
+  },[todayData,tradingSettings.antiTiltEnabled,tradingSettings.antiTiltStreakLen,tradingSettings.antiTiltMinutes]);
   const bestWindowsToday=useMemo(()=>{
     if(!scorecards)return null;
     const _now=new Date();
@@ -9094,7 +10010,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.0.1 online — hotfix for the engine crash that hit V8.0. Root cause was a temporal dead zone error: the conviction trajectory tracker (one of the new V8.0 features) was declared earlier in the component than the taraCall variable it depended on, so React tried to read taraCall before it existed and threw ReferenceError on every render. Fix: split the conviction code in two — the ref + reset effect stay where they were (no taraCall dependency), but the sampler interval and the trajectory useMemo are deferred to right after the taraCall IIFE finishes. Same behavior, no TDZ. All 11 V8.0 features intact: today P&L pill, streak/tilt pill, decisional overlay (edge/size/conviction/cooldown), today card with heatmap and P&L curve and volatility sparkline and best-windows hint and 24h macro calendar. Sorry for the crash — that one slipped past parse-check because parse-check only validates syntax, not declaration order. Verified by ripgrep that no other V8.0 code references late-declared variables."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.2 online — profit trader toolkit. 12 features added across all three tiers from yesterdays plan. SETTINGS: new Trading Settings modal accessible by clicking the Today P&L pill — configure bet size (default $10), win payout (default $8.50, Kalshi-typical), anti-tilt cooldown enable/duration/threshold, high-edge Discord alert filter, take-profit trigger (offer threshold), cut-loss trigger (minutes-in-loss). All localStorage per-device. DOLLAR TRACKING: Today P&L pill now shows +$/-$ amount alongside W/L counts. Computed as wins x winPayout minus losses x betSize. Required-WR-for-breakeven shown in settings. WALK-FORWARD WR: Performance card shows last-7d, last-30d, lifetime WR side-by-side, color-coded by performance. EDGE-BUCKET WR: visual breakdown of WR by edge-vs-Kalshi bucket — BIG +15+, GOOD +5 to +15, TIGHT -5 to +5, LATE worse than Kalshi. Bar chart showing volume + WR per bucket. Insight: skip TIGHT and LATE if their WR is below breakeven. KELLY CRITERION: bet sizing recommendation from quarter-Kelly formula using current WR + payout-to-bet ratio. Surfaces optimal bet as % of bankroll, full-Kelly aggressive alternative, source sample size. ANTI-TILT FORCED COOLDOWN: when configured threshold of consecutive losses hit (default 4), blocks new locks for configured duration (default 15min). Auto-cleared on first WIN. Override requires explicit confirm dialog. ASSET ROTATION HINT: when other assets recent-WR exceeds current by 15+pp over 4+ trades each, surfaces a hint banner with one-click switch button. PRE-WINDOW PREP CARD: 30s before next window opens, shows hour-WR for this day-of-week from personal scorecards, todays streak, macro status. Auto-hides at window start. LAST-LOSS POST-MORTEM: after a fresh loss, shows a small dismissible card explaining what disagreed with Taras call — surfaces the strongest dissenting signal that pointed toward the actual outcome. Helps pattern-match her failure modes. DAILY INSIGHT CARD: once-per-day actionable observation. Examples: tilt warning, heater reminder, edge-bucket pattern, walk-forward divergence vs lifetime, best-windows reminder. Dismissible. HIGH-EDGE DISCORD FILTER: when enabled, only fires LOCK alerts when edge over Kalshi exceeds configured threshold (default 15pp). EXIT/CLOSE/WHALE always pass through. TAKE-PROFIT/CUT-LOSS BANNERS: when configured triggers fire (offer >= threshold or in-loss for N min), animated banner appears with consider-exit suggestion. TIME-OF-DAY POSITION SCALING: size hint extended — when in known-best hour (>=70% WR, >=4 trades) with positive edge, suggests LARGE; with FULL bumped to LARGE on big-edge + best-hour combo. All 12 features integrated cleanly. Verified parse clean."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -9340,6 +10256,11 @@ function TaraApp(){
   const{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal,tapeWindows}=useGlobalTape(currentAsset);
   const marketSessions=useMemo(()=>getMarketSessions(),[timeState.currentHour]);
   const[klines,setKlines]=useState([]);
+  // V8.1: Movement risk pulse — combines vol acceleration, volume spikes, tape imbalance,
+  //   whale density into a 0-100 score every 2s. Wired here because all input refs are
+  //   in scope. lastRegimeRef passed by reference so the hook always reads the latest
+  //   regime without needing dependency rerun.
+  const movementRisk=useMovementRisk(velocityRef,tapeRef,ticksRef,whaleLog,lastRegimeRef);
 
   useEffect(()=>{setIsMounted(true);
     // ── PWA: register service worker for installability + keep-alive ──
@@ -9801,6 +10722,23 @@ function TaraApp(){
     if(!_isUserAction&&lastAssetSwitchAtRef.current&&Date.now()-lastAssetSwitchAtRef.current<2500){
       try{console.info('[V7.0.7] Suppressing',type,'broadcast — within 2.5s of asset switch');}catch(_){}
       return;
+    }
+    // V8.2: High-edge LOCK alert filter. When enabled, only fire LOCK broadcasts when
+    //   Tara's edge over Kalshi meets the configured threshold. Prevents alert fatigue
+    //   so user only gets pinged for the best setups.
+    if(type==='LOCK'&&tradingSettings?.highEdgeAlertOnly){
+      const _post=Number(data?.posterior)||0;
+      const _kalshi=Number(kalshiYesPrice);
+      if(Number.isFinite(_kalshi)&&_post>0){
+        const _dir=data?.dir;
+        const _taraDirConf=_dir==='UP'?_post:(100-_post);
+        const _kalshiDirConf=_dir==='UP'?_kalshi:(100-_kalshi);
+        const _edge=_taraDirConf-_kalshiDirConf;
+        if(_edge<Number(tradingSettings.highEdgeMinPp)){
+          try{console.info('[V8.2] Suppressing LOCK broadcast — edge',_edge.toFixed(1),'pp below threshold',tradingSettings.highEdgeMinPp);}catch(_){}
+          return;
+        }
+      }
     }
     const _activeAsset=currentAssetRef.current||'BTC';
     const _hooks=discordWebhooksRef.current||{};
@@ -13785,6 +14723,15 @@ function TaraApp(){
   },[analysis?.advisor?.label]);
 
   const handleManualSync=(dir)=>{
+    // V8.2: Anti-tilt cooldown gate. If active and direction is a new entry (not a flip
+    //   on existing position), block it with a confirm. EXIT/flip actions are unblocked.
+    if(tradingSettings?.antiTiltEnabled&&tiltLockUntil>Date.now()&&userPosition!==dir){
+      const _msLeft=tiltLockUntil-Date.now();
+      const _minLeft=Math.ceil(_msLeft/60000);
+      const _confirmed=window.confirm(`Tilt cooldown active (${_minLeft}m left). You're ${todayData?.streak||0} losses in a row. Tilt entries statistically lose more. Override and proceed?`);
+      if(!_confirmed)return;
+      setTiltLockUntil(0); // user explicitly overrode — clear the lock
+    }
     // If switching sides mid-trade: broadcast LOSS for exited trade FIRST, then open new
     if(userPosition!==null&&userPosition!==dir){
       hasReversedRef.current=true;
@@ -14133,7 +15080,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              8.0.1
+              8.2
             </span>
           </div>
 
@@ -14149,8 +15096,10 @@ function TaraApp(){
           <div className="hidden md:flex items-center gap-1 text-xs shrink-0">{marketSessions.sessions.map((s,i)=><span key={i} className={`${s.color} opacity-80`}>{s.flag}</span>)}</div>
 
           {/* V8.0: Today's P&L + streak/tilt awareness pills — fits between sessions and asset selector */}
-          <TodayPnLPill todayData={todayData}/>
+          <TodayPnLPill todayData={todayData} onClick={()=>setShowTradingSettings(true)}/>
           <StreakTiltPill todayData={todayData}/>
+          {/* V8.1: Movement risk pulse — vol/volume/tape/whale composite */}
+          <MovementRiskPill movementRisk={movementRisk}/>
 
           {/* Spacer */}
           <div className="flex-1"/>
@@ -14436,12 +15385,63 @@ function TaraApp(){
         {/* V7.10.6: Market context strip — current phase, cautions, next transition */}
         <MarketContextStrip useLocalTime={useLocalTime}/>
 
+        {/* V8.2: Anti-tilt cooldown — most urgent banner, blocks new locks */}
+        <AntiTiltCooldownBanner
+          tiltLockUntil={tiltLockUntil}
+          setTiltLockUntil={setTiltLockUntil}
+          settings={tradingSettings}
+        />
+
+        {/* V8.2: TP / SL trigger banner */}
+        <TPSLBanner
+          settings={tradingSettings}
+          userPosition={userPosition}
+          currentOffer={currentOffer}
+          positionStatus={positionStatus}
+          positionOpenTime={positionEntry?.time}
+        />
+
+        {/* V8.2: Asset rotation suggestion */}
+        <AssetRotationHint
+          rotation={todayData?.assetRotation}
+          onSwitch={(asset)=>setCurrentAssetState(asset)}
+        />
+
+        {/* V8.2: Pre-window prep (30s before next window) */}
+        <PreWindowPrepCard
+          timeState={timeState}
+          bestWindowsToday={bestWindowsToday}
+          todayData={todayData}
+          marketCtx={getMarketContext(new Date())}
+        />
+
+        {/* V8.2: Last-loss post-mortem (auto-show after fresh loss, dismissible) */}
+        <LastLossPostmortem
+          todayData={todayData}
+          taraCallLog={taraCallLog}
+          currentAsset={currentAsset}
+        />
+
+        {/* V8.2: Daily insight — once-per-day actionable observation */}
+        <DailyInsightCard todayData={todayData} bestWindowsToday={bestWindowsToday}/>
+
         {/* V8.0: Today card — heatmap + P&L curve + volatility sparkline + best-windows + 24h macro */}
         <TodayCard
           todayData={todayData}
           bestWindowsToday={bestWindowsToday}
           tickHistoryRef={tickHistoryRef}
           upcomingMacro={getUpcomingMacroEvents(new Date(),24)}
+        />
+
+        {/* V8.2: Performance card — walk-forward WR + edge buckets + Kelly */}
+        <PerformanceCard todayData={todayData} settings={tradingSettings}/>
+
+        {/* V8.2: Trading settings modal */}
+        <TradingSettingsModal
+          open={showTradingSettings}
+          onClose={()=>setShowTradingSettings(false)}
+          settings={tradingSettings}
+          setSettings={setTradingSettings}
         />
 
         {/* MOBILE TAB NAV */}
@@ -14637,13 +15637,13 @@ function TaraApp(){
 
             {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab.
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
-            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
+            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
 
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab}/>
@@ -15615,13 +16615,106 @@ function TaraApp(){
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
 
+              {/* V8.2 — Profit trader toolkit (12 features across 3 tiers) */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Profit Trader Toolkit</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> &mdash; All Three Tiers</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">12 features across the three tiers from yesterday&rsquo;s plan. New Trading Settings modal accessible by clicking the Today P&L pill.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Tier 1 &mdash; would meaningfully change P&L</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Dollar tracking</strong> &mdash; Today P&L pill now shows +$/-$ alongside W/L. Configurable bet size (default $10) and win payout (default $8.50, Kalshi-typical). Required-WR-for-breakeven displayed in settings.</li>
+                  <li><strong>Edge-bucket WR display</strong> &mdash; bar chart of WR by edge-vs-Kalshi bucket: BIG (+15+), GOOD (+5 to +15), TIGHT (-5 to +5), LATE (worse than Kalshi). The data has been tracked since V6.0.8 but never surfaced &mdash; finally visible. Skip TIGHT and LATE if below breakeven.</li>
+                  <li><strong>Anti-tilt forced cooldown</strong> &mdash; auto-engages on configured streak threshold (default 4 losses). Blocks new locks for configured duration (default 15min). Override requires explicit confirm. Auto-clears on first WIN.</li>
+                  <li><strong>Walk-forward WR</strong> &mdash; new Performance card shows last-7d, last-30d, lifetime WR side-by-side. Highlights divergence from lifetime baseline.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Tier 2 &mdash; useful</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Asset rotation hint</strong> &mdash; banner when other asset&rsquo;s recent WR (4+ trades) is 15pp+ above current. One-click switch button.</li>
+                  <li><strong>Last-loss post-mortem</strong> &mdash; after a fresh loss, surfaces a dismissible card showing the strongest dissenting signal that pointed at the actual outcome. Helps pattern-match Tara&rsquo;s failure modes.</li>
+                  <li><strong>Pre-window prep card</strong> &mdash; appears 30s before next window opens. Shows hour-WR for this day-of-week, today&rsquo;s streak, macro status. Auto-hides at window start.</li>
+                  <li><strong>High-edge Discord filter</strong> &mdash; opt-in setting. When enabled, only fires LOCK alerts when edge over Kalshi exceeds threshold (default 15pp). Prevents alert fatigue. EXIT/CLOSE/WHALE always pass through.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Tier 3 &mdash; for later</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Kelly criterion sizing</strong> &mdash; quarter-Kelly recommendation in Performance card. Suggests optimal bet as % of bankroll given current WR + payout-to-bet ratio. Falls back to gentler 7d/30d sample if lifetime is large.</li>
+                  <li><strong>Take-profit / cut-loss banners</strong> &mdash; configurable triggers. TP fires when current offer &ge; threshold (default $0.85). SL fires when in-loss for N minutes (default 3). Animated banner with exit suggestion.</li>
+                  <li><strong>Daily insight summary</strong> &mdash; once-per-day actionable observation card. Examples: tilt warning, heater reminder, edge-bucket pattern, walk-forward divergence, best-windows reminder. Dismissible per day.</li>
+                  <li><strong>Time-of-day size scaling</strong> &mdash; size hint now incorporates current UTC hour vs personal scorecard. Best hour (&ge;70% WR, &ge;4 trades) + positive edge &rarr; LARGE. Big edge + best hour &rarr; LARGE. Otherwise existing logic.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Implementation notes</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Single new state slot</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">tradingSettings</code> in localStorage (per-device prefs, no cloud sync needed). Defaults are reasonable for typical Kalshi BTC/ETH 15m trades.</li>
+                  <li><strong>All metrics derive from existing data</strong> &mdash; no new fetches, no new Firestore docs. Edge buckets, walk-forward WR, Kelly all computed in todayData useMemo.</li>
+                  <li><strong>Banners stack predictably</strong> &mdash; anti-tilt (most urgent) at top, then TP/SL, asset rotation, pre-window prep, last-loss recap, daily insight. Each hides gracefully when not applicable.</li>
+                  <li><strong>Anti-tilt cooldown persists across reloads</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">tiltLockUntil</code> stored in localStorage. Stays in effect even if user closes tab to evade.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Verified</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Parse OK at 19,402 lines. Every TaraCallCard / ProjectionsCard call site updated to thread the new <code className="text-[10px] bg-[#0E100F] px-1">bestWindowsToday</code> prop. All V7.10.x and V8.0/8.1 features intact.</p>
+              </section>
+
+              {/* V8.1 — Sync hardening + Movement Risk pulse */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Sync Reliability + Risk Indicators</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Reliable Sync + Movement Risk</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported missing trades on refresh + cross-browser. Diagnosed three real failure modes in the call-log sync path. Also added the movement risk pulse for live volatility / volume / tape awareness.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sync fixes</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Three failures stacked together explained the missing entries. All addressed:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Hydration gate fixed</strong> &mdash; the old gate silently dropped any user-action write made in the first 1-3 seconds of page load (before <code className="text-[10px] bg-[#0E100F] px-1">cloudWatch</code> fired for the first time). New logic: pre-hydration writes set a pending flag, and the cloudWatch handler force-fires <code className="text-[10px] bg-[#0E100F] px-1">cloudWrite</code> as soon as it hydrates.</li>
+                  <li><strong>Debounce cut 1500ms &rarr; 300ms</strong> &mdash; the old 1.5s debounce gave a wide window where tab close lost writes. Call log writes happen at most every 5min so heavy debouncing was unnecessary anyway.</li>
+                  <li><strong>cloudFlushAll on tab close</strong> &mdash; new helper synchronously fires all pending debounced writes on <code className="text-[10px] bg-[#0E100F] px-1">pagehide</code>, <code className="text-[10px] bg-[#0E100F] px-1">beforeunload</code>, and <code className="text-[10px] bg-[#0E100F] px-1">visibilitychange</code> (hidden). Modern browsers respect in-flight fetches during pagehide for a brief grace period &mdash; this catches what the debounce timer would have lost.</li>
+                  <li><strong>Stale-pending resolver</strong> &mdash; on every cloud hydration, scans for entries whose window closed &gt;15min ago without a result. Queues them for the settlement fetcher. The 13-hour-old pending entries observed in the user&rsquo;s call log will resolve on next page load.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Movement risk pulse</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Real-time risk score combining four signals every 2 seconds:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>Vol acceleration vs rolling baseline</strong> (max 30pts) &mdash; baseline is EWMA of |accel|. 2.5x baseline = max contribution. Compression (&le;0.4x) also scores 10pts as a breakout-watch signal.</li>
+                  <li><strong>Volume spike</strong> (max 25pts) &mdash; last 30s vs last 5min average. 3x = max.</li>
+                  <li><strong>Tape imbalance</strong> (max 20pts, directional) &mdash; globalImbalance &ge;3x = strong UP bias; &le;0.33 = strong DOWN bias.</li>
+                  <li><strong>Whale density</strong> (max 15pts) &mdash; whale prints in last 60s vs last 10min baseline. Whale directional cluster contributes to bias.</li>
+                  <li><strong>Choppy regime amplifier</strong> (+8pts) &mdash; RANGE_BOUND/CHOP regimes amplify risk above 40pts (chop is dangerous).</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Levels &amp; visual surfaces</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>CALM</strong> (&lt;20) &mdash; subtle green pill, hidden when score is trivial.</li>
+                  <li><strong>NORMAL</strong> (20-44) &mdash; neutral pill in header.</li>
+                  <li><strong>ELEVATED</strong> (45-69) &mdash; amber pill in header + chip in DecisionalOverlay.</li>
+                  <li><strong>EXTREME</strong> (70+) &mdash; rose pill with pulse + chip in card + predictive readout below.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Predictive readouts</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Score &ge;60 with directional bias &rarr; &ldquo;UP/DOWN move likely next 30-60s&rdquo;</li>
+                  <li>Compression detected with mild bias &rarr; &ldquo;compressed &mdash; breakout watch&rdquo;</li>
+                  <li>Score &ge;70 &rarr; &ldquo;extreme conditions &mdash; stand back&rdquo;</li>
+                  <li>Score &le;15 &rarr; &ldquo;calm &mdash; favorable for normal positions&rdquo;</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Verified</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Parse OK at 18,649 lines. All V8.0/V7.10.x features intact. New hook is pure with proper interval cleanup. New components hide gracefully when score is low. No new state slots requiring sync, no architectural changes.</p>
+              </section>
+
               {/* V8.0 — Decisional overlay + Today card + 11 trader-awareness features */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Visual + Decisional Upgrade</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Trader Awareness</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Trader Awareness</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">11 features added in one drop. Designed to inform without dominating &mdash; each piece earns its place by changing how you trade the next round.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Header pills</div>
@@ -15668,7 +16761,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Fix · Kalshi Strike Fetch</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Kalshi Strike Fetch Restored</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Kalshi Strike Fetch Restored</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: &ldquo;Tara doesn&rsquo;t get strike pricing now from Kalshi&rdquo; for both BTC and ETH. Diagnosed and fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -15710,7 +16803,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Feature · Time-Aware Context · Memory Polish</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Phase Context + Memory Cleanup</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Phase Context + Memory Cleanup</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for time-specific alerts/disclaimers (what kind of market we&rsquo;re in, what we&rsquo;re entering, what to watch for) and to clean up + format previous records. Both in this release.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Market Context Strip</div>
@@ -15755,7 +16848,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Architectural Patch · Sync + Learning</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Sync &amp; Learning Done Right</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Sync &amp; Learning Done Right</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged three concerns simultaneously: records/stats/logs not syncing, Tara giving different responses across devices, and asking whether learning was actually happening. Took the time to audit every persistent state slot and the entire learning pipeline.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Persistence gaps found</div>
@@ -15805,7 +16898,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Browser Real-Time Sync</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Same Call, Every Browser</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Same Call, Every Browser</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;still not the same for everyone on each browser mate.&rdquo;</em> V7.10.3 fixed within-browser races but cross-browser was still broken &mdash; two real bugs compounding.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Bug 1: One-shot read, not real-time</div>
@@ -15840,7 +16933,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Tab Determinism</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — One Window, One Decision</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — One Window, One Decision</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshots showed the SAME window with Tab 1 saying <strong style={{color:'rgb(110,231,183)'}}>LOCKED UP 84%</strong> and Tab 2 saying <strong style={{color:'rgb(244,114,182)'}}>LOCKED DOWN 94%</strong>. Same browser, same window, opposite calls.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -15878,7 +16971,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stability Audit</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Audit Pass</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Audit Pass</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for a comprehensive review after the V7.10.1 snapshot-log fix. Reviewed potential bug categories systematically and fixed one minor stability issue.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was checked</div>
@@ -15909,7 +17002,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Trade Rounds Stopped Updating</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — The Bug That Killed Memory</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — The Bug That Killed Memory</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;tara completely stopped with updating trade round for both btc and eth now&rdquo;</em>. Found a critical bug shipped quietly in V7.8 and inherited by every release since. Both assets affected equally.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was broken</div>
@@ -15947,7 +17040,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · TDZ Bug Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Crash Fixed</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Crash Fixed</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshot showed engine stuck on MATH CRASH with error <em>&ldquo;Cannot access &lsquo;ft&rsquo; before initialization&rdquo;</em>. Posterior frozen at 50%, all signals reading 0, advisor card unable to render, projections empty.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -15967,7 +17060,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Three-State Model · Explicit No-Go</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — When Sit-Out Is The Right Answer</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — When Sit-Out Is The Right Answer</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Talked through sit-outs together. Agreed: V7.8 killing stylistic timidity (tier blocks, timer expirations, mixed-signal skips) was right. But there are 3 specific cases where NOT trading is mathematically correct, not conservative. Those become an explicit NO-GO category &mdash; clearly distinguished from a normal lock or a tentative caution call.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Three states now</div>
@@ -15995,7 +17088,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Persistent Learning · No Skips · Caution Notes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — She Trades Every Round Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — She Trades Every Round Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Weights persist across sessions</div>
@@ -16036,7 +17129,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Reversal Blockers · Stale-Lock Advisor</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Stop Inviting Bad Trades</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Stop Inviting Bad Trades</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged the screenshot. Tara locked DOWN 54%, engine showed 89% UP, Kalshi 99.7% UP, all 4 forward projections UP, price +25bps above strike. Advisor card said &ldquo;Tara DOWN 85% &middot; ENTER DOWN&rdquo;. Pressing ENTER would have been an instant loss. Two bugs fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor — continuation blockers</div>
@@ -16065,7 +17158,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Predict Reversals · Shadow Tara · Fast-Mode</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Predict the Reversal, Not Avoid It</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Predict the Reversal, Not Avoid It</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor (replaces V7.6 guard)</div>
@@ -16113,7 +17206,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Mean-Reversion Guard · Timer-Fires · Dual Feed</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Stop Chasing the Top</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Stop Chasing the Top</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Deep dive into 105 resolved trades + the recent 30 found the actual structural pattern behind &ldquo;we chase momentum and lose on swings.&rdquo;</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Findings from the call-log analysis</div>
@@ -16156,7 +17249,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Faster Low-Dial Locks · ETH Save Bug</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Truly Fast at Fast</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Truly Fast at Fast</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Two unrelated bugs in one release. User flagged both.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Speed dial low-end made aggressive</div>
@@ -16202,7 +17295,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Speed Dial Actually Functional</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Dial Has Function Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Dial Has Function Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;the timer decision has 0 function too. its just a gimmick and does nothing&rdquo;. They were right. The dial was only nudging two floor numbers that almost every trade passed regardless. Real fix:</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tier filter by dial position</div>
@@ -16249,7 +17342,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Engine · The Structural Blind Spot Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Higher Timeframes Finally Count</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Higher Timeframes Finally Count</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged a trade where the Score Breakdown showed &ldquo;Structural ▲ UP · 4/6 align&rdquo; with 5m and 15m both bullish, while Tara sat out leaning DOWN. Investigation: the engine was COMPUTING the multi-TF structural data and SHOWING it on the panel, but never adding it to the posterior. Five-of-six timeframes screaming UP, math weight: zero.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Structural alignment bonus</div>
@@ -16287,7 +17380,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stale State Fixes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Sound + Stale UI</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Sound + Stale UI</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three quick fixes. Two were old bugs, one was a missing persistence flag.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Sound enabled now persists</div>
@@ -16307,7 +17400,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Prediction Engine · The &ldquo;Why Jerome Beats Tara&rdquo; Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.0.1</span> — Honest Confidence, Smarter Locks</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.2</span> — Honest Confidence, Smarter Locks</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">After a side-by-side analysis of a real losing trade where Jerome won and Tara lost, we found the structural problem: Tara was over-trusting tape extremes and under-weighting strike position. This release surgically fixes both, plus the timer bug, plus calibrates the confidence display.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tape-extreme guard</div>
