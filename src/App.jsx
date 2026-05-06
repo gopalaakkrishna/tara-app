@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.1.6-baseline-sync-buttons';
+const BASELINE_VERSION='2026.05.06-v9.1.7-session-phase-coach-trajectory';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -1074,20 +1074,45 @@ const buildHourlyPerf=(tradeLog)=>{
 // ═══════════════════════════════════════
 const getMarketSessions=()=>{
   const now=new Date();
-  // V5.7: All time classification is LOCAL. Sessions are buckets of user's day:
-  //   Asia=morning, EU=mid, US=afternoon, OFF-HOURS=evening/late-night.
-  //   Day×session quality matrix continues to apply, indexed by user's local day.
+  // V9.1.7: Sessions DERIVE FROM UTC PHASE so phase + session never mismatch.
+  //   Was: sessions used user's LOCAL hours (asia=0-9 local, eu=7-16 local, us=13-22 local)
+  //   while PHASE_PROFILES are UTC-anchored. So in EST at 4 PM local, the phase showed
+  //   ASIA_OPEN (UTC 21:00) but session showed US — visually contradictory.
+  //   Now both come from the same UTC clock. ASIA = ASIA_OPEN/ASIA_LATE, EU = EU_PREOPEN/EU_OPEN,
+  //   US = NY_*. AFTERHOURS sits between US close and Asia open — bucket as 'OFF-HOURS'.
   const localH=now.getHours();
-  const dayLocal=now.getDay(); // 0=Sun..6=Sat in user's locale
+  const dayLocal=now.getDay();
   const dayName=['SUN','MON','TUE','WED','THU','FRI','SAT'][dayLocal];
-  const asia=localH>=0&&localH<9;
-  const eu=localH>=7&&localH<16;
-  const us=localH>=13&&localH<22;
+  const _phaseKey=getPhaseKey(now.getUTCHours(),now.getUTCMinutes());
+  const _sessionFromPhase=(()=>{
+    if(_phaseKey==='ASIA_OPEN'||_phaseKey==='ASIA_LATE')return'ASIA';
+    if(_phaseKey==='EU_PREOPEN'||_phaseKey==='EU_OPEN')return'EU';
+    if(_phaseKey==='NY_PREMARKET'||_phaseKey==='NY_OPEN'||_phaseKey==='NY_MORNING'
+      ||_phaseKey==='NY_LUNCH'||_phaseKey==='NY_AFTERNOON'||_phaseKey==='NY_CLOSE')return'US';
+    return'OFF-HOURS';
+  })();
+  const _flagFor={ASIA:'🌏',EU:'🌍',US:'🌎','OFF-HOURS':'🌒'};
+  const _colorFor={ASIA:'text-amber-400',EU:'text-blue-400',US:'text-emerald-400','OFF-HOURS':'text-gray-400'};
+  // Build active sessions list — overlap regions show multiple flags. Asia + EU overlap
+  //   during EU_PREOPEN; EU + US overlap during EU_OPEN late + NY_PREMARKET + NY_OPEN start.
   const sessions=[];
-  if(asia)sessions.push({name:'ASIA',flag:'🌏',color:'text-amber-400'});
-  if(eu)sessions.push({name:'EU',flag:'🌍',color:'text-blue-400'});
-  if(us)sessions.push({name:'US',flag:'🌎',color:'text-emerald-400'});
-  const dominant=sessions.length>0?sessions[sessions.length-1].name:'OFF-HOURS';
+  // Asia is active during ASIA_OPEN, ASIA_LATE
+  if(_phaseKey==='ASIA_OPEN'||_phaseKey==='ASIA_LATE'){
+    sessions.push({name:'ASIA',flag:'🌏',color:'text-amber-400'});
+  }
+  // EU is active during EU_PREOPEN, EU_OPEN, NY_PREMARKET, NY_OPEN start
+  if(_phaseKey==='EU_PREOPEN'||_phaseKey==='EU_OPEN'||_phaseKey==='NY_PREMARKET'||_phaseKey==='NY_OPEN'){
+    sessions.push({name:'EU',flag:'🌍',color:'text-blue-400'});
+  }
+  // US is active during NY_*
+  if(_phaseKey==='NY_PREMARKET'||_phaseKey==='NY_OPEN'||_phaseKey==='NY_MORNING'
+    ||_phaseKey==='NY_LUNCH'||_phaseKey==='NY_AFTERNOON'||_phaseKey==='NY_CLOSE'){
+    sessions.push({name:'US',flag:'🌎',color:'text-emerald-400'});
+  }
+  if(sessions.length===0){
+    sessions.push({name:'OFF-HOURS',flag:'🌒',color:'text-gray-400'});
+  }
+  const dominant=_sessionFromPhase;
   // V114: Day×Session quality multipliers (range -10 to +5; subtracted from quality threshold or added)
   // Higher = better historically (lower bar to lock); Lower = worse (higher bar)
   // Based on training data + market structure: Sun thin liquidity, Mon Asia gappy, Wed US best, Fri close fakeouts
@@ -6113,12 +6138,30 @@ function BestPracticesModal({open,onClose}){
 // avoid. Pulls from existing analysis + movementRisk + taraCall + position status.
 // Each card is one actionable observation. Color-coded by urgency.
 //
-// This is the "Best Practices" page made LIVE — instead of reading the static guide,
-// you see the relevant guidance for THIS trade, RIGHT NOW.
-function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData}){
+// V9.1.7 upgrades — answer to user feedback "i feel i still keep missing out on
+//   calls when trade is reversing against me, like price spikes or dips, same for
+//   maximizing profits and getting a good entry":
+//     1. TRAJECTORY tracking (last 30s direction of travel) — catches reversals
+//        BEFORE the gap-bps math reflects them. Surfaces "PRICE SPIKING AGAINST
+//        YOU NOW" / "PRICE ACCELERATING IN YOUR FAVOR".
+//     2. PEAK / TROUGH refs reset on position open — catches "you were +25bps
+//        and now you're +8bps — drawing down from peak, consider taking offer".
+//     3. ACCELERATION detection (last 10s velocity vs prior 30s) — sharper alert
+//        than just "risk elevated" because it reflects what's happening RIGHT
+//        NOW, not what conditions look like.
+function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef}){
+  // V9.1.7: Per-position peak/trough refs. Reset on position open or direction flip.
+  const _peakBpsRef=React.useRef({pos:null,peak:-Infinity,trough:Infinity,openTime:0});
+  React.useEffect(()=>{
+    // When position opens or flips, reset
+    const _curPos=userPosition;
+    const _ref=_peakBpsRef.current;
+    if(_curPos!==_ref.pos){
+      _peakBpsRef.current={pos:_curPos,peak:-Infinity,trough:Infinity,openTime:Date.now()};
+    }
+  },[userPosition]);
   if(!userPosition)return null; // only shows during a trade
-  // V8.7.1: Wrap entire body in try/catch. If any unexpected data shape causes an error,
-  //   return null gracefully (the coach card disappears) instead of crashing the dashboard.
+  // V8.7.1: Wrap entire body in try/catch.
   try{
     const _now=Date.now();
     const _isUP=userPosition==='UP';
@@ -6128,18 +6171,63 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     const _winning=_favoredGap>0;
     const _losing=_favoredGap<0;
     const _secLeft=(timeState?.minsRemaining||0)*60+(timeState?.secsRemaining||0);
-    const _winLen=15*60; // assume 15m for the math; 5m differs but rare
-    const _earlyWindow=_secLeft>=_winLen*0.66; // first third
-    const _midWindow=_secLeft<_winLen*0.66&&_secLeft>=_winLen*0.33; // middle third
-    const _lateWindow=_secLeft<_winLen*0.33; // last third
+    const _winLen=15*60;
+    const _earlyWindow=_secLeft>=_winLen*0.66;
+    const _midWindow=_secLeft<_winLen*0.66&&_secLeft>=_winLen*0.33;
+    const _lateWindow=_secLeft<_winLen*0.33;
     const _last90s=_secLeft<=90;
     const _veryLate=_secLeft<=45;
+
+    // V9.1.7: Update peak/trough on every render
+    if(_peakBpsRef.current.pos===userPosition){
+      if(_favoredGap>_peakBpsRef.current.peak)_peakBpsRef.current.peak=_favoredGap;
+      if(_favoredGap<_peakBpsRef.current.trough)_peakBpsRef.current.trough=_favoredGap;
+    }
+    const _peak=_peakBpsRef.current.peak;
+    const _trough=_peakBpsRef.current.trough;
+    const _drawdownFromPeak=_peak>0?_peak-_favoredGap:0; // bps lost from your high
+    const _reboundFromTrough=_trough<0?_favoredGap-_trough:0;
+
+    // V9.1.7: Trajectory analysis — recent price velocity. Compares last 10s velocity
+    //   to the 20s window before that to detect ACCELERATION (what's happening RIGHT NOW).
+    let _recentDir=null,_acceleration=null,_recent10sBps=null,_prior20sBps=null;
+    try{
+      const _ticks=tickHistoryRef?.current||[];
+      if(_ticks.length>=3&&Number(currentPrice)>0){
+        const _t10=_now-10000,_t30=_now-30000;
+        const _veryRecent=_ticks.filter(t=>t&&t.time&&t.time>=_t10);
+        const _earlier=_ticks.filter(t=>t&&t.time&&t.time<_t10&&t.time>=_t30);
+        if(_veryRecent.length>=1&&_earlier.length>=1){
+          const _p10Start=Number(_earlier[_earlier.length-1].p)||Number(_earlier[_earlier.length-1].price)||0;
+          const _p10End=Number(_veryRecent[_veryRecent.length-1].p)||Number(_veryRecent[_veryRecent.length-1].price)||currentPrice;
+          if(_p10Start>0&&_p10End>0){
+            _recent10sBps=((_p10End-_p10Start)/_p10Start)*10000;
+            const _p30Start=Number(_earlier[0].p)||Number(_earlier[0].price)||0;
+            if(_p30Start>0){
+              _prior20sBps=((_p10Start-_p30Start)/_p30Start)*10000;
+              // Acceleration = recent velocity - prior velocity, normalized to bps/sec
+              const _recentRate=_recent10sBps/10;
+              const _priorRate=_prior20sBps/20;
+              _acceleration=_recentRate-_priorRate;
+              _recentDir=_recent10sBps>1?'UP':_recent10sBps<-1?'DOWN':'FLAT';
+            }
+          }
+        }
+      }
+    }catch(_){}
+    const _trajAgainst=_recentDir&&((_isUP&&_recentDir==='DOWN')||(_isDN&&_recentDir==='UP'));
+    const _trajFor=_recentDir&&((_isUP&&_recentDir==='UP')||(_isDN&&_recentDir==='DOWN'));
+    const _spikeAgainst=_trajAgainst&&Math.abs(_recent10sBps||0)>=8;
+    const _spikeFor=_trajFor&&Math.abs(_recent10sBps||0)>=8;
+    const _acceleratingAgainst=_trajAgainst&&_acceleration!=null&&Math.abs(_acceleration)>=0.5;
+    const _acceleratingFor=_trajFor&&_acceleration!=null&&Math.abs(_acceleration)>=0.5;
+
     // Tara's read: is she still aligned?
     const _taraDir=taraCall?.snapshot?.call;
     const _taraAligned=_taraDir===userPosition;
     const _taraOpposed=(_taraDir==='UP'&&_isDN)||(_taraDir==='DOWN'&&_isUP);
     const _taraConf=Number(taraCall?.snapshot?.posterior)||50;
-    // Edge vs Kalshi (lower is bigger profit potential when aligned)
+    // Edge vs Kalshi
     const _kalshi=Number(kalshiYesPrice);
     const _hasKalshi=Number.isFinite(_kalshi)&&_kalshi>0;
     // Offer awareness
@@ -6159,6 +6247,23 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
 
     // ── Build advisory cards in priority order. Most urgent first. ──
     const cards=[];
+
+    // V9.1.7: ⚡ PRICE SPIKING AGAINST YOU — top priority. The moment Tara catches a
+    //   real-time reversal, surface it BEFORE the user has to read gap-bps.
+    if(_spikeAgainst&&_acceleratingAgainst){
+      cards.push({tone:'urgent',icon:'⚡',title:`Price spiking ${_recentDir} · against you`,
+        body:`Last 10s: ${_recent10sBps>0?'+':''}${Math.round(_recent10sBps)}bps move and accelerating. You're ${userPosition} — this is reversal velocity. ${_offerVal>0.30?'Cut at offer $'+_offerVal.toFixed(2)+' before more damage.':'Brace or exit — the move is fresh.'}`});
+    } else if(_spikeAgainst){
+      cards.push({tone:'urgent',icon:'⤵',title:`Sudden ${_recentDir} move · against you`,
+        body:`Price moved ${_recent10sBps>0?'+':''}${Math.round(_recent10sBps)}bps in last 10s. ${_winning?'You\'re still ahead — tighten exit before you give it back.':'You\'re behind and the move is fresh — exit unless tape stabilizes.'}`});
+    }
+
+    // V9.1.7: 📉 DRAWDOWN FROM PEAK — caught winning, now bleeding back to entry.
+    if(_peak>=15&&_drawdownFromPeak>=10&&_winning&&_drawdownFromPeak/Math.abs(_peak)>=0.5){
+      cards.push({tone:'urgent',icon:'📉',title:`Drawing down from +${Math.round(_peak)}bps peak`,
+        body:`You hit +${Math.round(_peak)}bps but you're now at +${Math.round(_favoredGap)}bps — gave back ${Math.round(_drawdownFromPeak)}bps. ${_offerVal>=0.65?'Offer $'+_offerVal.toFixed(2)+' is still strong — take it before more reversal.':'Watch the next 30s carefully — this is reversal territory.'}`});
+    }
+
     // ⛔ EXIT NOW signals
     if(positionStatus?.isStopHit){
       cards.push({tone:'urgent',icon:'🛑',title:'Stop hit — exit now',body:`Position breached -30%. Statistical recovery rate from here is below break-even cost. Don't argue with the math.`});
@@ -6173,12 +6278,24 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
       cards.push({tone:'urgent',icon:'🐋',title:'Late-window contrary whale',body:`$${Math.round(_largestContraryUsd/1000)}K ${_contrarySide} print just hit. Late whale spikes are the #1 cause of last-minute reversals. If you're up, take it; if you're flat or down, exit.`});
     }
 
-    // ✓ TAKE PROFIT signals
+    // V9.1.7: ⚡ ACCELERATING IN YOUR FAVOR — opposite of the danger spike, surface
+    //   the upside too. "Price is moving for you, hold the next 30s aggressively."
+    if(_spikeFor&&_acceleratingFor&&_winning){
+      cards.push({tone:'good',icon:'🚀',title:`Price spiking ${_recentDir} · with you`,
+        body:`Last 10s: ${_recent10sBps>0?'+':''}${Math.round(_recent10sBps)}bps and accelerating in your direction. Don't take profit yet — momentum hasn't peaked. Move stop to breakeven if you have one.`});
+    }
+
+    // ✓ TAKE PROFIT signals (V9.1.7: refined to use peak instead of just current gap)
     if(_offerVal>=0.85&&_secLeft>=120&&_winning){
-      cards.push({tone:'good',icon:'💰',title:`Take-profit zone · offer $${_offerVal.toFixed(2)}`,body:`You've captured most of the available value with ${Math.floor(_secLeft/60)}m+ left. Marginal additional profit isn't worth reversal risk. Configurable in Trading Settings.`});
+      cards.push({tone:'good',icon:'💰',title:`Take-profit zone · offer $${_offerVal.toFixed(2)}`,body:`You've captured most of the available value with ${Math.floor(_secLeft/60)}m+ left. Marginal additional profit isn't worth reversal risk.`});
     }
     if(_winning&&Math.abs(_favoredGap)>=20&&_secLeft<=180){
       cards.push({tone:'good',icon:'✓',title:'Strong lead · cruise to close',body:`+${Math.round(_favoredGap)}bps favorable with ${Math.floor(_secLeft/60)}m left. Time decay now favors you. Hold unless STALE warning fires.`});
+    }
+    // V9.1.7: New peak hit — surface the moment it happens so user doesn't miss the high.
+    if(_winning&&_favoredGap>=20&&_favoredGap===_peak&&_secLeft<=300){
+      cards.push({tone:'good',icon:'⭐',title:`New high · +${Math.round(_favoredGap)}bps peak`,
+        body:`You're at the highest point of this trade. ${_offerVal>=0.75?'Offer is $'+_offerVal.toFixed(2)+' — taking it now locks the win.':'Watch for first sign of stall (tape flips, opposing whale).'} If you give back more than half from here, exit.`});
     }
 
     // ⚠ WATCHFUL signals  
@@ -6196,6 +6313,11 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     }
     if(_bigContraryWhale&&!_last90s){
       cards.push({tone:'watch',icon:'🐋',title:'Contrary whale early in window',body:`$${Math.round(_largestContraryUsd/1000)}K ${_contrarySide} hit. Watch tape — if more contrary whales stack, exit before late-window selloff.`});
+    }
+    // V9.1.7: REBOUND from trough — was losing, now coming back. Hold or scale up.
+    if(_trough<=-15&&_reboundFromTrough>=10&&_favoredGap>=-5){
+      cards.push({tone:'watch',icon:'↗',title:`Rebounding from -${Math.round(Math.abs(_trough))}bps trough`,
+        body:`You were down ${Math.round(Math.abs(_trough))}bps and you're now ${_favoredGap>=0?'+':''}${Math.round(_favoredGap)}bps. ${_taraAligned?'Tara still aligned — let the rebound develop, don\'t exit at breakeven.':'Tara is opposed though — this rebound may be a fade. Take the recovery and exit.'}`});
     }
 
     // ℹ INFORMATIONAL signals
@@ -6226,8 +6348,15 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     },
       React.createElement('div',{className:'px-3 sm:px-4 py-1.5 border-b border-[#E8E9E4]/8 flex items-baseline justify-between gap-2'},
         React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:T2_GOLD}},'★ live trade coach'),
-        React.createElement('span',{className:'text-[10px] tabular-nums',style:{color:_winning?'rgb(110,231,183)':_losing?'rgba(244,114,182,0.85)':'rgba(232,233,228,0.6)'}},
-          userPosition,' · ',_winning?'+':'',Math.round(_favoredGap),'bps · ',Math.floor(_secLeft/60),'m ',String(_secLeft%60).padStart(2,'0'),'s',
+        React.createElement('div',{className:'flex items-center gap-2 text-[10px] tabular-nums'},
+          // V9.1.7: trajectory indicator in header — shows momentum direction with color
+          _recentDir&&React.createElement('span',{
+            style:{color:_trajFor?'rgb(110,231,183)':_trajAgainst?'rgba(244,114,182,0.85)':'rgba(232,233,228,0.4)'},
+            title:`Last 10s: ${_recent10sBps?Math.round(_recent10sBps):0}bps · ${_trajFor?'in your favor':_trajAgainst?'against you':'flat'}`,
+          },_recentDir==='UP'?'▲':_recentDir==='DOWN'?'▼':'▬',_recent10sBps?Math.round(_recent10sBps):0,'bps/10s'),
+          React.createElement('span',{style:{color:_winning?'rgb(110,231,183)':_losing?'rgba(244,114,182,0.85)':'rgba(232,233,228,0.6)'}},
+            userPosition,' · ',_winning?'+':'',Math.round(_favoredGap),'bps · ',Math.floor(_secLeft/60),'m ',String(_secLeft%60).padStart(2,'0'),'s',
+          ),
         ),
       ),
       React.createElement('div',{className:'p-2 sm:p-3 space-y-1.5'},
@@ -13147,7 +13276,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.6 online. Four fixes addressing user feedback. SYNC BUTTONS - explicit user control over baseline. Auto-merge sync still has subtle race conditions across devices, so we added two explicit operations. Save as Baseline pushes THIS device state to a separate Firestore doc baseline/canonical, marked with device label and timestamp. Apply Baseline reads that doc and OVERWRITES local. Workflow - keep your fullest device updated, end each session with Save as Baseline, and on any other device press Apply Baseline to receive that exact state. Click the SyncStatusPill in the header to open the sync menu - three options now - Force Resync (non-destructive merge from regular cloud paths), Save as Baseline, Apply Baseline. Baseline metadata loaded on mount so the menu shows last-saved-by-device-X-on-date. Confirmation dialogs preserve the existing localCounts of taraCallLog wins losses sitouts past windows P&L so user knows what they are about to overwrite or push. BRAIN section showing scanning when locked - fixed. The IIFE for taras-call panel inside BrainView was reading tc.call (live engine state) but the outer scope already had _snapLocked and _snapDir derived from taraCall.snapshot. The committed snapshot takes priority - once Tara locks, brain reflects that. Now uses _effectiveCall = _snapLocked ? _snapDir : tc.call for callLabel, callColor, borderClr, bgClr, arrow, isCall. Confidence display reads snapshot posterior when locked. NEWS TIMEZONE FIX. Some RSS feeds via rss2json return pubDate as YYYY-MM-DD HH:MM:SS without timezone marker. JavaScript treats those as LOCAL time, shifting timestamps by user TZ offset. New parseNewsDate helper - detects ISO with Z plus offset (parses normally), RFC 822 with GMT UTC plus 0000 (parses normally), bare YYYY-MM-DD HH:MM:SS strings (appends Z, treats as UTC). Used in rss2json and CryptoPanic ingestion paths. Display via toLocaleTimeString unchanged - it picks user's local TZ correctly given a proper ms timestamp. NEWS MINI ARROWS more prominent. Were using text-[#E8E9E4]/30 for neutral mixed cases - nearly invisible. Plus tiny 10px font size. Now - emerald 400 for UP triangle, rose 400 for DOWN triangle, amber 400/70 for diamond mixed neutral. Always visible. Font bumped to text-xs (12px). Same change applied to expanded news modal. EXISTING PRESERVED - V9.1.5 upgraded compact tape and depth strips with quality dots and 4-cell breakdowns, V9.1.4 force-resync MERGE not replace fix for taraCallLog scorecards pastWindows lifetimePnL, V9.1.4 multi-band orderBook tracking, V9.1.3 stats reconciliation, V9.1.3 sticky cross-browser lock, V9.1.2 plain language session notes, V9.1.2 schedule grouped by market session, V9.1 Discord scope keeps TARA_LOCK plus WHALE only. KNOWN LIMITATIONS - Apply Baseline is destructive for local data not in baseline. Use Save as Baseline first if THIS device has unique entries. The always-active server-side Tara would obviate this manual baseline mechanism by having one canonical engine instance regardless of devices."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.7 online. Three fixes per user feedback. SESSION + PHASE NOW ALIGNED. User noticed a mismatch - phase shows ASIA OPEN, session header says US IS PROFITABLE on the same screen. The bug - PHASE_PROFILES are UTC-anchored (ASIA_OPEN at 22-04 UTC) but getMarketSessions used user-LOCAL hours for asia/eu/us bucketing. So in EST at 4 PM local, phase showed ASIA_OPEN (UTC 21:00) but session showed US (because 16:00 local). Fixed - sessions now DERIVE from the UTC phase. ASIA covers ASIA_OPEN plus ASIA_LATE phases. EU covers EU_PREOPEN plus EU_OPEN. US covers all six NY_ phases. Both displays come from the same UTC clock now. Old taraCallLog entries with the old session field stay accurate because they were stamped at the time. New entries use the corrected derivation. LIVE TRADE COACH upgrade - was missing reversal warnings, profit zone alerts, and entry quality guidance. User said i still keep missing out on calls when trade is reversing against me, like price spikes or dips, same for maximizing profits and getting a good entry. Three new mechanisms - TRAJECTORY tracking (last 10s direction with prior 20s comparison for acceleration detection), surfaces PRICE SPIKING AGAINST YOU NOW with 10bps moves and accelerating language. PEAK plus TROUGH refs reset on position open or flip - catches you hit +25bps but you are now at +8bps gave back 17bps. Plus a NEW HIGH alert the moment you reach a new peak, with offer-take guidance. Acceleration detection compares last 10s velocity to prior 20s rate, flags when momentum is GROWING in either direction. Header now shows real-time trajectory indicator - up triangle and bps/10s in green when in your favor, down triangle and bps/10s in rose when against you. Cards added - Price spiking AGAINST you accelerating, Sudden move against you, Drawing down from peak with bps gave back, Price spiking WITH you accelerating, NEW HIGH bps peak, Rebounding from trough. EXISTING PRESERVED - V9.1.6 Save/Apply Baseline buttons, V9.1.6 Brain section locked vs scanning fix, V9.1.6 news timezone parseNewsDate helper, V9.1.6 mini news arrows visible, V9.1.5 upgraded compact strips with quality dots and 4-cell breakdowns, V9.1.4 force-resync MERGE not replace, V9.1.4 multi-band orderBook, V9.1.3 stats reconciliation, V9.1.3 sticky cross-browser lock, V9.1.2 plain language session notes, V9.1.2 schedule grouped by market session, V9.1 Discord scope. KNOWN LIMITATIONS - trajectory needs at least 30 seconds of tickHistory to engage. On a fresh session it stays hidden until ticks accumulate. Day-session bucket like WED-US for the dsAdj quality multiplier still uses local day, which is the right call - your historical wins by day-of-week stay tied to your local calendar."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -18839,7 +18968,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.1.6
+              9.1.7
             </span>
           </div>
 
@@ -19358,6 +19487,7 @@ function TaraApp(){
           whaleLog={whaleLog}
           tradingSettings={tradingSettings}
           todayData={todayData}
+          tickHistoryRef={tickHistoryRef}
         />
 
         {/* V8.2: Asset rotation suggestion */}
@@ -20672,6 +20802,29 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.1.7 — Session/phase aligned · Coach trajectory */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Session/phase aligned &middot; coach trajectory + peak/trough</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.1.7</span> &mdash; Phase/Session + Reversal Coach</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Phase + session aligned to UTC</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;phase and session should be categorized correctly right.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3"><code className="text-[10px] bg-[#0E100F] px-1">PHASE_PROFILES</code> are UTC-anchored (e.g. ASIA_OPEN = 22:00&ndash;04:00 UTC) but <code className="text-[10px] bg-[#0E100F] px-1">getMarketSessions</code> was using user-LOCAL hours for ASIA/EU/US bucketing. So in EST at 4 PM local, the screen showed <em>ASIA_OPEN</em> phase (UTC 21:00) but <em>US IS PROFITABLE</em> in the session header. Fixed: sessions now derive from the UTC phase. ASIA = <code className="text-[10px] bg-[#0E100F] px-1">ASIA_OPEN</code>+<code className="text-[10px] bg-[#0E100F] px-1">ASIA_LATE</code>; EU = <code className="text-[10px] bg-[#0E100F] px-1">EU_PREOPEN</code>+<code className="text-[10px] bg-[#0E100F] px-1">EU_OPEN</code>; US = all six <code className="text-[10px] bg-[#0E100F] px-1">NY_*</code> phases. Both displays come from the same UTC clock.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Live Trade Coach: trajectory + peak/trough awareness</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;i still keep missing out on calls when trade is reversing against me, like price spikes or dips. Same for maximizing profits and getting a good entry.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Three new mechanisms in <code className="text-[10px] bg-[#0E100F] px-1">LiveTradeCoach</code>:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Trajectory tracking</strong> &mdash; last 10s direction + bps move, with prior 20s comparison for acceleration. Surfaces <em>&ldquo;Price spiking ${'{'}DIR{'}'} &middot; against you&rdquo;</em> with <em>&ldquo;and accelerating&rdquo;</em> language when momentum is growing.</li>
+                  <li><strong>Peak / trough refs</strong> reset on position open or flip. Catches <em>&ldquo;You hit +25bps but you&rsquo;re now at +8bps &mdash; gave back 17bps&rdquo;</em>. New <strong>NEW HIGH</strong> alert the moment you reach a new peak with take-profit guidance.</li>
+                  <li><strong>Acceleration detection</strong> compares last-10s velocity to prior-20s rate. Catches reversals BEFORE the gap-bps math reflects them &mdash; the moment momentum flips, not 20s later.</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Header now shows a real-time trajectory pill: <strong style={{color:'rgb(110,231,183)'}}>&#9650; bps/10s</strong> in green when momentum is favorable, <strong style={{color:'rgba(244,114,182,0.85)'}}>&#9660; bps/10s</strong> in rose when against you.</p>
               </section>
 
               {/* V9.1.6 — Baseline sync · Brain fix · News fixes */}
