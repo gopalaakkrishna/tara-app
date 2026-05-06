@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.0-schedule-and-quality-of-life';
+const BASELINE_VERSION='2026.05.06-v9.1.1-layout-and-news';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -7196,7 +7196,7 @@ function TodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMacro}){
 //
 //   Strictly informational — does not gate Tara's calls. Tara still calls every
 //   round per V8.9.2; the schedule tells the USER when to actually engage.
-function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat}){
+function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSchedule}){
   const[tick,setTick]=React.useState(0);
   React.useEffect(()=>{
     const iv=setInterval(()=>setTick(t=>t+1),60000); // re-eval every minute
@@ -7296,24 +7296,32 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat}){
   if(!schedule||schedule.length===0)return null;
   const current=schedule[0];
 
-  return React.createElement('div',{className:'mb-2 px-3 py-2.5 rounded-lg',style:{background:'#111312',border:'1px solid rgba(232,233,228,0.08)'}},
+  return React.createElement('div',{className:'mb-2 px-3 py-2.5 rounded-lg min-w-0 overflow-hidden',style:{background:'#111312',border:'1px solid rgba(232,233,228,0.08)'}},
     // Header
     React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
       React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(229,200,112,0.85)'}},'Today\'s Schedule'),
-      React.createElement('span',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/35'},_resolvedFmt.toUpperCase())
+      React.createElement('div',{className:'flex items-center gap-2'},
+        React.createElement('span',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/35'},_resolvedFmt.toUpperCase()),
+        onOpenFullSchedule&&React.createElement('button',{
+          onClick:onOpenFullSchedule,
+          title:'Open full schedule',
+          className:'text-[10px] px-1.5 py-0.5 rounded border transition-colors hover:bg-[#E8E9E4]/5',
+          style:{color:'rgba(229,200,112,0.85)',borderColor:'rgba(229,200,112,0.30)'},
+        },'⊕')
+      )
     ),
     // Current state callout — biggest visual emphasis
     React.createElement('div',{
-      className:'mb-2 px-3 py-2 rounded-md flex items-center gap-2.5',
+      className:'mb-2 px-3 py-2 rounded-md flex items-center gap-2.5 min-w-0',
       style:{background:current.tierBg,border:`1px solid ${current.tierBorder}`,boxShadow:`0 0 12px ${current.tierBorder}`},
     },
-      React.createElement('span',{className:'text-base'},current.tier==='TRADE'?'🟢':current.tier==='BREAK'?'⏸':'🟡'),
+      React.createElement('span',{className:'text-base shrink-0'},current.tier==='TRADE'?'🟢':current.tier==='BREAK'?'⏸':'🟡'),
       React.createElement('div',{className:'flex-1 min-w-0'},
-        React.createElement('div',{className:'flex items-baseline gap-2 mb-0.5'},
-          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:current.tierColor}},`Now · ${current.tierLabel}`),
-          React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/55'},`${current.flag} ${current.label}`),
+        React.createElement('div',{className:'flex items-baseline gap-2 mb-0.5 flex-wrap'},
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold shrink-0',style:{color:current.tierColor}},`Now · ${current.tierLabel}`),
+          React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/55 truncate'},`${current.flag} ${current.label}`),
         ),
-        React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 leading-snug'},
+        React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 leading-snug break-words'},
           current.reason+(current.durationMin?` · ends in ${_fmtDuration(current.durationMin)}`:'')
         )
       )
@@ -7321,14 +7329,178 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat}){
     // Upcoming phases — compact list of next 4
     React.createElement('div',{className:'space-y-1'},
       schedule.slice(1,5).map((s,i)=>(
-        React.createElement('div',{key:i,className:'flex items-center gap-2 px-2 py-1 rounded text-[10px]',style:{background:'rgba(232,233,228,0.02)',border:`1px solid ${s.tierBorder}`}},
-          React.createElement('span',{className:'text-[10px]'},s.tier==='TRADE'?'🟢':s.tier==='BREAK'?'⏸':'🟡'),
+        React.createElement('div',{key:i,className:'flex items-center gap-2 px-2 py-1 rounded text-[10px] min-w-0',style:{background:'rgba(232,233,228,0.02)',border:`1px solid ${s.tierBorder}`}},
+          React.createElement('span',{className:'text-[10px] shrink-0'},s.tier==='TRADE'?'🟢':s.tier==='BREAK'?'⏸':'🟡'),
           React.createElement('span',{className:'tabular-nums text-[#E8E9E4]/55 shrink-0',style:{minWidth:'56px'}},_fmtTime(s.startsAt)),
           React.createElement('span',{className:'font-bold uppercase tracking-wider shrink-0',style:{color:s.tierColor,fontSize:'9px',minWidth:'66px'}},s.tierLabel),
-          React.createElement('span',{className:'text-[#E8E9E4]/55 truncate'},`${s.flag} ${s.label}`),
-          React.createElement('span',{className:'text-[#E8E9E4]/35 truncate text-[9px] hidden sm:inline'},`· ${s.reason}`),
+          React.createElement('span',{className:'text-[#E8E9E4]/55 truncate min-w-0'},`${s.flag} ${s.label}`),
+          React.createElement('span',{className:'text-[#E8E9E4]/35 truncate text-[9px] hidden sm:inline min-w-0'},`· ${s.reason}`),
         )
       ))
+    )
+  );
+}
+
+// V9.1.1: TradeScheduleModal — full-day schedule popup with extended detail.
+//   Shows next 24 hours, per-phase WR breakdown, macro events, best/worst phases.
+//   Triggered by the ⊕ button on TradeScheduleStrip.
+function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
+  React.useEffect(()=>{
+    const onKey=(e)=>{if(e.key==='Escape')onClose();};
+    window.addEventListener('keydown',onKey);
+    return()=>window.removeEventListener('keydown',onKey);
+  },[onClose]);
+
+  const fullSchedule=React.useMemo(()=>{
+    // Build per-phase historical WR map for current asset
+    const _phaseStats={};
+    (taraCallLog||[]).forEach(e=>{
+      if(!e||!e.phase||(e.asset||'BTC')!==currentAsset)return;
+      if(e.result!=='WIN'&&e.result!=='LOSS')return;
+      const k=e.phase;
+      if(!_phaseStats[k])_phaseStats[k]={W:0,L:0};
+      if(e.result==='WIN')_phaseStats[k].W++;else _phaseStats[k].L++;
+    });
+
+    // Generate next 24 hours of phase blocks
+    const out=[];
+    const now=new Date();
+    let cursor=new Date(now);
+    let totalMin=0;
+    const MAX_MIN=24*60;
+    let safety=0;
+    while(totalMin<MAX_MIN&&safety++<48){
+      const h=cursor.getUTCHours();
+      const m=cursor.getUTCMinutes();
+      const phaseKey=getPhaseKey(h,m);
+      const prof=PHASE_PROFILES[phaseKey]||null;
+      const trans=getNextPhaseTransition(h,m);
+      const minsUntilEnd=trans?.minsUntil||60;
+
+      const stats=_phaseStats[phaseKey];
+      const N=stats?(stats.W+stats.L):0;
+      const wr=N>=5?stats.W/N:null;
+      let tier='SELECTIVE',tierLabel='SELECTIVE',tierColor='rgba(229,200,112,0.85)',tierBg='rgba(229,200,112,0.05)',tierBorder='rgba(229,200,112,0.20)';
+      const _isDeadzone=prof?.deadzoneWarning===true;
+      const _liqLow=prof?.liquidity==='LOW';
+      const _volComp=prof?.vol==='COMPRESSING';
+      const _liqHigh=prof?.liquidity==='HIGH';
+      if(_isDeadzone||(N>=10&&wr!=null&&wr<0.50)||(_liqLow&&_volComp)){
+        tier='BREAK';tierLabel='BREAK';
+        tierColor='rgba(232,233,228,0.45)';tierBg='rgba(232,233,228,0.03)';tierBorder='rgba(232,233,228,0.10)';
+      }else if(_liqHigh&&!_volComp&&(wr==null||wr>=0.60)){
+        tier='TRADE';tierLabel='TRADE';
+        tierColor='rgba(110,231,183,0.95)';tierBg='rgba(110,231,183,0.06)';tierBorder='rgba(110,231,183,0.30)';
+      }
+      out.push({
+        phaseKey,profile:prof,
+        tier,tierLabel,tierColor,tierBg,tierBorder,
+        wr,N,W:stats?.W||0,L:stats?.L||0,
+        startsAt:new Date(cursor),
+        minutesFromNow:totalMin,
+        durationMin:minsUntilEnd,
+      });
+      cursor=new Date(cursor.getTime()+minsUntilEnd*60000);
+      totalMin+=minsUntilEnd;
+    }
+    return out;
+  },[taraCallLog,currentAsset]);
+
+  // Best/worst phases by WR for current asset
+  const ranked=React.useMemo(()=>{
+    const stats={};
+    (taraCallLog||[]).forEach(e=>{
+      if(!e||!e.phase||(e.asset||'BTC')!==currentAsset)return;
+      if(e.result!=='WIN'&&e.result!=='LOSS')return;
+      if(!stats[e.phase])stats[e.phase]={W:0,L:0,phase:e.phase};
+      if(e.result==='WIN')stats[e.phase].W++;else stats[e.phase].L++;
+    });
+    const arr=Object.values(stats).filter(s=>(s.W+s.L)>=5).map(s=>({
+      ...s,wr:s.W/(s.W+s.L),N:s.W+s.L,
+    }));
+    arr.sort((a,b)=>b.wr-a.wr);
+    return arr;
+  },[taraCallLog,currentAsset]);
+
+  const _resolvedFmt=timeFormat||'local';
+  const _tzOpt=_resolvedFmt==='utc'?{timeZone:'UTC'}:_resolvedFmt==='est'?{timeZone:'America/New_York'}:undefined;
+  const _fmtTime=(d)=>{
+    try{return d.toLocaleTimeString('en-US',{..._tzOpt,hour12:true,hour:'numeric',minute:'2-digit'});}
+    catch(_){return d.toLocaleTimeString('en-US',{hour12:true,hour:'numeric',minute:'2-digit'});}
+  };
+  const _fmtDuration=(min)=>{
+    if(min<60)return `${min}m`;
+    const h=Math.floor(min/60);const m=Math.round(min%60);
+    return m===0?`${h}h`:`${h}h ${m}m`;
+  };
+
+  return React.createElement('div',{
+    className:'fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 overflow-y-auto',
+    style:{background:'rgba(0,0,0,0.75)',backdropFilter:'blur(4px)'},
+    onClick:onClose,
+  },
+    React.createElement('div',{
+      className:'w-full max-w-3xl rounded-xl my-auto',
+      style:{background:'#181A19',border:'1px solid rgba(229,200,112,0.20)',boxShadow:'0 0 40px rgba(229,200,112,0.15)'},
+      onClick:(e)=>e.stopPropagation(),
+    },
+      // Header
+      React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid rgba(232,233,228,0.10)'}},
+        React.createElement('div',{className:'flex items-baseline gap-3'},
+          React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Trading Schedule'),
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(229,200,112,0.85)'}},`${currentAsset} · Next 24h · ${_resolvedFmt.toUpperCase()}`)
+        ),
+        React.createElement('button',{
+          onClick:onClose,
+          title:'Close (Esc)',
+          className:'w-7 h-7 rounded flex items-center justify-center text-[#E8E9E4]/50 hover:text-white hover:bg-[#E8E9E4]/5 transition-colors',
+        },'✕')
+      ),
+      // Body
+      React.createElement('div',{className:'px-5 py-4 max-h-[70vh] overflow-y-auto'},
+        // Best/worst summary
+        ranked.length>0&&React.createElement('div',{className:'mb-4 grid grid-cols-1 sm:grid-cols-2 gap-3'},
+          React.createElement('div',{className:'p-3 rounded-md',style:{background:'rgba(110,231,183,0.04)',border:'1px solid rgba(110,231,183,0.15)'}},
+            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.16em] font-bold mb-2',style:{color:'rgba(110,231,183,0.85)'}},'Best phases (you)'),
+            ranked.slice(0,3).map((r,i)=>React.createElement('div',{key:i,className:'flex items-baseline justify-between text-[11px] mb-1'},
+              React.createElement('span',{className:'text-[#E8E9E4]/75'},(PHASE_PROFILES[r.phase]?.label||r.phase)),
+              React.createElement('span',{className:'tabular-nums',style:{color:'rgba(110,231,183,0.85)'}},`${Math.round(r.wr*100)}% · ${r.N} trades`)
+            ))
+          ),
+          React.createElement('div',{className:'p-3 rounded-md',style:{background:'rgba(244,114,182,0.04)',border:'1px solid rgba(244,114,182,0.15)'}},
+            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.16em] font-bold mb-2',style:{color:'rgba(244,114,182,0.85)'}},'Worst phases (you)'),
+            ranked.slice(-3).reverse().map((r,i)=>React.createElement('div',{key:i,className:'flex items-baseline justify-between text-[11px] mb-1'},
+              React.createElement('span',{className:'text-[#E8E9E4]/75'},(PHASE_PROFILES[r.phase]?.label||r.phase)),
+              React.createElement('span',{className:'tabular-nums',style:{color:'rgba(244,114,182,0.85)'}},`${Math.round(r.wr*100)}% · ${r.N} trades`)
+            ))
+          )
+        ),
+        // Full schedule list
+        React.createElement('div',{className:'space-y-1.5'},
+          fullSchedule.map((s,i)=>React.createElement('div',{
+            key:i,
+            className:'p-2.5 rounded-md flex items-start gap-3',
+            style:{background:s.tierBg,border:'1px solid '+s.tierBorder},
+          },
+            React.createElement('span',{className:'text-base shrink-0'},s.tier==='TRADE'?'🟢':s.tier==='BREAK'?'⏸':'🟡'),
+            React.createElement('div',{className:'flex-1 min-w-0'},
+              React.createElement('div',{className:'flex items-baseline gap-2 mb-1 flex-wrap'},
+                React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:s.tierColor}},s.tierLabel),
+                React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/85 font-bold'},`${s.profile?.flag||''} ${s.profile?.label||s.phaseKey}`),
+                React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45 tabular-nums'},`${_fmtTime(s.startsAt)} · ${_fmtDuration(s.durationMin)}`)
+              ),
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55 leading-snug mb-1'},s.profile?.character||''),
+              React.createElement('div',{className:'flex items-baseline gap-3 text-[10px] flex-wrap'},
+                s.wr!=null?React.createElement('span',{className:'tabular-nums',style:{color:s.wr>=0.60?'rgba(110,231,183,0.85)':s.wr<0.50?'rgba(244,114,182,0.85)':'rgba(229,200,112,0.85)'}},`Your WR: ${Math.round(s.wr*100)}% (${s.W}W/${s.L}L)`):React.createElement('span',{className:'text-[#E8E9E4]/35'},`No prior data yet`),
+                s.profile?.liquidity&&React.createElement('span',{className:'text-[#E8E9E4]/45'},`liq: ${s.profile.liquidity}`),
+                s.profile?.vol&&React.createElement('span',{className:'text-[#E8E9E4]/45'},`vol: ${s.profile.vol}`),
+                s.profile?.coinFlipRisk&&React.createElement('span',{className:'text-[#E8E9E4]/45'},`coin-flip: ${s.profile.coinFlipRisk}`)
+              )
+            )
+          ))
+        ),
+        ranked.length===0&&React.createElement('div',{className:'text-center text-[11px] text-[#E8E9E4]/40 italic mt-4'},'No phase-WR data yet — schedule uses default profiles. Trade more to personalize.')
+      )
     )
   );
 }
@@ -8248,7 +8420,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -8267,6 +8439,14 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
       {/* V4.2: TARA'S CALL — primary panel, top of column.
           V6.2.3: hidden lg:block (was md:block). */}
       <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} className="hidden lg:block"/>
+
+      {/* V9.1.1: Tape flow meter — narrow box between Tara's Call and Projections.
+          Renders only when tapeWindows is available; otherwise null. */}
+      {tapeWindows&&(
+        <div className="hidden lg:block mb-3">
+          <TapeStrip tapeWindows={tapeWindows} whaleLog={whaleLog}/>
+        </div>
+      )}
 
       <div className="flex items-center justify-between mb-3 shrink-0">
         <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
@@ -9357,8 +9537,60 @@ function NewsFeedCard(){
             return;
           }
         }
+      }catch(_){/* fall through */}
+      // ── V9.1.1 Source 3: rss2json proxy with CoinDesk RSS ────────────────
+      //   rss2json.com offers 10k free requests/day with proper CORS headers.
+      //   Reliable when CryptoCompare proxies are blocked at the network level.
+      try{
+        const _rssFeeds=[
+          'https://www.coindesk.com/arc/outboundfeeds/rss/',
+          'https://decrypt.co/feed',
+          'https://cointelegraph.com/rss',
+        ];
+        // Try each RSS feed until one works
+        for(const _rss of _rssFeeds){
+          try{
+            const _r2j=await tryFetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(_rss)}`,6000);
+            if(_r2j?.status==='ok'&&Array.isArray(_r2j.items)&&_r2j.items.length>0){
+              const items=_r2j.items.slice(0,15).map(it=>({
+                title:it.title,
+                source:_r2j.feed?.title||(_rss.includes('coindesk')?'CoinDesk':_rss.includes('decrypt')?'Decrypt':'CoinTelegraph'),
+                url:it.link,
+                time:new Date(it.pubDate||Date.now()).getTime(),
+                categories:Array.isArray(it.categories)?it.categories.slice(0,3):[],
+              }));
+              setNews(items);
+              setErr(null);
+              setLoading(false);
+              _writeCache(items);
+              return;
+            }
+          }catch(_e){/* try next feed */}
+        }
+      }catch(_){/* fall through */}
+      // ── V9.1.1 Source 4: CryptoPanic free public posts ───────────────────
+      try{
+        const _cpUrl='https://cryptopanic.com/api/free/v1/posts/?public=true&currencies=BTC';
+        const _cp=await tryFetch(`https://api.allorigins.win/get?url=${encodeURIComponent(_cpUrl)}`,7000);
+        if(_cp?.contents){
+          const _cpData=JSON.parse(_cp.contents);
+          if(Array.isArray(_cpData?.results)&&_cpData.results.length>0){
+            const items=_cpData.results.slice(0,15).map(p=>({
+              title:p.title,
+              source:p.source?.title||'CryptoPanic',
+              url:p.url||p.original_url||'#',
+              time:new Date(p.published_at||Date.now()).getTime(),
+              categories:(p.currencies||[]).map(c=>c.code).slice(0,3),
+            }));
+            setNews(items);
+            setErr(null);
+            setLoading(false);
+            _writeCache(items);
+            return;
+          }
+        }
       }catch(_){/* fall through to cache */}
-      // ── Source 3: localStorage cache (≤4h old) ────────────────────────
+      // ── Source 5: localStorage cache (≤4h old) ────────────────────────
       const _cached=_readCache();
       if(_cached){
         setNews(_cached.items);
@@ -9367,8 +9599,10 @@ function NewsFeedCard(){
         setLoading(false);
         return;
       }
+      // V9.1.1: log diagnostic info to console so user can check DevTools
+      try{console.warn('[Tara news] All 4 sources failed: CryptoCompare(4 proxies) + Reddit + rss2json(3 feeds) + CryptoPanic. Check Network tab for blocked requests.');}catch(_){}
       // Truly nothing
-      setErr('All news sources unavailable');
+      setErr('All sources blocked — see browser console for details');
       setLoading(false);
     };
     fetchNewsRef.current=fetchNews; // V9.0: expose for retry button
@@ -9445,7 +9679,9 @@ function NewsFeedCard(){
 }
 
 // ── V111: RightPanel - Engine Log + Live Feeds + News (col 3) ──
-function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}){
+function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,taraCallLog,currentAsset,timeFormat}){
+  // V9.1.1: full-schedule popup state
+  const[scheduleModalOpen,setScheduleModalOpen]=React.useState(false);
   const reasoning=analysis?.reasoning||[];
   const tape=tapeRef?.current||{};
   const cb=tape.coinbase||{buys:0,sells:0};
@@ -9601,6 +9837,19 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
           })}
         </div>
       </div>
+      {/* V9.1.1: Trade Schedule strip — relocated from top of main render. Sits
+          between Engine Log and Live Feeds. Clicking the ⊕ button opens a full
+          schedule modal with extended detail. */}
+      {taraCallLog&&(
+        <div className="shrink-0 pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
+          <TradeScheduleStrip
+            taraCallLog={taraCallLog}
+            currentAsset={currentAsset}
+            timeFormat={timeFormat}
+            onOpenFullSchedule={()=>setScheduleModalOpen(true)}
+          />
+        </div>
+      )}
       {/* Live Feeds metrics */}
       <div className="shrink-0 pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
         <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2'} style={{color:T2_GOLD}}>Live Feeds</div>
@@ -9645,6 +9894,15 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab}
       <div className="pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
         <NewsFeedCard/>
       </div>
+      {/* V9.1.1: Full-schedule modal — opens via ⊕ on schedule strip header */}
+      {scheduleModalOpen&&taraCallLog&&(
+        <TradeScheduleModal
+          taraCallLog={taraCallLog}
+          currentAsset={currentAsset}
+          timeFormat={timeFormat}
+          onClose={()=>setScheduleModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -12355,7 +12613,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.0 online. This release rounds out the no-sit-outs philosophy with the missing pieces. ENGINE: TRUE COIN FLIP exception now skips the snapshot entirely. The V8.9.2 NO_TRADE-becomes-directional path was overcommitting in case (c) - posterior 47-53 with 20s left and gap under 2bps - which is a real coin flip with no time to resolve. V9.0 returns early in that case so Tara keeps sampling instead of faking conviction. Cases (a) bad edge vs Kalshi and (b) data feeds unavailable still commit directionally with caution since those have a clear read just bad price or unreliable inputs. Hard cap at 90s elapsed remains the safety net for anything truly stuck. NEW: TradeScheduleStrip surfaces TRADE / SELECTIVE / BREAK recommendations for the next 10 hours. Combines three inputs - PHASE_PROFILES static character (liquidity, vol, deadzoneWarning), your historical WR per phase from taraCallLog filtered to current asset, and macro events landing inside the phase. Tiers map to lifecycle - green TRADE means high liquidity plus non-compressing vol plus historical WR at or above 60 percent or no priors yet, gold SELECTIVE means mixed signals focus on confluence-only, dim BREAK means deadzone warning or under 50 percent WR with at least 10 trades or compressing illiquid window. Strictly informational, does not gate Tara - your call to engage or step away. Renders right under MarketContextStrip with current-state callout plus the next four upcoming phase changes. NEW: 3-way time format toggle. State migrated from useLocalTime boolean to timeFormat string with values local utc est. Header pill cycles LOCAL to UTC to EST to LOCAL on click. Persists under taraTimeFormat key with migration from old taraV110TZ boolean. Threaded through TaraCallCard, ProjectionsCard, TaraMemoryStrip, TaraMemoryModal, the engine projection timeline, and the new TradeScheduleStrip. NEW: news retry button. The fetch failure UI was alarming and offered no recovery path. Now reads News feed temporarily offline plus a Retry button that calls fetchNews via fetchNewsRef. Wording softened from fetch unavailable to temporarily offline since macro countdown stays accurate regardless. SYNC: 2-second hysteresis on the error label matches the 750ms hysteresis on the writing label. Firestore SDK auto-retries internally so most red flashes were transient single failures that resolved before user even noticed. Now the pill only goes red if error genuinely persists 2 seconds. DISCORD: NO_TRADE override commits no longer broadcast TARA_LOCK to Discord. The wasOverriddenNoTrade and wasOverriddenSitOut snapshots get caught in a guard before broadcastToDiscord, broadcastRef.sentLock still gets set so we don't retry. Normal locks (real signal, real conviction) still broadcast. Override commits are screen-only - cautioned for the user, suppressed from the channel where they're noise. EXISTING from V8.9.2 still in place: every-round directional calls, _normalizeLegacySnap defensive cleanup, gold-vs-rose caution badge styling, follow-Tara button (V8.9.1), smart money detectors strip (V8.9.0), spike alerts (V8.8.9), sync pill counter approach (V8.8.7), asset-aware dedup (V8.8.6), no-op SW plus circuit breaker (V8.8.5). KNOWN OPEN GAP: single-browser switching BTC and ETH mid-window can leave the previous asset's window unresolved since resolution code path is scoped to active asset. Multi-browser side-steps it. Per-asset resolution scheduler is the eventual fix."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.1 online. Layout reshuffle plus news fetch fixes. SCHEDULE relocated from top of main render to inside RightPanel between Engine Log and Live Feeds - tighter information density, no more competing for vertical space with the chart. New circle-plus button on the schedule header opens TradeScheduleModal as a popup overlay - shows next 24 hours instead of 10, plus best/worst phases breakdown for current asset based on your historical WR, plus full phase character description per row. Esc or click outside dismisses. TAPE FLOW METER moved from top into its own slot inside ProjectionsCard between TaraCallCard and the Projections header - both desktop (col 2) and mobile (after mobile TaraCallCard, before PredictionContent). Width naturally narrower because column-bound rather than full-page. NEWS FETCH improvements - added two new fallback sources after the existing CryptoCompare-via-4-proxies and Reddit. Source 3 is rss2json.com proxying CoinDesk, Decrypt, and CoinTelegraph RSS feeds (10k free requests per day with proper CORS headers). Source 4 is CryptoPanic free public posts API via allorigins. Plus diagnostic console.warn when all sources fail so you can check Network tab in DevTools to identify what's actually being blocked at the network level. Error message updated from All news sources unavailable to All sources blocked - see browser console for details. RESPONSIVE AUDIT - added min-w-0 plus truncate plus flex-wrap to schedule strip rows, current-state callout, and outer container so nothing pushes the column wider than its assigned grid track. Schedule strip rows now wrap gracefully on narrow viewports. Current-state callout description text uses break-words. EXISTING preserved - V9.1 Discord scope (TARA_LOCK plus WHALE only, four user-action broadcasts suppressed), V9.0 trade schedule logic, V9.0 3-way time format, V9.0 sync error hysteresis, V9.0 true coin flip skip, V8.9.2 every-round directional calls. KNOWN OPEN GAP - single-browser BTC and ETH switching mid-window leaves prior asset unresolved."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -13952,7 +14210,8 @@ function TaraApp(){
               setTimeout(()=>setWindowRecap(null),6000);
               // Note: scorecard wins/losses NOT pre-incremented since we no longer auto-score the general
               const winsNow=scorecards[windowType]?.wins||0,lossesNow=scorecards[windowType]?.losses||0;
-              broadcastToDiscord('CLOSE',{window:windowType,won,dir:userPosition,regime:lastRegimeRef.current,price:currentPrice,strike:targetMargin,wins:winsNow,losses:lossesNow});
+              // V9.1: SUPPRESSED. User-triggered (window closing on user's position). Tara-only broadcasts.
+              // broadcastToDiscord('CLOSE',{window:windowType,won,dir:userPosition,regime:lastRegimeRef.current,price:currentPrice,strike:targetMargin,wins:winsNow,losses:lossesNow});
             }
             // Resolve training trade
             // V2.6: Marginal-close handling. When |closingGapBps| < 10 (Tara's local feed and Kalshi's
@@ -17417,16 +17676,17 @@ function TaraApp(){
         updateScore(windowType,'losses',1);
         // Broadcast the LOSS for the trade being exited — before the new entry
         const gapBpsExit=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
-        broadcastToDiscord('EXIT',{
-          result:'LOSS',
-          action:`REVERSED — exiting ${userPosition}`,
-          price:currentPrice,
-          strike:targetMargin,
-          gap:gapBpsExit,
-          clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,
-          regime:lastRegimeRef.current,
-          dir:userPosition,
-        });
+        // V9.1: SUPPRESSED. User-triggered (reversal exit). Tara-only broadcasts now.
+        // broadcastToDiscord('EXIT',{
+        //   result:'LOSS',
+        //   action:`REVERSED — exiting ${userPosition}`,
+        //   price:currentPrice,
+        //   strike:targetMargin,
+        //   gap:gapBpsExit,
+        //   clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,
+        //   regime:lastRegimeRef.current,
+        //   dir:userPosition,
+        // });
         pendingTradeRef.current=null;
       }
     }
@@ -17475,7 +17735,10 @@ function TaraApp(){
         timestampISO:new Date().toISOString(),                   // wall-clock for date analysis
       };
       // Broadcast the new entry after the reversal loss
-      broadcastToDiscord('LOCK',{dir,price:currentPrice,strike:targetMargin,gap:gapBps,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,regime:lastRegimeRef.current,posterior:analysis?.rawProbAbove||0});
+      // V9.1: SUPPRESSED. User mandate — only Tara's own locks (TARA_LOCK at line ~17049)
+      //   and whale alerts broadcast to Discord. User-triggered actions (manual entry,
+      //   exit, force-close) are screen-only.
+      // broadcastToDiscord('LOCK',{dir,price:currentPrice,strike:targetMargin,gap:gapBps,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,regime:lastRegimeRef.current,posterior:analysis?.rawProbAbove||0});
     }
     setForceRender(p=>p+1);
   };
@@ -17503,7 +17766,8 @@ function TaraApp(){
           pendingTradeRef.current=null;
         }
         // Broadcast exit/switch action since user explicitly confirmed it
-        broadcastToDiscord('EXIT',{result,action:advisorLabel||target,price:currentPrice,strike:targetMargin,gap:gapBps,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,regime:lastRegimeRef.current});
+        // V9.1: SUPPRESSED. User-triggered (taking advisor action). Tara-only broadcasts.
+        // broadcastToDiscord('EXIT',{result,action:advisorLabel||target,price:currentPrice,strike:targetMargin,gap:gapBps,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,regime:lastRegimeRef.current});
       }
       setUserPosition(null);setPositionEntry(null);setCurrentOffer('');
       taraAdviceRef.current='CLOSED';
@@ -17783,7 +18047,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.0
+              9.1.1
             </span>
           </div>
 
@@ -18097,8 +18361,8 @@ function TaraApp(){
           </div>
         </div>
 
-        {/* V3.1: Tape strip — sliding-window buy/sell pressure */}
-        <TapeStrip tapeWindows={tapeWindows} whaleLog={whaleLog}/>
+        {/* V9.1.1: TapeStrip relocated — now renders between TaraCallCard and
+            ProjectionsCard for tighter signal-to-decision adjacency. */}
 
         {/* V7.10.6: Market context strip — current phase, cautions, next transition */}
         {/* V8.7.2: Now also reads call log + currentAsset for session-WR advisory */}
@@ -18109,12 +18373,9 @@ function TaraApp(){
           currentAsset={currentAsset}
         />
 
-        {/* V9.0: Trade Schedule — TRADE / SELECTIVE / BREAK windows for next 10h */}
-        <TradeScheduleStrip
-          taraCallLog={taraCallLog}
-          currentAsset={currentAsset}
-          timeFormat={timeFormat}
-        />
+        {/* V9.1.1: TradeScheduleStrip relocated — now renders inside RightPanel
+            between Engine Log and Live Feeds. Full-schedule modal opens via the
+            ⊕ button on the strip header. */}
 
         {/* V8.2: Anti-tilt cooldown — most urgent banner, blocks new locks */}
         <AntiTiltCooldownBanner
@@ -18399,6 +18660,13 @@ function TaraApp(){
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
             <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
 
+            {/* V9.1.1: Tape flow meter on mobile — between Tara's Call and PredictionContent. */}
+            {tapeWindows&&(
+              <div className="lg:hidden mb-3">
+                <TapeStrip tapeWindows={tapeWindows} whaleLog={whaleLog}/>
+              </div>
+            )}
+
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
 
             {/* V8.4: Performance card moved here from above-grid stack. mt-auto pins it to
@@ -18410,10 +18678,10 @@ function TaraApp(){
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
-          <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab}/>
+          <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat}/>
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
@@ -19429,6 +19697,68 @@ function TaraApp(){
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V9.1.1 — Layout and news */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Layout reshuffle &middot; news fallbacks</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.1.1</span> &mdash; Layout + News</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Schedule relocated</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Trade Schedule moved from top of main render into RightPanel between Engine Log and Live Feeds. Tighter information density. The new <strong style={{color:T2_GOLD}}>&oplus;</strong> button on the schedule header opens <code className="text-[10px] bg-[#0E100F] px-1">TradeScheduleModal</code> &mdash; a popup overlay showing next 24 hours instead of 10, plus best/worst phases ranked by your historical WR for current asset, plus full phase character text per row. Esc or click-outside dismisses.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Tape flow relocated</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Moved from full-width strip at top into its own slot inside ProjectionsCard between TaraCallCard and the Projections header. Width naturally narrower (column-bound, not page-bound). Both desktop (col 2 above projections) and mobile (after mobile TaraCallCard, before PredictionContent).</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">News fetch &mdash; two more sources</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Source 3:</strong> <code className="text-[10px] bg-[#0E100F] px-1">rss2json.com</code> proxying CoinDesk + Decrypt + CoinTelegraph RSS (10k free requests/day, proper CORS)</li>
+                  <li><strong>Source 4:</strong> CryptoPanic free public posts API via allorigins</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Plus diagnostic <code className="text-[10px] bg-[#0E100F] px-1">console.warn</code> when all sources fail. Open DevTools Network tab to identify which requests are getting blocked at the network level. Error message updated from <em>&ldquo;All news sources unavailable&rdquo;</em> to <em>&ldquo;All sources blocked &mdash; see browser console for details&rdquo;</em>.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Responsive audit</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Added <code className="text-[10px] bg-[#0E100F] px-1">min-w-0</code> + <code className="text-[10px] bg-[#0E100F] px-1">truncate</code> + <code className="text-[10px] bg-[#0E100F] px-1">flex-wrap</code> + <code className="text-[10px] bg-[#0E100F] px-1">overflow-hidden</code> to schedule strip rows, current-state callout, outer container. Nothing pushes the column wider than its assigned grid track. Schedule rows wrap gracefully on narrow viewports; description text uses <code className="text-[10px] bg-[#0E100F] px-1">break-words</code>.</p>
+              </section>
+
+              {/* V9.1 — Broadcast scope */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Discord scope &mdash; Tara-only signals</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.1</span> &mdash; Broadcast Scope</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;only Tara&rsquo;s locked calls go in, that along with whale alerts. None that I select or enter should go. Tara can keep sending trade advisor calls too.&rdquo;</em></p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Kept</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong className="text-white">TARA_LOCK</strong> &mdash; Tara&rsquo;s own engine locks. V9.0 override-suppression still applies (no broadcast for <code className="text-[10px] bg-[#0E100F] px-1">wasOverriddenNoTrade</code> or <code className="text-[10px] bg-[#0E100F] px-1">wasOverriddenSitOut</code> caution-only commits).</li>
+                  <li><strong className="text-white">WHALE</strong> &mdash; Tara-detected unusual flow.</li>
+                  <li><strong className="text-white">Manual broadcast button</strong> &mdash; pushes Tara&rsquo;s current analysis state, user is just relaying.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Suppressed (V9.1)</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">LOCK</code> at <code className="text-[10px] bg-[#0E100F] px-1">handleManualSync</code> &mdash; fires when user enters a position</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">EXIT</code> at reversal-detection &mdash; fires when user&rsquo;s position reverses and auto-exits</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">EXIT</code> at <code className="text-[10px] bg-[#0E100F] px-1">executeAction</code> &mdash; fires when user taps advisor&rsquo;s recommended action</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">CLOSE</code> at window-resolve &mdash; fires when the window closes on a user-held position</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">All four are commented out (not deleted) with V9.1 markers in source. Easy to re-enable. The Discord channel now reads as a pure Tara signal log &mdash; what Tara sees, not what the user does in response.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Honest FGT + FTC Audit (no fix shipped)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Detection is solid (~95%). Integration is ~60%. <strong className="text-white">Empirical proof:</strong> structural-led tier 50% WR across 24 trades, 9 of 12 losses aligned with the trend. Tara reads &ldquo;trend confirmed&rdquo;, goes with it, gets caught at exhaustion. Concrete gaps:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Channel-extreme fade missing.</strong> <code className="text-[10px] bg-[#0E100F] px-1">_tcPosFavors</code> at line 15686 has wrong polarity at extremes &mdash; channelPos=0.15 currently <em>favors</em> DOWN when it should flag exhaustion-bounce risk.</li>
+                  <li><strong>Volume divergence not cross-referenced</strong> with FTC slope</li>
+                  <li><strong><code className="text-[10px] bg-[#0E100F] px-1">slopeBpsPerBar</code> unused</strong> by engine even though FTC returns it &mdash; that&rsquo;s the earliest exhaustion signal</li>
+                  <li><strong>15m FTC not weighted higher</strong> &mdash; all 3 TFs vote equal, 1m noise drowns 15m structural</li>
+                  <li><strong><code className="text-[10px] bg-[#0E100F] px-1">futurePriceBps</code> + <code className="text-[10px] bg-[#0E100F] px-1">projectionBps</code> barely feed posterior</strong> &mdash; the &ldquo;Future&rdquo; in both names suggests they should</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Engine fix held for a dedicated version where threshold tuning can validate against the call log.</p>
+              </section>
 
               {/* V9.0 — Schedule + quality of life */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
