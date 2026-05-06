@@ -408,7 +408,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v8.8.2-no-reload-loop';
+const BASELINE_VERSION='2026.05.06-v8.8.3-jsx-and-dup-key-cleanup';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -11365,7 +11365,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.8.2 online — reload spasm killed. User screen recording showed the page reloading endlessly in a loop. Caused by V8.8.0 IIFE plus V8.7.4 ErrorBoundary auto-recovery both calling window.location.reload on every load when a stale service worker was detected. The cap mechanism could not save it because each reload reset the cycle from the user perspective. FIX — V8.8.2 IIFE no longer reloads at all. It just unregisters service workers and clears caches in the background as fire-and-forget cleanup. React mounts normally on first load no matter what. ALSO — ErrorBoundary componentDidCatch no longer auto-reloads. It does the same background SW + cache cleanup but lets the error UI render so the user sees what happened and clicks the manual recovery button if they want. SAFETY NET — 5 second timeout still in place. If React fails to mount within 5 seconds the IIFE injects a recovery panel into the page with a manual Clear-and-reload button. STILL INTACT — Session WR Advisor (5 tier color-coded by your prior performance, you-pill on collapsed header), Live Trade Coach (situational advisory while in a trade with up to 4 cards), enriched session awareness, trade log normalization, BrainView snapshot fix, scorecard fix, and all V8.6 cross-device sync. WHAT TO DO — Push V8.8.2 App.jsx to GitHub. Vercel auto-deploys. The new bundle has no reload loop. The deployed sw.js kill-switch from V8.8 should still work. If your browser is currently spasming hit Ctrl+Shift+R once to break out of the loop. After that V8.8.2 takes over and the spasm cannot recur. Verified parse clean."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.8.3 online — build hygiene pass. The deployed V8.8.2 bundle was crashing with a 'Cannot access ee before initialization' TDZ error in the user's browser. Static analysis on the local repo bundle came back clean — the same source built locally and run in headless Chromium did NOT crash. That tells me the deployed Vercel build is from a different commit than what was in the audit zip, OR the deployed bundle is being served from a stale cache that the V8.8.2 SW kill switch hasn't fully purged on every device. While I can't repro the TDZ from the audit zip, the build did flag five real bugs that needed cleaning up regardless and were potentially related to whatever generated the deployed crash. FIRST — bare > inside JSX text content at line 21241 (the V5.3 changelog <li> describing targetMargin>0 and !targetMargin). esbuild emits a warning, the stricter rolldown parser used by Vite 6 will hard-error on it. Replaced with &gt; entity. SECOND through FIFTH — four duplicate object keys: rawSignalScores at line 14354 (V148.1 added it with ||{} fallback, then V6.3.5 added it again with ||null below — V6.3.5 silently won and consumers reading rawSignalScores got null instead of {}); regime, qScore, fgt all duplicated in the lock snapshot literal at line 15695 (the V6.5.7 block at top added them, then a later code block re-added them at the bottom of the same object — last-write-wins meant the bottom block won). Removed all four earlier occurrences. Runtime behavior preserved exactly because last-write-wins already meant the kept occurrences were the live ones. WHAT TO DO — Push V8.8.3 to GitHub. Vercel auto-deploys. After the new bundle goes live, hit Ctrl+Shift+R once on the deployed site to clear cached V8.8.2 assets. If the 'ee' TDZ still fires after that, open DevTools Console, expand the ReferenceError, and paste the full stack trace including the index-XXXX.js:LINE:COL frames. The .js.map is published with the bundle so any minified position maps back to source instantly — that gets the actual line. STILL INTACT — every V8.8.2 behavior. No-reload SW kill, ErrorBoundary with manual Refresh/Hard buttons, 5s safety net, Session WR Advisor, Live Trade Coach, BrainView snapshot, scorecard, all cross-device sync. Verified clean: build emits zero warnings, all 42 modules transform, headless Chromium loads the patched bundle with zero page errors and the full Tara UI mounts."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -14351,7 +14351,6 @@ function TaraApp(){
       return{confidence:String(_displayConf.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),session:String(_sessInfo.dominant),sessionDayRating:String(_sessInfo.dsRating),sessionDayKey:String(_sessInfo.dsKey),sessionDayAdj:Number(_sessInfo.dsAdj),velocityRegime:String(velocityRegime||'NORMAL'),trajectoryAdj:Number(eng.trajectoryAdj||0),projectedPrice:Number(eng.projectedPrice||0),projectedGapBps:Number(eng.projectedGapBps||0),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor:_advisorResult,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
         // V148.1: surface rawSignalScores and mtfAlignment to consumers (V147 Score Breakdown
         //         panel was reading these but they weren't in the return — every bar showed 0).
-        rawSignalScores:eng.rawSignalScores||{},
         mtfAlignment:eng.mtfAlignment,
         fgtResults:eng.fgtResults||{},
         // V6.2.0: structural indicators surfaced for Tara's gate + score breakdown UI
@@ -15700,9 +15699,6 @@ function TaraApp(){
         //   The lock broadcast reads these so it shows lock-time state, not current state.
         lockPrice:currentPrice,
         strike:targetMargin,
-        qScore:Math.round(qualityGate?.score||0),
-        fgt:analysis?.mtfAlignment,
-        regime:analysis?.regime,
         // V6.0.8: Kalshi YES price (0-100) at the moment Tara locked. Combined with
         //   atPosterior, this gives the "edge" — how much more confident Tara is than
         //   the market about this direction. Edge is what determines profitability,
@@ -16715,7 +16711,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              8.8.2
+              8.8.3
             </span>
           </div>
 
@@ -18346,10 +18342,35 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 8.8 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 8.8 &mdash; What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V8.8.3 — Build hygiene pass */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Build Hygiene · Five Quiet Bugs</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8.3</span> &mdash; JSX + Dup-Key Cleanup</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">The deployed V8.8.2 was crashing in some browsers with a <code className="text-[10px] bg-[#0E100F] px-1">Cannot access &apos;ee&apos; before initialization</code> TDZ. The audit zip built clean and ran clean in headless Chromium &mdash; meaning the source in the zip isn&rsquo;t the source the deployed bundle was built from. Either Vercel was serving an older commit or a stale cache was holding on. Either way, the build itself surfaced five real defects worth fixing on the way to V8.8.3.</p>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What got fixed</div>
+                <ul className="list-disc pl-4 space-y-2 text-[11px]">
+                  <li><strong style={{color:T2_GOLD}}>Bare &gt; in JSX text.</strong> Inside the V5.3 changelog &lt;li&gt; describing strike confirmation. esbuild emits a warning, the stricter rolldown parser used by Vite 6 hard-errors on it. Replaced with the &amp;gt; entity. Identical render, future-proof.</li>
+                  <li><strong style={{color:T2_GOLD}}>Dup key <code className="text-[10px] bg-[#0E100F] px-1">rawSignalScores</code>.</strong> V148.1 added it with a <code className="text-[10px] bg-[#0E100F] px-1">||{'{}'}</code> fallback. V6.3.5 added it again 9 lines below with <code className="text-[10px] bg-[#0E100F] px-1">||null</code>. Last-write-wins meant V6.3.5 silently overrode V148.1 &mdash; consumers got null, not the empty object the panel author wanted. Removed the V148.1 line; V6.3.5 (the live one at runtime) stays.</li>
+                  <li><strong style={{color:T2_GOLD}}>Dup keys <code className="text-[10px] bg-[#0E100F] px-1">regime</code>, <code className="text-[10px] bg-[#0E100F] px-1">qScore</code>, <code className="text-[10px] bg-[#0E100F] px-1">fgt</code>.</strong> All three duplicated in the lock-snapshot object literal. The V6.5.7 block at the top declared them, then a later block at the bottom of the same literal redeclared them. Removed the V6.5.7 trio (the dormant ones); the bottom block (live at runtime) stays. No behavioral change; runtime values were always the bottom block&rsquo;s.</li>
+                  <li><strong style={{color:T2_GOLD}}>Version bump.</strong> <code className="text-[10px] bg-[#0E100F] px-1">BASELINE_VERSION</code> &rarr; <code className="text-[10px] bg-[#0E100F] px-1">2026.05.06-v8.8.3-jsx-and-dup-key-cleanup</code>. Header pill, package.json, boot chat all carry 8.8.3 now.</li>
+                </ul>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Verified</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>npm run build &mdash; zero warnings, all 42 modules transform clean.</li>
+                  <li>Headless Chromium load &mdash; zero page errors, full Tara UI mounts.</li>
+                  <li>Babel re-scan &mdash; zero bare &lt;/&gt; in JSX text, zero duplicate keys anywhere in the tree.</li>
+                </ul>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">If &apos;ee&apos; TDZ still fires after deploy</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Hit Ctrl+Shift+R once to clear cached V8.8.2 assets. If it still fires, open DevTools Console, expand the ReferenceError, copy the full stack including the <code className="text-[10px] bg-[#0E100F] px-1">index-XXXX.js:LINE:COL</code> frames. The .js.map ships with every Vercel build &mdash; a real stack maps back to the exact source line in seconds.</p>
+              </section>
 
               {/* V8.8 — Service Worker Kill Switch (real fix) */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
@@ -21242,7 +21263,7 @@ function TaraApp(){
                 <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>5.3</span> — Instant Strike, Real Calls</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User report: "still no calls from tara". V5.2's gate-0 fix was correct but NOT sufficient. The actual root cause was upstream — analysis was null because of how strike confirmation worked. Identified and fixed.</p>
                 <ul className="list-disc pl-4 space-y-1 mt-2">
-                  <li><strong>The actual bug.</strong> Window rollover used to set <code>targetMargin=0</code> + <code>strikeConfirmed=false</code> immediately. Then it showed the "NEW WINDOW — CONFIRM STRIKE PRICE" banner waiting for user to tap OK, OR for Kalshi to fetch (1-3s). During that gap, the analysis useMemo returned <code>null</code> because of two checks: <code>!strikeConfirmed&&strikeMode==='manual'&&targetMargin>0</code> AND <code>!targetMargin</code>. With analysis null, every SIT_OUT screenshot you sent had reason "Engine still loading". Tara was never even getting to evaluate her gates.</li>
+                  <li><strong>The actual bug.</strong> Window rollover used to set <code>targetMargin=0</code> + <code>strikeConfirmed=false</code> immediately. Then it showed the "NEW WINDOW — CONFIRM STRIKE PRICE" banner waiting for user to tap OK, OR for Kalshi to fetch (1-3s). During that gap, the analysis useMemo returned <code>null</code> because of two checks: <code>!strikeConfirmed&&strikeMode==='manual'&&targetMargin&gt;0</code> AND <code>!targetMargin</code>. With analysis null, every SIT_OUT screenshot you sent had reason "Engine still loading". Tara was never even getting to evaluate her gates.</li>
                   <li><strong>The fix.</strong> Strike now auto-sets and auto-confirms at window open using live spot. Kalshi auto-set effect overrides when Kalshi data arrives (1-3s later with V5.2 parallel fetch). Analysis runs from second 1 of every window. Tara's gates can actually run.</li>
                   <li><strong>Same fix for mid-window page-opens.</strong> Used to leave strike at 0 (analysis null) until user manually entered or Kalshi fetched. Now auto-sets to live spot or Kalshi (whichever's available) the moment the page loads.</li>
                   <li><strong>Strike confirm banner removed.</strong> Per user request: "remove the confirm strike box completely now. we don't need it with kalshi price working. if i need to ill edit and press ok manually if and when needed." The strike pill in the row still lets you edit the value directly any time.</li>
