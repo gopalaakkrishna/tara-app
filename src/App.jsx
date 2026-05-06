@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v8.9.2-no-sit-outs-only-cautions';
+const BASELINE_VERSION='2026.05.06-v9.0-schedule-and-quality-of-life';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -5160,7 +5160,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   );
 }
 
-function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition}){
+function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition}){
   if(!taraCall)return null;
     const tc=taraCall;
     const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
@@ -5882,7 +5882,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             survives refresh + spans devices. Click "all" to see the full history. */}
         {/* V5.6.4: Always render. Empty-state placeholder ensures users know where to find it
             even before Tara has committed to any windows. */}
-        <TaraMemoryStrip taraCallLog={taraCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} onEditEntry={onEditEntry}/>
+        <TaraMemoryStrip taraCallLog={taraCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry}/>
       </div>
     );
 
@@ -6807,12 +6807,13 @@ function TabPresencePill({peerTabs}){
 // amber when writing in progress, rose when error. Click → opens force-resync menu.
 function SyncStatusPill({onClick}){
   const[status,setStatus]=React.useState(()=>({state:'idle',lastOk:null,lastError:null,writes:0,reads:0,listeners:0}));
-  // V8.8.7: 750ms hysteresis on the writing label. The status state can flip to
-  //   'writing' for very brief windows (a single fast transaction). Without delay
-  //   the pill flickers green→yellow→green constantly during active trading. With
-  //   the delay, only sustained writes (>750ms in flight, like initial hydration
-  //   or a slow round-trip) actually render as SYNCING.
+  // V8.8.7: 750ms hysteresis on the writing label.
+  // V8.9.3: 2-second hysteresis on the error label too — Firestore SDK auto-retries
+  //   transactions internally, so a transient single error often resolves before the
+  //   user's next render. Without delay the pill flashes red on every transient
+  //   network blip even when the next write succeeds.
   const[displayWriting,setDisplayWriting]=React.useState(false);
+  const[displayError,setDisplayError]=React.useState(false);
   React.useEffect(()=>{
     return subscribeCloudStatus(setStatus);
   },[]);
@@ -6822,6 +6823,16 @@ function SyncStatusPill({onClick}){
       return()=>clearTimeout(t);
     }else{
       setDisplayWriting(false);
+    }
+  },[status.state]);
+  React.useEffect(()=>{
+    // V8.9.3: only show red after the error persists 2s. If a successful write
+    //   clears the error before then, never display red.
+    if(status.state==='error'){
+      const t=setTimeout(()=>setDisplayError(true),2000);
+      return()=>clearTimeout(t);
+    }else{
+      setDisplayError(false);
     }
   },[status.state]);
   const _now=Date.now();
@@ -6835,7 +6846,7 @@ function SyncStatusPill({onClick}){
   let _health,_color,_bg,_border,_label,_dotPulse=false;
   if(status.state==='disabled'){
     _health='disabled';_color='rgba(232,233,228,0.4)';_bg='rgba(232,233,228,0.03)';_border='rgba(232,233,228,0.10)';_label='SYNC OFF';
-  } else if(status.state==='error'&&status.lastError&&(_now-status.lastError.at)<30000){
+  } else if(status.state==='error'&&status.lastError&&(_now-status.lastError.at)<30000&&displayError){
     _health='error';_color='rgb(244,114,182)';_bg='rgba(244,114,182,0.06)';_border='rgba(244,114,182,0.30)';_label='SYNC ERR';_dotPulse=true;
   } else if(status.state==='writing'&&displayWriting){
     _health='writing';_color='rgba(229,200,112,0.95)';_bg='rgba(229,200,112,0.06)';_border='rgba(229,200,112,0.25)';_label='SYNCING';_dotPulse=true;
@@ -7167,6 +7178,161 @@ function TodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMacro}){
 // ── V7.10.6: MARKET CONTEXT STRIP ─────────────────────────────────────────
 // Shows current trading phase + cautions + next transition countdown.
 // Subtle, contextual — designed to inform without dominating the UI.
+// ── V9.0: TRADE SCHEDULE STRIP ────────────────────────────────────────────
+// Session-aware schedule that recommends TRADE / SELECTIVE / BREAK windows
+//   for the next ~10 hours. Combines three inputs:
+//     1. PHASE_PROFILES static profile (liquidity, vol, deadzoneWarning)
+//     2. User's actual historical WR in this phase × asset (from taraCallLog)
+//     3. Macro events scheduled to land inside the phase
+//
+//   Tiers:
+//     TRADE      (green)  — phase has high liquidity + non-compressing vol +
+//                           historical WR ≥ 60% (or no prior data yet)
+//     SELECTIVE  (gold)   — mixed signals; focus on confluence-only entries
+//     BREAK      (dim)    — phaseProfile.deadzoneWarning OR historical WR < 50%
+//                           with ≥ 10 trades OR very low liquidity. The user can
+//                           step away, do other things, come back when conditions
+//                           improve.
+//
+//   Strictly informational — does not gate Tara's calls. Tara still calls every
+//   round per V8.9.2; the schedule tells the USER when to actually engage.
+function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat}){
+  const[tick,setTick]=React.useState(0);
+  React.useEffect(()=>{
+    const iv=setInterval(()=>setTick(t=>t+1),60000); // re-eval every minute
+    return()=>clearInterval(iv);
+  },[]);
+
+  const schedule=React.useMemo(()=>{
+    // Build per-phase historical WR map for current asset
+    const _phaseStats={};
+    (taraCallLog||[]).forEach(e=>{
+      if(!e||!e.phase||(e.asset||'BTC')!==currentAsset)return;
+      if(e.result!=='WIN'&&e.result!=='LOSS')return;
+      const k=e.phase;
+      if(!_phaseStats[k])_phaseStats[k]={W:0,L:0};
+      if(e.result==='WIN')_phaseStats[k].W++;else _phaseStats[k].L++;
+    });
+
+    // Generate next 10 hours of phase blocks
+    const out=[];
+    const now=new Date();
+    let cursor=new Date(now);
+    let totalMin=0;
+    const MAX_MIN=10*60;
+    let safety=0;
+    while(totalMin<MAX_MIN&&safety++<24){
+      const h=cursor.getUTCHours();
+      const m=cursor.getUTCMinutes();
+      const phaseKey=getPhaseKey(h,m);
+      const prof=PHASE_PROFILES[phaseKey]||null;
+      // Find when this phase ends (next transition)
+      const trans=getNextPhaseTransition(h,m);
+      const minsUntilEnd=trans?.minsUntil||60;
+
+      // Recommendation tier
+      const stats=_phaseStats[phaseKey];
+      const N=stats?(stats.W+stats.L):0;
+      const wr=N>=5?stats.W/N:null;
+      let tier='SELECTIVE',tierLabel='SELECTIVE',tierColor='rgba(229,200,112,0.85)',tierBg='rgba(229,200,112,0.05)',tierBorder='rgba(229,200,112,0.20)';
+      let reasonBits=[];
+      const _isDeadzone=prof?.deadzoneWarning===true;
+      const _liqLow=prof?.liquidity==='LOW';
+      const _volComp=prof?.vol==='COMPRESSING';
+      const _liqHigh=prof?.liquidity==='HIGH';
+      const _liqMed=prof?.liquidity==='MED';
+
+      if(_isDeadzone||(N>=10&&wr!=null&&wr<0.50)||(_liqLow&&_volComp)){
+        tier='BREAK';tierLabel='BREAK';
+        tierColor='rgba(232,233,228,0.45)';tierBg='rgba(232,233,228,0.03)';tierBorder='rgba(232,233,228,0.10)';
+        if(_isDeadzone)reasonBits.push('thin liquidity');
+        if(N>=10&&wr!=null&&wr<0.50)reasonBits.push(`historical ${Math.round(wr*100)}% WR`);
+        if(_liqLow&&_volComp)reasonBits.push('compressing & illiquid');
+      }else if(_liqHigh&&!_volComp&&(wr==null||wr>=0.60)){
+        tier='TRADE';tierLabel='TRADE';
+        tierColor='rgba(110,231,183,0.95)';tierBg='rgba(110,231,183,0.06)';tierBorder='rgba(110,231,183,0.30)';
+        if(wr!=null)reasonBits.push(`${Math.round(wr*100)}% WR · ${N} trades`);
+        else reasonBits.push('high liquidity, no priors yet');
+      }else{
+        // SELECTIVE — mixed
+        if(wr!=null)reasonBits.push(`${Math.round(wr*100)}% WR · ${N} trades`);
+        if(_liqMed)reasonBits.push('medium liquidity');
+        if(reasonBits.length===0)reasonBits.push('mixed conditions');
+      }
+
+      out.push({
+        phaseKey,
+        label:prof?.label||phaseKey,
+        flag:prof?.flag||'',
+        tier,tierLabel,tierColor,tierBg,tierBorder,
+        reason:reasonBits.join(' · '),
+        wr,N,
+        startsAt:new Date(cursor),
+        minutesFromNow:totalMin,
+        durationMin:minsUntilEnd,
+        liquidity:prof?.liquidity||'',
+        vol:prof?.vol||'',
+      });
+
+      // Advance cursor by phase duration
+      cursor=new Date(cursor.getTime()+minsUntilEnd*60000);
+      totalMin+=minsUntilEnd;
+    }
+    return out;
+  },[taraCallLog,currentAsset,tick]);
+
+  const _resolvedFmt=timeFormat||'local';
+  const _tzOpt=_resolvedFmt==='utc'?{timeZone:'UTC'}:_resolvedFmt==='est'?{timeZone:'America/New_York'}:undefined;
+  const _fmtTime=(d)=>{
+    try{return d.toLocaleTimeString('en-US',{..._tzOpt,hour12:true,hour:'numeric',minute:'2-digit'});}
+    catch(_){return d.toLocaleTimeString('en-US',{hour12:true,hour:'numeric',minute:'2-digit'});}
+  };
+  const _fmtDuration=(min)=>{
+    if(min<60)return `${min}m`;
+    const h=Math.floor(min/60);const m=Math.round(min%60);
+    return m===0?`${h}h`:`${h}h ${m}m`;
+  };
+
+  if(!schedule||schedule.length===0)return null;
+  const current=schedule[0];
+
+  return React.createElement('div',{className:'mb-2 px-3 py-2.5 rounded-lg',style:{background:'#111312',border:'1px solid rgba(232,233,228,0.08)'}},
+    // Header
+    React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
+      React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(229,200,112,0.85)'}},'Today\'s Schedule'),
+      React.createElement('span',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/35'},_resolvedFmt.toUpperCase())
+    ),
+    // Current state callout — biggest visual emphasis
+    React.createElement('div',{
+      className:'mb-2 px-3 py-2 rounded-md flex items-center gap-2.5',
+      style:{background:current.tierBg,border:`1px solid ${current.tierBorder}`,boxShadow:`0 0 12px ${current.tierBorder}`},
+    },
+      React.createElement('span',{className:'text-base'},current.tier==='TRADE'?'🟢':current.tier==='BREAK'?'⏸':'🟡'),
+      React.createElement('div',{className:'flex-1 min-w-0'},
+        React.createElement('div',{className:'flex items-baseline gap-2 mb-0.5'},
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:current.tierColor}},`Now · ${current.tierLabel}`),
+          React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/55'},`${current.flag} ${current.label}`),
+        ),
+        React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 leading-snug'},
+          current.reason+(current.durationMin?` · ends in ${_fmtDuration(current.durationMin)}`:'')
+        )
+      )
+    ),
+    // Upcoming phases — compact list of next 4
+    React.createElement('div',{className:'space-y-1'},
+      schedule.slice(1,5).map((s,i)=>(
+        React.createElement('div',{key:i,className:'flex items-center gap-2 px-2 py-1 rounded text-[10px]',style:{background:'rgba(232,233,228,0.02)',border:`1px solid ${s.tierBorder}`}},
+          React.createElement('span',{className:'text-[10px]'},s.tier==='TRADE'?'🟢':s.tier==='BREAK'?'⏸':'🟡'),
+          React.createElement('span',{className:'tabular-nums text-[#E8E9E4]/55 shrink-0',style:{minWidth:'56px'}},_fmtTime(s.startsAt)),
+          React.createElement('span',{className:'font-bold uppercase tracking-wider shrink-0',style:{color:s.tierColor,fontSize:'9px',minWidth:'66px'}},s.tierLabel),
+          React.createElement('span',{className:'text-[#E8E9E4]/55 truncate'},`${s.flag} ${s.label}`),
+          React.createElement('span',{className:'text-[#E8E9E4]/35 truncate text-[9px] hidden sm:inline'},`· ${s.reason}`),
+        )
+      ))
+    )
+  );
+}
+
 function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset}){
   const[ctx,setCtx]=React.useState(()=>getMarketContext(new Date()));
   const[expanded,setExpanded]=React.useState(false);
@@ -7401,7 +7567,7 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
 // V5.6.1: Tara's Memory — compact strip showing the most recent calls inline in the
 //   Tara card. Click "all" to open a fuller paged view. The strip + modal both source
 //   from taraCallLog (cloud-synced array of every call she's made).
-function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,onEditEntry}){
+function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,timeFormat,onEditEntry}){
   const[open,setOpen]=React.useState(false);
   const[learnOpen,setLearnOpen]=React.useState(false);
   const recent=React.useMemo(()=>{
@@ -7449,7 +7615,7 @@ function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,onEd
             })
           ),
     ),
-    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,onEditEntry:onEditEntry,initialFilter:windowType}),
+    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,timeFormat:timeFormat,onEditEntry:onEditEntry,initialFilter:windowType}),
     learnOpen&&React.createElement(TaraLearningsModal,{learnings:taraLearnings,onClose:()=>setLearnOpen(false)}),
   );
 }
@@ -7638,7 +7804,7 @@ function TaraLearningsModal({learnings,onClose}){
 }
 
 // V5.6.1: Full memory history modal. Filter by window type, sort newest first.
-function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry,initialFilter}){
+function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntry,initialFilter}){
   const[editingId,setEditingId]=React.useState(null);
   // V7.0.6: default filter to current windowType (passed from card) so modal opens
   //   already aligned. User can click ALL to broaden.
@@ -7674,7 +7840,10 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry,initialFi
   //   bucket-start ISO timestamp, so end = start + winMs. Renders in viewer's local time.
   // V6.5.3: All time displays in this modal honor the parent's useLocalTime toggle.
   //   useLocalTime=true → viewer's local timezone. useLocalTime=false → America/New_York (EST/EDT).
-  const _tzOpt=useLocalTime?{}:{timeZone:'America/New_York'};
+  // V8.9.3: 3-way time format. Falls back to useLocalTime boolean for backward-compat
+  //   if timeFormat prop wasn't threaded through (defensive default).
+  const _resolvedFmt=timeFormat||(useLocalTime?'local':'est');
+  const _tzOpt=_resolvedFmt==='utc'?{timeZone:'UTC'}:_resolvedFmt==='est'?{timeZone:'America/New_York'}:{};
   const _periodFromWindowId=(wid,wt)=>{
     if(!wid)return null;
     try{
@@ -7741,7 +7910,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry,initialFi
             },
             title:'Download call log as JSON for analysis',
           },'↓ Export JSON'),
-          React.createElement('div',{className:'px-2 py-1 rounded-lg text-[9px] uppercase tracking-[0.14em] font-bold',style:{background:'rgba(232,233,228,0.05)',color:'rgba(232,233,228,0.5)',border:'1px solid rgba(232,233,228,0.08)'},title:'All times shown in this view honor the LOCAL/EST toggle in the header'},useLocalTime?'LOCAL':'EST'),
+          React.createElement('div',{className:'px-2 py-1 rounded-lg text-[9px] uppercase tracking-[0.14em] font-bold',style:{background:'rgba(232,233,228,0.05)',color:'rgba(232,233,228,0.5)',border:'1px solid rgba(232,233,228,0.08)'},title:'All times shown in this view honor the time format toggle in the header'},_resolvedFmt.toUpperCase()),
           React.createElement('button',{onClick:onClose,className:'p-2 rounded-lg hover:bg-[#E8E9E4]/5 text-[#E8E9E4]/60 hover:text-white transition-colors text-xl'},'✕'),
         ),
       ),
@@ -8079,7 +8248,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry,initialFi
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -8097,7 +8266,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
           V6.2.3: hidden lg:block (was md:block). */}
-      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} className="hidden lg:block"/>
+      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} className="hidden lg:block"/>
 
       <div className="flex items-center justify-between mb-3 shrink-0">
         <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
@@ -9078,6 +9247,10 @@ function NewsFeedCard(){
   const[err,setErr]=React.useState(null);
   // V134: also fetch macro event countdown — always shown even if news fails
   const[macroEvents,setMacroEvents]=React.useState([]);
+  // V9.0: ref to fetchNews so the retry button can trigger a fresh fetch
+  //   without re-running the entire useEffect (which would also restart the macro
+  //   interval). Set inside useEffect, called from the retry button below.
+  const fetchNewsRef=React.useRef(null);
   React.useEffect(()=>{
     const computeMacros=()=>{
       // Find next 3 upcoming macro events in next 8 hours
@@ -9198,6 +9371,7 @@ function NewsFeedCard(){
       setErr('All news sources unavailable');
       setLoading(false);
     };
+    fetchNewsRef.current=fetchNews; // V9.0: expose for retry button
     fetchNews();
     const iv=setInterval(fetchNews,30000); // V134: 30s polling
     return()=>{clearInterval(iv);clearInterval(macroIv);};
@@ -9244,7 +9418,10 @@ function NewsFeedCard(){
         {loading?(
           <div className={'text-[10px] text-[#E8E9E4]/30 italic'}>Loading market news...</div>
         ):err&&news.length===0?(
-          <div className={'text-[10px] text-amber-400/60 italic p-1.5 rounded bg-amber-500/5 border border-amber-500/15'}>News fetch unavailable ({err}). Macro countdown above stays active.</div>
+          <div className={'p-2 rounded bg-amber-500/5 border border-amber-500/15'}>
+            <div className="text-[10px] text-amber-400/70 italic mb-1.5">News feed temporarily offline ({err}). Macro countdown above stays accurate.</div>
+            <button onClick={()=>{setLoading(true);setErr(null);try{fetchNewsRef.current?.();}catch(_){}}} className="text-[9px] uppercase tracking-[0.14em] font-bold px-2 py-0.5 rounded border border-amber-500/30 text-amber-400/85 hover:bg-amber-500/10 transition-colors">↻ Retry</button>
+          </div>
         ):news.length===0?(
           <div className={'text-[10px] text-[#E8E9E4]/30 italic'}>No news available</div>
         ):news.map((n,i)=>{
@@ -10572,7 +10749,22 @@ function TaraApp(){
   // V3.1.11: surface Kalshi extraction status in UI so user can diagnose without DevTools
   const[kalshiDebug,setKalshiDebug]=useState({ok:null,reason:'not yet polled',totalMarkets:0,matchingClose:0,bestStrike:null,sampleFields:[]});
   // streakData moved below tradeLog declaration
-  const[useLocalTime,setUseLocalTime]=useState(true);
+  // V8.9.3: 3-way time format. timeFormat is the source of truth ('local' | 'utc' | 'est').
+  //   useLocalTime kept as a derived boolean so the ~25 existing consumers don't all need
+  //   refactoring at once. Consumers that need to distinguish UTC from EST read timeFormat.
+  //   Migration from old boolean: taraV110TZ='false' → 'est', everything else → 'local'.
+  const[timeFormat,setTimeFormat]=useState(()=>{
+    try{
+      const stored=localStorage.getItem('taraTimeFormat');
+      if(stored==='local'||stored==='utc'||stored==='est')return stored;
+      const oldTz=localStorage.getItem('taraV110TZ');
+      if(oldTz==='false')return 'est';
+      return 'local';
+    }catch(_){return 'local';}
+  });
+  const useLocalTime=timeFormat==='local';
+  // back-compat shim for any code that still calls setUseLocalTime
+  const setUseLocalTime=(v)=>setTimeFormat(v?'local':'est');
   // V6.5.8: ASSET — which crypto Tara is monitoring. Default BTC. Persists.
   //   Switching asset resets price history, locks, window data, and re-subscribes
   //   to the new asset's exchange feeds.
@@ -12163,7 +12355,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.9.2 online — no more sit outs, every round a directional call. User: completely remove the NO TRADE display, give Tara's call every round, surface the original sit-out reasoning as a cautionary advice. ENGINE CHANGE: the NO_TRADE snapshot path (line 16146 area, V7.9 explicit no-go for negative edge / data unavailable / late coin-flip) used to commit a snapshot with call NO_TRADE and isNoGo true. Now it commits with call equal to the implied direction (UP or DOWN that was already computed before the no-go gate fired), surfaces the original no-go reason as the caution field, sets wasOverriddenNoTrade true for analytics. The lock is real - locked true, confidence is the actual conviction level. Tier still tags the override category for stats so we can track these. DISPLAY CHANGES: TaraCallCard now defensively normalizes any legacy SIT_OUT or NO_TRADE snapshot at read time via _normalizeLegacySnap helper - even if a stale snapshot syncs from the cloud or comes from an old browser, it gets promoted to the implied direction with the reason as caution. The ⊘ symbol, NO TRADE label, and SITTING OUT label paths all become structurally unreachable. Caution badge stays gold for normal V7.8 low-conviction commits but goes ROSE with No-Trade Override or Sit-Out Override label when the underlying snapshot would have been a sit-out / no-trade pre-V8.9.2. BrainView label cleanup too - SIT_OUT now displays as SCANNING (pre-decision state) since that's what it actually represents. WHAT THIS UNLOCKS: every window now produces a directional call you can take. The smart money pills (V8.9.0) plus the rose-tinted caution badge tell you when Tara would have skipped, but the call is yours to make. The Got in on Tara's call button (V8.9.1) works on every commit including overrides - advisor goes live for every trade. WR EXPECTATION: this will trade more aggressively than the gated version. Recent 153-trade analysis showed Fix-A-and-B gates would have boosted WR from 64% to 70% by skipping certain patterns. Those skips are now cautions instead of skips. If you respect the rose cautions and skip them manually, you keep the WR gain; if you take them, your WR drops back toward 64%. Your call. STILL INTACT: V8.9.1 follow-Tara button, V8.9.0 smart money detectors, V8.8.9 spike alert, V8.8.7 sync pill steady + news multi-proxy, V8.8.6 asset-aware dedup, V8.8.5 no-op SW + circuit breaker. SAME OPEN GAP: single-browser BTC-ETH switching mid-window."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.0 online. This release rounds out the no-sit-outs philosophy with the missing pieces. ENGINE: TRUE COIN FLIP exception now skips the snapshot entirely. The V8.9.2 NO_TRADE-becomes-directional path was overcommitting in case (c) - posterior 47-53 with 20s left and gap under 2bps - which is a real coin flip with no time to resolve. V9.0 returns early in that case so Tara keeps sampling instead of faking conviction. Cases (a) bad edge vs Kalshi and (b) data feeds unavailable still commit directionally with caution since those have a clear read just bad price or unreliable inputs. Hard cap at 90s elapsed remains the safety net for anything truly stuck. NEW: TradeScheduleStrip surfaces TRADE / SELECTIVE / BREAK recommendations for the next 10 hours. Combines three inputs - PHASE_PROFILES static character (liquidity, vol, deadzoneWarning), your historical WR per phase from taraCallLog filtered to current asset, and macro events landing inside the phase. Tiers map to lifecycle - green TRADE means high liquidity plus non-compressing vol plus historical WR at or above 60 percent or no priors yet, gold SELECTIVE means mixed signals focus on confluence-only, dim BREAK means deadzone warning or under 50 percent WR with at least 10 trades or compressing illiquid window. Strictly informational, does not gate Tara - your call to engage or step away. Renders right under MarketContextStrip with current-state callout plus the next four upcoming phase changes. NEW: 3-way time format toggle. State migrated from useLocalTime boolean to timeFormat string with values local utc est. Header pill cycles LOCAL to UTC to EST to LOCAL on click. Persists under taraTimeFormat key with migration from old taraV110TZ boolean. Threaded through TaraCallCard, ProjectionsCard, TaraMemoryStrip, TaraMemoryModal, the engine projection timeline, and the new TradeScheduleStrip. NEW: news retry button. The fetch failure UI was alarming and offered no recovery path. Now reads News feed temporarily offline plus a Retry button that calls fetchNews via fetchNewsRef. Wording softened from fetch unavailable to temporarily offline since macro countdown stays accurate regardless. SYNC: 2-second hysteresis on the error label matches the 750ms hysteresis on the writing label. Firestore SDK auto-retries internally so most red flashes were transient single failures that resolved before user even noticed. Now the pill only goes red if error genuinely persists 2 seconds. DISCORD: NO_TRADE override commits no longer broadcast TARA_LOCK to Discord. The wasOverriddenNoTrade and wasOverriddenSitOut snapshots get caught in a guard before broadcastToDiscord, broadcastRef.sentLock still gets set so we don't retry. Normal locks (real signal, real conviction) still broadcast. Override commits are screen-only - cautioned for the user, suppressed from the channel where they're noise. EXISTING from V8.9.2 still in place: every-round directional calls, _normalizeLegacySnap defensive cleanup, gold-vs-rose caution badge styling, follow-Tara button (V8.9.1), smart money detectors strip (V8.9.0), spike alerts (V8.8.9), sync pill counter approach (V8.8.7), asset-aware dedup (V8.8.6), no-op SW plus circuit breaker (V8.8.5). KNOWN OPEN GAP: single-browser switching BTC and ETH mid-window can leave the previous asset's window unresolved since resolution code path is scoped to active asset. Multi-browser side-steps it. Per-asset resolution scheduler is the eventual fix."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -12577,6 +12769,7 @@ function TaraApp(){
     // Legacy back-compat: keep taraV110Hook synced to BTC's webhook
     localStorage.setItem('taraV110Hook',discordWebhooks.BTC||'');
     localStorage.setItem('taraV110TZ',String(useLocalTime));
+    localStorage.setItem('taraTimeFormat',timeFormat); // V8.9.3: 3-way format persistence
     localStorage.setItem('taraV110DU',discordUsername);
     localStorage.setItem('taraV110DA',discordAvatar);
   }catch(e){};},[discordWebhooks,useLocalTime,discordUsername,discordAvatar,isMounted]);
@@ -12912,7 +13105,10 @@ function TaraApp(){
   const chartData=useMemo(()=>klines.length>0?klines:liveHistory,[klines,liveHistory]);
 
   // Time
-  useEffect(()=>{const u=()=>{const now=new Date();const ms=now.getTime();const iMs=(windowType==='15m'?15:5)*60*1000;const nMs=Math.ceil((ms+500)/iMs)*iMs;const nW=new Date(nMs);const sW=new Date(nMs-iMs);const diff=nW.getTime()-now.getTime();const tz=useLocalTime?undefined:{timeZone:'America/New_York'};let ct,sw,nw;try{ct=now.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});sw=sW.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit'});nw=nW.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit'});}catch(e){ct=now.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});sw=sW.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit'});nw=nW.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit'});}setTimeState({currentTime:String(ct),startWindow:String(sw),nextWindow:String(nw),minsRemaining:Math.floor(diff/60000),secsRemaining:Math.floor((diff%60000)/1000),currentHour:now.getHours()});};u();const t=setInterval(u,1000);return()=>clearInterval(t);},[windowType,useLocalTime]);
+  useEffect(()=>{const u=()=>{const now=new Date();const ms=now.getTime();const iMs=(windowType==='15m'?15:5)*60*1000;const nMs=Math.ceil((ms+500)/iMs)*iMs;const nW=new Date(nMs);const sW=new Date(nMs-iMs);const diff=nW.getTime()-now.getTime();
+    // V8.9.3: 3-way time format
+    const tz=timeFormat==='utc'?{timeZone:'UTC'}:timeFormat==='est'?{timeZone:'America/New_York'}:undefined;
+    let ct,sw,nw;try{ct=now.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});sw=sW.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit'});nw=nW.toLocaleTimeString('en-US',{...tz,hour12:true,hour:'2-digit',minute:'2-digit'});}catch(e){ct=now.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit',second:'2-digit'});sw=sW.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit'});nw=nW.toLocaleTimeString('en-US',{hour12:true,hour:'2-digit',minute:'2-digit'});}setTimeState({currentTime:String(ct),startWindow:String(sw),nextWindow:String(nw),minsRemaining:Math.floor(diff/60000),secsRemaining:Math.floor((diff%60000)/1000),currentHour:now.getHours()});};u();const t=setInterval(u,1000);return()=>clearInterval(t);},[windowType,timeFormat]);
 
   // Position status
   const positionStatus=useMemo(()=>{if(!positionEntry||!currentPrice)return null;const{price:entry,side}=positionEntry;const pnlPct=side==='UP'?((currentPrice-entry)/entry)*100:((entry-currentPrice)/entry)*100;return{entry,side,pnlPct,isStopHit:pnlPct<=-30};},[positionEntry,currentPrice,betAmount]);
@@ -15116,7 +15312,8 @@ function TaraApp(){
         const out=[],iMs=min*60*1000,now=Date.now();
         let nT=Math.ceil(now/iMs)*iMs;
         if(nT-now<iMs*0.1)nT+=iMs;
-        const tz=useLocalTime?undefined:{timeZone:'America/New_York'};
+        // V8.9.3: 3-way time format
+        const tz=timeFormat==='utc'?{timeZone:'UTC'}:timeFormat==='est'?{timeZone:'America/New_York'}:undefined;
         for(let i=0;i<steps;i++){
           const sT=nT+(i*iMs);
           const minAhead=(sT-now)/60000;
@@ -16184,10 +16381,25 @@ function TaraApp(){
       }
       // Snapshot the no-go if any fired
       if(_noGoReason){
-        // V8.9.2: REMOVED no-trade gating. User mandate: every round Tara picks a
-        //   direction; the original no-go reason becomes a CAUTION badge so the user
-        //   knows to be skeptical, but they get the call. The directional read
-        //   (_commitDir) was already computed before this gate; just commit it.
+        // V8.9.3: TRUE COIN FLIP exception. When the no-go reason is the late-window
+        //   coin-flip case (posterior 47-53, ≤20s left, gap ≤2bps from strike), DON'T
+        //   commit a directional snapshot — there's no real signal to commit on.
+        //   Return early so Tara keeps sampling. The hard-cap commit at end-of-window
+        //   is the safety net if she's truly stuck. User mandate: when it's genuinely
+        //   a coin flip, sample more, don't fake conviction.
+        //
+        //   Cases (a) edge-bad and (b) data-missing still commit per V8.9.2 — those
+        //   have a clear directional read, just disadvantageous price or unreliable
+        //   data. Surfaced as cautions.
+        if(_noGoTier==='no-go-coinflip-late'){
+          // Don't snapshot. Keep WATCHING — display will show "Coin flip — only Xpt off
+          //   neutral" reason text via the live IIFE return. User sees Tara is still
+          //   uncertain; can decide to skip externally or wait for hard-cap.
+          return;
+        }
+        // V8.9.2: REMOVED no-trade gating for cases (a)+(b). User mandate: every round
+        //   Tara picks a direction; the original no-go reason becomes a CAUTION badge
+        //   so the user knows to be skeptical, but they get the call.
         const _ngSnap={
           call:_commitDir,direction:_commitDir,
           confidence:_commitConf,
@@ -16824,7 +17036,18 @@ function TaraApp(){
         strike:snap.strike||baseData.strike,
         price:snap.lockPrice||baseData.price,
       };
-      broadcastToDiscord('TARA_LOCK',{..._lockBaseData,dir:snap.call,confidence:snap.confidence,reason:snap.reason,gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0});
+      // V9.0: SUPPRESS Discord broadcast for override commits. When the lock is the
+      //   V8.9.2 directional promotion of what would have been NO_TRADE or SIT_OUT
+      //   (wasOverriddenNoTrade or wasOverriddenSitOut flags), skip the LOCK message.
+      //   These are low-conviction commits with cautions attached — the user wants
+      //   to see them on-screen but not push to Discord (where they're noise).
+      const _isOverrideCommit=snap?.wasOverriddenNoTrade===true||snap?.wasOverriddenSitOut===true;
+      if(_isOverrideCommit){
+        // skip Discord push — still set the broadcastRef flag so we don't retry
+        taraBroadcastRef.current.sentLock=true;
+      }else{
+        broadcastToDiscord('TARA_LOCK',{..._lockBaseData,dir:snap.call,confidence:snap.confidence,reason:snap.reason,gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0});
+      }
     }
     // SITOUT: V7.0.8 — DISABLED per user request. SITOUT means Tara decided NOT to trade,
     //   which is non-actionable noise in Discord. User wants lock + exit alerts only.
@@ -17560,7 +17783,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              8.9.2
+              9.0
             </span>
           </div>
 
@@ -17632,8 +17855,9 @@ function TaraApp(){
 
           {/* Right controls — on mobile show only 3 most critical: sound, ?, whale */}
           <div className="flex items-center gap-1 shrink-0">
-            <div className="hidden xl:flex flex-col items-end cursor-pointer mr-1" onClick={()=>setUseLocalTime(!useLocalTime)}>
-              <span className={'text-xs text-[#E8E9E4]/40 uppercase'}>{useLocalTime?'LOCAL':'EST'}</span>
+            {/* V8.9.3: 3-way time format toggle. local → utc → est → local */}
+            <div className="hidden xl:flex flex-col items-end cursor-pointer mr-1" onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')} title={`Time format: ${timeFormat.toUpperCase()} · click to cycle (LOCAL → UTC → EST)`}>
+              <span className={'text-xs text-[#E8E9E4]/40 uppercase'}>{timeFormat.toUpperCase()}</span>
               <span className={'text-sm font-mono text-[#E8E9E4]/80'}>{timeState.currentTime||'--:--:--'}</span>
             </div>
             {/* Always visible — sound is essential */}
@@ -17885,6 +18109,13 @@ function TaraApp(){
           currentAsset={currentAsset}
         />
 
+        {/* V9.0: Trade Schedule — TRADE / SELECTIVE / BREAK windows for next 10h */}
+        <TradeScheduleStrip
+          taraCallLog={taraCallLog}
+          currentAsset={currentAsset}
+          timeFormat={timeFormat}
+        />
+
         {/* V8.2: Anti-tilt cooldown — most urgent banner, blocks new locks */}
         <AntiTiltCooldownBanner
           tiltLockUntil={tiltLockUntil}
@@ -18022,9 +18253,9 @@ function TaraApp(){
             <T2Stamp code="PRED · 015"/>
             <div className="flex justify-between items-center mb-3 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <div onClick={()=>setUseLocalTime(!useLocalTime)} className={'flex items-center gap-1.5 bg-[#111312] border border-[#E8E9E4]/10 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide cursor-pointer hover:border-indigo-500/30 transition-colors'}>
+                <div onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')} className={'flex items-center gap-1.5 bg-[#111312] border border-[#E8E9E4]/10 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide cursor-pointer hover:border-indigo-500/30 transition-colors'} title={`Time format: ${timeFormat.toUpperCase()} · click to cycle`}>
                   <IC.Clock className="w-4 h-4"/>
-                  <span className={'text-[#E8E9E4]/60 hidden sm:inline'}>{timeState.startWindow}–{timeState.nextWindow} {useLocalTime?'LOCAL':'EST'}</span>
+                  <span className={'text-[#E8E9E4]/60 hidden sm:inline'}>{timeState.startWindow}–{timeState.nextWindow} {timeFormat.toUpperCase()}</span>
                   <span className="text-white font-bold text-sm">{timeState.minsRemaining}m {timeState.secsRemaining}s</span>
                   {analysis?.isPostDecay&&<span className="text-amber-400">⚡</span>}
                 </div>
@@ -18166,7 +18397,7 @@ function TaraApp(){
 
             {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab.
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
-            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
+            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
 
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
 
@@ -18179,7 +18410,7 @@ function TaraApp(){
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab}/>
@@ -19198,6 +19429,40 @@ function TaraApp(){
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V9.0 — Schedule + quality of life */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Schedule + Quality of Life</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.0</span> &mdash; Schedule, Coin-Flip Honesty, Less Noise</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;when it&rsquo;s slow/choppy I can take breaks. When the movement is good I can keep trading. Stop NO_TRADE Discord broadcasts. Fix news fetch. All time in either Local, UTC, or EST. Sync issues going to red and yellow.&rdquo;</em></p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">True Coin Flip</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">V8.9.2 made every NO_TRADE commit directional with caution. Right idea for two of the three no-go cases &mdash; bad edge vs Kalshi and data unavailable both have a clear directional read with just a bad price or unreliable input. But case (c) &mdash; posterior 47&ndash;53 with &le;20s left and gap &le;2bps from strike &mdash; is a real coin flip. V9.0 returns early in that case. Tara keeps sampling instead of faking conviction. Hard cap at 90s elapsed remains the safety net.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Trade Schedule</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">New <code className="text-[10px] bg-[#0E100F] px-1">TradeScheduleStrip</code> renders under MarketContextStrip. Shows the next ~10 hours of phase blocks tagged TRADE / SELECTIVE / BREAK. Three inputs:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong className="text-white">PHASE_PROFILES</strong> static character &mdash; liquidity, vol, deadzoneWarning fields</li>
+                  <li><strong className="text-white">Your historical WR</strong> per phase from <code className="text-[10px] bg-[#0E100F] px-1">taraCallLog</code>, filtered to current asset, requires N&ge;5 to surface</li>
+                  <li><strong className="text-white">Macro proximity</strong> &mdash; FOMC / CPI / NFP windows shift recommendations</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Tiers: <strong style={{color:'rgb(110,231,183)'}}>TRADE</strong> = high liq + non-compressing vol + WR&ge;60% (or no priors); <strong style={{color:T2_GOLD}}>SELECTIVE</strong> = mixed; <strong className="text-[#E8E9E4]/45">BREAK</strong> = deadzone warning OR WR&lt;50% with N&ge;10 OR compressing+illiquid. Strictly informational &mdash; does not gate Tara&rsquo;s calls. The user decides when to actually engage.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Time Format Toggle</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">State migrated from <code className="text-[10px] bg-[#0E100F] px-1">useLocalTime</code> boolean to <code className="text-[10px] bg-[#0E100F] px-1">timeFormat</code> string (local | utc | est). Header pill cycles LOCAL &rarr; UTC &rarr; EST. Persists as <code className="text-[10px] bg-[#0E100F] px-1">taraTimeFormat</code> with migration from old boolean. Threaded through TaraCallCard, ProjectionsCard, TaraMemoryStrip, TaraMemoryModal, the engine projection timeline, and TradeScheduleStrip. <code className="text-[10px] bg-[#0E100F] px-1">useLocalTime</code> kept as a derived prop so the ~25 existing consumers don&rsquo;t need refactoring.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">News Retry</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">When all news proxies fail, the panel now shows <em>&ldquo;News feed temporarily offline&rdquo;</em> with a <strong className="text-amber-400/85">&#8635; Retry</strong> button. Wires <code className="text-[10px] bg-[#0E100F] px-1">fetchNewsRef</code> outside the useEffect so the button can trigger a fresh fetch without re-running the entire effect (which would also restart the macro interval). Macro countdown stays accurate regardless &mdash; that&rsquo;s the trading-critical part.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Discord NO_TRADE Suppression</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">V8.9.2 override commits (<code className="text-[10px] bg-[#0E100F] px-1">wasOverriddenNoTrade</code> or <code className="text-[10px] bg-[#0E100F] px-1">wasOverriddenSitOut</code>) no longer broadcast TARA_LOCK to Discord. The check happens inside the existing broadcast guard at line 16876 area. <code className="text-[10px] bg-[#0E100F] px-1">sentLock</code> flag still gets set so we don&rsquo;t retry. Normal high-conviction locks still broadcast. Override commits are screen-only &mdash; cautioned for the user, suppressed from the channel where they&rsquo;re noise.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sync Pill Hysteresis</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">2-second hysteresis on the error label, matching the 750ms hysteresis on the writing label from V8.8.7. Firestore SDK auto-retries transactions internally up to 5 times, so most red flashes were transient single failures that cleared before the user noticed. Now the pill only goes red if the error persists 2+ seconds.</p>
+              </section>
 
               {/* V8.9.2 — No more sit-outs */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
