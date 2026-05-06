@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v8.8.7-sync-pill-and-news';
+const BASELINE_VERSION='2026.05.06-v8.8.9-spike-alert-aggressive';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -9848,6 +9848,263 @@ const computeWeightDiff=(oldW,newW)=>{
   return diffs;
 };
 
+// ── V8.8.9: SPIKE ALERT — multi-window, always-on, sound + system notification ──
+// Catches outsized price moves with three rolling windows checked in parallel:
+//   10s, 20s, 30s. Whichever fires first / hits hardest wins. Aggressive
+//   thresholds tuned for "I keep missing fast moves":
+//     10s: max(20 bps, 1.0 × atrBps)   ~0.2% in 10s
+//     20s: max(30 bps, 1.3 × atrBps)   ~0.3% in 20s
+//     30s: max(40 bps, 1.6 × atrBps)   ~0.4% in 30s
+//   Floor numbers catch genuine spikes in calm regimes; ATR multipliers scale
+//   the threshold up in already-volatile regimes.
+//   Always-on (not just when locked). When NOT locked, framing is informational
+//   ("scan for entry"); when locked, verdict is direction-aware (RIDE/EXIT).
+//   Three layers of attention:
+//     (a) Big animated overlay at top of screen (glowing border, pulse)
+//     (b) Document.title patch — visible in OS taskbar / browser tab strip
+//     (c) Soft beep + system notification (require permission for the latter,
+//         requested via button on the overlay).
+//   Throttled to one alert per 30s.
+function useSpikeAlert({tickHistoryRef,lockedCallRef,currentAsset,atrBps}){
+  const[alert,setAlert]=React.useState(null);
+  const[notifyPerm,setNotifyPerm]=React.useState(()=>{
+    try{return(typeof Notification!=='undefined')?Notification.permission:'unsupported';}catch(_){return'unsupported';}
+  });
+  const _lastFiredRef=React.useRef(0);
+  const _origTitleRef=React.useRef(null);
+  const _atrRef=React.useRef(atrBps);
+  const _assetRef=React.useRef(currentAsset);
+  const _audioCtxRef=React.useRef(null);
+  const _soundEnabledRef=React.useRef(true);
+  React.useEffect(()=>{
+    try{_soundEnabledRef.current=localStorage.getItem('taraSpikeSoundEnabled')!=='false';}catch(_){}
+  },[]);
+  React.useEffect(()=>{_atrRef.current=atrBps;},[atrBps]);
+  React.useEffect(()=>{_assetRef.current=currentAsset;},[currentAsset]);
+  // Soft beep via Web Audio. PUMP → 880Hz (bright), DUMP → 440Hz (neutral).
+  //   200ms sine wave with fade-in/out. Volume 0.15 — soft, not jarring.
+  const _playBeep=React.useCallback((dir)=>{
+    if(!_soundEnabledRef.current)return;
+    try{
+      let ctx=_audioCtxRef.current;
+      if(!ctx){
+        const _Ctor=window.AudioContext||window.webkitAudioContext;
+        if(!_Ctor)return;
+        ctx=new _Ctor();
+        _audioCtxRef.current=ctx;
+      }
+      // If suspended (no user interaction yet), try to resume. If still suspended
+      //   after this, the play will silently fail — that's acceptable.
+      if(ctx.state==='suspended'){try{ctx.resume();}catch(_){}}
+      const now=ctx.currentTime;
+      const osc=ctx.createOscillator();
+      const gain=ctx.createGain();
+      osc.frequency.setValueAtTime(dir==='PUMP'?880:440,now);
+      osc.type='sine';
+      gain.gain.setValueAtTime(0,now);
+      gain.gain.linearRampToValueAtTime(0.15,now+0.02);
+      gain.gain.linearRampToValueAtTime(0.15,now+0.18);
+      gain.gain.linearRampToValueAtTime(0,now+0.22);
+      osc.connect(gain);gain.connect(ctx.destination);
+      osc.start(now);osc.stop(now+0.25);
+    }catch(_){}
+  },[]);
+  // System notification — needs permission. Granted state only.
+  const _fireSystemNotification=React.useCallback((a)=>{
+    try{
+      if(typeof Notification==='undefined')return;
+      if(Notification.permission!=='granted')return;
+      const _sign=a.bps>0?'+':'';
+      const _verdict=a.locked
+        ?(a.favorable?'Your call is winning — ride it':'Moving against you — consider exit')
+        :`Sudden ${a.dir.toLowerCase()} — scan for entry`;
+      const n=new Notification(`${a.dir==='PUMP'?'🚀':'🔻'} ${a.asset} ${_sign}${a.bps.toFixed(0)}bps`,{
+        body:_verdict,
+        tag:'tara-spike',           // replaces previous notification of same tag
+        renotify:true,              // re-alert even if same tag
+        silent:false,
+      });
+      setTimeout(()=>{try{n.close();}catch(_){}},6000);
+    }catch(_){}
+  },[]);
+  React.useEffect(()=>{
+    const iv=setInterval(()=>{
+      const lock=lockedCallRef?.current;
+      const isLocked=!!(lock&&lock.dir&&lock.dir!=='SIT_OUT');
+      const ticks=tickHistoryRef?.current||[];
+      if(ticks.length<3)return;
+      const now=Date.now();
+      const _atr=Number.isFinite(_atrRef.current)&&_atrRef.current>0?_atrRef.current:15;
+      // Multi-window: check 10s, 20s, 30s — pick window with largest |move|
+      const _windows=[
+        {sec:10,floor:20,mult:1.0},
+        {sec:20,floor:30,mult:1.3},
+        {sec:30,floor:40,mult:1.6},
+      ];
+      let _bestFire=null;
+      for(const w of _windows){
+        const cutoff=now-w.sec*1000;
+        const inWindow=ticks.filter(t=>t&&t.p&&t.time>=cutoff);
+        if(inWindow.length<3)continue;
+        const oldest=inWindow[0].p;
+        const newest=inWindow[inWindow.length-1].p;
+        if(!oldest||!newest||!Number.isFinite(oldest)||!Number.isFinite(newest))continue;
+        const moveBps=((newest-oldest)/oldest)*10000;
+        const absMove=Math.abs(moveBps);
+        const threshold=Math.max(w.floor,_atr*w.mult);
+        if(absMove<threshold)continue;
+        if(!_bestFire||absMove>Math.abs(_bestFire.moveBps)){
+          _bestFire={windowSec:w.sec,moveBps,threshold};
+        }
+      }
+      if(!_bestFire)return;
+      // Throttle: 30s
+      if(now-_lastFiredRef.current<30000)return;
+      _lastFiredRef.current=now;
+      const dir=_bestFire.moveBps>0?'PUMP':'DUMP';
+      const favorable=isLocked&&((dir==='PUMP'&&lock.dir==='UP')||(dir==='DUMP'&&lock.dir==='DOWN'));
+      const _asset=_assetRef.current||'BTC';
+      const newAlert={
+        firedAt:now,
+        dir,
+        bps:_bestFire.moveBps,
+        windowSec:_bestFire.windowSec,
+        favorable,
+        locked:isLocked,
+        asset:_asset,
+      };
+      setAlert(newAlert);
+      _playBeep(dir);
+      _fireSystemNotification(newAlert);
+      // Tab title patch
+      try{
+        if(_origTitleRef.current==null)_origTitleRef.current=document.title;
+        const _sign=_bestFire.moveBps>0?'+':'';
+        document.title=`${dir==='PUMP'?'🚀':'🔻'} ${_asset} ${_sign}${_bestFire.moveBps.toFixed(0)}bps · Tara`;
+      }catch(_){}
+    },1000);
+    return()=>clearInterval(iv);
+  },[tickHistoryRef,lockedCallRef,_playBeep,_fireSystemNotification]);
+  React.useEffect(()=>{
+    if(!alert)return;
+    const t=setTimeout(()=>{
+      setAlert(null);
+      try{
+        if(_origTitleRef.current!=null){document.title=_origTitleRef.current;_origTitleRef.current=null;}
+      }catch(_){}
+    },8000);
+    return()=>clearTimeout(t);
+  },[alert]);
+  React.useEffect(()=>{
+    return()=>{
+      try{
+        if(_origTitleRef.current!=null){document.title=_origTitleRef.current;_origTitleRef.current=null;}
+        if(_audioCtxRef.current){try{_audioCtxRef.current.close();}catch(_){}_audioCtxRef.current=null;}
+      }catch(_){}
+    };
+  },[]);
+  const dismiss=React.useCallback(()=>{
+    setAlert(null);
+    try{
+      if(_origTitleRef.current!=null){document.title=_origTitleRef.current;_origTitleRef.current=null;}
+    }catch(_){}
+  },[]);
+  const toggleSound=React.useCallback(()=>{
+    const next=!_soundEnabledRef.current;
+    _soundEnabledRef.current=next;
+    try{localStorage.setItem('taraSpikeSoundEnabled',String(next));}catch(_){}
+    // Force-rerender by updating a state — easiest: re-set the alert if any
+    setAlert(prev=>prev?{...prev,_soundToggleTick:Date.now()}:prev);
+  },[]);
+  const requestNotifyPermission=React.useCallback(async()=>{
+    try{
+      if(typeof Notification==='undefined')return'unsupported';
+      const result=await Notification.requestPermission();
+      setNotifyPerm(result);
+      return result;
+    }catch(_){return'denied';}
+  },[]);
+  return{alert,dismiss,toggleSound,soundEnabled:_soundEnabledRef.current,requestNotifyPermission,notifyPerm};
+}
+
+function SpikeAlertOverlay({alert,dismiss,toggleSound,soundEnabled,requestNotifyPermission,notifyPerm}){
+  if(!alert)return null;
+  const{dir,bps,favorable,locked,asset,windowSec}=alert;
+  const _sign=bps>0?'+':'';
+  // Color: green if locked+favorable, rose if locked+adverse, gold if not locked
+  let _color,_bg,_verdict;
+  if(locked){
+    _color=favorable?'rgba(110,231,183,0.95)':'rgba(244,114,182,0.95)';
+    _bg=favorable?'rgba(110,231,183,0.10)':'rgba(244,114,182,0.10)';
+    _verdict=favorable?'🚀 YOUR CALL WINNING — RIDE IT':'⚠️ MOVING AGAINST YOU — CONSIDER EXIT';
+  }else{
+    _color='rgba(229,200,112,0.95)'; // brand gold — neutral attention
+    _bg='rgba(229,200,112,0.10)';
+    _verdict=dir==='PUMP'?'🚀 SUDDEN PUMP — scan for entry':'🔻 SUDDEN DUMP — scan for entry';
+  }
+  const _showNotifyButton=notifyPerm==='default';
+  return React.createElement('div',{
+    className:'fixed top-14 left-1/2 z-[110]',
+    style:{transform:'translateX(-50%)',maxWidth:'92vw',animation:'taraSpikeAlertIn 240ms cubic-bezier(0.16,1,0.3,1)'},
+  },
+    React.createElement('div',{
+      className:'px-5 py-3 rounded-lg border-2 backdrop-blur-md cursor-pointer',
+      style:{
+        background:_bg,
+        borderColor:_color,
+        boxShadow:`0 8px 32px ${_color}, 0 0 32px ${_color}`,
+        animation:'taraSpikePulse 1.2s ease-in-out infinite',
+      },
+      onClick:dismiss,
+      title:'Tap to dismiss',
+    },
+      React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
+        React.createElement('span',{className:'text-[10px] uppercase tracking-[0.22em] font-bold',style:{color:_color}},
+          `${asset} ${dir} · last ${windowSec}s`
+        ),
+      ),
+      React.createElement('div',{className:'font-serif text-3xl font-bold leading-none',style:{color:'#fff',fontFamily:"'Cormorant Garamond', serif"}},
+        `${_sign}${bps.toFixed(0)} bps`
+      ),
+      React.createElement('div',{className:'text-xs font-bold mt-2 tracking-wide',style:{color:_color}},
+        _verdict
+      ),
+      React.createElement('div',{className:'flex items-center justify-between gap-3 mt-2 pt-2 border-t',style:{borderColor:'rgba(255,255,255,0.08)'}},
+        React.createElement('div',{className:'flex items-center gap-2'},
+          // Sound toggle
+          React.createElement('button',{
+            className:'text-[10px] px-1.5 py-0.5 rounded hover:bg-white/5 transition-colors',
+            onClick:(e)=>{e.stopPropagation();toggleSound();},
+            title:soundEnabled?'Sound on — click to mute':'Sound muted — click to unmute',
+            style:{color:soundEnabled?'rgba(255,255,255,0.6)':'rgba(255,255,255,0.3)'},
+          },soundEnabled?'🔊':'🔇'),
+          // Enable system alerts (only if permission='default')
+          _showNotifyButton&&React.createElement('button',{
+            className:'text-[9px] uppercase tracking-wider px-2 py-0.5 rounded border hover:bg-white/5 transition-colors',
+            style:{color:_color,borderColor:_color+''},
+            onClick:async(e)=>{e.stopPropagation();await requestNotifyPermission();},
+            title:'Enable system notifications so you get pinged even when Tara is in a background tab',
+          },'+ system alerts'),
+          notifyPerm==='granted'&&React.createElement('span',{
+            className:'text-[9px] uppercase tracking-wider',
+            style:{color:'rgba(255,255,255,0.3)'},
+          },'· system alerts on'),
+        ),
+        React.createElement('div',{className:'text-[9px] text-white/40'},
+          'tap to dismiss'
+        )
+      )
+    )
+  );
+}
+
+// V8.8.8/8.8.9: Bridge component — calls the spike alert hook with refs from
+//   TaraApp's scope (passed as props) and renders the overlay.
+function SpikeAlertHookHost(props){
+  const hookResult=useSpikeAlert(props);
+  return React.createElement(SpikeAlertOverlay,hookResult);
+}
+
 function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
   const[showSessionStart,setShowSessionStart]=useState(false); // V6.5.7: no auto-open on load — click 📋 button (which pulses for attention).
@@ -11550,7 +11807,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.8.7 online — sync pill flicker + news fetch, both fixed. ONE: SYNC PILL. Pre-V8.8.7 the cloud sync state was a single global flag toggled by every cloudWrite/cloudWriteDebouncedRMW. Eleven sync paths writing concurrently meant the global state oscillated writing→ok→writing→ok multiple times per second — pill flickered green/yellow constantly during active trading. Worse, when path A was still writing and path B finished, the state showed ok even though A was in flight (lying about sync state, not just flickering). Two-part fix: (a) module-level _activeWrites counter — increments on write start, decrements on completion; state stays writing as long as count>0 so concurrent writes do not oscillate. (b) 750ms render hysteresis in SyncStatusPill — only renders SYNCING after status has been writing for 750ms continuously. Brief writes (<750ms total) never flicker. Sustained writes (initial hydration, slow round-trip) still show. TWO: NEWS FETCH. Pre-V8.8.7 the news ticker tried CryptoCompare direct + CoinGecko status_updates direct. Both endpoints have been deprecated/restricted since the code was written: CryptoCompare moved to API-key-required model (free public tier rejected, the free key still exists but you have to register for it), CoinGecko status_updates is gone entirely. Replaced with a multi-proxy parallel strategy mirroring the Kalshi V5.2 approach — direct + corsproxy.io + codetabs + allorigins fired simultaneously, take the first success. If all four fail for CryptoCompare, falls back to Reddit r/CryptoCurrency JSON via corsproxy.io. If THAT fails, reads from a localStorage cache (4h max age) and shows cached news with a soft cached-N-min-ago hint instead of the alarming All sources unavailable message. The macro countdown above the news section was never broken — it pulls from a hardcoded calendar of FOMC/CPI/etc events and stays accurate regardless of news fetch state. WHAT TO DO: push V8.8.7. Vercel auto-deploys. Header should show 8.8.7. The sync pill should now be steady green during normal use, only showing yellow during genuinely sustained writes. The news ticker should populate again. STILL INTACT: V8.8.6 asset-aware dedup (BTC + ETH coexist, first-write-wins), V8.8.5 no-op SW + circuit breaker, V8.8.4 unminified + x-ray ErrorBoundary + TDZ fix. SAME OPEN GAP from V8.8.6: single-browser BTC↔ETH switching mid-window can leave the previous asset window unresolved. Multi-browser side-steps it."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.8.9 online — spike alert went aggressive. Three-window detection 10s/20s/30s with thresholds: 10s max(20bps, 1.0x atrBps), 20s max(30bps, 1.3x atrBps), 30s max(40bps, 1.6x atrBps). Whichever fires first / hits hardest wins. Throttle reduced to 30s. Now ALWAYS-ON, not just when locked — when not locked the alert reads SUDDEN PUMP/DUMP - scan for entry in gold (neutral attention). When locked it still differentiates favorable (RIDE IT, green) vs adverse (CONSIDER EXIT, rose). THREE LAYERS now: visual overlay + tab title + soft beep + system notification. Beep is 200ms sine, 880Hz for PUMP, 440Hz for DUMP, volume 0.15 (soft, not jarring). Sound on by default since you opted in; toggle on the alert overlay (speaker icon). System notifications need browser permission — first time alert fires, a small + system alerts button appears in the overlay; tap it once and the browser asks permission, after that you get OS-level pings even when Tara is fully minimized or in another tab. Persisted: taraSpikeSoundEnabled in localStorage. Pre-V8.8.9 (V8.8.8) was 30s window, max(50bps, 1.8x atrBps), only when locked, no sound, no system notifications. STILL INTACT: V8.8.7 sync pill steady + news multi-proxy, V8.8.6 asset-aware dedup, V8.8.5 no-op SW + circuit breaker, V8.8.4 unminified + x-ray ErrorBoundary + TDZ fix. Note: AudioContext can start in suspended state on browsers that haven't seen user interaction yet. Hook calls ctx.resume() before playing — works once you've clicked anywhere on the page. SAME OPEN GAP: single-browser BTC<>ETH switching mid-window can leave the previous asset window unresolved. Multi-browser side-steps it."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -16818,6 +17075,23 @@ function TaraApp(){
 
   return(
     <div className={'min-h-screen bg-[#111312] text-[#E8E9E4] font-sans flex flex-col selection:bg-[#E8E9E4]/20'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
+      {/* V8.8.8: Spike alert keyframes + overlay */}
+      <style>{`
+        @keyframes taraSpikeAlertIn {
+          from { opacity: 0; transform: translateX(-50%) translateY(-12px) scale(0.96); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+        }
+        @keyframes taraSpikePulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.015); }
+        }
+      `}</style>
+      <SpikeAlertHookHost
+        tickHistoryRef={tickHistoryRef}
+        lockedCallRef={lockedCallRef}
+        currentAsset={currentAsset}
+        atrBps={analysis?.atrBps}
+      />
       
       {/* V134: Session-start status check */}
       <SessionStartCheck open={showSessionStart} onClose={()=>setShowSessionStart(false)} windowType={windowType} scorecards={scorecards} tradeLog={tradeLog} regime={analysis?.regime} velocityRegime={analysis?.velocityRegime} calibration={calibration} baselineDrift={baselineDrift} resetToLatestBaseline={resetToLatestBaseline} runSyncWithProgress={runSyncWithProgress} syncState={syncState} resetDirectionalBias={resetDirectionalBias} resetFreshStart={resetFreshStart}/>
@@ -16909,7 +17183,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              8.8.7
+              8.8.9
             </span>
           </div>
 
@@ -18544,6 +18818,57 @@ function TaraApp(){
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V8.8.9 — Spike alert aggressive */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Spike Alert · Aggressive · Sound · System Notifications</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8.9</span> &mdash; Spike Alert Aggressive</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;i keep missing big sudden price moves and i don&rsquo;t even have any alert to notice&rdquo;</em>. Total rebuild of the spike alert. Three improvements stacked.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Multi-window + lower thresholds</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong style={{color:T2_GOLD}}>10s</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">max(20 bps, 1.0 &times; atrBps)</code></li>
+                  <li><strong style={{color:T2_GOLD}}>20s</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">max(30 bps, 1.3 &times; atrBps)</code></li>
+                  <li><strong style={{color:T2_GOLD}}>30s</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">max(40 bps, 1.6 &times; atrBps)</code></li>
+                  <li>Whichever window fires first / hits hardest wins. Catches both fast 10s spikes and slower 30s drifts.</li>
+                  <li>Throttle reduced from 60s to 30s.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Always-on (not just locked)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">When not locked, alert reads <code className="text-[10px] bg-[#0E100F] px-1">SUDDEN PUMP/DUMP &mdash; scan for entry</code> in <span style={{color:T2_GOLD}}>gold</span> (neutral attention). When locked, still differentiates favorable (RIDE IT, green) vs adverse (CONSIDER EXIT, rose).</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sound + system notifications</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong style={{color:T2_GOLD}}>Soft beep</strong> &mdash; 200ms sine wave, 880Hz for PUMP / 440Hz for DUMP, volume 0.15. On by default. Toggle via 🔊 icon on the overlay. Persisted in localStorage.</li>
+                  <li><strong style={{color:T2_GOLD}}>System notifications</strong> &mdash; first time the alert fires, a <code className="text-[10px] bg-[#0E100F] px-1">+ system alerts</code> button appears. Tap once, browser asks permission, then OS-level pings work even when Tara is fully minimized or in another tab. After granting, the button is replaced by a quiet &ldquo;system alerts on&rdquo; indicator.</li>
+                </ul>
+              </section>
+
+              {/* V8.8.8 — Spike alert overlay */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Spike Alert · Visual + Tab Title</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8.8</span> &mdash; Spike Alert</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;i keep missing out on important price movements while in trade. like if it insanely starts pumping or dumping. so i need like a visual cue or something.&rdquo;</em> Filled the gap between the EXIT WARNING (which fires on adverse posterior swings) and outright price spikes that haven&rsquo;t shown up in the posterior yet.</p>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Trigger</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>30-second price move</strong> &ge; <code className="text-[10px] bg-[#0E100F] px-1">max(50 bps, 1.8 &times; atrBps)</code>. Floor of 50bps catches genuine spikes in calm regimes; the ATR multiplier scales it up in already-volatile regimes so we don&rsquo;t false-alarm on normal chop.</li>
+                  <li><strong>Only when locked</strong> &mdash; pre-lock and SIT_OUT skip the check entirely.</li>
+                  <li><strong>Throttled</strong> to one alert per 60s so a sustained move doesn&rsquo;t spam.</li>
+                </ul>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">UI</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong style={{color:'rgba(110,231,183,0.95)'}}>Green overlay</strong> when move favors your call (&ldquo;RIDE IT&rdquo;).</li>
+                  <li><strong style={{color:'rgba(244,114,182,0.95)'}}>Rose overlay</strong> when move is against you (&ldquo;CONSIDER EXIT&rdquo;).</li>
+                  <li><strong style={{color:T2_GOLD}}>Tab title patch</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">🚀 BTC +85bps · Tara</code> so background-tab use is covered.</li>
+                  <li>Auto-dismiss after 8s, or tap to clear.</li>
+                </ul>
+              </section>
 
               {/* V8.8.7 — Sync pill flicker + news fetch */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
