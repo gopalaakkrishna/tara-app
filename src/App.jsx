@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.1.1-layout-and-news';
+const BASELINE_VERSION='2026.05.06-v9.1.2-plain-language-and-fixes';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -7214,21 +7214,33 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
       if(e.result==='WIN')_phaseStats[k].W++;else _phaseStats[k].L++;
     });
 
-    // Generate next 10 hours of phase blocks
+    // V9.1.2: Phase → market-session mapping for grouping
+    const _sessionOf=(pk)=>{
+      if(pk==='ASIA_OPEN'||pk==='ASIA_LATE')return{key:'ASIA',label:'Asia',flag:'🌏'};
+      if(pk==='EU_PREOPEN'||pk==='EU_OPEN')return{key:'EU',label:'Europe',flag:'🌍'};
+      if(pk==='NY_PREMARKET'||pk==='NY_OPEN'||pk==='NY_MORNING'||pk==='NY_LUNCH'||pk==='NY_AFTERNOON'||pk==='NY_CLOSE')return{key:'US',label:'US',flag:'🌎'};
+      return{key:'AFTER',label:'After Hours',flag:'🌒'};
+    };
+
+    // V9.1.2: Generate next 12 hours from CURRENT phase boundaries (not arbitrary
+    //   1-hour intervals). Bug fix from V9.1.1 — was reading trans?.minsUntil but
+    //   getNextPhaseTransition returns {minutesUntil}, so the fallback of 60 fired
+    //   every iteration, producing 60-min intervals instead of real phase blocks.
     const out=[];
     const now=new Date();
     let cursor=new Date(now);
     let totalMin=0;
-    const MAX_MIN=10*60;
+    const MAX_MIN=12*60;
     let safety=0;
     while(totalMin<MAX_MIN&&safety++<24){
       const h=cursor.getUTCHours();
       const m=cursor.getUTCMinutes();
       const phaseKey=getPhaseKey(h,m);
       const prof=PHASE_PROFILES[phaseKey]||null;
-      // Find when this phase ends (next transition)
+      // V9.1.2: correct field name — minutesUntil, not minsUntil
       const trans=getNextPhaseTransition(h,m);
-      const minsUntilEnd=trans?.minsUntil||60;
+      const minsUntilEnd=trans?.minutesUntil||60;
+      const session=_sessionOf(phaseKey);
 
       // Recommendation tier
       const stats=_phaseStats[phaseKey];
@@ -7246,30 +7258,35 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
         tier='BREAK';tierLabel='BREAK';
         tierColor='rgba(232,233,228,0.45)';tierBg='rgba(232,233,228,0.03)';tierBorder='rgba(232,233,228,0.10)';
         if(_isDeadzone)reasonBits.push('thin liquidity');
-        if(N>=10&&wr!=null&&wr<0.50)reasonBits.push(`historical ${Math.round(wr*100)}% WR`);
-        if(_liqLow&&_volComp)reasonBits.push('compressing & illiquid');
+        if(N>=10&&wr!=null&&wr<0.50)reasonBits.push(`you win ${Math.round(wr*100)}% here`);
+        if(_liqLow&&_volComp)reasonBits.push('quiet & illiquid');
       }else if(_liqHigh&&!_volComp&&(wr==null||wr>=0.60)){
         tier='TRADE';tierLabel='TRADE';
         tierColor='rgba(110,231,183,0.95)';tierBg='rgba(110,231,183,0.06)';tierBorder='rgba(110,231,183,0.30)';
-        if(wr!=null)reasonBits.push(`${Math.round(wr*100)}% WR · ${N} trades`);
-        else reasonBits.push('high liquidity, no priors yet');
+        if(wr!=null)reasonBits.push(`you win ${Math.round(wr*100)}% here · ${N} trades`);
+        else reasonBits.push('busy market, no priors yet');
       }else{
-        // SELECTIVE — mixed
-        if(wr!=null)reasonBits.push(`${Math.round(wr*100)}% WR · ${N} trades`);
-        if(_liqMed)reasonBits.push('medium liquidity');
+        if(wr!=null)reasonBits.push(`you win ${Math.round(wr*100)}% here · ${N} trades`);
+        if(_liqMed)reasonBits.push('medium activity');
         if(reasonBits.length===0)reasonBits.push('mixed conditions');
       }
 
+      // Number of 15m windows in this phase
+      const _windows15=Math.round(minsUntilEnd/15);
+
       out.push({
         phaseKey,
+        session,
         label:prof?.label||phaseKey,
         flag:prof?.flag||'',
         tier,tierLabel,tierColor,tierBg,tierBorder,
         reason:reasonBits.join(' · '),
         wr,N,
         startsAt:new Date(cursor),
+        endsAt:new Date(cursor.getTime()+minsUntilEnd*60000),
         minutesFromNow:totalMin,
         durationMin:minsUntilEnd,
+        windows15:_windows15,
         liquidity:prof?.liquidity||'',
         vol:prof?.vol||'',
       });
@@ -7296,6 +7313,21 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
   if(!schedule||schedule.length===0)return null;
   const current=schedule[0];
 
+  // V9.1.2: Plain-language tier hint for the current callout
+  const _currentHint=current.tier==='TRADE'?'good for trading'
+    :current.tier==='BREAK'?'take a break — slow market'
+    :'pick spots carefully';
+
+  // V9.1.2: Group upcoming phases by session for readable display
+  const _upcomingBySession={};
+  schedule.slice(1,8).forEach(s=>{
+    const k=s.session.key;
+    if(!_upcomingBySession[k])_upcomingBySession[k]={session:s.session,rows:[]};
+    _upcomingBySession[k].rows.push(s);
+  });
+  // Preserve insertion order
+  const _sessionOrder=Object.keys(_upcomingBySession);
+
   return React.createElement('div',{className:'mb-2 px-3 py-2.5 rounded-lg min-w-0 overflow-hidden',style:{background:'#111312',border:'1px solid rgba(232,233,228,0.08)'}},
     // Header
     React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
@@ -7310,7 +7342,7 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
         },'⊕')
       )
     ),
-    // Current state callout — biggest visual emphasis
+    // Current state callout — biggest visual emphasis with plain hint
     React.createElement('div',{
       className:'mb-2 px-3 py-2 rounded-md flex items-center gap-2.5 min-w-0',
       style:{background:current.tierBg,border:`1px solid ${current.tierBorder}`,boxShadow:`0 0 12px ${current.tierBorder}`},
@@ -7319,24 +7351,34 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
       React.createElement('div',{className:'flex-1 min-w-0'},
         React.createElement('div',{className:'flex items-baseline gap-2 mb-0.5 flex-wrap'},
           React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold shrink-0',style:{color:current.tierColor}},`Now · ${current.tierLabel}`),
-          React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/55 truncate'},`${current.flag} ${current.label}`),
+          React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/55 truncate'},`${current.flag} ${current.label} · ${_currentHint}`),
         ),
         React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 leading-snug break-words'},
-          current.reason+(current.durationMin?` · ends in ${_fmtDuration(current.durationMin)}`:'')
+          current.reason+(current.durationMin?` · ends at ${_fmtTime(current.endsAt)} (in ${_fmtDuration(current.durationMin)})`:'')
         )
       )
     ),
-    // Upcoming phases — compact list of next 4
-    React.createElement('div',{className:'space-y-1'},
-      schedule.slice(1,5).map((s,i)=>(
-        React.createElement('div',{key:i,className:'flex items-center gap-2 px-2 py-1 rounded text-[10px] min-w-0',style:{background:'rgba(232,233,228,0.02)',border:`1px solid ${s.tierBorder}`}},
-          React.createElement('span',{className:'text-[10px] shrink-0'},s.tier==='TRADE'?'🟢':s.tier==='BREAK'?'⏸':'🟡'),
-          React.createElement('span',{className:'tabular-nums text-[#E8E9E4]/55 shrink-0',style:{minWidth:'56px'}},_fmtTime(s.startsAt)),
-          React.createElement('span',{className:'font-bold uppercase tracking-wider shrink-0',style:{color:s.tierColor,fontSize:'9px',minWidth:'66px'}},s.tierLabel),
-          React.createElement('span',{className:'text-[#E8E9E4]/55 truncate min-w-0'},`${s.flag} ${s.label}`),
-          React.createElement('span',{className:'text-[#E8E9E4]/35 truncate text-[9px] hidden sm:inline min-w-0'},`· ${s.reason}`),
-        )
-      ))
+    // V9.1.2: Upcoming phases grouped by market session, with real start-end time ranges
+    React.createElement('div',{className:'space-y-1.5'},
+      _sessionOrder.map(sk=>{
+        const grp=_upcomingBySession[sk];
+        return React.createElement('div',{key:sk,className:'min-w-0'},
+          React.createElement('div',{className:'text-[8px] uppercase tracking-[0.20em] font-bold text-[#E8E9E4]/40 mb-1 px-1'},
+            `${grp.session.flag} ${grp.session.label}`
+          ),
+          React.createElement('div',{className:'space-y-1'},
+            grp.rows.map((s,i)=>(
+              React.createElement('div',{key:i,className:'flex items-center gap-2 px-2 py-1 rounded text-[10px] min-w-0',style:{background:'rgba(232,233,228,0.02)',border:`1px solid ${s.tierBorder}`}},
+                React.createElement('span',{className:'text-[10px] shrink-0'},s.tier==='TRADE'?'🟢':s.tier==='BREAK'?'⏸':'🟡'),
+                React.createElement('span',{className:'tabular-nums text-[#E8E9E4]/55 shrink-0',style:{minWidth:'92px'}},`${_fmtTime(s.startsAt)}–${_fmtTime(s.endsAt)}`),
+                React.createElement('span',{className:'font-bold uppercase tracking-wider shrink-0',style:{color:s.tierColor,fontSize:'9px',minWidth:'66px'}},s.tierLabel),
+                React.createElement('span',{className:'text-[#E8E9E4]/55 truncate min-w-0'},`${s.flag} ${s.label}`),
+                React.createElement('span',{className:'text-[#E8E9E4]/35 truncate text-[9px] hidden sm:inline min-w-0'},`· ${s.windows15} windows`),
+              )
+            ))
+          )
+        );
+      })
     )
   );
 }
@@ -7375,7 +7417,7 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
       const phaseKey=getPhaseKey(h,m);
       const prof=PHASE_PROFILES[phaseKey]||null;
       const trans=getNextPhaseTransition(h,m);
-      const minsUntilEnd=trans?.minsUntil||60;
+      const minsUntilEnd=trans?.minutesUntil||60; // V9.1.2: correct field name
 
       const stats=_phaseStats[phaseKey];
       const N=stats?(stats.W+stats.L):0;
@@ -7505,7 +7547,30 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
   );
 }
 
-function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset}){
+// V9.1.2: Plain-language helper for regime labels. Used in user-facing UI to
+//   replace jargon like "TRENDING DOWN" with "going down (dump)" etc.
+const regimeToPlainLabel=(regime)=>{
+  const map={
+    'TRENDING UP':'going up — pump trajectory',
+    'TRENDING DOWN':'going down — dump trajectory',
+    'RANGE-CHOP':'sideways chop',
+    'SHORT SQUEEZE':'short squeeze — pump',
+    'HIGH VOL CHOP':'wild swings — both directions',
+  };
+  return map[regime]||regime;
+};
+const regimeToShortPlain=(regime)=>{
+  const map={
+    'TRENDING UP':'pumping ▲',
+    'TRENDING DOWN':'dumping ▼',
+    'RANGE-CHOP':'sideways',
+    'SHORT SQUEEZE':'squeeze ▲',
+    'HIGH VOL CHOP':'wild',
+  };
+  return map[regime]||regime;
+};
+
+function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset,analysis}){
   const[ctx,setCtx]=React.useState(()=>getMarketContext(new Date()));
   const[expanded,setExpanded]=React.useState(false);
   React.useEffect(()=>{
@@ -7538,19 +7603,19 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
         let _tone,_label,_text,_color;
         if(_wr>=70){
           _tone='positive';_label=`★ ${_curSession} is your zone`;_color='rgba(110,231,183,0.95)';
-          _text=`${_wr}% WR over ${_n} ${currentAsset} calls in ${_curSession}. Trade with confidence here — your edge is highest in this session. Consider sizing up on confluent setups.`;
+          _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). This is your strongest session — trade with confidence, can size up on strong setups.`;
         } else if(_wr>=60){
           _tone='good';_label=`✓ ${_curSession} is profitable`;_color='rgba(110,231,183,0.85)';
-          _text=`${_wr}% WR over ${_n} ${currentAsset} calls in ${_curSession}. Solid edge. Standard size with normal selectivity.`;
+          _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). You're making money — trade normal size, normal selectivity.`;
         } else if(_wr>=50){
           _tone='neutral';_label=`◇ ${_curSession} is breakeven`;_color='rgba(229,200,112,0.85)';
-          _text=`${_wr}% WR over ${_n} ${currentAsset} calls in ${_curSession}. Marginal edge. Pull back to half size or stick to highest-conviction setups only.`;
+          _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). Just barely breakeven — go smaller, only take strong setups.`;
         } else if(_wr>=40){
           _tone='warning';_label=`⚠ ${_curSession} is unprofitable`;_color='rgba(229,200,112,0.95)';
-          _text=`${_wr}% WR over ${_n} ${currentAsset} calls in ${_curSession}. You're losing money here — proceed with caution. Half size, big-edge setups only.`;
+          _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). You're losing money in this session — half size or skip unless the setup is great.`;
         } else {
           _tone='bad';_label=`✗ ${_curSession} is your weakness`;_color='rgba(244,114,182,0.95)';
-          _text=`${_wr}% WR over ${_n} ${currentAsset} calls in ${_curSession}. Significant negative edge. Strongly consider sitting this session out until pattern improves.`;
+          _text=`You win ${_wr}% of the time here (${_n} trades on ${currentAsset}). You usually lose in this session — better to skip until your numbers improve.`;
         }
         _sessionAdvice={tone:_tone,label:_label,text:_text,color:_color,wr:_wr,n:_n,session:_curSession};
       }
@@ -7592,15 +7657,38 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
       React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
         React.createElement('span',{className:'text-base shrink-0',style:{lineHeight:1}},ctx.phase.flag),
         React.createElement('span',{className:'text-[11px] sm:text-xs uppercase font-bold tracking-[0.14em] shrink-0',style:{color:ctx.phase.color}},ctx.phase.label),
-        // Liquidity + vol pills
-        React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded',style:{
-          color:ctx.phase.liquidity==='EXTREME'?'rgb(110,231,183)':ctx.phase.liquidity==='HIGH'?'rgb(110,231,183)':ctx.phase.liquidity==='MED'?'rgba(229,200,112,0.85)':'rgba(244,114,182,0.7)',
-          background:'rgba(232,233,228,0.05)',
-        }},`liq: ${ctx.phase.liquidity}`),
-        React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded hidden sm:inline-block',style:{
-          color:ctx.phase.vol==='EXPANDING'?'rgba(244,114,182,0.85)':ctx.phase.vol==='COMPRESSING'?'rgba(147,197,253,0.85)':'rgba(232,233,228,0.55)',
-          background:'rgba(232,233,228,0.05)',
-        }},`vol: ${ctx.phase.vol.toLowerCase()}`),
+        // V9.1.2: plain-language activity + movement pills (was LIQ/VOL jargon).
+        //   liquidity → activity: how much is going on right now
+        //   vol → movement: are price moves growing or shrinking
+        (()=>{
+          const _liqMap={EXTREME:'PEAK ACTIVITY',HIGH:'BUSY',MED:'MODERATE',LOW:'QUIET'};
+          const _liqLabel=_liqMap[ctx.phase.liquidity]||ctx.phase.liquidity;
+          return React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded',style:{
+            color:ctx.phase.liquidity==='EXTREME'?'rgb(110,231,183)':ctx.phase.liquidity==='HIGH'?'rgb(110,231,183)':ctx.phase.liquidity==='MED'?'rgba(229,200,112,0.85)':'rgba(244,114,182,0.7)',
+            background:'rgba(232,233,228,0.05)',
+          },title:`Liquidity: ${ctx.phase.liquidity}`},_liqLabel);
+        })(),
+        (()=>{
+          const _volMap={EXPANDING:'MOVES GROWING',STEADY:'CALM',COMPRESSING:'MOVES SHRINKING'};
+          const _volLabel=_volMap[ctx.phase.vol]||ctx.phase.vol.toLowerCase();
+          return React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded hidden sm:inline-block',style:{
+            color:ctx.phase.vol==='EXPANDING'?'rgba(244,114,182,0.85)':ctx.phase.vol==='COMPRESSING'?'rgba(147,197,253,0.85)':'rgba(232,233,228,0.55)',
+            background:'rgba(232,233,228,0.05)',
+          },title:`Volatility: ${ctx.phase.vol}`},_volLabel);
+        })(),
+        // V9.1.2: "Tara sees" plain-language pill — shows what direction Tara
+        //   thinks price is going, in user-friendly terms (pumping/dumping/sideways).
+        analysis?.regime&&React.createElement('span',{
+          className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded',
+          style:{
+            color:analysis.regime==='TRENDING UP'||analysis.regime==='SHORT SQUEEZE'?'rgb(110,231,183)'
+              :analysis.regime==='TRENDING DOWN'?'rgba(244,114,182,0.95)'
+              :'rgba(232,233,228,0.65)',
+            background:'rgba(232,233,228,0.05)',
+            border:'1px solid rgba(232,233,228,0.10)',
+          },
+          title:`Tara's read: ${regimeToPlainLabel(analysis.regime)}`,
+        },`tara: ${regimeToShortPlain(analysis.regime)}`),
         // V8.7: Deadzone pill — pinned visible if coin-flip phase
         ctx.phase.deadzoneWarning&&React.createElement('span',{
           className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded',
@@ -8440,13 +8528,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
           V6.2.3: hidden lg:block (was md:block). */}
       <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} className="hidden lg:block"/>
 
-      {/* V9.1.1: Tape flow meter — narrow box between Tara's Call and Projections.
-          Renders only when tapeWindows is available; otherwise null. */}
-      {tapeWindows&&(
-        <div className="hidden lg:block mb-3">
-          <TapeStrip tapeWindows={tapeWindows} whaleLog={whaleLog}/>
-        </div>
-      )}
+      {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
 
       <div className="flex items-center justify-between mb-3 shrink-0">
         <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
@@ -9420,6 +9502,24 @@ function TapeStrip({tapeWindows,whaleLog}){
   );
 }
 
+// V9.1.2: Simple keyword-based price-impact inference for news headlines.
+//   Returns 'UP' (bullish), 'DOWN' (bearish), or null (neutral/unclear).
+//   Not perfect — no LLM/sentiment model — but gives the user a quick visual cue.
+const inferNewsPriceImpact=(title)=>{
+  if(!title||typeof title!=='string')return null;
+  const t=title.toLowerCase();
+  // Bearish keywords (price down)
+  const bearWords=['crash','plunge','dump','sell-off','sells off','drop','fall','tank','collapse','liquidation','liquidations','outflow','outflows','ban','banned','sec sue','lawsuit','hack','hacked','fraud','exploit','rug','rugpull','bearish','short squeeze fail','warning','reject','rejection','denied','breach','exodus','correction','plummet','tumble','slump','slide','wipe','wiped','red day','blood','panic','fear'];
+  // Bullish keywords (price up)
+  const bullWords=['surge','rally','soar','pump','spike','breakout','breaks out','approval','approved','etf inflow','etf inflows','adoption','accumulate','accumulating','accumulation','bullish','green day','milestone','high','ath','all-time high','record','partnership','deal','launch','adoption','institutional','endorsement','buys','bought','whale buy','support','demand'];
+  let bearScore=0,bullScore=0;
+  for(const w of bearWords)if(t.includes(w))bearScore++;
+  for(const w of bullWords)if(t.includes(w))bullScore++;
+  if(bullScore>bearScore&&bullScore>0)return'UP';
+  if(bearScore>bullScore&&bearScore>0)return'DOWN';
+  return null;
+};
+
 // ── V111: NewsFeedCard - external events affecting BTC price ──
 function NewsFeedCard(){
   const[news,setNews]=React.useState([]);
@@ -9431,6 +9531,8 @@ function NewsFeedCard(){
   //   without re-running the entire useEffect (which would also restart the macro
   //   interval). Set inside useEffect, called from the retry button below.
   const fetchNewsRef=React.useRef(null);
+  // V9.1.2: expand modal for full news view
+  const[expandOpen,setExpandOpen]=React.useState(false);
   React.useEffect(()=>{
     const computeMacros=()=>{
       // Find next 3 upcoming macro events in next 8 hours
@@ -9630,7 +9732,13 @@ function NewsFeedCard(){
     <div className="shrink-0">
       <div className={'flex items-center justify-between mb-2'}>
         <span className={'text-xs uppercase tracking-[0.2em] text-[#E8E9E4]/40 font-bold'}>News & Macro</span>
-        <span className={'text-[9px] text-[#E8E9E4]/30 italic'}>{loading?'loading...':err?'macro only':'30s refresh'}</span>
+        <div className="flex items-center gap-2">
+          <span className={'text-[9px] text-[#E8E9E4]/30 italic'}>{loading?'loading...':err?'macro only':'30s refresh'}</span>
+          {/* V9.1.2: Expand to full news view */}
+          {news.length>0&&(
+            <button onClick={()=>setExpandOpen(true)} title="Expand news feed" className="text-[10px] px-1.5 py-0.5 rounded border transition-colors hover:bg-[#E8E9E4]/5" style={{color:'rgba(229,200,112,0.85)',borderColor:'rgba(229,200,112,0.30)'}}>⊕</button>
+          )}
+        </div>
       </div>
       {/* V134: Macro events countdown - always shown */}
       {macroEvents.length>0&&(
@@ -9660,11 +9768,16 @@ function NewsFeedCard(){
           <div className={'text-[10px] text-[#E8E9E4]/30 italic'}>No news available</div>
         ):news.map((n,i)=>{
           const hot=isHot(n.title);
+          // V9.1.2: infer price impact for the headline
+          const impact=inferNewsPriceImpact(n.title);
+          const impactArrow=impact==='UP'?'▲':impact==='DOWN'?'▼':null;
+          const impactColor=impact==='UP'?'text-emerald-400':impact==='DOWN'?'text-rose-400':null;
           const cls=hot?'p-1.5 rounded bg-amber-500/10 border border-amber-500/20':'p-1.5 rounded hover:bg-[#111312]/50 border border-transparent';
           return(
             <a key={i} href={n.url} target="_blank" rel="noopener noreferrer" className={'block '+cls}>
-              <div className={'text-[10px] leading-tight '+(hot?'text-amber-300 font-semibold':'text-[#E8E9E4]/70')}>
-                {hot&&'🔥 '}{n.title.slice(0,90)}{n.title.length>90?'...':''}
+              <div className={'text-[10px] leading-tight flex items-start gap-1.5 '+(hot?'text-amber-300 font-semibold':'text-[#E8E9E4]/70')}>
+                {impactArrow&&<span className={'shrink-0 font-bold '+impactColor} title={impact==='UP'?'Likely bullish for price':'Likely bearish for price'}>{impactArrow}</span>}
+                <span className="min-w-0">{hot&&'🔥 '}{n.title.slice(0,90)}{n.title.length>90?'...':''}</span>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className={'text-[9px] text-[#E8E9E4]/40 uppercase'}>{n.source}</span>
@@ -9674,7 +9787,90 @@ function NewsFeedCard(){
           );
         })}
       </div>
+      {/* V9.1.2: Expanded news modal */}
+      {expandOpen&&(
+        <NewsExpandModal news={news} macroEvents={macroEvents} onClose={()=>setExpandOpen(false)} formatAge={formatAge}/>
+      )}
     </div>
+  );
+}
+
+// V9.1.2: Expanded news modal — full list, larger rows, with impact arrows.
+function NewsExpandModal({news,macroEvents,onClose,formatAge}){
+  React.useEffect(()=>{
+    const onKey=(e)=>{if(e.key==='Escape')onClose();};
+    window.addEventListener('keydown',onKey);
+    return()=>window.removeEventListener('keydown',onKey);
+  },[onClose]);
+  return React.createElement('div',{
+    className:'fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-8 overflow-y-auto',
+    style:{background:'rgba(0,0,0,0.75)',backdropFilter:'blur(4px)'},
+    onClick:onClose,
+  },
+    React.createElement('div',{
+      className:'w-full max-w-2xl rounded-xl my-auto',
+      style:{background:'#181A19',border:'1px solid rgba(229,200,112,0.20)',boxShadow:'0 0 40px rgba(229,200,112,0.15)'},
+      onClick:(e)=>e.stopPropagation(),
+    },
+      React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid rgba(232,233,228,0.10)'}},
+        React.createElement('div',{className:'flex items-baseline gap-3'},
+          React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'News Feed'),
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(229,200,112,0.85)'}},`${news.length} stories`)
+        ),
+        React.createElement('button',{
+          onClick:onClose,
+          title:'Close (Esc)',
+          className:'w-7 h-7 rounded flex items-center justify-center text-[#E8E9E4]/50 hover:text-white hover:bg-[#E8E9E4]/5 transition-colors',
+        },'✕')
+      ),
+      React.createElement('div',{className:'px-5 py-4 max-h-[70vh] overflow-y-auto'},
+        macroEvents.length>0&&React.createElement('div',{className:'mb-4'},
+          React.createElement('div',{className:'text-[9px] uppercase tracking-wide text-amber-400/70 font-bold mb-2'},'Upcoming Macro'),
+          React.createElement('div',{className:'space-y-1.5'},
+            macroEvents.map((e,i)=>{
+              const isImminent=Math.abs(e.minutesUntil)<=15;
+              const isNow=e.minutesUntil<=0&&Math.abs(e.minutesUntil)<=2;
+              const cls=isNow?'bg-rose-500/15 border-rose-500/40 text-rose-300':isImminent?'bg-amber-500/10 border-amber-500/30 text-amber-300':'bg-[#111312] border-[#E8E9E4]/10 text-[#E8E9E4]/70';
+              const label=e.minutesUntil>0?`in ${e.minutesUntil}m`:`${Math.abs(e.minutesUntil)}m ago`;
+              return React.createElement('div',{key:i,className:'p-2 rounded border text-[11px] flex justify-between '+cls},
+                React.createElement('span',{className:'font-bold'},e.name),
+                React.createElement('span',null,`${label} · ${e.impact}`)
+              );
+            })
+          )
+        ),
+        React.createElement('div',{className:'space-y-2'},
+          news.length===0?React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/40 italic text-center py-4'},'No news loaded'):
+          news.map((n,i)=>{
+            const impact=inferNewsPriceImpact(n.title);
+            const impactArrow=impact==='UP'?'▲':impact==='DOWN'?'▼':'·';
+            const impactColor=impact==='UP'?'rgba(110,231,183,0.95)':impact==='DOWN'?'rgba(244,114,182,0.95)':'rgba(232,233,228,0.30)';
+            const impactLabel=impact==='UP'?'Likely bullish':impact==='DOWN'?'Likely bearish':'Mixed/unclear';
+            return React.createElement('a',{
+              key:i,
+              href:n.url,target:'_blank',rel:'noopener noreferrer',
+              className:'block p-3 rounded-md hover:bg-[#111312]/50 transition-colors',
+              style:{background:'rgba(232,233,228,0.02)',border:'1px solid rgba(232,233,228,0.08)'},
+            },
+              React.createElement('div',{className:'flex items-start gap-3'},
+                React.createElement('div',{className:'shrink-0 w-8 text-center',title:impactLabel},
+                  React.createElement('div',{className:'text-base font-bold',style:{color:impactColor}},impactArrow),
+                  React.createElement('div',{className:'text-[8px] uppercase tracking-wider',style:{color:impactColor,opacity:0.7}},impact||'mixed')
+                ),
+                React.createElement('div',{className:'flex-1 min-w-0'},
+                  React.createElement('div',{className:'text-[12px] text-[#E8E9E4]/85 leading-snug mb-1'},n.title),
+                  React.createElement('div',{className:'flex items-center gap-2 text-[10px]'},
+                    React.createElement('span',{className:'text-[#E8E9E4]/45 uppercase'},n.source),
+                    React.createElement('span',{className:'text-[#E8E9E4]/30'},`· ${formatAge(n.time)}`),
+                    Array.isArray(n.categories)&&n.categories.length>0&&React.createElement('span',{className:'text-[#E8E9E4]/35 truncate'},`· ${n.categories.slice(0,2).join(', ')}`)
+                  )
+                )
+              )
+            );
+          })
+        )
+      )
+    )
   );
 }
 
@@ -12613,7 +12809,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.1 online. Layout reshuffle plus news fetch fixes. SCHEDULE relocated from top of main render to inside RightPanel between Engine Log and Live Feeds - tighter information density, no more competing for vertical space with the chart. New circle-plus button on the schedule header opens TradeScheduleModal as a popup overlay - shows next 24 hours instead of 10, plus best/worst phases breakdown for current asset based on your historical WR, plus full phase character description per row. Esc or click outside dismisses. TAPE FLOW METER moved from top into its own slot inside ProjectionsCard between TaraCallCard and the Projections header - both desktop (col 2) and mobile (after mobile TaraCallCard, before PredictionContent). Width naturally narrower because column-bound rather than full-page. NEWS FETCH improvements - added two new fallback sources after the existing CryptoCompare-via-4-proxies and Reddit. Source 3 is rss2json.com proxying CoinDesk, Decrypt, and CoinTelegraph RSS feeds (10k free requests per day with proper CORS headers). Source 4 is CryptoPanic free public posts API via allorigins. Plus diagnostic console.warn when all sources fail so you can check Network tab in DevTools to identify what's actually being blocked at the network level. Error message updated from All news sources unavailable to All sources blocked - see browser console for details. RESPONSIVE AUDIT - added min-w-0 plus truncate plus flex-wrap to schedule strip rows, current-state callout, and outer container so nothing pushes the column wider than its assigned grid track. Schedule strip rows now wrap gracefully on narrow viewports. Current-state callout description text uses break-words. EXISTING preserved - V9.1 Discord scope (TARA_LOCK plus WHALE only, four user-action broadcasts suppressed), V9.0 trade schedule logic, V9.0 3-way time format, V9.0 sync error hysteresis, V9.0 true coin flip skip, V8.9.2 every-round directional calls. KNOWN OPEN GAP - single-browser BTC and ETH switching mid-window leaves prior asset unresolved."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.2 online. Five fixes per user feedback. TAPE FLOW relocated to compact thin-strip directly under Depth of Market - same size, same area, matching DOM aesthetics. Removed the bigger TapeStrip from inside ProjectionsCard and from the mobile slot. Both DOM and tape now sit as twin compact bars with green and red percentages and one-line labels. SCHEDULE redesigned. Bug fix - was reading trans?.minsUntil but getNextPhaseTransition returns minutesUntil so the fallback of 60 fired every iteration producing fake 60-minute intervals. Now reads correct field. Phases display real start-end time ranges (4:00-5:00 PM not 4:38 PM). Upcoming phases grouped by market session - Asia, Europe, US, AfterHours - with session header. Each row shows windows15 count (number of 15-minute trading windows in that phase). Same fix applied in TradeScheduleModal. NEWS retry plus expand. Added inferNewsPriceImpact - simple keyword sentiment that checks bullish words like surge approval ETF inflows adoption versus bearish words like crash dump outflows ban hack. Each headline gets up arrow or down arrow showing projected price impact. New circle-plus button on news header opens NewsExpandModal - full list with bigger rows, impact arrows in left column with UP DOWN MIXED tag, source plus age plus categories. Esc dismisses. PLAIN LANGUAGE pass on session notes. LIQ:HIGH became BUSY. VOL:STEADY became CALM. VOL:COMPRESSING became MOVES SHRINKING. VOL:EXPANDING became MOVES GROWING. LIQ:EXTREME became PEAK ACTIVITY. LIQ:MED became MODERATE. LIQ:LOW became QUIET. Session advice text rewritten - was 70%+ said edge is highest, sizing up on confluent setups; now says This is your strongest session, can size up on strong setups. Was 50%+ said marginal edge, half size highest-conviction; now says Just barely breakeven, go smaller only take strong setups. Same plain-rewrite for all 5 tiers. NEW Tara sees pill in MarketContextStrip header next to LIQ/VOL pills - shows pumping with up arrow when TRENDING UP, dumping with down arrow when TRENDING DOWN, sideways for RANGE-CHOP, squeeze with up arrow for SHORT SQUEEZE, wild for HIGH VOL CHOP. Plain-language tooltip explains in full sentence. Helper functions regimeToPlainLabel and regimeToShortPlain added at module scope - reusable elsewhere if needed. EXISTING preserved - V9.1 Discord scope (TARA_LOCK plus WHALE only), V9.1.1 schedule modal popup, V9.1.1 four-source news fetch with diagnostic console.warn, V9.1.1 responsive audit. KNOWN OPEN GAP - single-browser BTC and ETH switching mid-window leaves prior asset unresolved."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -18047,7 +18243,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.1.1
+              9.1.2
             </span>
           </div>
 
@@ -18359,6 +18555,30 @@ function TaraApp(){
               <div style={{width:`${sellPct}%`}} className={'h-full bg-rose-500/70 transition-all duration-300'}></div>
             </div>
           </div>
+
+          {/* V9.1.2: Tape flow bar — same compact size as DOM, sits right below it.
+              Uses 30s sliding window buy/sell pct. Shows BUY $X / SELL $X with thin bar. */}
+          {tapeWindows&&(()=>{
+            const _w30=tapeWindows.w30||{};
+            const _tBuy=_w30.buys||0,_tSell=_w30.sells||0;
+            const _tTotal=_tBuy+_tSell;
+            if(_tTotal<=0)return null;
+            const _tBuyPct=(_tBuy/_tTotal)*100;
+            const _tSellPct=100-_tBuyPct;
+            const _fmt=(n)=>n>=1e6?'$'+(n/1e6).toFixed(1)+'M':n>=1e3?'$'+(n/1e3).toFixed(0)+'K':'$'+Math.round(n);
+            return(
+              <div className="px-3 pb-2 hidden sm:block">
+                <div className={'flex justify-between text-xs text-[#E8E9E4]/30 uppercase tracking-wide mb-1'}>
+                  <span>Tape Flow · 30s</span>
+                  <span>{_fmt(_tBuy)} BUY / {_fmt(_tSell)} SELL</span>
+                </div>
+                <div className="w-full h-1 bg-[#111312] rounded-full overflow-hidden flex">
+                  <div style={{width:`${_tBuyPct}%`}} className={'h-full bg-emerald-500/70 transition-all duration-300'}></div>
+                  <div style={{width:`${_tSellPct}%`}} className={'h-full bg-rose-500/70 transition-all duration-300'}></div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* V9.1.1: TapeStrip relocated — now renders between TaraCallCard and
@@ -18371,6 +18591,7 @@ function TaraApp(){
           taraLearnings={taraLearnings}
           taraCallLog={taraCallLog}
           currentAsset={currentAsset}
+          analysis={analysis}
         />
 
         {/* V9.1.1: TradeScheduleStrip relocated — now renders inside RightPanel
@@ -18660,12 +18881,7 @@ function TaraApp(){
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
             <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
 
-            {/* V9.1.1: Tape flow meter on mobile — between Tara's Call and PredictionContent. */}
-            {tapeWindows&&(
-              <div className="lg:hidden mb-3">
-                <TapeStrip tapeWindows={tapeWindows} whaleLog={whaleLog}/>
-              </div>
-            )}
+            {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
 
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
 
@@ -19697,6 +19913,46 @@ function TaraApp(){
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V9.1.2 — Plain language and fixes */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Plain language &middot; tape relocation &middot; fixes</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.1.2</span> &mdash; Plain Language + Fixes</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Tape flow relocated (again)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Compact thin-strip directly under Depth of Market &mdash; same size, same area, matching DOM aesthetics. Removed the bigger TapeStrip from inside ProjectionsCard and the mobile slot. Both DOM and tape now sit as twin compact bars: <strong>BID/ASK depth</strong> on top, <strong>BUY/SELL flow</strong> below.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Schedule bug fix &amp; redesign</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Was reading <code className="text-[10px] bg-[#0E100F] px-1">trans?.minsUntil</code> but <code className="text-[10px] bg-[#0E100F] px-1">getNextPhaseTransition</code> returns <code className="text-[10px] bg-[#0E100F] px-1">minutesUntil</code>. Wrong field name → fallback of 60 fired every iteration → fake 60-minute intervals instead of real phase blocks. Fixed. Now phases show real start-end time ranges (e.g. 4:00&ndash;5:00 PM). Upcoming phases grouped by market session (Asia &middot; Europe &middot; US &middot; AfterHours) with session headers. Each row shows the count of 15m trading windows in that phase. Same fix applied to <code className="text-[10px] bg-[#0E100F] px-1">TradeScheduleModal</code>.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">News expand + impact arrows</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Each headline gets <strong style={{color:'rgba(110,231,183,0.95)'}}>&#9650;</strong> or <strong style={{color:'rgba(244,114,182,0.95)'}}>&#9660;</strong> showing projected price impact. Implementation:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li>New <code className="text-[10px] bg-[#0E100F] px-1">inferNewsPriceImpact</code> &mdash; keyword sentiment scan</li>
+                  <li>Bullish words: surge, rally, approval, ETF inflows, adoption, partnership, all-time high &hellip;</li>
+                  <li>Bearish words: crash, dump, outflows, ban, hack, lawsuit, plunge, exploit &hellip;</li>
+                  <li>New &oplus; button opens <code className="text-[10px] bg-[#0E100F] px-1">NewsExpandModal</code> &mdash; full list with bigger rows, impact arrow + UP/DOWN/MIXED tag in left column, sources, ages, categories. Esc dismisses.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Plain language pass</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;most wordings are complex and I don&rsquo;t really understand them&rdquo;</em>. Replacing trader jargon with plain words throughout the session-notes area:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">LIQ: HIGH</code> &rarr; <strong>BUSY</strong></li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">LIQ: EXTREME</code> &rarr; <strong>PEAK ACTIVITY</strong></li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">LIQ: MED</code> &rarr; <strong>MODERATE</strong></li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">LIQ: LOW</code> &rarr; <strong>QUIET</strong></li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">VOL: STEADY</code> &rarr; <strong>CALM</strong></li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">VOL: EXPANDING</code> &rarr; <strong>MOVES GROWING</strong></li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">VOL: COMPRESSING</code> &rarr; <strong>MOVES SHRINKING</strong></li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Session advice text rewritten plain &mdash; was <em>&ldquo;Solid edge. Standard size with normal selectivity&rdquo;</em>, now <em>&ldquo;You&rsquo;re making money &mdash; trade normal size, normal selectivity.&rdquo;</em> All 5 tiers (zone / profitable / breakeven / unprofitable / weakness) get plain rewrites.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">New: &ldquo;Tara sees&rdquo; pill</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Next to the activity/movement pills, a new pill shows what direction Tara reads the market in plain language: <strong style={{color:'rgb(110,231,183)'}}>pumping &#9650;</strong>, <strong style={{color:'rgba(244,114,182,0.95)'}}>dumping &#9660;</strong>, <strong>sideways</strong>, <strong style={{color:'rgb(110,231,183)'}}>squeeze &#9650;</strong>, or <strong>wild</strong>. Tooltip expands: <em>&ldquo;going down &mdash; dump trajectory&rdquo;</em> etc. Helper functions <code className="text-[10px] bg-[#0E100F] px-1">regimeToPlainLabel</code> + <code className="text-[10px] bg-[#0E100F] px-1">regimeToShortPlain</code> added at module scope &mdash; reusable elsewhere.</p>
+              </section>
 
               {/* V9.1.1 — Layout and news */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
