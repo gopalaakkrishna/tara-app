@@ -408,7 +408,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v8.8.4-unminified-and-x-ray-error-boundary';
+const BASELINE_VERSION='2026.05.06-v8.8.5-noop-sw-and-circuit-breaker';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -11458,7 +11458,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.8.4 online — gloves off, two changes. ONE — minification disabled. The deployed V8.8.2/V8.8.3 bundles were crashing with a 'Cannot access ee before initialization' TDZ that I could NOT reproduce locally. Static analysis on the source was clean — every let/const had its references properly behind its declaration, no forward refs anywhere. Bundle scanned clean too. Built and ran the same source in headless Chromium with zero errors. That points hard at a minifier-induced TDZ — esbuild collapses scopes and reuses short names like 'ee' across them, and there's an edge case where this introduces a TDZ that wasn't in the source. Vite config now sets minify: false. Bundle goes from ~1.5MB to ~2.5MB but gzip is unchanged at ~520KB and for a single-user dashboard there's no real cost. CRUCIAL SIDE EFFECT — variable names are now preserved end-to-end. If anything still throws TDZ, the error will name the actual source variable instead of 'ee', which makes the bug fix-in-place trivial. TWO — ErrorBoundary upgraded to x-ray. Previous version showed only error.toString() ('Cannot access ee before initialization') which was useless for finding the call site. New version captures error.stack AND React's componentStack, displays both in scrollable panels, persists them to localStorage._taraLastCrash so they survive a reload, and adds a 'Copy diagnostic' button that puts the entire trace on the clipboard ready to paste. If V8.8.4 still crashes — which I don't expect, since unminified eliminates the most likely cause — hit Copy and paste the whole thing back. With real source-line stack frames I can pinpoint the bug in seconds. WHAT TO DO — Push V8.8.4 to GitHub. Vercel auto-deploys. Ctrl+Shift+R once on the live site to clear cached V8.8.2/V8.8.3 assets. STILL INTACT — every behavior from V8.8.3 forward. No-reload SW kill, manual Refresh/Hard recovery buttons, 5s safety net, all V8.8.3 syntax/dup-key fixes, every prior feature. Verified: npm run build clean, npm run dev starts in <1s, headless Chromium load shows full Tara UI with zero errors at version 8.8.4."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.8.5 online — reload-loop killed AND the underlying TDZ killed. Two separate fixes that landed together. FIX ONE: V8.8.4 ErrorBoundary x-rayed the actual TDZ. The deployed bundle hit 'Cannot access changed before initialization' when the cloudWatch hydration callback for taraCallLog ran with non-empty entries — V8.7 added a prev.forEach normalization pass ABOVE the existing d.entries.forEach but didn't move the let changed=false declaration up with it. The first forEach assigned changed=true before the let ran. Pure JS-spec TDZ. Trivial fix once the unminified V8.8.4 named the actual variable: moved let changed=false to before both forEach calls, line 10420. FIX TWO: V8.8.4 deploy got into a reload spasm anyway. Diagnosed the cause: public/sw.js (the V8.8 kill-switch service worker) had client.navigate(client.url) in its activate handler. That force-reloads every controlled tab AFTER the SW unregisters itself. Combined with browser SW update-checks on every navigation, this fed back into itself. V8.8.5 ships three changes in one. ONE: public/sw.js is now a true no-op. install → skipWaiting, activate → clear caches → unregister self. No claim. No navigate. No fetch handler. Browser handles all requests natively. After this version of sw.js installs once, the user has no SW from then on. TWO: index.html now ships a reload-loop circuit breaker as the very first script. Tracks reload count in sessionStorage. After 3 reloads in 30 seconds, halts the page completely and shows a static error UI with a single Clear-all-browser-state-and-reload-once button. Even if some other code somewhere keeps trying to reload, this caps at 3. THREE: vercel.json now sets Cache-Control: no-cache for /sw.js and /index.html, so the no-op SW + new index.html propagate immediately and don't get held back by Vercel CDN. WHAT TO DO: push V8.8.5 to GitHub. Vercel auto-deploys with the new headers. Open the site once. The browser fetches the new sw.js, installs it, runs activate, unregisters. From that point forward no SW exists for tara11.vercel.app. The reload spasm cannot recur. Header should show 8.8.5. STILL INTACT: every behavior from V8.8.4 forward. Unminified bundle, x-ray ErrorBoundary with copy-diagnostic, V8.8.4 TDZ fix, all V8.8.3 syntax/dup-key fixes."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -16804,7 +16804,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              8.8.4
+              8.8.5
             </span>
           </div>
 
@@ -18439,6 +18439,26 @@ function TaraApp(){
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V8.8.5 — Reload-loop circuit breaker + no-op SW */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Reload Spasm Killed</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8.5</span> &mdash; No-Op SW + Circuit Breaker</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;page keeps loop reloading itself&rdquo;.</em> V8.8.4 fixed the <code className="text-[10px] bg-[#0E100F] px-1">&lsquo;changed&rsquo;</code> TDZ but the deployed page got into a reload spasm anyway. Audit found three reload-call sites in the codebase; one was the trigger.</p>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">The trigger</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3"><code className="text-[10px] bg-[#0E100F] px-1">public/sw.js</code> step 4 of its <code className="text-[10px] bg-[#0E100F] px-1">activate</code> handler called <code className="text-[10px] bg-[#0E100F] px-1">client.navigate(client.url)</code>. That force-reloads every tab the SW controls. Browsers check for SW updates on every navigation within scope, so each reload could re-fire this activate, which fired another reload, etc.</p>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Three changes</div>
+                <ul className="list-disc pl-4 space-y-2 text-[11px]">
+                  <li><strong style={{color:T2_GOLD}}>public/sw.js is now a true no-op.</strong> install &rarr; skipWaiting. activate &rarr; clear caches, unregister self. No claim, no navigate, no fetch handler. Browser handles all requests natively. Once installed, runs once, removes itself, gone forever.</li>
+                  <li><strong style={{color:T2_GOLD}}>index.html ships a reload-loop circuit breaker.</strong> First script in the head. Tracks reload count in sessionStorage. After 3 reloads in 30 seconds, halts the page completely with a static error UI and one button: &ldquo;Clear all browser state and reload once&rdquo;. Hard ceiling. Even if any future code regression tries to reload-spam, this catches it.</li>
+                  <li><strong style={{color:T2_GOLD}}>vercel.json adds no-cache headers</strong> for <code className="text-[10px] bg-[#0E100F] px-1">/sw.js</code> and <code className="text-[10px] bg-[#0E100F] px-1">/index.html</code>. Without this, the Vercel CDN could serve the old kill-switch sw.js to users for hours, prolonging the spasm.</li>
+                </ul>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">If it still loops on first visit after deploy</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Wait for the 4th reload &mdash; the circuit breaker halts the page and shows the recovery button. Click it once. That clears the registered kill-switch SW, all caches, all localStorage, and reloads. After that single recovery, the no-op sw.js installs once and removes itself. The site is SW-free from that point.</p>
+              </section>
 
               {/* V8.8.4 — Unminified build + x-ray ErrorBoundary */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
