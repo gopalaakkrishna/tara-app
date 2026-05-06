@@ -10408,6 +10408,16 @@ function TaraApp(){
           if((incoming.id||0)<(existing.id||0))return true;
           return false;
         };
+        // V8.8.4 TDZ FIX: `changed` MUST be declared before any forEach that touches it.
+        //   V8.7 introduced the prev.forEach normalization pass above d.entries.forEach
+        //   but didn't move the `let changed=false` up with it — so when prev held real
+        //   call-log entries from localStorage AND normalization triggered, the callback
+        //   assigned `changed=true` before the `let` ran. TDZ. Minified, it surfaced as
+        //   "Cannot access 'ee' before initialization"; unminified V8.8.4 surfaced it as
+        //   "Cannot access 'changed' before initialization" with a real stack frame in
+        //   this useState lazy initializer. Empty-localStorage envs (jsdom, fresh
+        //   Chromium) never iterated, so the bug only fired for users with logged calls.
+        let changed=false;
         prev.forEach(e=>{
           let f=_backfillCallLogId(e);
           if(!f||!f.windowId)return;
@@ -10420,7 +10430,6 @@ function TaraApp(){
           if(_isCorrupt(f))return; // drop corrupt
           byKey.set(_key(f),f);
         });
-        let changed=false;
         d.entries.forEach(raw=>{
           let e=_backfillCallLogId(raw);
           if(!e||!e.id||!e.windowId)return;
