@@ -1,0 +1,45 @@
+<!--
+  V8.8 — INLINE SW KILL SCRIPT
+  
+  Add this <script> tag inside the <head> of your public/index.html, BEFORE any
+  other script tags. It runs synchronously at page load, before any bundled JS,
+  and unregisters any stale service worker that might be serving cached old code.
+  
+  This is the ROOT FIX for the "Cannot access 'ee' before initialization" crash.
+  After deploying this once, future deploys won't have the stale-cache problem.
+  
+  Once this is in place and you've reloaded once, you can leave it there
+  permanently — it's harmless when there's nothing to unregister.
+-->
+
+<script>
+  (function() {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+    
+    // Aggressively unregister any service worker on EVERY page load, then clear
+    // all caches. This guarantees no stale bundle ever gets served from cache.
+    navigator.serviceWorker.getRegistrations().then(function(regs) {
+      var killed = false;
+      regs.forEach(function(r) {
+        try { r.unregister(); killed = true; } catch (e) {}
+      });
+      
+      if ('caches' in window) {
+        caches.keys().then(function(keys) {
+          keys.forEach(function(k) {
+            try { caches.delete(k); } catch (e) {}
+          });
+          
+          // If we found and killed a registration, reload ONCE to fetch fresh assets.
+          // Use sessionStorage to prevent reload loops.
+          if (killed && !sessionStorage.getItem('_taraSwKilled')) {
+            sessionStorage.setItem('_taraSwKilled', '1');
+            window.location.reload();
+          } else if (!killed) {
+            sessionStorage.removeItem('_taraSwKilled');
+          }
+        }).catch(function() {});
+      }
+    }).catch(function() {});
+  })();
+</script>
