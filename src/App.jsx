@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.1.2-plain-language-and-fixes';
+const BASELINE_VERSION='2026.05.06-v9.1.4-twin-strips-merge-resync-news';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -8508,7 +8508,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -8528,7 +8528,15 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
           V6.2.3: hidden lg:block (was md:block). */}
       <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} className="hidden lg:block"/>
 
-      {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
+      {/* V9.1.4: TapeStrip + DepthStrip restored as TWIN PANELS — same visual depth.
+          User feedback: "want the tape flow and depth of market to be in depth like
+          this, accurate and perfect". Stacked vertically with mb-3 spacing. */}
+      {tapeWindows&&(
+        <div className="hidden lg:block space-y-2 mb-3">
+          <TapeStrip tapeWindows={tapeWindows} whaleLog={whaleLog}/>
+          <DepthStrip orderBook={orderBook} targetMargin={targetMargin}/>
+        </div>
+      )}
 
       <div className="flex items-center justify-between mb-3 shrink-0">
         <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
@@ -9520,6 +9528,127 @@ const inferNewsPriceImpact=(title)=>{
   return null;
 };
 
+// V9.1.4: DepthStrip — parallel to TapeStrip but for ORDER BOOK depth at the strike.
+//   Multi-band breakdown shows liquidity at TIGHT (0.05%), CLOSE (0.1%), STANDARD (0.2%),
+//   and WIDE (0.5%) distances from strike. Same visual structure as TapeStrip so the
+//   user can read both at a glance. Uses orderBook.bands which is populated in the
+//   level-2 fetch on a 5s cadence.
+function DepthStrip({orderBook,targetMargin}){
+  if(!orderBook||!orderBook.bands)return null;
+  const _bands=orderBook.bands;
+  // Use STANDARD band as headline (matches the pre-V9.1.4 _bookRange behavior)
+  const hlBids=Number(_bands.std?.b)||0;
+  const hlAsks=Number(_bands.std?.a)||0;
+  const hlTotal=hlBids+hlAsks;
+  const hlBidPct=hlTotal>0?(hlBids/hlTotal)*100:50;
+  const dominant=hlBidPct>=50?'BID':'ASK';
+  const dominantPct=Math.max(hlBidPct,100-hlBidPct);
+  const _MIN_USD=50000; // floor below which the band is "thin"
+  const hlAboveFloor=hlTotal>=_MIN_USD;
+  const fmtUSD=(n)=>{
+    const v=Math.round(n);
+    if(v>=1e6)return '$'+(v/1e6).toFixed(1)+'M';
+    if(v>=1e3)return '$'+(v/1e3).toFixed(0)+'K';
+    return '$'+v;
+  };
+  const bidColor='#6ee7b7';
+  const askColor='#f87171';
+  // Quality: do TIGHT and STD agree directionally with meaningful strength?
+  const _quality=(()=>{
+    const _stdTot=hlBids+hlAsks;
+    const _tightTot=(Number(_bands.tight?.b)||0)+(Number(_bands.tight?.a)||0);
+    const _wideTot=(Number(_bands.wide?.b)||0)+(Number(_bands.wide?.a)||0);
+    if(_stdTot<_MIN_USD||_wideTot<_MIN_USD){
+      return{level:'thin',dirText:'BOOK THIN'};
+    }
+    const _stdPct=hlBidPct;
+    const _widePct=_wideTot>0?((Number(_bands.wide?.b)||0)/_wideTot)*100:50;
+    const _stdSide=_stdPct>=50?'BID':'ASK';
+    const _wideSide=_widePct>=50?'BID':'ASK';
+    const _stdStrength=Math.max(_stdPct,100-_stdPct);
+    const _wideStrength=Math.max(_widePct,100-_widePct);
+    const bandsAgree=_stdSide===_wideSide&&_stdStrength>=58&&_wideStrength>=58;
+    const volMeaningful=_wideTot>=500000;
+    const tightConfirms=_tightTot>=_MIN_USD?(()=>{
+      const _tPct=((Number(_bands.tight?.b)||0)/_tightTot)*100;
+      const _tSide=_tPct>=50?'BID':'ASK';
+      return _tSide===_stdSide;
+    })():null;
+    let _score=0;
+    if(bandsAgree)_score+=1;
+    if(volMeaningful)_score+=1;
+    if(tightConfirms===true)_score+=1;
+    else if(tightConfirms===false)_score-=0.5;
+    const level=_score>=2.5?'high':_score>=1.5?'medium':'low';
+    return{level,bandsAgree,volMeaningful,tightConfirms,dirText:_stdSide};
+  })();
+  const renderBand=(label,band,pct,floor=_MIN_USD)=>{
+    const _b=Number(band?.b)||0,_a=Number(band?.a)||0;
+    const _tot=_b+_a;
+    const _pct=_tot>0?(_b/_tot)*100:50;
+    const aboveFloor=_tot>=floor;
+    const isBid=_pct>=50;
+    const color=!aboveFloor?'rgba(232,233,228,0.30)':isBid?bidColor:askColor;
+    const display=Math.max(_pct,100-_pct);
+    return(
+      <div className="flex flex-col items-center" key={label}>
+        <div className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/35 font-medium mb-0.5">{label}</div>
+        <div className="text-base sm:text-lg font-bold tabular-nums" style={{color,letterSpacing:'-0.01em'}}>{!aboveFloor?'—':display.toFixed(1)+'%'}</div>
+      </div>
+    );
+  };
+  return(
+    <div className="bg-[#181A19] border border-[#E8E9E4]/8 rounded-xl p-3 sm:p-4 relative">
+      <T2Stamp code="DOM · BAND"/>
+      <div className="flex items-baseline justify-between mb-2">
+        <div className="flex items-baseline gap-2.5">
+          <span className="text-[10px] uppercase tracking-[0.18em] text-[#E8E9E4]/50 font-bold">Depth</span>
+          {_quality.level!=='thin'&&(()=>{
+            const _color=_quality.level==='high'?'#6ee7b7':_quality.level==='medium'?'#fbbf24':'#f87171';
+            const _label=_quality.level==='high'?'STRONG':_quality.level==='medium'?'MIXED':'WEAK';
+            const _checks=[_quality.bandsAgree,_quality.volMeaningful,_quality.tightConfirms];
+            const _tooltip=[
+              `Bands agree: ${_quality.bandsAgree?'yes':'no'} (STD+WIDE same side, ≥58%)`,
+              `Volume meaningful: ${_quality.volMeaningful?'yes':'no'} (WIDE ≥ $500K)`,
+              `Tight confirms: ${_quality.tightConfirms===true?'yes':_quality.tightConfirms===false?'no':'n/a'}`,
+            ].join(' · ');
+            return(
+              <span className="inline-flex items-center gap-1.5" title={_tooltip}>
+                <span className="inline-flex items-center gap-0.5">
+                  {_checks.map((c,i)=>React.createElement('span',{
+                    key:i,
+                    className:'inline-block w-1 h-1 rounded-full',
+                    style:{background:c?_color:'rgba(232,233,228,0.18)'},
+                  }))}
+                </span>
+                <span className="text-[9px] uppercase tracking-[0.16em] font-bold" style={{color:_color}}>{_label}</span>
+              </span>
+            );
+          })()}
+          {_quality.level==='thin'&&(
+            <span className="text-[9px] uppercase tracking-[0.16em] font-bold text-[#E8E9E4]/30">{_quality.dirText}</span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="text-[11px] sm:text-xs font-bold tabular-nums" style={{color:bidColor}}>BID {fmtUSD(hlBids)}</span>
+        <span className="text-[11px] sm:text-xs tabular-nums text-[#E8E9E4]/55">{hlAboveFloor?dominantPct.toFixed(1)+'%':'—'}</span>
+        <span className="text-[11px] sm:text-xs font-bold tabular-nums" style={{color:askColor}}>ASK {fmtUSD(hlAsks)}</span>
+      </div>
+      <div className="w-full h-1.5 bg-[#111312] rounded-full overflow-hidden flex relative mb-2">
+        <div style={{width:`${hlBidPct}%`,background:bidColor,opacity:hlAboveFloor?0.85:0.30}} className="h-full transition-all duration-300"></div>
+        <div style={{width:`${100-hlBidPct}%`,background:askColor,opacity:hlAboveFloor?0.85:0.30}} className="h-full transition-all duration-300"></div>
+      </div>
+      <div className="grid grid-cols-4 gap-2 mt-2">
+        {renderBand('TIGHT',_bands.tight)}
+        {renderBand('CLOSE',_bands.close)}
+        {renderBand('STD',_bands.std)}
+        {renderBand('WIDE',_bands.wide)}
+      </div>
+    </div>
+  );
+}
+
 // ── V111: NewsFeedCard - external events affecting BTC price ──
 function NewsFeedCard(){
   const[news,setNews]=React.useState([]);
@@ -9769,19 +9898,31 @@ function NewsFeedCard(){
         ):news.map((n,i)=>{
           const hot=isHot(n.title);
           // V9.1.2: infer price impact for the headline
+          // V9.1.4: ALWAYS show an arrow — UP/DOWN/MIXED. User feedback: "show direction
+          //   arrows whenever even on the mini when not opened too".
           const impact=inferNewsPriceImpact(n.title);
-          const impactArrow=impact==='UP'?'▲':impact==='DOWN'?'▼':null;
-          const impactColor=impact==='UP'?'text-emerald-400':impact==='DOWN'?'text-rose-400':null;
+          const impactArrow=impact==='UP'?'▲':impact==='DOWN'?'▼':'·';
+          const impactColor=impact==='UP'?'text-emerald-400':impact==='DOWN'?'text-rose-400':'text-[#E8E9E4]/30';
+          const impactTitle=impact==='UP'?'Likely bullish for price':impact==='DOWN'?'Likely bearish for price':'Mixed/unclear for price';
+          // V9.1.4: Absolute timestamp formatter — small clock time alongside relative age
+          const _absTime=(()=>{
+            try{
+              const _d=new Date(n.time);
+              if(isNaN(_d.getTime()))return null;
+              return _d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+            }catch(_){return null;}
+          })();
           const cls=hot?'p-1.5 rounded bg-amber-500/10 border border-amber-500/20':'p-1.5 rounded hover:bg-[#111312]/50 border border-transparent';
           return(
             <a key={i} href={n.url} target="_blank" rel="noopener noreferrer" className={'block '+cls}>
               <div className={'text-[10px] leading-tight flex items-start gap-1.5 '+(hot?'text-amber-300 font-semibold':'text-[#E8E9E4]/70')}>
-                {impactArrow&&<span className={'shrink-0 font-bold '+impactColor} title={impact==='UP'?'Likely bullish for price':'Likely bearish for price'}>{impactArrow}</span>}
+                <span className={'shrink-0 font-bold '+impactColor} title={impactTitle}>{impactArrow}</span>
                 <span className="min-w-0">{hot&&'🔥 '}{n.title.slice(0,90)}{n.title.length>90?'...':''}</span>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className={'text-[9px] text-[#E8E9E4]/40 uppercase'}>{n.source}</span>
                 <span className={'text-[9px] text-[#E8E9E4]/30'}>· {formatAge(n.time)}</span>
+                {_absTime&&<span className={'text-[9px] text-[#E8E9E4]/30 tabular-nums'}>· {_absTime}</span>}
               </div>
             </a>
           );
@@ -9846,6 +9987,14 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge}){
             const impactArrow=impact==='UP'?'▲':impact==='DOWN'?'▼':'·';
             const impactColor=impact==='UP'?'rgba(110,231,183,0.95)':impact==='DOWN'?'rgba(244,114,182,0.95)':'rgba(232,233,228,0.30)';
             const impactLabel=impact==='UP'?'Likely bullish':impact==='DOWN'?'Likely bearish':'Mixed/unclear';
+            // V9.1.4: absolute timestamp for expanded view
+            const _absTime=(()=>{
+              try{
+                const _d=new Date(n.time);
+                if(isNaN(_d.getTime()))return null;
+                return _d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+              }catch(_){return null;}
+            })();
             return React.createElement('a',{
               key:i,
               href:n.url,target:'_blank',rel:'noopener noreferrer',
@@ -9859,9 +10008,10 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge}){
                 ),
                 React.createElement('div',{className:'flex-1 min-w-0'},
                   React.createElement('div',{className:'text-[12px] text-[#E8E9E4]/85 leading-snug mb-1'},n.title),
-                  React.createElement('div',{className:'flex items-center gap-2 text-[10px]'},
+                  React.createElement('div',{className:'flex items-center gap-2 text-[10px] flex-wrap'},
                     React.createElement('span',{className:'text-[#E8E9E4]/45 uppercase'},n.source),
                     React.createElement('span',{className:'text-[#E8E9E4]/30'},`· ${formatAge(n.time)}`),
+                    _absTime&&React.createElement('span',{className:'text-[#E8E9E4]/30 tabular-nums'},`· ${_absTime}`),
                     Array.isArray(n.categories)&&n.categories.length>0&&React.createElement('span',{className:'text-[#E8E9E4]/35 truncate'},`· ${n.categories.slice(0,2).join(', ')}`)
                   )
                 )
@@ -11298,7 +11448,7 @@ function TaraApp(){
   const priceMemoryRef=useRef([]);
   const lastPriceSourceRef=useRef({source:'none',time:0});
   const[history,setHistory]=useState([]);
-  const[orderBook,setOrderBook]=useState({localBuy:0,localSell:0,imbalance:1});
+  const[orderBook,setOrderBook]=useState({localBuy:0,localSell:0,imbalance:1,bands:null});
   const[liquidations,setLiquidations]=useState([]);
   const[newsEvents,setNewsEvents]=useState([]);
   const[targetMargin,setTargetMargin]=useState(0);
@@ -12521,6 +12671,41 @@ function TaraApp(){
     if(_diffs.length>0)setLastLearningUpdate({result:finalResult,diffs:_diffs,at:Date.now()});
   };
   const[tradeLog,setTradeLog]=useState(()=>loadTradeLog());
+
+  // V9.1.3: STATS RECONCILIATION — validate taraCallLog integrity on first hydration.
+  //   Tara's scorecard (taraScorecards) is already useMemo-derived from taraCallLog so
+  //   it can't drift mathematically — it's always whatever the log shows. The risk is
+  //   the LOG itself being inconsistent: duplicates, malformed entries, cross-asset
+  //   bleed, etc. This effect dedups on (asset, windowId, windowType) keeping the
+  //   FIRST entry (preserving V8.8.6 first-write-wins semantics) and surfaces a
+  //   diagnostic if anything was cleaned up.
+  const _logValidatedRef=useRef(false);
+  useEffect(()=>{
+    if(_logValidatedRef.current)return;
+    if(!Array.isArray(taraCallLog)||taraCallLog.length===0)return;
+    _logValidatedRef.current=true;
+    // Dedup: keep first occurrence by (asset, windowId, windowType)
+    const _seen=new Set();
+    const _deduped=[];
+    let _dups=0,_invalid=0;
+    for(const e of taraCallLog){
+      if(!e||typeof e!=='object'){_invalid++;continue;}
+      if(!e.windowId||!e.windowType){_invalid++;_deduped.push(e);continue;} // keep but flag
+      const _asset=e.asset||'BTC';
+      const _key=`${_asset}|${e.windowId}|${e.windowType}`;
+      if(_seen.has(_key)){_dups++;continue;}
+      _seen.add(_key);
+      _deduped.push(e);
+    }
+    if(_dups>0||_invalid>0){
+      console.info('[V9.1.3 log validation] cleaned taraCallLog',
+        {before:taraCallLog.length,after:_deduped.length,duplicatesRemoved:_dups,invalidEntries:_invalid});
+      if(_dups>0){
+        // Only update state if we actually removed dups — invalid-but-kept entries don't count
+        setTaraCallLog(_deduped);
+      }
+    }
+  },[taraCallLog]); // eslint-disable-line react-hooks/exhaustive-deps
   // Streak analysis — V7.1: per-asset. ETH and BTC have separate streak tracking.
   const streakData=useMemo(()=>{
     const _src=(tradeLog||[]).filter(t=>t&&(t.asset||'BTC')===currentAsset);
@@ -12809,7 +12994,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.2 online. Five fixes per user feedback. TAPE FLOW relocated to compact thin-strip directly under Depth of Market - same size, same area, matching DOM aesthetics. Removed the bigger TapeStrip from inside ProjectionsCard and from the mobile slot. Both DOM and tape now sit as twin compact bars with green and red percentages and one-line labels. SCHEDULE redesigned. Bug fix - was reading trans?.minsUntil but getNextPhaseTransition returns minutesUntil so the fallback of 60 fired every iteration producing fake 60-minute intervals. Now reads correct field. Phases display real start-end time ranges (4:00-5:00 PM not 4:38 PM). Upcoming phases grouped by market session - Asia, Europe, US, AfterHours - with session header. Each row shows windows15 count (number of 15-minute trading windows in that phase). Same fix applied in TradeScheduleModal. NEWS retry plus expand. Added inferNewsPriceImpact - simple keyword sentiment that checks bullish words like surge approval ETF inflows adoption versus bearish words like crash dump outflows ban hack. Each headline gets up arrow or down arrow showing projected price impact. New circle-plus button on news header opens NewsExpandModal - full list with bigger rows, impact arrows in left column with UP DOWN MIXED tag, source plus age plus categories. Esc dismisses. PLAIN LANGUAGE pass on session notes. LIQ:HIGH became BUSY. VOL:STEADY became CALM. VOL:COMPRESSING became MOVES SHRINKING. VOL:EXPANDING became MOVES GROWING. LIQ:EXTREME became PEAK ACTIVITY. LIQ:MED became MODERATE. LIQ:LOW became QUIET. Session advice text rewritten - was 70%+ said edge is highest, sizing up on confluent setups; now says This is your strongest session, can size up on strong setups. Was 50%+ said marginal edge, half size highest-conviction; now says Just barely breakeven, go smaller only take strong setups. Same plain-rewrite for all 5 tiers. NEW Tara sees pill in MarketContextStrip header next to LIQ/VOL pills - shows pumping with up arrow when TRENDING UP, dumping with down arrow when TRENDING DOWN, sideways for RANGE-CHOP, squeeze with up arrow for SHORT SQUEEZE, wild for HIGH VOL CHOP. Plain-language tooltip explains in full sentence. Helper functions regimeToPlainLabel and regimeToShortPlain added at module scope - reusable elsewhere if needed. EXISTING preserved - V9.1 Discord scope (TARA_LOCK plus WHALE only), V9.1.1 schedule modal popup, V9.1.1 four-source news fetch with diagnostic console.warn, V9.1.1 responsive audit. KNOWN OPEN GAP - single-browser BTC and ETH switching mid-window leaves prior asset unresolved."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.4 online. Three fixes per user feedback. TWIN STRIPS - tape and depth restored to detailed view. User said the compact under-DOM tape from V9.1.2 was too thin and wanted both tape flow AND depth of market in depth like the original screenshot. Reverted - removed compact bar. TapeStrip back to its prominent inline render between TaraCallCard and Projections header inside ProjectionsCard. NEW DepthStrip component built parallel to TapeStrip - same visual structure with quality dots STRONG MIXED WEAK, BID dollars, dominant percent middle, ASK dollars, gradient bar, plus 4-column breakdown showing TIGHT 0.05 percent / CLOSE 0.1 percent / STD 0.2 percent / WIDE 0.5 percent depth bands. orderBook fetch enhanced to compute all four bands from level-2 book data. Both strips stack vertically as twin panels. The small Depth of Market mini-bar at the top of the analysis card stays as a quick-glance indicator. CROSS-DEVICE SYNC FIX - root cause of going-back-to-baseline. The bug was in forceResyncFromCloud at line 17811. Force-resync did setTaraCallLog with cloud entries directly REPLACING local. Same for setScorecards REPLACING with cloud values. Same for setPastWindows. So if cloud had stale or fewer entries than local because a write had not propagated yet, force-resync nuked the local entries. Then RMW write back to cloud merged cloud-with-cloud equals same fewer entries - data permanently lost from cloud too. Fixed - force-resync now MERGES not replaces. taraCallLog uses _mergeCallLogEntries shared with regular cloudWatch handler. scorecards use max-per-cell taking the higher of cloud and local for wins/losses. pastWindows use windowId+windowType+asset dedup with first-write-wins. lifetimePnL uses newest-by-updatedAt. Result - sync from any device unions everything across devices, the baseline never overwrites. NEWS - always show direction arrow on the mini view too. Was only showing UP/DOWN when impact detected, mixed/neutral cases got no arrow at all. Now mixed/neutral shows neutral dot character. Plus absolute timestamp added next to relative age - 5m ago becomes 5m ago plus 2:15 PM. Same in expanded news modal. EXISTING PRESERVED - V9.1.3 stats reconciliation via _logValidatedRef effect, V9.1.3 sticky cloud lock with first-write-wins comparator, V9.1.2 plain language pass on session notes (BUSY/CALM/MOVES GROWING/MOVES SHRINKING), V9.1.2 Tara sees pill, V9.1.2 schedule grouped by market session with real start-end times, V9.1 Discord scope keeps TARA_LOCK plus WHALE only. KNOWN LIMITATIONS - depth bands snapshot every 5 seconds matching the existing fetch cadence, not a rolling time window like tape. The always-active server-side Tara would obviate the client-side merge mechanism by having one canonical engine instance regardless of devices."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -13399,7 +13584,18 @@ function TaraApp(){
   },[currentAsset,windowType,timeState.minsRemaining,timeState.secsRemaining,regimeMemory]);
 
   // Heavy data
-  useEffect(()=>{const _cbSym=ASSET_CONFIG[currentAsset]?.cb||'BTC-USD';const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const f=async()=>{try{const gran=windowType==='15m'?900:300;const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/candles?granularity=${gran}`);if(r.ok){const d=await r.json();if(Array.isArray(d))setHistory(d.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])})));}const r2=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/book?level=2`);if(r2.ok){const d2=await r2.json();if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});setOrderBook({localBuy:lb,localSell:ls,imbalance:ls===0?1:lb/ls});}}setIsLoading(false);}catch(e){setIsLoading(false);}};f();const iv=setInterval(f,5000);return()=>clearInterval(iv);},[targetMargin,windowType,currentAsset]);
+  useEffect(()=>{const _cbSym=ASSET_CONFIG[currentAsset]?.cb||'BTC-USD';const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const f=async()=>{try{const gran=windowType==='15m'?900:300;const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/candles?granularity=${gran}`);if(r.ok){const d=await r.json();if(Array.isArray(d))setHistory(d.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])})));}const r2=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/book?level=2`);if(r2.ok){const d2=await r2.json();if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});
+    // V9.1.4: multi-band depth — TIGHT (0.05%), CLOSE (0.1%), STANDARD (0.2%), WIDE (0.5%).
+    //   Each band captures bid and ask sizes within that distance from strike. Fed to
+    //   DepthStrip for the 4-column breakdown that mirrors TapeStrip's time windows.
+    const _strike=Number(targetMargin)||0;
+    const _bands={tight:{b:0,a:0},close:{b:0,a:0},std:{b:0,a:0},wide:{b:0,a:0}};
+    if(_strike>0){
+      const _r05=_strike*0.0005,_r10=_strike*0.001,_r20=_strike*0.002,_r50=_strike*0.005;
+      d2.bids.forEach(([p,s])=>{const _p=parseFloat(p),_sz=parseFloat(s);if(!Number.isFinite(_p)||!Number.isFinite(_sz)||_p>_strike)return;const _diff=_strike-_p;if(_diff<=_r05)_bands.tight.b+=_sz*_p;if(_diff<=_r10)_bands.close.b+=_sz*_p;if(_diff<=_r20)_bands.std.b+=_sz*_p;if(_diff<=_r50)_bands.wide.b+=_sz*_p;});
+      d2.asks.forEach(([p,s])=>{const _p=parseFloat(p),_sz=parseFloat(s);if(!Number.isFinite(_p)||!Number.isFinite(_sz)||_p<_strike)return;const _diff=_p-_strike;if(_diff<=_r05)_bands.tight.a+=_sz*_p;if(_diff<=_r10)_bands.close.a+=_sz*_p;if(_diff<=_r20)_bands.std.a+=_sz*_p;if(_diff<=_r50)_bands.wide.a+=_sz*_p;});
+    }
+    setOrderBook({localBuy:lb,localSell:ls,imbalance:ls===0?1:lb/ls,bands:_bands});}}setIsLoading(false);}catch(e){setIsLoading(false);}};f();const iv=setInterval(f,5000);return()=>clearInterval(iv);},[targetMargin,windowType,currentAsset]);
 
   // ── AUTO-STRIKE: Kalshi (15m) / Polymarket (5m) / Coinbase fallback ──
   const[strikeSource,setStrikeSource]=useState('auto');
@@ -14865,30 +15061,35 @@ function TaraApp(){
       if(d.windowType&&d.windowType!==windowType)return;
       if(d.asset&&d.asset!==_expectedAsset)return;
       let adopted=[];
-      // Engine lock — adopt if we don't already have one
-      if(d.engineLock&&!lockedCallRef.current){
+      // V9.1.3: shared first-write-wins comparator. Cloud is authoritative when:
+      //   - local has nothing, OR
+      //   - local lacks _committedAt (created this session before _persistLock ran), OR
+      //   - cloud's commit is meaningfully earlier than local's (>1s tolerance).
+      const _shouldAdoptCloud=(cloudObj,localObj)=>{
+        if(!cloudObj)return false;
+        if(!localObj)return true;
+        const _cT=Number(cloudObj._committedAt)||0;
+        const _lT=Number(localObj._committedAt)||0;
+        if(_cT>0&&_lT===0)return true; // local uncommitted → cloud authoritative
+        if(_cT>0&&_lT>0&&_cT+1000<_lT)return true; // cloud earlier
+        return false;
+      };
+      // Engine lock — V9.1.3 first-write-wins (was: only adopt if no local lock)
+      if(d.engineLock&&_shouldAdoptCloud(d.engineLock,lockedCallRef.current)){
         lockedCallRef.current={...d.engineLock};
         taraAdviceRef.current=d.engineLock.dir==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';
         engineLockedDirRef.current=d.engineLock.dir;
         adopted.push(`engine ${d.engineLock.dir}`);
       }
-      // V7.10.5 first-write-wins for snapshot adoption.
-      //   - If local has no snapshot → adopt cloud
-      //   - If local has snapshot but cloud was committed earlier → OVERRIDE local with cloud
-      //   - If local committed first → keep local (and _persistLock will write back to cloud)
-      if(d.taraSnapshot){
-        const _localSnap=taraCallSnapshotRef.current;
-        const _cloudT=Number(d.taraSnapshot._committedAt)||0;
-        const _localT=Number(_localSnap?._committedAt)||0;
-        if(!_localSnap){
-          taraCallSnapshotRef.current={...d.taraSnapshot};
-          adopted.push(`tara ${d.taraSnapshot.call}${d.taraSnapshot.locked?' LOCKED':''}`);
-        } else if(_cloudT>0&&_localT>0&&_cloudT+1000<_localT){
-          // Cloud is meaningfully earlier — override local
-          taraCallSnapshotRef.current={...d.taraSnapshot};
-          adopted.push(`tara ${d.taraSnapshot.call} (override · cloud was earlier by ${Math.round((_localT-_cloudT)/1000)}s)`);
-        }
-        // else: keep local (we were earlier or tie)
+      // V9.1.3: Tara snapshot — same first-write-wins rule applied to snapshot.
+      //   Previously when local lacked _committedAt (created mid-session before persist
+      //   stamped it), the comparison failed and local kept its fresh-but-wrong commit
+      //   even though cloud had the original. Now cloud overrides whenever cloud has a
+      //   timestamp and local doesn't.
+      if(d.taraSnapshot&&_shouldAdoptCloud(d.taraSnapshot,taraCallSnapshotRef.current)){
+        const _wasOverride=!!taraCallSnapshotRef.current;
+        taraCallSnapshotRef.current={...d.taraSnapshot};
+        adopted.push(_wasOverride?`tara ${d.taraSnapshot.call} (override · cloud authoritative)`:`tara ${d.taraSnapshot.call}${d.taraSnapshot.locked?' LOCKED':''}`);
       }
       // Mid-formation sample progress
       if(d.taraSamples&&taraCallSampleRef.current.dir===null&&d.taraSamples.dir){
@@ -15273,7 +15474,7 @@ function TaraApp(){
               const _wait=Math.ceil((_coolMs-(Date.now()-lockReleasedAtRef.current))/1000);
               reasoning.push(`[LOCK] UP candidate held — cooldown ${formatDuration(_wait)} remaining${confluenceStateRef.current.isConfluent?' (shortened — confluence)':''}`);
             } else {
-              lockedCallRef.current={dir:'UP',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null}; // V134: snapshot signals at lock
+              lockedCallRef.current={dir:'UP',lockedAt:Date.now(),_committedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null}; // V134/V9.1.3: snapshot signals at lock + first-write-wins stamp
               taraAdviceRef.current='UP - CONFIRMED';
               biasCountRef.current={UP:0,DOWN:0};
               _persistLock(); // V5.6: cloud-save so refresh restores this lock
@@ -15373,7 +15574,7 @@ function TaraApp(){
               const _wait=Math.ceil((_coolMs-(Date.now()-lockReleasedAtRef.current))/1000);
               reasoning.push(`[LOCK] DOWN candidate held — cooldown ${formatDuration(_wait)} remaining${confluenceStateRef.current.isConfluent?' (shortened — confluence)':''}`);
             } else {
-              lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,rugPullLock:isRugPull};
+              lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),_committedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,rugPullLock:isRugPull};
               if(isRugPull&&bearCount<CONSECUTIVE_NEEDED_DN)reasoning.push(`[RUG-FIRE] Rug pull detected — DOWN locked early at posterior ${posterior.toFixed(0)}`); // V134: snapshot signals at lock
               taraAdviceRef.current='DOWN - CONFIRMED';
               biasCountRef.current={UP:0,DOWN:0};
@@ -16553,6 +16754,7 @@ function TaraApp(){
         regime:analysis?.regime||'',
         qScore:Math.round(qualityGate?.score||0),
         fgt:analysis?.mtfAlignment,
+        _committedAt:Date.now(), // V9.1.3: stamp at creation so first-write-wins works pre-persist
       };
       hardForceRef.current=0; // consume the force press
       _persistLock();
@@ -16873,6 +17075,7 @@ function TaraApp(){
           regime:analysis?.regime||'',
           qScore:Math.round(_qFast),
           fgt:analysis?.mtfAlignment,
+          _committedAt:Date.now(), // V9.1.3: stamp at creation
         };
         taraCallSnapshotRef.current=_ngSnap;
         _logSnapshotEntry(_ngSnap); // V7.10.1: write to call log
@@ -16904,6 +17107,7 @@ function TaraApp(){
           regime:analysis?.regime||'',
           qScore:Math.round(_qFast),
           fgt:analysis?.mtfAlignment,
+          _committedAt:Date.now(), // V9.1.3: stamp at creation
         };
         taraCallSnapshotRef.current=_capSnap;
         _logSnapshotEntry(_capSnap); // V7.10.1: write to call log
@@ -16934,6 +17138,7 @@ function TaraApp(){
           regime:analysis?.regime||'',
           qScore:Math.round(_qFast),
           fgt:analysis?.mtfAlignment,
+          _committedAt:Date.now(), // V9.1.3: stamp at creation
         };
         taraCallSnapshotRef.current=_timerSnap;
         _logSnapshotEntry(_timerSnap); // V7.10.1: write to call log
@@ -17764,17 +17969,56 @@ function TaraApp(){
         if(!data){console.info('[V8.6] No cloud data for',path);return;}
         try{
           if(path==='memory/taraCallLog'&&Array.isArray(data.entries)){
-            setTaraCallLog(data.entries);_applied++;
+            // V9.1.4: MERGE instead of replace. Was setTaraCallLog(data.entries) which
+            //   silently nuked any unsynced local entries (cloud might have fewer if a
+            //   write hadn't propagated yet). Now we union local + cloud via the same
+            //   merge logic the regular cloudWatch handler uses — first-write-wins,
+            //   resolved beats unresolved.
+            setTaraCallLog(prev=>{
+              const merged=_mergeCallLogEntries(prev,data.entries);
+              return merged;
+            });_applied++;
           } else if(path==='scorecards/personal'){
-            setScorecards({
-              '15m':{wins:Number(data['15m']?.wins)||0,losses:Number(data['15m']?.losses)||0},
-              '5m':{wins:Number(data['5m']?.wins)||0,losses:Number(data['5m']?.losses)||0},
+            // V9.1.4: MAX-per-cell merge (was raw replace which caused the user's
+            //   "every sync goes back to baseline" complaint — if cloud had stale lower
+            //   numbers OR fields were undefined, local got overwritten with zeros).
+            setScorecards(prev=>{
+              const _max=(l,c)=>({
+                wins:Math.max(Number(l?.wins)||0,Number(c?.wins)||0),
+                losses:Math.max(Number(l?.losses)||0,Number(c?.losses)||0),
+              });
+              return{
+                '15m':_max(prev?.['15m'],data?.['15m']),
+                '5m':_max(prev?.['5m'],data?.['5m']),
+              };
             });_applied++;
           } else if(path==='history/pastWindows'&&Array.isArray(data.entries)){
-            setPastWindows(data.entries);_applied++;
+            // V9.1.4: MERGE instead of replace. windowId+windowType+asset dedup.
+            setPastWindows(prev=>{
+              const _key=(e)=>(e?.asset||'BTC')+'|'+(e?.windowId||'')+'|'+(e?.windowType||'');
+              const byKey=new Map();
+              (prev||[]).forEach(e=>{if(e&&e.windowId)byKey.set(_key(e),e);});
+              data.entries.forEach(e=>{
+                if(!e||!e.windowId)return;
+                const k=_key(e);
+                const existing=byKey.get(k);
+                if(!existing){byKey.set(k,e);return;}
+                // Older id wins (first-write-wins)
+                if((e.id||0)<(existing.id||0))byKey.set(k,e);
+              });
+              return Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-50);
+            });_applied++;
           } else if(path==='state/lifetimePnL'&&typeof data.value==='number'){
-            setLifetimePnL(data.value);
-            _pnlUpdatedAtRef.current=Number(data.updatedAt)||Date.now();_applied++;
+            // V9.1.4: keep the higher-magnitude or more-recent value. PnL is a running
+            //   sum so just take whichever is newer by updatedAt; fall back to local if
+            //   cloud is unstamped (old write).
+            setLifetimePnL(prev=>{
+              const _cT=Number(data.updatedAt)||0;
+              const _lT=Number(_pnlUpdatedAtRef.current)||0;
+              if(_cT>_lT)return data.value;
+              return prev;
+            });
+            _pnlUpdatedAtRef.current=Math.max(_pnlUpdatedAtRef.current||0,Number(data.updatedAt)||Date.now());_applied++;
           } else if(path==='learnings/tara'&&typeof data==='object'&&data.totalResolved>=0){
             setTaraLearnings(data);_applied++;
           } else if(path==='learnings/regimeMemory'&&typeof data==='object'){
@@ -17812,13 +18056,25 @@ function TaraApp(){
                 // Lock is from an older window — skip (auto-cleanup happens at next rollover)
                 console.info('[V8.6.1] Lock for',path,'is from stale window',data.windowId,'(live:',_liveWid,') — skipping');
               } else {
-                // Apply the lock to live state — same logic as the cloudWatch handler
-                if(data.engineLock&&!lockedCallRef.current){
+                // V9.1.3: force-resync now uses the same first-write-wins rule.
+                //   Cloud is authoritative when local lacks _committedAt or cloud is
+                //   meaningfully earlier. Force-resync should pull the canonical lock,
+                //   not just fill empty slots.
+                const _shouldAdopt=(cloudObj,localObj)=>{
+                  if(!cloudObj)return false;
+                  if(!localObj)return true;
+                  const _cT=Number(cloudObj._committedAt)||0;
+                  const _lT=Number(localObj._committedAt)||0;
+                  if(_cT>0&&_lT===0)return true;
+                  if(_cT>0&&_lT>0&&_cT+1000<_lT)return true;
+                  return false;
+                };
+                if(data.engineLock&&_shouldAdopt(data.engineLock,lockedCallRef.current)){
                   lockedCallRef.current={...data.engineLock};
                   taraAdviceRef.current=data.engineLock.dir==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';
                   engineLockedDirRef.current=data.engineLock.dir;
                 }
-                if(data.taraSnapshot&&!taraCallSnapshotRef.current){
+                if(data.taraSnapshot&&_shouldAdopt(data.taraSnapshot,taraCallSnapshotRef.current)){
                   taraCallSnapshotRef.current={...data.taraSnapshot};
                 }
                 if(data.taraSamples&&!taraCallSampleRef.current){
@@ -17826,7 +18082,7 @@ function TaraApp(){
                 }
                 _cloudLockMirrorRef.current=data;
                 _applied++;
-                console.info('[V8.6.1] Applied lock from',path,':',data.engineLock?.dir||data.taraSnapshot?.call);
+                console.info('[V9.1.3] Applied lock from',path,':',data.engineLock?.dir||data.taraSnapshot?.call);
               }
             }
           }
@@ -18243,7 +18499,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.1.2
+              9.1.4
             </span>
           </div>
 
@@ -18556,29 +18812,9 @@ function TaraApp(){
             </div>
           </div>
 
-          {/* V9.1.2: Tape flow bar — same compact size as DOM, sits right below it.
-              Uses 30s sliding window buy/sell pct. Shows BUY $X / SELL $X with thin bar. */}
-          {tapeWindows&&(()=>{
-            const _w30=tapeWindows.w30||{};
-            const _tBuy=_w30.buys||0,_tSell=_w30.sells||0;
-            const _tTotal=_tBuy+_tSell;
-            if(_tTotal<=0)return null;
-            const _tBuyPct=(_tBuy/_tTotal)*100;
-            const _tSellPct=100-_tBuyPct;
-            const _fmt=(n)=>n>=1e6?'$'+(n/1e6).toFixed(1)+'M':n>=1e3?'$'+(n/1e3).toFixed(0)+'K':'$'+Math.round(n);
-            return(
-              <div className="px-3 pb-2 hidden sm:block">
-                <div className={'flex justify-between text-xs text-[#E8E9E4]/30 uppercase tracking-wide mb-1'}>
-                  <span>Tape Flow · 30s</span>
-                  <span>{_fmt(_tBuy)} BUY / {_fmt(_tSell)} SELL</span>
-                </div>
-                <div className="w-full h-1 bg-[#111312] rounded-full overflow-hidden flex">
-                  <div style={{width:`${_tBuyPct}%`}} className={'h-full bg-emerald-500/70 transition-all duration-300'}></div>
-                  <div style={{width:`${_tSellPct}%`}} className={'h-full bg-rose-500/70 transition-all duration-300'}></div>
-                </div>
-              </div>
-            );
-          })()}
+          {/* V9.1.4: Compact tape bar removed — TapeStrip + DepthStrip render as twin
+              detailed panels inside ProjectionsCard. The DOM mini-bar above stays as a
+              quick-glance indicator at the top of the analysis card. */}
         </div>
 
         {/* V9.1.1: TapeStrip relocated — now renders between TaraCallCard and
@@ -18894,7 +19130,7 @@ function TaraApp(){
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat}/>
@@ -19913,6 +20149,97 @@ function TaraApp(){
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V9.1.3 — Stats reconciliation + sticky locks */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Stats reconciliation &middot; sticky locks</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.1.3</span> &mdash; Stats &amp; Sticky Locks</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Stats reconciliation</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2"><code className="text-[10px] bg-[#0E100F] px-1">taraScorecards</code> is already <code className="text-[10px] bg-[#0E100F] px-1">useMemo</code>-derived from <code className="text-[10px] bg-[#0E100F] px-1">taraCallLog</code> so the displayed wins/losses/sitouts are always whatever the log shows &mdash; can&rsquo;t drift mathematically. The risk was the LOG itself accumulating duplicates or malformed entries.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li>New <code className="text-[10px] bg-[#0E100F] px-1">_logValidatedRef</code> effect runs once on first hydration</li>
+                  <li>Dedupes on <code className="text-[10px] bg-[#0E100F] px-1">(asset, windowId, windowType)</code> keeping FIRST occurrence (preserves V8.8.6 first-write-wins semantics)</li>
+                  <li>Counts duplicates + invalid entries, logs to <code className="text-[10px] bg-[#0E100F] px-1">console.info</code>, calls <code className="text-[10px] bg-[#0E100F] px-1">setTaraCallLog</code> only if dups removed</li>
+                  <li>Result: on next refresh, all WIN/LOSS/SITOUT counts tally exactly with the log</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sticky lock across refresh / browser</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The bug: first-write-wins comparison required <code className="text-[10px] bg-[#0E100F] px-1">_committedAt</code> timestamps on BOTH local and cloud snapshots. Cloud always had it (stamped lazily by <code className="text-[10px] bg-[#0E100F] px-1">_persistLock</code>); local often did not, when the engine recomputed mid-window before <code className="text-[10px] bg-[#0E100F] px-1">_persistLock</code> had run. So when user refreshed and engine picked opposite direction, the check <code className="text-[10px] bg-[#0E100F] px-1">_cloudT&gt;0 &amp;&amp; _localT&gt;0 &amp;&amp; _cloudT+1000&lt;_localT</code> would fail because <code className="text-[10px] bg-[#0E100F] px-1">_localT</code> was 0. Local kept its fresh wrong commit.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Fixed in three places:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Snapshot creation:</strong> every site now stamps <code className="text-[10px] bg-[#0E100F] px-1">_committedAt:Date.now()</code> at creation &mdash; user-forced lock, NO_TRADE override directional, time-cap-commit, timer-commit</li>
+                  <li><strong>Engine lock:</strong> <code className="text-[10px] bg-[#0E100F] px-1">lockedCallRef.current</code> creation at UP and DOWN paths now stamps <code className="text-[10px] bg-[#0E100F] px-1">_committedAt</code> at creation</li>
+                  <li><strong>Adoption logic:</strong> <code className="text-[10px] bg-[#0E100F] px-1">cloudWatch</code> + force-resync paths now share <code className="text-[10px] bg-[#0E100F] px-1">_shouldAdoptCloud</code> comparator. Cloud authoritative when (a) local has nothing, (b) local lacks <code className="text-[10px] bg-[#0E100F] px-1">_committedAt</code> &mdash; this is the new fix &mdash; or (c) cloud earlier by &gt;1s</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Result: refresh mid-window now restores the original direction Tara committed, in any browser. Open in a new tab while window is live &rarr; new tab snaps to original direction. Open in different browser on different device &rarr; same. The old &ldquo;only-the-first-counted&rdquo; behavior now extends to &ldquo;only-the-first-displayed&rdquo; too.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
+                <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.1.4 — Twin strips · merge-resync · news polish */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Twin tape+depth &middot; merge-on-resync &middot; news</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.1.4</span> &mdash; Twin Strips + Merge Resync</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Twin strips: tape + depth at full detail</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;i want the tape flow and depth of market to be in depth like this, accurate and perfect.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Reverted V9.1.2&rsquo;s thin compact bar. <code className="text-[10px] bg-[#0E100F] px-1">TapeStrip</code> back to its prominent inline render between TaraCallCard and Projections header. New <code className="text-[10px] bg-[#0E100F] px-1">DepthStrip</code> built parallel to it &mdash; same visual structure (quality dots <strong style={{color:'#6ee7b7'}}>STRONG</strong> / <strong style={{color:'#fbbf24'}}>MIXED</strong> / <strong style={{color:'#f87171'}}>WEAK</strong>, BID/ASK dollars, dominant %, gradient bar, 4-column breakdown). Columns are TIGHT (0.05%) &middot; CLOSE (0.1%) &middot; STD (0.2%) &middot; WIDE (0.5%) bands of order-book depth. <code className="text-[10px] bg-[#0E100F] px-1">orderBook</code> fetch enhanced to compute all four bands from level-2 book data. Stacks vertically as twin panels.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Cross-device sync &mdash; root cause of &ldquo;back to baseline&rdquo;</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;every time I sync I feel like I go back to the baseline version of score and stats.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The bug was in <code className="text-[10px] bg-[#0E100F] px-1">forceResyncFromCloud</code>: it called <code className="text-[10px] bg-[#0E100F] px-1">setTaraCallLog(data.entries)</code> directly &mdash; a raw <strong>replace</strong> instead of a merge. Same for <code className="text-[10px] bg-[#0E100F] px-1">setScorecards</code>, <code className="text-[10px] bg-[#0E100F] px-1">setPastWindows</code>. So if cloud had stale or fewer entries than local (a write hadn&rsquo;t propagated yet), force-resync nuked the local entries. Then the RMW write-back merged <em>cloud with itself</em> = same fewer entries &mdash; data permanently lost from cloud too.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Fixed:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">taraCallLog</code> &rarr; uses shared <code className="text-[10px] bg-[#0E100F] px-1">_mergeCallLogEntries</code> (same logic as regular <code className="text-[10px] bg-[#0E100F] px-1">cloudWatch</code> handler)</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">scorecards/personal</code> &rarr; max-per-cell merge (takes the higher of cloud and local for each W/L)</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">pastWindows</code> &rarr; windowId+windowType+asset dedup with first-write-wins</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">lifetimePnL</code> &rarr; newest-by-<code className="text-[10px] bg-[#0E100F] px-1">updatedAt</code></li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Result: force-resync from any device unions everything across devices instead of overwriting. Baseline never wins.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">News mini view: arrows + timestamps</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Was only showing &#9650;/&#9660; when impact was detected; mixed/neutral got no arrow at all. Now neutral cases show a placeholder dot character (&middot;) so the column is consistent. Absolute timestamp added next to relative age &mdash; <em>5m ago</em> becomes <em>5m ago &middot; 2:15 PM</em>. Same in the expanded news modal.</p>
+              </section>
+
+              {/* V9.1.3 — Stats reconciliation + sticky lock */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Stats tally &middot; sticky lock across refresh and browser</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.1.3</span> &mdash; Stats &amp; Sticky Lock</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Stats reconciliation</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;ensure Tara corrects wins, losses and sitouts correctly from her stats and logs.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3"><code className="text-[10px] bg-[#0E100F] px-1">taraScorecards</code> is already a <code className="text-[10px] bg-[#0E100F] px-1">useMemo</code> derived from <code className="text-[10px] bg-[#0E100F] px-1">taraCallLog</code>, so the displayed wins/losses/sitouts cannot drift mathematically from the log. The risk was the LOG itself accumulating duplicates or malformed entries. New <code className="text-[10px] bg-[#0E100F] px-1">_logValidatedRef</code> effect runs once on first hydration:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li>Dedupes on <code className="text-[10px] bg-[#0E100F] px-1">asset|windowId|windowType</code> keeping FIRST occurrence (preserves V8.8.6 first-write-wins)</li>
+                  <li>Counts duplicates and invalid entries, logs to <code className="text-[10px] bg-[#0E100F] px-1">console.info</code></li>
+                  <li>Calls <code className="text-[10px] bg-[#0E100F] px-1">setTaraCallLog</code> only if duplicates were actually removed</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sticky lock across refresh / browser</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;is there a way for Tara to go back to the initial decision and stay locked back to it always even if refreshed mid-window or opened in another browser&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The bug: first-write-wins comparison required <code className="text-[10px] bg-[#0E100F] px-1">_committedAt</code> on BOTH sides. Cloud always had it (stamped lazily by <code className="text-[10px] bg-[#0E100F] px-1">_persistLock</code>). Local often didn&rsquo;t when the engine recomputed mid-window before <code className="text-[10px] bg-[#0E100F] px-1">_persistLock</code> ran. So when user refreshed and engine picked opposite direction, the comparison <code className="text-[10px] bg-[#0E100F] px-1">_cT&gt;0 &amp;&amp; _lT&gt;0 &amp;&amp; _cT+1000&lt;_lT</code> failed because <code className="text-[10px] bg-[#0E100F] px-1">_lT</code> was 0. Local kept its fresh wrong commit.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Fixed in three places:</p>
+                <ol className="list-decimal pl-4 space-y-1 text-[11px] mb-3">
+                  <li>Every snapshot creation site stamps <code className="text-[10px] bg-[#0E100F] px-1">_committedAt:Date.now()</code> at creation &mdash; user-forced lock, NO_TRADE override, time-cap-commit, timer-commit.</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">lockedCallRef.current</code> creation at UP and DOWN engine-lock paths stamps <code className="text-[10px] bg-[#0E100F] px-1">_committedAt</code> at creation.</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">cloudWatch</code> handler uses shared <code className="text-[10px] bg-[#0E100F] px-1">_shouldAdoptCloud</code>: cloud authoritative when local has nothing OR local lacks <code className="text-[10px] bg-[#0E100F] px-1">_committedAt</code> (the new fix) OR cloud earlier by &gt;1s. Same comparator applied to engineLock + taraSnapshot. Same comparator applied to force-resync path.</li>
+                </ol>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Refresh mid-window now restores the original direction Tara committed. Open Tara in a new browser tab while a window is live &mdash; the new tab snaps to the original locked direction. Open in completely different browser on different device &mdash; same. The OLD behavior of <em>only-the-first-counted</em> now extends to <em>only-the-first-displayed</em>.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Known limitation</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of browsers. User explicitly noted that&rsquo;s for later.</p>
+              </section>
 
               {/* V9.1.2 — Plain language and fixes */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
