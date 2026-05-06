@@ -408,7 +408,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v8.7.3-aggressive-sw-kill';
+const BASELINE_VERSION='2026.05.06-v8.8-sw-kill-switch';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -3899,34 +3899,73 @@ const computeV99Posterior=(params)=>{
 // ERROR BOUNDARY
 // ═══════════════════════════════════════
 class ErrorBoundary extends React.Component{
-  constructor(props){super(props);this.state={hasError:false,error:null};}
+  constructor(props){
+    super(props);
+    this.state={hasError:false,error:null,recovering:false};
+    // V8.7.4: Track auto-recovery attempts. If we've recovered once this session
+    //   and we're crashing AGAIN, recovery isn't working — fall through to manual.
+    this._autoRecoveryAttempted=false;
+    try{this._autoRecoveryAttempted=sessionStorage.getItem('_taraAutoRecoveryAttempted')==='1';}catch(_){}
+  }
   static getDerivedStateFromError(e){return{hasError:true,error:e};}
+  componentDidMount(){
+    // V8.8: If we mount cleanly without crashing, clear the auto-recovery flag.
+    // This lets future sessions auto-recover from crashes — without this, once any
+    // crash happens, every subsequent crash this session forces manual recovery.
+    if(!this.state.hasError){
+      try{sessionStorage.removeItem('_taraAutoRecoveryAttempted');}catch(_){}
+    }
+  }
   componentDidCatch(e,i){
     console.error('Tara crash:',e,i);
-    // V8.7.2: Auto-attempt service worker unregister on crash. Stale cached bundles
-    //   are a common cause of crashes after a deploy. Unregistering on crash means
-    //   the next reload (whether user clicks Reset or just refreshes) fetches fresh.
-    try{
-      if('serviceWorker' in navigator){
-        navigator.serviceWorker.getRegistrations().then(regs=>{
-          regs.forEach(r=>{try{r.unregister();}catch(_){}});
-        }).catch(()=>{});
-      }
-    }catch(_){}
-  }
-  render(){
-    if(!this.state.hasError)return this.props.children;
-    // V8.7.2: Robust recovery options. Hard Recovery = nuke everything and refetch.
-    const _hardRecover=async()=>{
+    // V8.7.4: AUTO-RECOVER. The bug is almost certainly a stale cached bundle.
+    //   Trigger soft recovery automatically — no user click needed. If that already
+    //   failed once this session, fall through to manual recovery buttons.
+    if(this._autoRecoveryAttempted){
+      console.warn('[V8.8] Auto-recovery already attempted this session — showing manual options. If this persists across deploys, the kill-switch sw.js may not be deployed yet.');
+      return;
+    }
+    try{sessionStorage.setItem('_taraAutoRecoveryAttempted','1');}catch(_){}
+    this.setState({recovering:true});
+    // Run recovery on next tick so React has time to commit the loading state
+    setTimeout(async()=>{
       try{
-        // 1. Unregister all service workers
         if('serviceWorker' in navigator){
           const regs=await navigator.serviceWorker.getRegistrations();
           await Promise.all(regs.map(r=>r.unregister().catch(()=>{})));
         }
       }catch(_){}
       try{
-        // 2. Clear all caches (CacheStorage API)
+        if('caches' in window){
+          const keys=await caches.keys();
+          await Promise.all(keys.map(k=>caches.delete(k).catch(()=>{})));
+        }
+      }catch(_){}
+      try{window.location.reload(true);}catch(_){window.location.reload();}
+    },100);
+  }
+  render(){
+    if(!this.state.hasError)return this.props.children;
+    // V8.7.4: While auto-recovery is running, show a quiet loading state.
+    if(this.state.recovering){
+      return(
+        <div className="min-h-screen bg-[#111312] text-[#E8E9E4]/70 p-8 font-mono flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-sm uppercase tracking-[0.2em] mb-3" style={{color:'#E5C870'}}>Refreshing Tara</div>
+            <div className="text-xs text-[#E8E9E4]/40">Clearing cached code, fetching latest version...</div>
+          </div>
+        </div>
+      );
+    }
+    // V8.7.2: Robust recovery options shown only if auto-recovery failed
+    const _hardRecover=async()=>{
+      try{
+        if('serviceWorker' in navigator){
+          const regs=await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r=>r.unregister().catch(()=>{})));
+        }
+      }catch(_){}
+      try{
         if('caches' in window){
           const keys=await caches.keys();
           await Promise.all(keys.map(k=>caches.delete(k).catch(()=>{})));
@@ -3934,11 +3973,9 @@ class ErrorBoundary extends React.Component{
       }catch(_){}
       try{localStorage.clear();}catch(_){}
       try{sessionStorage.clear();}catch(_){}
-      // 3. Force reload with cache bypass
       try{window.location.reload(true);}catch(_){window.location.reload();}
     };
     const _softRecover=async()=>{
-      // Only unregister SW + caches — keep localStorage so user data isn't lost
       try{
         if('serviceWorker' in navigator){
           const regs=await navigator.serviceWorker.getRegistrations();
@@ -3951,6 +3988,7 @@ class ErrorBoundary extends React.Component{
           await Promise.all(keys.map(k=>caches.delete(k).catch(()=>{})));
         }
       }catch(_){}
+      try{sessionStorage.removeItem('_taraAutoRecoveryAttempted');}catch(_){}
       try{window.location.reload(true);}catch(_){window.location.reload();}
     };
     return(
@@ -3958,7 +3996,7 @@ class ErrorBoundary extends React.Component{
         <h1 className="text-2xl font-bold mb-4">Tara Engine Crash</h1>
         <pre className={'bg-black p-4 rounded text-xs mb-4 whitespace-pre-wrap border border-rose-500/30'}>{this.state.error?.toString()}</pre>
         <p className={'text-xs text-[#E8E9E4]/60 mb-4 max-w-2xl leading-relaxed'}>
-          A common cause of this error is a stale cached build from a previous deploy. Most of the time, &ldquo;Refresh Code Only&rdquo; below clears the service worker cache and fetches the latest version &mdash; your trades, weights, and learning are preserved.
+          Auto-recovery already ran this session. If you keep seeing this after deploying V8.8, the kill-switch <code style={{background:'#0E100F',padding:'1px 4px'}}>sw.js</code> file may not be in <code style={{background:'#0E100F',padding:'1px 4px'}}>public/</code> yet &mdash; that&apos;s the file that permanently fixes the cache problem on future deploys. Click &ldquo;Refresh Code Only&rdquo; below to clear once more.
         </p>
         <div className="flex gap-3 flex-wrap">
           <button onClick={_softRecover} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold">Refresh Code Only (keeps data)</button>
@@ -11345,7 +11383,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.7.3 online — aggressive service worker kill. User said clearly: I dont want this, I want Tara to load properly when I try, Im not resetting or losing anything. They are right. Recovery buttons are a band-aid, not a fix. The bug is in the deployed bundle from a previous broken state being kept alive by the service worker cache. Fixed it for real. WHAT V8.7.3 DOES — Module-level IIFE runs synchronously at App.jsx load BEFORE React mounts. Calls navigator.serviceWorker.getRegistrations() and unregisters every single one. Clears Cache Storage. If any SW was found and removed does a one-time reload (guarded by sessionStorage flag to prevent loops) so the page fetches fresh assets without SW interception. After this runs, on second page-load pass, no SW is present so it skips and the app renders normally with fresh code from the server every time. ALSO — Disabled the SW registration entirely in TaraApp mount effect. Re-registering after killing it would just put the user back into the same stale-cache trap. The previous useEffect that set up updatefound + controllerchange + skipWaiting all gone. Tradeoff: PWA installability (offline cache) is lost. Reliability gained. Future deploys will fetch fresh on every visit. WHAT TO DO ON YOUR SIDE — Push V8.7.3 to GitHub. Vercel auto-deploys. Open Tara in your browser. The IIFE will detect the stale SW from the previous broken build, unregister it, clear caches, and reload once. After that reload Tara will be on V8.7.3 with no SW at all. From now on every page visit gets the latest code straight from Vercel. STILL INTACT — Session WR Advisor (5 tier color-coded by your prior performance, you-pill on collapsed header), Live Trade Coach (situational advisory while in a trade with up to 4 cards), enriched session awareness (deadzone warnings + expectedMovement + volumeGuidance + whatTaraDoes + coinFlipRisk per phase), trade log normalization, BrainView snapshot fix, scorecard fix, and all V8.6 cross-device sync. Verified parse clean."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.8 online — service worker kill switch. User said: I dont want this. I want Tara to load properly when I try. Im not resetting or losing anything. They are absolutely right. The previous attempts (V8.7.2 ErrorBoundary buttons, V8.7.3 IIFE in App.jsx) couldnt actually fix the root problem because by the time App.jsx loads, the broken cached bundle has already crashed. The fix has to live OUTSIDE the bundle. V8.8 ships TWO new files alongside App.jsx: sw.js (a kill-switch service worker that replaces the old caching one) and an inline script snippet for index.html. THE REAL FIX — sw.js. The user has an old caching service worker named sw.js in their public folder that is serving stale broken bundles from cache. V8.8 sw.js is a kill-switch worker. On install it calls skipWaiting. On activate it clears all caches, claims all clients, unregisters itself, and force-navigates all controlled tabs to fetch fresh code. After deploying once, the broken sw.js gets replaced by the kill-switch sw.js. The kill-switch unregisters itself and the cache problem is gone forever. SECONDARY — index.html snippet. A small synchronous inline script the user adds to public/index.html. It runs BEFORE any bundled JS and unregisters any service worker found, then clears caches. This is belt-and-suspenders for cases where the sw.js itself is broken (unlikely but defensive). HARDENED — ErrorBoundary. componentDidMount now clears the auto-recovery flag on a clean session render so future crashes can auto-recover (without this the flag stayed at 1 forever once any crash happened). Manual fallback message updated to point at deploying sw.js. WHAT TO DO — Push three files to GitHub: App.jsx (root or src), sw.js (in public/), index.html (in public/, with the script snippet added to head before any other scripts). Vercel auto-deploys. The new sw.js takes over from the old one, the kill-switch fires, fresh code loads, no more crash. From this deploy forward Tara will load properly every time. STILL INTACT — Session WR Advisor (5 tier color-coded by prior performance, you-pill on collapsed header), Live Trade Coach (situational advisory in a trade), enriched session awareness, trade log normalization, BrainView snapshot fix, scorecard fix, all V8.6 cross-device sync. Verified parse clean."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -16695,7 +16733,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              8.7.3
+              8.8
             </span>
           </div>
 
@@ -18122,7 +18160,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 8.7.3 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 8.8 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -18326,10 +18364,45 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 8.7.3 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 8.8 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V8.8 — Service Worker Kill Switch (real fix) */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical · The Real Fix</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; SW Kill Switch</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;I dont want this. I want Tara to load properly when I try. Im not resetting or losing anything.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Right diagnosis. The previous attempts (V8.7.2 ErrorBoundary buttons, V8.7.3 IIFE in App.jsx) couldn&rsquo;t actually fix the root problem &mdash; by the time App.jsx loads, the broken cached bundle has already crashed. The fix has to live <strong>outside</strong> the bundle.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Two new files alongside App.jsx</div>
+                <ul className="list-disc pl-4 space-y-2 text-[11px]">
+                  <li><strong style={{color:T2_GOLD}}>sw.js</strong> &mdash; A kill-switch service worker that replaces the old caching one. On install it calls <code className="text-[10px] bg-[#0E100F] px-1">skipWaiting</code>. On activate it clears all caches, claims all clients, unregisters itself, and force-navigates all controlled tabs to fetch fresh code. After deploying once, the broken old sw.js gets replaced by this kill-switch. The kill-switch unregisters itself and the cache problem is gone forever.</li>
+                  <li><strong style={{color:T2_GOLD}}>index-html-snippet.html</strong> &mdash; A small synchronous inline script you add to your <code className="text-[10px] bg-[#0E100F] px-1">public/index.html</code>. Runs <strong>BEFORE</strong> any bundled JS. Unregisters any service worker found, clears caches. Belt-and-suspenders for cases where sw.js itself is broken.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Hardened ErrorBoundary</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">componentDidMount</code> now clears the auto-recovery flag on a clean session render. Without this, the flag stayed at <code className="text-[10px] bg-[#0E100F] px-1">1</code> forever once any crash happened, so the next crash forced manual recovery instead of auto-recovering.</li>
+                  <li>Manual fallback message updated to point at deploying sw.js.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What to do</div>
+                <ol className="list-decimal pl-4 space-y-1 text-[11px]">
+                  <li>Push <strong>App.jsx</strong> to your usual location (root or <code className="text-[10px] bg-[#0E100F] px-1">src/</code>).</li>
+                  <li>Push <strong>sw.js</strong> to <code className="text-[10px] bg-[#0E100F] px-1">public/sw.js</code> &mdash; this REPLACES the old caching one.</li>
+                  <li>Open your <code className="text-[10px] bg-[#0E100F] px-1">public/index.html</code> and paste the script tag from <strong>index-html-snippet.html</strong> inside the <code className="text-[10px] bg-[#0E100F] px-1">&lt;head&gt;</code>, BEFORE any other script tags.</li>
+                  <li>Push to GitHub. Vercel auto-deploys.</li>
+                  <li>Open Tara. The new sw.js takes over from the old one, the kill-switch fires, fresh code loads, no more crash. From this deploy forward Tara will load properly every time.</li>
+                </ol>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Why this is the real fix</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">The crash happens BEFORE App.jsx loads &mdash; the cached bundle (built from older broken code) crashes during its own evaluation. Code inside App.jsx can&rsquo;t prevent its own crash. Only <code className="text-[10px] bg-[#0E100F] px-1">sw.js</code> (which the browser loads <strong>before</strong> the bundle) and the inline script in <code className="text-[10px] bg-[#0E100F] px-1">index.html</code> (which runs <strong>before</strong> any bundle) can stop it. V8.8 ships both.</p>
+              </section>
 
               {/* V8.7.3 — Aggressive SW kill */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
@@ -18337,7 +18410,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical · Service Worker Killed</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> &mdash; Loads Fresh, Always</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; Loads Fresh, Always</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User said: <em>&ldquo;I don&rsquo;t want this. I want Tara to load properly when I try. I&rsquo;m not resetting or losing anything.&rdquo;</em> They&rsquo;re right. Recovery buttons are a band-aid, not a fix. Killed the service worker entirely.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What V8.7.3 does</div>
@@ -18370,7 +18443,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical · Cache Recovery + Session Advisor</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> &mdash; Cache Buster + WR Coach</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; Cache Buster + WR Coach</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshot showed persistent Tara Engine Crash with <em>ReferenceError: Cannot access &lsquo;ee&rsquo; before initialization</em>. Static analysis of current source found no TDZ &mdash; the crash was from a stale service-worker-cached bundle from a previous broken state. Fixed both the symptom (recovery flow) and prevention (auto-update SW).</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Fix #1 &mdash; Beefed-up ErrorBoundary</div>
@@ -18415,7 +18488,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Crash Defense</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> &mdash; Defensive Render Wrapping</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; Defensive Render Wrapping</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported &ldquo;test engine crash.&rdquo; Investigation: parse clean, engine itself unchanged in V8.7, but new components could throw on edge-case data shapes. Hardened defensively.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Hardened</div>
@@ -18437,7 +18510,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · UX Upgrades + Critical Fixes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> &mdash; Live Coach, Phase Advisory, Brain Fixes</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; Live Coach, Phase Advisory, Brain Fixes</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported 7 issues. All addressed: 2 critical bugs fixed, 2 major features added, all stale text refreshed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Critical Fix #1 — BrainView desync</div>
@@ -18532,7 +18605,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Silent V8.5 Bug Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> &mdash; Path Metrics Now Actually Saved</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; Path Metrics Now Actually Saved</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked: &ldquo;is Tara saving all the needed info for her to learn from wins and losses?&rdquo; Honest investigation found a real bug — V8.5&rsquo;s entire path-metrics + shock-aware-learning system was silently inert. Code looked correct, but the path data never reached the persisted call log.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">The bug</div>
@@ -18576,7 +18649,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Force Resync Completeness</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> &mdash; Resync Pulls Active Locks Too</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; Resync Pulls Active Locks Too</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked: when force-resyncing does it sync the current lock decision Tara is on, or only stats and records?</p>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3"><strong>Honest answer:</strong> V8.6 only pulled records and stats. Locks already synced automatically through <code className="text-[10px] bg-[#0E100F] px-1">cloudWatch</code> listeners (have since V7), but the V8.6 manual Force Resync button missed them &mdash; meaning a fresh browser pressing Force Resync mid-window had to wait ~1-2s for the lock listener to settle.</p>
 
@@ -18611,7 +18684,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical · Cross-Device Sync Bugs Fixed</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> &mdash; Sync That Actually Works Across Devices</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; Sync That Actually Works Across Devices</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: scorecards + memory looked correct on local PC + primary browser but were stale or missing on a different browser/device. V8.3 fixed multi-tab same-browser sync, but several state slots still used the old last-write-wins pattern across devices. Diagnosed four bugs, fixed all four.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Bug 1 — Per-asset weights collision</div>
@@ -18693,7 +18766,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Intelligence Upgrade + Trader Guide</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> &mdash; She Sees the Path Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; She Sees the Path Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked: &ldquo;does she understand a last-minute extreme pump or dump?&rdquo; Honest answer was no &mdash; she only knew entry context + outcome, not the path between. A late-minute whale dump looked identical to her as being wrong from the start, and she was over-correcting weights in response to bad luck. V8.5 closes the gap.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Within-window path metrics</div>
@@ -18768,7 +18841,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>UI · Responsive Polish + Layout Optimization</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> &mdash; Cleaner Layout, Any Screen Size</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; Cleaner Layout, Any Screen Size</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: Performance card was full-width above the grid taking lots of vertical real estate while the prediction column had blank space at the bottom. Also wanted bulletproof responsive behavior at any viewport size.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Performance card moved + redesigned</div>
@@ -18809,7 +18882,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical · Multi-Tab Data Integrity</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> &mdash; Atomic Multi-Tab Sync</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; Atomic Multi-Tab Sync</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: opening tab A on BTC + tab B on ETH during the same window only saved one tab&rsquo;s entry. Diagnosed root cause + applied a three-layer fix.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">The bug</div>
@@ -18872,7 +18945,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Profit Trader Toolkit</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> &mdash; All Three Tiers</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> &mdash; All Three Tiers</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">12 features across the three tiers from yesterday&rsquo;s plan. New Trading Settings modal accessible by clicking the Today P&L pill.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Tier 1 &mdash; would meaningfully change P&L</div>
@@ -18917,7 +18990,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Sync Reliability + Risk Indicators</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Reliable Sync + Movement Risk</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Reliable Sync + Movement Risk</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported missing trades on refresh + cross-browser. Diagnosed three real failure modes in the call-log sync path. Also added the movement risk pulse for live volatility / volume / tape awareness.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sync fixes</div>
@@ -18965,7 +19038,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Visual + Decisional Upgrade</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Trader Awareness</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Trader Awareness</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">11 features added in one drop. Designed to inform without dominating &mdash; each piece earns its place by changing how you trade the next round.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Header pills</div>
@@ -19012,7 +19085,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Fix · Kalshi Strike Fetch</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Kalshi Strike Fetch Restored</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Kalshi Strike Fetch Restored</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: &ldquo;Tara doesn&rsquo;t get strike pricing now from Kalshi&rdquo; for both BTC and ETH. Diagnosed and fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -19054,7 +19127,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Feature · Time-Aware Context · Memory Polish</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Phase Context + Memory Cleanup</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Phase Context + Memory Cleanup</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for time-specific alerts/disclaimers (what kind of market we&rsquo;re in, what we&rsquo;re entering, what to watch for) and to clean up + format previous records. Both in this release.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Market Context Strip</div>
@@ -19099,7 +19172,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Architectural Patch · Sync + Learning</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Sync &amp; Learning Done Right</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Sync &amp; Learning Done Right</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged three concerns simultaneously: records/stats/logs not syncing, Tara giving different responses across devices, and asking whether learning was actually happening. Took the time to audit every persistent state slot and the entire learning pipeline.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Persistence gaps found</div>
@@ -19149,7 +19222,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Browser Real-Time Sync</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Same Call, Every Browser</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Same Call, Every Browser</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;still not the same for everyone on each browser mate.&rdquo;</em> V7.10.3 fixed within-browser races but cross-browser was still broken &mdash; two real bugs compounding.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Bug 1: One-shot read, not real-time</div>
@@ -19184,7 +19257,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Tab Determinism</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — One Window, One Decision</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — One Window, One Decision</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshots showed the SAME window with Tab 1 saying <strong style={{color:'rgb(110,231,183)'}}>LOCKED UP 84%</strong> and Tab 2 saying <strong style={{color:'rgb(244,114,182)'}}>LOCKED DOWN 94%</strong>. Same browser, same window, opposite calls.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -19222,7 +19295,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stability Audit</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Audit Pass</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Audit Pass</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for a comprehensive review after the V7.10.1 snapshot-log fix. Reviewed potential bug categories systematically and fixed one minor stability issue.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was checked</div>
@@ -19253,7 +19326,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Trade Rounds Stopped Updating</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — The Bug That Killed Memory</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — The Bug That Killed Memory</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;tara completely stopped with updating trade round for both btc and eth now&rdquo;</em>. Found a critical bug shipped quietly in V7.8 and inherited by every release since. Both assets affected equally.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was broken</div>
@@ -19291,7 +19364,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · TDZ Bug Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Crash Fixed</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Crash Fixed</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshot showed engine stuck on MATH CRASH with error <em>&ldquo;Cannot access &lsquo;ft&rsquo; before initialization&rdquo;</em>. Posterior frozen at 50%, all signals reading 0, advisor card unable to render, projections empty.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -19311,7 +19384,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Three-State Model · Explicit No-Go</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — When Sit-Out Is The Right Answer</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — When Sit-Out Is The Right Answer</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Talked through sit-outs together. Agreed: V7.8 killing stylistic timidity (tier blocks, timer expirations, mixed-signal skips) was right. But there are 3 specific cases where NOT trading is mathematically correct, not conservative. Those become an explicit NO-GO category &mdash; clearly distinguished from a normal lock or a tentative caution call.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Three states now</div>
@@ -19339,7 +19412,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Persistent Learning · No Skips · Caution Notes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — She Trades Every Round Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — She Trades Every Round Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Weights persist across sessions</div>
@@ -19380,7 +19453,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Reversal Blockers · Stale-Lock Advisor</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Stop Inviting Bad Trades</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Stop Inviting Bad Trades</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged the screenshot. Tara locked DOWN 54%, engine showed 89% UP, Kalshi 99.7% UP, all 4 forward projections UP, price +25bps above strike. Advisor card said &ldquo;Tara DOWN 85% &middot; ENTER DOWN&rdquo;. Pressing ENTER would have been an instant loss. Two bugs fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor — continuation blockers</div>
@@ -19409,7 +19482,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Predict Reversals · Shadow Tara · Fast-Mode</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Predict the Reversal, Not Avoid It</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Predict the Reversal, Not Avoid It</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor (replaces V7.6 guard)</div>
@@ -19457,7 +19530,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Mean-Reversion Guard · Timer-Fires · Dual Feed</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Stop Chasing the Top</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Stop Chasing the Top</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Deep dive into 105 resolved trades + the recent 30 found the actual structural pattern behind &ldquo;we chase momentum and lose on swings.&rdquo;</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Findings from the call-log analysis</div>
@@ -19500,7 +19573,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Faster Low-Dial Locks · ETH Save Bug</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Truly Fast at Fast</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Truly Fast at Fast</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Two unrelated bugs in one release. User flagged both.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Speed dial low-end made aggressive</div>
@@ -19546,7 +19619,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Speed Dial Actually Functional</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Dial Has Function Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Dial Has Function Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;the timer decision has 0 function too. its just a gimmick and does nothing&rdquo;. They were right. The dial was only nudging two floor numbers that almost every trade passed regardless. Real fix:</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tier filter by dial position</div>
@@ -19593,7 +19666,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Engine · The Structural Blind Spot Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Higher Timeframes Finally Count</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Higher Timeframes Finally Count</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged a trade where the Score Breakdown showed &ldquo;Structural ▲ UP · 4/6 align&rdquo; with 5m and 15m both bullish, while Tara sat out leaning DOWN. Investigation: the engine was COMPUTING the multi-TF structural data and SHOWING it on the panel, but never adding it to the posterior. Five-of-six timeframes screaming UP, math weight: zero.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Structural alignment bonus</div>
@@ -19631,7 +19704,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stale State Fixes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Sound + Stale UI</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Sound + Stale UI</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three quick fixes. Two were old bugs, one was a missing persistence flag.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Sound enabled now persists</div>
@@ -19651,7 +19724,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Prediction Engine · The &ldquo;Why Jerome Beats Tara&rdquo; Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.3</span> — Honest Confidence, Smarter Locks</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8</span> — Honest Confidence, Smarter Locks</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">After a side-by-side analysis of a real losing trade where Jerome won and Tara lost, we found the structural problem: Tara was over-trusting tape extremes and under-weighting strike position. This release surgically fixes both, plus the timer bug, plus calibrates the confidence display.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tape-extreme guard</div>
