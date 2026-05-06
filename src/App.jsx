@@ -52,6 +52,25 @@ const _cloudSyncListeners=new Set();
 let _cloudSyncStatus={state:_fbDb?'idle':'disabled',lastOk:null,lastError:null,writes:0,reads:0,listeners:0};
 const _setCloudStatus=(patch)=>{_cloudSyncStatus={..._cloudSyncStatus,...patch};_cloudSyncListeners.forEach(l=>l(_cloudSyncStatus));};
 const subscribeCloudStatus=(fn)=>{_cloudSyncListeners.add(fn);fn(_cloudSyncStatus);return()=>_cloudSyncListeners.delete(fn);};
+// V8.8.7: Active-write counter. Each cloudWrite / cloudWriteDebouncedRMW transaction
+//   increments on start, decrements on completion (success or failure). State stays
+//   'writing' as long as count>0, so concurrent writes from multiple sync paths
+//   don't oscillate writing→ok→writing→ok the way they did when each path toggled
+//   the global state independently. The pill applies an additional 750ms render
+//   hysteresis on top of this so brief writes never flicker.
+let _activeWrites=0;
+const _incActiveWrites=()=>{
+  _activeWrites++;
+  if(_activeWrites===1)_setCloudStatus({state:'writing'});
+};
+const _decActiveWrites=(success)=>{
+  _activeWrites=Math.max(0,_activeWrites-1);
+  if(_activeWrites===0&&success){
+    _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
+  }
+  // If !success, the catch handler already set state:'error' — leave it.
+  // If count still >0, leave state at 'writing' — another write is in flight.
+};
 
 // ── V8.3: CROSS-TAB BROADCAST CHANNEL ────────────────────────────────────────
 // Instant cross-tab messaging within the same browser. Eliminates the ~1s wait for
@@ -110,15 +129,18 @@ const cloudRead=async(path)=>{
 };
 const cloudWrite=async(path,data)=>{
   const ref=_fbDoc(path);if(!ref)return false;
-  _setCloudStatus({state:'writing'});
+  _incActiveWrites(); // V8.8.7
+  let _ok=false;
   try{
     await setDoc(ref,{...data,_updatedAt:serverTimestamp()});
-    _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
+    _ok=true;
     return true;
   }catch(e){
     console.warn('[Firestore write failed]',path,e?.message);
     _setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});
     return false;
+  }finally{
+    _decActiveWrites(_ok); // V8.8.7
   }
 };
 const cloudDelete=async(path)=>{
@@ -218,20 +240,25 @@ const cloudWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
       return;
     }
     try{
-      _setCloudStatus({state:'writing'});
-      // True atomic transaction. Firestore auto-retries (up to 5x by default) if
-      //   another tab/device modifies the doc between our read and write inside the tx.
-      //   This guarantees that concurrent writes serialize — no clobbering possible.
-      await runTransaction(_fbDb,async(tx)=>{
-        const snap=await tx.get(ref);
-        const cloudData=snap.exists()?snap.data():null;
-        const localData=getLocalData();
-        const merged=mergeFn(cloudData,localData);
-        if(merged!=null){
-          tx.set(ref,{...merged,_updatedAt:serverTimestamp()});
-        }
-      });
-      _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
+      _incActiveWrites(); // V8.8.7
+      let _ok=false;
+      try{
+        // True atomic transaction. Firestore auto-retries (up to 5x by default) if
+        //   another tab/device modifies the doc between our read and write inside the tx.
+        //   This guarantees that concurrent writes serialize — no clobbering possible.
+        await runTransaction(_fbDb,async(tx)=>{
+          const snap=await tx.get(ref);
+          const cloudData=snap.exists()?snap.data():null;
+          const localData=getLocalData();
+          const merged=mergeFn(cloudData,localData);
+          if(merged!=null){
+            tx.set(ref,{...merged,_updatedAt:serverTimestamp()});
+          }
+        });
+        _ok=true;
+      }finally{
+        _decActiveWrites(_ok); // V8.8.7
+      }
     }catch(e){
       try{console.warn('[V8.3] RMW transaction failed',path,e?.message);}catch(_){}
       _setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});
@@ -408,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v8.8.5-noop-sw-and-circuit-breaker';
+const BASELINE_VERSION='2026.05.06-v8.8.7-sync-pill-and-news';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -6705,9 +6732,23 @@ function TabPresencePill({peerTabs}){
 // amber when writing in progress, rose when error. Click → opens force-resync menu.
 function SyncStatusPill({onClick}){
   const[status,setStatus]=React.useState(()=>({state:'idle',lastOk:null,lastError:null,writes:0,reads:0,listeners:0}));
+  // V8.8.7: 750ms hysteresis on the writing label. The status state can flip to
+  //   'writing' for very brief windows (a single fast transaction). Without delay
+  //   the pill flickers green→yellow→green constantly during active trading. With
+  //   the delay, only sustained writes (>750ms in flight, like initial hydration
+  //   or a slow round-trip) actually render as SYNCING.
+  const[displayWriting,setDisplayWriting]=React.useState(false);
   React.useEffect(()=>{
     return subscribeCloudStatus(setStatus);
   },[]);
+  React.useEffect(()=>{
+    if(status.state==='writing'){
+      const t=setTimeout(()=>setDisplayWriting(true),750);
+      return()=>clearTimeout(t);
+    }else{
+      setDisplayWriting(false);
+    }
+  },[status.state]);
   const _now=Date.now();
   const _lastOkAgo=status.lastOk?_now-status.lastOk:null;
   // Health state derivation:
@@ -6721,7 +6762,7 @@ function SyncStatusPill({onClick}){
     _health='disabled';_color='rgba(232,233,228,0.4)';_bg='rgba(232,233,228,0.03)';_border='rgba(232,233,228,0.10)';_label='SYNC OFF';
   } else if(status.state==='error'&&status.lastError&&(_now-status.lastError.at)<30000){
     _health='error';_color='rgb(244,114,182)';_bg='rgba(244,114,182,0.06)';_border='rgba(244,114,182,0.30)';_label='SYNC ERR';_dotPulse=true;
-  } else if(status.state==='writing'){
+  } else if(status.state==='writing'&&displayWriting){
     _health='writing';_color='rgba(229,200,112,0.95)';_bg='rgba(229,200,112,0.06)';_border='rgba(229,200,112,0.25)';_label='SYNCING';_dotPulse=true;
   } else if(status.listeners>0&&_lastOkAgo!=null&&_lastOkAgo<60000){
     _health='healthy';_color='rgba(110,231,183,0.95)';_bg='rgba(110,231,183,0.06)';_border='rgba(110,231,183,0.20)';_label='SYNCED';
@@ -8987,8 +9028,12 @@ function NewsFeedCard(){
     const macroIv=setInterval(computeMacros,60000);
     
     const fetchNews=async()=>{
-      // V134: Try multiple sources with timeout and fallback
-      const tryFetch=async(url,timeoutMs=5000)=>{
+      // V8.8.7: Multi-proxy parallel fetch + localStorage cache + Reddit fallback.
+      //   Prior versions tried CryptoCompare direct + CoinGecko status_updates direct.
+      //   Both endpoints have been deprecated/restricted since: CryptoCompare moved
+      //   to API-key model (free public tier rejected), CoinGecko status_updates is
+      //   gone. Same multi-proxy strategy as Kalshi (V5.2) for resilience.
+      const tryFetch=async(url,timeoutMs=6000)=>{
         const ctrl=new AbortController();
         const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
         try{
@@ -8998,41 +9043,83 @@ function NewsFeedCard(){
           return await r.json();
         }catch(e){clearTimeout(timer);throw e;}
       };
-      // Source 1: CryptoCompare
+      const _writeCache=(items)=>{
+        try{localStorage.setItem('taraNewsCache_v1',JSON.stringify({at:Date.now(),items}));}catch(_){}
+      };
+      const _readCache=()=>{
+        try{
+          const raw=localStorage.getItem('taraNewsCache_v1');
+          if(!raw)return null;
+          const c=JSON.parse(raw);
+          if(!c||!Array.isArray(c.items)||c.items.length===0)return null;
+          if(Date.now()-c.at>4*3600000)return null; // 4h max age
+          return c;
+        }catch(_){return null;}
+      };
+      // ── Source 1: CryptoCompare via parallel multi-proxy ──────────────
+      const _ccUrl='https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=BTC';
+      const _proxyAttempts=[
+        // direct first — some users still get through (mobile/unblocked IPs)
+        tryFetch(_ccUrl,5000).then(d=>({_via:'direct',data:d})),
+        tryFetch(`https://corsproxy.io/?url=${encodeURIComponent(_ccUrl)}`,6000).then(d=>({_via:'corsproxy',data:d})),
+        tryFetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(_ccUrl)}`,6000).then(d=>({_via:'codetabs',data:d})),
+        tryFetch(`https://api.allorigins.win/get?url=${encodeURIComponent(_ccUrl)}`,7000).then(r=>{
+          // allorigins wraps the response: {contents: "<json string>"}
+          if(!r||typeof r.contents!=='string')throw new Error('allorigins empty');
+          return{_via:'allorigins',data:JSON.parse(r.contents)};
+        }),
+      ];
+      let _ccWin=null;
+      try{_ccWin=await Promise.any(_proxyAttempts);}catch(_){}
+      if(_ccWin&&_ccWin.data?.Data?.length>0){
+        const items=_ccWin.data.Data.slice(0,15).map(n=>({
+          title:n.title,
+          source:n.source_info?.name||n.source||'News',
+          url:n.url,
+          time:n.published_on*1000,
+          categories:(n.categories||'').split('|').filter(Boolean),
+        }));
+        setNews(items);
+        setErr(null);
+        setLoading(false);
+        _writeCache(items);
+        return;
+      }
+      // ── Source 2: Reddit r/CryptoCurrency JSON (free, no key) ─────────
       try{
-        const d=await tryFetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=BTC');
-        if(d?.Data?.length>0){
-          const items=d.Data.slice(0,15).map(n=>({
-            title:n.title,
-            source:n.source_info?.name||n.source||'News',
-            url:n.url,
-            time:n.published_on*1000,
-            categories:(n.categories||'').split('|').filter(Boolean)
-          }));
-          setNews(items);
-          setErr(null);
-          setLoading(false);
-          return;
+        const _redditUrl='https://www.reddit.com/r/CryptoCurrency/hot.json?limit=20';
+        const _rd=await tryFetch(`https://corsproxy.io/?url=${encodeURIComponent(_redditUrl)}`,6000);
+        const _children=_rd?.data?.children||[];
+        if(_children.length>0){
+          const items=_children
+            .filter(c=>c?.data&&!c.data.stickied)
+            .slice(0,15)
+            .map(c=>({
+              title:c.data.title,
+              source:'r/CryptoCurrency',
+              url:'https://reddit.com'+c.data.permalink,
+              time:c.data.created_utc*1000,
+              categories:[c.data.link_flair_text||'Discussion'].filter(Boolean),
+            }));
+          if(items.length>0){
+            setNews(items);
+            setErr(null);
+            setLoading(false);
+            _writeCache(items);
+            return;
+          }
         }
-      }catch(e){/* fallback */}
-      // Source 2: CoinGecko status updates (free, no key, returns BTC-related items)
-      try{
-        const d=await tryFetch('https://api.coingecko.com/api/v3/status_updates?category=general&per_page=15');
-        if(d?.status_updates?.length>0){
-          const items=d.status_updates.slice(0,15).map(n=>({
-            title:n.description||n.user_title||'Update',
-            source:n.user||'CoinGecko',
-            url:n.project?.id?`https://www.coingecko.com/coins/${n.project.id}`:'#',
-            time:new Date(n.created_at).getTime(),
-            categories:[n.category||'general']
-          }));
-          setNews(items);
-          setErr(null);
-          setLoading(false);
-          return;
-        }
-      }catch(e){/* fallback */}
-      // Both failed
+      }catch(_){/* fall through to cache */}
+      // ── Source 3: localStorage cache (≤4h old) ────────────────────────
+      const _cached=_readCache();
+      if(_cached){
+        setNews(_cached.items);
+        const _ageMin=Math.round((Date.now()-_cached.at)/60000);
+        setErr(`cached (${_ageMin}m ago) — fresh fetch failed`);
+        setLoading(false);
+        return;
+      }
+      // Truly nothing
       setErr('All news sources unavailable');
       setLoading(false);
     };
@@ -10122,7 +10209,8 @@ function TaraApp(){
       //     - WIN where outcomeDir opposes the call direction (data flip)
       //   Also dedupes by windowId+windowType, keeping the resolved entry if duplicates exist.
       const seen=new Map();
-      const _key=(e)=>(e.windowId||'')+'|'+(e.windowType||'');
+      // V8.8.6: include asset in the key so BTC + ETH at the same window slot coexist
+      const _key=(e)=>(e.asset||'BTC')+'|'+(e.windowId||'')+'|'+(e.windowType||'');
       let dropped=0;
       let resolved=0;
       parsed.forEach(e=>{
@@ -10239,7 +10327,8 @@ function TaraApp(){
   // V8.3: Helper to merge two arrays of call log entries. Used by both RMW write
   //   and the BroadcastChannel handler. Mirrors the cloudWatch merge logic.
   const _mergeCallLogEntries=React.useCallback((existing,incoming)=>{
-    const _key=(e)=>(e?.windowId||'')+'|'+(e?.windowType||'');
+    // V8.8.6: asset in dedup key so BTC + ETH coexist for the same windowId
+    const _key=(e)=>(e?.asset||'BTC')+'|'+(e?.windowId||'')+'|'+(e?.windowType||'');
     const _shouldReplace=(prev,inc)=>{
       if(!prev.result&&inc.result)return true;
       if(prev.result&&!inc.result)return false;
@@ -10400,7 +10489,8 @@ function TaraApp(){
           if(!_outcome)return e;
           return{...e,result:e.dir===_outcome?'WIN':'LOSS',outcomeDir:_outcome};
         };
-        const _key=(e)=>e.windowId+'|'+e.windowType;
+        // V8.8.6: asset in dedup key so BTC + ETH coexist for the same windowId
+        const _key=(e)=>(e.asset||'BTC')+'|'+e.windowId+'|'+e.windowType;
         const byKey=new Map();
         const _shouldReplace=(existing,incoming)=>{
           if(!existing.result&&incoming.result)return true;
@@ -10593,7 +10683,8 @@ function TaraApp(){
         ()=>_pastWindowsRef.current.slice(-50),
         (cloudData,localEntries)=>{
           const cloudEntries=(cloudData&&Array.isArray(cloudData.entries))?cloudData.entries:[];
-          const _key=(e)=>(e?.windowId||'')+'|'+(e?.windowType||'');
+          // V8.8.6: asset in dedup key so BTC + ETH past-window snapshots coexist
+          const _key=(e)=>(e?.asset||'BTC')+'|'+(e?.windowId||'')+'|'+(e?.windowType||'');
           const byKey=new Map();
           cloudEntries.forEach(e=>{if(e&&e.windowId)byKey.set(_key(e),e);});
           localEntries.forEach(e=>{if(e&&e.windowId&&!byKey.has(_key(e)))byKey.set(_key(e),e);});
@@ -10623,7 +10714,8 @@ function TaraApp(){
           const bucket=Math.floor(e.time/winMs)*winMs;
           return{...e,windowId:`${e.windowType}-${new Date(bucket).toISOString()}`};
         };
-        const _key=(e)=>e.windowId+'|'+e.windowType;
+        // V8.8.6: asset in dedup key so BTC + ETH past-window snapshots coexist
+        const _key=(e)=>(e?.asset||'BTC')+'|'+e.windowId+'|'+e.windowType;
         const byKey=new Map();
         prev.forEach(e=>{const f=_backfill(e);if(f&&f.windowId)byKey.set(_key(f),f);});
         let changed=false;
@@ -11458,7 +11550,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.8.5 online — reload-loop killed AND the underlying TDZ killed. Two separate fixes that landed together. FIX ONE: V8.8.4 ErrorBoundary x-rayed the actual TDZ. The deployed bundle hit 'Cannot access changed before initialization' when the cloudWatch hydration callback for taraCallLog ran with non-empty entries — V8.7 added a prev.forEach normalization pass ABOVE the existing d.entries.forEach but didn't move the let changed=false declaration up with it. The first forEach assigned changed=true before the let ran. Pure JS-spec TDZ. Trivial fix once the unminified V8.8.4 named the actual variable: moved let changed=false to before both forEach calls, line 10420. FIX TWO: V8.8.4 deploy got into a reload spasm anyway. Diagnosed the cause: public/sw.js (the V8.8 kill-switch service worker) had client.navigate(client.url) in its activate handler. That force-reloads every controlled tab AFTER the SW unregisters itself. Combined with browser SW update-checks on every navigation, this fed back into itself. V8.8.5 ships three changes in one. ONE: public/sw.js is now a true no-op. install → skipWaiting, activate → clear caches → unregister self. No claim. No navigate. No fetch handler. Browser handles all requests natively. After this version of sw.js installs once, the user has no SW from then on. TWO: index.html now ships a reload-loop circuit breaker as the very first script. Tracks reload count in sessionStorage. After 3 reloads in 30 seconds, halts the page completely and shows a static error UI with a single Clear-all-browser-state-and-reload-once button. Even if some other code somewhere keeps trying to reload, this caps at 3. THREE: vercel.json now sets Cache-Control: no-cache for /sw.js and /index.html, so the no-op SW + new index.html propagate immediately and don't get held back by Vercel CDN. WHAT TO DO: push V8.8.5 to GitHub. Vercel auto-deploys with the new headers. Open the site once. The browser fetches the new sw.js, installs it, runs activate, unregisters. From that point forward no SW exists for tara11.vercel.app. The reload spasm cannot recur. Header should show 8.8.5. STILL INTACT: every behavior from V8.8.4 forward. Unminified bundle, x-ray ErrorBoundary with copy-diagnostic, V8.8.4 TDZ fix, all V8.8.3 syntax/dup-key fixes."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.8.7 online — sync pill flicker + news fetch, both fixed. ONE: SYNC PILL. Pre-V8.8.7 the cloud sync state was a single global flag toggled by every cloudWrite/cloudWriteDebouncedRMW. Eleven sync paths writing concurrently meant the global state oscillated writing→ok→writing→ok multiple times per second — pill flickered green/yellow constantly during active trading. Worse, when path A was still writing and path B finished, the state showed ok even though A was in flight (lying about sync state, not just flickering). Two-part fix: (a) module-level _activeWrites counter — increments on write start, decrements on completion; state stays writing as long as count>0 so concurrent writes do not oscillate. (b) 750ms render hysteresis in SyncStatusPill — only renders SYNCING after status has been writing for 750ms continuously. Brief writes (<750ms total) never flicker. Sustained writes (initial hydration, slow round-trip) still show. TWO: NEWS FETCH. Pre-V8.8.7 the news ticker tried CryptoCompare direct + CoinGecko status_updates direct. Both endpoints have been deprecated/restricted since the code was written: CryptoCompare moved to API-key-required model (free public tier rejected, the free key still exists but you have to register for it), CoinGecko status_updates is gone entirely. Replaced with a multi-proxy parallel strategy mirroring the Kalshi V5.2 approach — direct + corsproxy.io + codetabs + allorigins fired simultaneously, take the first success. If all four fail for CryptoCompare, falls back to Reddit r/CryptoCurrency JSON via corsproxy.io. If THAT fails, reads from a localStorage cache (4h max age) and shows cached news with a soft cached-N-min-ago hint instead of the alarming All sources unavailable message. The macro countdown above the news section was never broken — it pulls from a hardcoded calendar of FOMC/CPI/etc events and stays accurate regardless of news fetch state. WHAT TO DO: push V8.8.7. Vercel auto-deploys. Header should show 8.8.7. The sync pill should now be steady green during normal use, only showing yellow during genuinely sustained writes. The news ticker should populate again. STILL INTACT: V8.8.6 asset-aware dedup (BTC + ETH coexist, first-write-wins), V8.8.5 no-op SW + circuit breaker, V8.8.4 unminified + x-ray ErrorBoundary + TDZ fix. SAME OPEN GAP from V8.8.6: single-browser BTC↔ETH switching mid-window can leave the previous asset window unresolved. Multi-browser side-steps it."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -13216,11 +13308,17 @@ function TaraApp(){
               const _winMs=_capturedWindowType==='15m'?900000:300000;
               const _justClosedBucket=Math.floor(Date.now()/_winMs)*_winMs-_winMs;
               const _pwid=`${_capturedWindowType}-${new Date(_justClosedBucket).toISOString()}`;
+              // V8.8.6: tag past-window snapshot with asset so BTC + ETH at the same
+              //   window slot coexist in the past-windows pill / history. Without this,
+              //   whichever asset closed first wrote the snapshot and the second was
+              //   silently dropped.
+              const _pwAsset=currentAssetRef.current||currentAsset||'BTC';
               const _pastEntry={
                 id:Date.now(),
                 windowId:_pwid,
                 time:Date.now(),
                 windowType:_capturedWindowType,
+                asset:_pwAsset,
                 strike:_scoringStrike,
                 closingPrice:closeFromKalshi,
                 closeSource:'kalshi',
@@ -13229,7 +13327,9 @@ function TaraApp(){
               };
               const _sixtySecAgo=Date.now()-60000;
               setPastWindows(prev=>{
-                if(prev.some(e=>e&&((e.windowId&&e.windowId===_pwid)||(e.windowType===_capturedWindowType&&e.time>_sixtySecAgo))))return prev;
+                // V8.8.6: dedup check now keys on asset too — BTC's snapshot for a
+                //   window doesn't suppress ETH's snapshot for the same window.
+                if(prev.some(e=>e&&(e.asset||'BTC')===_pwAsset&&((e.windowId&&e.windowId===_pwid)||(e.windowType===_capturedWindowType&&e.time>_sixtySecAgo))))return prev;
                 return [...prev,_pastEntry].slice(-50);
               });
             }
@@ -13240,10 +13340,15 @@ function TaraApp(){
               return `${_capturedWindowType}-${new Date(_justClosedBucket).toISOString()}`;
             })();
             const _logResult=(resultStr)=>{
+              // V8.8.6: capture the asset this resolution is FOR. Without filtering by
+              //   asset, when BTC and ETH both have unresolved entries for the same
+              //   windowId (now possible after V8.8.6 dedup-key fix), the find() could
+              //   pick either one and write the wrong asset's outcome onto it.
+              const _resolveAsset=currentAssetRef.current||currentAsset||'BTC';
               setTaraCallLog(prev=>{
-                let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&e.windowId===_capturedWindowId&&e.result===null);
+                let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_resolveAsset&&e.windowId===_capturedWindowId&&e.result===null);
                 if(!idx){
-                  idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&e.result===null&&e.windowType===_capturedWindowType);
+                  idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&(e.asset||'BTC')===_resolveAsset&&e.result===null&&e.windowType===_capturedWindowType);
                 }
                 if(!idx)return prev;
                 if(idx.e.result!==null)return prev;
@@ -16804,7 +16909,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              8.8.5
+              8.8.7
             </span>
           </div>
 
@@ -18439,6 +18544,52 @@ function TaraApp(){
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V8.8.7 — Sync pill flicker + news fetch */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Sync Pill Steadied · News Fetch Restored</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8.7</span> &mdash; Sync Pill + News</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;the synced button keeps glitching to syncing and yellow color sometimes&rdquo;</em> + <em>&ldquo;news fetch unavailable, what does that mean.&rdquo;</em> Two unrelated UX bugs, both shipped together.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sync pill — counter + hysteresis</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The cloud sync state was a single global flag toggled by every <code className="text-[10px] bg-[#0E100F] px-1">cloudWrite</code> / <code className="text-[10px] bg-[#0E100F] px-1">cloudWriteDebouncedRMW</code>. With eleven sync paths writing concurrently the global state oscillated writing&rarr;ok&rarr;writing&rarr;ok multiple times per second &mdash; pill flickered green/yellow during normal use. And when path A was still in flight while path B finished, state showed ok even though A wasn&rsquo;t done (lying, not just flickering).</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-2">
+                  <li><strong style={{color:T2_GOLD}}>Active-write counter</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">_activeWrites</code> increments at write start, decrements at completion. State stays <code className="text-[10px] bg-[#0E100F] px-1">writing</code> while count&gt;0. Concurrent writes can no longer oscillate the global state.</li>
+                  <li><strong style={{color:T2_GOLD}}>750ms render hysteresis</strong> &mdash; the pill only renders SYNCING after the writing state has been continuous for 750ms. Brief writes (&lt;750ms total) never flicker. Sustained writes (initial hydration, slow round-trip) still show.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">News fetch &mdash; multi-proxy + cache</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Both prior endpoints have been deprecated/restricted since the code was written. CryptoCompare moved from a free public API to an API-key model. CoinGecko&rsquo;s <code className="text-[10px] bg-[#0E100F] px-1">status_updates</code> endpoint is gone entirely.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong style={{color:T2_GOLD}}>Multi-proxy parallel</strong> &mdash; direct + <code className="text-[10px] bg-[#0E100F] px-1">corsproxy.io</code> + <code className="text-[10px] bg-[#0E100F] px-1">codetabs</code> + <code className="text-[10px] bg-[#0E100F] px-1">allorigins</code> fired simultaneously for the CryptoCompare news endpoint. Take the first success. Mirrors the Kalshi V5.2 approach.</li>
+                  <li><strong style={{color:T2_GOLD}}>Reddit fallback</strong> &mdash; if all four CryptoCompare attempts fail, hits Reddit r/CryptoCurrency JSON via <code className="text-[10px] bg-[#0E100F] px-1">corsproxy.io</code>.</li>
+                  <li><strong style={{color:T2_GOLD}}>localStorage cache</strong> &mdash; successful fetches cached at <code className="text-[10px] bg-[#0E100F] px-1">taraNewsCache_v1</code>. If everything fresh fails but cached news is &le;4h old, show the cached items with a soft "cached (Nm ago)" hint instead of the alarming "All sources unavailable" message.</li>
+                  <li><strong>Note</strong> &mdash; the macro countdown above the news section was never broken. It pulls from a hardcoded calendar of FOMC/CPI/etc events and stays accurate independently of news fetch state.</li>
+                </ul>
+              </section>
+
+              {/* V8.8.6 — Asset-aware dedup */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>BTC + ETH Coexist · First-Write-Wins</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.8.6</span> &mdash; Asset-Aware Dedup</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;tara should only save 1 log per window from whichever browser locked first&hellip; and tara should also store ETH and BTC for the same windows at the same time, currently it only saves one or the other.&rdquo;</em> Same root cause for both. The dedup key across the call log + past-windows merge logic was <code className="text-[10px] bg-[#0E100F] px-1">windowId|windowType</code> with no asset, which (a) collapsed BTC and ETH at the same window slot to one row and (b) made the multi-browser first-write-wins race look like a single noisy race instead of two clean per-asset races.</p>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Eight changes, one shape</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong style={{color:T2_GOLD}}>Five dedup keys</strong> — <code className="text-[10px] bg-[#0E100F] px-1">loadCallLog</code> sanitize pass, <code className="text-[10px] bg-[#0E100F] px-1">_mergeCallLogEntries</code>, <code className="text-[10px] bg-[#0E100F] px-1">taraCallLog</code> cloudWatch handler, <code className="text-[10px] bg-[#0E100F] px-1">pastWindows</code> RMW merge, <code className="text-[10px] bg-[#0E100F] px-1">pastWindows</code> cloudWatch handler. All updated to <code className="text-[10px] bg-[#0E100F] px-1">asset|windowId|windowType</code>.</li>
+                  <li><strong style={{color:T2_GOLD}}>Past-window snapshot payload</strong> now carries <code className="text-[10px] bg-[#0E100F] px-1">asset</code> on creation. The <code className="text-[10px] bg-[#0E100F] px-1">setPastWindows</code> dedup OR-clause is asset-scoped so BTC&rsquo;s snapshot for a window doesn&rsquo;t suppress ETH&rsquo;s for the same window.</li>
+                  <li><strong style={{color:T2_GOLD}}>Resolution asset filter</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">_logResult</code> now captures <code className="text-[10px] bg-[#0E100F] px-1">currentAssetRef.current</code> at the moment of resolution and filters its <code className="text-[10px] bg-[#0E100F] px-1">find()</code> calls by asset. Without this, when BTC and ETH both have unresolved entries for the same windowId (now possible) the find could pick either one and write the wrong outcome onto it.</li>
+                </ul>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">First-write-wins lives in <code className="text-[10px] bg-[#0E100F] px-1">_shouldReplace</code></div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">No new logic needed for that part &mdash; <code className="text-[10px] bg-[#0E100F] px-1">_shouldReplace</code> already does it (resolved beats unresolved, then lower <code className="text-[10px] bg-[#0E100F] px-1">id</code> beats higher). The dedup-key fix is what lets it work correctly per-asset. Two browsers locking BTC at 14:00:01.0 and 14:00:01.3 still converge to the earlier id; the same race for ETH runs in parallel and converges independently.</p>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Known gap</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">In a single browser switching between BTC and ETH mid-window, the previous asset&rsquo;s window can fail to resolve because the resolution code path is scoped to the active asset. Multi-browser side-steps this. Single-browser switching is a separate refactor &mdash; would need a per-asset resolution scheduler that fires regardless of which view is active. Logged for later.</p>
+              </section>
 
               {/* V8.8.5 — Reload-loop circuit breaker + no-op SW */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
