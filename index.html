@@ -1,45 +1,25 @@
-<!--
-  V8.8 — INLINE SW KILL SCRIPT
-  
-  Add this <script> tag inside the <head> of your public/index.html, BEFORE any
-  other script tags. It runs synchronously at page load, before any bundled JS,
-  and unregisters any stale service worker that might be serving cached old code.
-  
-  This is the ROOT FIX for the "Cannot access 'ee' before initialization" crash.
-  After deploying this once, future deploys won't have the stale-cache problem.
-  
-  Once this is in place and you've reloaded once, you can leave it there
-  permanently — it's harmless when there's nothing to unregister.
--->
-
-<script>
-  (function() {
-    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-    
-    // Aggressively unregister any service worker on EVERY page load, then clear
-    // all caches. This guarantees no stale bundle ever gets served from cache.
-    navigator.serviceWorker.getRegistrations().then(function(regs) {
-      var killed = false;
-      regs.forEach(function(r) {
-        try { r.unregister(); killed = true; } catch (e) {}
-      });
-      
-      if ('caches' in window) {
-        caches.keys().then(function(keys) {
-          keys.forEach(function(k) {
-            try { caches.delete(k); } catch (e) {}
-          });
-          
-          // If we found and killed a registration, reload ONCE to fetch fresh assets.
-          // Use sessionStorage to prevent reload loops.
-          if (killed && !sessionStorage.getItem('_taraSwKilled')) {
-            sessionStorage.setItem('_taraSwKilled', '1');
-            window.location.reload();
-          } else if (!killed) {
-            sessionStorage.removeItem('_taraSwKilled');
-          }
-        }).catch(function() {});
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0E100F" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Tara 5.5.5</title>
+    <link rel="manifest" href="/manifest.json" />
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
       }
-    }).catch(function() {});
-  })();
-</script>
+    </script>
+  </body>
+</html>
