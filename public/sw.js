@@ -1,47 +1,41 @@
-// Tara V8.8 — KILL SWITCH SERVICE WORKER
-// This service worker exists ONLY to unregister itself and clear all caches.
-// Replaces any prior caching service worker that may be serving stale code.
-// After this runs once, the page reloads and fetches everything fresh from the server.
+// Tara V8.8.5 — TRUE NO-OP SERVICE WORKER (replaces V8.8 kill switch)
+// 
+// The previous "kill switch" SW called `client.navigate(client.url)` in its
+// activate handler to force-reload tabs after unregistering itself. That ONE
+// line was the reload-spasm trigger: every time the browser checked for SW
+// updates on navigation (which it does automatically on every page load
+// within scope), this activate handler could fire and trigger another reload,
+// which triggered another update check, which fired another activate, etc.
+//
+// V8.8.5 strips the SW down to: install → skipWaiting → activate → clear
+// caches → unregister self → done. No claim, no navigate, no fetch handler.
+// Browser handles all requests natively. Future page loads see no SW
+// controlling them. No reloads. No spasms.
+//
+// Once this version of sw.js is fetched once, the user's browser will install
+// it, run activate, unregister it, and that's the last sw.js the user ever
+// has. Subsequent deploys keep this no-op file in place so any user who
+// returns with a stale registered SW gets the same auto-unregister behavior.
 
 self.addEventListener('install', (event) => {
-  // Skip the "waiting" phase — activate immediately
+  // Activate immediately; we have nothing to install.
   event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    // 1. Clear all caches
+    // Clear any caches left behind by older Tara service workers.
     try {
-      const cacheNames = await caches.keys();
-      await Promise.all(cacheNames.map((name) => caches.delete(name)));
-    } catch (e) { /* ignore */ }
-    
-    // 2. Take control of all open clients (tabs)
-    try {
-      await self.clients.claim();
-    } catch (e) { /* ignore */ }
-    
-    // 3. Unregister this service worker
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k).catch(() => {})));
+    } catch (_) { /* ignore */ }
+    // Unregister ourselves silently. No claim(), no navigate(). The current
+    // page keeps running with whatever it has; the next navigation goes
+    // straight to the network with no SW in the picture.
     try {
       await self.registration.unregister();
-    } catch (e) { /* ignore */ }
-    
-    // 4. Force-reload all controlled clients with fresh code
-    try {
-      const allClients = await self.clients.matchAll({ type: 'window' });
-      for (const client of allClients) {
-        try {
-          if ('navigate' in client) {
-            client.navigate(client.url);
-          }
-        } catch (e) { /* ignore */ }
-      }
-    } catch (e) { /* ignore */ }
+    } catch (_) { /* ignore */ }
   })());
 });
 
-// 5. Pass-through fetch — never serve from cache, always go to network
-self.addEventListener('fetch', (event) => {
-  // Don't intercept; let the browser handle natively from network
-  return;
-});
+// Intentionally NO fetch handler. The browser handles all requests natively.
