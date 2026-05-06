@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v8.9.1-follow-tara-button';
+const BASELINE_VERSION='2026.05.06-v8.9.2-no-sit-outs-only-cautions';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -5170,13 +5170,41 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     //   stays committed for the window — never flips back to WATCHING/SIT_OUT/different
     //   direction. User spec: 'once she says down up or sitout she sticks to it no
     //   matter what'. All display values read from snap when present.
-    const snap=tc.snapshot;
+    // V8.9.2: User mandate — Tara always picks a direction every round. NO_TRADE
+    //   and SIT_OUT snapshots (legacy or cloud-synced from older versions) are
+    //   normalized here at read-time: promote to direction with caution, never
+    //   show ⊘ NO TRADE or SITTING OUT label. Live snapshot creation is also
+    //   directional now (V8.9.2 engine change) — this is defensive cleanup so
+    //   no path can leak the old labels.
+    const _normalizeLegacySnap=(_snap)=>{
+      if(!_snap)return _snap;
+      const _legacyNoGo=_snap.call==='NO_TRADE'||_snap.isNoGo===true;
+      const _legacySitOut=_snap.call==='SIT_OUT';
+      if(!_legacyNoGo&&!_legacySitOut)return _snap;
+      const _impliedDir=_snap.direction||(_snap.atPosterior!=null?(_snap.atPosterior>=50?'UP':'DOWN'):null);
+      if(!_impliedDir)return _snap; // can't promote, leave as-is (TaraCallCard SCANNING fallback)
+      const _post=typeof _snap.atPosterior==='number'?_snap.atPosterior:50;
+      const _conf=_impliedDir==='UP'?Math.max(50,Math.round(_post)):Math.max(50,Math.round(100-_post));
+      return{
+        ..._snap,
+        call:_impliedDir,
+        direction:_impliedDir,
+        confidence:_conf,
+        caution:_snap.caution||_snap.reason||(_legacyNoGo?'No-trade conditions present':'Sit-out conditions present'),
+        isNoGo:false,
+        wasOverriddenNoTrade:_legacyNoGo,
+        wasOverriddenSitOut:_legacySitOut,
+        locked:true,
+      };
+    };
+    const snap=_normalizeLegacySnap(tc.snapshot);
     const isCommittedSnap=snap!==null;
-    // V7.9: NO_TRADE is its own class — explicit no-go (negative edge, data unavailable,
-    //   late coin-flip). Distinguished from a normal lock so UI can show NO TRADE chip.
-    const isNoGoSnap=snap&&(snap.call==='NO_TRADE'||snap.isNoGo===true);
+    // V8.9.2: isNoGoSnap and isSatOutSnap are now structurally false thanks to
+    //   _normalizeLegacySnap. Kept as variables to avoid touching the many
+    //   ternary branches below — they just always evaluate to false now.
+    const isNoGoSnap=false;
     const isLockedSnap=snap&&snap.call!=='SIT_OUT'&&!isNoGoSnap;
-    const isSatOutSnap=snap&&snap.call==='SIT_OUT';
+    const isSatOutSnap=false;
     // V5.6.5: USER-VISIBLE STATES.
     //   No snapshot yet     → SCANNING (no direction, no UP/DOWN reveal)
     //   Snapshot LOCKED UP  → LOCKED UP
@@ -5389,13 +5417,25 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
         {/* V7.8: CAUTION BADGE for low-confidence commits. When Tara had to commit (1-2min
              cap, no high-conviction signal) and confidence is below the firm threshold,
              surface a clear caution chip so user knows the call is provisional. */}
-        {isLockedSnap&&snap?.caution&&(
-          <div className="mb-2 px-2.5 py-1.5 rounded-md flex items-baseline gap-2" style={{background:'rgba(229,200,112,0.10)',border:'1px solid rgba(229,200,112,0.28)'}}>
-            <span className="text-[10px]" style={{color:T2_GOLD}}>⚠</span>
-            <span className="text-[10px] uppercase tracking-[0.14em] font-bold" style={{color:T2_GOLD}}>Caution</span>
-            <span className="text-[11px] text-[#E8E9E4]/85 leading-snug">{snap.caution}</span>
-          </div>
-        )}
+        {isLockedSnap&&snap?.caution&&(()=>{
+          // V8.9.2: stronger styling when this is an override caution (would have
+          //   been NO_TRADE or sit-out before V8.9.2). Normal V7.8 cautions stay
+          //   gold; override cautions go rose so the user sees the elevated risk.
+          const _isOverride=snap.wasOverriddenNoTrade||snap.wasOverriddenSitOut;
+          const _color=_isOverride?'rgba(244,114,182,0.95)':T2_GOLD;
+          const _bg=_isOverride?'rgba(244,114,182,0.10)':'rgba(229,200,112,0.10)';
+          const _border=_isOverride?'rgba(244,114,182,0.35)':'rgba(229,200,112,0.28)';
+          const _label=snap.wasOverriddenNoTrade?'No-Trade Override'
+            :snap.wasOverriddenSitOut?'Sit-Out Override'
+            :'Caution';
+          return(
+            <div className="mb-2 px-2.5 py-1.5 rounded-md flex items-baseline gap-2" style={{background:_bg,border:'1px solid '+_border}}>
+              <span className="text-[10px]" style={{color:_color}}>⚠</span>
+              <span className="text-[10px] uppercase tracking-[0.14em] font-bold" style={{color:_color}}>{_label}</span>
+              <span className="text-[11px] text-[#E8E9E4]/85 leading-snug">{snap.caution}</span>
+            </div>
+          );
+        })()}
         {/* V6.2.8: When sitting out, show what direction Tara would have leaned if forced.
              Lets the user see her implicit read even when she's not committing. Helps them
              make their own manual call when they have an external read that disagrees with
@@ -8312,7 +8352,7 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
             const callColor=tc.call==='UP'?'text-emerald-300':tc.call==='DOWN'?'text-rose-300':'text-amber-300/85';
             const borderClr=tc.call==='UP'?'rgba(52,211,153,0.4)':tc.call==='DOWN'?'rgba(244,114,182,0.4)':T2_GOLD_BORDER;
             const bgClr=tc.call==='UP'?'rgba(52,211,153,0.06)':tc.call==='DOWN'?'rgba(244,114,182,0.06)':'rgba(229,200,112,0.04)';
-            const callLabel=tc.call==='SIT_OUT'?'SITTING OUT':tc.call;
+            const callLabel=tc.call==='SIT_OUT'?'SCANNING':tc.call; // V8.9.2: legacy SIT_OUT path → show as SCANNING (pre-decision)
             const arrow=tc.call==='UP'?'▲':tc.call==='DOWN'?'▼':'—';
             return(
               <section className="px-4 py-3 rounded-lg" style={{background:bgClr,border:'1px solid '+borderClr}}>
@@ -12123,7 +12163,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.9.1 online — follow-Tara button + advisor unlocked. User: when locked Tara has a call but unless I tap ENTERED UP/DOWN myself, the advisor doesn't kick in for in-trade management. Now: a one-tap Got in on Tara's UP/DOWN call button appears directly on the call card the moment Tara locks. Color matches direction (green for UP, rose for DOWN), prominent placement right under her reasoning. Tap once - userPosition is set to match her call, positionEntry captures current price, and computeAdvisor's full in-trade management logic activates: hold suggestions, exit triggers, target adjustments, edge-vs-Kalshi cross-references, conviction asymmetry warnings, all the live management surface. Once you're following, the button replaces with a small ✓ Following Tara · tap to exit status badge. Hidden if you've already entered the OPPOSITE direction (you made a different choice, don't override it). Threaded through both the mobile TaraCallCard and the desktop one inside ProjectionsCard. Same handleManualSync function the existing ENTERED UP/DOWN buttons use - so behavior is identical to manually tapping ENTERED in the right direction. Includes anti-tilt cooldown gate, Discord broadcast, all the existing safeguards. STILL INTACT: V8.9.0 smart money detectors (PIN/FADE/DIV/ABSORB pills), V8.8.9 spike alert aggressive multi-window + sound + system notify, V8.8.7 sync pill steady + news multi-proxy, V8.8.6 asset-aware dedup, V8.8.5 no-op SW + circuit breaker. SAME OPEN GAP: single-browser BTC<>ETH switching mid-window can leave the previous asset window unresolved."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.9.2 online — no more sit outs, every round a directional call. User: completely remove the NO TRADE display, give Tara's call every round, surface the original sit-out reasoning as a cautionary advice. ENGINE CHANGE: the NO_TRADE snapshot path (line 16146 area, V7.9 explicit no-go for negative edge / data unavailable / late coin-flip) used to commit a snapshot with call NO_TRADE and isNoGo true. Now it commits with call equal to the implied direction (UP or DOWN that was already computed before the no-go gate fired), surfaces the original no-go reason as the caution field, sets wasOverriddenNoTrade true for analytics. The lock is real - locked true, confidence is the actual conviction level. Tier still tags the override category for stats so we can track these. DISPLAY CHANGES: TaraCallCard now defensively normalizes any legacy SIT_OUT or NO_TRADE snapshot at read time via _normalizeLegacySnap helper - even if a stale snapshot syncs from the cloud or comes from an old browser, it gets promoted to the implied direction with the reason as caution. The ⊘ symbol, NO TRADE label, and SITTING OUT label paths all become structurally unreachable. Caution badge stays gold for normal V7.8 low-conviction commits but goes ROSE with No-Trade Override or Sit-Out Override label when the underlying snapshot would have been a sit-out / no-trade pre-V8.9.2. BrainView label cleanup too - SIT_OUT now displays as SCANNING (pre-decision state) since that's what it actually represents. WHAT THIS UNLOCKS: every window now produces a directional call you can take. The smart money pills (V8.9.0) plus the rose-tinted caution badge tell you when Tara would have skipped, but the call is yours to make. The Got in on Tara's call button (V8.9.1) works on every commit including overrides - advisor goes live for every trade. WR EXPECTATION: this will trade more aggressively than the gated version. Recent 153-trade analysis showed Fix-A-and-B gates would have boosted WR from 64% to 70% by skipping certain patterns. Those skips are now cautions instead of skips. If you respect the rose cautions and skip them manually, you keep the WR gain; if you take them, your WR drops back toward 64%. Your call. STILL INTACT: V8.9.1 follow-Tara button, V8.9.0 smart money detectors, V8.8.9 spike alert, V8.8.7 sync pill steady + news multi-proxy, V8.8.6 asset-aware dedup, V8.8.5 no-op SW + circuit breaker. SAME OPEN GAP: single-browser BTC-ETH switching mid-window."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -16144,18 +16184,24 @@ function TaraApp(){
       }
       // Snapshot the no-go if any fired
       if(_noGoReason){
+        // V8.9.2: REMOVED no-trade gating. User mandate: every round Tara picks a
+        //   direction; the original no-go reason becomes a CAUTION badge so the user
+        //   knows to be skeptical, but they get the call. The directional read
+        //   (_commitDir) was already computed before this gate; just commit it.
         const _ngSnap={
-          call:'NO_TRADE',direction:_commitDir,confidence:_commitConf,
-          isNoGo:true,
-          noGoCategory:_noGoTier,
-          reason:_noGoReason,
+          call:_commitDir,direction:_commitDir,
+          confidence:_commitConf,
+          caution:_noGoReason,           // V8.9.2: surfaced as caution badge in TaraCallCard
+          wasOverriddenNoTrade:true,     // V8.9.2: flag for analytics — would have been NO_TRADE
+          noGoCategory:_noGoTier,        // preserved for stats/analysis
+          reason:`${_commitDir} ${_commitConf}% — ⚠ ${_noGoReason}`,
           atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
           atPosterior:_post,
           kalshiAtLock:_kPctNow,
-          locked:false,earlyLock:false,
+          locked:true,earlyLock:false,   // V8.9.2: locked=true now (was false), since we commit
           isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
           samples:0,needSamples:0,
-          tier:_noGoTier,
+          tier:_noGoTier,                // tier still tags the override category
           session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
           regime:analysis?.regime||'',
           qScore:Math.round(_qFast),
@@ -17514,7 +17560,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              8.9.1
+              8.9.2
             </span>
           </div>
 
@@ -19152,6 +19198,29 @@ function TaraApp(){
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V8.9.2 — No more sit-outs */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Every Round a Call · Sit-Outs &rarr; Cautions</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.9.2</span> &mdash; No More Sit-Outs</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;completely remove the &lsquo;NO TRADE&rsquo; display. I want Tara&rsquo;s call every round. But give me a cautionary advice if needed to no-trade or sit out.&rdquo;</em></p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Engine</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The V7.9 NO_TRADE snapshot path used to commit a snapshot with <code className="text-[10px] bg-[#0E100F] px-1">call:&apos;NO_TRADE&apos;</code> and <code className="text-[10px] bg-[#0E100F] px-1">isNoGo:true</code>. Now it commits the directional read that was already computed before the gate fired (the <code className="text-[10px] bg-[#0E100F] px-1">_commitDir</code>), surfaces the original no-go reason as the <code className="text-[10px] bg-[#0E100F] px-1">caution</code> field, and sets <code className="text-[10px] bg-[#0E100F] px-1">wasOverriddenNoTrade:true</code> for analytics. <code className="text-[10px] bg-[#0E100F] px-1">locked:true</code> now &mdash; this is a real lock that the &ldquo;Got in on Tara&rsquo;s call&rdquo; button (V8.9.1) can act on.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Display</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li>TaraCallCard normalizes legacy snapshots at read time via <code className="text-[10px] bg-[#0E100F] px-1">_normalizeLegacySnap</code>. Even cloud-synced snapshots from older versions get promoted to direction-with-caution.</li>
+                  <li>The <code className="text-[10px] bg-[#0E100F] px-1">isNoGoSnap</code> and <code className="text-[10px] bg-[#0E100F] px-1">isSatOutSnap</code> branches are structurally unreachable now &mdash; the &oslash; symbol, NO TRADE label, and SITTING OUT label cannot render.</li>
+                  <li>Caution badge stays <strong style={{color:T2_GOLD}}>gold</strong> for normal V7.8 low-conviction commits, goes <strong style={{color:'rgba(244,114,182,0.95)'}}>rose</strong> with <em>No-Trade Override</em> / <em>Sit-Out Override</em> label when the underlying snapshot would have been suppressed pre-V8.9.2.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">WR expectation</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Recent 153-trade analysis showed gates A and B (Kalshi-disagree + structural-led-in-trend) would lift WR from 64% to 70%. Those gates are now <em>cautions</em>, not skips. If you respect the rose cautions and skip those manually, you keep the WR gain. If you take everything Tara calls, WR drifts back toward 64%. Tara hands you the directional read and the warning &mdash; the decision is yours.</p>
+              </section>
 
               {/* V8.9.1 — Follow-Tara button */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
