@@ -2,106 +2,24 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#111312" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0E100F" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Tara</title>
-    <script>
-      // V8.8.5 RELOAD-LOOP CIRCUIT BREAKER + background SW cleanup.
-      // Vite parses the raw text of inline scripts as HTML when injecting
-      // bundle preloads, so this script intentionally contains no literal
-      // HTML tag markers anywhere -- including comments. All tag characters
-      // in the recovery UI come from the LT/GT escape vars below.
-      (function() {
-        try {
-          var KEY = '_taraReloadGuard_v885';
-          var raw = sessionStorage.getItem(KEY);
-          var data = null;
-          try { data = raw ? JSON.parse(raw) : null; } catch (_) { data = null; }
-          var now = Date.now();
-          if (!data || (now - (data.firstAt || 0)) > 30000) {
-            data = { firstAt: now, count: 1 };
-          } else {
-            data.count = (data.count || 0) + 1;
-          }
-          sessionStorage.setItem(KEY, JSON.stringify(data));
-
-          if (data.count > 3) {
-            try { if (window.stop) window.stop(); } catch (_) {}
-            var LT = '\u003C';
-            var GT = '\u003E';
-            var html =
-              LT + 'title' + GT + 'Tara — Reload Loop Halted' + LT + '/title' + GT +
-              LT + 'meta charset="UTF-8"/' + GT +
-              LT + 'meta name="viewport" content="width=device-width,initial-scale=1.0"/' + GT +
-              LT + 'style' + GT +
-                'html,body{background:#111312;color:#E8E9E4;margin:0;padding:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;min-height:100vh}' +
-                '.t885-wrap{padding:32px;min-height:100vh;display:flex;align-items:center;justify-content:center}' +
-                '.t885-card{max-width:560px}' +
-                '.t885-h{color:#E5C870;font-size:18px;margin:0 0 16px 0;font-weight:bold;letter-spacing:0.18em;text-transform:uppercase}' +
-                '.t885-p{color:rgba(232,233,228,0.8);margin:0 0 16px 0;line-height:1.6;font-size:13px}' +
-                '.t885-pf{color:rgba(232,233,228,0.4);margin:16px 0 0 0;font-size:11px}' +
-                '.t885-btn{background:#10b981;color:white;border:none;padding:12px 20px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px}' +
-                '.t885-btn:hover{background:#059669}' +
-              LT + '/style' + GT +
-              LT + 'div class="t885-wrap"' + GT + LT + 'div class="t885-card"' + GT +
-                LT + 'h1 class="t885-h"' + GT + 'Tara — Reload Loop Halted' + LT + '/h1' + GT +
-                LT + 'p class="t885-p"' + GT + 'The page was reloading itself in a loop. Tara V8.8.5 caught it and stopped on the 4th reload. Almost certainly a stale service worker from an earlier Tara version. Click below to clear browser state for tara11.vercel.app and reload once — this is a one-shot fix.' + LT + '/p' + GT +
-                LT + 'button id="_t885nuke" class="t885-btn"' + GT + 'Clear all browser state &amp; reload once' + LT + '/button' + GT +
-                LT + 'p class="t885-pf"' + GT + 'Trade history, weights, and learning live in Firestore — they will repopulate after reload. This only clears local browser state.' + LT + '/p' + GT +
-              LT + '/div' + GT + LT + '/div' + GT;
-
-            document.documentElement.innerHTML = html;
-
-            var btn = document.getElementById('_t885nuke');
-            if (btn) {
-              btn.addEventListener('click', function() {
-                (async function() {
-                  try {
-                    if ('serviceWorker' in navigator) {
-                      var regs = await navigator.serviceWorker.getRegistrations();
-                      await Promise.all(regs.map(function(r) { return r.unregister().catch(function() {}); }));
-                    }
-                  } catch (_) {}
-                  try {
-                    if ('caches' in window) {
-                      var keys = await caches.keys();
-                      await Promise.all(keys.map(function(k) { return caches.delete(k).catch(function() {}); }));
-                    }
-                  } catch (_) {}
-                  try { localStorage.clear(); } catch (_) {}
-                  try { sessionStorage.clear(); } catch (_) {}
-                  window.location.replace(window.location.pathname);
-                })();
-              });
-            }
-            throw new Error('Tara reload loop halted by circuit breaker');
-          }
-        } catch (e) {
-          if (e && e.message && e.message.indexOf('reload loop halted') !== -1) throw e;
-        }
-      })();
-
-      // Background SW + cache cleanup (no reload).
-      (function() {
-        if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-        navigator.serviceWorker.getRegistrations().then(function(regs) {
-          regs.forEach(function(r) {
-            try { r.unregister(); } catch (e) {}
-          });
-          if ('caches' in window) {
-            caches.keys().then(function(keys) {
-              keys.forEach(function(k) {
-                try { caches.delete(k); } catch (e) {}
-              });
-            }).catch(function() {});
-          }
-        }).catch(function() {});
-      })();
-    </script>
+    <link rel="manifest" href="/manifest.json" />
+    <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
   </body>
 </html>
