@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v8.8.9-spike-alert-aggressive';
+const BASELINE_VERSION='2026.05.06-v8.9.1-follow-tara-button';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -5160,7 +5160,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   );
 }
 
-function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday}){
+function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition}){
   if(!taraCall)return null;
     const tc=taraCall;
     const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
@@ -5351,6 +5351,41 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           </div>
         </div>
         <div className="text-[11px] text-[#E8E9E4]/65 leading-snug mb-2">{dispReason||'Awaiting signal data...'}</div>
+        {/* V8.9.1: Follow-Tara button — one-tap copy of Tara's locked direction
+             into the user's position. When tapped, sets userPosition = snap.call so
+             the advisor's full in-trade management logic kicks in (hold suggestions,
+             exit triggers, target adjustments). When already following, shows a
+             status badge that doubles as an exit toggle. Hidden when user has
+             explicitly entered the OPPOSITE direction (they've made a different
+             choice). */}
+        {isLockedSnap&&typeof handleManualSync==='function'&&(
+          userPosition===null
+            ?React.createElement('button',{
+                onClick:()=>handleManualSync(snap.call),
+                className:'w-full mb-2 py-2 px-3 rounded-md text-[11px] uppercase tracking-[0.18em] font-bold transition-all',
+                style:{
+                  background:snap.call==='UP'?'rgba(110,231,183,0.10)':'rgba(244,114,182,0.10)',
+                  border:`1px solid ${snap.call==='UP'?'rgba(110,231,183,0.40)':'rgba(244,114,182,0.40)'}`,
+                  color:snap.call==='UP'?'rgba(110,231,183,0.95)':'rgba(244,114,182,0.95)',
+                  boxShadow:`0 0 12px ${snap.call==='UP'?'rgba(110,231,183,0.20)':'rgba(244,114,182,0.20)'}`,
+                },
+              },`Got in on Tara's ${snap.call} call`)
+            :userPosition===snap.call
+              ?React.createElement('button',{
+                  onClick:()=>handleManualSync(snap.call), // toggles off
+                  className:'w-full mb-2 py-1.5 px-3 rounded-md text-[10px] uppercase tracking-[0.18em] font-bold transition-all flex items-center justify-between',
+                  style:{
+                    background:'rgba(110,231,183,0.06)',
+                    border:'1px solid rgba(110,231,183,0.25)',
+                    color:'rgba(110,231,183,0.85)',
+                  },
+                  title:'Tap to mark as exited',
+                },
+                  React.createElement('span',null,'✓ Following Tara'),
+                  React.createElement('span',{style:{color:'rgba(232,233,228,0.40)',fontSize:'9px'}},'tap to exit'),
+                )
+              :null  /* userPosition is set but doesn't match Tara — user chose differently, hide */
+        )}
         {/* V7.8: CAUTION BADGE for low-confidence commits. When Tara had to commit (1-2min
              cap, no high-conviction signal) and confidence is below the firm threshold,
              surface a clear caution chip so user knows the call is provisional. */}
@@ -8004,7 +8039,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,onEditEntry,initialFi
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -8022,7 +8057,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
           V6.2.3: hidden lg:block (was md:block). */}
-      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} className="hidden lg:block"/>
+      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} className="hidden lg:block"/>
 
       <div className="flex items-center justify-between mb-3 shrink-0">
         <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
@@ -10105,6 +10140,276 @@ function SpikeAlertHookHost(props){
   return React.createElement(SpikeAlertOverlay,hookResult);
 }
 
+// ── V8.9.0: SMART-MONEY DETECTORS ─────────────────────────────────────────
+// Four detectors that flag when "smart money" patterns appear in the live tape,
+//   helping the user align with informed flow rather than retail chase. None of
+//   these are silver bullets — they're context cues that improve sit-out
+//   discipline (skip trades where you're clearly the bagholder).
+//
+//   1. STRIKE PINNING — last 3min, price within 0.5×ATR of strike, multiple
+//      crossings = position defenders pinning the strike. Bet WITH dominant side.
+//   2. RETAIL CROWD FADE — >70% of last-60s prints are <$5K, all same direction
+//      = retail chasing. Suggest fading.
+//   3. KALSHI-SPOT DIVERGENCE — Kalshi YES moves >5¢ in 30s while spot is flat,
+//      OR Kalshi and spot move opposite directions = positioning play / squeeze.
+//      Lower trust in Kalshi confluence when active.
+//   4. ORDER BOOK ABSORPTION — heavy one-sided tape flow but price doesn't move
+//      = someone defending. Align with the absorber's direction.
+function useSmartMoneyDetectors({
+  tickHistoryRef,    // spot price ticks {p, time}
+  tradeTicksRef,     // per-trade tape from useGlobalTape {p, s, usd, t, src, time}
+  kalshiHistoryRef,  // Kalshi YES price history {yes, time} — fed by TaraApp
+  currentPrice,
+  targetMargin,
+  atrBps,
+  clockSeconds,
+}){
+  const[signals,setSignals]=React.useState({
+    pinning:{detected:false,side:null,score:0,reason:''},
+    retailCrowd:{detected:false,side:null,score:0,reason:''},
+    kalshiSpot:{detected:false,side:null,score:0,reason:''},
+    absorption:{detected:false,side:null,score:0,reason:''},
+  });
+  // Ref to current values so the polling interval reads fresh data without
+  //   tearing down + recreating on every render.
+  const _refs=React.useRef({});
+  _refs.current={tickHistoryRef,tradeTicksRef,kalshiHistoryRef,currentPrice,targetMargin,atrBps,clockSeconds};
+  React.useEffect(()=>{
+    const iv=setInterval(()=>{
+      const r=_refs.current;
+      const now=Date.now();
+      // ═══════ #1 STRIKE PINNING ═══════
+      let pinning={detected:false,side:null,score:0,reason:''};
+      if(r.clockSeconds!=null&&r.clockSeconds<=180&&r.clockSeconds>=0&&r.currentPrice>0&&r.targetMargin>0&&r.atrBps>0){
+        const distBps=Math.abs((r.currentPrice-r.targetMargin)/r.targetMargin)*10000;
+        const halfAtr=Math.max(r.atrBps*0.5,25);
+        if(distBps<=halfAtr){
+          // Count strike crossings in last 60s + dominant side (above/below)
+          const ticks=(r.tickHistoryRef?.current||[]).filter(t=>t&&t.p&&t.time>now-60000);
+          let crossings=0;let lastSide=null;
+          let aboveCount=0,belowCount=0;
+          ticks.forEach(t=>{
+            const above=t.p>r.targetMargin;
+            const side=above?'A':'B';
+            if(lastSide&&side!==lastSide)crossings++;
+            lastSide=side;
+            if(above)aboveCount++;else belowCount++;
+          });
+          const dominantSide=aboveCount>belowCount?'UP':'DOWN';
+          if(crossings>=2){
+            pinning={
+              detected:true,
+              side:dominantSide,
+              score:Math.min(100,55+crossings*7+Math.max(0,180-r.clockSeconds)*0.15),
+              reason:`Pinning at ${r.targetMargin.toFixed(0)} — ${crossings} crossings/60s, ${dominantSide} dominant (${distBps.toFixed(0)}bps from strike)`,
+            };
+          }else if(distBps<=halfAtr*0.4){
+            // Tight to strike, low movement — early pin forming
+            pinning={
+              detected:true,
+              side:dominantSide,
+              score:42,
+              reason:`Tight to strike (${distBps.toFixed(0)}bps), early pin forming`,
+            };
+          }
+        }
+      }
+      // ═══════ #2 RETAIL CROWD FADE ═══════
+      let retailCrowd={detected:false,side:null,score:0,reason:''};
+      const tapeTicks=(r.tradeTicksRef?.current||[]).filter(t=>t&&t.time>now-60000);
+      if(tapeTicks.length>=30){
+        let smallBuyUSD=0,smallSellUSD=0,smallCount=0;
+        tapeTicks.forEach(t=>{
+          const usd=t.usd||(t.s*t.p)||0;
+          if(usd<5000){
+            smallCount++;
+            if(t.t==='B')smallBuyUSD+=usd;else smallSellUSD+=usd;
+          }
+        });
+        const smallPct=smallCount/tapeTicks.length;
+        const smallTotal=smallBuyUSD+smallSellUSD;
+        if(smallPct>=0.7&&smallTotal>0){
+          const smallBuyShare=smallBuyUSD/smallTotal;
+          if(smallBuyShare>=0.7){
+            retailCrowd={
+              detected:true,
+              side:'DOWN', // Fade direction
+              score:Math.min(100,smallPct*70+smallBuyShare*40),
+              reason:`Retail buying chase — ${(smallPct*100).toFixed(0)}% prints <$5K, ${(smallBuyShare*100).toFixed(0)}% buys. Fade signal: DOWN`,
+            };
+          }else if(smallBuyShare<=0.3){
+            retailCrowd={
+              detected:true,
+              side:'UP', // Fade direction
+              score:Math.min(100,smallPct*70+(1-smallBuyShare)*40),
+              reason:`Retail selling chase — ${(smallPct*100).toFixed(0)}% prints <$5K, ${((1-smallBuyShare)*100).toFixed(0)}% sells. Fade signal: UP`,
+            };
+          }
+        }
+      }
+      // ═══════ #3 KALSHI-SPOT DIVERGENCE ═══════
+      let kalshiSpot={detected:false,side:null,score:0,reason:''};
+      const kalshiHist=(r.kalshiHistoryRef?.current||[]).filter(k=>k&&k.time>now-30000);
+      if(kalshiHist.length>=3&&r.currentPrice>0){
+        const kAlpha=kalshiHist[0].yes;
+        const kOmega=kalshiHist[kalshiHist.length-1].yes;
+        const kalshiDelta=kOmega-kAlpha; // cents
+        const spotTicks=(r.tickHistoryRef?.current||[]).filter(t=>t&&t.p&&t.time>now-30000);
+        if(spotTicks.length>=3){
+          const sAlpha=spotTicks[0].p;
+          const sOmega=spotTicks[spotTicks.length-1].p;
+          const spotDeltaBps=((sOmega-sAlpha)/sAlpha)*10000;
+          const absKalshi=Math.abs(kalshiDelta);
+          const absSpot=Math.abs(spotDeltaBps);
+          if(absKalshi>=5&&absSpot<10){
+            // Kalshi moving without spot — positioning play
+            kalshiSpot={
+              detected:true,
+              side:kalshiDelta>0?'UP':'DOWN',
+              score:Math.min(100,40+absKalshi*4),
+              reason:`Kalshi ${kalshiDelta>0?'+':''}${kalshiDelta.toFixed(1)}¢ in 30s, spot flat (${spotDeltaBps.toFixed(0)}bps) — info or squeeze attempt`,
+            };
+          }else if(absKalshi>=5&&absSpot>=10&&Math.sign(kalshiDelta)!==Math.sign(spotDeltaBps)){
+            // Opposite directions — Kalshi disagrees with spot
+            kalshiSpot={
+              detected:true,
+              side:spotDeltaBps>0?'UP':'DOWN', // trust spot direction
+              score:Math.min(100,55+absKalshi*2+absSpot*0.8),
+              reason:`Kalshi ${kalshiDelta>0?'+':''}${kalshiDelta.toFixed(1)}¢ but spot ${spotDeltaBps>0?'+':''}${spotDeltaBps.toFixed(0)}bps — mistrust Kalshi, follow spot`,
+            };
+          }
+        }
+      }
+      // ═══════ #4 ORDER BOOK ABSORPTION ═══════
+      let absorption={detected:false,side:null,score:0,reason:''};
+      const absTape=(r.tradeTicksRef?.current||[]).filter(t=>t&&t.time>now-30000);
+      const absPrice=(r.tickHistoryRef?.current||[]).filter(t=>t&&t.p&&t.time>now-30000);
+      if(absTape.length>=20&&absPrice.length>=5){
+        let buyUSD=0,sellUSD=0;
+        absTape.forEach(t=>{
+          const u=t.usd||(t.s*t.p)||0;
+          if(t.t==='B')buyUSD+=u;else sellUSD+=u;
+        });
+        const sAlpha=absPrice[0].p;
+        const sOmega=absPrice[absPrice.length-1].p;
+        const priceDeltaBps=((sOmega-sAlpha)/sAlpha)*10000;
+        // Heavy sell flow but price flat/up = bids absorbed by buyer (defender = buyer)
+        if(sellUSD>=750000&&sellUSD>buyUSD*1.5&&priceDeltaBps>=-5){
+          absorption={
+            detected:true,
+            side:'UP',
+            score:Math.min(100,40+Math.log10(Math.max(1,sellUSD/100000))*22),
+            reason:`$${(sellUSD/1e6).toFixed(2)}M sells absorbed in 30s, price held — buyer defending. Align: UP`,
+          };
+        }
+        // Heavy buy flow but price flat/down = asks absorbed by seller (defender = seller)
+        else if(buyUSD>=750000&&buyUSD>sellUSD*1.5&&priceDeltaBps<=5){
+          absorption={
+            detected:true,
+            side:'DOWN',
+            score:Math.min(100,40+Math.log10(Math.max(1,buyUSD/100000))*22),
+            reason:`$${(buyUSD/1e6).toFixed(2)}M buys absorbed in 30s, price held — seller defending. Align: DOWN`,
+          };
+        }
+      }
+      setSignals({pinning,retailCrowd,kalshiSpot,absorption});
+    },1000);
+    return()=>clearInterval(iv);
+  },[]);
+  return signals;
+}
+
+// V8.9.0: Compact pill strip for the four smart-money detectors. Each pill:
+//   - inactive: dim border + zinc text
+//   - active: colored border + glow, side badge (UP / DOWN)
+//   - clicking expands the reason tooltip below
+function SmartMoneyStrip({signals,lockDir}){
+  const[expanded,setExpanded]=React.useState(null);
+  const _detectors=[
+    {key:'pinning',label:'PIN',full:'Strike Pin',signal:signals.pinning},
+    {key:'retailCrowd',label:'FADE',full:'Retail Crowd',signal:signals.retailCrowd},
+    {key:'kalshiSpot',label:'DIV',full:'Kalshi-Spot Divergence',signal:signals.kalshiSpot},
+    {key:'absorption',label:'ABSORB',full:'Book Absorption',signal:signals.absorption},
+  ];
+  const _activeCount=_detectors.filter(d=>d.signal.detected).length;
+  // Cross-detector consensus: if 2+ detectors active and all agree on a side,
+  //   that's a strong directional cue.
+  const _activeSides=_detectors.filter(d=>d.signal.detected&&d.signal.side).map(d=>d.signal.side);
+  const _allUp=_activeSides.length>=2&&_activeSides.every(s=>s==='UP');
+  const _allDown=_activeSides.length>=2&&_activeSides.every(s=>s==='DOWN');
+  const _consensusSide=_allUp?'UP':(_allDown?'DOWN':null);
+  return React.createElement('div',{className:'mb-2'},
+    React.createElement('div',{className:'flex items-center gap-1.5 mb-1 px-1'},
+      React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(229,200,112,0.85)'}},
+        'Smart Money'
+      ),
+      _activeCount>0&&React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/40'},
+        '· '+_activeCount+'/4 active'
+      ),
+      _consensusSide&&React.createElement('span',{
+        className:'text-[9px] uppercase tracking-wider font-bold ml-auto px-1.5 py-0.5 rounded',
+        style:{
+          color:_consensusSide==='UP'?'rgba(110,231,183,0.95)':'rgba(244,114,182,0.95)',
+          background:_consensusSide==='UP'?'rgba(110,231,183,0.10)':'rgba(244,114,182,0.10)',
+          border:`1px solid ${_consensusSide==='UP'?'rgba(110,231,183,0.35)':'rgba(244,114,182,0.35)'}`,
+        },
+      },`consensus: ${_consensusSide}`),
+    ),
+    React.createElement('div',{className:'grid grid-cols-4 gap-1.5'},
+      _detectors.map(d=>{
+        const active=d.signal.detected;
+        const side=d.signal.side;
+        // Color by alignment with lock direction (if locked) or neutral when scanning
+        let _color,_bg,_border;
+        if(active){
+          if(lockDir&&side){
+            const aligned=side===lockDir;
+            _color=aligned?'rgba(110,231,183,0.95)':'rgba(244,114,182,0.95)';
+            _bg=aligned?'rgba(110,231,183,0.08)':'rgba(244,114,182,0.08)';
+            _border=aligned?'rgba(110,231,183,0.40)':'rgba(244,114,182,0.40)';
+          }else{
+            _color='rgba(229,200,112,0.95)';
+            _bg='rgba(229,200,112,0.08)';
+            _border='rgba(229,200,112,0.35)';
+          }
+        }else{
+          _color='rgba(232,233,228,0.30)';
+          _bg='transparent';
+          _border='rgba(232,233,228,0.10)';
+        }
+        return React.createElement('button',{
+          key:d.key,
+          onClick:()=>setExpanded(expanded===d.key?null:d.key),
+          className:'px-2 py-1.5 rounded-md text-left transition-all',
+          style:{background:_bg,border:`1px solid ${_border}`,boxShadow:active?`0 0 12px ${_border}`:'none'},
+          title:active?d.signal.reason:d.full+' — inactive',
+        },
+          React.createElement('div',{className:'flex items-baseline justify-between gap-1'},
+            React.createElement('span',{className:'text-[10px] font-bold tracking-wider uppercase',style:{color:_color}},
+              d.label
+            ),
+            active&&side&&React.createElement('span',{
+              className:'text-[8px] uppercase tracking-wider font-bold',
+              style:{color:_color},
+            },side==='UP'?'↑':'↓'),
+          ),
+          React.createElement('div',{className:'text-[8px] mt-0.5',style:{color:_color,opacity:active?0.7:0.4}},
+            active?Math.round(d.signal.score)+'%':'—'
+          ),
+        );
+      })
+    ),
+    expanded&&React.createElement('div',{
+      className:'mt-1.5 px-2 py-1.5 rounded-md text-[10px] leading-relaxed',
+      style:{background:'rgba(14,16,15,0.6)',border:'1px solid rgba(232,233,228,0.10)',color:'rgba(232,233,228,0.75)'},
+    },
+      _detectors.find(d=>d.key===expanded)?.signal.detected
+        ?_detectors.find(d=>d.key===expanded).signal.reason
+        :_detectors.find(d=>d.key===expanded).full+' — no pattern detected right now.'
+    )
+  );
+}
+
 function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
   const[showSessionStart,setShowSessionStart]=useState(false); // V6.5.7: no auto-open on load — click 📋 button (which pulses for attention).
@@ -10192,6 +10497,17 @@ function TaraApp(){
   const mtfLocksRef=useRef({'5m':null,'15m':null}); // {dir,lockedAt,posterior};
 
   const[kalshiYesPrice,setKalshiYesPrice]=useState(null); // live YES price from active Kalshi market
+  // V8.9.0: Kalshi YES price history for smart-money divergence detector. Captures
+  //   each non-null Kalshi update with timestamp, kept to last 60s. Used to detect
+  //   when Kalshi moves >5¢ in 30s while spot stays flat (positioning play / squeeze).
+  const kalshiHistoryRef=useRef([]);
+  useEffect(()=>{
+    if(kalshiYesPrice==null||!Number.isFinite(kalshiYesPrice))return;
+    const now=Date.now();
+    kalshiHistoryRef.current.push({yes:kalshiYesPrice,time:now});
+    // Keep last 60s only
+    kalshiHistoryRef.current=kalshiHistoryRef.current.filter(k=>now-k.time<60000);
+  },[kalshiYesPrice]);
   // V3.0: Kalshi-published strike for the active window. When available, this is the strike
   //       Tara will suggest at window open instead of using the live BTC price as the strike.
   //       This eliminates the strike-misalignment problem where Tara's strike differed by a
@@ -11807,7 +12123,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.8.9 online — spike alert went aggressive. Three-window detection 10s/20s/30s with thresholds: 10s max(20bps, 1.0x atrBps), 20s max(30bps, 1.3x atrBps), 30s max(40bps, 1.6x atrBps). Whichever fires first / hits hardest wins. Throttle reduced to 30s. Now ALWAYS-ON, not just when locked — when not locked the alert reads SUDDEN PUMP/DUMP - scan for entry in gold (neutral attention). When locked it still differentiates favorable (RIDE IT, green) vs adverse (CONSIDER EXIT, rose). THREE LAYERS now: visual overlay + tab title + soft beep + system notification. Beep is 200ms sine, 880Hz for PUMP, 440Hz for DUMP, volume 0.15 (soft, not jarring). Sound on by default since you opted in; toggle on the alert overlay (speaker icon). System notifications need browser permission — first time alert fires, a small + system alerts button appears in the overlay; tap it once and the browser asks permission, after that you get OS-level pings even when Tara is fully minimized or in another tab. Persisted: taraSpikeSoundEnabled in localStorage. Pre-V8.8.9 (V8.8.8) was 30s window, max(50bps, 1.8x atrBps), only when locked, no sound, no system notifications. STILL INTACT: V8.8.7 sync pill steady + news multi-proxy, V8.8.6 asset-aware dedup, V8.8.5 no-op SW + circuit breaker, V8.8.4 unminified + x-ray ErrorBoundary + TDZ fix. Note: AudioContext can start in suspended state on browsers that haven't seen user interaction yet. Hook calls ctx.resume() before playing — works once you've clicked anywhere on the page. SAME OPEN GAP: single-browser BTC<>ETH switching mid-window can leave the previous asset window unresolved. Multi-browser side-steps it."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.9.1 online — follow-Tara button + advisor unlocked. User: when locked Tara has a call but unless I tap ENTERED UP/DOWN myself, the advisor doesn't kick in for in-trade management. Now: a one-tap Got in on Tara's UP/DOWN call button appears directly on the call card the moment Tara locks. Color matches direction (green for UP, rose for DOWN), prominent placement right under her reasoning. Tap once - userPosition is set to match her call, positionEntry captures current price, and computeAdvisor's full in-trade management logic activates: hold suggestions, exit triggers, target adjustments, edge-vs-Kalshi cross-references, conviction asymmetry warnings, all the live management surface. Once you're following, the button replaces with a small ✓ Following Tara · tap to exit status badge. Hidden if you've already entered the OPPOSITE direction (you made a different choice, don't override it). Threaded through both the mobile TaraCallCard and the desktop one inside ProjectionsCard. Same handleManualSync function the existing ENTERED UP/DOWN buttons use - so behavior is identical to manually tapping ENTERED in the right direction. Includes anti-tilt cooldown gate, Discord broadcast, all the existing safeguards. STILL INTACT: V8.9.0 smart money detectors (PIN/FADE/DIV/ABSORB pills), V8.8.9 spike alert aggressive multi-window + sound + system notify, V8.8.7 sync pill steady + news multi-proxy, V8.8.6 asset-aware dedup, V8.8.5 no-op SW + circuit breaker. SAME OPEN GAP: single-browser BTC<>ETH switching mid-window can leave the previous asset window unresolved."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -17064,6 +17380,21 @@ function TaraApp(){
     setForceRender(p=>p+1);
   };
 
+  // V8.9.0: Smart-money detectors. Hook polls every 1s, returns 4 signals
+  //   {pinning, retailCrowd, kalshiSpot, absorption}, each with detected/side/score/reason.
+  //   Strip renders compact pills near the call card.
+  //   IMPORTANT: hook MUST be called above the !isMounted early return to keep
+  //   the hook count stable across renders (React error #310 if it isn't).
+  const _smartMoneySignals=useSmartMoneyDetectors({
+    tickHistoryRef,
+    tradeTicksRef:ticksRef,
+    kalshiHistoryRef,
+    currentPrice,
+    targetMargin,
+    atrBps:analysis?.atrBps,
+    clockSeconds:timeState?.secsRemaining,
+  });
+
   if(!isMounted)return<div className={'min-h-screen bg-[#111312] flex items-center justify-center text-[#E8E9E4]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.1.0...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
@@ -17183,7 +17514,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              8.8.9
+              8.9.1
             </span>
           </div>
 
@@ -17784,9 +18115,12 @@ function TaraApp(){
               );
             })()}
 
+            {/* V8.9.0: Smart-money detector strip — visible at decision time. */}
+            <SmartMoneyStrip signals={_smartMoneySignals} lockDir={lockedCallRef.current?.dir||null}/>
+
             {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab.
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
-            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
+            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
 
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
 
@@ -17799,7 +18133,7 @@ function TaraApp(){
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab}/>
@@ -18818,6 +19152,53 @@ function TaraApp(){
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V8.9.1 — Follow-Tara button */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Follow Tara · One-Tap Position Sync</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.9.1</span> &mdash; Follow-Tara Button</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;when Tara locks a call I just take it externally — but the advisor doesn&rsquo;t show in-trade suggestions until I tap ENTERED UP/DOWN. Add a button on Tara&rsquo;s call so I can mark I followed her.&rdquo;</em></p>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was happening</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3"><code className="text-[10px] bg-[#0E100F] px-1">computeAdvisor</code> reads <code className="text-[10px] bg-[#0E100F] px-1">userPosition</code> to gate the full in-trade management surface (hold/exit/target/edge cross-references). When userPosition is null it shows minimal pre-entry context only. The user was getting trades on Tara&rsquo;s call but the advisor stayed quiet because they hadn&rsquo;t tapped ENTERED UP/DOWN.</p>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Fix</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>One-tap <strong style={{color:T2_GOLD}}>&ldquo;Got in on Tara&rsquo;s UP/DOWN call&rdquo;</strong> button on TaraCallCard, color-matched to her direction (green/rose), placed under her reasoning text.</li>
+                  <li>Calls the same <code className="text-[10px] bg-[#0E100F] px-1">handleManualSync</code> the existing ENTERED buttons use &mdash; identical downstream behavior (positionEntry capture, anti-tilt cooldown gate, Discord broadcast, all safeguards).</li>
+                  <li>While following, replaces with <strong style={{color:'rgba(110,231,183,0.85)'}}>&ldquo;✓ Following Tara · tap to exit&rdquo;</strong> status badge. Tap toggles userPosition off.</li>
+                  <li>Hidden when user has explicitly entered the OPPOSITE direction &mdash; don&rsquo;t override their explicit choice.</li>
+                  <li>Threaded through <code className="text-[10px] bg-[#0E100F] px-1">ProjectionsCard</code> for desktop view (where TaraCallCard is rendered inside).</li>
+                </ul>
+              </section>
+
+              {/* V8.9.0 — Smart-money detectors */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Smart Money Detectors · 4 Pills</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.9.0</span> &mdash; Smart Money Detectors</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;how can we be on their side and lose less times.&rdquo;</em> Built four detectors that flag patterns in the live tape where smart money is operating. None are silver bullets &mdash; they&rsquo;re context cues that improve sit-out discipline.</p>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">The four pills</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong style={{color:T2_GOLD}}>PIN</strong> &mdash; last 3min, price within <code className="text-[10px] bg-[#0E100F] px-1">max(0.5 &times; ATR, 25 bps)</code> of strike, &ge; 2 crossings in 60s. Position defenders pinning the strike. Direction = side currently dominant.</li>
+                  <li><strong style={{color:T2_GOLD}}>FADE</strong> &mdash; &ge; 70% of last-60s prints are &lt;$5K and &ge; 70% same direction. Retail chasing. Signal direction = opposite of crowd.</li>
+                  <li><strong style={{color:T2_GOLD}}>DIV</strong> &mdash; Kalshi YES moves &ge; 5&cent; in 30s while spot is flat (&lt; 10 bps), OR opposite directions with both moving. Positioning play / squeeze. Lower trust in Kalshi confluence.</li>
+                  <li><strong style={{color:T2_GOLD}}>ABSORB</strong> &mdash; one-sided tape flow &ge; $750K in 30s with &gt; 1.5x ratio while price holds. Someone defending. Align with the absorber.</li>
+                </ul>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">UI</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Pill strip near the call card. Each pill is dim when inactive, glowing border when active. Active color depends on alignment with your lock direction:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong style={{color:'rgba(110,231,183,0.95)'}}>Green</strong> &mdash; aligned with your lock direction</li>
+                  <li><strong style={{color:'rgba(244,114,182,0.95)'}}>Rose</strong> &mdash; against your lock direction</li>
+                  <li><strong style={{color:T2_GOLD}}>Gold</strong> &mdash; not locked (neutral attention)</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Click any pill to expand its reasoning. Consensus badge top-right when 2+ detectors agree on a direction.</p>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Hands-off design</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Detectors do <strong>not</strong> feed into Tara&rsquo;s gradient descent learning or alter her existing posterior. They are CONTEXT for you, not new training inputs &mdash; so wrong calls during early validation won&rsquo;t poison her weights. Once you&rsquo;ve watched them for a few weeks and trust the signal, we can wire confluence with PIN/ABSORB into her conviction multiplier.</p>
+              </section>
 
               {/* V8.8.9 — Spike alert aggressive */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
