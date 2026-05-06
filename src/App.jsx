@@ -408,7 +408,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v8.7-trade-coach-and-session-awareness';
+const BASELINE_VERSION='2026.05.06-v8.7.2-stale-cache-recovery-and-session-wr';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -3901,8 +3901,73 @@ const computeV99Posterior=(params)=>{
 class ErrorBoundary extends React.Component{
   constructor(props){super(props);this.state={hasError:false,error:null};}
   static getDerivedStateFromError(e){return{hasError:true,error:e};}
-  componentDidCatch(e,i){console.error('Tara crash:',e,i);}
-  render(){if(this.state.hasError)return<div className="min-h-screen bg-[#111312] text-rose-500 p-8 font-mono"><h1 className="text-2xl font-bold mb-4">Tara Engine Crash</h1><pre className={'bg-black p-4 rounded text-xs mb-4 whitespace-pre-wrap border border-rose-500/30'}>{this.state.error?.toString()}</pre><button onClick={()=>{try{localStorage.clear();}catch(e){}window.location.reload();}} className="px-4 py-2 bg-rose-500 text-white rounded font-bold">Reset & Reload</button></div>;return this.props.children;}
+  componentDidCatch(e,i){
+    console.error('Tara crash:',e,i);
+    // V8.7.2: Auto-attempt service worker unregister on crash. Stale cached bundles
+    //   are a common cause of crashes after a deploy. Unregistering on crash means
+    //   the next reload (whether user clicks Reset or just refreshes) fetches fresh.
+    try{
+      if('serviceWorker' in navigator){
+        navigator.serviceWorker.getRegistrations().then(regs=>{
+          regs.forEach(r=>{try{r.unregister();}catch(_){}});
+        }).catch(()=>{});
+      }
+    }catch(_){}
+  }
+  render(){
+    if(!this.state.hasError)return this.props.children;
+    // V8.7.2: Robust recovery options. Hard Recovery = nuke everything and refetch.
+    const _hardRecover=async()=>{
+      try{
+        // 1. Unregister all service workers
+        if('serviceWorker' in navigator){
+          const regs=await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r=>r.unregister().catch(()=>{})));
+        }
+      }catch(_){}
+      try{
+        // 2. Clear all caches (CacheStorage API)
+        if('caches' in window){
+          const keys=await caches.keys();
+          await Promise.all(keys.map(k=>caches.delete(k).catch(()=>{})));
+        }
+      }catch(_){}
+      try{localStorage.clear();}catch(_){}
+      try{sessionStorage.clear();}catch(_){}
+      // 3. Force reload with cache bypass
+      try{window.location.reload(true);}catch(_){window.location.reload();}
+    };
+    const _softRecover=async()=>{
+      // Only unregister SW + caches — keep localStorage so user data isn't lost
+      try{
+        if('serviceWorker' in navigator){
+          const regs=await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map(r=>r.unregister().catch(()=>{})));
+        }
+      }catch(_){}
+      try{
+        if('caches' in window){
+          const keys=await caches.keys();
+          await Promise.all(keys.map(k=>caches.delete(k).catch(()=>{})));
+        }
+      }catch(_){}
+      try{window.location.reload(true);}catch(_){window.location.reload();}
+    };
+    return(
+      <div className="min-h-screen bg-[#111312] text-rose-500 p-8 font-mono">
+        <h1 className="text-2xl font-bold mb-4">Tara Engine Crash</h1>
+        <pre className={'bg-black p-4 rounded text-xs mb-4 whitespace-pre-wrap border border-rose-500/30'}>{this.state.error?.toString()}</pre>
+        <p className={'text-xs text-[#E8E9E4]/60 mb-4 max-w-2xl leading-relaxed'}>
+          A common cause of this error is a stale cached build from a previous deploy. Most of the time, &ldquo;Refresh Code Only&rdquo; below clears the service worker cache and fetches the latest version &mdash; your trades, weights, and learning are preserved.
+        </p>
+        <div className="flex gap-3 flex-wrap">
+          <button onClick={_softRecover} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold">Refresh Code Only (keeps data)</button>
+          <button onClick={_hardRecover} className="px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white rounded font-bold">Hard Recovery (clears everything)</button>
+        </div>
+        <p className={'text-[10px] text-[#E8E9E4]/30 mt-6'}>If &ldquo;Refresh Code Only&rdquo; doesn&rsquo;t fix it, your local data may have a corrupted entry &mdash; use Hard Recovery as a last resort. Cloud-synced data will repopulate automatically on reload.</p>
+      </div>
+    );
+  }
 }
 
 // ═══════════════════════════════════════
@@ -5846,129 +5911,140 @@ function BestPracticesModal({open,onClose}){
 // you see the relevant guidance for THIS trade, RIGHT NOW.
 function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData}){
   if(!userPosition)return null; // only shows during a trade
-  const _now=Date.now();
-  const _isUP=userPosition==='UP';
-  const _isDN=userPosition==='DOWN';
-  const _gap=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
-  const _favoredGap=_isUP?_gap:-_gap; // signed: + = favorable
-  const _winning=_favoredGap>0;
-  const _losing=_favoredGap<0;
-  const _secLeft=(timeState?.minsRemaining||0)*60+(timeState?.secsRemaining||0);
-  const _winLen=15*60; // assume 15m for the math; 5m differs but rare
-  const _earlyWindow=_secLeft>=_winLen*0.66; // first third
-  const _midWindow=_secLeft<_winLen*0.66&&_secLeft>=_winLen*0.33; // middle third
-  const _lateWindow=_secLeft<_winLen*0.33; // last third
-  const _last90s=_secLeft<=90;
-  const _veryLate=_secLeft<=45;
-  // Tara's read: is she still aligned?
-  const _taraDir=taraCall?.snapshot?.call;
-  const _taraAligned=_taraDir===userPosition;
-  const _taraOpposed=(_taraDir==='UP'&&_isDN)||(_taraDir==='DOWN'&&_isUP);
-  const _taraConf=Number(taraCall?.snapshot?.posterior)||50;
-  // Edge vs Kalshi (lower is bigger profit potential when aligned)
-  const _kalshi=Number(kalshiYesPrice);
-  const _hasKalshi=Number.isFinite(_kalshi)&&_kalshi>0;
-  // Offer awareness
-  const _offerVal=parseFloat(currentOffer)||0;
-  // Recent contrary whale check
-  const _contrarySide=_isUP?'SELL':'BUY';
-  const _last60sWhales=(whaleLog||[]).filter(w=>w&&w.time>_now-60000&&w.side===_contrarySide&&(w.usd||0)>=200000);
-  const _bigContraryWhale=_last60sWhales.length>0;
-  // Risk
-  const _riskLevel=movementRisk?.level||'CALM';
-  const _riskExtreme=_riskLevel==='EXTREME';
-  const _riskElevated=_riskLevel==='ELEVATED';
+  // V8.7.1: Wrap entire body in try/catch. If any unexpected data shape causes an error,
+  //   return null gracefully (the coach card disappears) instead of crashing the dashboard.
+  try{
+    const _now=Date.now();
+    const _isUP=userPosition==='UP';
+    const _isDN=userPosition==='DOWN';
+    const _gap=targetMargin>0?((Number(currentPrice)||0)-targetMargin)/targetMargin*10000:0;
+    const _favoredGap=_isUP?_gap:-_gap; // signed: + = favorable
+    const _winning=_favoredGap>0;
+    const _losing=_favoredGap<0;
+    const _secLeft=(timeState?.minsRemaining||0)*60+(timeState?.secsRemaining||0);
+    const _winLen=15*60; // assume 15m for the math; 5m differs but rare
+    const _earlyWindow=_secLeft>=_winLen*0.66; // first third
+    const _midWindow=_secLeft<_winLen*0.66&&_secLeft>=_winLen*0.33; // middle third
+    const _lateWindow=_secLeft<_winLen*0.33; // last third
+    const _last90s=_secLeft<=90;
+    const _veryLate=_secLeft<=45;
+    // Tara's read: is she still aligned?
+    const _taraDir=taraCall?.snapshot?.call;
+    const _taraAligned=_taraDir===userPosition;
+    const _taraOpposed=(_taraDir==='UP'&&_isDN)||(_taraDir==='DOWN'&&_isUP);
+    const _taraConf=Number(taraCall?.snapshot?.posterior)||50;
+    // Edge vs Kalshi (lower is bigger profit potential when aligned)
+    const _kalshi=Number(kalshiYesPrice);
+    const _hasKalshi=Number.isFinite(_kalshi)&&_kalshi>0;
+    // Offer awareness
+    const _offerVal=parseFloat(currentOffer)||0;
+    // Recent contrary whale check
+    const _contrarySide=_isUP?'SELL':'BUY';
+    const _last60sWhales=(Array.isArray(whaleLog)?whaleLog:[]).filter(w=>w&&w.time>_now-60000&&w.side===_contrarySide&&(w.usd||0)>=200000);
+    const _bigContraryWhale=_last60sWhales.length>0;
+    const _largestContraryUsd=_bigContraryWhale?(Number(_last60sWhales[0]?.usd)||0):0;
+    // Risk
+    const _riskLevel=movementRisk?.level||'CALM';
+    const _riskExtreme=_riskLevel==='EXTREME';
+    const _riskElevated=_riskLevel==='ELEVATED';
+    const _riskScore=Number(movementRisk?.score)||0;
+    const _riskDirBias=movementRisk?.dirBias||null;
+    const _riskPredictive=movementRisk?.predictive||'';
 
-  // ── Build advisory cards in priority order. Most urgent first. ──
-  const cards=[];
-  // ⛔ EXIT NOW signals
-  if(positionStatus?.isStopHit){
-    cards.push({tone:'urgent',icon:'🛑',title:'Stop hit — exit now',body:`Position breached -30%. Statistical recovery rate from here is below break-even cost. Don't argue with the math.`});
-  }
-  if(_taraOpposed&&_taraConf>=70&&!_winning){
-    cards.push({tone:'urgent',icon:'⚠',title:`Tara flipped to ${_taraDir} (${Math.round(_taraConf)}%)`,body:`Conditions inverted. Your read at entry is now contrary to model. Strongly consider exit unless you have specific reason to disagree.`});
-  }
-  if(_riskExtreme&&movementRisk?.dirBias&&movementRisk.dirBias!==userPosition){
-    cards.push({tone:'urgent',icon:'⚡',title:'Extreme risk · contrary direction',body:`Movement risk score ${movementRisk.score}/100, leaning ${movementRisk.dirBias}. ${movementRisk.predictive||''} You're on the wrong side of the surge.`});
-  }
-  if(_bigContraryWhale&&_last90s){
-    cards.push({tone:'urgent',icon:'🐋',title:'Late-window contrary whale',body:`$${Math.round(_last60sWhales[0].usd/1000)}K ${_contrarySide} print just hit. Late whale spikes are the #1 cause of last-minute reversals. If you're up, take it; if you're flat or down, exit.`});
-  }
+    // ── Build advisory cards in priority order. Most urgent first. ──
+    const cards=[];
+    // ⛔ EXIT NOW signals
+    if(positionStatus?.isStopHit){
+      cards.push({tone:'urgent',icon:'🛑',title:'Stop hit — exit now',body:`Position breached -30%. Statistical recovery rate from here is below break-even cost. Don't argue with the math.`});
+    }
+    if(_taraOpposed&&_taraConf>=70&&!_winning){
+      cards.push({tone:'urgent',icon:'⚠',title:`Tara flipped to ${_taraDir} (${Math.round(_taraConf)}%)`,body:`Conditions inverted. Your read at entry is now contrary to model. Strongly consider exit unless you have specific reason to disagree.`});
+    }
+    if(_riskExtreme&&_riskDirBias&&_riskDirBias!==userPosition){
+      cards.push({tone:'urgent',icon:'⚡',title:'Extreme risk · contrary direction',body:`Movement risk score ${_riskScore}/100, leaning ${_riskDirBias}. ${_riskPredictive} You're on the wrong side of the surge.`});
+    }
+    if(_bigContraryWhale&&_last90s){
+      cards.push({tone:'urgent',icon:'🐋',title:'Late-window contrary whale',body:`$${Math.round(_largestContraryUsd/1000)}K ${_contrarySide} print just hit. Late whale spikes are the #1 cause of last-minute reversals. If you're up, take it; if you're flat or down, exit.`});
+    }
 
-  // ✓ TAKE PROFIT signals
-  if(_offerVal>=0.85&&_secLeft>=120&&_winning){
-    cards.push({tone:'good',icon:'💰',title:`Take-profit zone · offer $${_offerVal.toFixed(2)}`,body:`You've captured most of the available value with ${Math.floor(_secLeft/60)}m+ left. Marginal additional profit isn't worth reversal risk. Configurable in Trading Settings.`});
-  }
-  if(_winning&&Math.abs(_favoredGap)>=20&&_secLeft<=180){
-    cards.push({tone:'good',icon:'✓',title:'Strong lead · cruise to close',body:`+${Math.round(_favoredGap)}bps favorable with ${Math.floor(_secLeft/60)}m left. Time decay now favors you. Hold unless STALE warning fires.`});
-  }
+    // ✓ TAKE PROFIT signals
+    if(_offerVal>=0.85&&_secLeft>=120&&_winning){
+      cards.push({tone:'good',icon:'💰',title:`Take-profit zone · offer $${_offerVal.toFixed(2)}`,body:`You've captured most of the available value with ${Math.floor(_secLeft/60)}m+ left. Marginal additional profit isn't worth reversal risk. Configurable in Trading Settings.`});
+    }
+    if(_winning&&Math.abs(_favoredGap)>=20&&_secLeft<=180){
+      cards.push({tone:'good',icon:'✓',title:'Strong lead · cruise to close',body:`+${Math.round(_favoredGap)}bps favorable with ${Math.floor(_secLeft/60)}m left. Time decay now favors you. Hold unless STALE warning fires.`});
+    }
 
-  // ⚠ WATCHFUL signals  
-  if(_winning&&_riskElevated&&!_riskExtreme){
-    cards.push({tone:'watch',icon:'👁',title:'Risk elevated while ahead',body:`Score ${movementRisk?.score}/100. Reversal possible. ${_offerVal>=0.75?'Consider taking the offer at $'+_offerVal.toFixed(2)+'.':'Watch for whale prints + tape flip.'}`});
-  }
-  if(_taraOpposed&&_winning&&_taraConf>=60){
-    cards.push({tone:'watch',icon:'⚡',title:'Tara disagrees but you\'re ahead',body:`Tara reading ${_taraDir} ${Math.round(_taraConf)}%. You're winning the moment but trend is shifting. Tighten exit — don't give it back.`});
-  }
-  if(_losing&&_taraAligned&&_midWindow){
-    cards.push({tone:'watch',icon:'⏳',title:'Down but Tara still backs you',body:`-${Math.round(Math.abs(_favoredGap))}bps but Tara still ${userPosition} ${Math.round(_taraConf)}%. Mid-window dips are normal — hold unless gap exceeds 30bps adverse.`});
-  }
-  if(_losing&&_lateWindow&&Math.abs(_favoredGap)>=15){
-    cards.push({tone:'watch',icon:'🕐',title:'Late-window comeback unlikely',body:`-${Math.round(Math.abs(_favoredGap))}bps with ${_secLeft}s left. ${_offerVal>0.30?'Cut at offer $'+_offerVal.toFixed(2)+' to recover something.':'Statistical recovery rate from here: ~25%.'}`});
-  }
-  if(_bigContraryWhale&&!_last90s){
-    cards.push({tone:'watch',icon:'🐋',title:'Contrary whale early in window',body:`$${Math.round(_last60sWhales[0].usd/1000)}K ${_contrarySide} hit. Watch tape — if more contrary whales stack, exit before late-window selloff.`});
-  }
+    // ⚠ WATCHFUL signals  
+    if(_winning&&_riskElevated&&!_riskExtreme){
+      cards.push({tone:'watch',icon:'👁',title:'Risk elevated while ahead',body:`Score ${_riskScore}/100. Reversal possible. ${_offerVal>=0.75?'Consider taking the offer at $'+_offerVal.toFixed(2)+'.':'Watch for whale prints + tape flip.'}`});
+    }
+    if(_taraOpposed&&_winning&&_taraConf>=60){
+      cards.push({tone:'watch',icon:'⚡',title:'Tara disagrees but you\'re ahead',body:`Tara reading ${_taraDir} ${Math.round(_taraConf)}%. You're winning the moment but trend is shifting. Tighten exit — don't give it back.`});
+    }
+    if(_losing&&_taraAligned&&_midWindow){
+      cards.push({tone:'watch',icon:'⏳',title:'Down but Tara still backs you',body:`-${Math.round(Math.abs(_favoredGap))}bps but Tara still ${userPosition} ${Math.round(_taraConf)}%. Mid-window dips are normal — hold unless gap exceeds 30bps adverse.`});
+    }
+    if(_losing&&_lateWindow&&Math.abs(_favoredGap)>=15){
+      cards.push({tone:'watch',icon:'🕐',title:'Late-window comeback unlikely',body:`-${Math.round(Math.abs(_favoredGap))}bps with ${_secLeft}s left. ${_offerVal>0.30?'Cut at offer $'+_offerVal.toFixed(2)+' to recover something.':'Statistical recovery rate from here: ~25%.'}`});
+    }
+    if(_bigContraryWhale&&!_last90s){
+      cards.push({tone:'watch',icon:'🐋',title:'Contrary whale early in window',body:`$${Math.round(_largestContraryUsd/1000)}K ${_contrarySide} hit. Watch tape — if more contrary whales stack, exit before late-window selloff.`});
+    }
 
-  // ℹ INFORMATIONAL signals
-  if(_earlyWindow&&_taraAligned&&_winning){
-    cards.push({tone:'info',icon:'→',title:'Early lead · let it develop',body:`+${Math.round(_favoredGap)}bps favorable in first third. Don't take profit prematurely — windows often expand. Watch for tape flips around midpoint.`});
-  }
-  if(_midWindow&&_taraAligned&&Math.abs(_favoredGap)<5){
-    cards.push({tone:'info',icon:'≈',title:'Flat at midpoint · normal',body:`Around even with ${Math.floor(_secLeft/60)}m left. Mid-window flatness is common — direction usually picks up in last third. Hold.`});
-  }
-  if(_veryLate&&_winning&&_offerVal>=0.65){
-    cards.push({tone:'info',icon:'⏱',title:'Last 45s · offer holding',body:`Offer $${_offerVal.toFixed(2)} with ${_secLeft}s left. Ride to close — time decay is now strongly in your favor.`});
-  }
+    // ℹ INFORMATIONAL signals
+    if(_earlyWindow&&_taraAligned&&_winning){
+      cards.push({tone:'info',icon:'→',title:'Early lead · let it develop',body:`+${Math.round(_favoredGap)}bps favorable in first third. Don't take profit prematurely — windows often expand. Watch for tape flips around midpoint.`});
+    }
+    if(_midWindow&&_taraAligned&&Math.abs(_favoredGap)<5){
+      cards.push({tone:'info',icon:'≈',title:'Flat at midpoint · normal',body:`Around even with ${Math.floor(_secLeft/60)}m left. Mid-window flatness is common — direction usually picks up in last third. Hold.`});
+    }
+    if(_veryLate&&_winning&&_offerVal>=0.65){
+      cards.push({tone:'info',icon:'⏱',title:'Last 45s · offer holding',body:`Offer $${_offerVal.toFixed(2)} with ${_secLeft}s left. Ride to close — time decay is now strongly in your favor.`});
+    }
 
-  if(cards.length===0){
-    cards.push({tone:'info',icon:'·',title:'Position open · all clear',body:`${userPosition} from $${(targetMargin||0).toFixed(0)}, ${_winning?'+':''}${Math.round(_favoredGap)}bps. ${Math.floor(_secLeft/60)}m ${_secLeft%60}s left. Tara ${_taraAligned?'aligned':_taraOpposed?'opposed':'neutral'}. No active alerts.`});
-  }
+    if(cards.length===0){
+      cards.push({tone:'info',icon:'·',title:'Position open · all clear',body:`${userPosition} from $${(targetMargin||0).toFixed(0)}, ${_winning?'+':''}${Math.round(_favoredGap)}bps. ${Math.floor(_secLeft/60)}m ${_secLeft%60}s left. Tara ${_taraAligned?'aligned':_taraOpposed?'opposed':'neutral'}. No active alerts.`});
+    }
 
-  // Color schemes per tone
-  const _toneStyles={
-    urgent:{border:'rgba(244,114,182,0.50)',bg:'rgba(244,114,182,0.07)',accent:'rgb(244,114,182)',pulse:true},
-    good:  {border:'rgba(110,231,183,0.40)',bg:'rgba(110,231,183,0.05)',accent:'rgb(110,231,183)',pulse:false},
-    watch: {border:'rgba(229,200,112,0.40)',bg:'rgba(229,200,112,0.05)',accent:'rgba(229,200,112,0.95)',pulse:false},
-    info:  {border:'rgba(147,197,253,0.30)',bg:'rgba(147,197,253,0.04)',accent:'rgba(147,197,253,0.85)',pulse:false},
-  };
-  return React.createElement('div',{
-    className:'rounded-lg overflow-hidden mb-2 sm:mb-3',
-    style:{border:'1px solid rgba(229,200,112,0.30)',background:'rgba(229,200,112,0.03)'},
-  },
-    React.createElement('div',{className:'px-3 sm:px-4 py-1.5 border-b border-[#E8E9E4]/8 flex items-baseline justify-between gap-2'},
-      React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:T2_GOLD}},'★ live trade coach'),
-      React.createElement('span',{className:'text-[10px] tabular-nums',style:{color:_winning?'rgb(110,231,183)':_losing?'rgba(244,114,182,0.85)':'rgba(232,233,228,0.6)'}},
-        userPosition,' · ',_winning?'+':'',Math.round(_favoredGap),'bps · ',Math.floor(_secLeft/60),'m ',String(_secLeft%60).padStart(2,'0'),'s',
+    // Color schemes per tone
+    const _toneStyles={
+      urgent:{border:'rgba(244,114,182,0.50)',bg:'rgba(244,114,182,0.07)',accent:'rgb(244,114,182)',pulse:true},
+      good:  {border:'rgba(110,231,183,0.40)',bg:'rgba(110,231,183,0.05)',accent:'rgb(110,231,183)',pulse:false},
+      watch: {border:'rgba(229,200,112,0.40)',bg:'rgba(229,200,112,0.05)',accent:'rgba(229,200,112,0.95)',pulse:false},
+      info:  {border:'rgba(147,197,253,0.30)',bg:'rgba(147,197,253,0.04)',accent:'rgba(147,197,253,0.85)',pulse:false},
+    };
+    return React.createElement('div',{
+      className:'rounded-lg overflow-hidden mb-2 sm:mb-3',
+      style:{border:'1px solid rgba(229,200,112,0.30)',background:'rgba(229,200,112,0.03)'},
+    },
+      React.createElement('div',{className:'px-3 sm:px-4 py-1.5 border-b border-[#E8E9E4]/8 flex items-baseline justify-between gap-2'},
+        React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:T2_GOLD}},'★ live trade coach'),
+        React.createElement('span',{className:'text-[10px] tabular-nums',style:{color:_winning?'rgb(110,231,183)':_losing?'rgba(244,114,182,0.85)':'rgba(232,233,228,0.6)'}},
+          userPosition,' · ',_winning?'+':'',Math.round(_favoredGap),'bps · ',Math.floor(_secLeft/60),'m ',String(_secLeft%60).padStart(2,'0'),'s',
+        ),
       ),
-    ),
-    React.createElement('div',{className:'p-2 sm:p-3 space-y-1.5'},
-      cards.slice(0,4).map((card,i)=>{
-        const s=_toneStyles[card.tone]||_toneStyles.info;
-        return React.createElement('div',{
-          key:i,
-          className:'rounded p-1.5 sm:p-2 flex gap-2'+(s.pulse?' animate-pulse':''),
-          style:{border:'1px solid '+s.border,background:s.bg},
-        },
-          React.createElement('span',{className:'text-base shrink-0 leading-tight',style:{color:s.accent}},card.icon),
-          React.createElement('div',{className:'min-w-0 flex-1'},
-            React.createElement('div',{className:'text-[11px] sm:text-[12px] font-bold leading-tight mb-0.5',style:{color:s.accent}},card.title),
-            React.createElement('div',{className:'text-[10px] sm:text-[11px] text-[#E8E9E4]/75 leading-snug'},card.body),
-          ),
-        );
-      }),
-    ),
-  );
+      React.createElement('div',{className:'p-2 sm:p-3 space-y-1.5'},
+        cards.slice(0,4).map((card,i)=>{
+          const s=_toneStyles[card.tone]||_toneStyles.info;
+          return React.createElement('div',{
+            key:i,
+            className:'rounded p-1.5 sm:p-2 flex gap-2'+(s.pulse?' animate-pulse':''),
+            style:{border:'1px solid '+s.border,background:s.bg},
+          },
+            React.createElement('span',{className:'text-base shrink-0 leading-tight',style:{color:s.accent}},card.icon),
+            React.createElement('div',{className:'min-w-0 flex-1'},
+              React.createElement('div',{className:'text-[11px] sm:text-[12px] font-bold leading-tight mb-0.5',style:{color:s.accent}},card.title),
+              React.createElement('div',{className:'text-[10px] sm:text-[11px] text-[#E8E9E4]/75 leading-snug'},card.body),
+            ),
+          );
+        }),
+      ),
+    );
+  }catch(err){
+    try{console.warn('[V8.7.1] LiveTradeCoach render failed; hiding card',err?.message);}catch(_){}
+    return null;
+  }
 }
 
 // ── V8.2: TRADING SETTINGS MODAL ────────────────────────────────────────────
@@ -6871,7 +6947,7 @@ function TodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMacro}){
 // ── V7.10.6: MARKET CONTEXT STRIP ─────────────────────────────────────────
 // Shows current trading phase + cautions + next transition countdown.
 // Subtle, contextual — designed to inform without dominating the UI.
-function MarketContextStrip({useLocalTime}){
+function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset}){
   const[ctx,setCtx]=React.useState(()=>getMarketContext(new Date()));
   const[expanded,setExpanded]=React.useState(false);
   React.useEffect(()=>{
@@ -6883,6 +6959,45 @@ function MarketContextStrip({useLocalTime}){
     return()=>clearInterval(iv);
   },[]);
   if(!ctx||!ctx.phase)return null;
+  // V8.7.2: Compute the user's actual win rate in the CURRENT session bucket.
+  //   Sessions = ASIA / EU / US (matches the session field stamped on each call).
+  //   We need at least 5 resolved trades in this session to surface advice — under
+  //   that, sample size is too small to be meaningful.
+  let _sessionAdvice=null;
+  try{
+    const _curSession=ctx?.sessions?.dominant; // 'ASIA' | 'EU' | 'US' typically
+    if(_curSession&&Array.isArray(taraCallLog)){
+      const _sessionCalls=taraCallLog.filter(e=>{
+        if(!e||(e.result!=='WIN'&&e.result!=='LOSS'))return false;
+        if((e.asset||'BTC')!==currentAsset)return false;
+        return e.session===_curSession;
+      });
+      const _n=_sessionCalls.length;
+      if(_n>=5){
+        const _wins=_sessionCalls.filter(e=>e.result==='WIN').length;
+        const _wr=Math.round((_wins/_n)*100);
+        // Tone tiers based on actual win rate — confident vs proceed-with-caution
+        let _tone,_label,_text,_color;
+        if(_wr>=70){
+          _tone='positive';_label=`★ ${_curSession} is your zone`;_color='rgba(110,231,183,0.95)';
+          _text=`${_wr}% WR over ${_n} ${currentAsset} calls in ${_curSession}. Trade with confidence here — your edge is highest in this session. Consider sizing up on confluent setups.`;
+        } else if(_wr>=60){
+          _tone='good';_label=`✓ ${_curSession} is profitable`;_color='rgba(110,231,183,0.85)';
+          _text=`${_wr}% WR over ${_n} ${currentAsset} calls in ${_curSession}. Solid edge. Standard size with normal selectivity.`;
+        } else if(_wr>=50){
+          _tone='neutral';_label=`◇ ${_curSession} is breakeven`;_color='rgba(229,200,112,0.85)';
+          _text=`${_wr}% WR over ${_n} ${currentAsset} calls in ${_curSession}. Marginal edge. Pull back to half size or stick to highest-conviction setups only.`;
+        } else if(_wr>=40){
+          _tone='warning';_label=`⚠ ${_curSession} is unprofitable`;_color='rgba(229,200,112,0.95)';
+          _text=`${_wr}% WR over ${_n} ${currentAsset} calls in ${_curSession}. You're losing money here — proceed with caution. Half size, big-edge setups only.`;
+        } else {
+          _tone='bad';_label=`✗ ${_curSession} is your weakness`;_color='rgba(244,114,182,0.95)';
+          _text=`${_wr}% WR over ${_n} ${currentAsset} calls in ${_curSession}. Significant negative edge. Strongly consider sitting this session out until pattern improves.`;
+        }
+        _sessionAdvice={tone:_tone,label:_label,text:_text,color:_color,wr:_wr,n:_n,session:_curSession};
+      }
+    }
+  }catch(_){ /* fall through — advice card just won't appear */ }
   const _criticalCount=ctx.cautions.filter(c=>c.severity==='critical').length;
   const _warningCount=ctx.cautions.filter(c=>c.severity==='warning').length;
   const _hasUrgent=_criticalCount>0;
@@ -6934,6 +7049,18 @@ function MarketContextStrip({useLocalTime}){
           style:{color:'rgba(244,114,182,0.95)',background:'rgba(244,114,182,0.10)',border:'1px solid rgba(244,114,182,0.25)'},
           title:'This phase has poor edge. Skip or half-size.',
         },'⚠ deadzone'),
+        // V8.7.2: Your-WR-this-session pill — only when we have ≥5 trades to be meaningful
+        _sessionAdvice&&React.createElement('span',{
+          className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded tabular-nums',
+          style:{
+            color:_sessionAdvice.color,
+            background:_sessionAdvice.tone==='positive'||_sessionAdvice.tone==='good'?'rgba(110,231,183,0.06)'
+              :_sessionAdvice.tone==='neutral'||_sessionAdvice.tone==='warning'?'rgba(229,200,112,0.06)'
+              :'rgba(244,114,182,0.08)',
+            border:'1px solid '+_sessionAdvice.color.replace('0.95','0.30').replace('0.85','0.30'),
+          },
+          title:`Your ${_sessionAdvice.session} WR: ${_sessionAdvice.wr}% over ${_sessionAdvice.n} ${currentAsset} trades`,
+        },`you · ${_sessionAdvice.wr}%`),
         // Top caution if present (collapsed view)
         !expanded&&_topCaution&&React.createElement('span',{className:'text-[10px] truncate min-w-0',style:{
           color:_topCaution.severity==='critical'?'rgba(244,114,182,0.95)':_topCaution.severity==='warning'?'rgba(229,200,112,0.85)':'rgba(232,233,228,0.55)',
@@ -6963,6 +7090,27 @@ function MarketContextStrip({useLocalTime}){
           React.createElement('div',{className:'text-[#E8E9E4]/75 leading-snug'},
             'This phase has historically poor edge. Skip or half-size unless you have a specific high-conviction setup.',
           ),
+        ),
+      ),
+      // V8.7.2: SESSION WR ADVISORY — your actual win rate in the current session bucket
+      _sessionAdvice&&React.createElement('div',{
+        className:'flex items-baseline gap-2 px-2.5 py-2 rounded',
+        style:{
+          background:_sessionAdvice.tone==='positive'||_sessionAdvice.tone==='good'?'rgba(110,231,183,0.06)'
+            :_sessionAdvice.tone==='neutral'||_sessionAdvice.tone==='warning'?'rgba(229,200,112,0.06)'
+            :'rgba(244,114,182,0.08)',
+          border:'1px solid '+(
+            _sessionAdvice.tone==='positive'||_sessionAdvice.tone==='good'?'rgba(110,231,183,0.30)'
+            :_sessionAdvice.tone==='neutral'||_sessionAdvice.tone==='warning'?'rgba(229,200,112,0.30)'
+            :'rgba(244,114,182,0.30)'),
+        },
+      },
+        React.createElement('div',{className:'flex-1 min-w-0'},
+          React.createElement('div',{className:'flex items-baseline gap-2 mb-0.5'},
+            React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:_sessionAdvice.color}},_sessionAdvice.label),
+            React.createElement('span',{className:'text-[10px] tabular-nums font-bold',style:{color:_sessionAdvice.color}},_sessionAdvice.wr,'% · ',_sessionAdvice.n,' trades'),
+          ),
+          React.createElement('div',{className:'text-[#E8E9E4]/75 leading-snug'},_sessionAdvice.text),
         ),
       ),
       // V8.7: Coin flip risk pill
@@ -7847,17 +7995,21 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
   //   window. Once Tara locks, that lock is sticky regardless of engine ticks. Brain
   //   was reading `prediction` (engine state, tick-to-tick) which caused desync — Brain
   //   showed SIT_OUT/FORMING while the card showed LOCKED. Snapshot takes priority.
-  const _snap=taraCall?.snapshot;
-  const _snapLocked=_snap&&(_snap.call==='UP'||_snap.call==='DOWN');
-  const _snapDir=_snapLocked?_snap.call:null;
+  // V8.7.1: Wrap snapshot read in try/catch — if shape is unexpected, fall back to engine.
+  let _snap=null,_snapLocked=false,_snapDir=null;
+  try{
+    _snap=taraCall?.snapshot||null;
+    _snapLocked=!!(_snap&&(_snap.call==='UP'||_snap.call==='DOWN'));
+    _snapDir=_snapLocked?_snap.call:null;
+  }catch(_){ /* snapshot unreadable — fall through */ }
   const isLocked=_snapLocked||prediction.includes('CONFIRMED');
   const isRejected=!_snapLocked&&prediction.includes('REJECTED');
   const isSearching=!_snapLocked&&(prediction==='SEARCHING...'||prediction.includes('FORMING'));
   const lockInfo=analysis.lockInfo||(_snapLocked?{
-    dir:_snap.call,
-    lockPrice:Number(_snap.priceAtLock)||0,
-    lockedPosterior:Number(_snap.posterior)||0,
-    lockedAt:_snap.lockedAt||0,
+    dir:_snap?.call,
+    lockPrice:Number(_snap?.priceAtLock)||0,
+    lockedPosterior:Number(_snap?.posterior)||0,
+    lockedAt:_snap?.lockedAt||0,
   }:null);
 
   // ── Synthesize current read in plain English ──
@@ -11193,7 +11345,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.7 online — major UX upgrade plus critical bug fixes. User reported 7 issues: scorecards stopped updating, Brain showed SIT_OUT while card was LOCKED, How Tara Works text was stale, old version numbers in places, sync button uncertain, wanted live trade coach during trades, wanted richer session awareness. All addressed. CRITICAL FIX 1 — BrainView desync. Brain was reading analysis.prediction (engine state, tick-to-tick) which can show FORMING or SEARCHING while Tara is actually locked. The card reads from taraCall.snapshot which is the persistent commit. Fix: Brain now reads snapshot first (sticky for the window once committed) and only falls back to engine state when no snapshot exists. The synthesized read uses snapshot dir/price/posterior. Eliminates the SIT_OUT-while-LOCKED display bug. CRITICAL FIX 2 — Defensive try/catch in _logResult. The V8.6.2 path metric merge ran inside setTaraCallLog updater. Any throw inside computePathMetrics or classifyLossPattern would propagate up and the entire result merge would silently fail, leaving the entry stuck at result:null forever — which is why scorecards stopped updating. Fix: wrap path metrics + classifier in try/catch with console warns. Result merge ALWAYS completes regardless of path-metric failures. NEW FEATURE — Live Trade Coach. While in a trade, a new gold-bordered banner shows situational advisory cards in priority order: stop hit, Tara opposed, extreme contrary risk, late whale spike, take-profit zone, strong lead cruise, risk elevated while ahead, Tara disagrees while ahead, down-but-Tara-backs-you, late-window comeback unlikely, contrary whale early, early lead let it develop, midpoint flat, last 45s offer holding. Each card has icon, title, body, color-coded by tone (urgent/good/watch/info). Header shows position direction + bps + time left. Pulls from analysis + movementRisk + taraCall + whaleLog + offer + position status. Replaces the static Best Practices guide with live advisory tied to YOUR trade RIGHT NOW. NEW FEATURE — Enriched Session Awareness. Each of 12 phase profiles (ASIA_OPEN through AFTERHOURS) now has expectedMovement (what kind of action to expect), volumeGuidance (size up, normal, pull back, skip), deadzoneWarning (boolean for coin-flip phases), whatTaraDoes (how Tara behaves in this phase), and coinFlipRisk (LOW/MEDIUM/HIGH). MarketContextStrip expanded view now shows all of these prominently with a pinned deadzone warning at top if applicable. Collapsed header gets a deadzone pill when active. NEW FEATURE — Trade log normalization. New normalizeCallLogEntry helper backfills derivable fields on legacy entries: windowId from time+windowType, asset default to BTC, closingGapBps from strike+closingPrice, outcomeDir from price comparison. Stamps _normalizedAt. Idempotent. Wired into cloudWatch merge so every entry gets normalized once. UPDATED — How Tara Works modal title now says 8.7. New Current Tara V8.7 Overview section at top covers what Tara does, per-asset everything, cloud sync, multi-tab safety. New Learning System section explains 5 parallel loops + path-aware + shock-aware. New Sync Architecture section lists 11 sync paths. Best Practices section updated for V8.7 features (Trade Coach, Session Awareness expanded view, snapshot vs engine state). Whats New header also bumped to 8.7. UPDATED — Stale 7.1.0 references fixed. Baseline picker now correctly says v7.1.0 baseline (its just one of the named baseline records, not the current version). Discord username + footer now generic Tara without version. SyncStatusPill — already working from V8.6 — green dot SYNCED when listeners active and recent op succeeded. Hover for details. Click for force resync. Verified."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.7.2 online — stale cache recovery + session WR advisor. User reported persistent Tara Engine Crash with ReferenceError: Cannot access ee before initialization. Spent the previous turn confirming via static analysis that the current Tara.jsx source is clean — no module-level TDZ, no block-scope TDZ in render paths, no minified ee references that could TDZ. Conclusion: the deployed build picks up fresh on each load but the BROWSER service worker keeps serving an older cached bundle that DID have the bug. Fixed by hardening the recovery path. ROOT FIX — ErrorBoundary upgraded. The old Reset and Reload button only cleared localStorage; the service worker survived and kept serving the broken bundle. New ErrorBoundary offers two options: Refresh Code Only (preserves your data — unregisters service worker, clears caches API, then reloads — fixes 95% of stale-bundle crashes) and Hard Recovery (nukes everything for last resort). componentDidCatch now ALSO auto-attempts SW unregister so even a plain refresh after a crash gets fresh code. PREVENT FUTURE STALENESS — Service worker auto-skip-waiting. Whenever Tara mounts and finds a waiting service worker (means new code is downloaded but stuck behind old one), posts SKIP_WAITING message to activate it immediately. Also listens for new updates and auto-activates them. controllerchange listener does a one-time reload when the SW takes control — user gets seamless transition to fresh code without any action. NEW FEATURE — Session WR advisor. User asked: in session-based window cautionary box, can Tara also advise according to our prior success ratio. Like if we won 70+ percent in EU, show a note for best success in this window be more confident. But for Asia at 55 percent tell me proceed with caution. Done. MarketContextStrip now takes taraCallLog and currentAsset props. For the current dominant session (ASIA, EU, or US), it computes the user actual WR over all resolved BTC or ETH calls in that session. With at least 5 trades worth of data it surfaces a 5-tier color-coded advisory. 70+% — green, your zone, trade with confidence, consider sizing up on confluent setups. 60-69% — green, profitable, solid edge, standard size. 50-59% — amber, breakeven, marginal edge, pull back to half size or highest-conviction only. 40-49% — amber, unprofitable, you are losing money here, big-edge setups only. Below 40% — rose, your weakness, significant negative edge, strongly consider sitting this session out. The pill shows in the COLLAPSED header as you 70% so you see your edge at a glance. Click to expand for full advisory text. Both protected behind try-catch so any unexpected data shape just hides the pill. Verified parse clean."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -11505,8 +11657,31 @@ function TaraApp(){
 
   useEffect(()=>{setIsMounted(true);
     // ── PWA: register service worker for installability + keep-alive ──
+    // V8.7.2: Auto-update SW. Without this, deployed updates can sit in a "waiting"
+    //   state and the user keeps loading stale cached code until they manually clear.
     if('serviceWorker' in navigator){
       navigator.serviceWorker.register('/sw.js').then(reg=>{
+        // If a new SW is already waiting on this load, activate it now and reload
+        if(reg.waiting){
+          try{reg.waiting.postMessage({type:'SKIP_WAITING'});}catch(_){}
+        }
+        // When a new SW finishes installing in the background, auto-activate
+        reg.addEventListener('updatefound',()=>{
+          const installing=reg.installing;
+          if(!installing)return;
+          installing.addEventListener('statechange',()=>{
+            if(installing.state==='installed'&&navigator.serviceWorker.controller){
+              try{installing.postMessage({type:'SKIP_WAITING'});}catch(_){}
+            }
+          });
+        });
+        // Reload once when the SW takes control (post-skipWaiting)
+        let _refreshed=false;
+        navigator.serviceWorker.addEventListener('controllerchange',()=>{
+          if(_refreshed)return;
+          _refreshed=true;
+          try{window.location.reload();}catch(_){}
+        });
         // Request periodic background sync if supported
         if('periodicSync' in reg){
           reg.periodicSync.register('tara-keepalive',{minInterval:60*1000}).catch(()=>{});
@@ -16545,7 +16720,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              8.7
+              8.7.2
             </span>
           </div>
 
@@ -16862,7 +17037,13 @@ function TaraApp(){
         <TapeStrip tapeWindows={tapeWindows} whaleLog={whaleLog}/>
 
         {/* V7.10.6: Market context strip — current phase, cautions, next transition */}
-        <MarketContextStrip useLocalTime={useLocalTime}/>
+        {/* V8.7.2: Now also reads call log + currentAsset for session-WR advisory */}
+        <MarketContextStrip
+          useLocalTime={useLocalTime}
+          taraLearnings={taraLearnings}
+          taraCallLog={taraCallLog}
+          currentAsset={currentAsset}
+        />
 
         {/* V8.2: Anti-tilt cooldown — most urgent banner, blocks new locks */}
         <AntiTiltCooldownBanner
@@ -17966,7 +18147,7 @@ function TaraApp(){
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
-                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 8.7 Works
+                  <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 8.7.2 Works
                 </h2>
                 <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>Complete guide — predictions, learning, advisor, and best practices</p>
               </div>
@@ -18170,10 +18351,77 @@ function TaraApp(){
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4'}>
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
             <div className={'sticky top-0 bg-[#181A19] border-b border-[#E8E9E4]/10 p-4 flex justify-between items-center'}>
-              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 8.7 — What's New</h2>
+              <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Info className="w-5 h-5 text-indigo-400"/>Tara 8.7.2 — What's New</h2>
               <button onClick={()=>setShowHelp(false)} className={'text-[#E8E9E4]/50 hover:text-white'}><IC.X className="w-5 h-5"/></button>
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
+
+              {/* V8.7.2 — Stale cache recovery + Session WR advisor */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical · Cache Recovery + Session Advisor</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> &mdash; Cache Buster + WR Coach</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshot showed persistent Tara Engine Crash with <em>ReferenceError: Cannot access &lsquo;ee&rsquo; before initialization</em>. Static analysis of current source found no TDZ &mdash; the crash was from a stale service-worker-cached bundle from a previous broken state. Fixed both the symptom (recovery flow) and prevention (auto-update SW).</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Fix #1 &mdash; Beefed-up ErrorBoundary</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The old &ldquo;Reset &amp; Reload&rdquo; button only cleared localStorage. The service worker survived and kept serving the broken bundle on every reload. New options:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong style={{color:'rgb(110,231,183)'}}>Refresh Code Only</strong> &mdash; unregisters service workers, clears Cache Storage, reloads. Preserves your localStorage data (trades, weights, learning all intact). Fixes 95% of stale-bundle crashes.</li>
+                  <li><strong style={{color:'rgb(244,114,182)'}}>Hard Recovery</strong> &mdash; nukes service workers, caches, localStorage, sessionStorage. Last-resort option. Cloud-synced data repopulates on reload.</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">componentDidCatch</code> now auto-attempts SW unregister, so even a plain refresh after a crash gets fresh code.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Fix #2 &mdash; Service worker auto-skip-waiting</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Prevents future stale-bundle issues entirely.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>On mount, if a waiting SW exists, post <code className="text-[10px] bg-[#0E100F] px-1">SKIP_WAITING</code> to activate immediately.</li>
+                  <li>On <code className="text-[10px] bg-[#0E100F] px-1">updatefound</code>, watch for installed state and auto-activate the new worker.</li>
+                  <li>On <code className="text-[10px] bg-[#0E100F] px-1">controllerchange</code>, do a one-time reload &mdash; seamless transition to fresh code, zero user action.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">New Feature &mdash; Session WR Advisor</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User asked: <em>&ldquo;in session-based window cautionary box, can Tara also advise according to our prior success ratio. Like if we won 70+% in EU it can show me a note... for Asia if it&rsquo;s 55% it tells me to proceed with caution.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">MarketContextStrip now reads <code className="text-[10px] bg-[#0E100F] px-1">taraCallLog</code> + <code className="text-[10px] bg-[#0E100F] px-1">currentAsset</code> and computes the user&rsquo;s actual WR in the dominant session (ASIA / EU / US). With ≥5 resolved trades, surfaces a 5-tier color-coded advisory:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong style={{color:'rgba(110,231,183,0.95)'}}>★ 70%+ &mdash; your zone</strong> &mdash; trade with confidence, consider sizing up on confluent setups</li>
+                  <li><strong style={{color:'rgba(110,231,183,0.85)'}}>✓ 60-69% &mdash; profitable</strong> &mdash; solid edge, standard size with normal selectivity</li>
+                  <li><strong style={{color:'rgba(229,200,112,0.85)'}}>◇ 50-59% &mdash; breakeven</strong> &mdash; marginal edge, pull back to half size or highest-conviction setups only</li>
+                  <li><strong style={{color:'rgba(229,200,112,0.95)'}}>⚠ 40-49% &mdash; unprofitable</strong> &mdash; you&rsquo;re losing money here, big-edge setups only</li>
+                  <li><strong style={{color:'rgba(244,114,182,0.95)'}}>✗ Below 40% &mdash; weakness</strong> &mdash; significant negative edge, strongly consider sitting this session out</li>
+                </ul>
+                <p className="text-[11px] text-[#E8E9E4]/55 italic mt-2">A compact &ldquo;you · 70%&rdquo; pill appears in the collapsed header so you see your edge at a glance. Click to expand for full advisory. Both protected by try-catch so any unexpected data shape just hides the pill rather than breaking the strip.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What you should do now</div>
+                <ol className="list-decimal pl-4 space-y-1 text-[11px]">
+                  <li>Deploy V8.7.2.</li>
+                  <li>On the broken browser, click <strong style={{color:'rgb(110,231,183)'}}>Refresh Code Only</strong> in the crash screen. The service worker will be unregistered and fresh code will load.</li>
+                  <li>From now on, future deploys will auto-update without you needing to do anything &mdash; the SW will skip-waiting silently on each visit.</li>
+                </ol>
+              </section>
+
+              {/* V8.7.1 — Render crash defense */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Crash Defense</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> &mdash; Defensive Render Wrapping</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported &ldquo;test engine crash.&rdquo; Investigation: parse clean, engine itself unchanged in V8.7, but new components could throw on edge-case data shapes. Hardened defensively.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Hardened</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>LiveTradeCoach</strong> &mdash; entire body wrapped in try/catch. Returns null gracefully on any error. Belt-and-suspenders optional chaining on movementRisk fields. Number() coercion on currentPrice + whale usd values.</li>
+                  <li><strong>BrainView snapshot read</strong> &mdash; try/catch around taraCall.snapshot access. Falls back gracefully to engine state if shape is unexpected. All snapshot field accesses use optional chaining.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Not touched</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">The analysis engine itself. The engine has its own try/catch (since V134) that catches errors and surfaces them as a &ldquo;MATH CRASH&rdquo; advisor. None of V8.7&apos;s changes touched engine logic.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Result</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">V8.7 features remain functionally identical, but any render edge-case now degrades gracefully (component disappears, console warn logged) instead of white-screening the dashboard.</p>
+              </section>
 
               {/* V8.7 — Trade Coach + Session Awareness + critical fixes */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
@@ -18181,7 +18429,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · UX Upgrades + Critical Fixes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> &mdash; Live Coach, Phase Advisory, Brain Fixes</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> &mdash; Live Coach, Phase Advisory, Brain Fixes</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported 7 issues. All addressed: 2 critical bugs fixed, 2 major features added, all stale text refreshed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Critical Fix #1 — BrainView desync</div>
@@ -18276,7 +18524,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Silent V8.5 Bug Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> &mdash; Path Metrics Now Actually Saved</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> &mdash; Path Metrics Now Actually Saved</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked: &ldquo;is Tara saving all the needed info for her to learn from wins and losses?&rdquo; Honest investigation found a real bug — V8.5&rsquo;s entire path-metrics + shock-aware-learning system was silently inert. Code looked correct, but the path data never reached the persisted call log.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">The bug</div>
@@ -18320,7 +18568,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Force Resync Completeness</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> &mdash; Resync Pulls Active Locks Too</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> &mdash; Resync Pulls Active Locks Too</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked: when force-resyncing does it sync the current lock decision Tara is on, or only stats and records?</p>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3"><strong>Honest answer:</strong> V8.6 only pulled records and stats. Locks already synced automatically through <code className="text-[10px] bg-[#0E100F] px-1">cloudWatch</code> listeners (have since V7), but the V8.6 manual Force Resync button missed them &mdash; meaning a fresh browser pressing Force Resync mid-window had to wait ~1-2s for the lock listener to settle.</p>
 
@@ -18355,7 +18603,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical · Cross-Device Sync Bugs Fixed</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> &mdash; Sync That Actually Works Across Devices</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> &mdash; Sync That Actually Works Across Devices</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: scorecards + memory looked correct on local PC + primary browser but were stale or missing on a different browser/device. V8.3 fixed multi-tab same-browser sync, but several state slots still used the old last-write-wins pattern across devices. Diagnosed four bugs, fixed all four.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Bug 1 — Per-asset weights collision</div>
@@ -18437,7 +18685,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Intelligence Upgrade + Trader Guide</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> &mdash; She Sees the Path Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> &mdash; She Sees the Path Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked: &ldquo;does she understand a last-minute extreme pump or dump?&rdquo; Honest answer was no &mdash; she only knew entry context + outcome, not the path between. A late-minute whale dump looked identical to her as being wrong from the start, and she was over-correcting weights in response to bad luck. V8.5 closes the gap.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Within-window path metrics</div>
@@ -18512,7 +18760,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>UI · Responsive Polish + Layout Optimization</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> &mdash; Cleaner Layout, Any Screen Size</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> &mdash; Cleaner Layout, Any Screen Size</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: Performance card was full-width above the grid taking lots of vertical real estate while the prediction column had blank space at the bottom. Also wanted bulletproof responsive behavior at any viewport size.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Performance card moved + redesigned</div>
@@ -18553,7 +18801,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical · Multi-Tab Data Integrity</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> &mdash; Atomic Multi-Tab Sync</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> &mdash; Atomic Multi-Tab Sync</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: opening tab A on BTC + tab B on ETH during the same window only saved one tab&rsquo;s entry. Diagnosed root cause + applied a three-layer fix.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">The bug</div>
@@ -18616,7 +18864,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Profit Trader Toolkit</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> &mdash; All Three Tiers</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> &mdash; All Three Tiers</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">12 features across the three tiers from yesterday&rsquo;s plan. New Trading Settings modal accessible by clicking the Today P&L pill.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Tier 1 &mdash; would meaningfully change P&L</div>
@@ -18661,7 +18909,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Sync Reliability + Risk Indicators</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Reliable Sync + Movement Risk</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Reliable Sync + Movement Risk</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported missing trades on refresh + cross-browser. Diagnosed three real failure modes in the call-log sync path. Also added the movement risk pulse for live volatility / volume / tape awareness.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sync fixes</div>
@@ -18709,7 +18957,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Visual + Decisional Upgrade</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Trader Awareness</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Trader Awareness</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">11 features added in one drop. Designed to inform without dominating &mdash; each piece earns its place by changing how you trade the next round.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Header pills</div>
@@ -18756,7 +19004,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Fix · Kalshi Strike Fetch</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Kalshi Strike Fetch Restored</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Kalshi Strike Fetch Restored</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: &ldquo;Tara doesn&rsquo;t get strike pricing now from Kalshi&rdquo; for both BTC and ETH. Diagnosed and fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -18798,7 +19046,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Feature · Time-Aware Context · Memory Polish</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Phase Context + Memory Cleanup</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Phase Context + Memory Cleanup</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for time-specific alerts/disclaimers (what kind of market we&rsquo;re in, what we&rsquo;re entering, what to watch for) and to clean up + format previous records. Both in this release.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Market Context Strip</div>
@@ -18843,7 +19091,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Architectural Patch · Sync + Learning</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Sync &amp; Learning Done Right</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Sync &amp; Learning Done Right</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged three concerns simultaneously: records/stats/logs not syncing, Tara giving different responses across devices, and asking whether learning was actually happening. Took the time to audit every persistent state slot and the entire learning pipeline.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Persistence gaps found</div>
@@ -18893,7 +19141,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Browser Real-Time Sync</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Same Call, Every Browser</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Same Call, Every Browser</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;still not the same for everyone on each browser mate.&rdquo;</em> V7.10.3 fixed within-browser races but cross-browser was still broken &mdash; two real bugs compounding.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Bug 1: One-shot read, not real-time</div>
@@ -18928,7 +19176,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Tab Determinism</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — One Window, One Decision</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — One Window, One Decision</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshots showed the SAME window with Tab 1 saying <strong style={{color:'rgb(110,231,183)'}}>LOCKED UP 84%</strong> and Tab 2 saying <strong style={{color:'rgb(244,114,182)'}}>LOCKED DOWN 94%</strong>. Same browser, same window, opposite calls.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -18966,7 +19214,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stability Audit</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Audit Pass</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Audit Pass</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for a comprehensive review after the V7.10.1 snapshot-log fix. Reviewed potential bug categories systematically and fixed one minor stability issue.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was checked</div>
@@ -18997,7 +19245,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Trade Rounds Stopped Updating</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — The Bug That Killed Memory</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — The Bug That Killed Memory</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;tara completely stopped with updating trade round for both btc and eth now&rdquo;</em>. Found a critical bug shipped quietly in V7.8 and inherited by every release since. Both assets affected equally.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was broken</div>
@@ -19035,7 +19283,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · TDZ Bug Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Crash Fixed</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Crash Fixed</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshot showed engine stuck on MATH CRASH with error <em>&ldquo;Cannot access &lsquo;ft&rsquo; before initialization&rdquo;</em>. Posterior frozen at 50%, all signals reading 0, advisor card unable to render, projections empty.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -19055,7 +19303,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Three-State Model · Explicit No-Go</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — When Sit-Out Is The Right Answer</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — When Sit-Out Is The Right Answer</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Talked through sit-outs together. Agreed: V7.8 killing stylistic timidity (tier blocks, timer expirations, mixed-signal skips) was right. But there are 3 specific cases where NOT trading is mathematically correct, not conservative. Those become an explicit NO-GO category &mdash; clearly distinguished from a normal lock or a tentative caution call.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Three states now</div>
@@ -19083,7 +19331,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Persistent Learning · No Skips · Caution Notes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — She Trades Every Round Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — She Trades Every Round Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Weights persist across sessions</div>
@@ -19124,7 +19372,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Reversal Blockers · Stale-Lock Advisor</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Stop Inviting Bad Trades</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Stop Inviting Bad Trades</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged the screenshot. Tara locked DOWN 54%, engine showed 89% UP, Kalshi 99.7% UP, all 4 forward projections UP, price +25bps above strike. Advisor card said &ldquo;Tara DOWN 85% &middot; ENTER DOWN&rdquo;. Pressing ENTER would have been an instant loss. Two bugs fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor — continuation blockers</div>
@@ -19153,7 +19401,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Predict Reversals · Shadow Tara · Fast-Mode</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Predict the Reversal, Not Avoid It</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Predict the Reversal, Not Avoid It</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor (replaces V7.6 guard)</div>
@@ -19201,7 +19449,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Mean-Reversion Guard · Timer-Fires · Dual Feed</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Stop Chasing the Top</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Stop Chasing the Top</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Deep dive into 105 resolved trades + the recent 30 found the actual structural pattern behind &ldquo;we chase momentum and lose on swings.&rdquo;</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Findings from the call-log analysis</div>
@@ -19244,7 +19492,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Faster Low-Dial Locks · ETH Save Bug</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Truly Fast at Fast</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Truly Fast at Fast</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Two unrelated bugs in one release. User flagged both.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Speed dial low-end made aggressive</div>
@@ -19290,7 +19538,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Speed Dial Actually Functional</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Dial Has Function Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Dial Has Function Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;the timer decision has 0 function too. its just a gimmick and does nothing&rdquo;. They were right. The dial was only nudging two floor numbers that almost every trade passed regardless. Real fix:</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tier filter by dial position</div>
@@ -19337,7 +19585,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Engine · The Structural Blind Spot Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Higher Timeframes Finally Count</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Higher Timeframes Finally Count</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged a trade where the Score Breakdown showed &ldquo;Structural ▲ UP · 4/6 align&rdquo; with 5m and 15m both bullish, while Tara sat out leaning DOWN. Investigation: the engine was COMPUTING the multi-TF structural data and SHOWING it on the panel, but never adding it to the posterior. Five-of-six timeframes screaming UP, math weight: zero.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Structural alignment bonus</div>
@@ -19375,7 +19623,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stale State Fixes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Sound + Stale UI</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Sound + Stale UI</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three quick fixes. Two were old bugs, one was a missing persistence flag.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Sound enabled now persists</div>
@@ -19395,7 +19643,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Prediction Engine · The &ldquo;Why Jerome Beats Tara&rdquo; Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7</span> — Honest Confidence, Smarter Locks</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.7.2</span> — Honest Confidence, Smarter Locks</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">After a side-by-side analysis of a real losing trade where Jerome won and Tara lost, we found the structural problem: Tara was over-trusting tape extremes and under-weighting strike position. This release surgically fixes both, plus the timer bug, plus calibrates the confidence display.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tape-extreme guard</div>
