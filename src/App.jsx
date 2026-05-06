@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.1.4-twin-strips-merge-resync-news';
+const BASELINE_VERSION='2026.05.06-v9.1.5-upgraded-compact-strips';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -8528,15 +8528,8 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
           V6.2.3: hidden lg:block (was md:block). */}
       <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} className="hidden lg:block"/>
 
-      {/* V9.1.4: TapeStrip + DepthStrip restored as TWIN PANELS — same visual depth.
-          User feedback: "want the tape flow and depth of market to be in depth like
-          this, accurate and perfect". Stacked vertically with mb-3 spacing. */}
-      {tapeWindows&&(
-        <div className="hidden lg:block space-y-2 mb-3">
-          <TapeStrip tapeWindows={tapeWindows} whaleLog={whaleLog}/>
-          <DepthStrip orderBook={orderBook} targetMargin={targetMargin}/>
-        </div>
-      )}
+      {/* V9.1.5: Tape + Depth render as upgraded compact strips next to the small
+          DOM bar at the top of the analysis card. No big panels here anymore. */}
 
       <div className="flex items-center justify-between mb-3 shrink-0">
         <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
@@ -12994,7 +12987,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.4 online. Three fixes per user feedback. TWIN STRIPS - tape and depth restored to detailed view. User said the compact under-DOM tape from V9.1.2 was too thin and wanted both tape flow AND depth of market in depth like the original screenshot. Reverted - removed compact bar. TapeStrip back to its prominent inline render between TaraCallCard and Projections header inside ProjectionsCard. NEW DepthStrip component built parallel to TapeStrip - same visual structure with quality dots STRONG MIXED WEAK, BID dollars, dominant percent middle, ASK dollars, gradient bar, plus 4-column breakdown showing TIGHT 0.05 percent / CLOSE 0.1 percent / STD 0.2 percent / WIDE 0.5 percent depth bands. orderBook fetch enhanced to compute all four bands from level-2 book data. Both strips stack vertically as twin panels. The small Depth of Market mini-bar at the top of the analysis card stays as a quick-glance indicator. CROSS-DEVICE SYNC FIX - root cause of going-back-to-baseline. The bug was in forceResyncFromCloud at line 17811. Force-resync did setTaraCallLog with cloud entries directly REPLACING local. Same for setScorecards REPLACING with cloud values. Same for setPastWindows. So if cloud had stale or fewer entries than local because a write had not propagated yet, force-resync nuked the local entries. Then RMW write back to cloud merged cloud-with-cloud equals same fewer entries - data permanently lost from cloud too. Fixed - force-resync now MERGES not replaces. taraCallLog uses _mergeCallLogEntries shared with regular cloudWatch handler. scorecards use max-per-cell taking the higher of cloud and local for wins/losses. pastWindows use windowId+windowType+asset dedup with first-write-wins. lifetimePnL uses newest-by-updatedAt. Result - sync from any device unions everything across devices, the baseline never overwrites. NEWS - always show direction arrow on the mini view too. Was only showing UP/DOWN when impact detected, mixed/neutral cases got no arrow at all. Now mixed/neutral shows neutral dot character. Plus absolute timestamp added next to relative age - 5m ago becomes 5m ago plus 2:15 PM. Same in expanded news modal. EXISTING PRESERVED - V9.1.3 stats reconciliation via _logValidatedRef effect, V9.1.3 sticky cloud lock with first-write-wins comparator, V9.1.2 plain language pass on session notes (BUSY/CALM/MOVES GROWING/MOVES SHRINKING), V9.1.2 Tara sees pill, V9.1.2 schedule grouped by market session with real start-end times, V9.1 Discord scope keeps TARA_LOCK plus WHALE only. KNOWN LIMITATIONS - depth bands snapshot every 5 seconds matching the existing fetch cadence, not a rolling time window like tape. The always-active server-side Tara would obviate the client-side merge mechanism by having one canonical engine instance regardless of devices."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.5 online. User reverted again - wants compact thin-bar tape and depth at the top of analysis card, not big panels. But MORE detailed and accurate than V9.1.2. Built upgraded compact strips. DOM strip - keeps thin form factor, adds inline quality dots STRONG MIXED WEAK based on STD plus WIDE band agreement and meaningful volume. Dominant percentages prominent in BID color and ASK color split. Below the main bar a 4-cell breakdown shows TIGHT 0.05 percent, CLOSE 0.1 percent, STD 0.2 percent, WIDE 0.5 percent depth band imbalances - color-coded green for bid-dominant, red for ask-dominant, dimmed when below floor. TAPE FLOW strip same upgrade pattern. Quality dots on top, BUY dollars and SELL dollars labels prominent. Below bar a 4-cell breakdown showing 5s 15s 30s 60s window dominance percentages with same color coding. The big TapeStrip and DepthStrip components retained in code but no longer rendered in ProjectionsCard. EXISTING PRESERVED - V9.1.4 force-resync MERGE not replace fix for taraCallLog scorecards pastWindows lifetimePnL, V9.1.4 news always-arrow plus absolute timestamp, V9.1.4 multi-band orderBook tracking via level-2 fetch, V9.1.3 stats reconciliation, V9.1.3 sticky cross-browser lock with first-write-wins comparator, V9.1.2 plain language session notes BUSY CALM MOVES GROWING MOVES SHRINKING, V9.1.2 schedule grouped by market session with real start-end times. KNOWN LIMITATIONS - depth bands snapshot every 5 seconds matching the existing fetch cadence, not a rolling time window like tape."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -18499,7 +18492,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.1.4
+              9.1.5
             </span>
           </div>
 
@@ -18803,18 +18796,171 @@ function TaraApp(){
             </div>
           </div>
 
-          {/* DOM bar */}
-          <div className="px-3 pb-2 hidden sm:block">
-            <div className={'flex justify-between text-xs text-[#E8E9E4]/30 uppercase tracking-wide mb-1'}><span>Depth of Market</span><span>{buyPct.toFixed(0)}% BID / {sellPct.toFixed(0)}% ASK</span></div>
-            <div className="w-full h-1 bg-[#111312] rounded-full overflow-hidden flex">
-              <div style={{width:`${buyPct}%`}} className={'h-full bg-emerald-500/70 transition-all duration-300'}></div>
-              <div style={{width:`${sellPct}%`}} className={'h-full bg-rose-500/70 transition-all duration-300'}></div>
-            </div>
-          </div>
+          {/* V9.1.5: Upgraded compact DOM strip — same compact form as V9.1.2 but
+              with quality dots, dominant percentage prominent, and a 4-cell band
+              breakdown beneath the main bar (TIGHT/CLOSE/STD/WIDE).
+              Reads orderBook.bands populated by the level-2 fetch. */}
+          {(()=>{
+            const _bands=orderBook?.bands||null;
+            const _hlBids=Number(_bands?.std?.b)||orderBook.localBuy*currentPrice||0;
+            const _hlAsks=Number(_bands?.std?.a)||orderBook.localSell*currentPrice||0;
+            const _hlTotal=_hlBids+_hlAsks;
+            const _hlBidPct=_hlTotal>0?(_hlBids/_hlTotal)*100:50;
+            const _hlAskPct=100-_hlBidPct;
+            const _domDominantPct=Math.max(_hlBidPct,_hlAskPct);
+            const _MIN_DOM=50000;
+            const _aboveFloor=_hlTotal>=_MIN_DOM;
+            // Quality: do STD and WIDE bands agree at >=58% strength?
+            let _qLevel='thin';
+            if(_bands){
+              const _wideTot=(Number(_bands.wide?.b)||0)+(Number(_bands.wide?.a)||0);
+              if(_aboveFloor&&_wideTot>=_MIN_DOM){
+                const _stdSide=_hlBidPct>=50?'BID':'ASK';
+                const _stdStr=Math.max(_hlBidPct,100-_hlBidPct);
+                const _widePct=_wideTot>0?((Number(_bands.wide?.b)||0)/_wideTot)*100:50;
+                const _wideSide=_widePct>=50?'BID':'ASK';
+                const _wideStr=Math.max(_widePct,100-_widePct);
+                const _agree=_stdSide===_wideSide;
+                let _score=0;
+                if(_agree)_score+=1;
+                if(_stdStr>=58)_score+=1;
+                if(_wideStr>=58)_score+=1;
+                if(_wideTot>=500000)_score+=1;
+                _qLevel=_score>=3?'high':_score>=2?'medium':'low';
+              }
+            }
+            const _qColor=_qLevel==='high'?'#6ee7b7':_qLevel==='medium'?'#fbbf24':_qLevel==='low'?'#f87171':null;
+            const _qLabel=_qLevel==='high'?'STRONG':_qLevel==='medium'?'MIXED':_qLevel==='low'?'WEAK':null;
+            const _renderCell=(name,band,floor=_MIN_DOM)=>{
+              const _b=Number(band?.b)||0,_a=Number(band?.a)||0;
+              const _t=_b+_a;
+              const _af=_t>=floor;
+              const _p=_t>0?(_b/_t)*100:50;
+              const _isBid=_p>=50;
+              const _color=!_af?'rgba(232,233,228,0.30)':_isBid?'#6ee7b7':'#f87171';
+              const _disp=Math.max(_p,100-_p);
+              return React.createElement('div',{key:name,className:'text-center'},
+                React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/30 leading-tight'},name),
+                React.createElement('div',{className:'text-[10px] font-bold tabular-nums leading-tight',style:{color:_color}},_af?_disp.toFixed(0)+'%':'—')
+              );
+            };
+            return(
+              <div className="px-3 pb-2 hidden sm:block">
+                <div className="flex items-baseline justify-between mb-1">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xs text-[#E8E9E4]/30 uppercase tracking-wide">Depth of Market</span>
+                    {_qColor&&React.createElement('span',{className:'inline-flex items-center gap-1'},
+                      React.createElement('span',{className:'inline-flex gap-0.5'},
+                        [0,1,2].map(i=>React.createElement('span',{
+                          key:i,className:'inline-block w-1 h-1 rounded-full',
+                          style:{background:(_qLevel==='high'||(_qLevel==='medium'&&i<2)||(_qLevel==='low'&&i<1))?_qColor:'rgba(232,233,228,0.18)'},
+                        }))
+                      ),
+                      React.createElement('span',{className:'text-[8px] uppercase tracking-[0.16em] font-bold',style:{color:_qColor}},_qLabel)
+                    )}
+                  </div>
+                  <span className="text-xs text-[#E8E9E4]/40 tabular-nums">
+                    <span className="text-emerald-400/85 font-bold">{_hlBidPct.toFixed(0)}%</span>
+                    <span className="text-[#E8E9E4]/25 mx-1">BID /</span>
+                    <span className="text-rose-400/85 font-bold">{_hlAskPct.toFixed(0)}%</span>
+                    <span className="text-[#E8E9E4]/25 ml-1">ASK</span>
+                  </span>
+                </div>
+                <div className="w-full h-1 bg-[#111312] rounded-full overflow-hidden flex">
+                  <div style={{width:`${_hlBidPct}%`}} className="h-full bg-emerald-500/70 transition-all duration-300"></div>
+                  <div style={{width:`${_hlAskPct}%`}} className="h-full bg-rose-500/70 transition-all duration-300"></div>
+                </div>
+                {_bands&&(
+                  <div className="grid grid-cols-4 gap-2 mt-1">
+                    {_renderCell('TIGHT',_bands.tight)}
+                    {_renderCell('CLOSE',_bands.close)}
+                    {_renderCell('STD',_bands.std)}
+                    {_renderCell('WIDE',_bands.wide)}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
-          {/* V9.1.4: Compact tape bar removed — TapeStrip + DepthStrip render as twin
-              detailed panels inside ProjectionsCard. The DOM mini-bar above stays as a
-              quick-glance indicator at the top of the analysis card. */}
+          {/* V9.1.5: Upgraded compact Tape Flow strip — same compact form as V9.1.2
+              but with quality dots, dominant percentage prominent, and a 4-cell time
+              breakdown beneath the main bar (5s/15s/30s/60s). */}
+          {tapeWindows&&(()=>{
+            const _w5=tapeWindows.w5||{},_w15=tapeWindows.w15||{},_w30=tapeWindows.w30||{},_w60=tapeWindows.w60||{};
+            const _tBuy=_w30.buys||0,_tSell=_w30.sells||0;
+            const _tTotal=_tBuy+_tSell;
+            if(_tTotal<=0)return null;
+            const _tBuyPct=(_tBuy/_tTotal)*100;
+            const _tSellPct=100-_tBuyPct;
+            const _hlAboveFloor=_tTotal>=TAPE_FLOORS.w30;
+            const _fmt=(n)=>n>=1e6?'$'+(n/1e6).toFixed(1)+'M':n>=1e3?'$'+(n/1e3).toFixed(0)+'K':'$'+Math.round(n);
+            // Quality: do 30s + 60s agree directionally with strength + meaningful volume?
+            let _qLevel='thin';
+            const _w60Tot=(_w60.buys||0)+(_w60.sells||0);
+            if(_hlAboveFloor&&_w60Tot>=TAPE_FLOORS.w60){
+              const _w30Pct=_w30.buyPct!=null?_w30.buyPct:_tBuyPct;
+              const _w60Pct=_w60.buyPct!=null?_w60.buyPct:50;
+              const _w30Side=_w30Pct>=50?'BUY':'SELL';
+              const _w60Side=_w60Pct>=50?'BUY':'SELL';
+              const _w30Str=Math.max(_w30Pct,100-_w30Pct);
+              const _w60Str=Math.max(_w60Pct,100-_w60Pct);
+              let _score=0;
+              if(_w30Side===_w60Side)_score+=1;
+              if(_w30Str>=60)_score+=1;
+              if(_w60Str>=60)_score+=1;
+              if(_w60Tot>=500000)_score+=1;
+              _qLevel=_score>=3?'high':_score>=2?'medium':'low';
+            }
+            const _qColor=_qLevel==='high'?'#6ee7b7':_qLevel==='medium'?'#fbbf24':_qLevel==='low'?'#f87171':null;
+            const _qLabel=_qLevel==='high'?'STRONG':_qLevel==='medium'?'MIXED':_qLevel==='low'?'WEAK':null;
+            const _renderTapeCell=(name,w,floor)=>{
+              const _t=(w.buys||0)+(w.sells||0);
+              const _af=_t>=floor;
+              const _p=w.buyPct!=null?w.buyPct:50;
+              const _isBuy=_p>=50;
+              const _color=!_af?'rgba(232,233,228,0.30)':_isBuy?'#6ee7b7':'#f87171';
+              const _disp=Math.max(_p,100-_p);
+              return React.createElement('div',{key:name,className:'text-center'},
+                React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/30 leading-tight'},name),
+                React.createElement('div',{className:'text-[10px] font-bold tabular-nums leading-tight',style:{color:_color}},_af?_disp.toFixed(0)+'%':'—')
+              );
+            };
+            const _domDominantPct=Math.max(_tBuyPct,_tSellPct);
+            return(
+              <div className="px-3 pb-2 hidden sm:block">
+                <div className="flex items-baseline justify-between mb-1">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xs text-[#E8E9E4]/30 uppercase tracking-wide">Tape Flow · 30s</span>
+                    {_qColor&&React.createElement('span',{className:'inline-flex items-center gap-1'},
+                      React.createElement('span',{className:'inline-flex gap-0.5'},
+                        [0,1,2].map(i=>React.createElement('span',{
+                          key:i,className:'inline-block w-1 h-1 rounded-full',
+                          style:{background:(_qLevel==='high'||(_qLevel==='medium'&&i<2)||(_qLevel==='low'&&i<1))?_qColor:'rgba(232,233,228,0.18)'},
+                        }))
+                      ),
+                      React.createElement('span',{className:'text-[8px] uppercase tracking-[0.16em] font-bold',style:{color:_qColor}},_qLabel)
+                    )}
+                  </div>
+                  <span className="text-xs text-[#E8E9E4]/40 tabular-nums">
+                    <span className="text-emerald-400/85 font-bold">{_fmt(_tBuy)}</span>
+                    <span className="text-[#E8E9E4]/25 mx-1">BUY /</span>
+                    <span className="text-rose-400/85 font-bold">{_fmt(_tSell)}</span>
+                    <span className="text-[#E8E9E4]/25 ml-1">SELL</span>
+                  </span>
+                </div>
+                <div className="w-full h-1 bg-[#111312] rounded-full overflow-hidden flex">
+                  <div style={{width:`${_tBuyPct}%`}} className="h-full bg-emerald-500/70 transition-all duration-300"></div>
+                  <div style={{width:`${_tSellPct}%`}} className="h-full bg-rose-500/70 transition-all duration-300"></div>
+                </div>
+                <div className="grid grid-cols-4 gap-2 mt-1">
+                  {_renderTapeCell('5S',_w5,TAPE_FLOORS.w5)}
+                  {_renderTapeCell('15S',_w15,TAPE_FLOORS.w15)}
+                  {_renderTapeCell('30S',_w30,TAPE_FLOORS.w30)}
+                  {_renderTapeCell('60S',_w60,TAPE_FLOORS.w60)}
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* V9.1.1: TapeStrip relocated — now renders between TaraCallCard and
@@ -20179,6 +20325,27 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.1.5 — Upgraded compact strips */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Upgraded compact tape + depth strips</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.1.5</span> &mdash; Compact, Detailed, Accurate</h3>
+
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;i want these 2 to be here only. i just want them a bit more enhanced, detailed and accurate. almost like this but a little more upgraded.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Removed the big <code className="text-[10px] bg-[#0E100F] px-1">TapeStrip</code>+<code className="text-[10px] bg-[#0E100F] px-1">DepthStrip</code> panels from inside ProjectionsCard. Both DOM and Tape now render as upgraded compact strips at the top of the analysis card, same form factor as V9.1.2 but with three new layers of detail.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Three upgrades on each strip</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Quality dots</strong> &mdash; inline 3-dot indicator next to the label: <strong style={{color:'#6ee7b7'}}>&#9679;&#9679;&#9679; STRONG</strong> / <strong style={{color:'#fbbf24'}}>&#9679;&#9679;&#9675; MIXED</strong> / <strong style={{color:'#f87171'}}>&#9679;&#9675;&#9675; WEAK</strong>. Score combines side agreement + strength + meaningful volume.</li>
+                  <li><strong>Dominant percentages prominent</strong> &mdash; right-side label now color-codes the BID/BUY % in green and ASK/SELL % in rose, instead of monochrome.</li>
+                  <li><strong>4-cell breakdown row</strong> beneath the main bar &mdash; TIGHT/CLOSE/STD/WIDE bands for DOM, 5s/15s/30s/60s windows for Tape. Each cell shows dominant-side % color-coded (green = bid/buy lead, red = ask/sell lead, dim when below floor).</li>
+                </ul>
+
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Reads <code className="text-[10px] bg-[#0E100F] px-1">orderBook.bands</code> populated by V9.1.4&rsquo;s level-2 fetch enhancement. The <code className="text-[10px] bg-[#0E100F] px-1">TapeStrip</code>+<code className="text-[10px] bg-[#0E100F] px-1">DepthStrip</code> components stay in source for potential reuse but no longer render anywhere.</p>
               </section>
 
               {/* V9.1.4 — Twin strips · merge-resync · news polish */}
