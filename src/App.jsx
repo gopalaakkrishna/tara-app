@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.1.8-baseline-propagate-sitout-gate-market-character';
+const BASELINE_VERSION='2026.05.06-v9.1.9-derive-from-log-sync-diagnostic';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -10152,6 +10152,45 @@ function NewsFeedCard(){
 //   2. Save as Baseline (pushes THIS device's state to baseline/canonical)
 //   3. Apply Baseline (overwrites local with the canonical baseline)
 function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,forceResyncing,baselineBusy,baselineMeta,deviceLabel,localCounts}){
+  // V9.1.9: Cloud diagnostic — read live cloud paths and show counts side-by-side
+  //   with local. If they disagree, the user can see immediately.
+  const[cloudDiag,setCloudDiag]=React.useState(null);
+  const[diagLoading,setDiagLoading]=React.useState(false);
+  const[diagError,setDiagError]=React.useState(null);
+  const _runDiag=React.useCallback(async()=>{
+    setDiagLoading(true);
+    setDiagError(null);
+    try{
+      const _log=await cloudRead('memory/taraCallLog');
+      const _scores=await cloudRead('scorecards/personal');
+      const _past=await cloudRead('history/pastWindows');
+      const _pnl=await cloudRead('state/lifetimePnL');
+      const _baseline=await cloudRead('baseline/canonical');
+      const _entries=Array.isArray(_log?.entries)?_log.entries:[];
+      const _wins=_entries.filter(e=>e&&e.result==='WIN').length;
+      const _losses=_entries.filter(e=>e&&e.result==='LOSS').length;
+      const _sitouts=_entries.filter(e=>e&&e.result==='SITOUT').length;
+      setCloudDiag({
+        log:_entries.length,
+        wins:_wins,
+        losses:_losses,
+        sitouts:_sitouts,
+        legacyScores:_scores?{m15:`${_scores['15m']?.wins||0}W·${_scores['15m']?.losses||0}L`,m5:`${_scores['5m']?.wins||0}W·${_scores['5m']?.losses||0}L`}:null,
+        past:Array.isArray(_past?.entries)?_past.entries.length:0,
+        pnl:Number(_pnl?.value)||0,
+        baseline:_baseline?{
+          savedAt:_baseline.savedAt,
+          sourceDevice:_baseline.sourceDevice,
+          dataLogCount:Array.isArray(_baseline.data?.taraCallLog)?_baseline.data.taraCallLog.length:0,
+        }:null,
+      });
+    }catch(e){
+      setDiagError(e?.message||'cloud read failed');
+    }finally{
+      setDiagLoading(false);
+    }
+  },[]);
+  React.useEffect(()=>{_runDiag();},[_runDiag]);
   React.useEffect(()=>{
     const onKey=(e)=>{if(e.key==='Escape')onClose();};
     window.addEventListener('keydown',onKey);
@@ -10159,17 +10198,20 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,for
   },[onClose]);
   const _baselineDate=baselineMeta?.savedAt?new Date(baselineMeta.savedAt).toLocaleString():null;
   const _baselineSizes=baselineMeta?.sizes||{};
+  // V9.1.9: drift detection — compare local vs cloud for the source-of-truth log
+  const _logDrift=cloudDiag?Math.abs((cloudDiag.log||0)-(localCounts.taraCallLog||0)):null;
+  const _hasDrift=_logDrift!=null&&_logDrift>0;
   return React.createElement('div',{
     className:'fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8',
     style:{background:'rgba(0,0,0,0.75)',backdropFilter:'blur(4px)'},
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'w-full max-w-lg rounded-xl',
+      className:'w-full max-w-lg rounded-xl my-auto max-h-[90vh] overflow-y-auto',
       style:{background:'#181A19',border:'1px solid rgba(229,200,112,0.20)',boxShadow:'0 0 40px rgba(229,200,112,0.15)'},
       onClick:(e)=>e.stopPropagation(),
     },
-      React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid rgba(232,233,228,0.10)'}},
+      React.createElement('div',{className:'flex items-center justify-between px-5 py-4 sticky top-0',style:{borderBottom:'1px solid rgba(232,233,228,0.10)',background:'#181A19'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Sync'),
           React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(229,200,112,0.85)'}},'cross-device')
@@ -10181,18 +10223,52 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,for
         },'✕')
       ),
       React.createElement('div',{className:'px-5 py-4 space-y-3'},
-        // This device summary
-        React.createElement('div',{className:'p-3 rounded-md text-xs',style:{background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.08)'}},
-          React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
-            React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold text-[#E8E9E4]/45'},'This device'),
-            React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/60'},deviceLabel)
+        // V9.1.9: SIDE-BY-SIDE diagnostic — local vs cloud
+        React.createElement('div',{className:'p-3 rounded-md text-xs',style:{background:'rgba(232,233,228,0.03)',border:`1px solid ${_hasDrift?'rgba(244,114,182,0.30)':'rgba(232,233,228,0.08)'}`}},
+          React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
+            React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold',style:{color:_hasDrift?'rgba(244,114,182,0.95)':'rgba(232,233,228,0.55)'}},_hasDrift?'⚠ DRIFT DETECTED':'Sync diagnostic'),
+            React.createElement('button',{
+              onClick:_runDiag,
+              disabled:diagLoading,
+              className:'text-[9px] uppercase tracking-[0.14em] font-bold px-1.5 py-0.5 rounded border transition-colors hover:bg-[#E8E9E4]/5 disabled:opacity-50',
+              style:{color:'rgba(229,200,112,0.85)',borderColor:'rgba(229,200,112,0.30)'},
+            },diagLoading?'reading…':'↻ refresh')
           ),
-          React.createElement('div',{className:'text-[#E8E9E4]/70 leading-snug'},
-            `${localCounts.taraCallLog} log entries · ${localCounts.wins}W·${localCounts.losses}L·${localCounts.sitouts}SO · ${localCounts.pastWindows} past windows · `,
-            React.createElement('span',{className:localCounts.pnl>=0?'text-emerald-400':'text-rose-400'},
-              `${localCounts.pnl>=0?'+':''}$${localCounts.pnl.toFixed(2)}`
+          // Two columns: local | cloud
+          React.createElement('div',{className:'grid grid-cols-2 gap-3'},
+            // LOCAL column
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 mb-1'},`THIS DEVICE · ${deviceLabel}`),
+              React.createElement('div',{className:'text-[11px] tabular-nums leading-snug text-[#E8E9E4]/80'},
+                React.createElement('div',null,`${localCounts.taraCallLog} log entries`),
+                React.createElement('div',null,`${localCounts.wins}W·${localCounts.losses}L·${localCounts.sitouts}SO`),
+                React.createElement('div',null,`${localCounts.pastWindows} past windows`),
+                React.createElement('div',{className:localCounts.pnl>=0?'text-emerald-400':'text-rose-400'},`${localCounts.pnl>=0?'+':''}$${localCounts.pnl.toFixed(2)} P&L`)
+              )
             ),
-            ' P&L'
+            // CLOUD column
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 mb-1'},'CLOUD (Firestore)'),
+              diagError?React.createElement('div',{className:'text-[10px] text-rose-400'},'Read failed: ',diagError):
+                cloudDiag?React.createElement('div',{className:'text-[11px] tabular-nums leading-snug text-[#E8E9E4]/80'},
+                  React.createElement('div',{className:Math.abs(cloudDiag.log-localCounts.taraCallLog)>0?'text-amber-300 font-bold':null},
+                    `${cloudDiag.log} log entries`,
+                    Math.abs(cloudDiag.log-localCounts.taraCallLog)>0?` (Δ${cloudDiag.log-localCounts.taraCallLog})`:null
+                  ),
+                  React.createElement('div',null,`${cloudDiag.wins}W·${cloudDiag.losses}L·${cloudDiag.sitouts}SO`),
+                  React.createElement('div',null,`${cloudDiag.past} past windows`),
+                  React.createElement('div',{className:cloudDiag.pnl>=0?'text-emerald-400':'text-rose-400'},`${cloudDiag.pnl>=0?'+':''}$${cloudDiag.pnl.toFixed(2)} P&L`)
+                ):
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/40 italic'},'Reading…')
+            )
+          ),
+          // Drift hint
+          _hasDrift&&React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-amber-300 leading-snug',style:{borderTop:'1px solid rgba(232,233,228,0.10)'}},
+            `Local and cloud have different log sizes (Δ ${_logDrift}). Press Force Resync to merge — or save this device as baseline if local has more recent data.`
+          ),
+          // Baseline cloud info
+          cloudDiag?.baseline&&React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-[#E8E9E4]/55 leading-snug',style:{borderTop:'1px solid rgba(232,233,228,0.10)'}},
+            'Cloud baseline: ',cloudDiag.baseline.dataLogCount,' entries from ',cloudDiag.baseline.sourceDevice,' on ',new Date(cloudDiag.baseline.savedAt).toLocaleString()
           )
         ),
         // OPTION 1 — Force Resync
@@ -11864,19 +11940,15 @@ function TaraApp(){
   // V7.10.5: scorecards now persist to localStorage AND sync to cloud. Previously the
   //   user's personal W/L tally was in-memory only — reset every reload AND inconsistent
   //   across devices. Initial value reads localStorage seed (cached from last session).
-  const[scorecards,setScorecards]=useState(()=>{
-    try{
-      const stored=localStorage.getItem('taraPersonalScorecards_v1');
-      if(stored){
-        const p=JSON.parse(stored);
-        if(p&&typeof p==='object')return{
-          '15m':{wins:Number(p['15m']?.wins)||0,losses:Number(p['15m']?.losses)||0},
-          '5m':{wins:Number(p['5m']?.wins)||0,losses:Number(p['5m']?.losses)||0},
-        };
-      }
-    }catch(e){}
-    return{'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}};
-  });
+  // V9.1.9: scorecards is now DERIVED from taraCallLog after that state is declared.
+  //   Stubs here for refs that are used in later useEffects. Real assignment happens
+  //   below the taraCallLog state via React.useMemo (~line 12125 area).
+  // V9.1.9: setScorecards is a no-op stub. Legacy callers (applyBaseline path,
+  //   migrations) call this — but with derive-from-log it's redundant. The log
+  //   itself is what carries scorecard data now. Stub returns void.
+  const setScorecards=()=>{ /* derive-from-log; no-op for backward compat */ };
+  // V9.1.9: hydration ref kept for legacy reads but no longer used to gate writes.
+  const _scorecardsHydratedRef=useRef(true);
   // V3.2.4: Tara's Call scorecard — separate from general prediction. Tracks UP/DOWN/SIT_OUT
   //   decisions where Tara has applied an additional conviction filter. SIT_OUT trades don't
   //   count for or against. Lets us measure "would Tara's selective calls win at higher rate?"
@@ -11888,11 +11960,8 @@ function TaraApp(){
   //   call log is the single source of truth — no separate counter to drift.
   // V5.7.1 declarations moved to AFTER taraCallLog (V5.7.4 hotfix — TDZ fix).
   const _callLogHydratedRef=useRef(false);
-  // V7.10.5: hydration sentinel for personal scorecards cloud sync. Same pattern as the
-  //   call log — only push to cloud after we've heard from cloud at least once. Prevents
-  //   blasting baseline-default values back to cloud and overwriting other devices' data
-  //   on first mount before cloudWatch has had a chance to deliver the saved state.
-  const _scorecardsHydratedRef=useRef(false);
+  // V9.1.9: _scorecardsHydratedRef now declared earlier with the derived scorecards
+  //   block. Legacy V7.10.5 hydration sentinel removed.
   // V3.2.4: Snapshot Tara's Call at endgame freeze. Whatever Tara is calling when the
   //   final 90s zone begins becomes "Tara's Call for this round." It gets resolved when
   //   the window rolls over. This ref persists across the snapshot→rollover transition.
@@ -12049,6 +12118,20 @@ function TaraApp(){
     });
     return out;
   },[taraCallLog,currentAsset]);
+  // V9.1.9: scorecards (lifetime, all assets) — derived from taraCallLog.
+  //   This replaces the legacy useState that had broken max-per-cell merge sync.
+  //   Same source of truth as taraScorecards; no separate sync path needed.
+  const scorecards=React.useMemo(()=>{
+    const out={'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}};
+    (taraCallLog||[]).forEach(e=>{
+      if(!e||!e.windowType||!e.result)return;
+      const wt=e.windowType;
+      if(!out[wt])out[wt]={wins:0,losses:0};
+      if(e.result==='WIN')out[wt].wins++;
+      else if(e.result==='LOSS')out[wt].losses++;
+    });
+    return out;
+  },[taraCallLog]);
   // V7.0.2: per-asset call log shown in Memory modal + cards. Engine still reads full log
   //   for learnings — filtering only happens at display layer.
   const displayedCallLog=React.useMemo(()=>{
@@ -12357,53 +12440,26 @@ function TaraApp(){
   //   but that's a rare action and the user can re-clear once cloud catches up.)
   // V8.3: Switched to RMW write — reads cloud, takes max-per-cell, writes back. Solves
   //   multi-tab clobbering where Tab A's +1 and Tab B's +1 collapsed to one increment.
+  // V9.1.9: Legacy scorecards/personal cloud sync DISABLED. Was max-per-cell merge
+  //   which produced phantom totals across devices (e.g. Device A 50W/30L + Device B
+  //   5W/60L max-merged to 50W/60L = 110 trades neither device ever had). Replaced
+  //   by deriving scorecards from taraCallLog directly — the log is already cloud-
+  //   synced via memory/taraCallLog with proper transactional first-write-wins merge.
+  //   The cloudWatch listener is kept as a NO-OP for backward compatibility — if
+  //   another device on V9.1.8 or earlier writes to scorecards/personal, we ignore.
   const _scorecardsRef=useRef(scorecards);
   _scorecardsRef.current=scorecards;
   useEffect(()=>{
+    // Cache local copy for legacy reads (BrainView "Recent record" lifetime stat).
     try{localStorage.setItem('taraPersonalScorecards_v1',JSON.stringify(scorecards));}catch(e){}
-    if(_scorecardsHydratedRef.current){
-      cloudWriteDebouncedRMW(
-        'scorecards/personal',
-        ()=>_scorecardsRef.current,
-        (cloudData,localData)=>{
-          const _maxMerge=(l,c)=>({
-            wins:Math.max(Number(l?.wins)||0,Number(c?.wins)||0),
-            losses:Math.max(Number(l?.losses)||0,Number(c?.losses)||0),
-          });
-          const merged={
-            '15m':_maxMerge(localData?.['15m'],cloudData?.['15m']),
-            '5m':_maxMerge(localData?.['5m'],cloudData?.['5m']),
-          };
-          // Skip write if merge equals cloud (already in sync)
-          if(cloudData&&merged['15m'].wins===(cloudData['15m']?.wins||0)&&merged['15m'].losses===(cloudData['15m']?.losses||0)
-             &&merged['5m'].wins===(cloudData['5m']?.wins||0)&&merged['5m'].losses===(cloudData['5m']?.losses||0))return null;
-          return merged;
-        },
-        1500,
-      );
-    }
+    // No cloud write — derive-from-log is the source of truth now.
   },[scorecards]);
   useEffect(()=>{
-    const unsub=cloudWatch('scorecards/personal',(d)=>{
+    // Listen for legacy writes from older devices but ignore them. The log itself
+    //   is what carries scorecard truth now.
+    const unsub=cloudWatch('scorecards/personal',()=>{
       _scorecardsHydratedRef.current=true;
-      if(!d||typeof d!=='object')return;
-      setScorecards(prev=>{
-        const _merge=(local,cloud)=>{
-          const lW=Number(local?.wins)||0,lL=Number(local?.losses)||0;
-          const cW=Number(cloud?.wins)||0,cL=Number(cloud?.losses)||0;
-          // Take max-per-cell so increments from any device propagate. Tradeoff: reset on
-          //   one device gets reverted by other devices' higher counts. Acceptable for now.
-          return{wins:Math.max(lW,cW),losses:Math.max(lL,cL)};
-        };
-        const next={
-          '15m':_merge(prev?.['15m'],d?.['15m']),
-          '5m':_merge(prev?.['5m'],d?.['5m']),
-        };
-        // No-op short-circuit if the merge produced identical numbers to prev
-        if(next['15m'].wins===prev['15m']?.wins&&next['15m'].losses===prev['15m']?.losses&&
-           next['5m'].wins===prev['5m']?.wins&&next['5m'].losses===prev['5m']?.losses)return prev;
-        return next;
-      });
+      // No-op. Scorecards derive from taraCallLog now.
     });
     return unsub;
   },[]);
@@ -13329,7 +13385,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.8 online. Three changes per user feedback. BASELINE PROPAGATION FIX. User reported - i pushed last update, made sure to save it as a baseline before, after update tried to sync to new baseline but still didnt get those trades. Found it. saveAsBaseline and applyBaseline were only writing to baseline/canonical (a separate doc) and updating local React state. The LIVE cloud paths memory/taraCallLog scorecards/personal history/pastWindows state/lifetimePnL learnings/tara still had OLD pre-baseline data. Result - the cloudWatch listener on the device that applied baseline would re-emit old live data and merge it back, undoing the baseline. AND - other devices doing Force Resync pulled from those same live paths and got stale pre-baseline state. Fixed - both saveAsBaseline and applyBaseline now ALSO push to all 5 live cloud paths so the regular sync mechanism distributes the canonical state immediately. Other devices receive within ~1 second via cloudWatch. SITOUT GATING. User asked Tara to only count SITOUT when site is opened with less than 2-3 mins remaining (real missed-window case). Otherwise if odds are good and we sense an entry we call it, otherwise rollover quietly. Implemented - added _mountTimeRef tracking session-start time. Gated _logSnapshotEntry to skip ambiguous SIT_OUT entries (snapshot.call equals SIT_OUT and not isNoGo) unless user mounted within last 30s AND window has ≤3 min left. Real directional UP/DOWN calls always log. Explicit NO_TRADE no-gos always log (those are intentional skip decisions). Same gate applied to 5m no-Kalshi resolution path - drops the unresolved entry instead of marking SITOUT when user did not open late. MARKET CHARACTER BADGE. User asked - does Tara treat each market in their own way like dead slow movement, super fast up or down, swinging back and forth - and asked for a badge so each trade you know what kind of market are we dealing with. Yes Tara already classifies internally - 8 windowAmplitude types (DEAD OPENING WHIPSAW SPIKE-FADE LATE-BREAK TRENDING GRIND RANGE NORMAL) plus 5 regimes (TRENDING UP TRENDING DOWN RANGE-CHOP SHORT SQUEEZE HIGH VOL CHOP). Per-regime weights load from regimeWeightsByAsset so the engine actually adapts. Now surfaced in LiveTradeCoach header as two plain-language pills - going one way / slow grind / late breakout / wild swings / spike & fade / sideways range / dead-quiet for window character, plus pumping ▲ / dumping ▼ / choppy / squeeze ▲ / wild for regime. Tooltips explain underlying measurements. EXISTING PRESERVED - V9.1.7 phase/session UTC alignment fix, V9.1.7 LiveTradeCoach trajectory + peak/trough + acceleration detection, V9.1.6 Save/Apply Baseline buttons, V9.1.6 Brain locked vs scanning fix, V9.1.6 news timezone parseNewsDate, V9.1.6 mini news arrows visible, V9.1.5 upgraded compact strips, V9.1.4 force-resync MERGE not replace, V9.1.3 stats reconciliation. KNOWN LIMITATIONS - if Firebase rules deny writes (current rules are wide open allow all but if changed) the live-path push silently fails and falls back to old behavior. Tara's chat logs the count of paths pushed so you can verify."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.9 online. The score and record sync issue user reported - fixed at the structural level. Found the actual bug. There were TWO scoreboards in Tara - taraScorecards (derived from taraCallLog, accurate, single source of truth) and a separate scorecards state with broken max-per-cell merge that produced phantom totals across devices. Example - Device A had 50W/30L, Device B had 5W/60L. Max-per-cell merge stamped 50W/60L equals 110 trades that NEITHER device ever had. Plus it kept fighting with the taraScorecards display. STRUCTURAL FIX. Made scorecards a useMemo derived from taraCallLog same as taraScorecards. Same source of truth for both. Single sync path - the call log itself, which already syncs correctly via transactional Firestore RMW with first-write-wins by entry ID. Disabled the broken legacy scorecards/personal write path - it was the source of the drift. Disabled cloudWatch handler too (now no-op for backward compat with V9.1.8 and earlier devices still writing to it). updateScore is now a no-op stub - the log itself drives the count, no separate increment needed. SYNC DIAGNOSTIC ADDED. The Sync menu (click SyncStatusPill) now shows side-by-side LOCAL vs CLOUD comparison. Reads memory/taraCallLog, scorecards/personal, history/pastWindows, state/lifetimePnL, and baseline/canonical from Firestore directly and displays the count of log entries, W L SITOUT, past windows, and P&L on each side. If they differ, the box outlines in rose with DRIFT DETECTED label and shows exactly how many entries are missing. There is a refresh button to re-read cloud anytime. Use this to verify - open the menu on each device. If both show the same numbers in cloud column, sync is working. If local differs from cloud, press Force Resync to merge. APPLY BASELINE no longer overwrites scorecards directly - the call log carries the data, so applying the log alone updates the scoreboard automatically. Force Resync no longer touches scorecards either. Both write the log to live cloud paths so other devices receive within ~1 second. EXISTING PRESERVED - V9.1.8 baseline live-path propagation, V9.1.8 SITOUT gate, V9.1.8 market character badges, V9.1.7 phase/session UTC alignment, V9.1.7 LiveTradeCoach trajectory plus peak/trough plus acceleration, V9.1.6 Save/Apply Baseline buttons, V9.1.6 Brain locked vs scanning fix, V9.1.6 news timezone parseNewsDate, V9.1.4 force-resync MERGE not replace. KNOWN LIMITATIONS - if multiple devices each had unique pre-V9.1.9 calls and never properly synced, those calls live only in the device that has them. Force Resync from the device with the most calls will write them to cloud, then other devices receive via cloudWatch. The diagnostic in the Sync menu lets you verify - look at LOCAL count vs CLOUD count side by side."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -14098,7 +14154,10 @@ function TaraApp(){
   // Position status
   const positionStatus=useMemo(()=>{if(!positionEntry||!currentPrice)return null;const{price:entry,side}=positionEntry;const pnlPct=side==='UP'?((currentPrice-entry)/entry)*100:((entry-currentPrice)/entry)*100;return{entry,side,pnlPct,isStopHit:pnlPct<=-30};},[positionEntry,currentPrice,betAmount]);
 
-  const updateScore=(type,wl,amt)=>setScorecards(prev=>({...prev,[type]:{...prev[type],[wl]:Math.max(0,(Number(prev[type]?.[wl])||0)+amt)}}));
+  // V9.1.9: updateScore is a no-op stub. Was incrementing scorecards state directly
+  //   but with derive-from-log the log itself drives the count. Legacy callers pass
+  //   through harmlessly.
+  const updateScore=(type,wl,amt)=>{};
 
   const[discordLog,setDiscordLog]=useState([]); // {id, type, label, ts, messageId, webhookId, webhookToken}
 
@@ -18350,19 +18409,10 @@ function TaraApp(){
               return merged;
             });_applied++;
           } else if(path==='scorecards/personal'){
-            // V9.1.4: MAX-per-cell merge (was raw replace which caused the user's
-            //   "every sync goes back to baseline" complaint — if cloud had stale lower
-            //   numbers OR fields were undefined, local got overwritten with zeros).
-            setScorecards(prev=>{
-              const _max=(l,c)=>({
-                wins:Math.max(Number(l?.wins)||0,Number(c?.wins)||0),
-                losses:Math.max(Number(l?.losses)||0,Number(c?.losses)||0),
-              });
-              return{
-                '15m':_max(prev?.['15m'],data?.['15m']),
-                '5m':_max(prev?.['5m'],data?.['5m']),
-              };
-            });_applied++;
+            // V9.1.9: No-op. Scorecards derive from taraCallLog. The taraCallLog
+            //   path above already pulled the source-of-truth log; scorecards
+            //   recompute from it automatically.
+            _applied++;
           } else if(path==='history/pastWindows'&&Array.isArray(data.entries)){
             // V9.1.4: MERGE instead of replace. windowId+windowType+asset dedup.
             setPastWindows(prev=>{
@@ -18632,10 +18682,9 @@ function TaraApp(){
       //   waiting for the cloudWatch round-trip.
       // RAW REPLACE — this is the user's explicit choice
       if(Array.isArray(_d.taraCallLog))setTaraCallLog(_d.taraCallLog);
-      if(_d.scorecards)setScorecards({
-        '15m':{wins:Number(_d.scorecards['15m']?.wins)||0,losses:Number(_d.scorecards['15m']?.losses)||0},
-        '5m':{wins:Number(_d.scorecards['5m']?.wins)||0,losses:Number(_d.scorecards['5m']?.losses)||0},
-      });
+      // V9.1.9: scorecards derive from taraCallLog now — applying the log alone
+      //   updates the displayed scoreboard automatically. Old payload still
+      //   carries scorecards for backward compat but we don't apply it directly.
       if(Array.isArray(_d.pastWindows))setPastWindows(_d.pastWindows);
       if(typeof _d.lifetimePnL==='number'){
         setLifetimePnL(_d.lifetimePnL);
@@ -19116,7 +19165,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.1.8
+              9.1.9
             </span>
           </div>
 
@@ -20950,6 +20999,44 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.1.9 — Score derive-from-log · Sync diagnostic */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Score derive-from-log &middot; live cloud diagnostic in sync menu</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.1.9</span> &mdash; Score Derive-From-Log + Sync Diagnostic</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Found the actual sync bug</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;score and record still don&rsquo;t sync well.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">There were TWO scoreboards:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-2">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">taraScorecards</code> &mdash; derived from <code className="text-[10px] bg-[#0E100F] px-1">taraCallLog</code> (accurate)</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">scorecards</code> &mdash; separate state with <strong>broken max-per-cell merge</strong> sync</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Example of the broken merge: Device A had 50W/30L, Device B had 5W/60L. Max-per-cell stamped <strong>50W/60L = 110 trades that NEITHER device ever had</strong>. And it kept fighting with the log-derived display.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Structural fix &mdash; one source of truth</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Made <code className="text-[10px] bg-[#0E100F] px-1">scorecards</code> a <code className="text-[10px] bg-[#0E100F] px-1">useMemo</code> derived from <code className="text-[10px] bg-[#0E100F] px-1">taraCallLog</code> &mdash; same as <code className="text-[10px] bg-[#0E100F] px-1">taraScorecards</code>. Single source of truth. Single sync path: the call log, which already syncs correctly via Firestore <code className="text-[10px] bg-[#0E100F] px-1">runTransaction</code> RMW with first-write-wins-by-id. Disabled:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li>Broken legacy <code className="text-[10px] bg-[#0E100F] px-1">scorecards/personal</code> write path (the source of drift)</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">cloudWatch</code> handler (now no-op for V9.1.8 and earlier devices)</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">updateScore</code> increment function (log drives count now)</li>
+                  <li>Apply Baseline scorecards write (log carries scorecard data)</li>
+                  <li>Force Resync scorecards merge (same reason)</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Live cloud diagnostic</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The Sync menu (click <code className="text-[10px] bg-[#0E100F] px-1">SyncStatusPill</code>) now reads cloud directly and shows <strong>side-by-side LOCAL vs CLOUD comparison</strong>:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li>Both columns: log entries / W L SITOUT / past windows / P&L</li>
+                  <li>If they differ, box outlines in rose with <strong>DRIFT DETECTED</strong> + delta count</li>
+                  <li>↻ refresh button re-reads cloud anytime</li>
+                  <li>Cloud baseline info shown at the bottom (entries + source device + date)</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Use this to verify: open the menu on each device. If both show the same numbers in the CLOUD column, sync is working. If they differ, that&rsquo;s a Firestore-level issue (network, rules, permission), not a Tara bug.</p>
               </section>
 
               {/* V9.1.8 — Baseline propagation · SITOUT gate · Market character */}
