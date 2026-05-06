@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.1.7-session-phase-coach-trajectory';
+const BASELINE_VERSION='2026.05.06-v9.1.8-baseline-propagate-sitout-gate-market-character';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -6346,8 +6346,56 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
       className:'rounded-lg overflow-hidden mb-2 sm:mb-3',
       style:{border:'1px solid rgba(229,200,112,0.30)',background:'rgba(229,200,112,0.03)'},
     },
-      React.createElement('div',{className:'px-3 sm:px-4 py-1.5 border-b border-[#E8E9E4]/8 flex items-baseline justify-between gap-2'},
-        React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:T2_GOLD}},'★ live trade coach'),
+      React.createElement('div',{className:'px-3 sm:px-4 py-1.5 border-b border-[#E8E9E4]/8 flex items-baseline justify-between gap-2 flex-wrap'},
+        React.createElement('div',{className:'flex items-baseline gap-2 flex-wrap'},
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:T2_GOLD}},'★ live trade coach'),
+          // V9.1.8: Market-character badges — surfaces windowAmplitude + regime so user
+          //   sees what kind of market they're trading in. Tara already classifies these
+          //   internally (and weights load per-regime); now they're visible at a glance.
+          (()=>{
+            const _wa=analysis?.windowAmplitude;
+            const _waLabel=_wa?.label;
+            if(!_waLabel||_waLabel==='OPENING')return null;
+            // Plain-language map for trade-coach context. Some are positive, some warn.
+            const _waMap={
+              TRENDING:{plain:'going one way',color:'rgb(110,231,183)',hint:'Direction is set — ride the trend'},
+              GRIND:{plain:'slow grind',color:'rgba(110,231,183,0.85)',hint:'Tight upward/downward drift, takes patience'},
+              'LATE-BREAK':{plain:'late breakout',color:'rgb(110,231,183)',hint:'Direction picked up late in window'},
+              WHIPSAW:{plain:'wild swings',color:'rgba(244,114,182,0.95)',hint:'Multiple reversals — no clean side'},
+              'SPIKE-FADE':{plain:'spike & fade',color:'rgba(244,114,182,0.85)',hint:'Big early move, then drifted back'},
+              RANGE:{plain:'sideways range',color:'rgba(147,197,253,0.85)',hint:'Bounces between high and low'},
+              DEAD:{plain:'dead/quiet',color:'rgba(232,233,228,0.55)',hint:'Barely moving — small ranges only'},
+              NORMAL:{plain:'normal',color:'rgba(232,233,228,0.7)',hint:'Mid-range activity'},
+            };
+            const _entry=_waMap[_waLabel]||{plain:_waLabel.toLowerCase(),color:'rgba(232,233,228,0.7)',hint:''};
+            return React.createElement('span',{
+              className:'text-[9px] uppercase tracking-[0.14em] font-bold px-1.5 py-0.5 rounded',
+              style:{color:_entry.color,background:'rgba(232,233,228,0.05)',border:'1px solid rgba(232,233,228,0.10)'},
+              title:`${_waLabel} — ${_entry.hint}. Range: ${Math.round(_wa.rangeBps||0)}bps · ${_wa.directionChanges||0} reversals.`,
+            },_entry.plain);
+          })(),
+          // Regime mini-pill
+          analysis?.regime&&React.createElement('span',{
+            className:'text-[9px] uppercase tracking-[0.14em] font-bold px-1.5 py-0.5 rounded',
+            style:{
+              color:analysis.regime==='TRENDING UP'||analysis.regime==='SHORT SQUEEZE'?'rgb(110,231,183)':
+                analysis.regime==='TRENDING DOWN'?'rgba(244,114,182,0.95)':
+                analysis.regime==='HIGH VOL CHOP'?'rgba(229,200,112,0.95)':
+                'rgba(147,197,253,0.85)',
+              background:'rgba(232,233,228,0.05)',
+              border:'1px solid rgba(232,233,228,0.10)',
+            },
+            title:`Market regime: ${analysis.regime}`,
+          },(()=>{
+            const _r=analysis.regime;
+            if(_r==='TRENDING UP')return 'pumping ▲';
+            if(_r==='TRENDING DOWN')return 'dumping ▼';
+            if(_r==='RANGE-CHOP')return 'choppy';
+            if(_r==='SHORT SQUEEZE')return 'squeeze ▲';
+            if(_r==='HIGH VOL CHOP')return 'wild';
+            return _r.toLowerCase();
+          })()),
+        ),
         React.createElement('div',{className:'flex items-center gap-2 text-[10px] tabular-nums'},
           // V9.1.7: trajectory indicator in header — shows momentum direction with color
           _recentDir&&React.createElement('span',{
@@ -11755,6 +11803,11 @@ function TaraApp(){
   const windowHighTimeRef=useRef(0);
   const windowLowTimeRef=useRef(0);
   const windowOpenTimeRef=useRef(0);
+  // V9.1.8: Track when the user opened the app this session. If they open mid-window
+  //   with little time left, that's a real "I missed this window" SITOUT and should
+  //   count. If the engine simply didn't form a call during a normal window, we no
+  //   longer log it as a SITOUT — let the window roll over without an entry.
+  const _mountTimeRef=useRef(Date.now());
   // ── V8.5: WITHIN-WINDOW CONTEXT TRACKING ────────────────────────────────
   // Captures whale activity + macro shocks DURING the active window so we can
   //   classify loss patterns at close (LATE_REVERSAL vs WHALE_SPIKE vs MACRO_SHOCK).
@@ -13276,7 +13329,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.7 online. Three fixes per user feedback. SESSION + PHASE NOW ALIGNED. User noticed a mismatch - phase shows ASIA OPEN, session header says US IS PROFITABLE on the same screen. The bug - PHASE_PROFILES are UTC-anchored (ASIA_OPEN at 22-04 UTC) but getMarketSessions used user-LOCAL hours for asia/eu/us bucketing. So in EST at 4 PM local, phase showed ASIA_OPEN (UTC 21:00) but session showed US (because 16:00 local). Fixed - sessions now DERIVE from the UTC phase. ASIA covers ASIA_OPEN plus ASIA_LATE phases. EU covers EU_PREOPEN plus EU_OPEN. US covers all six NY_ phases. Both displays come from the same UTC clock now. Old taraCallLog entries with the old session field stay accurate because they were stamped at the time. New entries use the corrected derivation. LIVE TRADE COACH upgrade - was missing reversal warnings, profit zone alerts, and entry quality guidance. User said i still keep missing out on calls when trade is reversing against me, like price spikes or dips, same for maximizing profits and getting a good entry. Three new mechanisms - TRAJECTORY tracking (last 10s direction with prior 20s comparison for acceleration detection), surfaces PRICE SPIKING AGAINST YOU NOW with 10bps moves and accelerating language. PEAK plus TROUGH refs reset on position open or flip - catches you hit +25bps but you are now at +8bps gave back 17bps. Plus a NEW HIGH alert the moment you reach a new peak, with offer-take guidance. Acceleration detection compares last 10s velocity to prior 20s rate, flags when momentum is GROWING in either direction. Header now shows real-time trajectory indicator - up triangle and bps/10s in green when in your favor, down triangle and bps/10s in rose when against you. Cards added - Price spiking AGAINST you accelerating, Sudden move against you, Drawing down from peak with bps gave back, Price spiking WITH you accelerating, NEW HIGH bps peak, Rebounding from trough. EXISTING PRESERVED - V9.1.6 Save/Apply Baseline buttons, V9.1.6 Brain section locked vs scanning fix, V9.1.6 news timezone parseNewsDate helper, V9.1.6 mini news arrows visible, V9.1.5 upgraded compact strips with quality dots and 4-cell breakdowns, V9.1.4 force-resync MERGE not replace, V9.1.4 multi-band orderBook, V9.1.3 stats reconciliation, V9.1.3 sticky cross-browser lock, V9.1.2 plain language session notes, V9.1.2 schedule grouped by market session, V9.1 Discord scope. KNOWN LIMITATIONS - trajectory needs at least 30 seconds of tickHistory to engage. On a fresh session it stays hidden until ticks accumulate. Day-session bucket like WED-US for the dsAdj quality multiplier still uses local day, which is the right call - your historical wins by day-of-week stay tied to your local calendar."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.8 online. Three changes per user feedback. BASELINE PROPAGATION FIX. User reported - i pushed last update, made sure to save it as a baseline before, after update tried to sync to new baseline but still didnt get those trades. Found it. saveAsBaseline and applyBaseline were only writing to baseline/canonical (a separate doc) and updating local React state. The LIVE cloud paths memory/taraCallLog scorecards/personal history/pastWindows state/lifetimePnL learnings/tara still had OLD pre-baseline data. Result - the cloudWatch listener on the device that applied baseline would re-emit old live data and merge it back, undoing the baseline. AND - other devices doing Force Resync pulled from those same live paths and got stale pre-baseline state. Fixed - both saveAsBaseline and applyBaseline now ALSO push to all 5 live cloud paths so the regular sync mechanism distributes the canonical state immediately. Other devices receive within ~1 second via cloudWatch. SITOUT GATING. User asked Tara to only count SITOUT when site is opened with less than 2-3 mins remaining (real missed-window case). Otherwise if odds are good and we sense an entry we call it, otherwise rollover quietly. Implemented - added _mountTimeRef tracking session-start time. Gated _logSnapshotEntry to skip ambiguous SIT_OUT entries (snapshot.call equals SIT_OUT and not isNoGo) unless user mounted within last 30s AND window has ≤3 min left. Real directional UP/DOWN calls always log. Explicit NO_TRADE no-gos always log (those are intentional skip decisions). Same gate applied to 5m no-Kalshi resolution path - drops the unresolved entry instead of marking SITOUT when user did not open late. MARKET CHARACTER BADGE. User asked - does Tara treat each market in their own way like dead slow movement, super fast up or down, swinging back and forth - and asked for a badge so each trade you know what kind of market are we dealing with. Yes Tara already classifies internally - 8 windowAmplitude types (DEAD OPENING WHIPSAW SPIKE-FADE LATE-BREAK TRENDING GRIND RANGE NORMAL) plus 5 regimes (TRENDING UP TRENDING DOWN RANGE-CHOP SHORT SQUEEZE HIGH VOL CHOP). Per-regime weights load from regimeWeightsByAsset so the engine actually adapts. Now surfaced in LiveTradeCoach header as two plain-language pills - going one way / slow grind / late breakout / wild swings / spike & fade / sideways range / dead-quiet for window character, plus pumping ▲ / dumping ▼ / choppy / squeeze ▲ / wild for regime. Tooltips explain underlying measurements. EXISTING PRESERVED - V9.1.7 phase/session UTC alignment fix, V9.1.7 LiveTradeCoach trajectory + peak/trough + acceleration detection, V9.1.6 Save/Apply Baseline buttons, V9.1.6 Brain locked vs scanning fix, V9.1.6 news timezone parseNewsDate, V9.1.6 mini news arrows visible, V9.1.5 upgraded compact strips, V9.1.4 force-resync MERGE not replace, V9.1.3 stats reconciliation. KNOWN LIMITATIONS - if Firebase rules deny writes (current rules are wide open allow all but if changed) the live-path push silently fails and falls back to old behavior. Tara's chat logs the count of paths pushed so you can verify."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -15233,6 +15286,13 @@ function TaraApp(){
           //   trade against Kalshi). Better than scoring against unverified spot data.
           if(_capturedWindowType==='5m'){
             // 5m windows: log as SITOUT (no Kalshi market exists for 5m BTC).
+            // V9.1.8: Same gate as _logSnapshotEntry — only if user opened the app late.
+            //   If a snapshot was created earlier in the window (before this resolve),
+            //   it might be UP/DOWN/NO_TRADE — those keep their results. The SITOUT
+            //   resolution here only applies when result was still null at rollover.
+            const _resolveNow=Date.now();
+            const _resolveMsSinceMount=_resolveNow-(_mountTimeRef.current||_resolveNow);
+            const _userOpenedLate5m=_resolveMsSinceMount<=30000;
             const _capturedWindowId=_capturedSnap?.windowId||(()=>{
               const _winMs=300000;
               const _justClosedBucket=Math.floor(Date.now()/_winMs)*_winMs-_winMs;
@@ -15245,6 +15305,13 @@ function TaraApp(){
               }
               if(!idx)return prev;
               if(idx.e.result!==null)return prev;
+              // V9.1.8: Only mark as SITOUT if user opened the app late. Otherwise drop
+              //   the unresolved entry — it's not actionable.
+              if(!_userOpenedLate5m){
+                try{console.info('[V9.1.8] Dropping ambiguous 5m unresolved entry (user did not open late)');}catch(_){}
+                const next=prev.filter((_,i)=>i!==idx.i);
+                return next;
+              }
               const next=[...prev];
               next[idx.i]={...idx.e,result:'SITOUT',resolvedAt:Date.now(),resolution:'5m-no-kalshi'};
               setTimeout(()=>_recomputeLearningsFromLog(next),0);
@@ -17214,6 +17281,28 @@ function TaraApp(){
     //   compounded each version since.
     const _logSnapshotEntry=(snapshot)=>{
       try{
+        // V9.1.8: SITOUT logging gate. User feedback: only count SITOUT when site is
+        //   opened with ≤2-3 mins remaining. Otherwise let the window roll over without
+        //   an entry. Real directional calls (UP/DOWN) always log; NO_TRADE explicit
+        //   no-gos also still log (those are intentional skip decisions). The skip
+        //   target is the AMBIGUOUS engine-didn't-form case where snapshot.call is
+        //   SIT_OUT and there's no isNoGo flag — those used to log as SITOUT.
+        const _isAmbiguousSitOut=snapshot&&snapshot.call==='SIT_OUT'&&!snapshot.isNoGo;
+        if(_isAmbiguousSitOut){
+          const _now=Date.now();
+          const _msSinceMount=_now-(_mountTimeRef.current||_now);
+          const _winLenSec=(windowType==='15m'?900:300);
+          const _elapsedSec=windowOpenTimeRef.current?Math.max(0,(_now-windowOpenTimeRef.current)/1000):0;
+          const _secsLeft=Math.max(0,_winLenSec-_elapsedSec);
+          // "User opened the app late" = mounted within last 30s AND window has ≤3min left.
+          //   Any other ambiguous SIT_OUT (engine had time, didn't form a call) is no
+          //   longer logged — it's not an actionable result, just a quiet rollover.
+          const _userOpenedLate=_msSinceMount<=30000&&_secsLeft<=180;
+          if(!_userOpenedLate){
+            try{console.info('[V9.1.8] Skipping ambiguous SITOUT log — engine had time, no commit. Window left:',Math.round(_secsLeft),'s, mounted',Math.round(_msSinceMount/1000),'s ago');}catch(_){}
+            return;
+          }
+        }
         const _wid=computeWindowId(windowType);
         // Asset tag with strike-magnitude inference (mirrors V7.1 logic from main lock path).
         const _refAsset=currentAssetRef.current||currentAsset||'BTC';
@@ -18470,6 +18559,24 @@ function TaraApp(){
         },
       };
       await cloudWrite('baseline/canonical',_payload);
+      // V9.1.8: ALSO push to live cloud paths so other devices' cloudWatch listeners
+      //   receive this state within ~1s without needing to manually Apply Baseline.
+      //   Force Resync from another device will also pull this fresh data instead of
+      //   the stale pre-baseline data.
+      try{
+        const _liveWrites=[];
+        _liveWrites.push(cloudWrite('memory/taraCallLog',{entries:_payload.data.taraCallLog,_baselineSave:_payload.savedAt}));
+        _liveWrites.push(cloudWrite('scorecards/personal',{..._payload.data.scorecards,_baselineSave:_payload.savedAt}));
+        _liveWrites.push(cloudWrite('history/pastWindows',{entries:_payload.data.pastWindows,_baselineSave:_payload.savedAt}));
+        _liveWrites.push(cloudWrite('state/lifetimePnL',{value:_payload.data.lifetimePnL,updatedAt:_payload.data.pnlUpdatedAt,_baselineSave:_payload.savedAt}));
+        if(_payload.data.taraLearnings){
+          _liveWrites.push(cloudWrite('learnings/tara',{..._payload.data.taraLearnings,_baselineSave:_payload.savedAt}));
+        }
+        await Promise.all(_liveWrites);
+        console.info('[V9.1.8] Pushed baseline to',_liveWrites.length,'live cloud paths.');
+      }catch(_e){
+        console.warn('[V9.1.8] Live-path push partial fail',_e?.message);
+      }
       setBaselineMeta({savedAt:_payload.savedAt,sourceDevice:_payload.sourceDevice,sizes:_payload.sizes});
       try{setChatLog(prev=>[...prev,{role:'tara',text:`Saved as baseline from ${_deviceLabel}. Other devices can now Apply Baseline to receive ${_logCount} log entries · ${_winCount}W-${_lossCount}L-${_sitoutCount}SO · ${_pastCount} past windows · $${_pnl.toFixed(2)} lifetime P&L.`}]);}catch(_){}
       console.info('[V9.1.6] Saved baseline:',_payload.sizes,'from',_deviceLabel);
@@ -18513,6 +18620,16 @@ function TaraApp(){
         `Your CURRENT local has ${_localLogCount} log entries — these will be REPLACED, not merged. `+
         `If you have unique trades on this device that aren't in the baseline, save THIS device as baseline first instead.`;
       if(!window.confirm(_msg)){setBaselineBusy(false);return;}
+      // V9.1.8: BASELINE PROPAGATION FIX. Was just setting local React state — but the
+      //   live cloud paths (memory/taraCallLog, scorecards/personal, etc.) still had
+      //   the OLD pre-baseline data. So:
+      //   (a) the cloudWatch listener would re-emit old data and merge it back into
+      //       local on the next firestore tick, undoing the baseline,
+      //   (b) other devices doing Force Resync would pull from the live paths and get
+      //       the pre-baseline state, so the baseline never propagated.
+      //   Fix: push the baseline to live cloud paths immediately so the regular sync
+      //   mechanism distributes it, AND set local state so this device sees it without
+      //   waiting for the cloudWatch round-trip.
       // RAW REPLACE — this is the user's explicit choice
       if(Array.isArray(_d.taraCallLog))setTaraCallLog(_d.taraCallLog);
       if(_d.scorecards)setScorecards({
@@ -18535,6 +18652,37 @@ function TaraApp(){
       }
       if(_d.regimeWeightsByAsset&&typeof _d.regimeWeightsByAsset==='object'){
         setRegimeWeightsByAsset(_d.regimeWeightsByAsset);
+      }
+      // V9.1.8: Push to LIVE cloud paths so other devices receive via normal sync.
+      //   This is the fix for "I save baseline on laptop, apply on phone, but new
+      //   device still missing trades." Now the live paths get the baseline data,
+      //   so any device doing force-resync OR just sitting with cloudWatch active
+      //   will receive it within the listener latency (~1s).
+      try{
+        const _writes=[];
+        if(Array.isArray(_d.taraCallLog)){
+          _writes.push(cloudWrite('memory/taraCallLog',{entries:_d.taraCallLog,_baselineApply:Date.now()}));
+        }
+        if(_d.scorecards){
+          _writes.push(cloudWrite('scorecards/personal',{
+            '15m':{wins:Number(_d.scorecards['15m']?.wins)||0,losses:Number(_d.scorecards['15m']?.losses)||0},
+            '5m':{wins:Number(_d.scorecards['5m']?.wins)||0,losses:Number(_d.scorecards['5m']?.losses)||0},
+            _baselineApply:Date.now(),
+          }));
+        }
+        if(Array.isArray(_d.pastWindows)){
+          _writes.push(cloudWrite('history/pastWindows',{entries:_d.pastWindows,_baselineApply:Date.now()}));
+        }
+        if(typeof _d.lifetimePnL==='number'){
+          _writes.push(cloudWrite('state/lifetimePnL',{value:_d.lifetimePnL,updatedAt:Date.now(),_baselineApply:Date.now()}));
+        }
+        if(_d.taraLearnings&&typeof _d.taraLearnings==='object'){
+          _writes.push(cloudWrite('learnings/tara',{..._d.taraLearnings,_baselineApply:Date.now()}));
+        }
+        await Promise.all(_writes);
+        console.info('[V9.1.8] Pushed baseline to',_writes.length,'live cloud paths.');
+      }catch(_e){
+        console.warn('[V9.1.8] Live-path push partial fail',_e?.message);
       }
       try{setChatLog(prev=>[...prev,{role:'tara',text:`Applied baseline from ${_src} (${_savedDate}). Local now has ${_logCount} log entries · ${_winCount}W-${_lossCount}L-${_sitoutCount}SO · ${_pastCount} past windows · $${_pnl.toFixed(2)} lifetime P&L.`}]);}catch(_){}
       console.info('[V9.1.6] Applied baseline:',_sz,'from',_src);
@@ -18968,7 +19116,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.1.7
+              9.1.8
             </span>
           </div>
 
@@ -20802,6 +20950,35 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.1.8 — Baseline propagation · SITOUT gate · Market character */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Baseline live-path propagation &middot; SITOUT only when late &middot; market char</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.1.8</span> &mdash; Baseline Fix + SITOUT Gate + Market Char</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Baseline propagation &mdash; the actual fix</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;before pushing the last update I made sure to save it as a baseline. After update I tried to sync to new baseline but I still didn&rsquo;t get those trades.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Found the bug. <code className="text-[10px] bg-[#0E100F] px-1">saveAsBaseline</code>/<code className="text-[10px] bg-[#0E100F] px-1">applyBaseline</code> only wrote to <code className="text-[10px] bg-[#0E100F] px-1">baseline/canonical</code> (a separate doc) and updated local React state. The LIVE cloud paths (<code className="text-[10px] bg-[#0E100F] px-1">memory/taraCallLog</code>, <code className="text-[10px] bg-[#0E100F] px-1">scorecards/personal</code>, <code className="text-[10px] bg-[#0E100F] px-1">history/pastWindows</code>, <code className="text-[10px] bg-[#0E100F] px-1">state/lifetimePnL</code>, <code className="text-[10px] bg-[#0E100F] px-1">learnings/tara</code>) still had old pre-baseline data. So (a) the cloudWatch listener re-emitted stale data and merged it back into local, undoing the baseline, and (b) other devices doing Force Resync pulled the same stale paths. Fix: both Save and Apply now ALSO push to all 5 live paths, so other devices receive within ~1s via cloudWatch.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">SITOUT only counts when you genuinely miss</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;Tara only adds to the counts of sitouts if the site is opened with less than 2 or 3 mins. Even then if the odds are good enough and we sense an entry we call it.&rdquo;</em> Added <code className="text-[10px] bg-[#0E100F] px-1">_mountTimeRef</code> tracking when the user opened the app. Gated <code className="text-[10px] bg-[#0E100F] px-1">_logSnapshotEntry</code>: ambiguous SIT_OUT entries are skipped unless user mounted within last 30s AND window has &le;3 min left. Real directional UP/DOWN calls always log. Explicit NO_TRADE no-gos always log (intentional skip decisions). Same gate on the 5m no-Kalshi resolution path &mdash; drops unresolved entries instead of stamping SITOUT.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Market character badges in trade coach</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;does Tara treat each market in their own way... add a necessary badge so each trade I know what kind of market are we dealing with.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Yes &mdash; Tara already classifies markets internally on two axes:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-2">
+                  <li><strong>Window character</strong> (8 types): <code className="text-[10px] bg-[#0E100F] px-1">DEAD</code>, <code className="text-[10px] bg-[#0E100F] px-1">WHIPSAW</code>, <code className="text-[10px] bg-[#0E100F] px-1">SPIKE-FADE</code>, <code className="text-[10px] bg-[#0E100F] px-1">LATE-BREAK</code>, <code className="text-[10px] bg-[#0E100F] px-1">TRENDING</code>, <code className="text-[10px] bg-[#0E100F] px-1">GRIND</code>, <code className="text-[10px] bg-[#0E100F] px-1">RANGE</code>, <code className="text-[10px] bg-[#0E100F] px-1">NORMAL</code></li>
+                  <li><strong>Regime</strong> (5 types): <code className="text-[10px] bg-[#0E100F] px-1">TRENDING UP</code>, <code className="text-[10px] bg-[#0E100F] px-1">TRENDING DOWN</code>, <code className="text-[10px] bg-[#0E100F] px-1">RANGE-CHOP</code>, <code className="text-[10px] bg-[#0E100F] px-1">SHORT SQUEEZE</code>, <code className="text-[10px] bg-[#0E100F] px-1">HIGH VOL CHOP</code></li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Per-regime weights load from <code className="text-[10px] bg-[#0E100F] px-1">regimeWeightsByAsset</code> &mdash; the engine actually adapts what signals to trust per regime. Now surfaced in <code className="text-[10px] bg-[#0E100F] px-1">LiveTradeCoach</code> header as two plain-language pills:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Window: <strong style={{color:'rgb(110,231,183)'}}>going one way</strong> / <strong style={{color:'rgba(110,231,183,0.85)'}}>slow grind</strong> / <strong style={{color:'rgba(244,114,182,0.95)'}}>wild swings</strong> / <strong style={{color:'rgba(244,114,182,0.85)'}}>spike &amp; fade</strong> / <strong style={{color:'rgba(147,197,253,0.85)'}}>sideways range</strong> / <strong style={{color:'rgba(232,233,228,0.55)'}}>dead-quiet</strong></li>
+                  <li>Regime: <strong style={{color:'rgb(110,231,183)'}}>pumping &#9650;</strong> / <strong style={{color:'rgba(244,114,182,0.95)'}}>dumping &#9660;</strong> / <strong style={{color:'rgba(147,197,253,0.85)'}}>choppy</strong> / <strong style={{color:'rgb(110,231,183)'}}>squeeze &#9650;</strong> / <strong style={{color:'rgba(229,200,112,0.95)'}}>wild</strong></li>
+                </ul>
               </section>
 
               {/* V9.1.7 — Session/phase aligned · Coach trajectory */}
