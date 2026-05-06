@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.1.5-upgraded-compact-strips';
+const BASELINE_VERSION='2026.05.06-v9.1.6-baseline-sync-buttons';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -8777,15 +8777,24 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
           {/* V4.2: TARA'S CALL — leading panel. Her actual decision, framed first. */}
           {taraCall&&(()=>{
             const tc=taraCall;
+            // V9.1.6: Honor the snapshot when locked. Was reading tc.call (live engine)
+            //   which kept showing SIT_OUT/SCANNING after Tara had committed because the
+            //   IIFE didn't use _snapLocked from the outer BrainView scope. Now: if a
+            //   directional snapshot exists, that's the call to display. Falls back to
+            //   live tc.call only when no snapshot.
+            const _effectiveCall=_snapLocked?_snapDir:tc.call;
             const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
             const total=(sc.wins||0)+(sc.losses||0);
             const wr=total>0?Math.round((sc.wins/total)*100):null;
-            const isCall=tc.call==='UP'||tc.call==='DOWN';
-            const callColor=tc.call==='UP'?'text-emerald-300':tc.call==='DOWN'?'text-rose-300':'text-amber-300/85';
-            const borderClr=tc.call==='UP'?'rgba(52,211,153,0.4)':tc.call==='DOWN'?'rgba(244,114,182,0.4)':T2_GOLD_BORDER;
-            const bgClr=tc.call==='UP'?'rgba(52,211,153,0.06)':tc.call==='DOWN'?'rgba(244,114,182,0.06)':'rgba(229,200,112,0.04)';
-            const callLabel=tc.call==='SIT_OUT'?'SCANNING':tc.call; // V8.9.2: legacy SIT_OUT path → show as SCANNING (pre-decision)
-            const arrow=tc.call==='UP'?'▲':tc.call==='DOWN'?'▼':'—';
+            const isCall=_effectiveCall==='UP'||_effectiveCall==='DOWN';
+            const callColor=_effectiveCall==='UP'?'text-emerald-300':_effectiveCall==='DOWN'?'text-rose-300':'text-amber-300/85';
+            const borderClr=_effectiveCall==='UP'?'rgba(52,211,153,0.4)':_effectiveCall==='DOWN'?'rgba(244,114,182,0.4)':T2_GOLD_BORDER;
+            const bgClr=_effectiveCall==='UP'?'rgba(52,211,153,0.06)':_effectiveCall==='DOWN'?'rgba(244,114,182,0.06)':'rgba(229,200,112,0.04)';
+            const callLabel=_effectiveCall==='SIT_OUT'?'SCANNING':_effectiveCall;
+            const arrow=_effectiveCall==='UP'?'▲':_effectiveCall==='DOWN'?'▼':'—';
+            // V9.1.6: Confidence display — use snapshot's posterior when locked,
+            //   live confidence otherwise.
+            const _confidence=_snapLocked?(Number(_snap?.posterior)||tc.confidence):tc.confidence;
             return(
               <section className="px-4 py-3 rounded-lg" style={{background:bgClr,border:'1px solid '+borderClr}}>
                 <div className="flex items-baseline justify-between mb-2">
@@ -8795,7 +8804,7 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
                 <div className={`flex items-baseline gap-2 mb-2 ${callColor}`}>
                   <span className="text-2xl">{arrow}</span>
                   <span className="text-3xl font-serif font-bold tracking-tight">{callLabel}</span>
-                  {isCall&&<span className="text-base tabular-nums opacity-70">{tc.confidence}%</span>}
+                  {isCall&&<span className="text-base tabular-nums opacity-70">{Math.round(_confidence)}%</span>}
                 </div>
                 <p className="text-sm text-[#E8E9E4]/80 leading-relaxed">{tc.reason||'Awaiting signal data...'}</p>
               </section>
@@ -9503,6 +9512,35 @@ function TapeStrip({tapeWindows,whaleLog}){
   );
 }
 
+// V9.1.6: Parse news pubDate strings with proper UTC handling. Some RSS feeds
+//   (notably rss2json) return dates as "YYYY-MM-DD HH:MM:SS" without timezone, which
+//   JavaScript treats as LOCAL time — shifting timestamps by the user's TZ offset.
+//   This helper detects timezone-less strings and treats them as UTC instead.
+const parseNewsDate=(s)=>{
+  if(!s)return Date.now();
+  if(typeof s==='number')return s;
+  const _str=String(s).trim();
+  // ISO format with Z, +HH:MM, or -HH:MM offset → JavaScript parses correctly
+  if(/[TZ]|[+-]\d{2}:?\d{2}$/.test(_str)){
+    const _t=Date.parse(_str);
+    return Number.isFinite(_t)?_t:Date.now();
+  }
+  // RFC 822 (e.g. "Tue, 06 May 2026 10:30:00 GMT" / "+0000") → has timezone, fine
+  if(/GMT|UTC|[+-]\d{4}$/.test(_str)){
+    const _t=Date.parse(_str);
+    return Number.isFinite(_t)?_t:Date.now();
+  }
+  // No timezone marker — most likely "YYYY-MM-DD HH:MM:SS" from rss2json. Treat as UTC.
+  if(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(_str)){
+    const _normalized=_str.replace(' ','T')+'Z';
+    const _t=Date.parse(_normalized);
+    if(Number.isFinite(_t))return _t;
+  }
+  // Fallback — let JS guess
+  const _t=Date.parse(_str);
+  return Number.isFinite(_t)?_t:Date.now();
+};
+
 // V9.1.2: Simple keyword-based price-impact inference for news headlines.
 //   Returns 'UP' (bullish), 'DOWN' (bearish), or null (neutral/unclear).
 //   Not perfect — no LLM/sentiment model — but gives the user a quick visual cue.
@@ -9780,7 +9818,7 @@ function NewsFeedCard(){
                 title:it.title,
                 source:_r2j.feed?.title||(_rss.includes('coindesk')?'CoinDesk':_rss.includes('decrypt')?'Decrypt':'CoinTelegraph'),
                 url:it.link,
-                time:new Date(it.pubDate||Date.now()).getTime(),
+                time:parseNewsDate(it.pubDate||Date.now()),
                 categories:Array.isArray(it.categories)?it.categories.slice(0,3):[],
               }));
               setNews(items);
@@ -9803,7 +9841,7 @@ function NewsFeedCard(){
               title:p.title,
               source:p.source?.title||'CryptoPanic',
               url:p.url||p.original_url||'#',
-              time:new Date(p.published_at||Date.now()).getTime(),
+              time:parseNewsDate(p.published_at||Date.now()),
               categories:(p.currencies||[]).map(c=>c.code).slice(0,3),
             }));
             setNews(items);
@@ -9890,14 +9928,17 @@ function NewsFeedCard(){
           <div className={'text-[10px] text-[#E8E9E4]/30 italic'}>No news available</div>
         ):news.map((n,i)=>{
           const hot=isHot(n.title);
-          // V9.1.2: infer price impact for the headline
-          // V9.1.4: ALWAYS show an arrow — UP/DOWN/MIXED. User feedback: "show direction
-          //   arrows whenever even on the mini when not opened too".
+          // V9.1.6: Mini-list arrows — brighter, larger. User feedback: arrows didn't
+          //   show on the mini view. Was using text-[#E8E9E4]/30 for neutral (nearly
+          //   invisible) and tiny 10px size. Now: emerald/rose for direction, amber
+          //   for mixed (always visible), text-xs (12px) so it actually reads.
           const impact=inferNewsPriceImpact(n.title);
-          const impactArrow=impact==='UP'?'▲':impact==='DOWN'?'▼':'·';
-          const impactColor=impact==='UP'?'text-emerald-400':impact==='DOWN'?'text-rose-400':'text-[#E8E9E4]/30';
+          const impactArrow=impact==='UP'?'▲':impact==='DOWN'?'▼':'◆';
+          const impactColor=impact==='UP'?'text-emerald-400':impact==='DOWN'?'text-rose-400':'text-amber-400/70';
           const impactTitle=impact==='UP'?'Likely bullish for price':impact==='DOWN'?'Likely bearish for price':'Mixed/unclear for price';
           // V9.1.4: Absolute timestamp formatter — small clock time alongside relative age
+          // V9.1.6: Uses parseNewsDate-normalized ms timestamp; toLocaleTimeString
+          //   renders in user's local TZ correctly.
           const _absTime=(()=>{
             try{
               const _d=new Date(n.time);
@@ -9909,7 +9950,7 @@ function NewsFeedCard(){
           return(
             <a key={i} href={n.url} target="_blank" rel="noopener noreferrer" className={'block '+cls}>
               <div className={'text-[10px] leading-tight flex items-start gap-1.5 '+(hot?'text-amber-300 font-semibold':'text-[#E8E9E4]/70')}>
-                <span className={'shrink-0 font-bold '+impactColor} title={impactTitle}>{impactArrow}</span>
+                <span className={'shrink-0 font-bold text-xs leading-tight '+impactColor} title={impactTitle}>{impactArrow}</span>
                 <span className="min-w-0">{hot&&'🔥 '}{n.title.slice(0,90)}{n.title.length>90?'...':''}</span>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
@@ -9926,6 +9967,125 @@ function NewsFeedCard(){
         <NewsExpandModal news={news} macroEvents={macroEvents} onClose={()=>setExpandOpen(false)} formatAge={formatAge}/>
       )}
     </div>
+  );
+}
+
+// V9.1.6: SyncMenuModal — opens when SyncStatusPill is clicked. Three options:
+//   1. Force Resync (pulls latest from cloud, MERGES with local)
+//   2. Save as Baseline (pushes THIS device's state to baseline/canonical)
+//   3. Apply Baseline (overwrites local with the canonical baseline)
+function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,forceResyncing,baselineBusy,baselineMeta,deviceLabel,localCounts}){
+  React.useEffect(()=>{
+    const onKey=(e)=>{if(e.key==='Escape')onClose();};
+    window.addEventListener('keydown',onKey);
+    return()=>window.removeEventListener('keydown',onKey);
+  },[onClose]);
+  const _baselineDate=baselineMeta?.savedAt?new Date(baselineMeta.savedAt).toLocaleString():null;
+  const _baselineSizes=baselineMeta?.sizes||{};
+  return React.createElement('div',{
+    className:'fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8',
+    style:{background:'rgba(0,0,0,0.75)',backdropFilter:'blur(4px)'},
+    onClick:onClose,
+  },
+    React.createElement('div',{
+      className:'w-full max-w-lg rounded-xl',
+      style:{background:'#181A19',border:'1px solid rgba(229,200,112,0.20)',boxShadow:'0 0 40px rgba(229,200,112,0.15)'},
+      onClick:(e)=>e.stopPropagation(),
+    },
+      React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid rgba(232,233,228,0.10)'}},
+        React.createElement('div',{className:'flex items-baseline gap-3'},
+          React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Sync'),
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(229,200,112,0.85)'}},'cross-device')
+        ),
+        React.createElement('button',{
+          onClick:onClose,
+          title:'Close (Esc)',
+          className:'w-7 h-7 rounded flex items-center justify-center text-[#E8E9E4]/50 hover:text-white hover:bg-[#E8E9E4]/5 transition-colors',
+        },'✕')
+      ),
+      React.createElement('div',{className:'px-5 py-4 space-y-3'},
+        // This device summary
+        React.createElement('div',{className:'p-3 rounded-md text-xs',style:{background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.08)'}},
+          React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
+            React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold text-[#E8E9E4]/45'},'This device'),
+            React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/60'},deviceLabel)
+          ),
+          React.createElement('div',{className:'text-[#E8E9E4]/70 leading-snug'},
+            `${localCounts.taraCallLog} log entries · ${localCounts.wins}W·${localCounts.losses}L·${localCounts.sitouts}SO · ${localCounts.pastWindows} past windows · `,
+            React.createElement('span',{className:localCounts.pnl>=0?'text-emerald-400':'text-rose-400'},
+              `${localCounts.pnl>=0?'+':''}$${localCounts.pnl.toFixed(2)}`
+            ),
+            ' P&L'
+          )
+        ),
+        // OPTION 1 — Force Resync
+        React.createElement('button',{
+          onClick:onForceResync,
+          disabled:forceResyncing||baselineBusy,
+          className:'w-full text-left p-3 rounded-md transition-colors disabled:opacity-50 hover:bg-indigo-500/10',
+          style:{background:'rgba(99,102,241,0.06)',border:'1px solid rgba(99,102,241,0.25)'},
+        },
+          React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
+            React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(165,180,252,0.95)'}},forceResyncing?'Resyncing…':'Force Resync from Cloud'),
+            React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/40'},'merge · safe')
+          ),
+          React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/65 leading-snug'},
+            'Pull the latest from cloud and ',React.createElement('strong',{className:'text-[#E8E9E4]/85'},'merge'),
+            ' with this device. Local entries that aren\u2019t in cloud are kept; cloud entries that aren\u2019t local get added. No data loss.'
+          )
+        ),
+        // OPTION 2 — Save as Baseline
+        React.createElement('button',{
+          onClick:onSaveBaseline,
+          disabled:baselineBusy||forceResyncing,
+          className:'w-full text-left p-3 rounded-md transition-colors disabled:opacity-50 hover:bg-emerald-500/10',
+          style:{background:'rgba(16,185,129,0.06)',border:'1px solid rgba(16,185,129,0.25)'},
+        },
+          React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
+            React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(110,231,183,0.95)'}},baselineBusy?'Working\u2026':'Save as Baseline'),
+            React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/40'},'this device \u2192 canonical')
+          ),
+          React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/65 leading-snug'},
+            'Mark THIS device as the canonical truth. Pushes this device\u2019s log, scorecards, P&L, and learnings to ',
+            React.createElement('code',{className:'text-[10px] bg-[#0E100F] px-1'},'baseline/canonical'),
+            '. Other devices can then "Apply Baseline" to receive this exact state.'
+          )
+        ),
+        // OPTION 3 — Apply Baseline
+        React.createElement('button',{
+          onClick:onApplyBaseline,
+          disabled:baselineBusy||forceResyncing||!baselineMeta,
+          className:'w-full text-left p-3 rounded-md transition-colors disabled:opacity-50 hover:bg-amber-500/10',
+          style:{background:'rgba(245,158,11,0.06)',border:'1px solid rgba(245,158,11,0.25)'},
+        },
+          React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
+            React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(252,211,77,0.95)'}},baselineBusy?'Working\u2026':'Apply Baseline'),
+            React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/40'},'canonical \u2192 this device')
+          ),
+          React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/65 leading-snug'},
+            baselineMeta?React.createElement(React.Fragment,null,
+              'Pull the canonical baseline from cloud. ',
+              React.createElement('strong',{className:'text-rose-300'},'Overwrites'),
+              ' local data. Last saved by ',
+              React.createElement('strong',{className:'text-[#E8E9E4]/85'},baselineMeta.sourceDevice||'unknown'),
+              ' on ',
+              React.createElement('strong',{className:'text-[#E8E9E4]/85'},_baselineDate||'\u2014'),
+              '. Baseline has ',
+              React.createElement('strong',{className:'text-[#E8E9E4]/85'},`${_baselineSizes.taraCallLog||0} entries · ${_baselineSizes.wins||0}W·${_baselineSizes.losses||0}L·${_baselineSizes.sitouts||0}SO · ${_baselineSizes.pastWindows||0} windows`),
+              '.'
+            ):'No baseline saved yet. Save one from your most up-to-date device first.'
+          )
+        ),
+        // Helper text
+        React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/35 leading-snug pt-1'},
+          'Workflow: keep your fullest device updated normally. End each session with ',
+          React.createElement('strong',{className:'text-[#E8E9E4]/55'},'Save as Baseline'),
+          '. On any other device, press ',
+          React.createElement('strong',{className:'text-[#E8E9E4]/55'},'Apply Baseline'),
+          ' to receive that exact state. Force Resync still works as a non-destructive merge any time.'
+        )
+      )
+    )
   );
 }
 
@@ -12987,7 +13147,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.5 online. User reverted again - wants compact thin-bar tape and depth at the top of analysis card, not big panels. But MORE detailed and accurate than V9.1.2. Built upgraded compact strips. DOM strip - keeps thin form factor, adds inline quality dots STRONG MIXED WEAK based on STD plus WIDE band agreement and meaningful volume. Dominant percentages prominent in BID color and ASK color split. Below the main bar a 4-cell breakdown shows TIGHT 0.05 percent, CLOSE 0.1 percent, STD 0.2 percent, WIDE 0.5 percent depth band imbalances - color-coded green for bid-dominant, red for ask-dominant, dimmed when below floor. TAPE FLOW strip same upgrade pattern. Quality dots on top, BUY dollars and SELL dollars labels prominent. Below bar a 4-cell breakdown showing 5s 15s 30s 60s window dominance percentages with same color coding. The big TapeStrip and DepthStrip components retained in code but no longer rendered in ProjectionsCard. EXISTING PRESERVED - V9.1.4 force-resync MERGE not replace fix for taraCallLog scorecards pastWindows lifetimePnL, V9.1.4 news always-arrow plus absolute timestamp, V9.1.4 multi-band orderBook tracking via level-2 fetch, V9.1.3 stats reconciliation, V9.1.3 sticky cross-browser lock with first-write-wins comparator, V9.1.2 plain language session notes BUSY CALM MOVES GROWING MOVES SHRINKING, V9.1.2 schedule grouped by market session with real start-end times. KNOWN LIMITATIONS - depth bands snapshot every 5 seconds matching the existing fetch cadence, not a rolling time window like tape."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.6 online. Four fixes addressing user feedback. SYNC BUTTONS - explicit user control over baseline. Auto-merge sync still has subtle race conditions across devices, so we added two explicit operations. Save as Baseline pushes THIS device state to a separate Firestore doc baseline/canonical, marked with device label and timestamp. Apply Baseline reads that doc and OVERWRITES local. Workflow - keep your fullest device updated, end each session with Save as Baseline, and on any other device press Apply Baseline to receive that exact state. Click the SyncStatusPill in the header to open the sync menu - three options now - Force Resync (non-destructive merge from regular cloud paths), Save as Baseline, Apply Baseline. Baseline metadata loaded on mount so the menu shows last-saved-by-device-X-on-date. Confirmation dialogs preserve the existing localCounts of taraCallLog wins losses sitouts past windows P&L so user knows what they are about to overwrite or push. BRAIN section showing scanning when locked - fixed. The IIFE for taras-call panel inside BrainView was reading tc.call (live engine state) but the outer scope already had _snapLocked and _snapDir derived from taraCall.snapshot. The committed snapshot takes priority - once Tara locks, brain reflects that. Now uses _effectiveCall = _snapLocked ? _snapDir : tc.call for callLabel, callColor, borderClr, bgClr, arrow, isCall. Confidence display reads snapshot posterior when locked. NEWS TIMEZONE FIX. Some RSS feeds via rss2json return pubDate as YYYY-MM-DD HH:MM:SS without timezone marker. JavaScript treats those as LOCAL time, shifting timestamps by user TZ offset. New parseNewsDate helper - detects ISO with Z plus offset (parses normally), RFC 822 with GMT UTC plus 0000 (parses normally), bare YYYY-MM-DD HH:MM:SS strings (appends Z, treats as UTC). Used in rss2json and CryptoPanic ingestion paths. Display via toLocaleTimeString unchanged - it picks user's local TZ correctly given a proper ms timestamp. NEWS MINI ARROWS more prominent. Were using text-[#E8E9E4]/30 for neutral mixed cases - nearly invisible. Plus tiny 10px font size. Now - emerald 400 for UP triangle, rose 400 for DOWN triangle, amber 400/70 for diamond mixed neutral. Always visible. Font bumped to text-xs (12px). Same change applied to expanded news modal. EXISTING PRESERVED - V9.1.5 upgraded compact tape and depth strips with quality dots and 4-cell breakdowns, V9.1.4 force-resync MERGE not replace fix for taraCallLog scorecards pastWindows lifetimePnL, V9.1.4 multi-band orderBook tracking, V9.1.3 stats reconciliation, V9.1.3 sticky cross-browser lock, V9.1.2 plain language session notes, V9.1.2 schedule grouped by market session, V9.1 Discord scope keeps TARA_LOCK plus WHALE only. KNOWN LIMITATIONS - Apply Baseline is destructive for local data not in baseline. Use Save as Baseline first if THIS device has unique entries. The always-active server-side Tara would obviate this manual baseline mechanism by having one canonical engine instance regardless of devices."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -18096,6 +18256,168 @@ function TaraApp(){
     }
   };
 
+  // V9.1.6: BASELINE MECHANISM ─────────────────────────────────────────────
+  // User feedback: auto-merge sync still has subtle race conditions across devices.
+  // Solution: explicit user-controlled baseline operations.
+  //   - saveAsBaseline: dump current local state to baseline/canonical (the user
+  //     designates THIS device's state as the canonical truth).
+  //   - applyBaseline: read baseline/canonical and OVERWRITE local with it (a fresh
+  //     device or a device that's drifted pulls the canonical truth).
+  // Stored at separate Firestore path 'baseline/canonical' so it doesn't interfere
+  //   with the regular sync paths. Last-saved metadata included for confirmation UI.
+  const[baselineMeta,setBaselineMeta]=React.useState(null); // {savedAt, sourceDevice, sizes}
+  const[baselineBusy,setBaselineBusy]=React.useState(false);
+  const[syncMenuOpen,setSyncMenuOpen]=React.useState(false);
+  // Lightweight device label so user can distinguish baselines they saved earlier
+  const _deviceLabel=React.useMemo(()=>{
+    try{
+      const _ua=navigator.userAgent||'';
+      const _isMobile=/Mobi|Android|iPhone|iPad|iPod/i.test(_ua);
+      const _platform=_isMobile?(/iPhone|iPad|iPod/i.test(_ua)?'iOS':'Android'):
+        /Mac/i.test(_ua)?'Mac':/Windows/i.test(_ua)?'Win':/Linux/i.test(_ua)?'Linux':'Web';
+      const _browser=/Chrome\/[\d.]+/i.test(_ua)&&!/Edg/i.test(_ua)?'Chrome':
+        /Edg\//i.test(_ua)?'Edge':/Firefox\//i.test(_ua)?'Firefox':/Safari\//i.test(_ua)?'Safari':'Browser';
+      return`${_platform} ${_browser}`;
+    }catch(_){return'unknown';}
+  },[]);
+  // Read existing baseline metadata on mount so the UI can display "last saved"
+  React.useEffect(()=>{
+    if(!_fbDb)return;
+    let cancelled=false;
+    cloudRead('baseline/canonical').then(d=>{
+      if(cancelled||!d)return;
+      setBaselineMeta({
+        savedAt:Number(d.savedAt)||0,
+        sourceDevice:String(d.sourceDevice||'unknown'),
+        sizes:d.sizes||null,
+      });
+    }).catch(_=>{});
+    return()=>{cancelled=true;};
+  },[]);
+  const saveAsBaseline=async()=>{
+    if(baselineBusy)return;
+    // Confirm with summary of what's about to be saved as baseline
+    const _logCount=Array.isArray(taraCallLogRef.current)?taraCallLogRef.current.length:0;
+    const _resolvedCount=(taraCallLogRef.current||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')).length;
+    const _winCount=(taraCallLogRef.current||[]).filter(e=>e&&e.result==='WIN').length;
+    const _lossCount=(taraCallLogRef.current||[]).filter(e=>e&&e.result==='LOSS').length;
+    const _sitoutCount=(taraCallLogRef.current||[]).filter(e=>e&&e.result==='SITOUT').length;
+    const _pastCount=Array.isArray(pastWindows)?pastWindows.length:0;
+    const _pnl=Number(_pnlRef.current)||0;
+    const _msg=`Save THIS device (${_deviceLabel}) as the canonical baseline?\n\n`+
+      `This will overwrite the current baseline in cloud:\n\n`+
+      `• Tara call log: ${_logCount} entries (${_winCount}W · ${_lossCount}L · ${_sitoutCount}SO)\n`+
+      `• Past windows: ${_pastCount}\n`+
+      `• Lifetime P&L: ${_pnl>=0?'+':''}$${_pnl.toFixed(2)}\n`+
+      `• Personal scorecard 15m: ${scorecards['15m']?.wins||0}W-${scorecards['15m']?.losses||0}L\n`+
+      `• Personal scorecard 5m: ${scorecards['5m']?.wins||0}W-${scorecards['5m']?.losses||0}L\n\n`+
+      `Other devices can then "Apply Baseline" to receive this exact state.`;
+    if(!window.confirm(_msg))return;
+    setBaselineBusy(true);
+    try{
+      // Snapshot ALL local state. Use refs/current values for accuracy.
+      const _payload={
+        v:1,
+        savedAt:Date.now(),
+        sourceDevice:_deviceLabel,
+        data:{
+          taraCallLog:(taraCallLogRef.current||[]).slice(-500),
+          scorecards:_scorecardsRef.current||{'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}},
+          pastWindows:(Array.isArray(pastWindows)?pastWindows:[]).slice(-50),
+          lifetimePnL:Number(_pnlRef.current)||0,
+          pnlUpdatedAt:Number(_pnlUpdatedAtRef.current)||Date.now(),
+          taraLearnings:taraLearnings||null,
+          regimeMemory:regimeMemory||null,
+          adaptiveWeightsByAsset:adaptiveWeightsByAsset||null,
+          regimeWeightsByAsset:regimeWeightsByAsset||null,
+        },
+        sizes:{
+          taraCallLog:_logCount,
+          resolved:_resolvedCount,
+          wins:_winCount,
+          losses:_lossCount,
+          sitouts:_sitoutCount,
+          pastWindows:_pastCount,
+        },
+      };
+      await cloudWrite('baseline/canonical',_payload);
+      setBaselineMeta({savedAt:_payload.savedAt,sourceDevice:_payload.sourceDevice,sizes:_payload.sizes});
+      try{setChatLog(prev=>[...prev,{role:'tara',text:`Saved as baseline from ${_deviceLabel}. Other devices can now Apply Baseline to receive ${_logCount} log entries · ${_winCount}W-${_lossCount}L-${_sitoutCount}SO · ${_pastCount} past windows · $${_pnl.toFixed(2)} lifetime P&L.`}]);}catch(_){}
+      console.info('[V9.1.6] Saved baseline:',_payload.sizes,'from',_deviceLabel);
+    }catch(e){
+      console.warn('[V9.1.6] Save baseline failed',e?.message);
+      try{setChatLog(prev=>[...prev,{role:'tara',text:`Save baseline failed: ${e?.message||'unknown error'}.`}]);}catch(_){}
+      alert('Save baseline failed: '+(e?.message||'unknown error'));
+    } finally {
+      setBaselineBusy(false);
+    }
+  };
+  const applyBaseline=async()=>{
+    if(baselineBusy)return;
+    setBaselineBusy(true);
+    try{
+      const _baseline=await cloudRead('baseline/canonical');
+      if(!_baseline||!_baseline.data){
+        alert('No baseline found in cloud. Save a baseline from another device first.');
+        setBaselineBusy(false);
+        return;
+      }
+      const _d=_baseline.data;
+      const _savedDate=_baseline.savedAt?new Date(_baseline.savedAt).toLocaleString():'unknown';
+      const _src=_baseline.sourceDevice||'unknown';
+      const _sz=_baseline.sizes||{};
+      const _logCount=_sz.taraCallLog!=null?_sz.taraCallLog:(Array.isArray(_d.taraCallLog)?_d.taraCallLog.length:0);
+      const _winCount=_sz.wins!=null?_sz.wins:(Array.isArray(_d.taraCallLog)?_d.taraCallLog.filter(e=>e&&e.result==='WIN').length:0);
+      const _lossCount=_sz.losses!=null?_sz.losses:(Array.isArray(_d.taraCallLog)?_d.taraCallLog.filter(e=>e&&e.result==='LOSS').length:0);
+      const _sitoutCount=_sz.sitouts!=null?_sz.sitouts:(Array.isArray(_d.taraCallLog)?_d.taraCallLog.filter(e=>e&&e.result==='SITOUT').length:0);
+      const _pastCount=_sz.pastWindows!=null?_sz.pastWindows:(Array.isArray(_d.pastWindows)?_d.pastWindows.length:0);
+      const _pnl=Number(_d.lifetimePnL)||0;
+      // Local state for "you're about to lose" warning
+      const _localLogCount=Array.isArray(taraCallLogRef.current)?taraCallLogRef.current.length:0;
+      const _msg=`Apply baseline from ${_src} (saved ${_savedDate})?\n\n`+
+        `This will OVERWRITE local with the baseline:\n\n`+
+        `• Tara call log: ${_logCount} entries (${_winCount}W · ${_lossCount}L · ${_sitoutCount}SO)\n`+
+        `• Past windows: ${_pastCount}\n`+
+        `• Lifetime P&L: ${_pnl>=0?'+':''}$${_pnl.toFixed(2)}\n`+
+        `• Personal scorecard 15m: ${_d.scorecards?.['15m']?.wins||0}W-${_d.scorecards?.['15m']?.losses||0}L\n`+
+        `• Personal scorecard 5m: ${_d.scorecards?.['5m']?.wins||0}W-${_d.scorecards?.['5m']?.losses||0}L\n\n`+
+        `Your CURRENT local has ${_localLogCount} log entries — these will be REPLACED, not merged. `+
+        `If you have unique trades on this device that aren't in the baseline, save THIS device as baseline first instead.`;
+      if(!window.confirm(_msg)){setBaselineBusy(false);return;}
+      // RAW REPLACE — this is the user's explicit choice
+      if(Array.isArray(_d.taraCallLog))setTaraCallLog(_d.taraCallLog);
+      if(_d.scorecards)setScorecards({
+        '15m':{wins:Number(_d.scorecards['15m']?.wins)||0,losses:Number(_d.scorecards['15m']?.losses)||0},
+        '5m':{wins:Number(_d.scorecards['5m']?.wins)||0,losses:Number(_d.scorecards['5m']?.losses)||0},
+      });
+      if(Array.isArray(_d.pastWindows))setPastWindows(_d.pastWindows);
+      if(typeof _d.lifetimePnL==='number'){
+        setLifetimePnL(_d.lifetimePnL);
+        _pnlUpdatedAtRef.current=Number(_d.pnlUpdatedAt)||Date.now();
+      }
+      if(_d.taraLearnings&&typeof _d.taraLearnings==='object'){
+        setTaraLearnings(_d.taraLearnings);
+      }
+      if(_d.regimeMemory&&typeof _d.regimeMemory==='object'){
+        setRegimeMemory(_d.regimeMemory);
+      }
+      if(_d.adaptiveWeightsByAsset&&typeof _d.adaptiveWeightsByAsset==='object'){
+        setAdaptiveWeightsByAsset(_d.adaptiveWeightsByAsset);
+      }
+      if(_d.regimeWeightsByAsset&&typeof _d.regimeWeightsByAsset==='object'){
+        setRegimeWeightsByAsset(_d.regimeWeightsByAsset);
+      }
+      try{setChatLog(prev=>[...prev,{role:'tara',text:`Applied baseline from ${_src} (${_savedDate}). Local now has ${_logCount} log entries · ${_winCount}W-${_lossCount}L-${_sitoutCount}SO · ${_pastCount} past windows · $${_pnl.toFixed(2)} lifetime P&L.`}]);}catch(_){}
+      console.info('[V9.1.6] Applied baseline:',_sz,'from',_src);
+    }catch(e){
+      console.warn('[V9.1.6] Apply baseline failed',e?.message);
+      try{setChatLog(prev=>[...prev,{role:'tara',text:`Apply baseline failed: ${e?.message||'unknown error'}.`}]);}catch(_){}
+      alert('Apply baseline failed: '+(e?.message||'unknown error'));
+    } finally {
+      setBaselineBusy(false);
+    }
+  };
+
   const handleManualSync=(dir)=>{
     // V8.2: Anti-tilt cooldown gate. If active and direction is a new entry (not a flip
     //   on existing position), block it with a confirm. EXIT/flip actions are unblocked.
@@ -18407,6 +18729,31 @@ function TaraApp(){
       {showStats&&<StatsView tradeLog={tradeLog} scorecards={scorecards} taraCallLog={displayedCallLog} onClose={()=>setShowStats(false)}/>}
       {showBrain&&<BrainView analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>setShowBrain(false)}/>}
 
+      {/* V9.1.6: Sync menu — opens when SyncStatusPill is clicked. Three options:
+          force resync (merge), save as baseline (this device → canonical), apply
+          baseline (canonical → this device). Designed for the "my laptop has the
+          most data, want to push it to phone" workflow. */}
+      {syncMenuOpen&&(
+        <SyncMenuModal
+          onClose={()=>setSyncMenuOpen(false)}
+          onForceResync={()=>{setSyncMenuOpen(false);forceResyncFromCloud();}}
+          onSaveBaseline={()=>{setSyncMenuOpen(false);saveAsBaseline();}}
+          onApplyBaseline={()=>{setSyncMenuOpen(false);applyBaseline();}}
+          forceResyncing={forceResyncing}
+          baselineBusy={baselineBusy}
+          baselineMeta={baselineMeta}
+          deviceLabel={_deviceLabel}
+          localCounts={{
+            taraCallLog:Array.isArray(taraCallLog)?taraCallLog.length:0,
+            wins:(taraCallLog||[]).filter(e=>e&&e.result==='WIN').length,
+            losses:(taraCallLog||[]).filter(e=>e&&e.result==='LOSS').length,
+            sitouts:(taraCallLog||[]).filter(e=>e&&e.result==='SITOUT').length,
+            pastWindows:Array.isArray(pastWindows)?pastWindows.length:0,
+            pnl:Number(_pnlRef.current)||0,
+          }}
+        />
+      )}
+
       {/* V134: Sync progress overlay */}
       {syncState&&syncState.active&&(
         <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
@@ -18492,7 +18839,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.1.5
+              9.1.6
             </span>
           </div>
 
@@ -18511,11 +18858,11 @@ function TaraApp(){
           <TodayPnLPill todayData={todayData} onClick={()=>setShowTradingSettings(true)}/>
           {/* V8.3: Peer tab indicator — shows when multi-tab merging is active */}
           <TabPresencePill peerTabs={peerTabs}/>
-          {/* V8.6: Cloud sync health indicator — click to force-resync from cloud */}
+          {/* V8.6: Cloud sync health indicator — click to open sync menu (force resync / baseline ops) */}
+          {/* V9.1.6: Click now opens a 3-option menu instead of a single force-resync confirm. */}
           <SyncStatusPill onClick={()=>{
-            if(forceResyncing)return;
-            const _ok=window.confirm('Force resync from cloud?\n\nThis pulls all data fresh from Firestore — useful when switching browsers/devices and your local data looks stale. Your local data is safe (will be merged with cloud).');
-            if(_ok)forceResyncFromCloud();
+            if(forceResyncing||baselineBusy)return;
+            setSyncMenuOpen(true);
           }}/>
           <StreakTiltPill todayData={todayData}/>
           {/* V8.1: Movement risk pulse — vol/volume/tape/whale composite */}
@@ -20325,6 +20672,34 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.1.6 — Baseline sync · Brain fix · News fixes */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Save / Apply Baseline &middot; Brain fix &middot; News timezone + arrows</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.1.6</span> &mdash; Baseline Sync + Brain + News</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Baseline sync &mdash; explicit user control</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;im still having issues with syncing my baseline laptop to others. add two sync buttons. 1. sync as baseline...2. sync from the baseline...&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Auto-merge sync still has subtle race conditions across devices. Solution: explicit user-controlled operations. Click SyncStatusPill to open the sync menu &mdash; three options now:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong style={{color:'rgba(165,180,252,0.95)'}}>Force Resync</strong> &mdash; non-destructive merge from regular cloud paths (V9.1.4 behavior, unchanged)</li>
+                  <li><strong style={{color:'rgba(110,231,183,0.95)'}}>Save as Baseline</strong> &mdash; pushes THIS device&rsquo;s state to a separate Firestore doc <code className="text-[10px] bg-[#0E100F] px-1">baseline/canonical</code>, marked with device label + timestamp</li>
+                  <li><strong style={{color:'rgba(252,211,77,0.95)'}}>Apply Baseline</strong> &mdash; reads that doc, OVERWRITES local with the canonical state (with confirmation showing source + sizes)</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Workflow: keep your fullest device updated normally. End each session with <em>Save as Baseline</em>. On any other device, press <em>Apply Baseline</em> to receive that exact state.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Brain section: locked instead of scanning</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;even when tara&rsquo;s call locked, the brain section still shows scanning&rdquo;</em>. The IIFE for the Tara&rsquo;s Call panel inside <code className="text-[10px] bg-[#0E100F] px-1">BrainView</code> was reading <code className="text-[10px] bg-[#0E100F] px-1">tc.call</code> (live engine state) but the outer scope already had <code className="text-[10px] bg-[#0E100F] px-1">_snapLocked</code>/<code className="text-[10px] bg-[#0E100F] px-1">_snapDir</code> derived from the committed snapshot. Snapshot now takes priority &mdash; once Tara locks, the Brain reflects that. Confidence display also reads the snapshot&rsquo;s locked posterior.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">News timezone</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: <em>&ldquo;timezone on news is wrong.&rdquo;</em> Some RSS feeds via rss2json return <code className="text-[10px] bg-[#0E100F] px-1">pubDate</code> as <code className="text-[10px] bg-[#0E100F] px-1">YYYY-MM-DD HH:MM:SS</code> without a timezone marker &mdash; JavaScript treats those as LOCAL time, shifting timestamps by the user&rsquo;s TZ offset. New <code className="text-[10px] bg-[#0E100F] px-1">parseNewsDate</code> helper detects ISO/RFC formats and parses them correctly; bare datetime strings are now treated as UTC explicitly.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">News mini arrows: visible now</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">User: <em>&ldquo;arrows dont show up when on the mini news section when it is not opened.&rdquo;</em> Was using <code className="text-[10px] bg-[#0E100F] px-1">text-[#E8E9E4]/30</code> for neutral cases (nearly invisible) and tiny 10px font. Now: emerald-400 &#9650; for UP, rose-400 &#9660; for DOWN, amber-400/70 &#9670; for mixed/unclear &mdash; always visible, bumped to <code className="text-[10px] bg-[#0E100F] px-1">text-xs</code>. Same in expanded modal.</p>
               </section>
 
               {/* V9.1.5 — Upgraded compact strips */}
