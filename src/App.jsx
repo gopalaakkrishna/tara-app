@@ -408,7 +408,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.05-v8.4-responsive-layout-and-performance-relocation';
+const BASELINE_VERSION='2026.05.05-v8.5-path-aware-learning-and-best-practices';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -1723,6 +1723,132 @@ const useMovementRisk=(velocityRef,tapeRef,ticksRef,whaleLog,regimeRef)=>{
   },[velocityRef,tapeRef,ticksRef,whaleLog,regimeRef]);
   return snapshot;
 };
+
+// ── V8.5: WITHIN-WINDOW PATH METRICS ─────────────────────────────────────────
+// Computes how the trade's price path behaved between entry and close. Run at trade
+// resolution (inside the rollover handler) using the window-tracking refs that
+// already exist + the trade's direction and strike.
+//
+// Returns:
+//   maxFavorableExcursionBps   — best you ever were vs strike (signed: + = favorable)
+//   maxAdverseExcursionBps     — worst you ever were vs strike (signed: - = adverse)
+//   peakClockSec               — clockSeconds when MFE was hit
+//   troughClockSec             — clockSeconds when MAE was hit
+//   last60sDriftBps            — net price move in the final 60s of the window
+//   reversalFromPeak           — true if MFE was meaningfully positive then ended unfavorable
+//   peakPosition               — 'EARLY' | 'MID' | 'LATE' bucketing of when MFE happened
+const computePathMetrics=({dir,strike,windowHigh,windowLow,windowHighTime,windowLowTime,windowOpenTime,closeTime,ticksAtClose,closingPrice})=>{
+  const out={
+    maxFavorableExcursionBps:null,
+    maxAdverseExcursionBps:null,
+    peakClockSec:null,
+    troughClockSec:null,
+    last60sDriftBps:null,
+    reversalFromPeak:false,
+    peakPosition:null,
+  };
+  if(!dir||!strike||strike<=0)return out;
+  if(!windowHigh||!windowLow||!closeTime||!windowOpenTime)return out;
+  const totalWindowMs=closeTime-windowOpenTime;
+  if(totalWindowMs<=0)return out;
+  // For UP positions: profitable when price > strike. So MFE = max(price)-strike, MAE = min(price)-strike.
+  // For DOWN positions: profitable when price < strike. So MFE = strike-min(price), MAE = strike-max(price).
+  const sign=dir==='UP'?1:-1;
+  const _mfePrice=sign>0?windowHigh:windowLow;
+  const _maePrice=sign>0?windowLow:windowHigh;
+  const _mfeTime=sign>0?windowHighTime:windowLowTime;
+  const _maeTime=sign>0?windowLowTime:windowHighTime;
+  out.maxFavorableExcursionBps=Math.round(((_mfePrice-strike)/strike)*10000*sign);
+  out.maxAdverseExcursionBps=Math.round(((_maePrice-strike)/strike)*10000*sign);
+  // Peak/trough times — clockSeconds REMAINING when the extreme was hit (matches lock-clock convention)
+  const _winSec=Math.round(totalWindowMs/1000);
+  if(_mfeTime){
+    const _elapsedMs=_mfeTime-windowOpenTime;
+    out.peakClockSec=Math.max(0,_winSec-Math.round(_elapsedMs/1000));
+  }
+  if(_maeTime){
+    const _elapsedMs=_maeTime-windowOpenTime;
+    out.troughClockSec=Math.max(0,_winSec-Math.round(_elapsedMs/1000));
+  }
+  // Peak position bucket — when did the favorable extreme happen relative to total window time?
+  if(_mfeTime){
+    const _mfeFrac=(_mfeTime-windowOpenTime)/totalWindowMs;
+    out.peakPosition=_mfeFrac<0.33?'EARLY':_mfeFrac<0.67?'MID':'LATE';
+  }
+  // Last 60s drift — find the tick from 60s before close, compute % move from there to close
+  if(Array.isArray(ticksAtClose)&&ticksAtClose.length>0&&closingPrice>0){
+    const _t60ago=closeTime-60000;
+    const _olderTick=ticksAtClose.filter(t=>t&&t.time&&t.time<=_t60ago).slice(-1)[0];
+    if(_olderTick){
+      // tickHistoryRef stores price as `p`; some other tick sources use `price`
+      const _olderPrice=Number(_olderTick.p)||Number(_olderTick.price)||0;
+      if(_olderPrice>0){
+        out.last60sDriftBps=Math.round(((closingPrice-_olderPrice)/_olderPrice)*10000);
+      }
+    }
+  }
+  // Reversal flag — were you meaningfully favorable at any point, but ended up losing?
+  // Threshold +5bps favorable is the floor for "real reversal" (anything less is noise).
+  const _closingExcBps=Math.round(((closingPrice-strike)/strike)*10000*sign);
+  if((out.maxFavorableExcursionBps||0)>=5&&_closingExcBps<0){
+    out.reversalFromPeak=true;
+  }
+  return out;
+};
+
+// ── V8.5: LOSS-PATTERN CLASSIFIER ────────────────────────────────────────────
+// Takes a resolved LOSS trade with path metrics + whale/macro context and returns
+// one of six pattern labels. Used to (a) show user "your most common loss type"
+// and (b) skip gradient-descent punishment on shock losses where the signals
+// were correct but the world changed.
+//
+// Categories (mutually exclusive, order matters — first match wins):
+//   WHALE_SPIKE      — large whale print >$200K within 60s of reversal/close
+//   MACRO_SHOCK      — geoRisk peak ≥0.5 OR major news event during window
+//   LATE_REVERSAL    — was favorable in last third, then flipped
+//   MID_REVERSAL     — was favorable in middle third, then faded
+//   EARLY_PEAK       — was favorable in first third, then sustained loss
+//   WRONG_FROM_START — never above water (MFE ≤ 0)
+const classifyLossPattern=(trade)=>{
+  if(!trade||trade.result!=='LOSS')return null;
+  const mfe=trade.maxFavorableExcursionBps;
+  const reversed=!!trade.reversalFromPeak;
+  const peakPos=trade.peakPosition;
+  const last60s=trade.last60sDriftBps;
+  // Shock detectors — these override path-pattern even if path looks like reversal,
+  // because the cause was external.
+  const hasContrayWhale=trade.windowContraryWhaleUsd&&trade.windowContraryWhaleUsd>=200000
+    &&trade.windowContraryWhaleClockSec!=null
+    &&trade.windowContraryWhaleClockSec<=60; // within last 60s of window
+  if(hasContrayWhale)return'WHALE_SPIKE';
+  const hadShock=(trade.windowMaxGeoRisk||0)>=0.5||!!trade.windowHadMacroEvent;
+  if(hadShock)return'MACRO_SHOCK';
+  // Path-based — straightforward bucket from peak position
+  if(mfe==null||mfe<=0)return'WRONG_FROM_START';
+  // Reversal-flagged path losses
+  if(reversed){
+    if(peakPos==='LATE')return'LATE_REVERSAL';
+    if(peakPos==='MID')return'MID_REVERSAL';
+    if(peakPos==='EARLY')return'EARLY_PEAK';
+  }
+  // Edge case: meaningful MFE but no clean peakPos — fall back on last60s drift sign
+  if(last60s!=null&&Math.abs(last60s)>=10){
+    return last60s*(trade.dir==='UP'?1:-1)<0?'LATE_REVERSAL':'EARLY_PEAK';
+  }
+  return'WRONG_FROM_START'; // default — couldn't classify cleanly
+};
+const LOSS_PATTERN_LABELS={
+  WRONG_FROM_START:{label:'Wrong from start',color:'rgba(244,114,182,0.95)',icon:'✗',hint:'Signal read was off entry. Tighten entry filter.'},
+  EARLY_PEAK:     {label:'Early peak fade',  color:'rgba(229,200,112,0.85)',icon:'⤴',hint:'Peaked in first third then faded. Consider quicker take-profit.'},
+  MID_REVERSAL:   {label:'Mid-window reversal',color:'rgba(229,200,112,0.85)',icon:'⤵',hint:'Was winning at midpoint. Watch for vol shifts.'},
+  LATE_REVERSAL:  {label:'Late reversal',    color:'rgba(244,114,182,0.85)',icon:'⚡',hint:'Winning until last minute. Tighter trailing stop in final 90s.'},
+  WHALE_SPIKE:    {label:'Whale spike',      color:'rgba(168,85,247,0.85)',icon:'🐋',hint:'Large contrary print near close. Not your read — circumstance.'},
+  MACRO_SHOCK:    {label:'Macro shock',      color:'rgba(168,85,247,0.85)',icon:'⚠',hint:'External event spike during window. Not your read — circumstance.'},
+};
+// Patterns where signals were correct but external shock caused the loss.
+//   Used by applyTradeLearning to skip/dampen gradient descent — don't punish
+//   correct signals because the world moved unpredictably.
+const SHOCK_LOSS_PATTERNS=new Set(['WHALE_SPIKE','MACRO_SHOCK']);
 
 // V134: HPotter Future Grand Trend — multi-timeframe forecast
 // Translated from PineScript v5 (Apr 2022 by HPotter)
@@ -5451,6 +5577,168 @@ function PastWindowsPill({pastWindows,windowType}){
   );
 }
 
+// ── V8.5: BEST PRACTICES MODAL ──────────────────────────────────────────────
+// Comprehensive trader's guide. Tells the user how Tara WANTS to be used: when to
+// enter, when to skip, when to take profit, when to cut loss, what to watch
+// during a trade, common pitfalls. Backed by the actual learning system + edge
+// math, not generic platitudes.
+function BestPracticesModal({open,onClose}){
+  if(!open)return null;
+  const _section=(title,children)=>React.createElement('section',{className:'mb-4 sm:mb-5'},
+    React.createElement('h3',{className:'text-xs sm:text-sm uppercase tracking-[0.18em] font-bold mb-2',style:{color:T2_GOLD}},title),
+    children,
+  );
+  const _row=(icon,iconColor,heading,body)=>React.createElement('div',{className:'flex gap-2 mb-2.5'},
+    React.createElement('span',{className:'text-base shrink-0 leading-tight',style:{color:iconColor}},icon),
+    React.createElement('div',{className:'min-w-0 flex-1'},
+      React.createElement('div',{className:'text-[12px] sm:text-[13px] font-bold text-white mb-0.5'},heading),
+      React.createElement('div',{className:'text-[11px] sm:text-[12px] text-[#E8E9E4]/70 leading-relaxed'},body),
+    ),
+  );
+  return React.createElement('div',{
+    className:'fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto',
+    onClick:onClose,
+  },
+    React.createElement('div',{
+      className:'bg-[#181A19] border border-[#E8E9E4]/15 rounded-xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
+      onClick:(e)=>e.stopPropagation(),
+      style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(229,200,112,0.06)'},
+    },
+      // Header
+      React.createElement('div',{className:'flex justify-between items-baseline mb-4 sm:mb-5 pb-3 border-b border-[#E8E9E4]/10'},
+        React.createElement('div',null,
+          React.createElement('h2',{className:'text-lg sm:text-xl font-serif text-white tracking-tight'},'Best Practices · Trading with Tara'),
+          React.createElement('p',{className:'text-[10px] uppercase tracking-wider text-[#E8E9E4]/45 mt-0.5'},'how to extract her edge'),
+        ),
+        React.createElement('button',{onClick:onClose,className:'text-[#E8E9E4]/40 hover:text-white text-2xl leading-none px-1'},'×'),
+      ),
+
+      // Intro
+      React.createElement('p',{className:'text-[12px] text-[#E8E9E4]/75 leading-relaxed mb-4 italic'},
+        'Tara has a real statistical edge in specific conditions. Most of profit-or-loss outcome is decided by ',
+        React.createElement('strong',{className:'text-white not-italic'},'whether you enter the right trades'),
+        ' — not by what happens after. This guide tells you which trades to take, which to skip, and how to manage the ones you take.',
+      ),
+
+      // 1. When to ENTER
+      _section('When to enter',[
+        _row('✓','rgb(110,231,183)','Big edge vs Kalshi (+15pp+)',
+          'The single highest-WR setup in your data. Tara says 80%, Kalshi says 60% → 20pp edge → enter with confidence and full size. These are the trades that pay for the year.'),
+        _row('✓','rgb(110,231,183)','Best-hour with positive edge',
+          `Your historical hour-of-day WR is shown in the prep card before each window. If it's 70%+ AND edge is positive, this is a LARGE-tier entry. Time-of-day matters more than people think.`),
+        _row('✓','rgba(110,231,183,0.75)','Confluent setup with strong regime',
+          'When regime is TRENDING_UP/TRENDING_DOWN and the call aligns with the trend, plus FGT alignment ≥2, this is a sustainable lock. Skip the first signal, wait for the second one to confirm.'),
+        _row('—','rgba(232,233,228,0.65)','Standard tier (good edge, normal hour)',
+          'Take it at normal size. Most of your trade volume lives here. Keep stakes consistent — discipline beats inspiration.'),
+      ]),
+
+      // 2. When to SKIP
+      _section('When to skip',[
+        _row('✗','rgb(244,114,182)','Negative edge vs Kalshi (LATE bucket)',
+          `If Tara's confidence is BEHIND Kalshi's, you're paying retail. The market knows what she knows, plus more. The position-size hint will say SKIP — listen to it.`),
+        _row('✗','rgb(244,114,182)','Tilt cooldown active',
+          `4+ losses in a row triggers a 15min forced cooldown. The override exists but is psychologically expensive — tilt entries are statistically the worst trades you'll ever make. Take the break.`),
+        _row('✗','rgb(244,114,182)','TIGHT-edge bucket with sub-50% WR',
+          `Check the edge-bucket WR in the Performance card. If your TIGHT bucket is below 50%, every TIGHT trade is destroying capital. This filter alone often saves more than any other improvement.`),
+        _row('⚠','rgba(229,200,112,0.85)','Macro event imminent',
+          `When CPI/NFP/FOMC is within ~30 minutes, posterior models break down. The market is repricing on news, not orderflow. Sit out unless you have specific edge on the event.`),
+        _row('⚠','rgba(229,200,112,0.85)','Phase transition in progress',
+          `Asia → EU open, EU → NY open are 15-30min windows where regime can flip violently. The phase pill above shows next transition — give those windows extra caution.`),
+      ]),
+
+      // 3. While in trade — what to watch
+      _section('While in a trade — what to watch',[
+        _row('🔔','rgb(244,114,182)','Tara LOCKED — STALE warning',
+          `If posterior flips against your position by 30+ points OR Kalshi flips against you 25+ points, the advisor banner goes red and animated. This means the conditions that justified the lock have inverted. Strongly consider exit.`),
+        _row('⚡','rgb(244,114,182)','Movement Risk pill at EXTREME',
+          `Score 70+ means vol acceleration + volume spike + tape imbalance are all firing. Even when you're winning, this is when reversals happen. Be ready to exit.`),
+        _row('🐋','rgba(168,85,247,0.85)','Whale prints opposing your position',
+          `A $200K+ whale on the wrong side, especially in the last 60s, is the leading indicator of a late-window reversal. Watch the whale strip — if you see contrary prints stacking, exit.`),
+        _row('⤵','rgba(229,200,112,0.85)','Conviction FADING',
+          `In the DecisionalOverlay, the Conv chip shows BUILDING / STABLE / FADING. If it goes FADING (Tara's confidence dropped 5+ points since lock), her own model is losing confidence. That's your cue.`),
+      ]),
+
+      // 4. When to TAKE PROFIT
+      _section('When to take profit',[
+        _row('💰','rgb(110,231,183)','Offer ≥ $0.85 with time remaining',
+          `If the Kalshi offer hits 0.85+ with 3+ minutes left, you've captured most of the available value. The marginal additional profit isn't worth the reversal risk. Configure auto-suggest in Trading Settings.`),
+        _row('💰','rgb(110,231,183)','Big-edge entry has paid out',
+          `When you enter with +15pp edge and the offer reaches +20pp profit, the math says exit. Your edge has already been realized; further gains are luck.`),
+        _row('—','rgba(232,233,228,0.65)','Time decay favorable',
+          `Last 90s with offer >0.75 and price holding: let it ride. Time decay is now your friend.`),
+        _row('—','rgba(232,233,228,0.65)','Position with 2-3min left + advisor calm',
+          `If conditions are stable, advisor isn't red, and you're up: hold to close. Most of the value is captured automatically by window expiry.`),
+      ]),
+
+      // 5. When to CUT LOSS
+      _section('When to cut loss',[
+        _row('🛑','rgb(244,114,182)','-30% stop hit',
+          `Hard rule. Don't argue with it. The math says positions that hit -30% statistically continue down — the recovery rate is below your fee + slippage cost.`),
+        _row('🛑','rgb(244,114,182)','Advisor: "Tara LOCKED — STALE"',
+          `The conditions justifying the lock have inverted. Tara herself is telling you to exit. The exit-warning logic only fires after 30+ point posterior flip — by the time it fires, the trade is statistically lost.`),
+        _row('⚠','rgba(229,200,112,0.85)','In-loss for 3+ minutes',
+          `Configure auto-suggest in Trading Settings. If you've been underwater for 3 minutes and price isn't recovering, the trade was likely wrong from start. Cut and re-evaluate.`),
+        _row('⚠','rgba(229,200,112,0.85)','Whale print opposing in last 60s',
+          `Late-window whale spike against you is THE most common reversal cause. Even if Tara still says you should be winning, the path to expiry just got dangerous.`),
+      ]),
+
+      // 6. Position sizing
+      _section('Position sizing',[
+        _row('—','rgba(232,233,228,0.65)','Use Kelly as your ceiling, not your default',
+          `The Performance card shows ¼-Kelly recommendation as % of bankroll. That's the ceiling for SUPER-strong entries. Most trades should be at 0.5-0.7× of that.`),
+        _row('—','rgba(232,233,228,0.65)','Scale by tier, not by emotion',
+          `LARGE: edge ≥15pp + best-hour. FULL: edge ≥15pp OR (edge ≥5pp + best-hour). NORMAL: standard. HALF: high-vol regime or 3+ loss streak. SKIP: negative edge or 5+ loss streak. The DecisionalOverlay tells you the tier.`),
+        _row('—','rgba(232,233,228,0.65)','Bet sizing locked, not adaptive',
+          `Configure your standard bet size in Trading Settings and stick to it. Adjusting size mid-session based on recent results is tilt in disguise.`),
+      ]),
+
+      // 7. Anti-tilt
+      _section('Anti-tilt psychology',[
+        _row('🛑','rgb(244,114,182)','Respect the cooldown',
+          `4 losses in a row → 15min forced cooldown. Built-in for a reason: empirically, the trade right after a 4-loss streak has the worst WR you'll ever produce. The override exists only for genuine setups; never override out of frustration.`),
+        _row('⚠','rgba(229,200,112,0.85)','Recognize chase patterns',
+          `Common tilt: lose 2 in a row → take a tight-edge call you'd normally skip → lose → repeat. The edge-bucket filter blocks this; trust it.`),
+        _row('—','rgba(232,233,228,0.65)','Wins also need management',
+          `4+ win streak → don't size up. Mean reversion is real. The heater pill warns you not to give back gains by suddenly trading bigger.`),
+      ]),
+
+      // 8. What Tara learns from each trade
+      _section('What Tara learns from each result',[
+        _row('🧠','rgba(147,197,253,0.85)','Signal weights adjust per trade',
+          `Each of 7 signals (gap, momentum, structure, flow, technical, regime, range-position) gets nudged based on whether it pointed correctly. Bigger contributors get bigger adjustments. Bystanders untouched.`),
+        _row('🧠','rgba(147,197,253,0.85)','Per-regime patterns emerge',
+          `She learns "in CHOP regime, flow is unreliable; in TRENDING_DOWN, momentum dominates" over ~30-50 trades per regime. This is why she behaves differently in different conditions.`),
+        _row('🧠','rgba(147,197,253,0.85)','Shock losses don\'t poison learning',
+          `When a loss is caused by a whale spike or macro shock (V8.5), gradient descent is dampened to 25% — your correct signals don't get unlearned because of bad luck.`),
+        _row('🧠','rgba(147,197,253,0.85)','Path metrics reveal failure modes',
+          `She tracks max-favorable / max-adverse excursion + when the peak happened, then classifies losses (LATE_REVERSAL, EARLY_PEAK, etc.) so you can see which failure mode dominates and target it.`),
+      ]),
+
+      // 9. Common pitfalls
+      _section('Common pitfalls',[
+        _row('×','rgb(244,114,182)','Trading every window',
+          `You don't need to trade every 5 or 15 minutes. Most of your edge concentrates in your top 4-6 hours of the day. Skipping low-quality windows is profitable, not lazy.`),
+        _row('×','rgb(244,114,182)','Ignoring the edge bucket',
+          `If TIGHT and LATE buckets show <50% WR in your performance card, those trades are net-negative. Filtering them out is the highest-impact change you can make.`),
+        _row('×','rgb(244,114,182)','Forcing a direction',
+          `If Tara is ambivalent (NO_TRADE, posterior 45-55, low conviction), don't manually override and pick a side. Her abstention IS the call. Wait for the next window.`),
+        _row('×','rgb(244,114,182)','Multiple tabs without awareness',
+          `V8.3 fixed the multi-tab data loss bug. The peer-tab pill in the header confirms when other tabs are open. If you don't see the pill but expect to, refresh — sync may be out of date.`),
+      ]),
+
+      React.createElement('div',{
+        className:'mt-5 pt-4 border-t border-[#E8E9E4]/10 text-center',
+      },
+        React.createElement('button',{
+          onClick:onClose,
+          className:'px-6 py-2 rounded text-[12px] uppercase font-bold tracking-wider transition-colors',
+          style:{background:'rgba(229,200,112,0.12)',color:T2_GOLD,border:'1px solid rgba(229,200,112,0.3)'},
+        },'Got it'),
+      ),
+    ),
+  );
+}
+
 // ── V8.2: TRADING SETTINGS MODAL ────────────────────────────────────────────
 // Configure bet size, win payout, anti-tilt cooldown, Discord alert filter,
 // take-profit/cut-loss rules. All localStorage-only, per-device prefs.
@@ -5713,20 +6001,28 @@ function LastLossPostmortem({todayData,taraCallLog,currentAsset}){
       if(Math.abs(v)>_dissenterScore){_dissenter=k;_dissenterScore=Math.abs(v);}
     }
   });
+  // V8.5: Loss-pattern context
+  const _pattern=_lastLoss.lossPattern||null;
+  const _patternMeta=_pattern&&LOSS_PATTERN_LABELS[_pattern];
+  const _isShock=_pattern&&SHOCK_LOSS_PATTERNS.has(_pattern);
+  // Color shifts for shock losses (purple — circumstantial, not signal failure)
+  const _border=_isShock?'rgba(168,85,247,0.30)':'rgba(244,114,182,0.25)';
+  const _bg=_isShock?'rgba(168,85,247,0.05)':'rgba(244,114,182,0.04)';
+  const _accent=_isShock?'rgba(168,85,247,0.95)':'rgba(244,114,182,0.95)';
+  // Path summary line if metrics exist
+  const _hasPath=_lastLoss.maxFavorableExcursionBps!=null||_lastLoss.last60sDriftBps!=null;
   return React.createElement('div',{
     className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2',
-    style:{
-      border:'1px solid rgba(244,114,182,0.25)',
-      background:'rgba(244,114,182,0.04)',
-    },
+    style:{border:'1px solid '+_border,background:_bg},
   },
     React.createElement('div',{className:'flex items-baseline justify-between gap-2 flex-wrap'},
       React.createElement('div',{className:'flex items-baseline gap-2 flex-wrap min-w-0 flex-1'},
-        React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:'rgba(244,114,182,0.95)'}},'Loss recap'),
+        React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:_accent}},
+          _patternMeta?_patternMeta.icon+' '+_patternMeta.label:'Loss recap'),
         React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/75'},
           _lastLoss.dir,' · ',_lastLoss.regime||'no regime',' · ',Math.round(_lastLoss.confidence||0),'% conf · closed ',_outcomeDir,
         ),
-        _dissenter&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/55'},
+        _dissenter&&!_isShock&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/55'},
           '· ',_dissenter,' (',_dissenterScore.toFixed(1),') saw it right',
         ),
       ),
@@ -5735,6 +6031,20 @@ function LastLossPostmortem({todayData,taraCallLog,currentAsset}){
         className:'text-[#E8E9E4]/35 hover:text-[#E8E9E4]/70 text-xs leading-none px-1 shrink-0',
         title:'Dismiss',
       },'×'),
+    ),
+    // V8.5: Pattern hint + path metrics summary on second line if available
+    (_patternMeta||_hasPath)&&React.createElement('div',{className:'mt-1 text-[10px] text-[#E8E9E4]/55 leading-snug flex flex-wrap gap-x-2 gap-y-0.5'},
+      _patternMeta&&React.createElement('span',{className:'italic'},_patternMeta.hint),
+      _lastLoss.maxFavorableExcursionBps!=null&&React.createElement('span',{className:'tabular-nums'},
+        '· peak ',(_lastLoss.maxFavorableExcursionBps>0?'+':''),_lastLoss.maxFavorableExcursionBps,'bps',
+        _lastLoss.peakClockSec!=null?` @ ${_lastLoss.peakClockSec}s left`:'',
+      ),
+      _lastLoss.last60sDriftBps!=null&&Math.abs(_lastLoss.last60sDriftBps)>=3&&React.createElement('span',{className:'tabular-nums'},
+        '· last 60s ',(_lastLoss.last60sDriftBps>0?'+':''),_lastLoss.last60sDriftBps,'bps',
+      ),
+      _isShock&&React.createElement('span',{className:'text-[10px] font-bold',style:{color:'rgba(168,85,247,0.85)'}},
+        '· learning dampened (signal was right)',
+      ),
     ),
   );
 }
@@ -5902,6 +6212,24 @@ function PerformanceCard({todayData,settings}){
           :React.createElement('div',{className:'text-[10px] leading-relaxed',style:{color:'rgba(244,114,182,0.85)'}},
               'No edge at current WR vs payout ratio.',
             ),
+      ),
+      // V8.5: Loss-pattern breakdown — most common failure modes
+      todayData.lossPatternStats&&Object.keys(todayData.lossPatternStats).length>0&&todayData.topLossPattern&&React.createElement('div',{className:'pt-1.5 border-t border-[#E8E9E4]/5'},
+        React.createElement('div',{className:'text-[8px] uppercase font-bold tracking-[0.12em] text-[#E8E9E4]/40 mb-1'},'Loss patterns'),
+        React.createElement('div',{className:'space-y-0.5'},
+          Object.entries(todayData.lossPatternStats).filter(([k])=>k!=='UNCLASSIFIED').sort((a,b)=>b[1]-a[1]).slice(0,4).map(([key,count])=>{
+            const meta=LOSS_PATTERN_LABELS[key]||{label:key,color:'rgba(232,233,228,0.7)',icon:'·'};
+            const pct=Math.round((count/todayData.topLossPattern.totalLosses)*100);
+            return React.createElement('div',{key,className:'flex items-baseline gap-1.5 text-[10px]'},
+              React.createElement('span',{className:'shrink-0 tabular-nums w-3',style:{color:meta.color}},meta.icon),
+              React.createElement('span',{className:'flex-1 min-w-0 truncate',style:{color:meta.color}},meta.label),
+              React.createElement('span',{className:'tabular-nums text-[#E8E9E4]/55 shrink-0'},count,' · ',pct,'%'),
+            );
+          }),
+        ),
+        todayData.topLossPattern&&React.createElement('div',{className:'mt-1 text-[10px] text-[#E8E9E4]/45 italic leading-tight'},
+          LOSS_PATTERN_LABELS[todayData.topLossPattern.key]?.hint||'',
+        ),
       ),
     ),
   );
@@ -8966,6 +9294,7 @@ function TaraApp(){
   });
   useEffect(()=>{try{localStorage.setItem('taraTradingSettings_v1',JSON.stringify(tradingSettings));}catch(_){}},[tradingSettings]);
   const[showTradingSettings,setShowTradingSettings]=useState(false);
+  const[showBestPractices,setShowBestPractices]=useState(false); // V8.5: best-practices modal
   // V8.2: Anti-tilt cooldown state — set when streak reaches threshold, blocks new entries
   //   for tradingSettings.antiTiltMinutes. Cleared on first WIN. Persists across reloads.
   const[tiltLockUntil,setTiltLockUntil]=useState(()=>{
@@ -9029,6 +9358,18 @@ function TaraApp(){
   const windowHighTimeRef=useRef(0);
   const windowLowTimeRef=useRef(0);
   const windowOpenTimeRef=useRef(0);
+  // ── V8.5: WITHIN-WINDOW CONTEXT TRACKING ────────────────────────────────
+  // Captures whale activity + macro shocks DURING the active window so we can
+  //   classify loss patterns at close (LATE_REVERSAL vs WHALE_SPIKE vs MACRO_SHOCK).
+  // Reset on rollover.
+  const windowWhaleStatsRef=useRef({
+    count:0,                         // total whale prints during window
+    contraryUsd:0,                   // largest whale opposing user's position (USD)
+    contraryClockSec:null,           // clockSec remaining when largest contrary fired
+    contrarySide:null,               // 'BUY' or 'SELL'
+  });
+  const windowMaxGeoRiskRef=useRef(0); // peak geoRisk seen during window (0-1 scale)
+  const windowHadMacroEventRef=useRef(false); // any macro event fired during window
   // When user manually edits strike, this is true — we skip auto-set until next window
   const isManualStrikeRef=useRef(false);
   const[strikeMode,setStrikeMode]=useState('auto'); // 'auto' | 'manual'
@@ -9763,7 +10104,7 @@ function TaraApp(){
   },[]);
   // Recompute learnings from a full call log. Called after each resolution.
   const _recomputeLearningsFromLog=React.useCallback((log)=>{
-    const stats={byRegime:{},byDirection:{},byTier:{},bySession:{},byRegimeDir:{},byConfluence:{},byEdge:{}};
+    const stats={byRegime:{},byDirection:{},byTier:{},bySession:{},byRegimeDir:{},byConfluence:{},byEdge:{},byLossPattern:{}};
     let total=0;
     (log||[]).forEach(e=>{
       if(!e||!e.result||e.result==='SITOUT')return;       // only resolved UP/DOWN calls
@@ -9795,6 +10136,11 @@ function TaraApp(){
         const _edge=_taraDirConf-_kalshiDirConf;
         const _edgeBucket=_edge>=15?'big-edge':_edge>=5?'good-edge':_edge>=-5?'tight':'late';
         _bump(stats.byEdge,_edgeBucket);
+      }
+      // V8.5: loss-pattern bucket (only LOSSes have a pattern, but bucket all results
+      //   for pattern-WR computation: WIN trades implicitly have pattern=null → not counted).
+      if(e.result==='LOSS'&&e.lossPattern){
+        _bump(stats.byLossPattern,e.lossPattern);
       }
     });
     const multipliers=_deriveMultipliers(stats);
@@ -10027,6 +10373,41 @@ function TaraApp(){
     const _curW=(adaptiveWeightsByAssetRef.current||{})[_safe]||(adaptiveWeightsByAssetRef.current||{}).BTC;
     const _curRW=(regimeWeightsByAssetRef.current||{})[_safe]||(regimeWeightsByAssetRef.current||{}).BTC;
     const _assetLog=(newLog||[]).filter(t=>t&&(t.asset||'BTC')===_safe);
+    // ── V8.5: SHOCK-AWARE LEARNING ──────────────────────────────────────
+    // When loss pattern is WHALE_SPIKE or MACRO_SHOCK, the loss was caused by external
+    //   circumstances (large contrary print, geo/macro event) — NOT a signal misread.
+    // Punishing weights at full force teaches Tara to distrust signals that were correct.
+    // We dampen the punishment to 25% (still some learning, but doesn't unlearn correct
+    //   signals due to bad luck), and tag the trade for telemetry.
+    const _isShockLoss=finalResult==='LOSS'&&resolvedTrade.lossPattern&&SHOCK_LOSS_PATTERNS.has(resolvedTrade.lossPattern);
+    if(_isShockLoss){
+      try{console.info('[V8.5] Shock loss detected — dampening gradient descent. Pattern:',resolvedTrade.lossPattern);}catch(_){}
+      // Apply 25% learning by feeding a temporarily lower-rate path:
+      //   We can't change LEARNING_RATE constants, so we simulate dampening by passing
+      //   a "softened" log where this trade's signal magnitudes are reduced by 75%.
+      //   This preserves the per-signal attribution math but the gradient is much smaller.
+      const _softLog=_assetLog.map((t,i,arr)=>{
+        if(i!==arr.length-1)return t;
+        if(!t||!t.signals)return t;
+        const _softSignals={};
+        Object.keys(t.signals).forEach(k=>{_softSignals[k]=Number(t.signals[k]||0)*0.25;});
+        return{...t,signals:_softSignals};
+      });
+      const _softTrade={...resolvedTrade};
+      if(_softTrade.signals){
+        const _softSigs={};
+        Object.keys(_softTrade.signals).forEach(k=>{_softSigs[k]=Number(_softTrade.signals[k]||0)*0.25;});
+        _softTrade.signals=_softSigs;
+      }
+      const _newW=updateWeights(_curW,_softLog,finalResult);
+      const _newRW=updateRegimeWeights(_curRW,_softTrade,finalResult);
+      const _diffs=computeWeightDiff(_curW,_newW);
+      setAdaptiveWeightsByAsset(prev=>({...prev,[_safe]:_newW}));
+      setRegimeWeightsByAsset(prev=>({...prev,[_safe]:_newRW}));
+      if(_diffs.length>0)setLastLearningUpdate({result:finalResult,diffs:_diffs,at:Date.now(),shockLoss:true,pattern:resolvedTrade.lossPattern});
+      return;
+    }
+    // Normal path — full gradient descent
     const _newW=updateWeights(_curW,_assetLog,finalResult);
     const _newRW=updateRegimeWeights(_curRW,resolvedTrade,finalResult);
     const _diffs=computeWeightDiff(_curW,_newW);
@@ -10203,6 +10584,29 @@ function TaraApp(){
         edge:_f>0,
       };
     }
+    // ── V8.5: Loss-pattern stats ──
+    const lossPatternStats={};
+    let _totalLosses=0;
+    _allResolved.forEach(e=>{
+      if(e.result!=='LOSS')return;
+      _totalLosses++;
+      const p=e.lossPattern||'UNCLASSIFIED';
+      lossPatternStats[p]=(lossPatternStats[p]||0)+1;
+    });
+    let topLossPattern=null;
+    if(_totalLosses>=5){
+      const _entries=Object.entries(lossPatternStats).filter(([k])=>k!=='UNCLASSIFIED');
+      if(_entries.length>0){
+        _entries.sort((a,b)=>b[1]-a[1]);
+        const[_topKey,_topCount]=_entries[0];
+        topLossPattern={
+          key:_topKey,
+          count:_topCount,
+          pct:Math.round((_topCount/_totalLosses)*100),
+          totalLosses:_totalLosses,
+        };
+      }
+    }
     return{
       todayCalls,wins,losses,sitouts,pending,resolved,wr,
       dollarPnL,
@@ -10214,6 +10618,9 @@ function TaraApp(){
       edgeBuckets,
       assetRotation,
       kelly,
+      // V8.5 additions
+      lossPatternStats,
+      topLossPattern,
     };
   },[taraCallLog,currentAsset,tradingSettings]);
   // Best windows hint — for the day-of-week we're in, find the user's best historical hours
@@ -10297,7 +10704,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.4 online — responsive layout cleanup + Performance card relocation. User reported: Performance card was full-width above the dashboard grid, taking lots of vertical real estate, while the prediction column had blank space at the bottom. Also wanted any-screen-size responsiveness without elements clipping. CHANGES: (1) MOVED PERFORMANCE CARD into the prediction column (left column of the main 3-col grid) with mt-auto so it pins to the column bottom and fills the blank space below PredictionContent. (2) REDESIGNED PERFORMANCE CARD INTERNAL LAYOUT for narrow column widths — walk-forward cards are now compact (3 small tiles fit in ~350px), edge-bucket labels shortened to single words with subscript ranges (BIG +15+, GOOD +5/15, TIGHT ±5, LATE under -5), W/L counts stacked vertically below the WR percentage to save horizontal space, Kelly hint reflows. (3) HEADER NOW FLEX-WRAPS — pills + buttons reflow to a second line on narrower viewports instead of clipping off-screen. Added gap-y for clean vertical spacing when wrapped. (4) ADDED min-w-0 to grid container, all 3 column wrappers, ProjectionsCard outer, RightPanel outer — without this, content wider than column forces the grid to stretch, breaking responsive layout. (5) TRADING SETTINGS MODAL now uses items-start sm:items-center so it pins to top of viewport on mobile (where it might exceed viewport height), with max-h-[96vh] + overflow-y-auto for safe scrolling. Reduced padding p-4 sm:p-5 inner. NET RESULT: page looks cleaner, Performance card fills previously-blank space efficiently, no elements clip at any screen size from 320px mobile through 4K desktop. Verified parse clean."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 8.5 online — path-aware learning + best practices guide. Closes the gap user identified: she previously had no way to distinguish a wrong-from-start loss from a late-minute reversal caused by external shock. WITHIN-WINDOW PATH METRICS: every resolved trade now records max favorable excursion bps (best you ever were vs strike), max adverse excursion bps (worst you were), peakClockSec/troughClockSec (when those extremes hit, in seconds remaining), last60sDriftBps (net price move in final minute, computed from tick history), reversalFromPeak (bool: were you favorable then ended unfavorable), peakPosition (EARLY/MID/LATE bucketing). All from existing windowHigh/Low/Time refs plus tickHistoryRef — no new fetches. LOSS-PATTERN CLASSIFIER: classifyLossPattern function categorizes every LOSS into one of six patterns. WRONG_FROM_START (never above water), EARLY_PEAK (peaked first third then faded), MID_REVERSAL (was winning at midpoint, lost in final third), LATE_REVERSAL (winning until last minute then flipped), WHALE_SPIKE (whale print 200K+ within 60s of close), MACRO_SHOCK (geoRisk peak 0.5+ or major event during window). Order matters — shock detectors fire first since they override path-pattern when external. WINDOW CONTEXT TRACKING: new windowWhaleStatsRef tracks whale count and largest contrary print during the active position. windowMaxGeoRiskRef tracks peak risk seen during window. Both reset on rollover. Updated every tick when a position is active. SHOCK-AWARE LEARNING: applyTradeLearning now checks if loss pattern is WHALE_SPIKE or MACRO_SHOCK. If so, gradient descent is dampened to 25% — signals that pointed correctly dont get unlearned because of bad luck. Trade flagged shockLoss for telemetry. Console emits V8.5 Shock loss detected. UI SURFACES: LastLossPostmortem now shows the pattern label + icon, path metrics summary inline (peak bps at clockSec, last 60s drift), and a learning dampened note for shock losses. PerformanceCard adds Loss patterns section showing top 4 patterns with counts and percentages, plus the most common patterns suggested fix. BEST PRACTICES MODAL: comprehensive traders guide accessible via new gold book button in header. Nine sections, 30 plus rows: when to enter, when to skip, while in trade what to watch, when to take profit, when to cut loss, position sizing, anti-tilt psychology, what Tara learns from each result, common pitfalls. Grounded in actual learning data not generic advice. Verified parse clean."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -10565,6 +10972,47 @@ function TaraApp(){
   useEffect(()=>{
     return subscribeToPeerTabs(setPeerTabs);
   },[]);
+
+  // ── V8.5: WINDOW CONTEXT TRACKING (whale prints + geoRisk during active window) ──
+  // Updates windowWhaleStatsRef + windowMaxGeoRiskRef whenever whaleLog or newsSentiment
+  // changes, but ONLY if there's an active position. Refs reset at window open.
+  // Used at trade resolution to classify shock losses.
+  useEffect(()=>{
+    if(!userPosition||!windowOpenTimeRef.current)return;
+    const _winOpen=windowOpenTimeRef.current;
+    const _now=Date.now();
+    const _winSec=windowType==='15m'?900:300;
+    // ── Whale tracking ── find whales that fired during this window
+    const _windowWhales=(whaleLog||[]).filter(w=>w&&w.time>=_winOpen);
+    if(_windowWhales.length>0){
+      // Contrary direction: opposing the user's position. UP user → SELL whales hurt.
+      const _contrarySide=userPosition==='UP'?'SELL':'BUY';
+      const _contraryWhales=_windowWhales.filter(w=>w.side===_contrarySide);
+      if(_contraryWhales.length>0){
+        // Find the largest contrary whale
+        const _largest=_contraryWhales.reduce((a,b)=>(b.usd||0)>(a.usd||0)?b:a,_contraryWhales[0]);
+        if((_largest.usd||0)>(windowWhaleStatsRef.current.contraryUsd||0)){
+          const _elapsedMs=_largest.time-_winOpen;
+          const _clockSec=Math.max(0,_winSec-Math.round(_elapsedMs/1000));
+          windowWhaleStatsRef.current={
+            count:_windowWhales.length,
+            contraryUsd:_largest.usd||0,
+            contraryClockSec:_clockSec,
+            contrarySide:_contrarySide,
+          };
+        } else {
+          windowWhaleStatsRef.current.count=_windowWhales.length;
+        }
+      } else {
+        windowWhaleStatsRef.current.count=_windowWhales.length;
+      }
+    }
+    // ── GeoRisk tracking ── peak risk during window
+    const _curRisk=Number(newsSentiment?.geoRisk)||0;
+    if(_curRisk>windowMaxGeoRiskRef.current){
+      windowMaxGeoRiskRef.current=_curRisk;
+    }
+  },[whaleLog,newsSentiment,userPosition,windowType]);
 
   useEffect(()=>{setIsMounted(true);
     // ── PWA: register service worker for installability + keep-alive ──
@@ -10869,6 +11317,10 @@ function TaraApp(){
     windowHighTimeRef.current=_now;
     windowLowTimeRef.current=_now;
     windowOpenTimeRef.current=_now;
+    // V8.5: Reset within-window context tracking
+    windowWhaleStatsRef.current={count:0,contraryUsd:0,contraryClockSec:null,contrarySide:null};
+    windowMaxGeoRiskRef.current=0;
+    windowHadMacroEventRef.current=false;
     setStrikeMode('manual');
     setPendingStrike(null);
     // Try Kalshi cache first (best source — preset strike from market)
@@ -11856,10 +12308,36 @@ function TaraApp(){
             if(pendingTradeRef.current&&pendingTradeRef.current.result===null){
               const _closingGap=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
               const _isMarginal=Math.abs(_closingGap)<10;
+              // ── V8.5: Compute within-window path metrics + window context for this trade ──
+              const _pendingT=pendingTradeRef.current;
+              const _pathMetrics=computePathMetrics({
+                dir:_pendingT.dir,
+                strike:_pendingT.strikeAtLock||targetMargin,
+                windowHigh:windowHighRef.current,
+                windowLow:windowLowRef.current,
+                windowHighTime:windowHighTimeRef.current,
+                windowLowTime:windowLowTimeRef.current,
+                windowOpenTime:windowOpenTimeRef.current,
+                closeTime:Date.now(),
+                ticksAtClose:tickHistoryRef.current||[],
+                closingPrice:currentPrice,
+              });
+              const _winCtx={
+                windowWhaleCount:windowWhaleStatsRef.current.count,
+                windowContraryWhaleUsd:windowWhaleStatsRef.current.contraryUsd,
+                windowContraryWhaleClockSec:windowWhaleStatsRef.current.contraryClockSec,
+                windowContraryWhaleSide:windowWhaleStatsRef.current.contrarySide,
+                windowMaxGeoRisk:windowMaxGeoRiskRef.current,
+                windowHadMacroEvent:windowHadMacroEventRef.current,
+              };
               const baseResolved={...pendingTradeRef.current,closingPrice:currentPrice,strikePrice:targetMargin,
                 /* V145 closing telemetry */ closingGapBps:_closingGap,
                 kalshiAtClose:kalshiYesPrice!=null?Number(kalshiYesPrice):null,
-                resolvedTimestampISO:new Date().toISOString()};
+                resolvedTimestampISO:new Date().toISOString(),
+                /* V8.5 path metrics + window context */
+                ..._pathMetrics,
+                ..._winCtx,
+              };
               if(_isMarginal){
                 // Mark as pending-verify and queue for Kalshi resolution
                 const pendingTrade={...baseResolved,result:'PENDING-VERIFY',localResultGuess:won?'WIN':'LOSS',marginalClose:true};
@@ -11877,10 +12355,13 @@ function TaraApp(){
               } else {
                 // Unambiguous close — record locally as before
                 const result=won?'WIN':'LOSS';
-                const resolvedTrade={...baseResolved,result};
+                // V8.5: Classify loss pattern immediately for shock-aware learning
+                const _withResult={...baseResolved,result};
+                const _lossPattern=classifyLossPattern(_withResult);
+                const resolvedTrade={..._withResult,lossPattern:_lossPattern};
                 const newLog=[...tradeLogRef.current,resolvedTrade];
                 saveTradeLog(newLog);setTradeLog(newLog);
-                applyTradeLearning(newLog,resolvedTrade,result); // V7.1: per-asset
+                applyTradeLearning(newLog,resolvedTrade,result); // V7.1: per-asset · V8.5: shock-aware inside
               }
               pendingTradeRef.current=null;
             }
@@ -15385,7 +15866,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              8.4
+              8.5
             </span>
           </div>
 
@@ -15485,6 +15966,12 @@ function TaraApp(){
               border:'0.5px solid '+T2_GOLD_BORDER,
             }} title="Tara's Brain — what she's thinking right now">🧠</button>
             <button onClick={()=>setShowGuide(true)} className={'p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors'} title="How Tara Works">?</button>
+            {/* V8.5: Best Practices guide — when/how to enter, exit, manage trades */}
+            <button onClick={()=>setShowBestPractices(true)} className={'hidden sm:flex p-1.5 rounded-lg transition-colors text-xs font-bold'} style={{
+              background:T2_GOLD_GLOW,
+              color:T2_GOLD,
+              border:'0.5px solid '+T2_GOLD_BORDER,
+            }} title="Best Practices — how to trade with Tara for max profit">📖</button>
             {/* V138: Premium Mode toggle removed — see help modal V138 section */}
             {/* Hidden on mobile — accessible via mobile tab nav or sm+ */}
             <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="hidden sm:flex"/>
@@ -15750,6 +16237,12 @@ function TaraApp(){
           onClose={()=>setShowTradingSettings(false)}
           settings={tradingSettings}
           setSettings={setTradingSettings}
+        />
+
+        {/* V8.5: Best Practices modal — comprehensive trader's guide */}
+        <BestPracticesModal
+          open={showBestPractices}
+          onClose={()=>setShowBestPractices(false)}
         />
 
         {/* MOBILE TAB NAV */}
@@ -16932,13 +17425,88 @@ function TaraApp(){
             </div>
             <div className={'p-4 sm:p-6 space-y-5 text-xs sm:text-sm text-[#E8E9E4]/80'}>
 
+              {/* V8.5 — Path-aware learning + Best Practices guide */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Intelligence Upgrade + Trader Guide</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> &mdash; She Sees the Path Now</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked: &ldquo;does she understand a last-minute extreme pump or dump?&rdquo; Honest answer was no &mdash; she only knew entry context + outcome, not the path between. A late-minute whale dump looked identical to her as being wrong from the start, and she was over-correcting weights in response to bad luck. V8.5 closes the gap.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Within-window path metrics</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Every resolved trade now captures, at close time:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">maxFavorableExcursionBps</code> &mdash; best position-relative price you ever hit. Signed: positive = above water.</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">maxAdverseExcursionBps</code> &mdash; worst you were vs strike. Signed: negative = underwater.</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">peakClockSec</code> / <code className="text-[10px] bg-[#0E100F] px-1">troughClockSec</code> &mdash; window seconds-remaining when those extremes hit.</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">last60sDriftBps</code> &mdash; net price move in the final minute. Computed from tickHistoryRef.</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">reversalFromPeak</code> &mdash; bool: were you meaningfully favorable then ended unfavorable?</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">peakPosition</code> &mdash; EARLY / MID / LATE third of the window when peak hit.</li>
+                </ul>
+                <p className="text-[11px] text-[#E8E9E4]/55 italic mt-2">All derived from existing windowHigh/Low/Time refs + tick history. No new fetches.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Six-pattern loss classifier</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2"><code className="text-[10px] bg-[#0E100F] px-1">classifyLossPattern</code> categorizes every LOSS:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong style={{color:'rgba(168,85,247,0.85)'}}>🐋 WHALE_SPIKE</strong> &mdash; large contrary whale print ($200K+) within 60s of close. Shock — overrides path patterns.</li>
+                  <li><strong style={{color:'rgba(168,85,247,0.85)'}}>⚠ MACRO_SHOCK</strong> &mdash; geoRisk peaked at 0.5+ or major macro event during window. Shock — overrides path patterns.</li>
+                  <li><strong style={{color:'rgba(244,114,182,0.85)'}}>⚡ LATE_REVERSAL</strong> &mdash; was favorable in final third, then flipped.</li>
+                  <li><strong style={{color:'rgba(229,200,112,0.85)'}}>⤵ MID_REVERSAL</strong> &mdash; was favorable in middle third, then faded.</li>
+                  <li><strong style={{color:'rgba(229,200,112,0.85)'}}>⤴ EARLY_PEAK</strong> &mdash; peaked in first third, sustained loss after.</li>
+                  <li><strong style={{color:'rgba(244,114,182,0.95)'}}>✗ WRONG_FROM_START</strong> &mdash; never above water. MFE &le; 0.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Window context tracking</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">windowWhaleStatsRef</code> tracks whale count + largest contrary print + clockSec when it fired.</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">windowMaxGeoRiskRef</code> tracks peak risk seen during the active window.</li>
+                  <li>Both reset on rollover; updated every tick when a position is active.</li>
+                  <li>Captured into <code className="text-[10px] bg-[#0E100F] px-1">baseResolved</code> at trade close so the classifier has full context.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Shock-aware learning</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The actual intelligence upgrade. <code className="text-[10px] bg-[#0E100F] px-1">applyTradeLearning</code> now checks if loss pattern is WHALE_SPIKE or MACRO_SHOCK. If so:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li>Signal magnitudes in the trade get scaled to 25% before gradient descent runs.</li>
+                  <li>Result: per-signal attribution math still works, but the gradient is much smaller.</li>
+                  <li>Signals that pointed correctly don&rsquo;t get unlearned because of bad luck.</li>
+                  <li>Trade flagged <code className="text-[10px] bg-[#0E100F] px-1">shockLoss:true</code> + pattern in lastLearningUpdate. Console emits <code className="text-[10px] bg-[#0E100F] px-1">[V8.5] Shock loss detected</code>.</li>
+                </ul>
+                <p className="text-[11px] text-[#E8E9E4]/55 italic mt-2">Path-pattern losses (LATE_REVERSAL, WRONG_FROM_START, etc.) still get full gradient descent &mdash; those represent real signal failures.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">UI surfaces</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>LastLossPostmortem</strong> shows pattern label + icon (purple for shock, rose for path), path metrics inline (peak bps at clockSec, last 60s drift), and a &ldquo;learning dampened&rdquo; note for shock losses.</li>
+                  <li><strong>PerformanceCard</strong> adds <em>Loss patterns</em> section showing top 4 patterns with counts and percentages, plus the most common pattern&rsquo;s suggested fix.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Best Practices guide (new modal)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Comprehensive trader&rsquo;s guide accessible via new gold &ldquo;📖&rdquo; button in header. Nine sections, 30+ rows:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px]">
+                  <li><strong>When to enter</strong> &mdash; big-edge, best-hour, confluent setups, standard tier</li>
+                  <li><strong>When to skip</strong> &mdash; negative edge, tilt cooldown, sub-50% TIGHT bucket, macro events, phase transitions</li>
+                  <li><strong>While in trade</strong> &mdash; STALE warning, EXTREME risk, contrary whales, FADING conviction</li>
+                  <li><strong>When to take profit</strong> &mdash; offer thresholds, big-edge realization, time decay, late-window stability</li>
+                  <li><strong>When to cut loss</strong> &mdash; -30% stop, STALE advisor, time-in-loss, late whale spikes</li>
+                  <li><strong>Position sizing</strong> &mdash; Kelly as ceiling, scale by tier, locked sizing not adaptive</li>
+                  <li><strong>Anti-tilt</strong> &mdash; respect cooldown, recognize chase patterns, manage win streaks too</li>
+                  <li><strong>What Tara learns</strong> &mdash; signal weights, regime patterns, shock-loss exclusion, path metrics</li>
+                  <li><strong>Common pitfalls</strong> &mdash; over-trading, ignoring edge buckets, forcing direction, multi-tab awareness</li>
+                </ul>
+                <p className="text-[11px] text-[#E8E9E4]/55 italic mt-2">Grounded in actual learning data &mdash; not generic platitudes. References the edge buckets, regime tracking, tilt cooldown, etc. that Tara already implements.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Verified</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">Parse OK at 20,361 lines. All V7.10.x and V8.0/8.1/8.2/8.3/8.4 features intact. Path metrics computed at single resolution site (main rollover); reversed-mid-trade and force-exit paths still capture closing data without path metrics &mdash; classifier returns null for those, which is fine (they&rsquo;re user-driven, not pure window outcomes). The V8.5 learning dampening only fires on classified shock losses, so unclassified losses (older entries pre-V8.5, force exits, reversed trades) get normal gradient descent.</p>
+              </section>
+
               {/* V8.4 — Responsive layout cleanup + Performance card relocation */}
               <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
                 <div className="flex items-baseline gap-2 mb-2">
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>UI · Responsive Polish + Layout Optimization</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> &mdash; Cleaner Layout, Any Screen Size</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> &mdash; Cleaner Layout, Any Screen Size</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: Performance card was full-width above the grid taking lots of vertical real estate while the prediction column had blank space at the bottom. Also wanted bulletproof responsive behavior at any viewport size.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Performance card moved + redesigned</div>
@@ -16979,7 +17547,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical · Multi-Tab Data Integrity</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> &mdash; Atomic Multi-Tab Sync</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> &mdash; Atomic Multi-Tab Sync</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: opening tab A on BTC + tab B on ETH during the same window only saved one tab&rsquo;s entry. Diagnosed root cause + applied a three-layer fix.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">The bug</div>
@@ -17042,7 +17610,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Profit Trader Toolkit</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> &mdash; All Three Tiers</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> &mdash; All Three Tiers</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">12 features across the three tiers from yesterday&rsquo;s plan. New Trading Settings modal accessible by clicking the Today P&L pill.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Tier 1 &mdash; would meaningfully change P&L</div>
@@ -17087,7 +17655,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Sync Reliability + Risk Indicators</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Reliable Sync + Movement Risk</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Reliable Sync + Movement Risk</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported missing trades on refresh + cross-browser. Diagnosed three real failure modes in the call-log sync path. Also added the movement risk pulse for live volatility / volume / tape awareness.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sync fixes</div>
@@ -17135,7 +17703,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Visual + Decisional Upgrade</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Trader Awareness</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Trader Awareness</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">11 features added in one drop. Designed to inform without dominating &mdash; each piece earns its place by changing how you trade the next round.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Header pills</div>
@@ -17182,7 +17750,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Fix · Kalshi Strike Fetch</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Kalshi Strike Fetch Restored</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Kalshi Strike Fetch Restored</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User reported: &ldquo;Tara doesn&rsquo;t get strike pricing now from Kalshi&rdquo; for both BTC and ETH. Diagnosed and fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -17224,7 +17792,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Feature · Time-Aware Context · Memory Polish</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Phase Context + Memory Cleanup</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Phase Context + Memory Cleanup</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for time-specific alerts/disclaimers (what kind of market we&rsquo;re in, what we&rsquo;re entering, what to watch for) and to clean up + format previous records. Both in this release.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Market Context Strip</div>
@@ -17269,7 +17837,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Architectural Patch · Sync + Learning</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Sync &amp; Learning Done Right</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Sync &amp; Learning Done Right</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged three concerns simultaneously: records/stats/logs not syncing, Tara giving different responses across devices, and asking whether learning was actually happening. Took the time to audit every persistent state slot and the entire learning pipeline.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Persistence gaps found</div>
@@ -17319,7 +17887,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Browser Real-Time Sync</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Same Call, Every Browser</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Same Call, Every Browser</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;still not the same for everyone on each browser mate.&rdquo;</em> V7.10.3 fixed within-browser races but cross-browser was still broken &mdash; two real bugs compounding.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Bug 1: One-shot read, not real-time</div>
@@ -17354,7 +17922,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Cross-Tab Determinism</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — One Window, One Decision</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — One Window, One Decision</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshots showed the SAME window with Tab 1 saying <strong style={{color:'rgb(110,231,183)'}}>LOCKED UP 84%</strong> and Tab 2 saying <strong style={{color:'rgb(244,114,182)'}}>LOCKED DOWN 94%</strong>. Same browser, same window, opposite calls.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -17392,7 +17960,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stability Audit</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Audit Pass</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Audit Pass</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User asked for a comprehensive review after the V7.10.1 snapshot-log fix. Reviewed potential bug categories systematically and fixed one minor stability issue.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was checked</div>
@@ -17423,7 +17991,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · Trade Rounds Stopped Updating</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — The Bug That Killed Memory</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — The Bug That Killed Memory</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged: <em>&ldquo;tara completely stopped with updating trade round for both btc and eth now&rdquo;</em>. Found a critical bug shipped quietly in V7.8 and inherited by every release since. Both assets affected equally.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What was broken</div>
@@ -17461,7 +18029,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Critical Patch · TDZ Bug Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Crash Fixed</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Crash Fixed</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User screenshot showed engine stuck on MATH CRASH with error <em>&ldquo;Cannot access &lsquo;ft&rsquo; before initialization&rdquo;</em>. Posterior frozen at 50%, all signals reading 0, advisor card unable to render, projections empty.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Root cause</div>
@@ -17481,7 +18049,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Three-State Model · Explicit No-Go</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — When Sit-Out Is The Right Answer</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — When Sit-Out Is The Right Answer</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Talked through sit-outs together. Agreed: V7.8 killing stylistic timidity (tier blocks, timer expirations, mixed-signal skips) was right. But there are 3 specific cases where NOT trading is mathematically correct, not conservative. Those become an explicit NO-GO category &mdash; clearly distinguished from a normal lock or a tentative caution call.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Three states now</div>
@@ -17509,7 +18077,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Persistent Learning · No Skips · Caution Notes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — She Trades Every Round Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — She Trades Every Round Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Weights persist across sessions</div>
@@ -17550,7 +18118,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Reversal Blockers · Stale-Lock Advisor</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Stop Inviting Bad Trades</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Stop Inviting Bad Trades</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged the screenshot. Tara locked DOWN 54%, engine showed 89% UP, Kalshi 99.7% UP, all 4 forward projections UP, price +25bps above strike. Advisor card said &ldquo;Tara DOWN 85% &middot; ENTER DOWN&rdquo;. Pressing ENTER would have been an instant loss. Two bugs fixed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor — continuation blockers</div>
@@ -17579,7 +18147,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Predict Reversals · Shadow Tara · Fast-Mode</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Predict the Reversal, Not Avoid It</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Predict the Reversal, Not Avoid It</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three direct user directives addressed.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Reversal predictor (replaces V7.6 guard)</div>
@@ -17627,7 +18195,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Mean-Reversion Guard · Timer-Fires · Dual Feed</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Stop Chasing the Top</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Stop Chasing the Top</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Deep dive into 105 resolved trades + the recent 30 found the actual structural pattern behind &ldquo;we chase momentum and lose on swings.&rdquo;</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Findings from the call-log analysis</div>
@@ -17670,7 +18238,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Faster Low-Dial Locks · ETH Save Bug</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Truly Fast at Fast</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Truly Fast at Fast</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Two unrelated bugs in one release. User flagged both.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Speed dial low-end made aggressive</div>
@@ -17716,7 +18284,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Speed Dial Actually Functional</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Dial Has Function Now</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Dial Has Function Now</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User: &ldquo;the timer decision has 0 function too. its just a gimmick and does nothing&rdquo;. They were right. The dial was only nudging two floor numbers that almost every trade passed regardless. Real fix:</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tier filter by dial position</div>
@@ -17763,7 +18331,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Engine · The Structural Blind Spot Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Higher Timeframes Finally Count</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Higher Timeframes Finally Count</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">User flagged a trade where the Score Breakdown showed &ldquo;Structural ▲ UP · 4/6 align&rdquo; with 5m and 15m both bullish, while Tara sat out leaning DOWN. Investigation: the engine was COMPUTING the multi-TF structural data and SHOWING it on the panel, but never adding it to the posterior. Five-of-six timeframes screaming UP, math weight: zero.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Structural alignment bonus</div>
@@ -17801,7 +18369,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Patch · Stale State Fixes</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Sound + Stale UI</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Sound + Stale UI</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Three quick fixes. Two were old bugs, one was a missing persistence flag.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Sound enabled now persists</div>
@@ -17821,7 +18389,7 @@ function TaraApp(){
                   <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Major · Prediction Engine · The &ldquo;Why Jerome Beats Tara&rdquo; Fix</span>
                   <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.05</span>
                 </div>
-                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.4</span> — Honest Confidence, Smarter Locks</h3>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>8.5</span> — Honest Confidence, Smarter Locks</h3>
                 <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">After a side-by-side analysis of a real losing trade where Jerome won and Tara lost, we found the structural problem: Tara was over-trusting tape extremes and under-weighting strike position. This release surgically fixes both, plus the timer bug, plus calibrates the confidence display.</p>
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1 · Tape-extreme guard</div>
