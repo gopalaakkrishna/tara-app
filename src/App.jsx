@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.7.4.1-ladder-tdz-fix';
+const BASELINE_VERSION='2026.05.07-v9.7.5-bybit-migration';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -2931,24 +2931,44 @@ const useMultiTFCandles=(asset)=>{
         if(!Array.isArray(d))throw new Error('bad shape');
         return d.slice(0,300).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
       }catch(e){
-        // Fallback Binance
+        // V9.7.5: Fallback Bybit (Binance global blocked in US).
+        //   Bybit kline returns [start, o, h, l, c, vol, turnover], newest first.
+        //   We reverse to oldest-first to match the Coinbase shape consumers expect.
         try{
-          const ivMap={60:'1m',180:'3m',300:'5m',900:'15m'};
-          const iv=ivMap[gran]||'1m';
-          const r2=await fetch(`https://api.binance.com/api/v3/uiKlines?symbol=${_bnSym}&interval=${iv}&limit=300`);
-          const d2=await r2.json();
-          if(!Array.isArray(d2))throw new Error('binance bad');
-          return d2.map(d=>({time:d[0]/1000,o:parseFloat(d[1]),h:parseFloat(d[2]),l:parseFloat(d[3]),c:parseFloat(d[4]),v:parseFloat(d[5])})).reverse();
+          const ivMap={60:'1',180:'3',300:'5',900:'15'};
+          const iv=ivMap[gran]||'1';
+          const r2=await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${_cfg.binance||'BTCUSDT'}&interval=${iv}&limit=300`);
+          const j=await r2.json();
+          if(j?.retCode!==0||!Array.isArray(j?.result?.list))throw new Error('bybit bad');
+          return j.result.list.map(c=>({time:parseInt(c[0])/1000,o:parseFloat(c[1]),h:parseFloat(c[2]),l:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])})).reverse();
         }catch(e2){return[];}
       }
     };
     const fetchAll=async()=>{
-      const[c1m,c3m,c5m,c15m]=await Promise.all([
+      // V9.7.5: Coinbase doesn't support granularity=180 (returns 400). Binance fallback
+      //   blocked in US (451). So we synthesize 3m from 1m by aggregating 3 consecutive bars.
+      //   Result: same 3m data shape the engine expects, no broken request.
+      const[c1m,c5m,c15m]=await Promise.all([
         fetchInterval('1m',60),
-        fetchInterval('3m',180),
         fetchInterval('5m',300),
         fetchInterval('15m',900),
       ]);
+      // Synthesize 3m from 1m. Coinbase returns newest-first; group 3 consecutive bars.
+      const c3m=[];
+      if(Array.isArray(c1m)&&c1m.length>=3){
+        for(let i=0;i+2<c1m.length;i+=3){
+          const a=c1m[i],b=c1m[i+1],c=c1m[i+2];
+          if(!a||!b||!c)continue;
+          c3m.push({
+            time:c.time, // oldest of the 3 = bar's start time
+            o:c.o,        // open of oldest
+            c:a.c,        // close of newest
+            h:Math.max(a.h,b.h,c.h),
+            l:Math.min(a.l,b.l,c.l),
+            v:(a.v||0)+(b.v||0)+(c.v||0),
+          });
+        }
+      }
       if(mounted)setTfCandles({c1m,c3m,c5m,c15m});
     };
     fetchAll();
@@ -2965,18 +2985,20 @@ const useDepthFlash=()=>{
     let mp=0;
     const f=async()=>{
       try{
-        // Get mark price quickly first
-        const pR=await fetch('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT');
-        const p=await pR.json();
-        mp=parseFloat(p.markPrice)||mp;
+        // V9.7.5: Bybit replaces Binance global (US geo-block).
+        //   Single tickers call gives mark price; orderbook call gives depth.
+        const pR=await fetch('https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT');
+        const pJ=await pR.json();
+        if(pJ?.retCode===0&&pJ?.result?.list?.[0]){
+          mp=parseFloat(pJ.result.list[0].markPrice)||mp;
+        }
         if(!mp)return;
-        // Then depth
-        const dR=await fetch('https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=50');
-        const d=await dR.json();
-        if(!d?.bids||!d?.asks)return;
+        const dR=await fetch('https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=50');
+        const dJ=await dR.json();
+        if(dJ?.retCode!==0||!dJ?.result?.b||!dJ?.result?.a)return;
         let mBW=0,mBP=0,tBL=0,mAW=0,mAP=0,tAL=0;
-        d.bids.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((mp-pr)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tBL+=usd;if(usd>mBW){mBW=usd;mBP=pr;}}});
-        d.asks.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((pr-mp)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tAL+=usd;if(usd>mAW){mAW=usd;mAP=pr;}}});
+        dJ.result.b.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((mp-pr)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tBL+=usd;if(usd>mBW){mBW=usd;mBP=pr;}}});
+        dJ.result.a.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((pr-mp)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tAL+=usd;if(usd>mAW){mAW=usd;mAP=pr;}}});
         const obImbal=tBL+tAL>0?(tBL-tAL)/(tBL+tAL):0; // -1=asks heavy, +1=bids heavy
         setDepth({obImbalanceLive:obImbal,liqLongWallLive:mAP,liqShortWallLive:mBP,liqLongUSDLive:tAL,liqShortUSDLive:tBL,depthUpdateAge:0,depthLastUpdate:Date.now()});
       }catch(e){/* silent fail */}
@@ -2988,11 +3010,138 @@ const useDepthFlash=()=>{
   return depth;
 };
 
-const useBloomberg=()=>{const[data,setData]=useState({fundingRate:0,fundingRatePrev:0,nextFundingTime:0,openInterest:0,openInterestUSD:0,oiChange5m:0,basisBps:0,markPrice:0,indexPrice:0,longShortRatio:1,topTraderLSPositions:1,binanceFuturesVol24h:0,liqLongWall:0,liqShortWall:0,liqLongUSD:0,liqShortUSD:0,longWallAgeMs:0,shortWallAgeMs:0,lastUpdate:0,status:'connecting'});const oiSnaps=useRef([]);const wallHistRef=useRef([]);useEffect(()=>{if(typeof window==='undefined')return;const f=async()=>{try{const R=await Promise.allSettled([fetch('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=3').then(r=>r.json()),fetch('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1').then(r=>r.json()),fetch('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=BTCUSDT&period=5m&limit=1').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT').then(r=>r.json()),fetch('https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=50').then(r=>r.json())]);const[pR,oR,fR,gR,tR,t24R,dR]=R;const now=Date.now();let u={lastUpdate:now,status:'live'};if(pR.status==='fulfilled'&&pR.value){const p=pR.value;const mk=parseFloat(p.markPrice)||0,ix=parseFloat(p.indexPrice)||0;u.fundingRate=parseFloat(p.lastFundingRate)||0;u.markPrice=mk;u.indexPrice=ix;u.basisBps=ix>0?((mk-ix)/ix)*10000:0;u.nextFundingTime=parseInt(p.nextFundingTime)||0;}if(oR.status==='fulfilled'&&oR.value){const oi=parseFloat(oR.value.openInterest)||0;oiSnaps.current.push({oi,time:now});oiSnaps.current=oiSnaps.current.filter(s=>now-s.time<600000);const o5=oiSnaps.current.find(s=>now-s.time>=270000&&now-s.time<=330000);u.openInterest=oi;u.openInterestUSD=oi*(u.markPrice||0);u.oiChange5m=o5?((oi-o5.oi)/o5.oi)*100:0;}if(fR.status==='fulfilled'&&Array.isArray(fR.value)&&fR.value.length>=2)u.fundingRatePrev=parseFloat(fR.value[1]?.fundingRate)||0;if(gR.status==='fulfilled'&&Array.isArray(gR.value)&&gR.value[0])u.longShortRatio=parseFloat(gR.value[0].longShortRatio)||1;if(tR.status==='fulfilled'&&Array.isArray(tR.value)&&tR.value[0])u.topTraderLSPositions=parseFloat(tR.value[0].longShortRatio)||1;if(t24R.status==='fulfilled'&&t24R.value)u.binanceFuturesVol24h=parseFloat(t24R.value.quoteVolume)||0;if(dR.status==='fulfilled'&&dR.value?.bids&&dR.value?.asks){const mp=u.markPrice||0;if(mp>0){let mBW=0,mBP=0,tBL=0,mAW=0,mAP=0,tAL=0;dR.value.bids.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((mp-pr)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tBL+=usd;if(usd>mBW){mBW=usd;mBP=pr;}}});dR.value.asks.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((pr-mp)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tAL+=usd;if(usd>mAW){mAW=usd;mAP=pr;}}});u.liqLongWall=mAP;u.liqShortWall=mBP;u.liqLongUSD=tAL;u.liqShortUSD=tBL;
-const wH=wallHistRef.current;wH.push({t:now,longWall:mAP,shortWall:mBP});while(wH.length>0&&now-wH[0].t>60000)wH.shift();
-let lwAge=0;if(mAP>0){let oldest=now;for(const s of wH){if(s.longWall>0&&Math.abs((s.longWall-mAP)/mAP*10000)<10)oldest=Math.min(oldest,s.t);}lwAge=now-oldest;}
-let swAge=0;if(mBP>0){let oldest=now;for(const s of wH){if(s.shortWall>0&&Math.abs((s.shortWall-mBP)/mBP*10000)<10)oldest=Math.min(oldest,s.t);}swAge=now-oldest;}
-u.longWallAgeMs=lwAge;u.shortWallAgeMs=swAge;}}setData(prev=>({...prev,...u}));}catch(e){setData(prev=>({...prev,status:'error'}));}};f();const iv=setInterval(f,8000);return()=>clearInterval(iv);},[]);return data;};
+// V9.7.5: BYBIT MIGRATION — Binance global (fapi.binance.com) is geo-blocked
+//   from US IPs since 2019. This hook now uses Bybit V5 API which is CORS-open
+//   and US-allowed. Same return shape as before so all downstream consumers
+//   (FlowPanel, engine FGT, Bloomberg/Liq signals, etc) work unchanged.
+//
+// Bybit endpoint mapping:
+//   - tickers (one call) → markPrice, indexPrice, fundingRate, nextFundingTime,
+//                          openInterest, openInterestValue, turnover24h, basisRate
+//   - funding/history    → fundingRatePrev (one call back)
+//   - account-ratio      → buyRatio/sellRatio → longShortRatio
+//   - orderbook          → liquidation walls (same shape as Binance)
+//
+// One signal degraded: topTraderLSPositions. Bybit doesn't expose a separate
+//   "top trader" position ratio. We set it to the same value as longShortRatio
+//   so the engine's interface is preserved, but the dual-signal becomes effectively
+//   single. This is acceptable — both signals were measuring overlapping things.
+//
+// Field name `binanceFuturesVol24h` kept for back-compat (it's now Bybit volume,
+//   but renaming would touch ~10 call sites and isn't worth the churn).
+const useBloomberg=()=>{
+  const[data,setData]=useState({
+    fundingRate:0,fundingRatePrev:0,nextFundingTime:0,
+    openInterest:0,openInterestUSD:0,oiChange5m:0,
+    basisBps:0,markPrice:0,indexPrice:0,
+    longShortRatio:1,topTraderLSPositions:1,
+    binanceFuturesVol24h:0,
+    liqLongWall:0,liqShortWall:0,liqLongUSD:0,liqShortUSD:0,
+    longWallAgeMs:0,shortWallAgeMs:0,
+    lastUpdate:0,status:'connecting',
+    _source:'bybit', // V9.7.5: tag for diagnostics
+  });
+  const oiSnaps=useRef([]);
+  const wallHistRef=useRef([]);
+  useEffect(()=>{
+    if(typeof window==='undefined')return;
+    const SYM='BTCUSDT';
+    const f=async()=>{
+      try{
+        const R=await Promise.allSettled([
+          fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${SYM}`).then(r=>r.json()),
+          fetch(`https://api.bybit.com/v5/market/funding/history?category=linear&symbol=${SYM}&limit=3`).then(r=>r.json()),
+          fetch(`https://api.bybit.com/v5/market/account-ratio?category=linear&symbol=${SYM}&period=5min&limit=1`).then(r=>r.json()),
+          fetch(`https://api.bybit.com/v5/market/orderbook?category=linear&symbol=${SYM}&limit=50`).then(r=>r.json()),
+        ]);
+        const[tR,fR,aR,oR]=R;
+        const now=Date.now();
+        let u={lastUpdate:now,status:'live',_source:'bybit'};
+
+        // ── TICKER (consolidates 4 of the old Binance calls) ────────────────
+        if(tR.status==='fulfilled'&&tR.value?.retCode===0&&tR.value?.result?.list?.[0]){
+          const t=tR.value.result.list[0];
+          const mk=parseFloat(t.markPrice)||0;
+          const ix=parseFloat(t.indexPrice)||0;
+          u.markPrice=mk;
+          u.indexPrice=ix;
+          u.fundingRate=parseFloat(t.fundingRate)||0;
+          u.nextFundingTime=parseInt(t.nextFundingTime)||0;
+          // Prefer Bybit's basisRate when present, else compute from mark-index
+          const _br=parseFloat(t.basisRate);
+          u.basisBps=Number.isFinite(_br)?_br*10000:(ix>0?((mk-ix)/ix)*10000:0);
+          u.binanceFuturesVol24h=parseFloat(t.turnover24h)||0; // kept name for back-compat
+          // Open interest. Bybit linear: openInterest in coins, openInterestValue in USD.
+          const oi=parseFloat(t.openInterest)||0;
+          oiSnaps.current.push({oi,time:now});
+          oiSnaps.current=oiSnaps.current.filter(s=>now-s.time<600000);
+          const o5=oiSnaps.current.find(s=>now-s.time>=270000&&now-s.time<=330000);
+          u.openInterest=oi;
+          u.openInterestUSD=parseFloat(t.openInterestValue)||(oi*mk);
+          u.oiChange5m=o5?((oi-o5.oi)/o5.oi)*100:0;
+        }
+
+        // ── FUNDING HISTORY (previous funding rate, for trend) ─────────────
+        if(fR.status==='fulfilled'&&fR.value?.retCode===0&&Array.isArray(fR.value?.result?.list)){
+          const _list=fR.value.result.list;
+          if(_list.length>=2)u.fundingRatePrev=parseFloat(_list[1]?.fundingRate)||0;
+          else if(_list.length>=1)u.fundingRatePrev=parseFloat(_list[0]?.fundingRate)||0;
+        }
+
+        // ── ACCOUNT RATIO (long/short positioning) ─────────────────────────
+        // Bybit returns buyRatio/sellRatio. Convert to longShortRatio = buy/sell.
+        // Use same value for both longShortRatio and topTraderLSPositions because
+        // Bybit doesn't expose a separate top-trader endpoint.
+        if(aR.status==='fulfilled'&&aR.value?.retCode===0&&aR.value?.result?.list?.[0]){
+          const a=aR.value.result.list[0];
+          const _buy=parseFloat(a.buyRatio)||0.5;
+          const _sell=parseFloat(a.sellRatio)||0.5;
+          if(_sell>0){
+            u.longShortRatio=_buy/_sell;
+            u.topTraderLSPositions=u.longShortRatio; // same source — see comment above
+          }
+        }
+
+        // ── ORDERBOOK (liquidation walls — same shape as Binance) ──────────
+        // Bybit linear orderbook: result.b is bids, result.a is asks, each [price, size].
+        // Same parsing as before: scan ±2% from mark price for biggest single-level USD,
+        // total USD on that side, persistence age over 60s.
+        if(oR.status==='fulfilled'&&oR.value?.retCode===0&&oR.value?.result?.b&&oR.value?.result?.a){
+          const mp=u.markPrice||0;
+          if(mp>0){
+            let mBW=0,mBP=0,tBL=0,mAW=0,mAP=0,tAL=0;
+            oR.value.result.b.forEach(([p,q])=>{
+              const pr=parseFloat(p),qt=parseFloat(q),dist=((mp-pr)/mp)*100;
+              if(dist<2&&dist>0){const usd=pr*qt;tBL+=usd;if(usd>mBW){mBW=usd;mBP=pr;}}
+            });
+            oR.value.result.a.forEach(([p,q])=>{
+              const pr=parseFloat(p),qt=parseFloat(q),dist=((pr-mp)/mp)*100;
+              if(dist<2&&dist>0){const usd=pr*qt;tAL+=usd;if(usd>mAW){mAW=usd;mAP=pr;}}
+            });
+            u.liqLongWall=mAP;u.liqShortWall=mBP;u.liqLongUSD=tAL;u.liqShortUSD=tBL;
+            // Wall persistence tracking (unchanged from Binance version)
+            const wH=wallHistRef.current;
+            wH.push({t:now,longWall:mAP,shortWall:mBP});
+            while(wH.length>0&&now-wH[0].t>60000)wH.shift();
+            let lwAge=0;
+            if(mAP>0){let oldest=now;for(const s of wH){if(s.longWall>0&&Math.abs((s.longWall-mAP)/mAP*10000)<10)oldest=Math.min(oldest,s.t);}lwAge=now-oldest;}
+            let swAge=0;
+            if(mBP>0){let oldest=now;for(const s of wH){if(s.shortWall>0&&Math.abs((s.shortWall-mBP)/mBP*10000)<10)oldest=Math.min(oldest,s.t);}swAge=now-oldest;}
+            u.longWallAgeMs=lwAge;u.shortWallAgeMs=swAge;
+          }
+        }
+
+        setData(prev=>({...prev,...u}));
+      }catch(e){
+        setData(prev=>({...prev,status:'error',_source:'bybit'}));
+      }
+    };
+    f();
+    const iv=setInterval(f,8000);
+    return()=>clearInterval(iv);
+  },[]);
+  return data;
+};
 
 // ═══════════════════════════════════════
 // SYNTHETIC DATA FALLBACK (always shows a chart)
@@ -16574,7 +16723,28 @@ function TaraApp(){
     const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;
     const _cbSym=_cfg.cb||'BTC-USD';
     const _bnSym=_cfg.binance||'BTCUSDT';
-    const fetch_=async()=>{try{const cbMap={'1m':60,'3m':60,'5m':300,'15m':900,'30m':900,'1h':3600};const gran=cbMap[chartRes]||60;const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/candles?granularity=${gran}`);if(!r.ok)throw new Error('CB fail');const d=await r.json();const f=d.map(c=>({time:c[0],o:parseFloat(c[3]),h:parseFloat(c[2]),l:parseFloat(c[1]),c:parseFloat(c[4]),v:parseFloat(c[5])})).reverse();setKlines(f);}catch(e){try{const r2=await fetch(`https://api.binance.com/api/v3/uiKlines?symbol=${_bnSym}&interval=${chartRes}&limit=200`);const d2=await r2.json();setKlines(d2.map(d=>({time:d[0]/1000,o:parseFloat(d[1]),h:parseFloat(d[2]),l:parseFloat(d[3]),c:parseFloat(d[4]),v:parseFloat(d[5])})));}catch(e2){console.warn('All chart APIs blocked');}}};
+    const fetch_=async()=>{
+      try{
+        const cbMap={'1m':60,'3m':60,'5m':300,'15m':900,'30m':900,'1h':3600};
+        const gran=cbMap[chartRes]||60;
+        const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/candles?granularity=${gran}`);
+        if(!r.ok)throw new Error('CB fail');
+        const d=await r.json();
+        const f=d.map(c=>({time:c[0],o:parseFloat(c[3]),h:parseFloat(c[2]),l:parseFloat(c[1]),c:parseFloat(c[4]),v:parseFloat(c[5])})).reverse();
+        setKlines(f);
+      }catch(e){
+        // V9.7.5: Bybit fallback (Binance global blocked in US).
+        try{
+          const ivMap={'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60'};
+          const ivb=ivMap[chartRes]||'1';
+          const r2=await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${_bnSym}&interval=${ivb}&limit=200`);
+          const j=await r2.json();
+          if(j?.retCode!==0||!Array.isArray(j?.result?.list))throw new Error('bybit bad');
+          // Bybit returns newest-first; reverse to oldest-first for chart.
+          setKlines(j.result.list.map(c=>({time:parseInt(c[0])/1000,o:parseFloat(c[1]),h:parseFloat(c[2]),l:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])})).reverse());
+        }catch(e2){console.warn('All chart APIs blocked');}
+      }
+    };
     fetch_();const iv=setInterval(fetch_,10000);return()=>clearInterval(iv);
   },[chartRes,currentAsset]);
 
@@ -16633,6 +16803,26 @@ function TaraApp(){
     }
     const _diag=shadowDiagRef.current[_shadowAsset];
     const _logErr=(reason)=>{_diag.lastError=reason;_diag.lastErrorAt=Date.now();};
+    // V9.7.5: periodic summary log so shadow failures aren't drowned in other console
+    //   noise (Binance 451s, Kalshi 403s, etc). Fires once every 60s while shadow is
+    //   stale. Shows attempts / successes / fail breakdown / last error string in a
+    //   clearly-prefixed line that's easy to grep for.
+    const _summaryIv=setInterval(()=>{
+      if(_cancelled)return;
+      const _staleMs=Date.now()-(_diag.lastSuccess||0);
+      // Only log if there's been activity (otherwise we'd spam blank diags on init)
+      if(_diag.ticksAttempted<3)return;
+      // Don't log if the shadow is healthy (recent success)
+      if(_diag.lastSuccess>0&&_staleMs<30000)return;
+      const _rate=_diag.ticksAttempted>0?Math.round(100*_diag.ticksSucceeded/_diag.ticksAttempted):0;
+      console.warn(
+        `[shadow ${_shadowAsset} SUMMARY] attempts=${_diag.ticksAttempted} `+
+        `succ=${_diag.ticksSucceeded} (${_rate}%) `+
+        `candleFail=${_diag.candleFails} candleEmpty=${_diag.candleEmpty} `+
+        `priceMissing=${_diag.priceMissing} kalshiFail=${_diag.kalshiFails} `+
+        `engineErr=${_diag.engineErrors} | lastErr="${_diag.lastError||'none'}"`
+      );
+    },60000);
     const _runShadow=async()=>{
       if(_cancelled)return;
       _diag.ticksAttempted++;
@@ -16798,7 +16988,7 @@ function TaraApp(){
     };
     _runShadow();
     const _iv=setInterval(_runShadow,2000);
-    return()=>{_cancelled=true;clearInterval(_iv);};
+    return()=>{_cancelled=true;clearInterval(_iv);clearInterval(_summaryIv);};
   // V9.5.1: REMOVED timeState.minsRemaining and timeState.secsRemaining from deps.
   //   With those in the array, the effect was tearing down 1× per second — the
   //   2s setInterval literally never fired, and the immediate fetch call got
@@ -20865,15 +21055,15 @@ function TaraApp(){
           isRisingConfluence:!!snapshot.isRisingConfluence,
           isTapeLed:!!snapshot.isTapeLed,
           isStructuralLed:!!snapshot.isStructuralLed,
-          rawPosteriorAtLock:analysis?.rawProbAbove,
-          calibratedPosteriorAtLock:analysis?.posterior,
+          rawPosteriorAtLock:analysis?.rawProbAbove??null,
+          calibratedPosteriorAtLock:analysis?.posterior??null,
           signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
           tapeAtLock:analysis?.tapeWindows?{
-            w15Buy:analysis.tapeWindows.w15?.buyPct,
-            w30Buy:analysis.tapeWindows.w30?.buyPct,
-            w60Buy:analysis.tapeWindows.w60?.buyPct,
+            w15Buy:analysis.tapeWindows.w15?.buyPct??null,
+            w30Buy:analysis.tapeWindows.w30?.buyPct??null,
+            w60Buy:analysis.tapeWindows.w60?.buyPct??null,
           }:null,
-          atrBpsAtLock:analysis?.atrBps,
+          atrBpsAtLock:analysis?.atrBps??null,
           kalshiAtLock:snapshot.kalshiAtLock!=null?snapshot.kalshiAtLock:(typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null),
           // Strike at lock — needed by V7.5 cross-asset rollover scoring
           strike:_strike,
@@ -21313,21 +21503,21 @@ function TaraApp(){
           dir:analysis.structAlignment.dir,
           count:analysis.structAlignment.count,
         }:null,
-        rawPosteriorAtLock:analysis?.rawProbAbove,
-        calibratedPosteriorAtLock:analysis?.posterior,
+        rawPosteriorAtLock:analysis?.rawProbAbove??null,
+        calibratedPosteriorAtLock:analysis?.posterior??null,
         calSwingAtLock:analysis?.rawProbAbove!=null&&analysis?.posterior!=null?Math.round(analysis.posterior-analysis.rawProbAbove):null,
         // V6.3.5: full signal scores + tape consensus at lock for analysis exports
         signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
         tapeAtLock:analysis?.tapeWindows?{
-          w15Buy:analysis.tapeWindows.w15?.buyPct,
-          w30Buy:analysis.tapeWindows.w30?.buyPct,
-          w60Buy:analysis.tapeWindows.w60?.buyPct,
+          w15Buy:analysis.tapeWindows.w15?.buyPct??null,
+          w30Buy:analysis.tapeWindows.w30?.buyPct??null,
+          w60Buy:analysis.tapeWindows.w60?.buyPct??null,
           w15Total:(analysis.tapeWindows.w15?.buys||0)+(analysis.tapeWindows.w15?.sells||0),
           w30Total:(analysis.tapeWindows.w30?.buys||0)+(analysis.tapeWindows.w30?.sells||0),
           w60Total:(analysis.tapeWindows.w60?.buys||0)+(analysis.tapeWindows.w60?.sells||0),
         }:null,
-        atrBpsAtLock:analysis?.atrBps,
-        windowAmplitudeAtLock:analysis?.windowAmplitude?.label,
+        atrBpsAtLock:analysis?.atrBps??null,
+        windowAmplitudeAtLock:analysis?.windowAmplitude?.label??null,
         // V6.4: conviction asymmetry at lock — was the latest swing stronger or weaker than prior?
         asymmetryAtLock:analysis?.convictionAsymmetry?{
           score:analysis.convictionAsymmetry.score,
@@ -21392,21 +21582,21 @@ function TaraApp(){
           dir:analysis.structAlignment.dir,
           count:analysis.structAlignment.count,
         }:null,
-        rawPosteriorAtLock:analysis?.rawProbAbove,
-        calibratedPosteriorAtLock:analysis?.posterior,
+        rawPosteriorAtLock:analysis?.rawProbAbove??null,
+        calibratedPosteriorAtLock:analysis?.posterior??null,
         calSwingAtLock:analysis?.rawProbAbove!=null&&analysis?.posterior!=null?Math.round(analysis.posterior-analysis.rawProbAbove):null,
         // V6.3.5: capture full signal scores + tape consensus at lock for analysis exports
         signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
         tapeAtLock:analysis?.tapeWindows?{
-          w15Buy:analysis.tapeWindows.w15?.buyPct,
-          w30Buy:analysis.tapeWindows.w30?.buyPct,
-          w60Buy:analysis.tapeWindows.w60?.buyPct,
+          w15Buy:analysis.tapeWindows.w15?.buyPct??null,
+          w30Buy:analysis.tapeWindows.w30?.buyPct??null,
+          w60Buy:analysis.tapeWindows.w60?.buyPct??null,
           w15Total:(analysis.tapeWindows.w15?.buys||0)+(analysis.tapeWindows.w15?.sells||0),
           w30Total:(analysis.tapeWindows.w30?.buys||0)+(analysis.tapeWindows.w30?.sells||0),
           w60Total:(analysis.tapeWindows.w60?.buys||0)+(analysis.tapeWindows.w60?.sells||0),
         }:null,
-        atrBpsAtLock:analysis?.atrBps,
-        windowAmplitudeAtLock:analysis?.windowAmplitude?.label,
+        atrBpsAtLock:analysis?.atrBps??null,
+        windowAmplitudeAtLock:analysis?.windowAmplitude?.label??null,
         // V6.4: conviction asymmetry at lock
         asymmetryAtLock:analysis?.convictionAsymmetry?{
           score:analysis.convictionAsymmetry.score,
@@ -22807,7 +22997,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.7.4
+              9.7.5
             </span>
           </div>
 
@@ -24756,6 +24946,43 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.7.5 — Bybit migration + bugfixes */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>full signal stack &middot; futures data restored</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.07</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.7.5</span> &mdash; Bybit Migration + Quick Fixes</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">The big change: Binance → Bybit</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Binance global (<code className="text-[10px] bg-[#0E100F] px-1">fapi.binance.com</code>) has been blocked from US IPs since 2019. For US users this meant the entire futures-flow signal pipeline &mdash; premium index, open interest, funding rate, long/short ratio, top-trader positioning, futures volume, depth liquidations &mdash; was returning nothing. Tara has been operating on Coinbase signals only, with graceful degradation hiding the gap.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">All seven endpoints now use Bybit V5 (<code className="text-[10px] bg-[#0E100F] px-1">api.bybit.com/v5/market/*</code>) which is CORS-open and US-allowed. Same return shape as before so all downstream consumers (FlowPanel, FGT, liquidation magnet detection, basis signal) work unchanged.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>tickers</strong> &mdash; one consolidated call gives mark/index/funding/OI/volume/basis</li>
+                  <li><strong>funding/history</strong> &mdash; previous funding rate for trend detection</li>
+                  <li><strong>account-ratio</strong> &mdash; long/short positioning from buy/sell ratios</li>
+                  <li><strong>orderbook</strong> &mdash; depth walls for liquidation magnet detection</li>
+                  <li>Also migrated <code className="text-[10px] bg-[#0E100F] px-1">useDepthFlash</code> + chart fallback + multi-timeframe candle fallback</li>
+                </ul>
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">One signal degraded</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Bybit doesn&rsquo;t expose a separate &ldquo;top-trader&rdquo; positioning ratio. <code className="text-[10px] bg-[#0E100F] px-1">topTraderLSPositions</code> now mirrors <code className="text-[10px] bg-[#0E100F] px-1">longShortRatio</code> (same source). The engine&rsquo;s interface is preserved but the dual-signal becomes effectively single. Acceptable &mdash; both signals were measuring overlapping things on Binance too.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Three quick bugfixes</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Firestore undefined writes</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">analysis?.posterior</code> was becoming <code className="text-[10px] bg-[#0E100F] px-1">undefined</code> during early loading. Firestore rejects undefined. Three snapshot-write sites now coalesce to <code className="text-[10px] bg-[#0E100F] px-1">?? null</code>.</li>
+                  <li><strong>Coinbase 3m candles</strong> &mdash; was requesting <code className="text-[10px] bg-[#0E100F] px-1">granularity=180</code> which Coinbase doesn&rsquo;t support (returns 400). Now synthesized from 1m by aggregating 3 consecutive bars.</li>
+                  <li><strong>Shadow ETH summary log</strong> &mdash; per-tick warnings were drowning in other console noise. Now a single <code className="text-[10px] bg-[#0E100F] px-1">[shadow ETH SUMMARY]</code> line fires once per minute while stale, with attempts/successes/per-failure-type counts and the last error string. Easy to grep for.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What to expect after deploy</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li>Console should be much quieter &mdash; the wall of <code className="text-[10px] bg-[#0E100F] px-1">net::ERR_FAILED 451</code> Binance lines should vanish</li>
+                  <li>FlowPanel signals should populate (OI delta, funding chip, long/short ratio, depth walls)</li>
+                  <li>Bybit volume scales differ from Binance &mdash; if some signals look stronger or weaker than before, that&rsquo;s the calibration shift, not a bug. Audit after a few days of data accumulates.</li>
+                  <li>Realistic WR upside: 66% baseline → maybe 70-72%. The Coinbase signals were already doing most of the work.</li>
+                </ul>
               </section>
 
               {/* V9.7.4 — Smart entry ladder */}
