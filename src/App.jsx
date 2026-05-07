@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.7.8-reversal-aware';
+const BASELINE_VERSION='2026.05.07-v9.7.9-gate-telemetry';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -3695,6 +3695,11 @@ const computeV99Posterior=(params)=>{
   const W=_regimeW||adaptiveWeights||DEFAULT_WEIGHTS;
   const reasoning=[];let totalScore=0;
   const rawSignalScores={}; // for training log
+  // V9.7.9: TELEMETRY SLOTS — track diagnostic state from V9.7.x gates so the
+  //   trade log can stamp them onto each entry. No behavior change — pure capture.
+  let _diagReversalDamper=null; // {applied, mult, reason, recentCandleDirs}
+  let _diagFgtCounter=null;     // {applied, before, after, mtfAlignment}
+  let _diagRegimeCal=null;      // {applied, key, wr, weight, shift, n}
 
   const closes=liveHistory.map(x=>x.c);
   const rsi=calcRSI(closes,14)||50;
@@ -3947,6 +3952,7 @@ const computeV99Posterior=(params)=>{
     //   history. Now: most recent 2 candles get veto power on STRUCT confidence.
     let _reversalDampMult=1.0;
     let _reversalReason=null;
+    let _recentCandleDirs=null; // V9.7.9 telemetry: capture for diagnostic stamping
     try{
       const _c1m=tfCandles?.c1m;
       if(Array.isArray(_c1m)&&_c1m.length>=2){
@@ -3957,6 +3963,8 @@ const computeV99Posterior=(params)=>{
           const _d1=_r1.c-_r1.o;
           const _bothUp=_d0>0&&_d1>0;
           const _bothDn=_d0<0&&_d1<0;
+          // Stamp recent candle dirs always (not just when damper fires)
+          _recentCandleDirs=`${_d1>0?'UP':_d1<0?'DN':'FLAT'},${_d0>0?'UP':_d0<0?'DN':'FLAT'}`;
           // Magnitude check — reversal must be meaningful, not tiny dojis
           const _avgPx=(_r0.c+_r1.c)/2;
           const _moveBps=_avgPx>0?(Math.abs(_d0)+Math.abs(_d1))/_avgPx*10000:0;
@@ -3972,6 +3980,8 @@ const computeV99Posterior=(params)=>{
         }
       }
     }catch(_){}
+    // V9.7.9 telemetry: stash on outer scope so it gets returned in diagnostics
+    _diagReversalDamper={applied:_reversalDampMult<1,mult:_reversalDampMult,reason:_reversalReason,recentCandleDirs:_recentCandleDirs};
     _structBoost=Math.round(_structBoost*_structTimeMult*_reversalDampMult)*(_structDir==='UP'?1:-1);
     if(_structBoost!==0){
       totalScore+=_structBoost;
@@ -4727,6 +4737,8 @@ const computeV99Posterior=(params)=>{
       // Only apply if the shift is meaningful (≥1pt) — avoids log noise on tiny adjustments
       if(Math.abs(_delta)>=1){
         reasoning.push(`[REGIME-CAL] ${_regime}×${_engineDir} historical WR ${_entry.wrPct}% (n=${_entry.n}, w=${_entry.weight.toFixed(2)}) → posterior ${dirCalibrated.toFixed(1)}%→${_newCal.toFixed(1)}%`);
+        // V9.7.9 telemetry
+        _diagRegimeCal={applied:true,key:_key,wr:_entry.wrPct,weight:_entry.weight,shift:_delta,n:_entry.n};
         dirCalibrated=_newCal;
       }
     }
@@ -4751,6 +4763,8 @@ const computeV99Posterior=(params)=>{
         const _capped=50+_sign*15; // cap at 65/35
         const _before=dirCalibrated;
         dirCalibrated=_capped;
+        // V9.7.9 telemetry
+        _diagFgtCounter={applied:true,before:_before,after:_capped,mtfAlignment};
         reasoning.push(`[FGT-COUNTER] FGT ${mtfAlignment>=0?'+':''}${mtfAlignment.toFixed(1)} opposes lock ${_lockingUp?'UP':'DOWN'} → conv capped ${_before.toFixed(1)}%→${_capped.toFixed(1)}%`);
       }
     }
@@ -5048,6 +5062,15 @@ const computeV99Posterior=(params)=>{
   }
 
   return{posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isMoonshot,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty,
+  // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
+  //   for post-hoc audit. Tells us which gates fired on which trades, so we can
+  //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
+  //   bad locks?" by filtering the call log on these flags.
+  diagnosticsV97:{
+    reversalDamper:_diagReversalDamper,
+    fgtCounter:_diagFgtCounter,
+    regimeCal:_diagRegimeCal,
+  },
   // V9.5.0: opponent-modeling signal exposed in output for UI display + trade-log audit
   kalshiLead:params.kalshiLead||null,
   // V6.4: conviction asymmetry — strength comparison of current vs prior swing
@@ -10629,7 +10652,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -10648,11 +10671,33 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     e.windowAmplitude||'',
                     // V9.7.6: lock-timing telemetry — secondsIntoWindow shows how
                     //   fast Tara locked; kalshiAtLock shows entry price; dialAtLock
-                    //   shows the speed dial. Together they tell us if the dial is
-                    //   actually catching early entries before Kalshi prices in.
+                    //   shows the speed dial.
                     e.secondsIntoWindow!=null?e.secondsIntoWindow:'',
                     e.kalshiAtLock!=null?e.kalshiAtLock:'',
                     e.dialAtLock!=null?e.dialAtLock:'',
+                    // V9.7.9: gate telemetry — answers "did each gate fire?"
+                    //   kalshiAtClose: Kalshi YES at window close (compare to kalshiAtLock for edge audit)
+                    //   kalshiVelocityAtLock: cents/30s at lock (was Tara entering during fast move?)
+                    //   urgencyApplied: did the V9.7.6 floor-drop kick in?
+                    //   reversalDamper: did STRUCT get cut due to recent candle reversal?
+                    //   recentCandleDirsAtLock: e.g. "DN,UP" = candle at -2m red, candle at -1m green
+                    //   fgtCounter: did FGT-counter cap conviction at 65?
+                    //   regimeCal: per-regime×direction blend application
+                    e.kalshiAtClose!=null?e.kalshiAtClose:'',
+                    e.kalshiVelocityAtLock!=null?e.kalshiVelocityAtLock.toFixed(1):'',
+                    e.urgencyApplied?'Y':'N',
+                    e.reversalDamperApplied?'Y':'N',
+                    e.reversalDamperMult!=null?e.reversalDamperMult.toFixed(2):'',
+                    e.recentCandleDirsAtLock||'',
+                    e.fgtCounterApplied?'Y':'N',
+                    e.convBeforeFgtCap!=null?e.convBeforeFgtCap.toFixed(1):'',
+                    e.regimeCalApplied?'Y':'N',
+                    e.regimeCalKey||'',
+                    e.regimeCalShift!=null?e.regimeCalShift.toFixed(1):'',
+                    e.regimeCalN!=null?e.regimeCalN:'',
+                    // Bonus context fields the V6.x entries already had but weren't exported
+                    e.fgt!=null?(typeof e.fgt==='number'?e.fgt.toFixed(1):e.fgt):'',
+                    e.qScore!=null?e.qScore:'',
                   ].map(v=>typeof v==='string'&&v.includes(',')?`"${v}"`:String(v));
                   _rows.push(_row.join(','));
                 });
@@ -14489,6 +14534,11 @@ function TaraApp(){
   //   each non-null Kalshi update with timestamp, kept to last 60s. Used to detect
   //   when Kalshi moves >5¢ in 30s while spot stays flat (positioning play / squeeze).
   const kalshiHistoryRef=useRef([]);
+  // V9.7.9: telemetry slot updated by taraCall IIFE on each tick. Holds the urgency
+  //   state and Kalshi velocity at the moment of the most recent computation. Read
+  //   by the lifecycle effect at lock time so the trade log entry can capture
+  //   "did urgency fire on this lock?" / "what was Kalshi velocity at lock?".
+  const _v97DiagRef=useRef({urgencyApplied:false,urgencyMult:1.0,kalshiVelocity30s:null,timestamp:0});
   useEffect(()=>{
     if(kalshiYesPrice==null||!Number.isFinite(kalshiYesPrice))return;
     const now=Date.now();
@@ -19650,6 +19700,9 @@ function TaraApp(){
         // V6.3.5: surface raw signal scores + tape windows for log analysis
         rawSignalScores:eng.rawSignalScores||null,
         tapeWindows:tapeWindows||null,
+        // V9.7.9: diagnostic state from V9.7.x gates — stamped on trade log entries
+        //   for post-hoc audit ("did the cap fire?" / "did the damper change the lock?").
+        diagnosticsV97:eng.diagnosticsV97||null,
         // V6.4: conviction asymmetry detector
         convictionAsymmetry:eng.convictionAsymmetry||null,
         rangeBps:Number(eng.rangeBps||0), // V152
@@ -19868,6 +19921,7 @@ function TaraApp(){
     //   entry price. Lock NOW.
     let _urgencyMult=1.0;
     let _urgencyReason=null;
+    let _kalshiVelocity30s=null; // V9.7.9 telemetry: capture velocity always
     if(typeof kalshiHistoryRef!=='undefined'&&kalshiHistoryRef.current?.length>=3){
       const _kh=kalshiHistoryRef.current;
       const _now=Date.now();
@@ -19877,6 +19931,7 @@ function TaraApp(){
         const _yesNow=_recent[_recent.length-1].yes;
         const _yesThen=_then[0].yes;
         const _delta=_yesNow-_yesThen;
+        _kalshiVelocity30s=_delta; // always capture for telemetry
         // Tara's lean direction: post>50 means UP lean (YES rising = good)
         //                        post<50 means DOWN lean (YES falling = good)
         const _agrees=(post>=50&&_delta>=4)||(post<50&&_delta<=-4);
@@ -19889,6 +19944,16 @@ function TaraApp(){
     const CONV_FLOOR=Math.max(1,Math.round(_convBase*_speedMultEng*_urgencyMult));
     // V9.7.6: surface urgency state via console.info (won't crash if unhooked)
     if(_urgencyReason){try{console.info('[urgency]',_urgencyReason,'CONV_FLOOR=',CONV_FLOOR);}catch(_){}}
+    // V9.7.9: stash urgency + kalshi velocity on a ref so the lifecycle effect can
+    //   read them at lock time and stamp onto the trade log entry.
+    if(typeof _v97DiagRef!=='undefined'&&_v97DiagRef?.current){
+      _v97DiagRef.current={
+        urgencyApplied:_urgencyMult<1.0,
+        urgencyMult:_urgencyMult,
+        kalshiVelocity30s:_kalshiVelocity30s,
+        timestamp:Date.now(),
+      };
+    }
     // Tape consensus (multi-window 15s/30s/60s buy%)
     const _tape15=tapeWindows?.w15?.buyPct??50;
     const _tape30=tapeWindows?.w30?.buyPct??50;
@@ -21817,6 +21882,30 @@ function TaraApp(){
         }:null,
         atrBpsAtLock:analysis?.atrBps??null,
         windowAmplitudeAtLock:analysis?.windowAmplitude?.label??null,
+        // ── V9.7.9: V9.7.x GATE TELEMETRY ─────────────────────────────────
+        // Stamp diagnostic state from each gate so post-hoc CSV audit can answer:
+        //   "did the FGT cap save trades?" / "did the reversal damper prevent
+        //   bad locks?" / "did urgency fire on this entry?". Without these, every
+        //   debugging conversation requires me to guess from raw posteriors.
+        // ── REVERSAL DAMPER (V9.7.8)
+        reversalDamperApplied:analysis?.diagnosticsV97?.reversalDamper?.applied||false,
+        reversalDamperMult:analysis?.diagnosticsV97?.reversalDamper?.mult??1.0,
+        recentCandleDirsAtLock:analysis?.diagnosticsV97?.reversalDamper?.recentCandleDirs||null,
+        // ── FGT-COUNTER GATE (V9.7.8)
+        fgtCounterApplied:analysis?.diagnosticsV97?.fgtCounter?.applied||false,
+        convBeforeFgtCap:analysis?.diagnosticsV97?.fgtCounter?.before??null,
+        // ── REGIME CALIBRATION (V9.5.0 / V9.7.6)
+        regimeCalApplied:analysis?.diagnosticsV97?.regimeCal?.applied||false,
+        regimeCalKey:analysis?.diagnosticsV97?.regimeCal?.key||null,
+        regimeCalWR:analysis?.diagnosticsV97?.regimeCal?.wr??null,
+        regimeCalWeight:analysis?.diagnosticsV97?.regimeCal?.weight??null,
+        regimeCalShift:analysis?.diagnosticsV97?.regimeCal?.shift??null,
+        regimeCalN:analysis?.diagnosticsV97?.regimeCal?.n??null,
+        // ── ADAPTIVE LOCK URGENCY (V9.7.6)
+        urgencyApplied:_v97DiagRef?.current?.urgencyApplied||false,
+        urgencyMult:_v97DiagRef?.current?.urgencyMult??1.0,
+        kalshiVelocityAtLock:_v97DiagRef?.current?.kalshiVelocity30s??null,
+        // ──────────────────────────────────────────────────────────────────
         // V6.4: conviction asymmetry at lock
         asymmetryAtLock:analysis?.convictionAsymmetry?{
           score:analysis.convictionAsymmetry.score,
@@ -23221,7 +23310,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.7.8
+              9.7.9
             </span>
           </div>
 
