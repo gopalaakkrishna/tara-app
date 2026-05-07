@@ -1,5 +1,6 @@
 // Tara V8.8.5 — TRUE NO-OP SERVICE WORKER (replaces V8.8 kill switch)
-// 
+//                   (still current as of V9.7.9 — no functional changes needed)
+//
 // The previous "kill switch" SW called `client.navigate(client.url)` in its
 // activate handler to force-reload tabs after unregistering itself. That ONE
 // line was the reload-spasm trigger: every time the browser checked for SW
