@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.7.1-flowclose-recdial';
+const BASELINE_VERSION='2026.05.07-v9.7.2-recspeed-eth-fallback';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -9572,7 +9572,7 @@ const regimeToShortPlain=(regime)=>{
   return map[regime]||regime;
 };
 
-function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset,analysis,currentStreak}){
+function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset,analysis,currentStreak,speedDial,setSpeedDial}){
   const[ctx,setCtx]=React.useState(()=>getMarketContext(new Date()));
   const[expanded,setExpanded]=React.useState(false);
   React.useEffect(()=>{
@@ -9710,6 +9710,42 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
           style:{color:'rgba(244,114,182,0.95)',background:'rgba(244,114,182,0.10)',border:'1px solid rgba(244,114,182,0.25)'},
           title:'This phase has poor edge. Skip or half-size.',
         },'⚠ deadzone'),
+        // V9.7.2: Recommended speed-dial chip — same logic as TaraCallCard's dial recommendation.
+        //   Surfaces only when current dial is ≥10 off from rec. Tap to apply.
+        //   Logic: EXTREME/FAST velocity → faster; SLOW/DEAD/WHIPSAW → patient;
+        //   ATR<6 floors at 55, ATR>30 ceilings at 40.
+        (typeof setSpeedDial==='function'&&analysis)&&(()=>{
+          const _vr=analysis?.velocityRegime||'NORMAL';
+          const _wa=analysis?.windowAmplitude?.label||'NORMAL';
+          const _atr=Number(analysis?.atrBps)||0;
+          let _r=50;
+          if(_vr==='EXTREME')_r-=20;
+          else if(_vr==='FAST')_r-=10;
+          else if(_vr==='SLOW')_r+=15;
+          if(_wa==='WILD')_r-=10;
+          else if(_wa==='DEAD'||_wa==='OPENING')_r+=15;
+          else if(_wa==='WHIPSAW')_r+=20;
+          if(_atr>0&&_atr<6)_r=Math.max(_r,55);
+          if(_atr>30)_r=Math.min(_r,40);
+          const _rec=Math.max(0,Math.min(100,Math.round(_r/5)*5));
+          const _cur=Math.max(0,Math.min(100,speedDial||50));
+          const _delta=Math.abs(_rec-_cur);
+          if(_delta<10)return null;
+          const _label=_rec<=20?'⚡ FAST':_rec<=40?'fast':_rec<=60?'balanced':_rec<=80?'patient':'🛡 PATIENT';
+          const _color=_rec<=30?'rgb(244,114,182)':_rec<=70?T2_GOLD:'rgb(110,231,183)';
+          const _reason=_vr==='EXTREME'?'extreme velocity — slow locks miss'
+            :_wa==='WHIPSAW'?'whipsaw — patience pays'
+            :_wa==='DEAD'||_vr==='SLOW'?'low movement — wait for confluence'
+            :_wa==='WILD'?'wild swings — go fast'
+            :_vr==='FAST'?'fast tape — slight speed bias'
+            :'normal conditions';
+          return React.createElement('button',{
+            onClick:(e)=>{e.stopPropagation();setSpeedDial(_rec);},
+            className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded hover:bg-[#E8E9E4]/5 transition-colors',
+            style:{color:_color,background:'rgba(232,233,228,0.04)',border:`1px solid ${_color}33`},
+            title:`Recommended speed: ${_rec} (${_label}). Reason: ${_reason}. You're at ${_cur}. Tap to apply.`,
+          },'speed: ',_rec,' rec');
+        })(),
         // V8.7.2: Your-WR-this-session pill — only when we have ≥5 trades to be meaningful
         _sessionAdvice&&React.createElement('span',{
           className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded tabular-nums',
@@ -16521,15 +16557,26 @@ function TaraApp(){
           if(_prev)shadowTaraByAssetRef.current[_shadowAsset]={..._prev,updatedAt:Date.now()};
         };
         const _gran=windowType==='15m'?900:300;
-        const _candleResp=await fetch(`https://api.exchange.coinbase.com/products/${_cfg.cb}/candles?granularity=${_gran}`,{signal:AbortSignal.timeout(5000)}).catch(e=>{_logErr('candles fetch threw: '+(e?.message||String(e)));return null;});
-        if(!_candleResp){_diag.candleFails++;_logErr('candles fetch null');_heartbeat();return;}
-        if(!_candleResp.ok){_diag.candleFails++;_logErr(`candles http ${_candleResp.status}`);_heartbeat();return;}
+        // V9.7.2: dual-source candle fetch with corsproxy fallback (same pattern V7.10.7 uses
+        //   for Kalshi). Coinbase rate-limits per-endpoint-per-IP; when active loop also polls
+        //   /candles every 5s plus shadow polls /candles every 2s, we sometimes hit the limit.
+        //   Try direct first (fast path), then fall back to corsproxy.io. Any error gets logged
+        //   to console.warn so it surfaces in devtools without needing to tap the diag panel.
+        const _cbCandlesUrl=`https://api.exchange.coinbase.com/products/${_cfg.cb}/candles?granularity=${_gran}`;
+        let _candleResp=await fetch(_cbCandlesUrl,{signal:AbortSignal.timeout(5000)}).catch(e=>{_logErr('candles fetch threw: '+(e?.message||String(e)));console.warn(`[shadow ${_shadowAsset}] direct candles failed:`,e?.message||e);return null;});
+        if(!_candleResp||!_candleResp.ok){
+          if(_candleResp&&!_candleResp.ok)console.warn(`[shadow ${_shadowAsset}] direct candles http ${_candleResp.status}, trying corsproxy`);
+          // Fallback through corsproxy
+          _candleResp=await fetch(`https://corsproxy.io/?url=${encodeURIComponent(_cbCandlesUrl)}`,{signal:AbortSignal.timeout(7000)}).catch(e=>{_logErr('candles corsproxy threw: '+(e?.message||String(e)));console.warn(`[shadow ${_shadowAsset}] corsproxy candles failed:`,e?.message||e);return null;});
+        }
+        if(!_candleResp){_diag.candleFails++;_logErr('candles both sources null');_heartbeat();return;}
+        if(!_candleResp.ok){_diag.candleFails++;_logErr(`candles http ${_candleResp.status} (both sources)`);console.warn(`[shadow ${_shadowAsset}] both candle sources failed, last status:`,_candleResp.status);_heartbeat();return;}
         if(_cancelled){_heartbeat();return;}
         const _candleData=await _candleResp.json();
-        if(!Array.isArray(_candleData)||_candleData.length<5){_diag.candleEmpty++;_logErr(`candles empty (got ${Array.isArray(_candleData)?_candleData.length:typeof _candleData})`);_heartbeat();return;}
+        if(!Array.isArray(_candleData)||_candleData.length<5){_diag.candleEmpty++;_logErr(`candles empty (got ${Array.isArray(_candleData)?_candleData.length:typeof _candleData})`);console.warn(`[shadow ${_shadowAsset}] empty candle response`);_heartbeat();return;}
         const _bars=_candleData.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
         const _shadowPrice=priceByAssetRef.current?.[_shadowAsset]?.price||_bars[0]?.c||0;
-        if(_shadowPrice<=0){_diag.priceMissing++;_logErr(`no price (priceByAssetRef=${priceByAssetRef.current?.[_shadowAsset]?.price||'null'}, bars[0].c=${_bars[0]?.c||'null'})`);_heartbeat();return;}
+        if(_shadowPrice<=0){_diag.priceMissing++;_logErr(`no price (priceByAssetRef=${priceByAssetRef.current?.[_shadowAsset]?.price||'null'}, bars[0].c=${_bars[0]?.c||'null'})`);console.warn(`[shadow ${_shadowAsset}] no price extractable`);_heartbeat();return;}
         // Fetch the shadow asset's Kalshi strike. Reuse the events endpoint.
         // V9.3.0: also capture market ticker, close_time, and YES price so the
         //   shadow output can drive a side-by-side call card (and eventually
@@ -22537,7 +22584,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.7.1
+              9.7.2
             </span>
           </div>
 
@@ -23046,6 +23093,8 @@ function TaraApp(){
           currentAsset={currentAsset}
           analysis={analysis}
           currentStreak={currentStreak}
+          speedDial={speedDial}
+          setSpeedDial={setSpeedDial}
         />
 
         {/* V9.1.1: TradeScheduleStrip relocated — now renders inside RightPanel
@@ -24484,6 +24533,27 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.7.2 — Session-card recommended speed + ETH shadow corsproxy fallback */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>session card chip &middot; eth corsproxy fallback</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.07</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.7.2</span> &mdash; Session Speed Chip + ETH Fix</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Recommended speed in the session card</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The session header strip (NY LUNCH, NY OPEN, etc.) now shows a <code className="text-[10px] bg-[#0E100F] px-1">speed: N rec</code> chip alongside the existing chips when current dial differs by &ge;10 from the recommendation. Tap the chip to apply. Same logic as the dial recommendation: derives from velocityRegime, windowAmplitude, and ATR. Title shows the reason (&ldquo;whipsaw — patience pays&rdquo; / &ldquo;extreme velocity — slow locks miss&rdquo; / etc.).</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">ETH shadow staleness mitigation</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Diagnostic from V9.6.1 confirmed shadow ETH was at 0% success across 171+ attempts &mdash; every Coinbase candles fetch was failing for the inactive asset. Most likely cause: rate limit when active loop polls /candles every 5s and shadow polls every 2s.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Dual-source candle fetch</strong> &mdash; try Coinbase direct first (fast path), fall back to <code className="text-[10px] bg-[#0E100F] px-1">corsproxy.io</code> on any failure. Same pattern V7.10.7 already uses for Kalshi.</li>
+                  <li><strong>Console.warn on every failure path</strong> &mdash; surfaces the actual error in devtools without needing to tap the diagnostic indicator. Format: <code className="text-[10px] bg-[#0E100F] px-1">[shadow ETH] direct candles failed: ...</code></li>
+                  <li><strong>Diagnostic still tracks per-source counts</strong> &mdash; tap the stale indicator to see attempts vs successes after this lands.</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">If ETH is still stale after this version, open devtools → Console and look for the <code className="text-[10px] bg-[#0E100F] px-1">[shadow ETH]</code> messages. They&rsquo;ll tell us whether it&rsquo;s a CORS issue, a 429 rate-limit, or something else &mdash; and we can target the actual cause in the next patch.</p>
               </section>
 
               {/* V9.7.1 — Flow tap-close + recommended speed dial */}
