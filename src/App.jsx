@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.2.3-cleanup-streak-widget-health';
+const BASELINE_VERSION='2026.05.07-v9.5.0-opponent-regimecal';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -1373,6 +1373,107 @@ const buildRegimeDirWR=(tradeLog)=>{
     wr[k].rate=wr[k].n>0?wr[k].wins/wr[k].n:0.5;
   });
   return wr;
+};
+
+// V9.5.0: PER-REGIME × DIRECTION POSTERIOR CALIBRATION
+// Stronger than the existing regimeDirConfBoost (which only adjusts the displayed
+// confidence number ±5pt at the very end). This computes a per-(regime,dir) blend
+// weight that pulls the posterior toward the empirically observed WR for that pair.
+//
+// Math: given engine's directional confidence C (0-100) and observed WR R (0-1),
+//       calibrated = C × (1-w) + R×100 × w
+//       where w grows with sample size:
+//         n<10: w=0 (not enough data, no correction)
+//         n=10: w=0.10
+//         n=30: w=0.30
+//         n=80+: w=0.45 (cap — never override engine entirely)
+//
+// Why blend instead of replace: the engine has live signal — orderbook, tape, FGT —
+// that the historical WR doesn't see. We respect both: pull toward history when
+// history is decisive, but never erase the live signal.
+//
+// Returns {<regime>|<dir>: {n, wr, weight, multiplier_target}}.
+//   multiplier_target is the WR×100 that we blend toward — kept here for diagnostics.
+const buildRegimeDirCalibration=(tradeLog)=>{
+  const out={};
+  const counts={};
+  for(const t of (tradeLog||[])){
+    if(!t||!t.result||!t.dir||!t.regime)continue;
+    if(t.result!=='WIN'&&t.result!=='LOSS')continue;
+    const k=t.regime+'|'+t.dir;
+    if(!counts[k])counts[k]={n:0,wins:0};
+    counts[k].n++;
+    if(t.result==='WIN')counts[k].wins++;
+  }
+  for(const k of Object.keys(counts)){
+    const{n,wins}=counts[k];
+    const wr=n>0?wins/n:0.5;
+    let weight=0;
+    if(n>=10){
+      // Linear ramp 10→80 trades, capped at 0.45
+      weight=Math.min(0.45,(n-10)/(80-10)*0.35+0.10);
+    }
+    out[k]={n,wr,weight,wrPct:Math.round(wr*1000)/10};
+  }
+  return out;
+};
+
+// V9.5.0: KALSHI-SPOT DIVERGENCE DETECTOR (opponent modeling)
+// Detects "Kalshi-only" moves — where the YES price moves materially over a 60s
+// window but spot price stays roughly flat. Interpretation: someone is taking a
+// directional Kalshi position based on expectation, not in response to the
+// underlying. Treated as a leading indicator (positioning signal).
+//
+// Inputs come from refs that are already populated:
+//   kalshiHist: array of {yes, time}  (last 60s, populated in TaraApp)
+//   tickHist:   array of {p, t, time, ...}  (tick-level price history)
+//
+// Returns {dir, kDelta, spotDeltaBps, score, detectedAt} or null.
+//   score is in points (0..10) suitable to feed into the engine's signal sum.
+//
+// Threshold rationale:
+//   |kDelta| ≥ 4¢ — typical Kalshi spread is 1-2¢, so 4¢ is a real move
+//   |spotDeltaBps| ≤ 4 — within Kalshi-only noise floor for 60s
+//   score scales linearly past 4¢, capped at 10pt at 14¢+ (rare extreme)
+const computeKalshiLead=({kalshiHist,tickHist,nowMs})=>{
+  const now=nowMs||Date.now();
+  const lookbackMs=60000;
+  const sampleWindowMs=8000; // accept samples within ±8s of the lookback edges
+  if(!Array.isArray(kalshiHist)||!Array.isArray(tickHist))return null;
+  if(kalshiHist.length<3||tickHist.length<5)return null;
+  // Most-recent samples (last 5s)
+  const _kRecent=kalshiHist.filter(k=>k&&Number.isFinite(k.yes)&&now-k.time<=5000);
+  // Old samples around the lookback edge
+  const _kOld=kalshiHist.filter(k=>k&&Number.isFinite(k.yes)&&now-k.time>=lookbackMs-sampleWindowMs&&now-k.time<=lookbackMs+sampleWindowMs);
+  if(_kRecent.length===0||_kOld.length===0)return null;
+  const kNow=_kRecent[_kRecent.length-1].yes;
+  const kThen=_kOld[0].yes;
+  if(!Number.isFinite(kNow)||!Number.isFinite(kThen))return null;
+  const kDelta=kNow-kThen; // cents
+  const ABS_K_THRESH=4;
+  if(Math.abs(kDelta)<ABS_K_THRESH)return null;
+  // Spot delta over same lookback. tickHist entries have {p, time}.
+  const _tRecent=tickHist.filter(t=>t&&Number.isFinite(t.p)&&t.p>0&&now-t.time<=5000);
+  const _tOld=tickHist.filter(t=>t&&Number.isFinite(t.p)&&t.p>0&&now-t.time>=lookbackMs-sampleWindowMs&&now-t.time<=lookbackMs+sampleWindowMs);
+  if(_tRecent.length===0||_tOld.length===0)return null;
+  const pNow=_tRecent[_tRecent.length-1].p;
+  const pThen=_tOld[0].p;
+  if(!pNow||!pThen)return null;
+  const spotDeltaBps=((pNow-pThen)/pThen)*10000;
+  const ABS_SPOT_FLAT=4; // bps
+  if(Math.abs(spotDeltaBps)>ABS_SPOT_FLAT)return null; // spot moved too — not divergent
+  // Direction Kalshi is leaning
+  const dir=kDelta>0?'UP':'DOWN';
+  const mag=Math.abs(kDelta);
+  // Score: 4¢ → 4pt, 8¢ → 7pt, 14¢+ → 10pt (cap)
+  const score=Math.min(10,Math.round(4+(mag-4)*0.6));
+  return{
+    dir,
+    kDelta:Math.round(kDelta*10)/10,
+    spotDeltaBps:Math.round(spotDeltaBps*10)/10,
+    score,
+    detectedAt:now,
+  };
 };
 
 // V114: Self-calibration audit - measures how well-calibrated Tara's confidence is
@@ -4145,6 +4246,20 @@ const computeV99Posterior=(params)=>{
       reasoning.push(`[TIME-OF-DAY] Hour ${_h} UTC → ${_boost>0?'+':''}${_boost} (from historical WR at this hour)`);
     }
   }
+  // V9.5.0: KALSHI-SPOT DIVERGENCE (opponent modeling).
+  //   When Kalshi YES moves materially (≥4¢ over 60s) without spot confirming
+  //   (|spotΔ| ≤4 bps), interpret as smart-money positioning ahead of a move.
+  //   Contributes ±4 to ±10 points to the posterior in the Kalshi-direction.
+  //   Score is capped so this signal can't dominate live tape/structure — it's
+  //   a leading indicator, not a primary one.
+  const _kLead=params.kalshiLead;
+  if(_kLead&&(_kLead.dir==='UP'||_kLead.dir==='DOWN')&&Number.isFinite(_kLead.score)&&_kLead.score>0){
+    const _kSign=_kLead.dir==='UP'?1:-1;
+    const _kAdj=_kLead.score*_kSign;
+    totalScore+=_kAdj;
+    rawSignalScores.kalshiLead=_kAdj;
+    reasoning.push(`[KALSHI-LEAD] Kalshi YES moved ${_kLead.kDelta>0?'+':''}${_kLead.kDelta}¢ vs spot ${_kLead.spotDeltaBps>0?'+':''}${_kLead.spotDeltaBps}bps over 60s → ${_kLead.dir} positioning ahead of move (${_kAdj>0?'+':''}${_kAdj})`);
+  }
   // Convert to posterior
   const rawPosterior=50+totalScore*0.95;
   let posterior=Math.max(1,Math.min(99,rawPosterior));
@@ -4170,6 +4285,33 @@ const computeV99Posterior=(params)=>{
   // V144: Calibration is now the ONLY direction-prior correction. Per-direction adjustments
   //       previously layered here have been removed in favor of bucket-based calibration.
   let dirCalibrated=calibratedPosterior;
+
+  // ── V9.5.0: PER-REGIME × DIRECTION POSTERIOR CALIBRATION ─────────────────
+  // Pulls the directional confidence toward the empirically observed WR for
+  // (current regime, current lean direction) when we have ≥10 trades to
+  // anchor against. Blend weight grows linearly with sample size, capped at
+  // 0.45 — the engine's live signal still has the majority say.
+  // Different from `regimeDirConfBoost` (which only adjusts the displayed
+  // confidence number ±5pt at the end). This adjusts the posterior, which
+  // propagates into lock decisions, gate logic, and the call confidence.
+  const _regCal=params.regimeDirCalibration;
+  if(_regCal&&_regime){
+    const _engineDir=dirCalibrated>=50?'UP':'DOWN';
+    const _key=_regime+'|'+_engineDir;
+    const _entry=_regCal[_key];
+    if(_entry&&_entry.n>=10&&_entry.weight>0){
+      const _engineConf=_engineDir==='UP'?dirCalibrated:(100-dirCalibrated);
+      const _observedConf=_entry.wr*100;
+      const _blended=_engineConf*(1-_entry.weight)+_observedConf*_entry.weight;
+      const _newCal=_engineDir==='UP'?_blended:(100-_blended);
+      const _delta=_newCal-dirCalibrated;
+      // Only apply if the shift is meaningful (≥1pt) — avoids log noise on tiny adjustments
+      if(Math.abs(_delta)>=1){
+        reasoning.push(`[REGIME-CAL] ${_regime}×${_engineDir} historical WR ${_entry.wrPct}% (n=${_entry.n}, w=${_entry.weight.toFixed(2)}) → posterior ${dirCalibrated.toFixed(1)}%→${_newCal.toFixed(1)}%`);
+        dirCalibrated=_newCal;
+      }
+    }
+  }
 
   // ── IMPROVEMENT 5: Posterior time-decay for late window locks ─────────────
   // Data: losses lock avg 777s, wins avg 744s. Late locks structurally weaker.
@@ -4463,6 +4605,8 @@ const computeV99Posterior=(params)=>{
   }
 
   return{posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isMoonshot,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty,
+  // V9.5.0: opponent-modeling signal exposed in output for UI display + trade-log audit
+  kalshiLead:params.kalshiLead||null,
   // V6.4: conviction asymmetry — strength comparison of current vs prior swing
   convictionAsymmetry:_convictionAsymmetry,
     // V152: range-position telemetry — exposed so trade log can audit "was Tara at the edge of typical range?"
@@ -5934,6 +6078,19 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             {/* V6.0.1: rising-confluence indicator — early entry tier */}
             {!(tc?._ctx?.isStructuralLed||snap?.isStructuralLed)&&!(tc?._ctx?.isSuperConfluent||snap?.isSuperConfluent)&&!(tc?._ctx?.isConfluent||snap?.isConfluent)&&!(tc?._ctx?.isTapeLed||snap?.isTapeLed)&&(tc?._ctx?.isRisingConfluence||snap?.isRisingConfluence)&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:'#A6E3A1'}}>↗ rising · early</span>}
             {snap&&snap.earlyLock&&<span className="text-[8px] tracking-[0.18em] uppercase text-emerald-400/70 font-bold">⚡ early lock</span>}
+            {/* V9.5.0: KALSHI-LEAD chip — surfaces when smart-money positioning detected.
+                Color matches alignment with current call: aligned = teal-gold (confirms
+                direction), opposite = amber (warning — Kalshi positioning AGAINST the call). */}
+            {analysis?.kalshiLead&&(()=>{
+              const _kl=analysis.kalshiLead;
+              const _activeCallDir=isLockedSnap?(snap.call==='UP'?'UP':snap.call==='DOWN'?'DOWN':null):(isWatching?_liveLeanDir:null);
+              const _aligned=_activeCallDir&&_kl.dir===_activeCallDir;
+              const _opposing=_activeCallDir&&_kl.dir!==_activeCallDir;
+              const _color=_aligned?'#6EE7B7':_opposing?'#FBBF24':'#7DD3FC';
+              const _label=_kl.dir==='UP'?'▲ kalshi-lead':'▼ kalshi-lead';
+              const _hint=`Kalshi YES ${_kl.kDelta>0?'+':''}${_kl.kDelta}¢ · spot ${_kl.spotDeltaBps>0?'+':''}${_kl.spotDeltaBps}bps over 60s — ${_aligned?'confirms call':_opposing?'positioning AGAINST call':'standalone signal'}`;
+              return <span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:_color}} title={_hint}>{_label} +{_kl.score}</span>;
+            })()}
           </div>
         </div>
         <div className="flex items-center justify-between gap-3 mb-1.5">
@@ -14935,6 +15092,10 @@ function TaraApp(){
   },[tradeLog,currentAsset]);
   const calibration=useMemo(()=>buildCalibration(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
   const regimeDirWR=useMemo(()=>buildRegimeDirWR(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]); // V134
+  // V9.5.0: per-(regime,dir) blend weights for posterior calibration. Different from
+  // regimeDirWR (which is just stats for UI) — this carries the {n, wr, weight}
+  // tuple the engine uses to pull the posterior toward observed WR.
+  const regimeDirCalibration=useMemo(()=>buildRegimeDirCalibration(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
   const sessionRegimeThresh=useMemo(()=>buildSessionRegimeThresh(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]); // V134
   const signalAccuracy=useMemo(()=>buildSignalAccuracy(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
   const sessionPerf=useMemo(()=>buildSessionPerf(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
@@ -17149,7 +17310,16 @@ function TaraApp(){
       // V3.1.7: tapeRef and ticksRef passed for volume-flow signal computation
       // V3.1.7+: windowHighRef/windowLowRef passed for window-amplitude awareness
       // V3.1.9: windowHighTime/windowLowTime/windowOpenTime for structure detection (TRENDING/WHIPSAW/etc.)
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap});
+      // V9.5.0: kalshiLead — Kalshi-spot divergence (opponent modeling). Computed here
+      //   so we can also surface it in the UI without re-running the engine.
+      // V9.5.0: regimeDirCalibration — per-(regime,dir) blend weights pulling the posterior
+      //   toward observed WR. Engine applies this after global posterior calibration.
+      const _kalshiLead=computeKalshiLead({
+        kalshiHist:kalshiHistoryRef.current||[],
+        tickHist:tickHistoryRef.current||[],
+        nowMs:Date.now(),
+      });
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
@@ -18062,6 +18232,8 @@ function TaraApp(){
         windowAmplitude:eng.windowAmplitude||null,
         // V3.1.11: within-window candle pattern (informational, surfaced via UI chip)
         candlePattern:eng.candlePattern||null,
+        // V9.5.0: opponent-modeling signal (Kalshi-spot divergence). null when no divergence.
+        kalshiLead:eng.kalshiLead||null,
         lockInfo:lockedCallRef.current?{dir:lockedCallRef.current.dir,lockedAt:lockedCallRef.current.lockedAt,lockedPosterior:lockedCallRef.current.lockedPosterior,lockPrice:lockedCallRef.current.lockPrice,lockRegime:lockedCallRef.current.lockedRegime}:null,
         bullCount:Number(bullCount),bearCount:Number(bearCount)};
     }catch(err){return{prediction:'ERROR',rawProbAbove:50,projections:[],reasoning:[err.stack||String(err)],textColor:'text-rose-500',advisor:{label:'MATH CRASH',reason:String(err),color:'rose',animate:false,hasAction:false},regime:'ERROR'};}
@@ -18353,11 +18525,19 @@ function TaraApp(){
     //   direction at minimum for tape-led. Combined with the extreme guard above, this kills
     //   the "strong tape at near-strike inflection point" failure pattern.
     const _gapNotMarginal=strikeFavorable&&Math.abs(_gapBpsForDir)>=3;
-    const isTapeLed=tapeSuperStrong&&conviction>=4&&!tapeOpposes&&!kalshiExtremeDisagrees&&_strikeReasonable
+    const _isTapeLedBase=tapeSuperStrong&&conviction>=4&&!tapeOpposes&&!kalshiExtremeDisagrees&&_strikeReasonable
       &&(_fgtAlignsDir||_strikeStronglyFavorable)
       &&!_isChopRegime
       &&!_tapeAtFlushExtreme   // V7.2: extreme tape = exhaustion, not continuation
       &&_gapNotMarginal;       // V7.2: gap must be ≥3 bps in direction
+    // V9.4.0: ASYMMETRIC TAPE-LED FLOOR — UP setups need a higher bar than DOWN.
+    //   V9.2.3 measured WR (4-day, n=185): tape-led × UP = 20% (n=5).
+    //   tape-led × DOWN = 69% (n=26). Tape confirms fades better than it
+    //   confirms pumps. For UP, additionally require tape ≥75% buy on the
+    //   active windows AND conviction ≥8pt AND FGT magnitude ≥1.5/4.
+    //   For DOWN, base check unchanged.
+    const _tapeLedUpExtra=dir!=='UP'||(tapeBuyPct>=75&&conviction>=8&&fgtAbs>=1.5);
+    const isTapeLed=_isTapeLedBase&&_tapeLedUpExtra;
     // V6.2.0: STRUCTURAL-LED TIER — primary fast-lock based on grand trend + trend channel.
     //   These are the user's preferred indicators: multi-hour structural context, looking
     //   at where price IS GOING, not where order flow already showed up.
@@ -18491,8 +18671,23 @@ function TaraApp(){
     const _isShortSqueeze=analysis.regime==='SHORT SQUEEZE';
     const _fgtMag=Math.abs(analysis.mtfAlignment||0);
     const _fgtAgreesDir=(analysis.mtfAlignment>0&&dir==='UP')||(analysis.mtfAlignment<0&&dir==='DOWN');
-    if(_isShortSqueeze&&dir==='UP'&&(!_fgtAgreesDir||_fgtMag<1.5)&&(isStructuralLed||isTapeLed)){
-      return{call:'SIT_OUT',reason:`${_dirLead} — SHORT SQUEEZE without FGT confirmation (FGT ${_fgtMag.toFixed(1)}/4) — squeeze likely exhausting`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    // V9.4.0: SHORT SQUEEZE × UP further restriction. V9.2.3 measured WR (n=40
+    //   in regime, of which 40 were UP): 56.1% — the new weakest regime now
+    //   that V9.2.3 fixed TRENDING UP. Inside that regime: tape-led × UP was
+    //   1/5 wins (20%), super-tier × UP was 0/2, tape+super combined cluster
+    //   was 0/5. Existing gate required FGT ≥1.5/4 for structural/tape locks.
+    //   New requirements per tier:
+    //     • structural-led / tape-led: FGT must agree AND magnitude ≥2.5/4
+    //     • super-confluence: FGT must agree AND magnitude ≥3.0/4
+    //   These keep the squeeze-continuation case (strong FGT) but eliminate
+    //   the marginal cases where the squeeze was actually exhausting.
+    if(_isShortSqueeze&&dir==='UP'){
+      if((isStructuralLed||isTapeLed)&&(!_fgtAgreesDir||_fgtMag<2.5)){
+        return{call:'SIT_OUT',reason:`${_dirLead} — SHORT SQUEEZE without strong FGT confirmation (need ≥2.5/4 in direction, have ${_fgtMag.toFixed(1)}) — squeeze likely exhausting`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+      }
+      if(isSuperConfluent&&(!_fgtAgreesDir||_fgtMag<3.0)){
+        return{call:'SIT_OUT',reason:`${_dirLead} — SHORT SQUEEZE super tier needs FGT ≥3.0/4 in direction (have ${_fgtMag.toFixed(1)}) — confluence without trend confirmation lost 0/2 last week`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+      }
     }
     // V5.7.7 Gate 2.6: Kalshi extreme-disagreement gate. When market is ≥90% certain the
     //   other way, we need BOTH tape alignment AND pattern alignment to commit. Otherwise sit.
@@ -18606,10 +18801,26 @@ function TaraApp(){
     else if(_learnConfBoost<0)_reasonParts.push(`${_learnConfBoost} historical ${dir} weakness in ${analysis.regime}`);
     if(_learnConflBoost>0)_reasonParts.push(`+${_learnConflBoost} from ${_conflBucket} history`);
     else if(_learnConflBoost<0)_reasonParts.push(`${_learnConflBoost} from ${_conflBucket} history`);
+    // V9.4.0: MARGINAL-ZONE CAUTION. V9.2.3 measured: |gap| < 10bps trades
+    //   landed at 59.3% WR (n=86). Same posterior in clean-move windows hit
+    //   85.7%. The marginal-zone losses concentrate in `single` tier with low
+    //   ATR + low quality. Per user mandate ("cautions instead of skips"),
+    //   we still call directionally — but attach a caution string so the call
+    //   card surfaces the warning chip and the user can size down.
+    let _marginalCaution=null;
+    const _isSingleTier=!isSuperConfluent&&!isConfluent&&!isStructuralLed&&!isTapeLed&&!isRisingConfluence;
+    const _atrBpsNum=Number(atrBps)||0;
+    const _isLowVol=_atrBpsNum>0&&_atrBpsNum<8;
+    const _isLowQ=q<50;
+    if(_isSingleTier&&_isLowVol&&_isLowQ){
+      _marginalCaution=`marginal zone — ATR ${_atrBpsNum.toFixed(1)}bps, q${q} · 59% WR baseline · size down`;
+      _reasonParts.push('⚠ marginal');
+    }
     return{
       call:dir,reason:_reasonParts.join(' · '),confidence:_confidence,direction:dir,conviction,phase:'FORMING',
+      caution:_marginalCaution, // V9.4.0: surfaces in TaraCallCard caution chip
       // Pass through to lifecycle so it can compute needSamples consistently
-      _ctx:{q,conviction,fgtAbs,regime:analysis.regime,winType,tapeStronglyAgrees,tapeSuperStrong,kalshiAgrees,kalshiStronglyAgrees,_remaining,_elapsed,isConfluent,isSuperConfluent,isRisingConfluence,isTapeLed,isStructuralLed,strikeFavorable},
+      _ctx:{q,conviction,fgtAbs,regime:analysis.regime,winType,tapeStronglyAgrees,tapeSuperStrong,kalshiAgrees,kalshiStronglyAgrees,_remaining,_elapsed,isConfluent,isSuperConfluent,isRisingConfluence,isTapeLed,isStructuralLed,strikeFavorable,marginalCaution:_marginalCaution},
     };
   })();
   // ═══════════════════════════════════════════════════════════════════════════
@@ -20848,6 +21059,16 @@ function TaraApp(){
         // V9.3.0: tag trades placed by Kalshi auto-execution so the daily P&L rollup,
         // loss-streak cooldown, and analytics can split auto-exec from manual.
         autoExec:_autoExec,
+        // V9.5.0: opponent-modeling snapshot at lock — null if no divergence detected,
+        // else {dir, kDelta, spotDeltaBps, score}. Lets us audit "did kalshi-lead
+        // signals predict outcomes" once we have ≥30 examples in the log.
+        kalshiLeadAtLock:analysis?.kalshiLead?{
+          dir:analysis.kalshiLead.dir,
+          kDelta:analysis.kalshiLead.kDelta,
+          spotDeltaBps:analysis.kalshiLead.spotDeltaBps,
+          score:analysis.kalshiLead.score,
+          aligned:analysis.kalshiLead.dir===dir,
+        }:null,
       };
       // Broadcast the new entry after the reversal loss
       // V9.1: SUPPRESSED. User mandate — only Tara's own locks (TARA_LOCK at line ~17049)
