@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.2.0-shared-tara-local-personal-asset-split';
+const BASELINE_VERSION='2026.05.06-v9.2.0-engine-overhaul-news-relocation';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -2935,10 +2935,19 @@ const computeV99Posterior=(params)=>{
   const _gtUpCount=_countDir(_gtDirs,'UP');
   const _gtDnCount=_countDir(_gtDirs,'DOWN');
   // Combined alignment: how many of 6 total signals (3 TC + 3 GT) point each way
-  const _structUpCount=_tcUpCount+_gtUpCount;
-  const _structDnCount=_tcDnCount+_gtDnCount;
-  const _structDir=_structUpCount>_structDnCount&&_structUpCount>=3?'UP':_structDnCount>_structUpCount&&_structDnCount>=3?'DOWN':'NEUTRAL';
-  const _structAlignment=Math.max(_structUpCount,_structDnCount); // 0-6 scale
+  // V9.2.0: WEIGHTED by timeframe. Was equal weight (each TF = 1 vote), so 1m noise
+  //   could flip the alignment. Now: 1m = 0.5, 5m = 1.0, 15m = 1.5. Total max = 6.0.
+  //   15m carries 3x the weight of 1m — user's TradingView workflow trusts higher TFs.
+  const _tfWeights={'1m':0.5,'5m':1.0,'15m':1.5};
+  const _weightedCount=(dirs,target)=>{
+    let sum=0;
+    ['1m','5m','15m'].forEach((tf,i)=>{if(dirs[i]===target)sum+=_tfWeights[tf];});
+    return sum;
+  };
+  const _structUpCount=_weightedCount(_tcDirs,'UP')+_weightedCount(_gtDirs,'UP');
+  const _structDnCount=_weightedCount(_tcDirs,'DOWN')+_weightedCount(_gtDirs,'DOWN');
+  const _structDir=_structUpCount>_structDnCount&&_structUpCount>=2.5?'UP':_structDnCount>_structUpCount&&_structDnCount>=2.5?'DOWN':'NEUTRAL';
+  const _structAlignment=Math.max(_structUpCount,_structDnCount); // 0-6 scale (weighted)
   // Use the 5m as the "primary" reading for display (it's the middle ground), but the
   //   gate decision uses the multi-TF alignment count.
   const _trendChannel=_tcByTf['5m']?{
@@ -3042,7 +3051,32 @@ const computeV99Posterior=(params)=>{
     _structBoost=Math.round(_structBoost*_structTimeMult)*(_structDir==='UP'?1:-1);
     if(_structBoost!==0){
       totalScore+=_structBoost;
-      reasoning.push(`[STRUCT-BOOST] ${_structAlignment}/6 ${_structDir} → ${_structBoost>0?'+':''}${_structBoost} (×${_structTimeMult.toFixed(2)} time-damp)`);
+      reasoning.push(`[STRUCT-BOOST] ${_structAlignment.toFixed(1)}/6 ${_structDir} → ${_structBoost>0?'+':''}${_structBoost} (×${_structTimeMult.toFixed(2)} time-damp)`);
+    }
+    // V9.2.0: SLOPE BOOST — slopeBpsPerBar from both TC and GT feed into posterior.
+    //   When slope confirms direction, small boost (up to ±6). When slope contradicts,
+    //   small penalty. This was computed but never read by the engine.
+    const _tc5m=_trendChannel; // 5m primary reading
+    const _gt5m=_grandTrend;
+    let _slopeBoost=0;
+    if(_tc5m?.valid){
+      const _tcS=Number(_tc5m.slopeBpsPerBar)||0;
+      const _tcAligned=(_structDir==='UP'&&_tcS>0.5)||(_structDir==='DOWN'&&_tcS<-0.5);
+      const _tcContrary=(_structDir==='UP'&&_tcS<-0.5)||(_structDir==='DOWN'&&_tcS>0.5);
+      if(_tcAligned)_slopeBoost+=Math.min(3,Math.abs(_tcS)*1.5);
+      if(_tcContrary)_slopeBoost-=Math.min(3,Math.abs(_tcS)*1.0);
+    }
+    if(_gt5m?.valid){
+      const _gtS=Number(_gt5m.slopeBpsPerBar)||0;
+      const _gtAligned=(_structDir==='UP'&&_gtS>0.5)||(_structDir==='DOWN'&&_gtS<-0.5);
+      const _gtContrary=(_structDir==='UP'&&_gtS<-0.5)||(_structDir==='DOWN'&&_gtS>0.5);
+      if(_gtAligned)_slopeBoost+=Math.min(3,Math.abs(_gtS)*1.0);
+      if(_gtContrary)_slopeBoost-=Math.min(3,Math.abs(_gtS)*0.8);
+    }
+    _slopeBoost=Math.round(_slopeBoost*(_structDir==='UP'?1:-1));
+    if(Math.abs(_slopeBoost)>=1){
+      totalScore+=_slopeBoost;
+      reasoning.push(`[SLOPE] TC+GT slope → ${_slopeBoost>0?'+':''}${_slopeBoost} (aligned=${_slopeBoost>0})`);
     }
   }
   // V7.7: REVERSAL PREDICTOR. Replaces V7.6 mean-reversion-guard (which sat out instead of
@@ -3680,6 +3714,48 @@ const computeV99Posterior=(params)=>{
     const beforeDecay=dirCalibrated;
     dirCalibrated=50+(dirCalibrated-50)*lateDecayFactor;
     reasoning.push(`[TIME] Late lock decay ×${lateDecayFactor}: ${beforeDecay.toFixed(1)}%→${dirCalibrated.toFixed(1)}%`);
+  }
+  // V9.2.0: CALIBRATION DAMPENING — call log analysis showed 80-89% posterior bucket
+  //   has 62% actual WR (off by 23pts), 90%+ has 66% actual (off by 26pts). Tara is
+  //   overconfident on her strongest calls. Dampen extreme posteriors toward 72% —
+  //   the empirical ceiling where calibration still holds.
+  //   Formula: when posterior > 78%, dampened = 72 + (posterior-72) × 0.35
+  //   Effect: 80% → 74.8%, 90% → 78.3%, 95% → 80.1%. Soft enough to preserve
+  //   directional signal but prevents the 95%-confidence-coin-flip problem.
+  if(Math.abs(dirCalibrated-50)>28){ // > 78% or < 22%
+    const _prevConf=dirCalibrated;
+    const _sign=dirCalibrated>50?1:-1;
+    const _dist=Math.abs(dirCalibrated-50);
+    const _ceiling=22; // corresponds to 72% (50+22)
+    if(_dist>_ceiling){
+      const _excess=_dist-_ceiling;
+      const _dampened=50+_sign*(_ceiling+_excess*0.35);
+      dirCalibrated=_dampened;
+      reasoning.push(`[CALIBRATION-DAMPEN] ${_prevConf.toFixed(1)}%→${_dampened.toFixed(1)}% (high-conviction dampening)`);
+    }
+  }
+  // V9.2.0: TRENDING REGIME PENALTY — call log analysis showed TRENDING UP regime
+  //   has 33% WR (4W/8L). The engine trusts trend signals in trending markets but
+  //   gets caught at reversals. When in a trending regime AND structural indicators
+  //   show exhaustion signs (channel extreme, slope flattening), apply a penalty
+  //   that pulls the posterior back toward 50%.
+  const _curRegime=regimeMemory?.current||'RANGE-CHOP';
+  if((_curRegime==='TRENDING UP'||_curRegime==='TRENDING DOWN')&&_trendChannel?.valid){
+    const _chPos=_trendChannel.channelPos;
+    const _trendingUp=_curRegime==='TRENDING UP';
+    // Exhaustion: trending UP but price is near channel top (> 0.80), or trending
+    //   DOWN but price is near channel bottom (< 0.20). High reversal risk.
+    const _trendExhausted=(_trendingUp&&_chPos>=0.80)||(!_trendingUp&&_chPos<=0.20);
+    // Slope flattening: the trend is losing steam. If slope is < 0.3 bps/bar in
+    //   the trend direction, momentum is dying.
+    const _tcS=Number(_trendChannel.slopeBpsPerBar)||0;
+    const _slopeFlat=(_trendingUp&&_tcS<0.3)||(!_trendingUp&&_tcS>-0.3);
+    if(_trendExhausted||_slopeFlat){
+      const _penalty=_trendExhausted&&_slopeFlat?0.70:0.85; // heavy or light
+      const _prev=dirCalibrated;
+      dirCalibrated=50+(dirCalibrated-50)*_penalty;
+      reasoning.push(`[TREND-EXHAUST] ${_curRegime} + ${_trendExhausted?'channel-extreme':''}${_slopeFlat?' slope-flat':''} → ×${_penalty} (${_prev.toFixed(1)}%→${dirCalibrated.toFixed(1)}%)`);
+    }
   }
   // V144: CRITICAL CHANGE — locks now use the calibrated posterior, not raw.
   //       Previously: 'finalPosterior' (calibrated) was returned as 'posterior',
@@ -10702,8 +10778,8 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
           })}
         </div>
       </div>
-      {/* News Feed */}
-      <div className="pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
+      {/* News Feed — V9.2.0: moved to projections column on desktop. Kept here for mobile. */}
+      <div className="pt-3 lg:hidden" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
         <NewsFeedCard/>
       </div>
       {/* V9.1.1: Full-schedule modal — opens via ⊕ on schedule strip header */}
@@ -13082,12 +13158,25 @@ function TaraApp(){
     // We dampen the punishment to 25% (still some learning, but doesn't unlearn correct
     //   signals due to bad luck), and tag the trade for telemetry.
     const _isShockLoss=finalResult==='LOSS'&&resolvedTrade.lossPattern&&SHOCK_LOSS_PATTERNS.has(resolvedTrade.lossPattern);
+    // V9.2.0: PATH-AWARE LEARNING — modulate gradient by HOW the trade lost.
+    //   Call log analysis: signals that read the market correctly early but lost to
+    //   late reversal shouldn't be punished the same as signals that were wrong from
+    //   the start. Loss patterns:
+    //   - LATE_REVERSAL: was favorable, reversed in last third → 30% gradient (signals were right initially)
+    //   - MID_REVERSAL:  was favorable at midpoint, faded → 50% gradient (mixed read)
+    //   - EARLY_PEAK:    peaked early, sustained loss → 75% gradient (partial misread)
+    //   - WRONG_FROM_START: never above water → 100% gradient (genuine misread)
+    //   - WHALE_SPIKE / MACRO_SHOCK: handled by existing shock-dampening (25%)
+    const _lossPattern=resolvedTrade.lossPattern;
+    const _pathDampMultiplier=finalResult==='LOSS'&&_lossPattern&&!_isShockLoss?(
+      _lossPattern==='LATE_REVERSAL'?0.30:
+      _lossPattern==='MID_REVERSAL'?0.50:
+      _lossPattern==='EARLY_PEAK'?0.75:
+      1.0 // WRONG_FROM_START or unknown → full
+    ):1.0;
+    const _isPathDampened=_pathDampMultiplier<1.0;
     if(_isShockLoss){
       try{console.info('[V8.5] Shock loss detected — dampening gradient descent. Pattern:',resolvedTrade.lossPattern);}catch(_){}
-      // Apply 25% learning by feeding a temporarily lower-rate path:
-      //   We can't change LEARNING_RATE constants, so we simulate dampening by passing
-      //   a "softened" log where this trade's signal magnitudes are reduced by 75%.
-      //   This preserves the per-signal attribution math but the gradient is much smaller.
       const _softLog=_assetLog.map((t,i,arr)=>{
         if(i!==arr.length-1)return t;
         if(!t||!t.signals)return t;
@@ -13107,6 +13196,32 @@ function TaraApp(){
       setAdaptiveWeightsByAsset(prev=>({...prev,[_safe]:_newW}));
       setRegimeWeightsByAsset(prev=>({...prev,[_safe]:_newRW}));
       if(_diffs.length>0)setLastLearningUpdate({result:finalResult,diffs:_diffs,at:Date.now(),shockLoss:true,pattern:resolvedTrade.lossPattern});
+      return;
+    }
+    // V9.2.0: PATH-DAMPENED learning path — applies when lossPattern indicates the
+    //   signals were partially correct. Same mechanism as shock dampening but with
+    //   variable multiplier based on HOW the trade lost.
+    if(_isPathDampened){
+      try{console.info(`[V9.2.0] Path-aware loss dampening: ${_lossPattern} → ${(_pathDampMultiplier*100).toFixed(0)}% gradient`);}catch(_){}
+      const _softLog=_assetLog.map((t,i,arr)=>{
+        if(i!==arr.length-1)return t;
+        if(!t||!t.signals)return t;
+        const _softSignals={};
+        Object.keys(t.signals).forEach(k=>{_softSignals[k]=Number(t.signals[k]||0)*_pathDampMultiplier;});
+        return{...t,signals:_softSignals};
+      });
+      const _softTrade={...resolvedTrade};
+      if(_softTrade.signals){
+        const _softSigs={};
+        Object.keys(_softTrade.signals).forEach(k=>{_softSigs[k]=Number(_softTrade.signals[k]||0)*_pathDampMultiplier;});
+        _softTrade.signals=_softSigs;
+      }
+      const _newW=updateWeights(_curW,_softLog,finalResult);
+      const _newRW=updateRegimeWeights(_curRW,_softTrade,finalResult);
+      const _diffs=computeWeightDiff(_curW,_newW);
+      setAdaptiveWeightsByAsset(prev=>({...prev,[_safe]:_newW}));
+      setRegimeWeightsByAsset(prev=>({...prev,[_safe]:_newRW}));
+      if(_diffs.length>0)setLastLearningUpdate({result:finalResult,diffs:_diffs,at:Date.now(),pathDampen:true,pattern:_lossPattern,dampMult:_pathDampMultiplier});
       return;
     }
     // Normal path — full gradient descent
@@ -13441,7 +13556,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.2.0 online. Big sync architecture clarification. User clarified the intent - Tara calls and memory record SHARED across all devices and all users. Personal scorecard LOCAL only - never synced. Plus BTC and ETH should log save and record in their own sections. Three structural changes. SHARED CORPUS scope confirmed. Tara call log, past windows, learnings, regime memory, weights all sync globally via Firestore at memory/taraCallLog, history/pastWindows, learnings/tara, learnings/regimeMemory, learnings/taraWeights. Every device and every user reads and writes the same docs. This is the intended behavior - Tara learns from collective experience. PERSONAL SCORECARD stripped from sync entirely. Removed scorecards/personal cloudWatch listener (was a no-op stub since V9.1.9 but still subscribed). Removed scorecards/personal from force-resync paths array. Removed scorecards write from saveAsBaseline payload. Removed scorecards write from baseline live-paths push. Removed scorecards write from applyBaseline live-paths push. Personal scorecard now lives only in localStorage taraPersonalScorecards_v1 on each device. Each device tracks its own personal W and L count without ever interfering with another device. BTC PLUS ETH SEPARATE SECTIONS. Asset tagging was already in place - every log entry has asset BTC or ETH and dedup uses asset plus windowId plus windowType as the key. So BTC and ETH already coexist in the SAME shared log doc, separated by their asset field. Tara's call card already filters to current asset via taraScorecards. New explicit splits added. Sync diagnostic in the SyncStatusPill menu now shows BTC and ETH counts separately on both LOCAL and CLOUD sides. Memory modal has new asset filter row at top - All assets, BTC, ETH - so user can isolate one asset's history. Counts respect both window-type and asset filters. Diagnostic also has clear visual separation - SHARED section (cloud icon, cross-device cross-user) above PERSONAL section (house icon, this device only never synced). User asked about Firebase rules. Current rules allow read write if true so wide open - no auth needed. Nothing in Firebase needs to change. The bug fix is purely client-side. EXISTING PRESERVED - V9.1.9 derive-from-log scorecards single source of truth, V9.1.9 cloud diagnostic, V9.1.8 baseline live-path propagation, V9.1.8 SITOUT gate, V9.1.8 market character badges, V9.1.7 phase/session UTC alignment, V9.1.7 LiveTradeCoach trajectory plus peak/trough plus acceleration. KNOWN LIMITATIONS - personal scorecard counts on each device may differ now since they were always separate-but-mistakenly-synced before. That is the intended behavior. The shared call log is the correct source of truth for Tara's collective memory."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.2.0 online. Major update - Tier 1 engine overhaul plus Tier 3 intelligence plus Tier 4 polish. ENGINE FIX 1 - timeframe weighting. Was equal weight (1m = 5m = 15m in struct alignment count). 1m noise would flip a 5/6 to 4/6 or push a neutral 1m to create a false alignment. Now weighted: 1m = 0.5, 5m = 1.0, 15m = 1.5. Max alignment still 6.0 but 15m carries 3x the weight of 1m. User's TradingView workflow trusts higher TFs - now Tara does too. ENGINE FIX 2 - exhaustion gate plus slope feed. The structural-led tier (50% WR, 24 trades - basically a coin flip) had 9 of 12 losses aligned with trend exhaustion. Two fixes. Added _tcExhausted gate - when channelPos is at extreme contrary to call direction (less than 0.15 for DOWN, greater than 0.85 for UP), structural-led is blocked entirely. Even _structStrong (5/6 alignment) cannot override the exhaustion gate. Added slopeBpsPerBar feed - was computed by both FTC and FGT but NEVER read by the engine. Now feeds up to plus or minus 6 points into posterior. TC and GT slopes both contribute. Aligned slope boosts, contrary slope penalizes. If BOTH slopes are contrary, structural-led tier is blocked. ENGINE FIX 3 - calibration dampening. Call log showed 80-89% posterior = 62% actual WR (off by 23 points). 90+ posterior = 66% actual (off by 26 points). Tara was overconfident on her strongest calls. Now when posterior exceeds 78%, excess is dampened by 0.35x. Effect: 80% becomes 74.8%, 90% becomes 78.3%, 95% becomes 80.1%. Soft enough to preserve direction but prevents the 95%-confidence-coin-flip problem. ENGINE FIX 4 - trending regime penalty. TRENDING UP regime had 33% WR (4W/8L). Added exhaustion detection in trending regimes - when channelPos is at channel extreme (greater than 0.80 for trending UP, less than 0.20 for trending DOWN) or slope is flattening (less than 0.3 bps/bar in trend direction), posterior is pulled back toward 50%. Both conditions = 0.70x multiplier, single condition = 0.85x. INTELLIGENCE - path-aware learning. Loss gradient now modulated by HOW the trade lost. LATE_REVERSAL (was favorable, reversed in last third) gets 30% gradient - signals were right initially. MID_REVERSAL gets 50%. EARLY_PEAK gets 75%. WRONG_FROM_START gets full 100%. WHALE_SPIKE and MACRO_SHOCK keep existing 25% dampening. This prevents Tara from unlearning correct signals just because the market reversed late. NEWS RELOCATION - moved News and Macro from the right panel to the projections column per user feedback about blank space. On desktop it sits between the predictions/signals content and PerformanceCard. Mobile keeps it in the right panel area. SYNC ARCHITECTURE - personal scorecard fully decoupled from cloud sync (local only, never synced). Memory/taraCallLog sync diagnostic shows BTC/ETH split on both LOCAL and CLOUD sides. Memory modal has asset filter row. EXISTING PRESERVED - V9.1.7 phase/session UTC alignment, V9.1.7 LiveTradeCoach trajectory plus peak/trough, V9.1.6 Save/Apply Baseline, V9.1.6 Brain locked vs scanning, V9.1.5 upgraded compact strips, V9.1.4 force-resync MERGE."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -16801,16 +16916,34 @@ function TaraApp(){
     const _struct=analysis?.structAlignment;
     // Cross-TF cross-indicator alignment in the lock direction
     const _structAgreesDir=_struct?.dir===dir&&_struct?.count>=4; // 4 of 6 signals minimum
-    // Channel position alignment (5m): for UP locks, want price in lower half (room to run up).
+    // V6.2.0: Channel position alignment (5m): for UP locks, want price in lower half (room to run up).
     //   For DOWN locks, want price in upper half. Mid-channel = no edge.
+    // V9.2.0: EXHAUSTION GATE added. When channelPos is at extreme contrary to call direction
+    //   (< 0.20 for DOWN, > 0.80 for UP), actively BLOCK structural-led — price is at the
+    //   channel boundary and likely to bounce. This was the core bug in the 50% WR structural
+    //   tier: 9 of 12 losses aligned with trend exhaustion.
     const _tcPosFavors=_tc?.valid&&((dir==='UP'&&_tc.channelPos<=0.45)||(dir==='DOWN'&&_tc.channelPos>=0.55));
+    const _tcExhausted=_tc?.valid&&((dir==='UP'&&_tc.channelPos>=0.85)||(dir==='DOWN'&&_tc.channelPos<=0.15));
+    // V9.2.0: slopeBpsPerBar check — if the 5m trend channel slope is flat or contrary
+    //   to the call direction, structural alignment is weaker than it looks. The slope was
+    //   computed but never read by the engine (identified in the call log analysis).
+    const _tcSlope=Number(_tc?.slopeBpsPerBar)||0;
+    const _tcSlopeAligned=(dir==='UP'&&_tcSlope>0.5)||(dir==='DOWN'&&_tcSlope<-0.5);
+    const _tcSlopeContrary=(dir==='UP'&&_tcSlope<-1.0)||(dir==='DOWN'&&_tcSlope>1.0);
     // Grand trend strength on 5m needs to be meaningful too (not just neutral with tied counts)
     const _gtStrengthOk=_gt?.valid&&_gt.strengthBps>=20;
+    // V9.2.0: GT slope check — same as TC slope. Was ignored, now penalizes contrary slope.
+    const _gtSlope=Number(_gt?.slopeBpsPerBar)||0;
+    const _gtSlopeContrary=(dir==='UP'&&_gtSlope<-1.0)||(dir==='DOWN'&&_gtSlope>1.0);
     // Strong version: 5+ of 6 align AND strength is real (the "perfect alignment" you'd see
     //   on TradingView when all timeframes scream the same direction)
-    const _structStrong=_struct?.dir===dir&&_struct?.count>=5&&_gtStrengthOk;
+    // V9.2.0: Exhaustion blocks even _structStrong — channelPos at boundary = bounce risk.
+    const _structStrong=_struct?.dir===dir&&_struct?.count>=5&&_gtStrengthOk&&!_tcExhausted;
     // Standard structural-led: 4 of 6 align + favorable channel position + meaningful strength
+    // V9.2.0: Added exhaustion block + slope-contrary penalty
     const isStructuralLed=(_structStrong||(_structAgreesDir&&(_tcPosFavors||_gtStrengthOk)))
+      &&!_tcExhausted              // V9.2.0: exhaustion gate
+      &&!(_tcSlopeContrary&&_gtSlopeContrary) // V9.2.0: BOTH slopes contrary = wrong direction
       &&conviction>=6
       &&!tapeSuperOpposes
       &&_strikeReasonable
@@ -20083,6 +20216,13 @@ function TaraApp(){
             {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
 
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
+
+            {/* V9.2.0: News & Macro relocated from RightPanel to here — fills the blank
+                space in the projections column per user feedback. Sits between the
+                predictions/signals content and the PerformanceCard. */}
+            <div className="pt-3 min-w-0 hidden lg:block" style={{borderTop:'1px solid rgba(232,233,228,0.08)'}}>
+              <NewsFeedCard/>
+            </div>
 
             {/* V8.4: Performance card moved here from above-grid stack. mt-auto pins it to
                 the column bottom so it fills the blank space when PredictionContent is short.
