@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.7.0-mission-mode';
+const BASELINE_VERSION='2026.05.07-v9.7.1-flowclose-recdial';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -6630,6 +6630,42 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _cFloor=Math.max(1,Math.round(7*_smult));
           // V7.4: Allowed tiers — what does this dial position permit?
           const _allowedTiers=_d>=80?'super-confluence + structural-led only':_d>=50?'confluence and higher':_d>=30?'any tier (no single-signal)':'all setups';
+          // V9.7.1: RECOMMENDED DIAL — derives from current market state.
+          //   Volume swing logic:
+          //     • EXTREME/WILD volatility → recommend FASTER (lower dial). When
+          //       moves are big and fast, slow patient locks miss them.
+          //     • SLOW/DEAD volatility → recommend MORE PATIENT (higher dial).
+          //       When moves are small, single-signal locks at low dial fire on
+          //       noise. Wait for stronger confluence.
+          //     • WHIPSAW → push patient. Whipsaw windows punish fast dials.
+          //   Output: integer 0-100, snapped to nearest 5.
+          const _rec=(()=>{
+            const _vr=analysis?.velocityRegime||'NORMAL';
+            const _wa=analysis?.windowAmplitude?.label||'NORMAL';
+            const _atr=Number(analysis?.atrBps)||0;
+            let _r=50;
+            if(_vr==='EXTREME')_r-=20;
+            else if(_vr==='FAST')_r-=10;
+            else if(_vr==='SLOW')_r+=15;
+            if(_wa==='WILD')_r-=10;
+            else if(_wa==='DEAD'||_wa==='OPENING')_r+=15;
+            else if(_wa==='WHIPSAW')_r+=20;
+            if(_atr>0&&_atr<6)_r=Math.max(_r,55);
+            if(_atr>30)_r=Math.min(_r,40);
+            return Math.max(0,Math.min(100,Math.round(_r/5)*5));
+          })();
+          const _recDelta=Math.abs(_rec-_d);
+          const _recLabel=_rec<=20?'⚡ FAST':_rec<=40?'fast':_rec<=60?'balanced':_rec<=80?'patient':'🛡 PATIENT';
+          const _recReason=(()=>{
+            const _vr=analysis?.velocityRegime||'NORMAL';
+            const _wa=analysis?.windowAmplitude?.label||'NORMAL';
+            if(_vr==='EXTREME')return 'extreme velocity — slow locks miss';
+            if(_wa==='WHIPSAW')return 'whipsaw — patience pays';
+            if(_wa==='DEAD'||_vr==='SLOW')return 'low movement — wait for confluence';
+            if(_wa==='WILD')return 'wild swings — go fast';
+            if(_vr==='FAST')return 'fast tape — slight speed bias';
+            return 'normal conditions';
+          })();
           return(
             <div className="border-t border-[#E8E9E4]/8 pt-2.5 mt-2.5">
               <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
@@ -6653,6 +6689,25 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 <span className="text-[#E8E9E4]/35">0 · faster</span>
                 <span className="text-[#E8E9E4]/35">100 · patient</span>
               </div>
+              {/* V9.7.1: Recommended dial pill — surfaces only when current dial differs by ≥10 from rec. */}
+              {_recDelta>=10&&(
+                <button
+                  onClick={()=>setSpeedDial(_rec)}
+                  className="mt-1.5 w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded text-[10px] hover:bg-[#E8E9E4]/5 transition-colors"
+                  style={{background:'rgba(229,200,112,0.06)',border:'1px solid rgba(229,200,112,0.20)'}}
+                  title={`Recommended for current ${analysis?.velocityRegime?.toLowerCase?.()||'normal'} ${analysis?.windowAmplitude?.label?.toLowerCase?.()||''} conditions`}
+                >
+                  <span className="text-[#E8E9E4]/55">recommended for now</span>
+                  <span className="flex items-baseline gap-1.5">
+                    <span className="tabular-nums font-bold" style={{color:T2_GOLD}}>{_rec}</span>
+                    <span className="uppercase tracking-wider text-[9px]" style={{color:T2_GOLD,opacity:0.85}}>{_recLabel}</span>
+                    <span className="text-[#E8E9E4]/35">tap →</span>
+                  </span>
+                </button>
+              )}
+              {_recDelta>=10&&(
+                <div className="text-[9px] text-[#E8E9E4]/45 mt-0.5 text-right italic">{_recReason}</div>
+              )}
               {/* V7.4: Effective gates from current dial — live, no need to lock to see */}
               <div className="mt-2 px-2.5 py-2 rounded-md" style={{background:'rgba(232,233,228,0.04)',border:'1px solid rgba(232,233,228,0.08)'}}>
                 <div className="text-[8px] uppercase tracking-[0.18em] text-[#E8E9E4]/45 font-bold mb-1">Effective gates</div>
@@ -21423,6 +21478,42 @@ function TaraApp(){
     return()=>{if(manualCloseTimerRef.current)clearTimeout(manualCloseTimerRef.current);};
   },[showWhaleLog,setShowWhaleLog]);
 
+  // V9.7.1: TAP ANYWHERE TO CLOSE FlowPanel.
+  //   User feedback: when Flow Intelligence auto-opens on whale activity, it stays
+  //   open through the 25s/60s timers even when the user has visually moved on.
+  //   This effect closes it on the first pointer-down anywhere outside the panel.
+  //   Inside the panel: no close (otherwise can't read or interact). The panel's
+  //   own ✕ button remains.
+  useEffect(()=>{
+    if(!showWhaleLog)return;
+    // Wait one frame before arming, otherwise the very click that *opened* the
+    // panel (e.g., the FLOW button) immediately triggers a close.
+    let _armed=false;
+    const _armTimer=setTimeout(()=>{_armed=true;},250);
+    const _onTap=(e)=>{
+      if(!_armed)return;
+      // Check if the click landed inside the panel. The panel is a fixed-position
+      // div with a unique class signature — we walk up the DOM tree looking for it.
+      let _node=e.target;
+      while(_node&&_node!==document.body){
+        if(_node.classList&&_node.classList.contains('fixed')&&_node.classList.contains('top-11')&&_node.classList.contains('right-0')){
+          // Inside the panel — don't close.
+          return;
+        }
+        _node=_node.parentElement;
+      }
+      setShowWhaleLog(false);
+      autoOpenedRef.current=false;
+    };
+    // pointerdown fires before click, on both mouse and touch. Capture phase so
+    // we see it before any inner-element handlers can stop propagation.
+    document.addEventListener('pointerdown',_onTap,true);
+    return()=>{
+      clearTimeout(_armTimer);
+      document.removeEventListener('pointerdown',_onTap,true);
+    };
+  },[showWhaleLog,setShowWhaleLog]);
+
   useEffect(()=>{
     if(!showWhaleAlerts||!discordWebhook)return;
     const fs=flowSignal;
@@ -22446,7 +22537,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.7.0
+              9.7.1
             </span>
           </div>
 
@@ -24393,6 +24484,29 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.7.1 — Flow tap-close + recommended speed dial */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>flow tap-close &middot; recommended dial</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.07</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.7.1</span> &mdash; UX Quick-Wins</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Flow Intelligence tap-close</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">When Flow Intelligence auto-opens on whale activity, it now closes on the first tap anywhere outside the panel. Inside the panel still works for reading and the existing &times; button is unchanged. Existing 25s/60s auto-close timers also still in effect &mdash; this just adds explicit dismissal.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Recommended speed dial</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Speed dial now shows a recommended setting based on current market conditions. Logic:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>EXTREME or FAST velocity</strong> &mdash; recommend faster dial (lower number). When moves are big and quick, slow patient locks miss them.</li>
+                  <li><strong>SLOW velocity or DEAD windows</strong> &mdash; recommend more patient (higher number). Single-signal locks at low dial fire on noise when there&rsquo;s no real movement.</li>
+                  <li><strong>WHIPSAW windows</strong> &mdash; push toward 70+. Whipsaw windows punish fast dials hard.</li>
+                  <li><strong>WILD windows</strong> &mdash; pull toward 40. Big swings reward speed.</li>
+                  <li><strong>ATR overlay</strong> &mdash; very low ATR (&lt;6 bps) floors patience at 55. Very high ATR (&gt;30 bps) ceilings at 40.</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Pill appears under the dial only when current setting differs by &ge;10 from recommendation. Tap to apply. The reason line below explains why this market state suggests this speed.</p>
               </section>
 
               {/* V9.7.0 — Mission Mode */}
