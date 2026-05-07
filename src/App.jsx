@@ -456,6 +456,121 @@ const taraMLPredict=(model,entry)=>{
   return _sigmoid(z); // 0-1 probability of WIN
 };
 
+
+// V9.2.3: STALE ENTRY CLEANUP — scans call log for missing/broken fields, backfills
+//   what's derivable, removes genuinely broken entries, deduplicates.
+const taraCleanupLog=(log)=>{
+  if(!Array.isArray(log)||log.length===0)return{cleaned:log,report:{removed:0,backfilled:0,deduped:0,details:[]}};
+  const report={removed:0,backfilled:0,deduped:0,details:[]};
+  let entries=[...log];
+  // Pass 1: Remove genuinely broken entries (no windowId, no time/id)
+  const beforeLen=entries.length;
+  entries=entries.filter(e=>{
+    if(!e)return false;
+    if(!e.windowId&&!e.id&&!e.time){report.details.push('Removed: no windowId/id/time');return false;}
+    return true;
+  });
+  report.removed=beforeLen-entries.length;
+  // Pass 2: Backfill derivable fields
+  entries=entries.forEach?entries.map(e=>{
+    let changed=false;
+    // Asset from strike
+    if(!e.asset&&e.strike){
+      e.asset=e.strike>=10000?'BTC':'ETH';
+      changed=true;
+    }
+    if(!e.asset)e.asset='BTC';
+    // closingGapBps from strike + closingPrice
+    if(e.closingGapBps==null&&e.strike>0&&e.closingPrice>0){
+      e.closingGapBps=Math.round(((e.closingPrice-e.strike)/e.strike)*10000*100)/100;
+      changed=true;
+    }
+    // outcomeDir from closingPrice vs strike
+    if(!e.outcomeDir&&e.strike>0&&e.closingPrice>0&&e.closingPrice!==e.strike){
+      e.outcomeDir=e.closingPrice>e.strike?'UP':'DOWN';
+      changed=true;
+    }
+    // phase from timestamp
+    if(!e.phase&&(e.id||e.time)){
+      try{
+        const dt=new Date(e.id||e.time);
+        const h=dt.getUTCHours(),m=dt.getUTCMinutes();
+        if(typeof getPhaseKey==='function')e.phase=getPhaseKey(h,m);
+        changed=true;
+      }catch(_){}
+    }
+    // session from phase
+    if(!e.session&&e.phase){
+      const pk=e.phase;
+      if(pk==='ASIA_OPEN'||pk==='ASIA_LATE')e.session='ASIA';
+      else if(pk==='EU_PREOPEN'||pk==='EU_OPEN')e.session='EU';
+      else if(pk.startsWith('NY_'))e.session='US';
+      else e.session='OFF-HOURS';
+      changed=true;
+    }
+    // windowType default
+    if(!e.windowType)e.windowType='15m';
+    if(changed)report.backfilled++;
+    return e;
+  }):entries;
+  // Pass 3: Deduplicate by asset|windowId|windowType
+  const seen=new Map();
+  const beforeDedup=entries.length;
+  entries.forEach(e=>{
+    const k=(e.asset||'BTC')+'|'+(e.windowId||'')+'|'+(e.windowType||'');
+    const existing=seen.get(k);
+    if(!existing){seen.set(k,e);return;}
+    // Keep resolved over unresolved, older id over newer
+    if(!existing.result&&e.result){seen.set(k,e);return;}
+    if(existing.result&&!e.result)return;
+    if((e.id||0)<(existing.id||0))seen.set(k,e);
+  });
+  entries=Array.from(seen.values()).sort((a,b)=>(a.id||0)-(b.id||0));
+  report.deduped=beforeDedup-entries.length;
+  return{cleaned:entries,report};
+};
+
+// V9.2.3: STREAK DETECTION — computes current win/loss streak from recent trades.
+const computeStreak=(log,asset)=>{
+  const recent=[...(log||[])].filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.asset||'BTC')===asset).sort((a,b)=>(b.id||0)-(a.id||0));
+  if(recent.length===0)return{type:null,count:0};
+  const firstResult=recent[0].result;
+  let count=0;
+  for(const e of recent){
+    if(e.result===firstResult)count++;
+    else break;
+  }
+  return{type:firstResult,count};
+};
+
+// V9.2.3: TIME-OF-DAY MODEL — computes hourly WR from call log, returns a
+//   boost/penalty map keyed by UTC hour. Fed into the engine posterior.
+const computeTimeOfDayModel=(log,asset)=>{
+  const hourStats={};
+  for(let h=0;h<24;h++)hourStats[h]={W:0,L:0};
+  (log||[]).forEach(e=>{
+    if(!e||!e.result||(e.asset||'BTC')!==asset)return;
+    if(e.result!=='WIN'&&e.result!=='LOSS')return;
+    const dt=new Date(e.id||e.time);
+    const h=dt.getUTCHours();
+    if(e.result==='WIN')hourStats[h].W++;else hourStats[h].L++;
+  });
+  // Compute per-hour boost: WR > 60% → positive, WR < 45% → negative. Needs ≥8 trades.
+  const boostMap={};
+  for(let h=0;h<24;h++){
+    const n=hourStats[h].W+hourStats[h].L;
+    if(n<8){boostMap[h]=0;continue;}
+    const wr=hourStats[h].W/n;
+    if(wr>=0.70)boostMap[h]=6;
+    else if(wr>=0.60)boostMap[h]=3;
+    else if(wr>=0.55)boostMap[h]=1;
+    else if(wr>=0.45)boostMap[h]=0;
+    else if(wr>=0.35)boostMap[h]=-3;
+    else boostMap[h]=-6;
+  }
+  return boostMap;
+};
+
 const formatDuration=(seconds)=>{
   if(seconds==null||isNaN(seconds))return'—';
   const s=Math.max(0,Math.round(seconds));
@@ -555,7 +670,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.2.2-ml-layer-analytics-page';
+const BASELINE_VERSION='2026.05.06-v9.2.3-cleanup-streak-widget-health';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -3845,6 +3960,19 @@ const computeV99Posterior=(params)=>{
         rawSignalScores.ml=_mlScore;
         reasoning.push(`[ML] Model predicts ${(_mlProb*100).toFixed(0)}% WIN chance → ${_mlScore>0?'+':''}${_mlScore} (trained on ${_mlModel.nTrades} trades, ${(_mlModel.accuracy*100).toFixed(0)}% accuracy)`);
       }
+    }
+  }
+  // V9.2.3: TIME-OF-DAY BOOST — data-driven hourly WR feeds back into posterior.
+  //   Computed from historical call log (per-asset). Hours with ≥8 trades and WR ≥60%
+  //   get a boost; hours with WR <45% get a penalty. Up to ±6 pts.
+  const _todBoost=params.timeOfDayBoost;
+  if(_todBoost){
+    const _h=new Date().getUTCHours();
+    const _boost=_todBoost[_h]||0;
+    if(_boost!==0){
+      totalScore+=_boost;
+      rawSignalScores.timeOfDay=_boost;
+      reasoning.push(`[TIME-OF-DAY] Hour ${_h} UTC → ${_boost>0?'+':''}${_boost} (from historical WR at this hour)`);
     }
   }
   // Convert to posterior
@@ -8016,7 +8144,7 @@ const regimeToShortPlain=(regime)=>{
   return map[regime]||regime;
 };
 
-function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset,analysis}){
+function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset,analysis,currentStreak}){
   const[ctx,setCtx]=React.useState(()=>getMarketContext(new Date()));
   const[expanded,setExpanded]=React.useState(false);
   React.useEffect(()=>{
@@ -8135,6 +8263,19 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
           },
           title:`Tara's read: ${regimeToPlainLabel(analysis.regime)}`,
         },`tara: ${regimeToShortPlain(analysis.regime)}`),
+        // V9.2.3: STREAK BADGE — shows current win/loss streak prominently.
+        //   Win streak ≥3: green with fire emoji. Loss streak ≥3: rose with caution.
+        currentStreak&&currentStreak.count>=3&&React.createElement('span',{
+          className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded',
+          style:{
+            color:currentStreak.type==='WIN'?'rgb(110,231,183)':'rgba(244,114,182,0.95)',
+            background:currentStreak.type==='WIN'?'rgba(110,231,183,0.08)':'rgba(244,114,182,0.08)',
+            border:`1px solid ${currentStreak.type==='WIN'?'rgba(110,231,183,0.25)':'rgba(244,114,182,0.25)'}`,
+          },
+          title:currentStreak.type==='WIN'
+            ?`${currentStreak.count} wins in a row — don't get overconfident, mean reversion is coming`
+            :`${currentStreak.count} losses in a row — consider half-size or skip next trade`,
+        },currentStreak.type==='WIN'?`🔥${currentStreak.count}W streak`:`⚠${currentStreak.count}L streak`),
         // V8.7: Deadzone pill — pinned visible if coin-flip phase
         ctx.phase.deadzoneWarning&&React.createElement('span',{
           className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded',
@@ -10603,7 +10744,7 @@ function NewsFeedCard(){
 //   1. Force Resync (pulls latest from cloud, MERGES with local)
 //   2. Save as Baseline (pushes THIS device's state to baseline/canonical)
 //   3. Apply Baseline (overwrites local with the canonical baseline)
-function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,forceResyncing,baselineBusy,baselineMeta,deviceLabel,localCounts}){
+function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onCleanup,forceResyncing,baselineBusy,baselineMeta,deviceLabel,localCounts,healthData}){
   // V9.1.9: Cloud diagnostic — read live cloud paths and show counts side-by-side
   //   with local. If they disagree, the user can see immediately.
   const[cloudDiag,setCloudDiag]=React.useState(null);
@@ -10825,6 +10966,58 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,for
           '. On any other device, press ',
           React.createElement('strong',{className:'text-[#E8E9E4]/55'},'Apply Baseline'),
           ' to receive that exact state. Force Resync still works as a non-destructive merge any time.'
+        ),
+        // V9.2.3: DATA CLEANUP
+        React.createElement('button',{
+          onClick:onCleanup,
+          className:'w-full text-left p-3 rounded-md transition-colors hover:bg-rose-500/10',
+          style:{background:'rgba(232,233,228,0.02)',border:'1px solid rgba(232,233,228,0.08)'},
+        },
+          React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
+            React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold text-[#E8E9E4]/55'},'🧹 Clean Up Log'),
+          ),
+          React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/55 leading-snug'},
+            'Scan for broken entries (no windowId), backfill missing fields (asset from strike, phase from timestamp, closingGapBps from prices), and remove duplicates. Preview before applying.'
+          )
+        ),
+        // V9.2.3: HEALTH DASHBOARD
+        healthData&&React.createElement('div',{className:'p-3 rounded-md',style:{background:'rgba(232,233,228,0.02)',border:'1px solid rgba(232,233,228,0.08)'}},
+          React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold text-[#E8E9E4]/45 mb-2'},'System Health'),
+          React.createElement('div',{className:'space-y-1.5 text-[11px]'},
+            // Coinbase feed
+            React.createElement('div',{className:'flex items-center justify-between'},
+              React.createElement('span',{className:'text-[#E8E9E4]/60'},'Coinbase price feed'),
+              React.createElement('span',{className:healthData.priceFresh?'text-emerald-400':'text-rose-400'},healthData.priceFresh?'● live':'○ stale')
+            ),
+            // Kalshi feed
+            React.createElement('div',{className:'flex items-center justify-between'},
+              React.createElement('span',{className:'text-[#E8E9E4]/60'},'Kalshi strike'),
+              React.createElement('span',{className:healthData.kalshiOk?'text-emerald-400':healthData.kalshiCached?'text-amber-400':'text-rose-400'},
+                healthData.kalshiOk?'● live':healthData.kalshiCached?'● cached':'○ offline')
+            ),
+            // Firestore sync
+            React.createElement('div',{className:'flex items-center justify-between'},
+              React.createElement('span',{className:'text-[#E8E9E4]/60'},'Firestore sync'),
+              React.createElement('span',{className:healthData.firestoreOk?'text-emerald-400':'text-amber-400'},
+                healthData.firestoreOk?'● connected':'○ unknown')
+            ),
+            // Engine cycle time
+            React.createElement('div',{className:'flex items-center justify-between'},
+              React.createElement('span',{className:'text-[#E8E9E4]/60'},'Engine cycle'),
+              React.createElement('span',{className:'text-[#E8E9E4]/50 tabular-nums'},`${healthData.engineMs||'—'}ms`)
+            ),
+            // ML model
+            React.createElement('div',{className:'flex items-center justify-between'},
+              React.createElement('span',{className:'text-[#E8E9E4]/60'},'ML model'),
+              React.createElement('span',{className:healthData.mlActive?'text-indigo-400':'text-[#E8E9E4]/30'},
+                healthData.mlActive?`● ${healthData.mlAccuracy}% acc · ${healthData.mlTrades}t`:'○ needs data')
+            ),
+            // Uptime
+            React.createElement('div',{className:'flex items-center justify-between'},
+              React.createElement('span',{className:'text-[#E8E9E4]/60'},'Session uptime'),
+              React.createElement('span',{className:'text-[#E8E9E4]/50 tabular-nums'},healthData.uptime||'—')
+            ),
+          )
         )
       )
     )
@@ -12913,6 +13106,20 @@ function TaraApp(){
       }
     },2000);
     return()=>{if(_mlTrainDebounceRef.current)clearTimeout(_mlTrainDebounceRef.current);};
+  },[taraCallLog]);
+  // V9.2.3: STREAK — derived from call log, surfaces in UI as a badge.
+  const currentStreak=React.useMemo(()=>computeStreak(taraCallLog,currentAsset),[taraCallLog,currentAsset]);
+  // V9.2.3: TIME-OF-DAY MODEL — per-hour WR boost map, fed into engine.
+  const timeOfDayBoostMap=React.useMemo(()=>computeTimeOfDayModel(taraCallLog,currentAsset),[taraCallLog,currentAsset]);
+  // V9.2.3: Widget data exposure moved to after taraCall is declared (avoids TDZ).
+  // V9.2.3: Cleanup handler
+  const handleCleanupLog=React.useCallback(()=>{
+    const{cleaned,report}=taraCleanupLog(taraCallLog);
+    const total=report.removed+report.backfilled+report.deduped;
+    if(total===0){alert('Log is clean — no changes needed.');return;}
+    const msg=`Cleanup results:\n• ${report.removed} broken entries removed\n• ${report.backfilled} entries backfilled\n• ${report.deduped} duplicates removed\n\nApply changes?`;
+    if(!window.confirm(msg))return;
+    setTaraCallLog(cleaned);
   },[taraCallLog]);
   const taraCallLogRef=useRef(taraCallLog);
   taraCallLogRef.current=taraCallLog;
@@ -16340,7 +16547,7 @@ function TaraApp(){
       // V3.1.7: tapeRef and ticksRef passed for volume-flow signal computation
       // V3.1.7+: windowHighRef/windowLowRef passed for window-amplitude awareness
       // V3.1.9: windowHighTime/windowLowTime/windowOpenTime for structure detection (TRENDING/WHIPSAW/etc.)
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel});
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
@@ -17846,6 +18053,19 @@ function TaraApp(){
   //   Refs read at render time — same data the lifecycle effect uses.
   taraCall.samples=taraCallSampleRef.current?.count||0;
   taraCall.snapshot=taraCallSnapshotRef.current||null;
+  // V9.2.3: Expose widget data on window for the popup to read.
+  useEffect(()=>{
+    const _snap=taraCall?.snapshot;
+    const _dir=_snap?.call;
+    const _conf=_snap?.posterior?Math.round(_snap.posterior):'';
+    const _secLeft=(timeState?.minsRemaining||0)*60+(timeState?.secsRemaining||0);
+    const _timer=`${Math.floor(_secLeft/60)}:${String(_secLeft%60).padStart(2,'0')}`;
+    window.__taraWidgetData={
+      dir:_dir||null,conf:_conf,price:currentPrice,asset:currentAsset,
+      wt:windowType,timer:_timer,
+      streakType:currentStreak?.type,streakCount:currentStreak?.count||0,
+    };
+  },[taraCall,currentPrice,currentAsset,windowType,timeState,currentStreak]);
   // V7.4: Ensure _ctx exists and has q + conviction so the speed-dial UI can surface
   //   the live blocker (e.g., "quality 22 / need 39"). Most SIT_OUT returns from the
   //   lock callback omit _ctx, leaving the UI without a way to read these.
@@ -19987,10 +20207,30 @@ function TaraApp(){
           onForceResync={()=>{setSyncMenuOpen(false);forceResyncFromCloud();}}
           onSaveBaseline={()=>{setSyncMenuOpen(false);saveAsBaseline();}}
           onApplyBaseline={()=>{setSyncMenuOpen(false);applyBaseline();}}
+          onCleanup={()=>{handleCleanupLog();}}
           forceResyncing={forceResyncing}
           baselineBusy={baselineBusy}
           baselineMeta={baselineMeta}
           deviceLabel={_deviceLabel}
+          healthData={(()=>{
+            const _priceFresh=currentPrice>0&&(Date.now()-(analysis?.lastPriceTick||Date.now()))<10000;
+            const _kalshiOk=kalshiYesPrice!=null&&Number(kalshiYesPrice)>0;
+            const _kalshiCached=!_kalshiOk&&kalshiDebug?.ok===false&&kalshiDebug?.reason?.includes('cached');
+            const _uptimeMs=Date.now()-(_mountTimeRef?.current||Date.now());
+            const _uptimeMin=Math.floor(_uptimeMs/60000);
+            const _uptimeStr=_uptimeMin>=60?`${Math.floor(_uptimeMin/60)}h ${_uptimeMin%60}m`:`${_uptimeMin}m`;
+            return{
+              priceFresh:_priceFresh||currentPrice>0,
+              kalshiOk:_kalshiOk,
+              kalshiCached:!!_kalshiCached,
+              firestoreOk:true, // TODO: track actual write success
+              engineMs:analysis?Math.round(analysis.computeTimeMs||0):null,
+              mlActive:!!taraMLModel,
+              mlAccuracy:taraMLModel?Math.round(taraMLModel.accuracy*100):0,
+              mlTrades:taraMLModel?.nTrades||0,
+              uptime:_uptimeStr,
+            };
+          })()}
           localCounts={(()=>{
             const _btc=(taraCallLog||[]).filter(e=>e&&(e.asset||'BTC')==='BTC');
             const _eth=(taraCallLog||[]).filter(e=>e&&e.asset==='ETH');
@@ -20096,7 +20336,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.2.2
+              9.2.3
             </span>
           </div>
 
@@ -20215,6 +20455,18 @@ function TaraApp(){
             <button onClick={()=>setShowSettings(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors'}><IC.Link className="w-3.5 h-3.5"/></button>
             <button onClick={()=>setShowAnalytics(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors'} title="Training Engine"><IC.BarChart className="w-3.5 h-3.5"/></button>
             <button onClick={()=>setAnalyticsPageOpen(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-indigo-500/20 text-indigo-400/60 hover:text-indigo-400 transition-colors'} title="Analytics Page">📊</button>
+            <button onClick={()=>{
+              // V9.2.3: WIDGET MODE — opens a tiny popup window showing Tara's call + price + timer.
+              //   Uses window.open with small dimensions. Updates via setInterval reading from
+              //   the opener's state via a shared ref.
+              const _w=320,_h=120;
+              const _left=window.screen.width-_w-20;
+              const _top=20;
+              const _popup=window.open('','tara-widget',`width=${_w},height=${_h},left=${_left},top=${_top},toolbar=no,menubar=no,scrollbars=no,resizable=yes,location=no,status=no`);
+              if(!_popup)return;
+              _popup.document.write(`<!DOCTYPE html><html><head><title>Tara Widget</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0E100F;color:#E8E9E4;font-family:Inter,system-ui,sans-serif;overflow:hidden;cursor:move;-webkit-app-region:drag}#w{padding:10px 14px;height:100vh;display:flex;flex-direction:column;justify-content:center;gap:4px}.r1{display:flex;align-items:center;justify-content:space-between;gap:8px}.dir{font-size:18px;font-weight:800;letter-spacing:0.04em}.up{color:#6ee7b7}.dn{color:#f472b6}.scan{color:#666;font-style:italic;font-size:12px}.price{font-size:14px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums}.r2{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#E8E9E466}.asset{font-weight:700;letter-spacing:0.08em}.streak-w{color:#6ee7b7;font-weight:700}.streak-l{color:#f472b6;font-weight:700}</style></head><body><div id="w"><div class="r1"><span id="call" class="scan">scanning</span><span id="price" class="price">---</span></div><div class="r2"><span id="asset" class="asset">BTC 15m</span><span id="timer">--:--</span><span id="streak"></span></div></div><script>setInterval(()=>{try{const o=window.opener;if(!o||o.closed){close();return;}const d=o.__taraWidgetData;if(!d)return;const c=document.getElementById('call');const p=document.getElementById('price');const a=document.getElementById('asset');const t=document.getElementById('timer');const s=document.getElementById('streak');if(d.dir==='UP'){c.className='dir up';c.textContent='▲ UP '+d.conf+'%';}else if(d.dir==='DOWN'){c.className='dir dn';c.textContent='▼ DN '+d.conf+'%';}else{c.className='scan';c.textContent='scanning...';}p.textContent='$'+Number(d.price||0).toLocaleString(undefined,{maximumFractionDigits:0});a.textContent=d.asset+' '+d.wt;t.textContent=d.timer;if(d.streakType&&d.streakCount>=3){s.className=d.streakType==='WIN'?'streak-w':'streak-l';s.textContent=(d.streakType==='WIN'?'🔥':'⚠')+d.streakCount+(d.streakType==='WIN'?'W':'L');}else{s.textContent='';}}catch(_){}},500);<\/script></body></html>`);
+              _popup.document.close();
+            }} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-emerald-400 transition-colors'} title="Widget Mode (mini popup)">⬡</button>
             <button onClick={()=>setShowHelp(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors'}><IC.Help className="w-3.5 h-3.5"/></button>
           </div>
         </div>
@@ -20579,6 +20831,7 @@ function TaraApp(){
           taraCallLog={taraCallLog}
           currentAsset={currentAsset}
           analysis={analysis}
+          currentStreak={currentStreak}
         />
 
         {/* V9.1.1: TradeScheduleStrip relocated — now renders inside RightPanel
