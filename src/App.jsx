@@ -15103,7 +15103,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.2.0 online. Major update - Tier 1 engine overhaul plus Tier 3 intelligence plus Tier 4 polish. ENGINE FIX 1 - timeframe weighting. Was equal weight (1m = 5m = 15m in struct alignment count). 1m noise would flip a 5/6 to 4/6 or push a neutral 1m to create a false alignment. Now weighted: 1m = 0.5, 5m = 1.0, 15m = 1.5. Max alignment still 6.0 but 15m carries 3x the weight of 1m. User's TradingView workflow trusts higher TFs - now Tara does too. ENGINE FIX 2 - exhaustion gate plus slope feed. The structural-led tier (50% WR, 24 trades - basically a coin flip) had 9 of 12 losses aligned with trend exhaustion. Two fixes. Added _tcExhausted gate - when channelPos is at extreme contrary to call direction (less than 0.15 for DOWN, greater than 0.85 for UP), structural-led is blocked entirely. Even _structStrong (5/6 alignment) cannot override the exhaustion gate. Added slopeBpsPerBar feed - was computed by both FTC and FGT but NEVER read by the engine. Now feeds up to plus or minus 6 points into posterior. TC and GT slopes both contribute. Aligned slope boosts, contrary slope penalizes. If BOTH slopes are contrary, structural-led tier is blocked. ENGINE FIX 3 - calibration dampening. Call log showed 80-89% posterior = 62% actual WR (off by 23 points). 90+ posterior = 66% actual (off by 26 points). Tara was overconfident on her strongest calls. Now when posterior exceeds 78%, excess is dampened by 0.35x. Effect: 80% becomes 74.8%, 90% becomes 78.3%, 95% becomes 80.1%. Soft enough to preserve direction but prevents the 95%-confidence-coin-flip problem. ENGINE FIX 4 - trending regime penalty. TRENDING UP regime had 33% WR (4W/8L). Added exhaustion detection in trending regimes - when channelPos is at channel extreme (greater than 0.80 for trending UP, less than 0.20 for trending DOWN) or slope is flattening (less than 0.3 bps/bar in trend direction), posterior is pulled back toward 50%. Both conditions = 0.70x multiplier, single condition = 0.85x. INTELLIGENCE - path-aware learning. Loss gradient now modulated by HOW the trade lost. LATE_REVERSAL (was favorable, reversed in last third) gets 30% gradient - signals were right initially. MID_REVERSAL gets 50%. EARLY_PEAK gets 75%. WRONG_FROM_START gets full 100%. WHALE_SPIKE and MACRO_SHOCK keep existing 25% dampening. This prevents Tara from unlearning correct signals just because the market reversed late. NEWS RELOCATION - moved News and Macro from the right panel to the projections column per user feedback about blank space. On desktop it sits between the predictions/signals content and PerformanceCard. Mobile keeps it in the right panel area. SYNC ARCHITECTURE - personal scorecard fully decoupled from cloud sync (local only, never synced). Memory/taraCallLog sync diagnostic shows BTC/ETH split on both LOCAL and CLOUD sides. Memory modal has asset filter row. EXISTING PRESERVED - V9.1.7 phase/session UTC alignment, V9.1.7 LiveTradeCoach trajectory plus peak/trough, V9.1.6 Save/Apply Baseline, V9.1.6 Brain locked vs scanning, V9.1.5 upgraded compact strips, V9.1.4 force-resync MERGE."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.5.0 online. Three releases stacked since 9.2.3 — auto-execution, multi-asset parallel, data-driven engine fixes, and now opponent modeling plus per-regime calibration. KALSHI AUTO-EXECUTION (9.3.0). RSA-PSS signed orders through the existing /api/kalshi proxy. When Tara locks UP or DOWN, she places a limit order on Kalshi automatically. Defaults are conservative — auto-exec OFF, dry-run ON, max bet 25 dollars per trade, daily loss cap 50 dollars, cooldown after 3 losses for 20 min. Kill switch in three places: top-bar pill, Live Trade Coach status strip, settings modal. Status pill shows on every order: KALSHI placing then submitted then resting then filled. Take-profit auto-exit at 85 cents offer. Window-roll cleanup cancels resting orders cleanly. Daily P and L counter rolls at UTC midnight. MULTI-ASSET PARALLEL ENGINE (9.3.0). Shadow Tara upgraded from 5-second lean indicator to 2-second sample-based soft-lock engine. Captures full Kalshi market info per asset — ticker, close time, YES price. Commits direction at 2 consecutive aligned samples with conviction at least 10 points. Cross-asset correlation feeds the primary engine in real time, no broadcast delay. New Dual-Asset Call Strip shows BTC and ETH side by side — click the inactive side to swap as primary. Active asset stays the live engine, inactive asset gets the parallel shadow. Auto-execution still primary-only for now. DATA-DRIVEN ENGINE FIXES (9.4.0). Three fixes from the 4-day 185-trade audit. Asymmetric tape-led floor — tape-led DOWN at 69 percent stays as is, tape-led UP now requires tape buy at least 75 percent, conviction at least 8 points, FGT magnitude at least 1.5 over 4. Data showed tape-led UP was 20 percent WR, tape-led DOWN was 69 percent — tape confirms fades better than pumps. Tier-aware SHORT SQUEEZE UP gates — was the new weak spot at 56 percent. Now structural-led and tape-led need FGT 2.5 over 4, super-confluence needs 3 over 4. Single tier in this regime stays at 64 percent unchanged. Marginal-zone caution — single tier in low ATR low quality windows attaches a caution chip per the cautions-instead-of-skips mandate. Still calls directionally, but surfaces the warning so user can size down or skip. OPPONENT MODELING (9.5.0). New Kalshi-spot divergence detector. When Kalshi YES moves at least 4 cents over 60 seconds while spot stays within 4 bps — that is smart-money positioning ahead of a move. New chip on the call card — kalshi-lead with the score, color shifts to amber when Kalshi positions AGAINST the current call as a warning. Score caps at 10 points so the signal cant dominate live tape or structure — its leading not primary. Trade log stamps kalshiLeadAtLock per trade so we can audit aligned versus non-aligned WR after 30-plus examples. PER-REGIME PER-DIRECTION CALIBRATION (9.5.0). Pulls the posterior toward observed historical WR for the current regime-direction pair. Sample-size-weighted blend — n=10 means 10 percent blend, n=80-plus means 45 percent blend. Engine never overridden — live signal always majority. Different from the old regimeDirConfBoost which only adjusted the displayed confidence number 5 points at the end. This adjusts the actual posterior, which propagates into lock decisions and gate logic. For your data — TRENDING DOWN DOWN at 67.5 percent gets calibrated, RANGE-CHOP at 82 percent gets a confidence lift, SHORT SQUEEZE UP at 56 percent gets dampened harder. Brain view shows REGIME-CAL lines on locks where it fires. PRESERVED — V9.2.3 engine overhaul (TF weighting, exhaustion gate, slope feed, calibration dampening, trending regime penalty, path-aware learning, cross-asset correlation, ML layer, time-of-day model), V9.1.7 LiveTradeCoach trajectory plus peak/trough, V9.1.6 Save/Apply Baseline, all V9.1.x sync architecture and plain-language work."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -21439,7 +21439,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.2.3
+              9.5.0
             </span>
           </div>
 
@@ -23372,6 +23372,70 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.5.0 — Opponent modeling + per-regime calibration */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>kalshi-spot divergence &middot; per-regime posterior calibration</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.07</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.5.0</span> &mdash; Opponent Modeling + Regime Calibration</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Opponent modeling (Kalshi-spot divergence)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">New <code className="text-[10px] bg-[#0E100F] px-1">computeKalshiLead</code> helper detects when Kalshi YES price moves materially (&ge;4&cent; over 60s) without spot confirming (|spot&Delta;| &le;4 bps). Interpretation: smart money positioning ahead of a move. Score caps at 10pt so the signal can't dominate live tape/structure &mdash; it's a leading indicator, not primary.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Engine signal</strong> &mdash; adds to <code className="text-[10px] bg-[#0E100F] px-1">rawSignalScores.kalshiLead</code> and <code className="text-[10px] bg-[#0E100F] px-1">totalScore</code>. Reasoning surfaces in Brain view.</li>
+                  <li><strong>UI chip</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">&#x25B2; kalshi-lead +7</code> next to tier chips. Emerald when aligned with call, amber when AGAINST (warning), teal when standalone.</li>
+                  <li><strong>Audit trail</strong> &mdash; every locked trade stamps <code className="text-[10px] bg-[#0E100F] px-1">kalshiLeadAtLock</code>. After 30+ stamped trades, audit "do aligned signals win more?" and bump weight if yes.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Per-regime &times; direction posterior calibration</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">New <code className="text-[10px] bg-[#0E100F] px-1">buildRegimeDirCalibration</code> helper. For each (regime, dir) pair with n&ge;10 trades, blends posterior toward observed historical WR. Weight ramps 0.10 at n=10 to 0.45 cap at n=80+. Engine's live signal always retains majority say.</p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Different from the existing <code className="text-[10px] bg-[#0E100F] px-1">regimeDirConfBoost</code> which only adjusts the displayed confidence number &plusmn;5pt at the very end. This adjusts the actual posterior, propagating into lock decisions, gate logic, and call confidence. Brain view shows <code className="text-[10px] bg-[#0E100F] px-1">[REGIME-CAL]</code> lines on locks where it fires.</p>
+              </section>
+
+              {/* V9.4.0 — Data-driven engine fixes */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>asymmetric tape-led &middot; ss&times;up gates &middot; marginal caution</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.07</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.4.0</span> &mdash; Data-Driven Engine Fixes</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Three precision patches from the 4-day, 185-trade WR audit (overall WR 67% vs 64% baseline).</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Asymmetric tape-led floor</strong> &mdash; tape-led &times; UP was 20% WR (n=5), tape-led &times; DOWN was 69% (n=26). Tape confirms fades better than pumps. UP now requires <code className="text-[10px] bg-[#0E100F] px-1">tapeBuyPct &ge; 75</code>, <code className="text-[10px] bg-[#0E100F] px-1">conviction &ge; 8</code>, <code className="text-[10px] bg-[#0E100F] px-1">fgtAbs &ge; 1.5</code>. DOWN unchanged.</li>
+                  <li><strong>SHORT SQUEEZE &times; UP gates</strong> &mdash; new weakest cluster at 56% WR (n=40), now that V9.2.3 fixed TRENDING UP. Tier-aware FGT requirements: structural-led/tape-led need &ge;2.5/4, super-confluence needs &ge;3.0/4. Single tier (currently fine at 64%) unchanged.</li>
+                  <li><strong>Marginal-zone caution</strong> &mdash; |gap|&lt;10bps trades hit 59% WR; clean-move trades (|gap|&ge;30) hit 86%. Single-tier in low-vol low-q now attaches a caution string per the cautions-instead-of-skips mandate. Still calls directionally, but the warning chip surfaces so user can size down.</li>
+                </ul>
+              </section>
+
+              {/* V9.3.0 — Kalshi auto-execution + multi-asset parallel engine */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>kalshi auto-exec &middot; multi-asset parallel &middot; dual-call ui</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.07</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.3.0</span> &mdash; Auto-Execution + Multi-Asset Parallel</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Kalshi auto-execution (primary asset)</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">RSA-PSS signed limit orders through the existing <code className="text-[10px] bg-[#0E100F] px-1">/api/kalshi/*</code> proxy. When Tara locks UP/DOWN, fires an order automatically.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Defaults conservative</strong> &mdash; auto-exec OFF, dry-run ON, max bet $25, daily loss cap $50, cooldown after 3 losses for 20 min</li>
+                  <li><strong>Kill switch in 3 places</strong> &mdash; settings modal, LiveTradeCoach status strip, top-bar pill (which opens settings)</li>
+                  <li><strong>Status pill</strong> shows lifecycle: <code className="text-[10px] bg-[#0E100F] px-1">placing &rarr; submitted &rarr; resting &rarr; filled &rarr; exited</code></li>
+                  <li><strong>Take-profit auto-exit</strong> at 85&cent; offer (configurable). Window-roll cleanup cancels resting orders cleanly.</li>
+                  <li><strong>Daily P&amp;L counter</strong> auto-rolls at UTC midnight. Loss-streak cooldown triggers after the configured threshold.</li>
+                  <li><strong>Localstorage only</strong> &mdash; credentials never sync to Firestore</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Multi-asset parallel engine</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Shadow Tara upgraded from 5s lean indicator to 2s sample-based soft-lock engine. Captures full Kalshi market info per asset (ticker, close time, YES price). Commits direction at 2 consecutive aligned samples with conviction &ge;10pt.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>DualAssetCallStrip</strong> &mdash; new side-by-side BTC + ETH call card. Click the inactive side to swap as primary.</li>
+                  <li><strong>Real-time cross-asset correlation</strong> &mdash; shadow loop now writes <code className="text-[10px] bg-[#0E100F] px-1">_otherAssetRef</code> directly. Single-tab users get cross-asset signal without needing two tabs open.</li>
+                  <li><strong>Auto-execution still primary-only for now</strong> &mdash; shadow auto-exec is the next deliverable</li>
+                </ul>
               </section>
 
               {/* V9.2.0 — Sync architecture clarified · Asset split */}
