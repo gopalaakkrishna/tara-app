@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.7.3-tz-consistency';
+const BASELINE_VERSION='2026.05.07-v9.7.4-entry-ladder';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -7838,6 +7838,54 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             ),
           ),
         ),
+        // ── V9.7.4: SMART ENTRY LADDER ────────────────────────────────────
+        React.createElement('details',{className:'mb-3 rounded',style:{background:'rgba(110,231,183,0.04)',border:'1px solid rgba(110,231,183,0.16)'}},
+          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#6EE7B7'}},
+            React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Smart entry ladder'),
+            React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45'},'capture spread'),
+          ),
+          React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3'},
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55 leading-relaxed'},
+              'When enabled, posts limit BELOW current offer to capture the spread. If unfilled within the step time, cancels and re-posts at offer. After max steps, takes the market. Saves 1-2¢ per contract on most fills, occasionally misses fast-moving setups entirely. Disabled in dry-run.',
+            ),
+            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded',style:{background:'rgba(110,231,183,0.06)'}},
+              React.createElement('div',null,
+                React.createElement('div',{className:'text-[11px] font-bold text-white'},'Enable entry ladder'),
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Off = current behaviour (place at offer + slippage, fills immediately)'),
+              ),
+              React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.entryLadderEnabled,onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryLadderEnabled:e.target.checked})),className:'ml-2'}),
+            ),
+            autoExecSettings?.entryLadderEnabled&&React.createElement('div',{className:'grid grid-cols-3 gap-2'},
+              React.createElement('label',{className:'block'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Undercut (¢)'),
+                React.createElement('input',{
+                  type:'number',min:1,max:20,step:1,value:autoExecSettings?.entryLadderUndercutCents||2,
+                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryLadderUndercutCents:Math.max(1,Math.min(20,_num(e.target.value,2)))})),
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                }),
+              ),
+              React.createElement('label',{className:'block'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Step time (s)'),
+                React.createElement('input',{
+                  type:'number',min:2,max:60,step:1,value:autoExecSettings?.entryLadderStepSec||8,
+                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryLadderStepSec:Math.max(2,Math.min(60,_num(e.target.value,8)))})),
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                }),
+              ),
+              React.createElement('label',{className:'block'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Max steps'),
+                React.createElement('input',{
+                  type:'number',min:1,max:5,step:1,value:autoExecSettings?.entryLadderMaxSteps||2,
+                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryLadderMaxSteps:Math.max(1,Math.min(5,_num(e.target.value,2)))})),
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                }),
+              ),
+            ),
+            autoExecSettings?.entryLadderEnabled&&React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 leading-relaxed'},
+              'Defaults: undercut by 2¢, wait 8s per step, max 2 steps then take market. Example: offer 60¢ → place at 58¢ for 8s → if unfilled, place at 60¢ for 8s → if unfilled, take market at 62¢ (60 + 2 slippage).',
+            ),
+          ),
+        ),
         // ── V9.6.0: ADVANCED EXIT LOGIC ───────────────────────────────────
         React.createElement('details',{className:'mb-3 rounded',style:{background:'rgba(244,114,182,0.04)',border:'1px solid rgba(244,114,182,0.16)'}},
           React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'rgba(244,114,182,0.95)'}},
@@ -14278,8 +14326,18 @@ function TaraApp(){
         sizingMode:v.sizingMode||'fixed',
         confidenceLowBet:Number(v.confidenceLowBet)>0?Number(v.confidenceLowBet):5,
         confidenceHighBet:Number(v.confidenceHighBet)>0?Number(v.confidenceHighBet):25,
+        // ── V9.7.4: SMART ENTRY LADDER ────────────────────────────────────
+        // When enabled, posts limit BELOW current offer to capture spread.
+        // If unfilled after `entryLadderStepSec`, cancels and re-posts closer
+        // to the offer. After `entryLadderMaxSteps` steps, takes the market
+        // (current offer + slippage). Net effect: most fills save 1-2¢/contract,
+        // a small minority of fast-moving setups never fill at all.
+        entryLadderEnabled:!!v.entryLadderEnabled, // default OFF — opt-in
+        entryLadderUndercutCents:Number(v.entryLadderUndercutCents)>0?Number(v.entryLadderUndercutCents):2, // start 2¢ below
+        entryLadderStepSec:Number(v.entryLadderStepSec)>=2?Number(v.entryLadderStepSec):8, // wait 8s per step
+        entryLadderMaxSteps:Number(v.entryLadderMaxSteps)>=1?Number(v.entryLadderMaxSteps):2, // 2 ladder rungs before market
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25};}
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
@@ -19904,9 +19962,21 @@ function TaraApp(){
     const _yes=Number(kalshiYesPrice);
     if(!Number.isFinite(_yes)||_yes<=0||_yes>=100)return;
     const _dir=_lock.dir;
-    // Limit price = current offer + slippage tolerance, clamped to 1-99
     const _dirCents=_dir==='UP'?_yes:(100-_yes);
-    const _limit=Math.max(1,Math.min(99,Math.round(_dirCents+autoExecSettings.slippageCents)));
+    // V9.7.4: SMART ENTRY LADDER — opt-in. When enabled, places limit BELOW
+    //   current offer to capture spread; ladder effect bumps it up over time.
+    //   When disabled (default), behaves exactly as V9.6.0: places at offer+slippage
+    //   for an immediate marketable-limit fill.
+    let _limit, _isLadderInitial=false;
+    if(autoExecSettings.entryLadderEnabled){
+      // Step 0: undercut the offer by entryLadderUndercutCents
+      const _undercut=Math.max(1,Math.min(20,Number(autoExecSettings.entryLadderUndercutCents)||2));
+      _limit=Math.max(1,Math.min(99,Math.round(_dirCents-_undercut)));
+      _isLadderInitial=true;
+    }else{
+      // Original behaviour: at offer + slippage (marketable limit, fills immediately)
+      _limit=Math.max(1,Math.min(99,Math.round(_dirCents+autoExecSettings.slippageCents)));
+    }
     // Convert back to the YES-axis for the order builder (it expects YES price 1-99 always)
     const _yesLimitForBuilder=_dir==='UP'?_limit:(100-_limit);
     // V9.6.0: POSITION SIZING — choose bet based on sizingMode
@@ -19970,6 +20040,11 @@ function TaraApp(){
       betDollars:_bet,sizingMode:_missionInfo?'mission':autoExecSettings.sizingMode,
       tierRank:_tierRank,convictionAtLock:_conviction,
       missionInfo:_missionInfo, // null when mission inactive
+      // V9.7.4: ladder tracking. Step 0 = initial undercut, step N = final market take.
+      ladderEnabled:!!autoExecSettings.entryLadderEnabled,
+      ladderStep:_isLadderInitial?0:null,
+      ladderStartedAt:_isLadderInitial?Date.now():null,
+      ladderTargetCents:_dirCents, // remember the offer at lock time for ladder math
     });
     (async()=>{
       try{
@@ -20063,6 +20138,118 @@ function TaraApp(){
     const iv=setInterval(_tick,2000);
     return()=>{_stopped=true;clearInterval(iv);};
   },[autoOrderState?.orderId,autoOrderState?.status,autoOrderState?.dryRun,kalshiCreds,killSwitchEngaged]);
+
+  // ── V9.7.4: ENTRY LADDER LIFECYCLE EFFECT ────────────────────────────────
+  // Watches resting auto-exec orders that were placed via the entry ladder
+  // (`ladderEnabled === true`). When the current step has been resting for
+  // `entryLadderStepSec`, cancel + replace at the next price tier:
+  //   step 0 → step 1: cancel undercut limit, replace at current offer
+  //   step 1 → step 2: cancel limit, take market (current offer + slippage)
+  //
+  // Honest limitations:
+  //   - Cancel-then-place is two separate API calls; if the cancel succeeds but
+  //     the replace fails, we end up with no order. Status becomes 'error'
+  //     and the user sees it in the LiveTradeCoach status strip.
+  //   - If the order fills DURING the cancel call, Kalshi will reject the cancel
+  //     and we treat that as "filled, no replace needed" by checking status.
+  //   - Disabled in dry-run: the dry-run order auto-fills at 3s in the POLL
+  //     effect, so the ladder never triggers in dry mode. This is intentional
+  //     — verify the ladder logic with live orders only, after dry-run plumbing
+  //     is confirmed working.
+  useEffect(()=>{
+    if(!autoExecSettings.entryLadderEnabled)return;
+    const _aos=autoOrderState;
+    if(!_aos||!_aos.ladderEnabled||_aos.ladderStep==null)return;
+    if(_aos.dryRun)return; // dry-run skip — see comment above
+    if(_aos.status!=='resting'&&_aos.status!=='submitted')return;
+    if(killSwitchEngaged)return;
+    const _stepMs=Math.max(2000,(autoExecSettings.entryLadderStepSec||8)*1000);
+    const _ageMs=Date.now()-(_aos.ladderStartedAt||_aos.placedAt||Date.now());
+    if(_ageMs<_stepMs)return; // not aged enough yet — POLL effect will trigger re-render
+    // Time to ladder up. Compute next step.
+    const _nextStep=_aos.ladderStep+1;
+    const _maxSteps=Math.max(1,Number(autoExecSettings.entryLadderMaxSteps)||2);
+    const _yes=Number(kalshiYesPrice);
+    if(!Number.isFinite(_yes))return;
+    const _curOffer=_aos.dir==='UP'?_yes:(100-_yes);
+    let _nextLimit;
+    if(_nextStep>=_maxSteps){
+      // Final step: take market (offer + slippage)
+      _nextLimit=Math.max(1,Math.min(99,Math.round(_curOffer+autoExecSettings.slippageCents)));
+    }else{
+      // Intermediate step: post at current offer (no undercut)
+      _nextLimit=Math.max(1,Math.min(99,Math.round(_curOffer)));
+    }
+    // Mark transitioning to prevent double-fire from re-renders
+    setAutoOrderState(prev=>prev?{...prev,status:'ladder-transitioning'}:null);
+    (async()=>{
+      try{
+        // Cancel the current resting order
+        if(_aos.orderId){
+          const _cancel=await kalshiCancelOrder({
+            apiKeyId:kalshiCreds.apiKeyId,
+            privateKeyPem:kalshiCreds.privateKeyPem,
+            orderId:_aos.orderId,
+            dryRun:false,
+          });
+          // If cancel failed because the order already filled, abort the ladder bump.
+          // The POLL effect will pick up the fill on its next tick.
+          if(!_cancel.ok){
+            const _reason=String(_cancel.reason||'').toLowerCase();
+            if(_reason.includes('filled')||_reason.includes('not found')||_reason.includes('completed')){
+              // Order filled or vanished — let the POLL flow handle it
+              setAutoOrderState(prev=>prev?{...prev,status:'submitted'}:null);
+              return;
+            }
+            setAutoOrderState(prev=>prev?{...prev,status:'error',error:'ladder cancel failed: '+(_cancel.reason||'unknown')}:null);
+            return;
+          }
+        }
+        // Place the new order at the bumped price
+        const _yesLimit=_aos.dir==='UP'?_nextLimit:(100-_nextLimit);
+        const _place=await kalshiPlaceOrder({
+          apiKeyId:kalshiCreds.apiKeyId,
+          privateKeyPem:kalshiCreds.privateKeyPem,
+          ticker:_aos.ticker,
+          dir:_aos.dir,
+          limitCents:_yesLimit,
+          betDollars:_aos.betDollars,
+          dryRun:false,
+        });
+        if(!_place.ok){
+          setAutoOrderState(prev=>prev?{...prev,status:'error',error:'ladder replace failed: '+(_place.reason||'unknown')}:null);
+          return;
+        }
+        const _ord=_place.order||{};
+        const _orderId=_ord.order_id||_ord.id||null;
+        const _status=_ord.status||'submitted';
+        setAutoOrderState(prev=>prev?{
+          ...prev,
+          orderId:_orderId,
+          status:_status,
+          limitCents:_nextLimit,
+          placedAt:Date.now(),
+          ladderStep:_nextStep,
+          ladderStartedAt:Date.now(),
+        }:null);
+      }catch(e){
+        setAutoOrderState(prev=>prev?{...prev,status:'error',error:'ladder threw: '+(e?.message||String(e))}:null);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[autoOrderState?.status,autoOrderState?.ladderStep,autoOrderState?.ladderStartedAt,kalshiYesPrice,autoExecSettings.entryLadderEnabled,autoExecSettings.entryLadderStepSec,autoExecSettings.entryLadderMaxSteps,autoExecSettings.slippageCents,kalshiCreds,killSwitchEngaged,_ladderTick]);
+
+  // V9.7.4: separate 1Hz tick so the ladder effect re-evaluates the age check
+  //   every second while resting (otherwise it'd only fire on status changes
+  //   and the bump would never trigger).
+  const[_ladderTick,setLadderTick]=useState(0);
+  useEffect(()=>{
+    if(!autoExecSettings.entryLadderEnabled)return;
+    if(!autoOrderState||!autoOrderState.ladderEnabled)return;
+    if(autoOrderState.status!=='resting'&&autoOrderState.status!=='submitted')return;
+    const iv=setInterval(()=>setLadderTick(x=>x+1),1000);
+    return()=>clearInterval(iv);
+  },[autoExecSettings.entryLadderEnabled,autoOrderState?.ladderEnabled,autoOrderState?.status]);
 
   // ── EXIT EFFECT ───────────────────────────────────────────────────────────
   // After an order fills, three exit paths (whichever fires first):
@@ -22618,7 +22805,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.7.3
+              9.7.4
             </span>
           </div>
 
@@ -24567,6 +24754,36 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.7.4 — Smart entry ladder */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>capture spread &middot; ladder up &middot; take market</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.07</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.7.4</span> &mdash; Smart Entry Ladder</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What it does</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">When auto-exec fires, instead of placing at offer + slippage (immediate fill), Tara posts a limit BELOW the current offer to capture the spread. If the order doesn&rsquo;t fill within the step time, she cancels and re-posts at the offer. After max steps, she takes the market.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Settings</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Enable entry ladder</strong> &mdash; default OFF. When off, behaves exactly as V9.6.0.</li>
+                  <li><strong>Undercut (¢)</strong> &mdash; how far below offer to post initially. Default 2¢. Range 1-20.</li>
+                  <li><strong>Step time (s)</strong> &mdash; how long to wait at each step before bumping up. Default 8s. Range 2-60.</li>
+                  <li><strong>Max steps</strong> &mdash; ladder rungs before market take. Default 2. Range 1-5.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Trade-off</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Most fills save 1-2¢ per contract (~3% of risk on a 60¢ entry). A small minority of fast-moving setups never fill at all because the price runs away. Net positive in normal markets, slight negative in EXTREME velocity. Probably worth combining with the recommended speed dial &mdash; on EXTREME velocity windows, set the dial to FAST or disable the ladder for that window.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Honest limitations</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li>Cancel-then-replace is two API calls. If cancel succeeds but replace fails, the order is gone &mdash; status becomes &lsquo;error&rsquo; in the LiveTradeCoach strip.</li>
+                  <li>If the order fills DURING the cancel call, Kalshi rejects the cancel. Tara catches this (looks for &ldquo;filled&rdquo;/&ldquo;not found&rdquo;/&ldquo;completed&rdquo; in the reason) and reverts to normal flow.</li>
+                  <li><strong>Disabled in dry-run</strong> &mdash; the ladder needs real Kalshi state machine to test. Verify the rest of auto-exec in dry-run first, then enable ladder with a tiny live bet.</li>
+                </ul>
               </section>
 
               {/* V9.7.3 — Timezone consistency sweep */}
