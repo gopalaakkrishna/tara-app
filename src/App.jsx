@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.5.2-atrbps-scopefix';
+const BASELINE_VERSION='2026.05.07-v9.6.0-autoexec-deepconfig';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -7323,6 +7323,52 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             return React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded',style:{color:_color,border:`1px solid ${_color}`,background:`${_color}15`}},_label);
           })(),
         ),
+        // ── V9.6.0: HOW-TO GUIDE ──────────────────────────────────────────
+        // Collapsible step-by-step walkthrough. Closed by default to keep modal
+        // compact; user can open when first setting up.
+        React.createElement('details',{className:'mb-3 rounded',style:{background:'rgba(110,231,183,0.04)',border:'1px solid rgba(110,231,183,0.16)'}},
+          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#6EE7B7'}},
+            React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'How to use auto-exec'),
+            React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45'},'tap to expand'),
+          ),
+          React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3 text-[11px] leading-relaxed text-[#E8E9E4]/75'},
+            // Step 1
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#6EE7B7'}},'1. Get Kalshi API credentials'),
+              React.createElement('p',null,'Log into Kalshi → Account → API. Generate a new RSA key pair. Kalshi keeps the public key; you save the private key (PKCS#8 PEM format starting with ',React.createElement('code',{className:'text-[10px] bg-[#0E100F] px-1'},'-----BEGIN PRIVATE KEY-----'),'). Copy your Key ID (UUID).'),
+            ),
+            // Step 2
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#6EE7B7'}},'2. Paste credentials below'),
+              React.createElement('p',null,'Both fields are stored in your browser only. Anthropic and Tara servers never see them. Test connection — expect a ',React.createElement('span',{className:'text-emerald-400'},'✓ balance $X.XX'),'. If you see ',React.createElement('span',{className:'text-rose-400'},'✗ http 401'),', your Vercel rewrite at ',React.createElement('code',{className:'text-[10px] bg-[#0E100F] px-1'},'/api/kalshi/*'),' is stripping custom headers — fix vercel.json before continuing.'),
+            ),
+            // Step 3
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#6EE7B7'}},'3. Configure guardrails'),
+              React.createElement('p',null,'Default: $25 per trade, $50 daily loss cap, 3-loss cooldown. Adjust to your size. The defaults are deliberately small — meant to verify the plumbing works end-to-end before you increase anything.'),
+            ),
+            // Step 4
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#6EE7B7'}},'4. Test in dry-run'),
+              React.createElement('p',null,'Toggle ',React.createElement('strong',{className:'text-white'},'Auto-place orders on lock'),' ON, leave ',React.createElement('strong',{style:{color:'#FBBF24'}},'Dry-run'),' ON. Wait for Tara to lock a window. Verify the ',React.createElement('code',{className:'text-[10px] bg-[#0E100F] px-1'},'KALSHI · DRY · placing → resting → filled'),' status strip appears in Live Trade Coach. Confirm the trade lands in the call log with ',React.createElement('code',{className:'text-[10px] bg-[#0E100F] px-1'},'autoExec: true'),'.'),
+            ),
+            // Step 5
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#6EE7B7'}},'5. Go live carefully'),
+              React.createElement('p',null,'Only after one full window working in dry-run, flip ',React.createElement('strong',{style:{color:'#FBBF24'}},'Dry-run'),' OFF. Use the smallest bet you can. Watch the next window completely — verify the order Tara placed matches what shows in your Kalshi UI. Only then increase size.'),
+            ),
+            // Step 6
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#6EE7B7'}},'6. Use the kill switch any time'),
+              React.createElement('p',null,'Three places, all instant: top-bar pill (opens settings), Live Trade Coach status strip (always visible during a trade), and the big red button below. Engaged kill switch blocks new orders immediately and keeps existing positions where they are.'),
+            ),
+            // Step 7
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#6EE7B7'}},'7. Tune entry filters'),
+              React.createElement('p',null,'See ',React.createElement('strong',{className:'text-white'},'Advanced entry filters'),' below. Conservative play: set ',React.createElement('strong',{className:'text-white'},'Minimum tier'),' to ',React.createElement('code',{className:'text-[10px] bg-[#0E100F] px-1'},'super-confluence'),' and turn on ',React.createElement('strong',{className:'text-white'},'Skip marginal-zone caution'),'. This trades way less often but with much higher conviction.'),
+            ),
+          ),
+        ),
         // Kill switch — biggest button, top of section
         React.createElement('button',{
           onClick:()=>setKillSwitchEngaged(v=>!v),
@@ -7443,6 +7489,173 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,autoExitOffer:Math.max(60,Math.min(99,_num(e.target.value,85)))})),
                 className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
               }),
+            ),
+          ),
+        ),
+        // ── V9.6.0: ADVANCED ENTRY FILTERS ────────────────────────────────
+        React.createElement('details',{className:'mb-3 rounded',style:{background:'rgba(196,181,253,0.04)',border:'1px solid rgba(196,181,253,0.16)'}},
+          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#C4B5FD'}},
+            React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Advanced entry filters'),
+            React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45'},'when to fire'),
+          ),
+          React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3'},
+            // Per-asset toggles
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#E8E9E4]/60 mb-1.5'},'Trade these assets'),
+              React.createElement('div',{className:'flex gap-2'},
+                ['BTC','ETH'].map(a=>
+                  React.createElement('label',{key:a,className:'flex-1 flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded',style:{background:autoExecSettings?.enabledAssets?.[a]!==false?'rgba(196,181,253,0.08)':'rgba(232,233,228,0.04)',border:autoExecSettings?.enabledAssets?.[a]!==false?'1px solid rgba(196,181,253,0.30)':'1px solid rgba(232,233,228,0.10)'}},
+                    React.createElement('span',{className:'text-[11px] font-bold text-white'},a),
+                    React.createElement('input',{type:'checkbox',checked:autoExecSettings?.enabledAssets?.[a]!==false,onChange:(e)=>setAutoExecSettings(prev=>({...prev,enabledAssets:{...(prev.enabledAssets||{BTC:true,ETH:true}),[a]:e.target.checked}}))}),
+                  )
+                ),
+              ),
+            ),
+            // Per-window toggles
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#E8E9E4]/60 mb-1.5'},'Trade these windows'),
+              React.createElement('div',{className:'flex gap-2'},
+                ['15m','5m'].map(w=>
+                  React.createElement('label',{key:w,className:'flex-1 flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded',style:{background:autoExecSettings?.enabledWindowTypes?.[w]!==false?'rgba(196,181,253,0.08)':'rgba(232,233,228,0.04)',border:autoExecSettings?.enabledWindowTypes?.[w]!==false?'1px solid rgba(196,181,253,0.30)':'1px solid rgba(232,233,228,0.10)'}},
+                    React.createElement('span',{className:'text-[11px] font-bold text-white'},w),
+                    React.createElement('input',{type:'checkbox',checked:autoExecSettings?.enabledWindowTypes?.[w]!==false,onChange:(e)=>setAutoExecSettings(prev=>({...prev,enabledWindowTypes:{...(prev.enabledWindowTypes||{'15m':true,'5m':true}),[w]:e.target.checked}}))}),
+                  )
+                ),
+              ),
+            ),
+            // Minimum tier
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#E8E9E4]/60 mb-1'},'Minimum tier'),
+              React.createElement('select',{
+                value:autoExecSettings?.minTier||'any',
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,minTier:e.target.value})),
+                className:'w-full bg-[#0E100F] border border-[#E8E9E4]/15 rounded px-2 py-1.5 text-white text-sm focus:border-[#E5C870] focus:outline-none',
+              },
+                React.createElement('option',{value:'any'},'Any tier (default — fires most often)'),
+                React.createElement('option',{value:'tape'},'Tape-led or higher (skips single-tier)'),
+                React.createElement('option',{value:'structural'},'Structural-led or higher'),
+                React.createElement('option',{value:'confluence'},'Confluence or higher (more selective)'),
+                React.createElement('option',{value:'super'},'Super-confluence ONLY (highest conviction)'),
+              ),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 mt-1 leading-relaxed'},
+                'Per V9.4.0 audit: super-confluence trades hit ~70-80% WR but fire 1-3× per day. Single-tier hits 64% but fires every window. Pick your speed.',
+              ),
+            ),
+            // Min quality / min conviction (grid)
+            React.createElement('div',{className:'grid grid-cols-2 gap-2'},
+              React.createElement('label',{className:'block'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Min quality (0=off)'),
+                React.createElement('input',{
+                  type:'number',min:0,max:100,step:5,value:autoExecSettings?.minQualityScore||0,
+                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,minQualityScore:Math.max(0,Math.min(100,_num(e.target.value,0)))})),
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                }),
+              ),
+              React.createElement('label',{className:'block'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Min conviction pt (0=off)'),
+                React.createElement('input',{
+                  type:'number',min:0,max:50,step:1,value:autoExecSettings?.minConviction||0,
+                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,minConviction:Math.max(0,Math.min(50,_num(e.target.value,0)))})),
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                }),
+              ),
+            ),
+            // Lock stability + skip marginal
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Wait N seconds after lock before placing (0=fire immediately)'),
+              React.createElement('input',{
+                type:'number',min:0,max:60,step:1,value:autoExecSettings?.lockStabilitySec||0,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,lockStabilitySec:Math.max(0,Math.min(60,_num(e.target.value,0)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+              }),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 mt-1'},'Filters out instant-flip locks. Try 5-10s if you see Tara locking and immediately re-evaluating.'),
+            ),
+            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded',style:{background:'rgba(232,233,228,0.04)'}},
+              React.createElement('div',null,
+                React.createElement('div',{className:'text-[11px] font-bold text-white'},'Skip marginal-zone caution'),
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Block when V9.4.0 attaches a marginal-zone caution chip (low ATR, low quality, single tier). Coin-flip zone — historically 59% WR.'),
+              ),
+              React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.skipMarginalCaution,onChange:(e)=>setAutoExecSettings(prev=>({...prev,skipMarginalCaution:e.target.checked})),className:'ml-2'}),
+            ),
+          ),
+        ),
+        // ── V9.6.0: ADVANCED EXIT LOGIC ───────────────────────────────────
+        React.createElement('details',{className:'mb-3 rounded',style:{background:'rgba(244,114,182,0.04)',border:'1px solid rgba(244,114,182,0.16)'}},
+          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'rgba(244,114,182,0.95)'}},
+            React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Advanced exit logic'),
+            React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45'},'when to close'),
+          ),
+          React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3'},
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55 leading-relaxed'},
+              'Three exit paths run in parallel. Whichever fires first wins. If none fires, position settles naturally on Kalshi. Take-profit lives in the basic guardrails section above.',
+            ),
+            // Stop loss
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Stop-loss: exit if our side drops by N¢ from fill (0=disabled)'),
+              React.createElement('input',{
+                type:'number',min:0,max:90,step:1,value:autoExecSettings?.stopLossDeltaCents||0,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(90,_num(e.target.value,0)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+              }),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 mt-1 leading-relaxed'},'E.g. 20: filled at 60¢, exit if our side drops to 40¢. Cuts losers early at the cost of some marginal recoveries. Try 25-35 to start.'),
+            ),
+            // Time exit
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Time exit: close when fewer than N seconds left (0=disabled)'),
+              React.createElement('input',{
+                type:'number',min:0,max:300,step:5,value:autoExecSettings?.timeExitSecLeft||0,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,timeExitSecLeft:Math.max(0,Math.min(300,_num(e.target.value,0)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+              }),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 mt-1 leading-relaxed'},'Closes the position before Kalshi settles. Locks in whatever offer is currently on the book. Useful in volatile late-window action — try 30-60s.'),
+            ),
+          ),
+        ),
+        // ── V9.6.0: POSITION SIZING ───────────────────────────────────────
+        React.createElement('details',{className:'mb-3 rounded',style:{background:'rgba(110,231,183,0.04)',border:'1px solid rgba(110,231,183,0.16)'}},
+          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#6EE7B7'}},
+            React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Position sizing'),
+            React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45'},'how much to bet'),
+          ),
+          React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3'},
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#E8E9E4]/60 mb-1'},'Sizing strategy'),
+              React.createElement('select',{
+                value:autoExecSettings?.sizingMode||'fixed',
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,sizingMode:e.target.value})),
+                className:'w-full bg-[#0E100F] border border-[#E8E9E4]/15 rounded px-2 py-1.5 text-white text-sm focus:border-[#E5C870] focus:outline-none',
+              },
+                React.createElement('option',{value:'fixed'},'Fixed (uses your bet-size, capped at max-bet)'),
+                React.createElement('option',{value:'confidence'},'Scale with conviction (low/high range)'),
+                React.createElement('option',{value:'kelly'},'Kelly fraction (most aggressive — math-driven)'),
+              ),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 mt-1 leading-relaxed'},
+                autoExecSettings?.sizingMode==='confidence'?'Linear ramp: conviction 5pt → low bet, 35pt+ → high bet.':
+                autoExecSettings?.sizingMode==='kelly'?'Kelly = (b·p − q) ÷ b, where p=posterior, b=net odds. Scales high-bet × Kelly fraction. Edge-only — sits out when math says no edge.':
+                'Always uses your manual bet-size from Trading Settings, capped at max-bet-per-trade.',
+              ),
+            ),
+            (autoExecSettings?.sizingMode==='confidence'||autoExecSettings?.sizingMode==='kelly')&&
+              React.createElement('div',{className:'grid grid-cols-2 gap-2'},
+                React.createElement('label',{className:'block'},
+                  React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Low bet ($)'),
+                  React.createElement('input',{
+                    type:'number',min:1,max:500,step:1,value:autoExecSettings?.confidenceLowBet||5,
+                    onChange:(e)=>setAutoExecSettings(prev=>({...prev,confidenceLowBet:Math.max(1,Math.min(500,_num(e.target.value,5)))})),
+                    className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                  }),
+                ),
+                React.createElement('label',{className:'block'},
+                  React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'High bet ($)'),
+                  React.createElement('input',{
+                    type:'number',min:1,max:500,step:1,value:autoExecSettings?.confidenceHighBet||25,
+                    onChange:(e)=>setAutoExecSettings(prev=>({...prev,confidenceHighBet:Math.max(1,Math.min(500,_num(e.target.value,25)))})),
+                    className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                  }),
+                ),
+              ),
+            React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 leading-relaxed'},
+              React.createElement('strong',{className:'text-[#E8E9E4]/70'},'Note:'),' max-bet-per-trade in basic guardrails always wins as the ceiling. Sizing strategy can only reduce, never exceed.',
             ),
           ),
         ),
@@ -13367,8 +13580,48 @@ function TaraApp(){
         slippageCents:Number(v.slippageCents)>=0?Number(v.slippageCents):2,
         autoExitOffer:Number(v.autoExitOffer)>0?Number(v.autoExitOffer):85, // exit at 85¢ offer
         autoExitSecLeft:Number(v.autoExitSecLeft)>0?Number(v.autoExitSecLeft):20,
+        // ── V9.6.0: ADVANCED ENTRY FILTERS ──────────────────────────────
+        // Per-asset enable. Default both ON. When OFF, auto-exec skips that asset
+        // even if the master toggle is on. Useful for "auto-trade BTC only".
+        enabledAssets:{
+          BTC:v.enabledAssets?.BTC!==false,
+          ETH:v.enabledAssets?.ETH!==false,
+        },
+        // Per-window-type enable. Default both ON.
+        enabledWindowTypes:{
+          '15m':v.enabledWindowTypes?.['15m']!==false,
+          '5m':v.enabledWindowTypes?.['5m']!==false,
+        },
+        // Minimum tier. 'any' = no filter. Other values lock out lower tiers:
+        //   'tape' = tape-led or higher (excludes single)
+        //   'structural' = structural-led or higher
+        //   'confluence' = confluence or higher
+        //   'super' = super-confluence ONLY — most conservative, lowest fire rate
+        minTier:v.minTier||'any',
+        // Minimum quality gate score (0-100). 0 = no filter.
+        minQualityScore:Number(v.minQualityScore)>=0?Number(v.minQualityScore):0,
+        // Minimum directional conviction (0-50, where conviction = |posterior-50|).
+        minConviction:Number(v.minConviction)>=0?Number(v.minConviction):0,
+        // Skip when V9.4.0 marginal-zone caution is attached. Conservative default OFF.
+        skipMarginalCaution:!!v.skipMarginalCaution,
+        // Lock-stability requirement: wait N seconds after lock fires before placing
+        // the order. Filters out instant-flip locks. 0 = fire immediately on lock.
+        lockStabilitySec:Number(v.lockStabilitySec)>=0?Number(v.lockStabilitySec):0,
+        // ── V9.6.0: ADVANCED EXIT LOGIC ──────────────────────────────────
+        // Stop-loss: exit if our side drops by N¢ from the fill price. 0 = disabled.
+        stopLossDeltaCents:Number(v.stopLossDeltaCents)>=0?Number(v.stopLossDeltaCents):0,
+        // Time-based exit: exit when fewer than N seconds remain in the window.
+        // 0 = disabled (let it settle naturally on Kalshi).
+        timeExitSecLeft:Number(v.timeExitSecLeft)>=0?Number(v.timeExitSecLeft):0,
+        // ── V9.6.0: POSITION SIZING ──────────────────────────────────────
+        // 'fixed': always uses tradingSettings.betSize, capped at maxBetPerTrade
+        // 'confidence': scales between confidenceLowBet and confidenceHighBet by conviction
+        // 'kelly': uses Kelly fraction × confidenceHighBet (most aggressive)
+        sizingMode:v.sizingMode||'fixed',
+        confidenceLowBet:Number(v.confidenceLowBet)>0?Number(v.confidenceLowBet):5,
+        confidenceHighBet:Number(v.confidenceHighBet)>0?Number(v.confidenceHighBet):25,
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20};}
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // Kill switch is in-memory + localStorage. When engaged, all auto-exec is gated off
@@ -18882,6 +19135,30 @@ function TaraApp(){
     if(userPosition){_autoExecLastFiredKeyRef.current=_key;return;}
     // Don't fire if there's already an active auto-order
     if(autoOrderState&&autoOrderState.status!=='canceled'&&autoOrderState.status!=='exited'&&autoOrderState.status!=='error'){return;}
+    // V9.6.0: ASSET / WINDOW FILTERS
+    if(autoExecSettings.enabledAssets&&autoExecSettings.enabledAssets[currentAsset]===false){_autoExecLastFiredKeyRef.current=_key;return;}
+    if(autoExecSettings.enabledWindowTypes&&autoExecSettings.enabledWindowTypes[windowType]===false){_autoExecLastFiredKeyRef.current=_key;return;}
+    // V9.6.0: LOCK STABILITY — wait N seconds after lock before placing the order.
+    //   Re-evaluates on every render (analysis pulse), so when the threshold is hit
+    //   the next pulse will fire. Doesn't burn the dedup key — we want to retry.
+    const _lockAgeMs=Date.now()-(_lock._committedAt||_lock.lockedAt||Date.now());
+    if(autoExecSettings.lockStabilitySec>0&&_lockAgeMs<autoExecSettings.lockStabilitySec*1000){return;}
+    // V9.6.0: TIER FILTER. Read tier flags from snap or live taraCall ctx
+    const _ctx=taraCall?._ctx||{};
+    const _tierRank=(_ctx.isSuperConfluent||taraCall?.isSuperConfluent)?5
+                  :(_ctx.isConfluent||taraCall?.isConfluent)?4
+                  :(_ctx.isStructuralLed||taraCall?.isStructuralLed)?3
+                  :(_ctx.isTapeLed||taraCall?.isTapeLed)?2
+                  :1; // 'single' tier
+    const _minTierRank={any:1,tape:2,structural:3,confluence:4,super:5}[autoExecSettings.minTier||'any']||1;
+    if(_tierRank<_minTierRank){_autoExecLastFiredKeyRef.current=_key;return;}
+    // V9.6.0: QUALITY GATE filter
+    if(autoExecSettings.minQualityScore>0&&(qualityGate?.score||0)<autoExecSettings.minQualityScore){_autoExecLastFiredKeyRef.current=_key;return;}
+    // V9.6.0: CONVICTION filter
+    const _conviction=Math.abs((analysis?.rawProbAbove||50)-50);
+    if(autoExecSettings.minConviction>0&&_conviction<autoExecSettings.minConviction){_autoExecLastFiredKeyRef.current=_key;return;}
+    // V9.6.0: SKIP MARGINAL CAUTION (V9.4.0 marginal-zone caution is attached to taraCall.caution)
+    if(autoExecSettings.skipMarginalCaution&&taraCall?.caution){_autoExecLastFiredKeyRef.current=_key;return;}
     const _g=_autoExecGuardrailCheck();
     if(!_g.ok){
       _autoExecLastFiredKeyRef.current=_key; // mark seen so we don't keep evaluating
@@ -18898,6 +19175,27 @@ function TaraApp(){
     const _limit=Math.max(1,Math.min(99,Math.round(_dirCents+autoExecSettings.slippageCents)));
     // Convert back to the YES-axis for the order builder (it expects YES price 1-99 always)
     const _yesLimitForBuilder=_dir==='UP'?_limit:(100-_limit);
+    // V9.6.0: POSITION SIZING — choose bet based on sizingMode
+    let _bet=Number(tradingSettings?.betSize)||0;
+    if(autoExecSettings.sizingMode==='confidence'){
+      // Linear interpolation: conviction 5 → low, conviction 35+ → high
+      const _convClamped=Math.max(5,Math.min(35,_conviction));
+      const _frac=(_convClamped-5)/30;
+      _bet=autoExecSettings.confidenceLowBet+(autoExecSettings.confidenceHighBet-autoExecSettings.confidenceLowBet)*_frac;
+    }else if(autoExecSettings.sizingMode==='kelly'){
+      // Kelly fraction: f* = (bp - q) / b, where p=win prob, q=1-p, b=net odds.
+      // For Kalshi: cost ¢ to win (100-cost)¢. b = (100-cost)/cost.
+      // p ≈ posterior/100 (in our directional axis).
+      const _p=(_dir==='UP'?(analysis?.rawProbAbove||50):100-(analysis?.rawProbAbove||50))/100;
+      const _q=1-_p;
+      const _b=(100-_dirCents)/Math.max(1,_dirCents);
+      const _kelly=(_b*_p-_q)/_b;
+      const _kellyFrac=Math.max(0,Math.min(1,_kelly));
+      _bet=autoExecSettings.confidenceHighBet*_kellyFrac;
+    }
+    // Always cap at maxBetPerTrade and floor at $1
+    _bet=Math.max(0,Math.min(autoExecSettings.maxBetPerTrade,_bet));
+    if(_bet<1){_autoExecLastFiredKeyRef.current=_key;return;} // sizing said don't fire
     _autoExecLastFiredKeyRef.current=_key;
     // Stamp working state immediately so duplicate renders don't double-fire
     setAutoOrderState({
@@ -18905,7 +19203,8 @@ function TaraApp(){
       dir:_dir,count:0,limitCents:_limit,placedAt:Date.now(),
       status:'placing',fillPrice:null,exitOrderId:null,error:null,
       dryRun:!!autoExecSettings.dryRun,key:_key,windowId:_wid,asset:currentAsset,
-      betDollars:Number(tradingSettings?.betSize)||0,
+      betDollars:_bet,sizingMode:autoExecSettings.sizingMode,
+      tierRank:_tierRank,convictionAtLock:_conviction,
     });
     (async()=>{
       try{
@@ -18915,7 +19214,7 @@ function TaraApp(){
           ticker:kalshiActiveMarket.ticker,
           dir:_dir,
           limitCents:_yesLimitForBuilder,
-          betDollars:Number(tradingSettings?.betSize)||0,
+          betDollars:_bet,
           dryRun:!!autoExecSettings.dryRun,
         });
         if(!res.ok){
@@ -18946,7 +19245,7 @@ function TaraApp(){
   // Re-evaluate on every analysis pulse (lock state lives in a ref so we need a render trigger)
   // and on guard-state changes so toggling kill-switch/enable propagates immediately.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[analysis,currentAsset,windowType,kalshiActiveMarket,kalshiYesPrice,userPosition,autoExecSettings.enabled,autoExecSettings.dryRun,killSwitchEngaged]);
+  },[analysis,currentAsset,windowType,kalshiActiveMarket,kalshiYesPrice,userPosition,autoExecSettings,killSwitchEngaged,taraCall]);
 
   // ── POLL EFFECT ───────────────────────────────────────────────────────────
   // While an order is in 'placing'/'submitted'/'resting'/'partially_filled' state,
@@ -19001,11 +19300,11 @@ function TaraApp(){
   },[autoOrderState?.orderId,autoOrderState?.status,autoOrderState?.dryRun,kalshiCreds,killSwitchEngaged]);
 
   // ── EXIT EFFECT ───────────────────────────────────────────────────────────
-  // After an order fills, watch for either:
-  //   (a) Kalshi YES-side offer reaches autoExitOffer (take profit)
-  //   (b) Window has fewer than autoExitSecLeft remaining (let it settle naturally instead)
-  // Path (a) fires a sell. Path (b) is a no-op — let the window settle on Kalshi's books;
-  // existing trade-log machinery records win/loss based on outcome.
+  // After an order fills, three exit paths (whichever fires first):
+  //   (a) Take profit: Kalshi YES-side offer reaches autoExitOffer
+  //   (b) Stop loss: our side drops by stopLossDeltaCents from fill price (V9.6.0)
+  //   (c) Time exit: fewer than timeExitSecLeft seconds remain in window (V9.6.0)
+  // Each path fires a sell. If none fires, the position settles naturally on Kalshi.
   useEffect(()=>{
     const _aos=autoOrderState;
     if(!_aos||_aos.status!=='filled')return;
@@ -19015,10 +19314,22 @@ function TaraApp(){
     const _yes=Number(kalshiYesPrice);
     if(!Number.isFinite(_yes))return;
     const _ourSideCents=_aos.dir==='UP'?_yes:(100-_yes);
+    // V9.6.0: classify which exit path is firing for status reason
+    let _exitReason=null;
     if(_ourSideCents>=autoExecSettings.autoExitOffer){
+      _exitReason=`take-profit at ${_ourSideCents}¢`;
+    }else if(autoExecSettings.stopLossDeltaCents>0&&_aos.fillPrice!=null&&(_aos.fillPrice-_ourSideCents)>=autoExecSettings.stopLossDeltaCents){
+      _exitReason=`stop-loss at ${_ourSideCents}¢ (down ${_aos.fillPrice-_ourSideCents}¢ from ${_aos.fillPrice}¢)`;
+    }else if(autoExecSettings.timeExitSecLeft>0){
+      const _msLeft=(timeState?.minsRemaining||0)*60000+(timeState?.secsRemaining||0)*1000;
+      if(_msLeft>0&&_msLeft<=autoExecSettings.timeExitSecLeft*1000){
+        _exitReason=`time exit (${Math.round(_msLeft/1000)}s left)`;
+      }
+    }
+    if(_exitReason){
       // Fire exit
       const _yesLimitForBuilder=_aos.dir==='UP'?_ourSideCents:(100-_ourSideCents);
-      setAutoOrderState(prev=>prev?{...prev,status:'exiting'}:null);
+      setAutoOrderState(prev=>prev?{...prev,status:'exiting',exitReason:_exitReason}:null);
       (async()=>{
         try{
           const r=await kalshiExitPosition({
@@ -19047,7 +19358,7 @@ function TaraApp(){
         }
       })();
     }
-  },[autoOrderState?.status,autoOrderState?.exitOrderId,kalshiYesPrice,autoExecSettings.autoExitOffer,kalshiCreds,killSwitchEngaged]);
+  },[autoOrderState?.status,autoOrderState?.exitOrderId,autoOrderState?.fillPrice,kalshiYesPrice,autoExecSettings.autoExitOffer,autoExecSettings.stopLossDeltaCents,autoExecSettings.timeExitSecLeft,timeState?.minsRemaining,timeState?.secsRemaining,kalshiCreds,killSwitchEngaged]);
 
   // ── CLEANUP ON WINDOW ROLL ────────────────────────────────────────────────
   // When the window changes, clear stale auto-order state. The trade itself was either
@@ -21460,7 +21771,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.5.2
+              9.6.0
             </span>
           </div>
 
