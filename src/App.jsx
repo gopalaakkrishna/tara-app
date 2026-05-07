@@ -667,6 +667,176 @@ const saveWeights=(w)=>{
 // removed
 // removed
 // Best hours: 4 (100%) and 5 (100%)
+// ═══════════════════════════════════════════════════════════════════════════
+// V9.3.0: KALSHI AUTO-EXECUTION (RSA-PSS signed orders via /api/kalshi proxy)
+// ═══════════════════════════════════════════════════════════════════════════
+// All requests go through the existing Vercel rewrite at /api/kalshi/*.
+// Credentials (api key id + RSA private key PEM) are localStorage-only and
+// NEVER synced to Firestore.
+//
+// Signing format (Kalshi v2 spec):
+//   message  = `${ts_ms}${METHOD_UPPER}${path_with_v2_prefix}`
+//              e.g. "1715000000000POST/trade-api/v2/portfolio/orders"
+//   signature = RSA-PSS(SHA-256, salt=32) over message, then base64 standard.
+// Headers required on every authed request:
+//   KALSHI-ACCESS-KEY        — api key UUID
+//   KALSHI-ACCESS-TIMESTAMP  — ms epoch (string)
+//   KALSHI-ACCESS-SIGNATURE  — base64
+//
+// IMPORTANT: this module assumes the Vercel proxy at /api/kalshi/* forwards
+// the Authorization-style headers untouched and preserves method+body. If your
+// vercel.json strips custom headers, orders will 401. Verify with a sandbox
+// order before flipping the dry-run switch off.
+// ───────────────────────────────────────────────────────────────────────────
+const _kBufToB64=(buf)=>{const b=new Uint8Array(buf);let s='';for(let i=0;i<b.byteLength;i++)s+=String.fromCharCode(b[i]);return btoa(s);};
+const _kPemToBuf=(pem)=>{
+  const cleaned=String(pem||'').replace(/-----BEGIN [^-]+-----/g,'').replace(/-----END [^-]+-----/g,'').replace(/\s+/g,'');
+  if(!cleaned)throw new Error('Empty private key');
+  const bin=atob(cleaned);const out=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);
+  return out.buffer;
+};
+const _kImportedKeyCache=new Map(); // pem→CryptoKey (so we don't re-import every order)
+const _kImportKey=async(pem)=>{
+  if(_kImportedKeyCache.has(pem))return _kImportedKeyCache.get(pem);
+  const key=await crypto.subtle.importKey('pkcs8',_kPemToBuf(pem),{name:'RSA-PSS',hash:'SHA-256'},false,['sign']);
+  _kImportedKeyCache.set(pem,key);
+  return key;
+};
+const _kSign=async({pem,method,path,ts})=>{
+  const key=await _kImportKey(pem);
+  const msg=new TextEncoder().encode(`${ts}${method}${path}`);
+  const sig=await crypto.subtle.sign({name:'RSA-PSS',saltLength:32},key,msg);
+  return _kBufToB64(sig);
+};
+
+// Authed fetch through /api/kalshi/* proxy. path is the Kalshi resource path
+// WITHOUT the /trade-api/v2 prefix — we add that to the signing string but the
+// proxy mounts at /api/kalshi/<path> and rewrites server-side to /trade-api/v2/<path>.
+const kalshiAuthedFetch=async({apiKeyId,privateKeyPem,method,path,body,timeoutMs=8000})=>{
+  if(!apiKeyId||!privateKeyPem)return{ok:false,status:0,reason:'no-credentials'};
+  const m=String(method||'GET').toUpperCase();
+  const ts=String(Date.now());
+  const fullPath=`/trade-api/v2${path}`;
+  let sig;
+  try{sig=await _kSign({pem:privateKeyPem,method:m,path:fullPath,ts});}
+  catch(e){return{ok:false,status:0,reason:'sign-failed: '+(e?.message||String(e))};}
+  const url=`/api/kalshi${path}`;
+  const headers={
+    'KALSHI-ACCESS-KEY':apiKeyId,
+    'KALSHI-ACCESS-TIMESTAMP':ts,
+    'KALSHI-ACCESS-SIGNATURE':sig,
+    'Accept':'application/json',
+  };
+  const init={method:m,headers};
+  if(body&&m!=='GET'&&m!=='HEAD'){headers['Content-Type']='application/json';init.body=JSON.stringify(body);}
+  try{init.signal=AbortSignal.timeout(timeoutMs);}catch(_){}
+  let resp;
+  try{resp=await fetch(url,init);}
+  catch(e){return{ok:false,status:0,reason:'network: '+(e?.message||String(e))};}
+  let data=null;
+  try{data=await resp.json();}catch(_){}
+  return{ok:resp.ok,status:resp.status,data,reason:resp.ok?null:(data?.error?.message||data?.error||`http ${resp.status}`)};
+};
+
+// Place a limit order. side='yes' for UP, 'no' for DOWN.
+// betDollars is the user's stake; we convert to contract count using the limit price.
+// Each YES contract pays out $1 if it resolves YES; cost = yes_price (cents).
+//   stake $10 @ 65¢ → 10/0.65 = 15 contracts (cost $9.75, net win $5.25 if hit).
+//   For NO contracts: cost = (100 - yes_price) cents, capped at 99.
+const kalshiBuildOrder=({ticker,dir,limitCents,betDollars})=>{
+  if(!ticker||(dir!=='UP'&&dir!=='DOWN'))return{ok:false,reason:'bad-args'};
+  const lim=Math.max(1,Math.min(99,Math.round(Number(limitCents)||0)));
+  if(!lim)return{ok:false,reason:'no-limit-price'};
+  const stake=Math.max(0,Number(betDollars)||0);
+  if(!stake)return{ok:false,reason:'no-stake'};
+  const side=dir==='UP'?'yes':'no';
+  const costPerContractCents=side==='yes'?lim:(100-lim);
+  if(costPerContractCents<=0)return{ok:false,reason:'bad-cost'};
+  // Floor to integer contracts; cap at 250 contracts as a per-order safety bound.
+  const count=Math.max(1,Math.min(250,Math.floor((stake*100)/costPerContractCents)));
+  const expiration_ts=Math.floor(Date.now()/1000)+90; // IOC-ish: cancel if not filled in 90s
+  const client_order_id=`tara_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+  const body={
+    ticker,
+    client_order_id,
+    side,
+    action:'buy',
+    type:'limit',
+    count,
+    expiration_ts,
+  };
+  // Limit price field name depends on side — yes_price for YES, no_price for NO.
+  if(side==='yes')body.yes_price=lim;
+  else body.no_price=100-lim;
+  return{ok:true,body,count,costPerContractCents,side,client_order_id};
+};
+
+// Place order (or simulate in dry-run). Returns {ok, dryRun, order?, reason?}.
+const kalshiPlaceOrder=async({apiKeyId,privateKeyPem,ticker,dir,limitCents,betDollars,dryRun})=>{
+  const built=kalshiBuildOrder({ticker,dir,limitCents,betDollars});
+  if(!built.ok)return{ok:false,reason:built.reason,dryRun:!!dryRun};
+  if(dryRun){
+    return{ok:true,dryRun:true,order:{
+      order_id:`DRY_${built.client_order_id}`,client_order_id:built.client_order_id,
+      ticker,side:built.side,action:'buy',type:'limit',count:built.count,
+      yes_price:built.body.yes_price,no_price:built.body.no_price,status:'resting',
+      created_time:new Date().toISOString(),
+      _simulated:true,
+    }};
+  }
+  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'POST',path:'/portfolio/orders',body:built.body});
+  if(!res.ok)return{ok:false,reason:res.reason||'order failed',dryRun:false,raw:res};
+  return{ok:true,dryRun:false,order:res.data?.order||res.data,raw:res};
+};
+
+const kalshiGetOrder=async({apiKeyId,privateKeyPem,orderId,dryRun})=>{
+  if(dryRun||(orderId&&String(orderId).startsWith('DRY_'))){
+    // Dry-run orders auto-fill after ~3s of simulated lookups
+    return{ok:true,dryRun:true,order:{order_id:orderId,status:'filled',_simulated:true}};
+  }
+  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'GET',path:`/portfolio/orders/${encodeURIComponent(orderId)}`});
+  if(!res.ok)return{ok:false,reason:res.reason||'lookup failed',raw:res};
+  return{ok:true,order:res.data?.order||res.data};
+};
+
+const kalshiCancelOrder=async({apiKeyId,privateKeyPem,orderId,dryRun})=>{
+  if(dryRun||(orderId&&String(orderId).startsWith('DRY_'))){
+    return{ok:true,dryRun:true,order:{order_id:orderId,status:'canceled',_simulated:true}};
+  }
+  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'DELETE',path:`/portfolio/orders/${encodeURIComponent(orderId)}`});
+  if(!res.ok)return{ok:false,reason:res.reason||'cancel failed',raw:res};
+  return{ok:true,order:res.data?.order||res.data};
+};
+
+// Sell out at market — used when offer threshold hit or window closing soon.
+// On Kalshi this is "buy the OPPOSITE side" or "sell" via the same orders endpoint
+// with action='sell'. We use action='sell' on the same side held.
+const kalshiExitPosition=async({apiKeyId,privateKeyPem,ticker,side,count,limitCents,dryRun})=>{
+  const lim=Math.max(1,Math.min(99,Math.round(Number(limitCents)||1)));
+  const client_order_id=`tara_exit_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+  const body={
+    ticker,client_order_id,side,action:'sell',type:'limit',
+    count:Math.max(1,Math.floor(Number(count)||0)),
+    expiration_ts:Math.floor(Date.now()/1000)+30,
+  };
+  if(side==='yes')body.yes_price=lim;else body.no_price=100-lim;
+  if(dryRun){
+    return{ok:true,dryRun:true,order:{order_id:`DRY_${client_order_id}`,client_order_id,ticker,side,action:'sell',count:body.count,status:'filled',_simulated:true}};
+  }
+  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'POST',path:'/portfolio/orders',body});
+  if(!res.ok)return{ok:false,reason:res.reason||'exit failed',raw:res};
+  return{ok:true,order:res.data?.order||res.data};
+};
+
+// Quick credentials check — calls /portfolio/balance which requires auth but no params.
+const kalshiPing=async({apiKeyId,privateKeyPem})=>{
+  if(!apiKeyId||!privateKeyPem)return{ok:false,reason:'no-credentials'};
+  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'GET',path:'/portfolio/balance',timeoutMs:6000});
+  if(!res.ok)return{ok:false,reason:res.reason||`http ${res.status}`};
+  return{ok:true,balance:res.data?.balance,raw:res.data};
+};
+
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
@@ -6521,7 +6691,7 @@ function BestPracticesModal({open,onClose}){
 //     3. ACCELERATION detection (last 10s velocity vs prior 30s) — sharper alert
 //        than just "risk elevated" because it reflects what's happening RIGHT
 //        NOW, not what conditions look like.
-function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef}){
+function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef,autoOrderState,killSwitchEngaged,onKillSwitch}){
   // V9.1.7: Per-position peak/trough refs. Reset on position open or direction flip.
   const _peakBpsRef=React.useRef({pos:null,peak:-Infinity,trough:Infinity,openTime:0});
   // V9.2.1: Sound alert tracking — only beep when a NEW urgent card appears, not on every render.
@@ -6804,6 +6974,33 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
           ),
         ),
       ),
+      // V9.3.0: Kalshi auto-order status strip — shows when Tara placed an auto-order
+      // for this lock. Compact: status pill, fill price, contracts, kill switch.
+      autoOrderState&&React.createElement('div',{
+        className:'px-3 sm:px-4 py-1.5 border-b border-[#E8E9E4]/8 flex items-baseline justify-between gap-2 flex-wrap text-[10px]',
+        style:{background:autoOrderState.dryRun?'rgba(251,191,36,0.04)':'rgba(229,200,112,0.04)'},
+      },
+        React.createElement('div',{className:'flex items-baseline gap-2 flex-wrap'},
+          React.createElement('span',{
+            className:'uppercase tracking-[0.16em] font-bold px-1.5 py-0.5 rounded',
+            style:(()=>{
+              const s=autoOrderState.status;
+              if(s==='filled'||s==='exited')return{color:'#6EE7B7',border:'1px solid rgba(110,231,183,0.40)',background:'rgba(110,231,183,0.08)'};
+              if(s==='error'||s==='canceled')return{color:'#F87171',border:'1px solid rgba(248,113,113,0.40)',background:'rgba(248,113,113,0.08)'};
+              if(s==='exiting')return{color:'#FBBF24',border:'1px solid rgba(251,191,36,0.40)',background:'rgba(251,191,36,0.08)'};
+              return{color:T2_GOLD,border:'1px solid rgba(229,200,112,0.40)',background:'rgba(229,200,112,0.06)'};
+            })(),
+          },(autoOrderState.dryRun?'DRY · ':'')+'KALSHI '+String(autoOrderState.status||'').toUpperCase()),
+          autoOrderState.dir&&React.createElement('span',{className:'text-[#E8E9E4]/65'},autoOrderState.dir,' · ',autoOrderState.count||'?',' contracts @ ',autoOrderState.limitCents,'¢'),
+          autoOrderState.fillPrice!=null&&React.createElement('span',{className:'text-emerald-400'},'filled @ ',autoOrderState.fillPrice,'¢'),
+          autoOrderState.error&&React.createElement('span',{className:'text-rose-400'},'⚠ ',String(autoOrderState.error).slice(0,80)),
+        ),
+        onKillSwitch&&React.createElement('button',{
+          onClick:onKillSwitch,
+          className:'px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider',
+          style:killSwitchEngaged?{color:'#F87171',background:'rgba(248,113,113,0.20)',border:'1px solid rgba(248,113,113,0.50)'}:{color:'rgba(248,113,113,0.85)',border:'1px solid rgba(248,113,113,0.30)'},
+        },killSwitchEngaged?'KILLED':'⛔ Kill'),
+      ),
       React.createElement('div',{className:'p-2 sm:p-3 space-y-1.5'},
         cards.slice(0,4).map((card,i)=>{
           const s=_toneStyles[card.tone]||_toneStyles.info;
@@ -6830,7 +7027,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
 // ── V8.2: TRADING SETTINGS MODAL ────────────────────────────────────────────
 // Configure bet size, win payout, anti-tilt cooldown, Discord alert filter,
 // take-profit/cut-loss rules. All localStorage-only, per-device prefs.
-function TradingSettingsModal({open,onClose,settings,setSettings}){
+function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,saveKalshiCreds,autoExecSettings,setAutoExecSettings,killSwitchEngaged,setKillSwitchEngaged,kalshiPingState,setKalshiPingState,autoExecCooldownUntil,setAutoExecCooldownUntil,autoExecDayPnL,setAutoExecDayPnL}){
   if(!open)return null;
   const _update=(k,v)=>setSettings(prev=>({...prev,[k]:v}));
   const _num=(s,fallback)=>{const n=Number(s);return Number.isFinite(n)?n:fallback;};
@@ -6952,6 +7149,167 @@ function TradingSettingsModal({open,onClose,settings,setSettings}){
           }),
         ),
       ),
+      // ── V9.3.0: KALSHI AUTO-EXECUTION ─────────────────────────────────
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg border',style:{background:'rgba(229,200,112,0.04)',borderColor:'rgba(229,200,112,0.20)'}},
+        React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
+          React.createElement('div',null,
+            React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-[0.18em]',style:{color:T2_GOLD}},'Kalshi Auto-Execution'),
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/45 mt-0.5'},'localStorage only · never synced'),
+          ),
+          // Live status pill
+          (()=>{
+            const _killed=!!killSwitchEngaged;
+            const _on=!!autoExecSettings?.enabled&&!_killed;
+            const _dry=!!autoExecSettings?.dryRun;
+            const _label=_killed?'KILLED':_on?(_dry?'LIVE · DRY-RUN':'LIVE'):'OFF';
+            const _color=_killed?'#F87171':_on?(_dry?'#FBBF24':'#6EE7B7'):'rgba(232,233,228,0.45)';
+            return React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded',style:{color:_color,border:`1px solid ${_color}`,background:`${_color}15`}},_label);
+          })(),
+        ),
+        // Kill switch — biggest button, top of section
+        React.createElement('button',{
+          onClick:()=>setKillSwitchEngaged(v=>!v),
+          className:'w-full px-3 py-2 rounded text-[11px] uppercase font-bold tracking-wider mb-3 transition-colors',
+          style:killSwitchEngaged?{background:'rgba(248,113,113,0.20)',color:'#F87171',border:'1px solid rgba(248,113,113,0.50)'}:{background:'rgba(248,113,113,0.06)',color:'#F87171',border:'1px solid rgba(248,113,113,0.30)'},
+        },killSwitchEngaged?'⛔ Kill switch ENGAGED — tap to release':'Engage kill switch'),
+        // API credentials
+        React.createElement('div',{className:'mb-3 p-2 rounded bg-[#0E100F]/60'},
+          React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-2'},'API credentials'),
+          React.createElement('label',{className:'block mb-2'},
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Key ID'),
+            React.createElement('input',{
+              type:'text',value:kalshiCreds?.apiKeyId||'',spellCheck:false,autoComplete:'off',
+              onChange:(e)=>saveKalshiCreds({apiKeyId:e.target.value,privateKeyPem:kalshiCreds?.privateKeyPem||''}),
+              className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-[11px] tabular-nums focus:border-[#E5C870] focus:outline-none font-mono',
+              placeholder:'00000000-0000-0000-0000-000000000000',
+            }),
+          ),
+          React.createElement('label',{className:'block'},
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Private key (PEM, full PKCS#8)'),
+            React.createElement('textarea',{
+              rows:4,value:kalshiCreds?.privateKeyPem||'',spellCheck:false,autoComplete:'off',
+              onChange:(e)=>saveKalshiCreds({apiKeyId:kalshiCreds?.apiKeyId||'',privateKeyPem:e.target.value}),
+              className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-[10px] focus:border-[#E5C870] focus:outline-none font-mono leading-tight',
+              placeholder:'-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----',
+            }),
+          ),
+          React.createElement('div',{className:'flex items-baseline gap-2 mt-2'},
+            React.createElement('button',{
+              onClick:async()=>{
+                setKalshiPingState({state:'pinging',msg:'',balance:null,at:Date.now()});
+                try{
+                  const r=await kalshiPing({apiKeyId:kalshiCreds?.apiKeyId,privateKeyPem:kalshiCreds?.privateKeyPem});
+                  if(r.ok)setKalshiPingState({state:'ok',msg:`balance $${((Number(r.balance)||0)/100).toFixed(2)}`,balance:r.balance,at:Date.now()});
+                  else setKalshiPingState({state:'fail',msg:r.reason||'unknown error',balance:null,at:Date.now()});
+                }catch(e){setKalshiPingState({state:'fail',msg:e?.message||String(e),balance:null,at:Date.now()});}
+              },
+              disabled:!kalshiCreds?.apiKeyId||!kalshiCreds?.privateKeyPem||kalshiPingState?.state==='pinging',
+              className:'px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider',
+              style:{background:'rgba(110,231,183,0.10)',color:'#6EE7B7',border:'1px solid rgba(110,231,183,0.30)'},
+            },kalshiPingState?.state==='pinging'?'Testing…':'Test connection'),
+            kalshiPingState?.state==='ok'&&React.createElement('span',{className:'text-[10px] text-emerald-400'},'✓ ',kalshiPingState.msg),
+            kalshiPingState?.state==='fail'&&React.createElement('span',{className:'text-[10px] text-rose-400'},'✗ ',kalshiPingState.msg),
+          ),
+          React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 mt-2 leading-relaxed'},
+            'Stored in your browser only. Anthropic / Tara servers never see these values. Test calls /portfolio/balance.',
+          ),
+        ),
+        // Master toggles
+        React.createElement('div',{className:'mb-3 p-2 rounded bg-[#0E100F]/60'},
+          React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer mb-2'},
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[11px] font-bold text-white'},'Auto-place orders on lock'),
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'When Tara locks UP/DOWN, fire a Kalshi limit order'),
+            ),
+            React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.enabled,onChange:(e)=>setAutoExecSettings(prev=>({...prev,enabled:e.target.checked})),className:'ml-2'}),
+          ),
+          React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[11px] font-bold',style:{color:'#FBBF24'}},'Dry-run mode'),
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Simulates orders without hitting Kalshi. Keep ON until you\'ve verified one sandbox order end-to-end.'),
+            ),
+            React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.dryRun,onChange:(e)=>setAutoExecSettings(prev=>({...prev,dryRun:e.target.checked})),className:'ml-2'}),
+          ),
+        ),
+        // Risk guardrails
+        React.createElement('div',{className:'mb-3 p-2 rounded bg-[#0E100F]/60'},
+          React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-2'},'Risk guardrails'),
+          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-2'},
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Max bet / trade ($)'),
+              React.createElement('input',{
+                type:'number',min:1,max:500,step:1,value:autoExecSettings?.maxBetPerTrade||0,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxBetPerTrade:Math.max(1,Math.min(500,_num(e.target.value,25)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+              }),
+            ),
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Daily loss cap ($)'),
+              React.createElement('input',{
+                type:'number',min:5,max:5000,step:5,value:autoExecSettings?.maxDailyLoss||0,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxDailyLoss:Math.max(5,Math.min(5000,_num(e.target.value,50)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+              }),
+            ),
+          ),
+          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-2'},
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Cooldown after N losses'),
+              React.createElement('input',{
+                type:'number',min:2,max:10,step:1,value:autoExecSettings?.cooldownLossStreak||3,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownLossStreak:Math.max(2,Math.min(10,_num(e.target.value,3)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+              }),
+            ),
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Cooldown duration (min)'),
+              React.createElement('input',{
+                type:'number',min:1,max:240,step:1,value:autoExecSettings?.cooldownMinutes||20,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownMinutes:Math.max(1,Math.min(240,_num(e.target.value,20)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+              }),
+            ),
+          ),
+          React.createElement('div',{className:'grid grid-cols-2 gap-2'},
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Slippage (¢ over offer)'),
+              React.createElement('input',{
+                type:'number',min:0,max:10,step:1,value:autoExecSettings?.slippageCents||0,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,slippageCents:Math.max(0,Math.min(10,_num(e.target.value,2)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+              }),
+            ),
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Take-profit at offer ¢'),
+              React.createElement('input',{
+                type:'number',min:60,max:99,step:1,value:autoExecSettings?.autoExitOffer||85,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,autoExitOffer:Math.max(60,Math.min(99,_num(e.target.value,85)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+              }),
+            ),
+          ),
+        ),
+        // Today's auto-exec stats + cooldown reset
+        React.createElement('div',{className:'p-2 rounded bg-[#0E100F]/60'},
+          React.createElement('div',{className:'flex items-baseline justify-between'},
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65'},
+              'Today auto-exec: ',
+              React.createElement('span',{className:'tabular-nums font-bold text-white'},autoExecDayPnL?.trades||0),
+              ' trades · ',
+              React.createElement('span',{className:'tabular-nums font-bold',style:{color:(autoExecDayPnL?.pnl||0)>=0?'#6EE7B7':'#F87171'}},'$',(autoExecDayPnL?.pnl||0).toFixed(2)),
+            ),
+            (autoExecCooldownUntil>Date.now())&&React.createElement('button',{
+              onClick:()=>setAutoExecCooldownUntil(0),
+              className:'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded',
+              style:{color:'#F87171',border:'1px solid rgba(248,113,113,0.30)'},
+            },`Clear cooldown (${Math.ceil((autoExecCooldownUntil-Date.now())/60000)}m)`),
+          ),
+          (autoExecDayPnL?.trades||0)>0&&React.createElement('button',{
+            onClick:()=>{if(window.confirm('Reset today\'s auto-exec P&L counter?'))setAutoExecDayPnL({day:new Date().toISOString().slice(0,10),pnl:0,trades:0});},
+            className:'mt-2 text-[9px] uppercase tracking-wider text-[#E8E9E4]/45 hover:text-[#E8E9E4]/70',
+          },'Reset day counter'),
+        ),
+      ),
       React.createElement('button',{
         onClick:onClose,
         className:'w-full px-4 py-2 rounded text-[11px] uppercase font-bold tracking-wider transition-colors',
@@ -7029,6 +7387,118 @@ function AssetRotationHint({rotation,onSwitch}){
         style:{color:'rgba(147,197,253,0.95)',border:'1px solid rgba(147,197,253,0.30)',background:'rgba(147,197,253,0.05)'},
       },`Switch to ${rotation.suggest}`),
     ),
+  );
+}
+
+// ── V9.3.0: DUAL-ASSET CALL STRIP ─────────────────────────────────────────────
+// Side-by-side BTC + ETH calls so the user sees Tara's read on both assets
+// simultaneously. The active asset shows the LIVE engine output (taraCall).
+// The inactive asset shows the SHADOW engine output (computed every 2s in the
+// background by the shadow useEffect at L15322).
+// Click the inactive side to switch to it as the active asset.
+//
+// Shadow data shape (from shadowTaraByAssetRef.current[asset]):
+//   {leanDir, confidence, posterior, strike, currentPrice, regime, kalshiYesCents,
+//    marketTicker, marketCloseTime, windowId, sampleCount, committedDir, conviction,
+//    atrBps, updatedAt}
+function DualAssetCallStrip({currentAsset,onSwitch,taraCall,kalshiYesPrice,currentPrice,targetMargin,shadowRef,timeState}){
+  // 1Hz tick to refresh shadow display (shadow data lives in a ref, doesn't auto-rerender)
+  const[,_t]=React.useState(0);
+  React.useEffect(()=>{const iv=setInterval(()=>_t(x=>x+1),1000);return()=>clearInterval(iv);},[]);
+  const _otherAsset=currentAsset==='BTC'?'ETH':'BTC';
+  const _shadow=shadowRef?.current?.[_otherAsset];
+  const _shadowFresh=_shadow&&(Date.now()-(_shadow.updatedAt||0))<8000;
+  // Active card: from live engine
+  const _activeDir=(taraCall?.call==='UP'||taraCall?.call==='DOWN')?taraCall.call:taraCall?.direction||null;
+  const _activeConv=taraCall?.confidence||taraCall?.conviction||0;
+  const _activePhase=taraCall?.phase||(taraCall?.call==='SIT_OUT'?'WATCHING':'');
+  const _activeRegime=taraCall?.regime||'';
+  const _activeKalshi=Number(kalshiYesPrice);
+  const _activeKalshiOk=Number.isFinite(_activeKalshi)&&_activeKalshi>0;
+  const _activeKalshiForDir=_activeKalshiOk&&_activeDir?(_activeDir==='UP'?_activeKalshi:(100-_activeKalshi)):null;
+  // Shadow card
+  const _shDir=_shadowFresh?(_shadow.committedDir||(_shadow.leanDir!=='NEUTRAL'?_shadow.leanDir:null)):null;
+  const _shConf=_shadowFresh?_shadow.confidence:0;
+  const _shCommitted=_shadowFresh&&!!_shadow.committedDir;
+  const _shKalshi=_shadowFresh?Number(_shadow.kalshiYesCents):null;
+  const _shKalshiOk=Number.isFinite(_shKalshi)&&_shKalshi>0&&_shKalshi<100;
+  const _shKalshiForDir=_shKalshiOk&&_shDir?(_shDir==='UP'?_shKalshi:(100-_shKalshi)):null;
+  const _shCfg=ASSET_CONFIG[_otherAsset]||{};
+  const _activeCfg=ASSET_CONFIG[currentAsset]||{};
+  const _renderCard=({asset,cfg,dir,conf,phase,regime,kalshiForDir,kalshiYes,price,strike,isActive,committed,onClick,sampleCount,stale})=>{
+    const _color=cfg.color||'#E5C870';
+    const _dirColor=dir==='UP'?'rgb(110,231,183)':dir==='DOWN'?'rgba(244,114,182,0.95)':'rgba(232,233,228,0.55)';
+    return React.createElement('div',{
+      onClick:onClick,
+      className:`flex-1 min-w-0 rounded-lg overflow-hidden ${onClick?'cursor-pointer hover:bg-white/5':''} transition-colors`,
+      style:{
+        border:isActive?`1px solid ${_color}66`:'1px solid rgba(232,233,228,0.10)',
+        background:isActive?`${_color}0E`:'rgba(14,16,15,0.40)',
+      },
+    },
+      React.createElement('div',{className:'px-2.5 py-1 flex items-baseline justify-between gap-1 border-b border-[#E8E9E4]/8'},
+        React.createElement('div',{className:'flex items-baseline gap-1.5 min-w-0'},
+          React.createElement('span',{className:'text-base leading-none shrink-0',style:{color:_color}},cfg.icon||'?'),
+          React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:isActive?_color:'rgba(232,233,228,0.55)'}},cfg.label||asset),
+          isActive?React.createElement('span',{className:'text-[8px] uppercase tracking-wider px-1 py-0.5 rounded shrink-0',style:{color:_color,background:`${_color}22`,border:`1px solid ${_color}44`}},'LIVE'):React.createElement('span',{className:'text-[8px] uppercase tracking-wider px-1 py-0.5 rounded shrink-0',style:{color:'rgba(232,233,228,0.45)',border:'1px solid rgba(232,233,228,0.15)'}},'SHADOW'),
+          stale&&React.createElement('span',{className:'text-[8px] uppercase tracking-wider text-rose-400/60 shrink-0'},'stale'),
+        ),
+        price>0&&React.createElement('span',{className:'text-[10px] tabular-nums text-[#E8E9E4]/55 shrink-0'},'$',Math.round(price).toLocaleString()),
+      ),
+      React.createElement('div',{className:'px-2.5 py-1.5 flex items-center justify-between gap-2'},
+        React.createElement('div',{className:'min-w-0'},
+          dir?React.createElement('div',{className:'flex items-baseline gap-1.5'},
+            React.createElement('span',{className:'text-lg font-bold leading-none',style:{color:_dirColor}},dir==='UP'?'▲':'▼',' ',dir),
+            React.createElement('span',{className:'text-[11px] tabular-nums font-bold',style:{color:_dirColor}},Math.round(conf||0),'%'),
+            committed===true&&React.createElement('span',{className:'text-[8px] uppercase font-bold px-1 py-0.5 rounded',style:{color:'rgb(110,231,183)',background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.30)'}},'committed'),
+            (sampleCount&&sampleCount>0&&!committed)&&React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/45'},'sample ',sampleCount,'/2'),
+          ):React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/55 italic'},stale?'feed stale':phase==='SEARCH'?'searching…':'no clear lean'),
+          React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 mt-0.5 truncate'},
+            regime?(regime.length>20?regime.slice(0,20)+'…':regime):'—',
+            strike>0?React.createElement('span',null,' · strike $',Math.round(strike).toLocaleString()):null,
+          ),
+        ),
+        kalshiForDir!=null&&React.createElement('div',{className:'text-right shrink-0'},
+          React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/45'},'kalshi ',dir||''),
+          React.createElement('div',{className:'text-[12px] tabular-nums font-bold',style:{color:kalshiForDir>=70?'rgb(110,231,183)':kalshiForDir>=55?'rgba(229,200,112,0.95)':kalshiForDir<=30?'rgba(244,114,182,0.95)':'rgba(232,233,228,0.65)'}},Math.round(kalshiForDir),'%'),
+        ),
+      ),
+    );
+  };
+  return React.createElement('div',{className:'mb-2 sm:mb-3 flex gap-2 items-stretch'},
+    _renderCard({
+      asset:currentAsset,
+      cfg:_activeCfg,
+      dir:_activeDir,
+      conf:_activeConv,
+      phase:_activePhase,
+      regime:_activeRegime,
+      kalshiForDir:_activeKalshiForDir,
+      kalshiYes:_activeKalshi,
+      price:currentPrice,
+      strike:targetMargin,
+      isActive:true,
+      committed:_activePhase==='FORMING'||_activePhase==='COMMITTED'||(_activeDir&&_activeConv>=70),
+      onClick:null,
+      stale:false,
+    }),
+    _renderCard({
+      asset:_otherAsset,
+      cfg:_shCfg,
+      dir:_shDir,
+      conf:_shConf,
+      phase:'',
+      regime:_shadowFresh?_shadow.regime:'',
+      kalshiForDir:_shKalshiForDir,
+      kalshiYes:_shKalshi,
+      price:_shadowFresh?_shadow.currentPrice:0,
+      strike:_shadowFresh?_shadow.strike:0,
+      isActive:false,
+      committed:_shCommitted,
+      onClick:onSwitch?()=>onSwitch(_otherAsset):null,
+      sampleCount:_shadowFresh?_shadow.sampleCount:0,
+      stale:!_shadowFresh,
+    }),
   );
 }
 
@@ -12708,6 +13178,83 @@ function TaraApp(){
   useEffect(()=>{try{localStorage.setItem('taraTradingSettings_v1',JSON.stringify(tradingSettings));}catch(_){}},[tradingSettings]);
   const[showTradingSettings,setShowTradingSettings]=useState(false);
   const[showBestPractices,setShowBestPractices]=useState(false); // V8.5: best-practices modal
+  // ── V9.3.0: KALSHI AUTO-EXECUTION STATE ─────────────────────────────────
+  // Credentials are localStorage-only and NEVER cloud-synced. Auto-exec defaults
+  // OFF and dry-run defaults ON until you've verified your first sandbox order.
+  const[kalshiCreds,setKalshiCreds]=useState(()=>{
+    try{
+      const id=localStorage.getItem('tara_kalshi_api_key_id')||'';
+      const pem=localStorage.getItem('tara_kalshi_private_key')||'';
+      return{apiKeyId:id,privateKeyPem:pem};
+    }catch(_){return{apiKeyId:'',privateKeyPem:''};}
+  });
+  const _saveKalshiCreds=(next)=>{
+    setKalshiCreds(next);
+    try{
+      if(next.apiKeyId)localStorage.setItem('tara_kalshi_api_key_id',next.apiKeyId);
+      else localStorage.removeItem('tara_kalshi_api_key_id');
+      if(next.privateKeyPem)localStorage.setItem('tara_kalshi_private_key',next.privateKeyPem);
+      else localStorage.removeItem('tara_kalshi_private_key');
+    }catch(_){}
+  };
+  const[autoExecSettings,setAutoExecSettings]=useState(()=>{
+    try{
+      const v=JSON.parse(localStorage.getItem('tara_autoexec_v1')||'{}');
+      return{
+        enabled:!!v.enabled,                         // master toggle
+        dryRun:v.dryRun!==false,                     // default ON — flip after sandbox verification
+        maxBetPerTrade:Number(v.maxBetPerTrade)>0?Number(v.maxBetPerTrade):25,
+        maxDailyLoss:Number(v.maxDailyLoss)>0?Number(v.maxDailyLoss):50,
+        cooldownLossStreak:Number(v.cooldownLossStreak)>=2?Number(v.cooldownLossStreak):3,
+        cooldownMinutes:Number(v.cooldownMinutes)>0?Number(v.cooldownMinutes):20,
+        slippageCents:Number(v.slippageCents)>=0?Number(v.slippageCents):2,
+        autoExitOffer:Number(v.autoExitOffer)>0?Number(v.autoExitOffer):85, // exit at 85¢ offer
+        autoExitSecLeft:Number(v.autoExitSecLeft)>0?Number(v.autoExitSecLeft):20,
+      };
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20};}
+  });
+  useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
+  // Kill switch is in-memory + localStorage. When engaged, all auto-exec is gated off
+  // INSTANTLY regardless of autoExecSettings.enabled. Survives reloads.
+  const[killSwitchEngaged,setKillSwitchEngaged]=useState(()=>{
+    try{return localStorage.getItem('tara_kalshi_kill')==='1';}catch(_){return false;}
+  });
+  useEffect(()=>{try{if(killSwitchEngaged)localStorage.setItem('tara_kalshi_kill','1');else localStorage.removeItem('tara_kalshi_kill');}catch(_){}},[killSwitchEngaged]);
+  // Auto-exec cooldown — set when loss streak triggers, blocks new orders for cooldownMinutes.
+  const[autoExecCooldownUntil,setAutoExecCooldownUntil]=useState(()=>{
+    try{const v=Number(localStorage.getItem('tara_autoexec_cooldown')||'0');return v>Date.now()?v:0;}catch(_){return 0;}
+  });
+  useEffect(()=>{try{if(autoExecCooldownUntil>Date.now())localStorage.setItem('tara_autoexec_cooldown',String(autoExecCooldownUntil));else localStorage.removeItem('tara_autoexec_cooldown');}catch(_){}},[autoExecCooldownUntil]);
+  // Tracks today's realized P&L from auto-exec only (separate from manual scorecard).
+  // Reset at UTC midnight. Used by the daily-loss guardrail.
+  const[autoExecDayPnL,setAutoExecDayPnL]=useState(()=>{
+    try{
+      const v=JSON.parse(localStorage.getItem('tara_autoexec_daypnl_v1')||'{}');
+      const todayKey=new Date().toISOString().slice(0,10);
+      return v.day===todayKey?{day:todayKey,pnl:Number(v.pnl)||0,trades:Number(v.trades)||0}:{day:todayKey,pnl:0,trades:0};
+    }catch(_){return{day:new Date().toISOString().slice(0,10),pnl:0,trades:0};}
+  });
+  useEffect(()=>{try{localStorage.setItem('tara_autoexec_daypnl_v1',JSON.stringify(autoExecDayPnL));}catch(_){}},[autoExecDayPnL]);
+  // Roll daily P&L over UTC midnight
+  useEffect(()=>{
+    const iv=setInterval(()=>{
+      const todayKey=new Date().toISOString().slice(0,10);
+      setAutoExecDayPnL(prev=>prev.day===todayKey?prev:{day:todayKey,pnl:0,trades:0});
+    },60000);
+    return()=>clearInterval(iv);
+  },[]);
+  // Active auto-exec order state. Tracks the order Tara placed for the current lock.
+  // Cleared when the position closes (window roll, manual close, or auto-exit fill).
+  // Shape: {orderId, ticker, side, count, limitCents, dir, placedAt, status, fillPrice, exitOrderId, error, dryRun}
+  const[autoOrderState,setAutoOrderState]=useState(null);
+  const autoOrderStateRef=useRef(autoOrderState);
+  useEffect(()=>{autoOrderStateRef.current=autoOrderState;},[autoOrderState]);
+  // Per-window dedup so we never double-fire on the same lock (e.g., on a forceRender pulse).
+  const _autoExecLastFiredKeyRef=useRef('');
+  // Auto-exec settings panel visibility (separate from the main trading settings modal)
+  const[showKalshiSettings,setShowKalshiSettings]=useState(false);
+  // Connection status from a manual ping
+  const[kalshiPingState,setKalshiPingState]=useState({state:'idle',msg:'',balance:null,at:0});
   // V8.2: Anti-tilt cooldown state — set when streak reaches threshold, blocks new entries
   //   for tradingSettings.antiTiltMinutes. Cleared on first WIN. Persists across reloads.
   const[tiltLockUntil,setTiltLockUntil]=useState(()=>{
@@ -14886,12 +15433,16 @@ function TaraApp(){
 
   // V7.7: SHADOW TARA — background analysis for the INACTIVE asset. User: "tara's decision
   //   only happens when i open the tab. i want her to make the decision already in the
-  //   background by the time i open". Every 5s, fetches the inactive asset's candles +
+  //   background by the time i open". Every 2s, fetches the inactive asset's candles +
   //   Kalshi strike + computes a lightweight directional read using computeV99Posterior.
   //   Stores in shadowTaraByAssetRef so the asset-switch handler can surface "Tara currently
   //   leans UP 78%" immediately. NOT a full lock candidate — no sample formation, no
   //   commitment, just her current posterior view. Once you switch tabs, real Tara takes
   //   over with full lifecycle.
+  // V9.3.0: cadence tightened from 5s→2s. Now also captures the Kalshi market ticker,
+  //   close_time, and YES price — so the shadow output can power side-by-side UI and
+  //   eventually shadow auto-execution. Adds simple 2-sample directional commitment so
+  //   the shadow has a "soft lock" view distinct from raw lean.
   useEffect(()=>{
     const _shadowAsset=currentAsset==='BTC'?'ETH':'BTC';
     const _cfg=ASSET_CONFIG[_shadowAsset]||ASSET_CONFIG.BTC;
@@ -14910,7 +15461,13 @@ function TaraApp(){
         const _shadowPrice=priceByAssetRef.current?.[_shadowAsset]?.price||_bars[0]?.c||0;
         if(_shadowPrice<=0)return;
         // Fetch the shadow asset's Kalshi strike. Reuse the events endpoint.
+        // V9.3.0: also capture market ticker, close_time, and YES price so the
+        //   shadow output can drive a side-by-side call card (and eventually
+        //   shadow-asset auto-execution).
         let _shadowStrike=0;
+        let _shadowMarketTicker=null;
+        let _shadowMarketCloseTime=null;
+        let _shadowYesCents=null;
         try{
           const _kPath=`events?series_ticker=${_cfg.kalshiSeriesTicker}${windowType==='15m'?'15M':'5M'}&with_nested_markets=true&status=open&limit=20`;
           const _kUrl=`https://api.elections.kalshi.com/trade-api/v2/${_kPath}`;
@@ -14929,6 +15486,12 @@ function TaraApp(){
               for(const _m of _markets){
                 if(_m.strike_type==='greater'&&_m.floor_strike){
                   _shadowStrike=Number(_m.floor_strike);
+                  _shadowMarketTicker=_m.ticker||null;
+                  _shadowMarketCloseTime=_m.close_time||null;
+                  // Best-effort YES price: prefer last_price, fall back to mid of bid/ask
+                  if(_m.last_price!=null)_shadowYesCents=Number(_m.last_price);
+                  else if(_m.yes_bid!=null&&_m.yes_ask!=null)_shadowYesCents=Math.round((Number(_m.yes_bid)+Number(_m.yes_ask))/2);
+                  else if(_m.yes_ask!=null)_shadowYesCents=Number(_m.yes_ask);
                   break;
                 }
               }
@@ -14966,7 +15529,28 @@ function TaraApp(){
           const _post=Number(_shadowResult.rawProbAbove)||50;
           const _leanDir=_post>=55?'UP':_post<=45?'DOWN':'NEUTRAL';
           const _confNum=Math.round(_leanDir==='UP'?_post:_leanDir==='DOWN'?(100-_post):50);
+          // V9.3.0: SOFT LOCK — when 2 consecutive samples agree on direction with conviction
+          //   ≥10pt, mark as 'committed'. Cleared on direction flip or window roll.
           if(!shadowTaraByAssetRef.current)shadowTaraByAssetRef.current={};
+          const _prev=shadowTaraByAssetRef.current[_shadowAsset]||{};
+          const _wid=computeWindowId(windowType);
+          let _committedDir=null,_sampleCount=1,_committedAt=null;
+          const _conviction=Math.abs(_post-50);
+          if(_prev.windowId===_wid&&_prev.leanDir===_leanDir&&_leanDir!=='NEUTRAL'&&_conviction>=10){
+            _sampleCount=(_prev.sampleCount||1)+1;
+            if(_sampleCount>=2){
+              _committedDir=_leanDir;
+              _committedAt=_prev.committedAt||Date.now();
+            }
+          } else if(_prev.windowId===_wid&&_prev.committedDir&&_prev.leanDir===_leanDir){
+            // direction unchanged; preserve commitment
+            _committedDir=_prev.committedDir;
+            _committedAt=_prev.committedAt;
+            _sampleCount=_prev.sampleCount||2;
+          } else {
+            // direction flipped or new window — reset
+            _sampleCount=1;
+          }
           shadowTaraByAssetRef.current[_shadowAsset]={
             leanDir:_leanDir,
             confidence:_confNum,
@@ -14974,13 +15558,31 @@ function TaraApp(){
             strike:_shadowStrike,
             currentPrice:_shadowPrice,
             regime:_shadowResult.regime||'',
+            // V9.3.0 NEW
+            kalshiYesCents:_shadowYesCents,
+            marketTicker:_shadowMarketTicker,
+            marketCloseTime:_shadowMarketCloseTime,
+            windowId:_wid,
+            sampleCount:_sampleCount,
+            committedDir:_committedDir,
+            committedAt:_committedDir?_committedAt:null,
+            conviction:_conviction,
+            atrBps:_shadowResult.atrBps||0,
             updatedAt:Date.now(),
           };
+          // V9.3.0: also feed _otherAssetRef so the PRIMARY engine's cross-asset signal
+          //   (otherAssetData param to computeV99Posterior) gets fresh data without
+          //   needing a second tab open. Previously this only updated via BroadcastChannel
+          //   from a different tab; now single-tab usage gets cross-asset correlation too.
+          const _otherPrevRef=_otherAssetRef.current;
+          const _other5m=(_otherPrevRef.asset===_shadowAsset&&_otherPrevRef.price>0&&(Date.now()-_otherPrevRef.lastUpdate)>4000)?_otherPrevRef.price:(_bars[0]?.o||_shadowPrice);
+          const _otherDelta=_other5m>0?((_shadowPrice-_other5m)/_other5m)*10000:0;
+          _otherAssetRef.current={asset:_shadowAsset,price:_shadowPrice,price5mAgo:_other5m,deltaBps:_otherDelta,lastUpdate:Date.now()};
         }
       }catch(e){/* shadow analysis is best-effort */}
     };
     _runShadow();
-    const _iv=setInterval(_runShadow,5000);
+    const _iv=setInterval(_runShadow,2000);
     return()=>{_cancelled=true;clearInterval(_iv);};
   },[currentAsset,windowType,timeState.minsRemaining,timeState.secsRemaining,regimeMemory]);
 
@@ -18010,6 +18612,275 @@ function TaraApp(){
       _ctx:{q,conviction,fgtAbs,regime:analysis.regime,winType,tapeStronglyAgrees,tapeSuperStrong,kalshiAgrees,kalshiStronglyAgrees,_remaining,_elapsed,isConfluent,isSuperConfluent,isRisingConfluence,isTapeLed,isStructuralLed,strikeFavorable},
     };
   })();
+  // ═══════════════════════════════════════════════════════════════════════════
+  // V9.3.0: KALSHI AUTO-EXECUTION — fire orders on lock, exit on threshold/time
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Three coordinated effects, all gated by the same enable + kill-switch checks:
+  //   1. ENTRY  — when lockedCallRef transitions to a new committed lock
+  //   2. POLL   — while an order is working, check status every 2s
+  //   3. EXIT   — when offer ≥ autoExitOffer OR seconds-left ≤ autoExitSecLeft, sell out
+  // ───────────────────────────────────────────────────────────────────────────
+  const _autoExecGuardrailCheck=useCallback(()=>{
+    // Returns {ok, reason}. Single source of truth for "should we fire?".
+    if(killSwitchEngaged)return{ok:false,reason:'kill switch engaged'};
+    if(!autoExecSettings.enabled)return{ok:false,reason:'auto-exec disabled'};
+    if(!kalshiCreds.apiKeyId||!kalshiCreds.privateKeyPem)return{ok:false,reason:'no API credentials'};
+    if(autoExecCooldownUntil>Date.now()){
+      const _min=Math.ceil((autoExecCooldownUntil-Date.now())/60000);
+      return{ok:false,reason:`cooldown ${_min}m left`};
+    }
+    if(tiltLockUntil>Date.now())return{ok:false,reason:'anti-tilt cooldown active'};
+    const _bet=Number(tradingSettings?.betSize)||0;
+    if(_bet<=0)return{ok:false,reason:'bet size is 0'};
+    if(_bet>autoExecSettings.maxBetPerTrade)return{ok:false,reason:`bet $${_bet} > cap $${autoExecSettings.maxBetPerTrade}`};
+    if(autoExecDayPnL.pnl<=-autoExecSettings.maxDailyLoss)return{ok:false,reason:`daily loss cap hit ($${(-autoExecDayPnL.pnl).toFixed(2)})`};
+    return{ok:true};
+  },[killSwitchEngaged,autoExecSettings,kalshiCreds,autoExecCooldownUntil,tiltLockUntil,tradingSettings,autoExecDayPnL]);
+
+  // ── ENTRY EFFECT ──────────────────────────────────────────────────────────
+  // Watches taraCall + lockedCallRef. When a new lock fires AND auto-exec is
+  // green-lit, places a limit order and opens a UI position via setUserPosition.
+  useEffect(()=>{
+    const _lock=lockedCallRef.current;
+    if(!_lock||!_lock.dir)return;
+    const _wid=computeWindowId(windowType);
+    const _key=`${currentAsset}|${_wid}|${_lock.dir}|${_lock._committedAt||_lock.lockedAt||0}`;
+    if(_autoExecLastFiredKeyRef.current===_key)return; // dedup — already handled this lock
+    // Don't fire if user already has a manual position open for this window
+    if(userPosition){_autoExecLastFiredKeyRef.current=_key;return;}
+    // Don't fire if there's already an active auto-order
+    if(autoOrderState&&autoOrderState.status!=='canceled'&&autoOrderState.status!=='exited'&&autoOrderState.status!=='error'){return;}
+    const _g=_autoExecGuardrailCheck();
+    if(!_g.ok){
+      _autoExecLastFiredKeyRef.current=_key; // mark seen so we don't keep evaluating
+      return;
+    }
+    // Need an active Kalshi market to place an order against
+    if(!kalshiActiveMarket||!kalshiActiveMarket.ticker){return;}
+    // Need a live YES price for the limit
+    const _yes=Number(kalshiYesPrice);
+    if(!Number.isFinite(_yes)||_yes<=0||_yes>=100)return;
+    const _dir=_lock.dir;
+    // Limit price = current offer + slippage tolerance, clamped to 1-99
+    const _dirCents=_dir==='UP'?_yes:(100-_yes);
+    const _limit=Math.max(1,Math.min(99,Math.round(_dirCents+autoExecSettings.slippageCents)));
+    // Convert back to the YES-axis for the order builder (it expects YES price 1-99 always)
+    const _yesLimitForBuilder=_dir==='UP'?_limit:(100-_limit);
+    _autoExecLastFiredKeyRef.current=_key;
+    // Stamp working state immediately so duplicate renders don't double-fire
+    setAutoOrderState({
+      orderId:null,ticker:kalshiActiveMarket.ticker,side:_dir==='UP'?'yes':'no',
+      dir:_dir,count:0,limitCents:_limit,placedAt:Date.now(),
+      status:'placing',fillPrice:null,exitOrderId:null,error:null,
+      dryRun:!!autoExecSettings.dryRun,key:_key,windowId:_wid,asset:currentAsset,
+      betDollars:Number(tradingSettings?.betSize)||0,
+    });
+    (async()=>{
+      try{
+        const res=await kalshiPlaceOrder({
+          apiKeyId:kalshiCreds.apiKeyId,
+          privateKeyPem:kalshiCreds.privateKeyPem,
+          ticker:kalshiActiveMarket.ticker,
+          dir:_dir,
+          limitCents:_yesLimitForBuilder,
+          betDollars:Number(tradingSettings?.betSize)||0,
+          dryRun:!!autoExecSettings.dryRun,
+        });
+        if(!res.ok){
+          setAutoOrderState(prev=>prev?{...prev,status:'error',error:res.reason||'order failed'}:null);
+          return;
+        }
+        const _ord=res.order||{};
+        const _orderId=_ord.order_id||_ord.id||null;
+        const _status=_ord.status||(res.dryRun?'resting':'submitted');
+        const _count=Number(_ord.count)||0;
+        setAutoOrderState(prev=>prev?{
+          ...prev,
+          orderId:_orderId,
+          count:_count||prev.count,
+          status:_status,
+          dryRun:!!res.dryRun,
+        }:null);
+        // V9.3.0: route through handleManualSync so the existing trade-log machinery
+        // builds pendingTradeRef with the autoExec:true flag. We're already gated on
+        // userPosition===null upstream so {force:true} just suppresses the toggle-off path.
+        if(currentPrice){
+          handleManualSync(_dir,{autoExec:true,force:true});
+        }
+      }catch(e){
+        setAutoOrderState(prev=>prev?{...prev,status:'error',error:e?.message||String(e)}:null);
+      }
+    })();
+  // Re-evaluate on every analysis pulse (lock state lives in a ref so we need a render trigger)
+  // and on guard-state changes so toggling kill-switch/enable propagates immediately.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[analysis,currentAsset,windowType,kalshiActiveMarket,kalshiYesPrice,userPosition,autoExecSettings.enabled,autoExecSettings.dryRun,killSwitchEngaged]);
+
+  // ── POLL EFFECT ───────────────────────────────────────────────────────────
+  // While an order is in 'placing'/'submitted'/'resting'/'partially_filled' state,
+  // poll its status every 2s. On 'filled', stamp fillPrice. On 'canceled'/'rejected',
+  // surface the error.
+  useEffect(()=>{
+    if(!autoOrderState||!autoOrderState.orderId)return;
+    const _activeStatuses=['submitted','resting','partially_filled','placing'];
+    if(!_activeStatuses.includes(autoOrderState.status))return;
+    if(killSwitchEngaged)return;
+    let _stopped=false;
+    let _consecutiveErrors=0;
+    const _tick=async()=>{
+      if(_stopped)return;
+      // Dry-run: simulate fill after 3s
+      if(autoOrderState.dryRun){
+        const _ageMs=Date.now()-autoOrderState.placedAt;
+        if(_ageMs>=3000){
+          setAutoOrderState(prev=>prev?{...prev,status:'filled',fillPrice:prev.limitCents}:null);
+        }
+        return;
+      }
+      try{
+        const r=await kalshiGetOrder({
+          apiKeyId:kalshiCreds.apiKeyId,
+          privateKeyPem:kalshiCreds.privateKeyPem,
+          orderId:autoOrderState.orderId,
+          dryRun:false,
+        });
+        if(!r.ok){
+          _consecutiveErrors++;
+          if(_consecutiveErrors>=3){
+            setAutoOrderState(prev=>prev?{...prev,status:'error',error:r.reason||'poll failed'}:null);
+          }
+          return;
+        }
+        _consecutiveErrors=0;
+        const _ord=r.order||{};
+        const _newStatus=_ord.status||autoOrderState.status;
+        if(_newStatus!==autoOrderState.status||_ord.fill_price!=null){
+          setAutoOrderState(prev=>prev?{
+            ...prev,
+            status:_newStatus,
+            fillPrice:_ord.fill_price!=null?Number(_ord.fill_price):prev.fillPrice,
+          }:null);
+        }
+      }catch(_){}
+    };
+    _tick(); // immediate
+    const iv=setInterval(_tick,2000);
+    return()=>{_stopped=true;clearInterval(iv);};
+  },[autoOrderState?.orderId,autoOrderState?.status,autoOrderState?.dryRun,kalshiCreds,killSwitchEngaged]);
+
+  // ── EXIT EFFECT ───────────────────────────────────────────────────────────
+  // After an order fills, watch for either:
+  //   (a) Kalshi YES-side offer reaches autoExitOffer (take profit)
+  //   (b) Window has fewer than autoExitSecLeft remaining (let it settle naturally instead)
+  // Path (a) fires a sell. Path (b) is a no-op — let the window settle on Kalshi's books;
+  // existing trade-log machinery records win/loss based on outcome.
+  useEffect(()=>{
+    const _aos=autoOrderState;
+    if(!_aos||_aos.status!=='filled')return;
+    if(killSwitchEngaged)return;
+    if(_aos.exitOrderId)return; // already exiting
+    // Compute current offer on the side we hold
+    const _yes=Number(kalshiYesPrice);
+    if(!Number.isFinite(_yes))return;
+    const _ourSideCents=_aos.dir==='UP'?_yes:(100-_yes);
+    if(_ourSideCents>=autoExecSettings.autoExitOffer){
+      // Fire exit
+      const _yesLimitForBuilder=_aos.dir==='UP'?_ourSideCents:(100-_ourSideCents);
+      setAutoOrderState(prev=>prev?{...prev,status:'exiting'}:null);
+      (async()=>{
+        try{
+          const r=await kalshiExitPosition({
+            apiKeyId:kalshiCreds.apiKeyId,
+            privateKeyPem:kalshiCreds.privateKeyPem,
+            ticker:_aos.ticker,
+            side:_aos.side,
+            count:_aos.count,
+            limitCents:_yesLimitForBuilder,
+            dryRun:!!_aos.dryRun,
+          });
+          if(!r.ok){
+            setAutoOrderState(prev=>prev?{...prev,status:'error',error:r.reason||'exit failed'}:null);
+            return;
+          }
+          const _ord=r.order||{};
+          setAutoOrderState(prev=>prev?{
+            ...prev,
+            exitOrderId:_ord.order_id||_ord.id||`pending_${Date.now()}`,
+            status:'exited',
+          }:null);
+          // Mirror to UI: clear the position so the existing trade-log path can record it
+          setUserPosition(null);setPositionEntry(null);
+        }catch(e){
+          setAutoOrderState(prev=>prev?{...prev,status:'error',error:e?.message||String(e)}:null);
+        }
+      })();
+    }
+  },[autoOrderState?.status,autoOrderState?.exitOrderId,kalshiYesPrice,autoExecSettings.autoExitOffer,kalshiCreds,killSwitchEngaged]);
+
+  // ── CLEANUP ON WINDOW ROLL ────────────────────────────────────────────────
+  // When the window changes, clear stale auto-order state. The trade itself was either
+  // exited (exit effect above) or settled naturally on Kalshi. New window → fresh slate.
+  const _lastSeenWindowIdRef=useRef('');
+  useEffect(()=>{
+    const _wid=computeWindowId(windowType);
+    if(!_wid)return;
+    if(_lastSeenWindowIdRef.current&&_lastSeenWindowIdRef.current!==_wid){
+      setAutoOrderState(prev=>{
+        if(!prev)return prev;
+        // If still resting/working when the window flipped, mark canceled (Kalshi will
+        // have auto-canceled via the expiration_ts on the order anyway).
+        if(['placing','submitted','resting','partially_filled'].includes(prev.status)){
+          return{...prev,status:'canceled',error:'window rolled'};
+        }
+        return null; // filled/exited/error → drop entirely on roll
+      });
+    }
+    _lastSeenWindowIdRef.current=_wid;
+  },[windowType,timeState.minsRemaining,timeState.secsRemaining]);
+
+  // ── DAILY P&L ROLLUP FROM TRADE LOG ──────────────────────────────────────
+  // When a new resolved trade lands in taraCallLog AND it has an autoExec marker,
+  // update autoExecDayPnL. This is the cooldown / daily-loss-cap data source.
+  // Also trigger loss-streak cooldown when threshold hit.
+  const _lastSeenAutoExecTradeIdRef=useRef(0);
+  useEffect(()=>{
+    if(!Array.isArray(taraCallLog))return;
+    const todayKey=new Date().toISOString().slice(0,10);
+    const _newAutoTrades=taraCallLog.filter(e=>e&&e.autoExec===true&&e.id>_lastSeenAutoExecTradeIdRef.current&&(e.result==='WIN'||e.result==='LOSS'));
+    if(_newAutoTrades.length===0)return;
+    let _maxId=_lastSeenAutoExecTradeIdRef.current;
+    let _pnlDelta=0;
+    let _newTradesCount=0;
+    for(const t of _newAutoTrades){
+      if(t.id>_maxId)_maxId=t.id;
+      const _isToday=t.resolvedTimestampISO?String(t.resolvedTimestampISO).slice(0,10)===todayKey:true;
+      if(!_isToday)continue;
+      _newTradesCount++;
+      const _bet=Number(t.betAmt)||Number(tradingSettings?.betSize)||0;
+      const _payout=Number(t.maxPay)||Number(tradingSettings?.winPayout)||0;
+      _pnlDelta+=t.result==='WIN'?_payout:-_bet;
+    }
+    _lastSeenAutoExecTradeIdRef.current=_maxId;
+    if(_newTradesCount>0){
+      setAutoExecDayPnL(prev=>{
+        const _samDay=prev.day===todayKey?prev:{day:todayKey,pnl:0,trades:0};
+        return{...(_samDay),pnl:_samDay.pnl+_pnlDelta,trades:_samDay.trades+_newTradesCount};
+      });
+    }
+    // Loss-streak cooldown: count consecutive recent LOSSes from auto-exec trades
+    const _autoTrades=taraCallLog.filter(e=>e&&e.autoExec===true&&(e.result==='WIN'||e.result==='LOSS'));
+    let _streak=0;
+    for(let i=_autoTrades.length-1;i>=0;i--){
+      if(_autoTrades[i].result==='LOSS')_streak++;
+      else break;
+    }
+    if(_streak>=autoExecSettings.cooldownLossStreak&&autoExecCooldownUntil<=Date.now()){
+      const _until=Date.now()+autoExecSettings.cooldownMinutes*60000;
+      setAutoExecCooldownUntil(_until);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[taraCallLog,autoExecSettings.cooldownLossStreak,autoExecSettings.cooldownMinutes,tradingSettings]);
+
   // V8.0 HOTFIX: conviction sampler + trajectory derivation. Located here (not where the
   //   ref is declared earlier) because they reference `taraCall` which only finishes being
   //   declared on the line above. Putting the dep array on `[taraCall]` further up caused
@@ -19884,10 +20755,18 @@ function TaraApp(){
     }
   };
 
-  const handleManualSync=(dir)=>{
+  const handleManualSync=(dir,opts)=>{
+    // V9.3.0: opts={autoExec, force}. autoExec=true tags the resulting trade entry so
+    // the auto-exec daily-P&L and loss-streak cooldown can attribute it. force=true
+    // bypasses the toggle-off behavior when called by the auto-exec entry effect (which
+    // already gates on userPosition===null upstream).
+    const _autoExec=!!(opts&&opts.autoExec);
+    const _force=!!(opts&&opts.force);
     // V8.2: Anti-tilt cooldown gate. If active and direction is a new entry (not a flip
     //   on existing position), block it with a confirm. EXIT/flip actions are unblocked.
+    // V9.3.0: skip the confirm() prompt when autoExec — guardrails already blocked it
     if(tradingSettings?.antiTiltEnabled&&tiltLockUntil>Date.now()&&userPosition!==dir){
+      if(_autoExec)return; // upstream guardrail already filters this; defensive
       const _msLeft=tiltLockUntil-Date.now();
       const _minLeft=Math.ceil(_msLeft/60000);
       const _confirmed=window.confirm(`Tilt cooldown active (${_minLeft}m left). You're ${todayData?.streak||0} losses in a row. Tilt entries statistically lose more. Override and proceed?`);
@@ -19923,7 +20802,7 @@ function TaraApp(){
         pendingTradeRef.current=null;
       }
     }
-    if(userPosition===dir){taraAdviceRef.current='SEARCHING...';setUserPosition(null);setPositionEntry(null);setForceRender(p=>p+1);return;}
+    if(userPosition===dir&&!_force){taraAdviceRef.current='SEARCHING...';setUserPosition(null);setPositionEntry(null);setForceRender(p=>p+1);return;}
     taraAdviceRef.current=String(dir);setUserPosition(String(dir));
     if(currentPrice){
       setPositionEntry({price:currentPrice,side:dir,time:Date.now()});
@@ -19966,6 +20845,9 @@ function TaraApp(){
         candlePatternScore:analysis?.candlePattern?.score||0,
         qualityScore:qualityGate?.score||null,                   // Tara's quality gate score
         timestampISO:new Date().toISOString(),                   // wall-clock for date analysis
+        // V9.3.0: tag trades placed by Kalshi auto-execution so the daily P&L rollup,
+        // loss-streak cooldown, and analytics can split auto-exec from manual.
+        autoExec:_autoExec,
       };
       // Broadcast the new entry after the reversal loss
       // V9.1: SUPPRESSED. User mandate — only Tara's own locks (TARA_LOCK at line ~17049)
@@ -20353,6 +21235,19 @@ function TaraApp(){
 
           {/* V8.0: Today's P&L + streak/tilt awareness pills — fits between sessions and asset selector */}
           <TodayPnLPill todayData={todayData} onClick={()=>setShowTradingSettings(true)}/>
+          {/* V9.3.0: Kalshi auto-exec status pill. Visible whenever auto-exec is enabled OR
+              kill switch is engaged. Click to open settings; long-press effect not needed —
+              the kill switch button on LiveTradeCoach is the always-instant kill. */}
+          {(autoExecSettings.enabled||killSwitchEngaged)&&(
+            <button
+              onClick={()=>setShowTradingSettings(true)}
+              className="px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider shrink-0 transition-colors"
+              style={killSwitchEngaged?{color:'#F87171',background:'rgba(248,113,113,0.15)',border:'1px solid rgba(248,113,113,0.40)'}:autoExecSettings.dryRun?{color:'#FBBF24',background:'rgba(251,191,36,0.10)',border:'1px solid rgba(251,191,36,0.30)'}:{color:'#6EE7B7',background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.30)'}}
+              title={killSwitchEngaged?'Kalshi auto-exec killed — tap to open settings':autoExecSettings.dryRun?'Auto-exec live in dry-run mode — tap to configure':'Auto-exec live — tap to configure'}
+            >
+              {killSwitchEngaged?'⛔ KILLED':autoExecSettings.dryRun?'DRY · AUTO':'⚡ AUTO'}
+            </button>
+          )}
           {/* V8.3: Peer tab indicator — shows when multi-tab merging is active */}
           <TabPresencePill peerTabs={peerTabs}/>
           {/* V8.6: Cloud sync health indicator — click to open sync menu (force resync / baseline ops) */}
@@ -20854,7 +21749,22 @@ function TaraApp(){
           positionOpenTime={positionEntry?.time}
         />
 
+        {/* V9.3.0: Dual-asset call strip — side-by-side BTC + ETH calls.
+            Active asset = live engine output. Inactive = shadow engine
+            (background analysis, 2s cadence, soft-lock at 2 consec samples). */}
+        <DualAssetCallStrip
+          currentAsset={currentAsset}
+          onSwitch={setCurrentAsset}
+          taraCall={taraCall}
+          kalshiYesPrice={kalshiYesPrice}
+          currentPrice={currentPrice}
+          targetMargin={targetMargin}
+          shadowRef={shadowTaraByAssetRef}
+          timeState={timeState}
+        />
+
         {/* V8.7: Live Trade Coach — situational advisory while in a trade */}
+        {/* V9.3.0: also shows Kalshi auto-order status + kill switch when active */}
         <LiveTradeCoach
           userPosition={userPosition}
           positionStatus={positionStatus}
@@ -20870,6 +21780,9 @@ function TaraApp(){
           tradingSettings={tradingSettings}
           todayData={todayData}
           tickHistoryRef={tickHistoryRef}
+          autoOrderState={autoOrderState}
+          killSwitchEngaged={killSwitchEngaged}
+          onKillSwitch={()=>setKillSwitchEngaged(v=>!v)}
         />
 
         {/* V8.2: Asset rotation suggestion */}
@@ -20908,12 +21821,24 @@ function TaraApp(){
             blank space below PredictionContent and uses the lg:auto-rows-fr column height
             efficiently. Renders responsively at narrower column widths. */}
 
-        {/* V8.2: Trading settings modal */}
+        {/* V8.2: Trading settings modal — V9.3.0: now also Kalshi auto-exec controls */}
         <TradingSettingsModal
           open={showTradingSettings}
           onClose={()=>setShowTradingSettings(false)}
           settings={tradingSettings}
           setSettings={setTradingSettings}
+          kalshiCreds={kalshiCreds}
+          saveKalshiCreds={_saveKalshiCreds}
+          autoExecSettings={autoExecSettings}
+          setAutoExecSettings={setAutoExecSettings}
+          killSwitchEngaged={killSwitchEngaged}
+          setKillSwitchEngaged={setKillSwitchEngaged}
+          kalshiPingState={kalshiPingState}
+          setKalshiPingState={setKalshiPingState}
+          autoExecCooldownUntil={autoExecCooldownUntil}
+          setAutoExecCooldownUntil={setAutoExecCooldownUntil}
+          autoExecDayPnL={autoExecDayPnL}
+          setAutoExecDayPnL={setAutoExecDayPnL}
         />
 
         {/* V8.5: Best Practices modal — comprehensive trader's guide */}
