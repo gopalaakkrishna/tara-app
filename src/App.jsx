@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.7.7-spike-sensitive';
+const BASELINE_VERSION='2026.05.07-v9.7.8-reversal-aware';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -3464,6 +3464,19 @@ const computeAdvisor=(params)=>{
   // Data: even 89% UP calls fail in adverse. Don't let model override reality.
   if(gapMagnitude>30&&isActuallyLosing)return{label:'CUT LOSSES — EXIT NOW',reason:`${gapMagnitude.toFixed(0)} bps adverse — too deep to recover. ${gapStr}. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT NOW',actionTarget:'SIT OUT'};
 
+  // ── V9.7.8: EARLY-CUT WHEN KALSHI ALSO INVERTS ───────────────────────────
+  // Old gate: CUT LOSSES needed >30 bps adverse OR comebackScore < 35.
+  // New: combined signal — 5 bps adverse AND Kalshi YES inverting ≥3¢/30s
+  // means BOTH the spot and the prediction market are pricing the trade as
+  // wrong. Don't wait for the chart to tank further. May 7 reversal trade
+  // bled 9 bps before CUT LOSSES fired; this would have caught it at 5.
+  if(isActuallyLosing&&gapMagnitude>=5&&_kalshiVel!=null){
+    const _kalshiInvertingAdverse=isUP?_kalshiVel<=-3:_kalshiVel>=3;
+    if(_kalshiInvertingAdverse){
+      return{label:'CUT LOSSES — KALSHI + SPOT BOTH ADVERSE',reason:`${gapMagnitude.toFixed(0)} bps adverse + Kalshi YES ${_kalshiVel>0?'+':''}${_kalshiVel.toFixed(0)}¢/30s against ${userPosition} · both signals confirm exit · [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT NOW',actionTarget:'SIT OUT'};
+    }
+  }
+
   // ── 3. REAL PROFIT ON TABLE — offer above your bet ────────────────────────
   if(profitPct>40&&momentumAgainst)return{label:'TAKE MAX PROFIT',reason:`+${profitPct.toFixed(0)}% on offer. Momentum reversing — lock in now before it fades. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:true,hasAction:true,actionLabel:'CASHOUT — MAX PROFIT',actionTarget:'CASH'};
   if(profitPct>20&&drawdownFromPeak>0.12)return{label:'TRAILING STOP HIT',reason:`Offer pulled back ${(drawdownFromPeak*100).toFixed(0)}% from its peak. Protect your gains now. [${timeLabel}]`,color:'emerald',animate:true,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'CASH'};
@@ -3926,10 +3939,44 @@ const computeV99Posterior=(params)=>{
     let _structBoost=_structAlignment>=6?20:_structAlignment>=5?14:8;
     // Time damping: full when >60% remaining, half when <25% remaining
     const _structTimeMult=timeFraction<=0.4?1.0:timeFraction<=0.75?(1.0-(timeFraction-0.4)*1.0):0.5;
-    _structBoost=Math.round(_structBoost*_structTimeMult)*(_structDir==='UP'?1:-1);
+    // V9.7.8: REVERSAL DAMPER. Read last 2 closed 1m candles. If both close STRONGLY
+    //   opposite to STRUCT direction, dampen STRUCT weight by 50%. Stops Tara from
+    //   locking DOWN at the bottom of a green-candle breakout (or UP at the top of
+    //   a red collapse). The previous engine read 6 candles back and gave equal
+    //   weight to all of them — meaning a fresh reversal got out-voted by stale
+    //   history. Now: most recent 2 candles get veto power on STRUCT confidence.
+    let _reversalDampMult=1.0;
+    let _reversalReason=null;
+    try{
+      const _c1m=tfCandles?.c1m;
+      if(Array.isArray(_c1m)&&_c1m.length>=2){
+        // c1m[0] is most recent. Check most recent 2 candles.
+        const _r0=_c1m[0],_r1=_c1m[1];
+        if(_r0&&_r1&&Number.isFinite(_r0.o)&&Number.isFinite(_r0.c)&&Number.isFinite(_r1.o)&&Number.isFinite(_r1.c)){
+          const _d0=_r0.c-_r0.o; // positive = green close
+          const _d1=_r1.c-_r1.o;
+          const _bothUp=_d0>0&&_d1>0;
+          const _bothDn=_d0<0&&_d1<0;
+          // Magnitude check — reversal must be meaningful, not tiny dojis
+          const _avgPx=(_r0.c+_r1.c)/2;
+          const _moveBps=_avgPx>0?(Math.abs(_d0)+Math.abs(_d1))/_avgPx*10000:0;
+          if(_moveBps>=4){ // 4bps+ across 2 candles = real move
+            if(_structDir==='DOWN'&&_bothUp){
+              _reversalDampMult=0.5;
+              _reversalReason=`recent 2x 1m closed UP (${_moveBps.toFixed(0)}bps) vs STRUCT DOWN`;
+            }else if(_structDir==='UP'&&_bothDn){
+              _reversalDampMult=0.5;
+              _reversalReason=`recent 2x 1m closed DOWN (${_moveBps.toFixed(0)}bps) vs STRUCT UP`;
+            }
+          }
+        }
+      }
+    }catch(_){}
+    _structBoost=Math.round(_structBoost*_structTimeMult*_reversalDampMult)*(_structDir==='UP'?1:-1);
     if(_structBoost!==0){
       totalScore+=_structBoost;
-      reasoning.push(`[STRUCT-BOOST] ${_structAlignment.toFixed(1)}/6 ${_structDir} → ${_structBoost>0?'+':''}${_structBoost} (×${_structTimeMult.toFixed(2)} time-damp)`);
+      const _dampNote=_reversalDampMult<1?` ⚠ damped ×${_reversalDampMult.toFixed(2)}: ${_reversalReason}`:'';
+      reasoning.push(`[STRUCT-BOOST] ${_structAlignment.toFixed(1)}/6 ${_structDir} → ${_structBoost>0?'+':''}${_structBoost} (×${_structTimeMult.toFixed(2)} time-damp)${_dampNote}`);
     }
     // V9.2.0: SLOPE BOOST — slopeBpsPerBar from both TC and GT feed into posterior.
     //   When slope confirms direction, small boost (up to ±6). When slope contradicts,
@@ -4681,6 +4728,30 @@ const computeV99Posterior=(params)=>{
       if(Math.abs(_delta)>=1){
         reasoning.push(`[REGIME-CAL] ${_regime}×${_engineDir} historical WR ${_entry.wrPct}% (n=${_entry.n}, w=${_entry.weight.toFixed(2)}) → posterior ${dirCalibrated.toFixed(1)}%→${_newCal.toFixed(1)}%`);
         dirCalibrated=_newCal;
+      }
+    }
+  }
+
+  // ── V9.7.8: FGT-COUNTER GATE ─────────────────────────────────────────────
+  // When FGT (multi-timeframe alignment) is pulling against the lock direction,
+  // cap conviction at 65%. The May 7 reversal trade locked DOWN at 74% with
+  // FGT showing 1/4 UP — the 1m timeframe was already calling reversal but
+  // got out-voted by stale STRUCT history. Cap prevents Tara from going past
+  // the honest-confidence threshold when her own signals are split.
+  // Threshold: |mtfAlignment| ≥ 0.7 against lock = "meaningful counter-signal"
+  if(typeof mtfAlignment==='number'&&Number.isFinite(mtfAlignment)){
+    const _lockingUp=dirCalibrated>50;
+    const _lockingDn=dirCalibrated<50;
+    const _fgtOpposesUp=_lockingUp&&mtfAlignment<=-0.7;
+    const _fgtOpposesDn=_lockingDn&&mtfAlignment>=0.7;
+    if(_fgtOpposesUp||_fgtOpposesDn){
+      const _absConf=Math.abs(dirCalibrated-50);
+      if(_absConf>15){ // >65% conviction
+        const _sign=_lockingUp?1:-1;
+        const _capped=50+_sign*15; // cap at 65/35
+        const _before=dirCalibrated;
+        dirCalibrated=_capped;
+        reasoning.push(`[FGT-COUNTER] FGT ${mtfAlignment>=0?'+':''}${mtfAlignment.toFixed(1)} opposes lock ${_lockingUp?'UP':'DOWN'} → conv capped ${_before.toFixed(1)}%→${_capped.toFixed(1)}%`);
       }
     }
   }
@@ -23150,7 +23221,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.7.7
+              9.7.8
             </span>
           </div>
 
