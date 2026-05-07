@@ -77,6 +77,35 @@ const _decActiveWrites=(success)=>{
 // Firestore round-trip when one tab adds an entry — other tabs see it immediately.
 // Backed up by Firestore + RMW writes for cross-device + cross-browser sync.
 const _crossTab=(typeof BroadcastChannel!=='undefined')?(()=>{try{return new BroadcastChannel('tara-cross-tab-v1');}catch(_){return null;}})():null;
+// V9.2.1: Cross-asset price channel. Separate from the call-log cross-tab channel.
+//   Each tab broadcasts its current asset + price every 5s. Other-asset tabs read it
+//   to detect correlation (e.g., BTC dumping → penalize ETH UP calls).
+
+// V9.2.1: Sound alerts via Web Audio API. Minimal beep function — no audio files needed.
+//   Called by spike alerts + trade coach urgent cards. User can mute via localStorage.
+const _taraBeep=(freq=880,durationMs=150,vol=0.15)=>{
+  try{
+    if(typeof window==='undefined')return;
+    if(localStorage.getItem('taraSoundMuted')==='true')return;
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const osc=ctx.createOscillator();
+    const gain=ctx.createGain();
+    osc.connect(gain);gain.connect(ctx.destination);
+    osc.frequency.value=freq;osc.type='sine';
+    gain.gain.value=vol;
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+durationMs/1000);
+    osc.stop(ctx.currentTime+durationMs/1000+0.05);
+    setTimeout(()=>{try{ctx.close();}catch(_){}},durationMs+200);
+  }catch(_){}
+};
+// Double beep for urgent alerts
+const _taraUrgentBeep=()=>{_taraBeep(1000,120,0.2);setTimeout(()=>_taraBeep(1200,120,0.2),180);};
+// Triple descending beep for spike-against alerts
+const _taraSpikeBeep=()=>{_taraBeep(1200,100,0.25);setTimeout(()=>_taraBeep(900,100,0.2),140);setTimeout(()=>_taraBeep(600,150,0.15),300);};
+// Rising beep for favorable spike
+const _taraWinBeep=()=>{_taraBeep(600,100,0.15);setTimeout(()=>_taraBeep(900,100,0.15),140);setTimeout(()=>_taraBeep(1200,150,0.2),300);};
+const _crossAssetChannel=(typeof BroadcastChannel!=='undefined')?(()=>{try{return new BroadcastChannel('tara-cross-asset-v1');}catch(_){return null;}})():null;
 const broadcastToOtherTabs=(type,payload)=>{
   if(!_crossTab)return;
   try{_crossTab.postMessage({type,payload,t:Date.now()});}catch(_){}
@@ -435,7 +464,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.2.0-engine-overhaul-news-relocation';
+const BASELINE_VERSION='2026.05.06-v9.2.1-cross-asset-sound-csv-timing';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -3679,6 +3708,31 @@ const computeV99Posterior=(params)=>{
     totalScore+=_meanRevAdj;
     reasoning.push(`[MEAN-REV-PREDICT] DOWN exhaustion (g${_gapS.toFixed(0)} m${_momS.toFixed(0)} f${_flowS.toFixed(0)}, tape ${_w15Buy.toFixed(0)}/${_w30Buy.toFixed(0)}/${_w60Buy.toFixed(0)}%) → expecting UP reversal (+${_meanRevAdj})`);
   }
+  // V9.2.1: CROSS-ASSET CORRELATION SIGNAL — when the OTHER asset (BTC↔ETH) has
+  //   moved significantly in the last 5 minutes, apply a directional boost/penalty.
+  //   BTC and ETH are ~80% correlated on 15m windows. If BTC just dumped 50bps and
+  //   we're calling ETH UP, that's contrary to the correlation — penalize. If BTC
+  //   dumped and we're calling ETH DOWN, boost.
+  const _otherA=params.otherAssetData;
+  if(_otherA&&_otherA.price>0&&(Date.now()-_otherA.lastUpdate)<30000){
+    const _otherDelta=_otherA.deltaBps||0;
+    const _absDelta=Math.abs(_otherDelta);
+    if(_absDelta>=15){ // only act on meaningful moves (>15bps in 5min)
+      const _otherDir=_otherDelta>0?1:-1; // +1 = other asset going UP
+      const _ourDir=totalScore>0?1:-1; // +1 = our engine leans UP
+      const _aligned=_otherDir===_ourDir;
+      // Correlation boost: up to ±8 pts. Proportional to magnitude, capped.
+      let _corrBoost=Math.min(8,_absDelta*0.08);
+      if(_aligned){
+        totalScore+=_corrBoost*_ourDir; // boost
+        reasoning.push(`[CROSS-ASSET] ${_otherA.asset} moved ${_otherDelta>0?'+':''}${Math.round(_otherDelta)}bps → aligned with our ${_ourDir>0?'UP':'DOWN'} lean (+${_corrBoost.toFixed(1)})`);
+      }else{
+        totalScore-=_corrBoost*_ourDir; // penalty
+        reasoning.push(`[CROSS-ASSET] ${_otherA.asset} moved ${_otherDelta>0?'+':''}${Math.round(_otherDelta)}bps → CONTRARY to our ${_ourDir>0?'UP':'DOWN'} lean (-${_corrBoost.toFixed(1)})`);
+      }
+      rawSignalScores.crossAsset=_aligned?_corrBoost:-_corrBoost;
+    }
+  }
   // Convert to posterior
   const rawPosterior=50+totalScore*0.95;
   let posterior=Math.max(1,Math.min(99,rawPosterior));
@@ -6228,6 +6282,8 @@ function BestPracticesModal({open,onClose}){
 function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef}){
   // V9.1.7: Per-position peak/trough refs. Reset on position open or direction flip.
   const _peakBpsRef=React.useRef({pos:null,peak:-Infinity,trough:Infinity,openTime:0});
+  // V9.2.1: Sound alert tracking — only beep when a NEW urgent card appears, not on every render.
+  const _lastCoachBeepRef=React.useRef({key:'',at:0});
   React.useEffect(()=>{
     // When position opens or flips, reset
     const _curPos=userPosition;
@@ -6409,6 +6465,29 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
 
     if(cards.length===0){
       cards.push({tone:'info',icon:'·',title:'Position open · all clear',body:`${userPosition} from $${(targetMargin||0).toFixed(0)}, ${_winning?'+':''}${Math.round(_favoredGap)}bps. ${Math.floor(_secLeft/60)}m ${_secLeft%60}s left. Tara ${_taraAligned?'aligned':_taraOpposed?'opposed':'neutral'}. No active alerts.`});
+    }
+
+    // V9.2.1: Sound trigger — beep when a NEW urgent card appears.
+    //   Uses the first card's title as the dedup key. Only fires if >5s since last beep
+    //   and the card title changed (avoids continuous beeping on the same condition).
+    if(cards.length>0&&cards[0].tone==='urgent'){
+      const _cardKey=cards[0].title;
+      const _now2=Date.now();
+      if(_cardKey!==_lastCoachBeepRef.current.key||_now2-_lastCoachBeepRef.current.at>10000){
+        _lastCoachBeepRef.current={key:_cardKey,at:_now2};
+        if(cards[0].title.includes('spiking')&&cards[0].title.includes('against')){
+          _taraSpikeBeep(); // triple descending for spike-against
+        }else{
+          _taraUrgentBeep(); // double beep for other urgents
+        }
+      }
+    }else if(cards.length>0&&cards[0].tone==='good'&&cards[0].title.includes('spiking')){
+      const _cardKey=cards[0].title;
+      const _now2=Date.now();
+      if(_cardKey!==_lastCoachBeepRef.current.key||_now2-_lastCoachBeepRef.current.at>10000){
+        _lastCoachBeepRef.current={key:_cardKey,at:_now2};
+        _taraWinBeep(); // rising beep for favorable spike
+      }
     }
 
     // Color schemes per tone
@@ -8068,6 +8147,47 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
           ),
         ),
       ),
+      // V9.2.1: ENTRY TIMING HINT — computed from call log. Shows which minute of the
+      //   window historically produces the best entries for this asset + session.
+      (()=>{
+        const _resolved=(taraCallLog||[]).filter(e=>{
+          if(!e||!e.result||e.result==='SITOUT'||!e.secondsIntoWindow)return false;
+          if((e.asset||'BTC')!==currentAsset)return false;
+          return true;
+        });
+        if(_resolved.length<15)return null; // need enough data
+        // Bucket by minute (0-1, 1-2, 2-3, etc up to minute 10)
+        const _buckets={};
+        _resolved.forEach(e=>{
+          const _min=Math.floor((e.secondsIntoWindow||0)/60);
+          if(_min>10)return; // skip very late entries
+          if(!_buckets[_min])_buckets[_min]={W:0,L:0,mfe:0,n:0};
+          _buckets[_min].n++;
+          if(e.result==='WIN')_buckets[_min].W++;
+          else _buckets[_min].L++;
+          if(e.maxFavorableExcursionBps)_buckets[_min].mfe+=Number(e.maxFavorableExcursionBps)||0;
+        });
+        // Find best minute range (2-minute window with highest WR, min 5 trades)
+        let _bestWr=0,_bestRange='',_bestN=0;
+        for(let start=0;start<=8;start++){
+          let _w=0,_l=0;
+          for(let m=start;m<=start+1;m++){
+            if(_buckets[m]){_w+=_buckets[m].W;_l+=_buckets[m].L;}
+          }
+          const _n=_w+_l;
+          if(_n<5)continue;
+          const _wr=_w/_n;
+          if(_wr>_bestWr){_bestWr=_wr;_bestRange=`${start}-${start+2}`;_bestN=_n;}
+        }
+        if(!_bestRange||_bestWr<0.55)return null;
+        const _wrPct=Math.round(_bestWr*100);
+        return React.createElement('div',{className:'flex items-baseline gap-2 pt-1.5 border-t border-[#E8E9E4]/5'},
+          React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 mt-0.5',style:{color:'rgb(110,231,183)'}},'Entry timing'),
+          React.createElement('span',{className:'text-[#E8E9E4]/75 leading-relaxed'},
+            `Best entry window: minutes ${_bestRange} (${_wrPct}% WR over ${_bestN} trades). Entries before minute ${_bestRange.split('-')[0]} tend to lock on noise; after minute ${_bestRange.split('-')[1]} tends to chase.`
+          ),
+        );
+      })(),
       // Footer: dominant session + day rating
       React.createElement('div',{className:'flex items-baseline justify-between gap-2 pt-1.5 border-t border-[#E8E9E4]/5 text-[9px] text-[#E8E9E4]/35 uppercase tracking-wider'},
         React.createElement('span',null,ctx.dayName,' · ',ctx.sessions.dominant,' DOMINANT · DAY×SESS RATING ',ctx.sessions.dsRating),
@@ -8431,6 +8551,53 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             },
             title:'Download call log as JSON for analysis',
           },'↓ Export JSON'),
+          // V9.2.1: CSV export — spreadsheet-friendly format
+          React.createElement('button',{
+            onClick:()=>{
+              try{
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude'];
+                const _rows=[_headers.join(',')];
+                (taraCallLog||[]).forEach(e=>{
+                  if(!e)return;
+                  const _d=e.id?new Date(e.id):new Date();
+                  const _date=_d.toLocaleDateString();
+                  const _time=_d.toLocaleTimeString();
+                  const _tier=e.isStructuralLed?'structural':e.isSuperConfluent?'super':e.isConfluent?'confluence':e.isTapeLed?'tape':e.isRisingConfluence?'rising':e.isUserForced?'forced':'single';
+                  const _row=[
+                    _date,_time,e.asset||'BTC',e.windowType||'15m',
+                    e.dir||'',e.result||'pending',
+                    e.posterior!=null?Math.round(e.posterior):'',
+                    e.regime||'',e.phase||'',
+                    e.strike||'',e.closingPrice||'',
+                    e.closingGapBps!=null?e.closingGapBps.toFixed(1):'',
+                    e.lossPattern||'',_tier,
+                    e.windowAmplitude||'',
+                  ].map(v=>typeof v==='string'&&v.includes(',')?`"${v}"`:String(v));
+                  _rows.push(_row.join(','));
+                });
+                const _csv=_rows.join('\n');
+                const _blob=new Blob([_csv],{type:'text/csv'});
+                const _url=URL.createObjectURL(_blob);
+                const _a=document.createElement('a');
+                const _ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+                _a.href=_url;
+                _a.download=`tara-call-log-${_ts}.csv`;
+                document.body.appendChild(_a);
+                _a.click();
+                document.body.removeChild(_a);
+                setTimeout(()=>URL.revokeObjectURL(_url),100);
+              }catch(e){
+                alert('CSV export failed: '+(e.message||String(e)));
+              }
+            },
+            className:'px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
+            style:{
+              background:'rgba(110,231,183,0.08)',
+              color:'rgba(110,231,183,0.85)',
+              border:'1px solid rgba(110,231,183,0.25)',
+            },
+            title:'Download call log as CSV for spreadsheet analysis',
+          },'↓ Export CSV'),
           React.createElement('div',{className:'px-2 py-1 rounded-lg text-[9px] uppercase tracking-[0.14em] font-bold',style:{background:'rgba(232,233,228,0.05)',color:'rgba(232,233,228,0.5)',border:'1px solid rgba(232,233,228,0.08)'},title:'All times shown in this view honor the time format toggle in the header'},_resolvedFmt.toUpperCase()),
           React.createElement('button',{onClick:onClose,className:'p-2 rounded-lg hover:bg-[#E8E9E4]/5 text-[#E8E9E4]/60 hover:text-white transition-colors text-xl'},'✕'),
         ),
@@ -8457,7 +8624,74 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:T2_GOLD}},counts.sitouts),
         ),
       ),
-      // V7.2: PER-TIER WR AUDIT. Honest breakdown of win rate by tier — shows
+      // V9.2.1: P&L SUMMARY + CUMULATIVE CURVE — computed from betAmt/maxPay fields.
+      //   Shows total dollar P&L, average win/loss size, and a mini cumulative curve.
+      (()=>{
+        const _withBets=filtered.filter(e=>e&&e.betAmt>0&&(e.result==='WIN'||e.result==='LOSS'));
+        if(_withBets.length<3)return null; // need enough data
+        let _totalPnl=0,_totalWinAmt=0,_totalLossAmt=0,_winCount=0,_lossCount=0;
+        const _curve=[];
+        // Sort chronologically for curve
+        const _sorted=[..._withBets].sort((a,b)=>(a.id||0)-(b.id||0));
+        _sorted.forEach(e=>{
+          const _pnl=e.result==='WIN'?(e.maxPay||0)-(e.betAmt||0):-(e.betAmt||0);
+          _totalPnl+=_pnl;
+          if(e.result==='WIN'){_totalWinAmt+=_pnl;_winCount++;}
+          else{_totalLossAmt+=Math.abs(_pnl);_lossCount++;}
+          _curve.push({pnl:_totalPnl,i:_curve.length});
+        });
+        const _avgWin=_winCount>0?_totalWinAmt/_winCount:0;
+        const _avgLoss=_lossCount>0?_totalLossAmt/_lossCount:0;
+        const _roi=_totalLossAmt>0?(_totalPnl/(_totalLossAmt+_totalWinAmt))*100:0;
+        // Mini SVG cumulative P&L curve
+        const _svgW=400,_svgH=60;
+        const _minPnl=Math.min(0,..._curve.map(c=>c.pnl));
+        const _maxPnl=Math.max(0,..._curve.map(c=>c.pnl));
+        const _range=Math.max(1,_maxPnl-_minPnl);
+        const _points=_curve.map((c,i)=>{
+          const x=(i/(_curve.length-1))*_svgW;
+          const y=_svgH-(((c.pnl-_minPnl)/_range)*_svgH);
+          return`${x.toFixed(1)},${y.toFixed(1)}`;
+        }).join(' ');
+        const _zeroY=_svgH-(((-_minPnl)/_range)*_svgH);
+        return React.createElement('div',{className:'mb-4 p-3 rounded-xl bg-[#181A19] border border-[#E8E9E4]/8'},
+          React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
+            React.createElement('span',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 font-bold'},'P&L Summary'),
+            React.createElement('span',{className:'text-[10px] tabular-nums text-[#E8E9E4]/50'},`${_withBets.length} trades with bet amounts`)
+          ),
+          React.createElement('div',{className:'grid grid-cols-4 gap-3 mb-3'},
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/35'},'Total P&L'),
+              React.createElement('div',{className:'text-lg font-bold tabular-nums',style:{color:_totalPnl>=0?'rgb(110,231,183)':'rgb(244,114,182)'}},`${_totalPnl>=0?'+':''}$${_totalPnl.toFixed(2)}`)
+            ),
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/35'},'Avg Win'),
+              React.createElement('div',{className:'text-sm font-bold tabular-nums text-emerald-400'},`+$${_avgWin.toFixed(2)}`)
+            ),
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/35'},'Avg Loss'),
+              React.createElement('div',{className:'text-sm font-bold tabular-nums text-rose-400'},`-$${_avgLoss.toFixed(2)}`)
+            ),
+            React.createElement('div',null,
+              React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/35'},'ROI'),
+              React.createElement('div',{className:'text-sm font-bold tabular-nums',style:{color:_roi>=0?'rgb(110,231,183)':'rgb(244,114,182)'}},`${_roi>=0?'+':''}${_roi.toFixed(1)}%`)
+            ),
+          ),
+          // Cumulative P&L curve
+          React.createElement('svg',{viewBox:`0 0 ${_svgW} ${_svgH}`,className:'w-full h-12 opacity-70'},
+            // Zero line
+            React.createElement('line',{x1:0,y1:_zeroY,x2:_svgW,y2:_zeroY,stroke:'rgba(232,233,228,0.15)',strokeDasharray:'4,4'}),
+            // Curve
+            React.createElement('polyline',{
+              points:_points,
+              fill:'none',
+              stroke:_totalPnl>=0?'rgb(110,231,183)':'rgb(244,114,182)',
+              strokeWidth:1.5,
+              strokeLinejoin:'round',
+            })
+          ),
+        );
+      })(),
       //   exactly which decision tiers are dragging down the average so we know
       //   what to tighten further. Filtered by current windowType filter.
       (()=>{
@@ -9545,6 +9779,11 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose}){
                         <span className="text-[#E8E9E4]/40 w-12 hidden md:block" style={T2_MONO_STYLE}>{t.qualityScore!=null?'Q'+t.qualityScore:'Q—'}</span>
                         <span className={'text-[#E8E9E4]/40 w-16 ml-auto sm:ml-0'} style={T2_MONO_STYLE}>{t.closingGapBps!=null?formatSignedInt(t.closingGapBps)+' bps':'—'}</span>
                         <span className={'font-bold w-12 shrink-0 text-right '+resCol}>{t.result}</span>
+                        {/* V9.2.1: P&L per trade — computed from betAmt + maxPay */}
+                        {t.betAmt>0&&t.result&&t.result!=='SITOUT'&&(()=>{
+                          const _pnl=t.result==='WIN'?(t.maxPay||0)-(t.betAmt||0):t.result==='LOSS'?-(t.betAmt||0):0;
+                          return <span className={'w-16 text-right shrink-0 hidden sm:block font-bold '+(_pnl>=0?'text-emerald-400':'text-rose-400')} style={T2_MONO_STYLE}>{_pnl>=0?'+':''}{_pnl.toFixed(2)}</span>;
+                        })()}
                       </div>
                       {/* V5.7.5: Bottom row — strike → close. Only when both prices are known. */}
                       {_strikeFmt&&_closeFmt&&(
@@ -12025,6 +12264,42 @@ function TaraApp(){
   //   this to force SEARCH mode for 5s after rollover, preventing stale-analysis
   //   instant-lock on the new window.
   const _rolloverGraceRef=useRef(0);
+  // V9.2.1: Cross-asset correlation. Stores the OTHER asset's recent price data
+  //   received via BroadcastChannel from the other tab. Used by the engine to
+  //   detect correlation (BTC dumps → penalize ETH UP, etc).
+  const _otherAssetRef=useRef({asset:null,price:0,price5mAgo:0,deltaBps:0,lastUpdate:0});
+  // Broadcast this tab's price to other tabs every 5s
+  useEffect(()=>{
+    if(!_crossAssetChannel||!currentPrice||!currentAsset)return;
+    const _send=()=>{
+      try{
+        _crossAssetChannel.postMessage({
+          type:'PRICE_UPDATE',
+          asset:currentAsset,
+          price:currentPrice,
+          windowOpenPrice:windowOpenPriceRef.current||0,
+          at:Date.now(),
+        });
+      }catch(_){}
+    };
+    _send();
+    const iv=setInterval(_send,5000);
+    return()=>clearInterval(iv);
+  },[currentPrice,currentAsset]);
+  // Listen for the other asset's price
+  useEffect(()=>{
+    if(!_crossAssetChannel)return;
+    const _handler=(ev)=>{
+      const d=ev.data;
+      if(!d||d.type!=='PRICE_UPDATE'||d.asset===currentAsset)return;
+      const _prev=_otherAssetRef.current;
+      const _price5mAgo=(_prev.asset===d.asset&&_prev.price>0&&(Date.now()-_prev.lastUpdate)>4000)?_prev.price:d.windowOpenPrice||d.price;
+      const _delta=_price5mAgo>0?((d.price-_price5mAgo)/_price5mAgo)*10000:0;
+      _otherAssetRef.current={asset:d.asset,price:d.price,price5mAgo:_price5mAgo,deltaBps:_delta,lastUpdate:Date.now()};
+    };
+    _crossAssetChannel.addEventListener('message',_handler);
+    return()=>_crossAssetChannel.removeEventListener('message',_handler);
+  },[currentAsset]);
   // ── V8.5: WITHIN-WINDOW CONTEXT TRACKING ────────────────────────────────
   // Captures whale activity + macro shocks DURING the active window so we can
   //   classify loss patterns at close (LATE_REVERSAL vs WHALE_SPIKE vs MACRO_SHOCK).
@@ -15713,7 +15988,7 @@ function TaraApp(){
       // V3.1.7: tapeRef and ticksRef passed for volume-flow signal computation
       // V3.1.7+: windowHighRef/windowLowRef passed for window-amplitude awareness
       // V3.1.9: windowHighTime/windowLowTime/windowOpenTime for structure detection (TRENDING/WHIPSAW/etc.)
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0});
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
@@ -17624,6 +17899,11 @@ function TaraApp(){
           // result:null populates at rollover scoring. NO_TRADE entries skip resolution
           //   (no win/loss to compute) but the entry exists so memory shows the no-go event.
           result:snapshot.isNoGo?'NO_TRADE':null,
+          // V9.2.1: Bet amount + max payout for P&L tracking. Captured at snapshot
+          //   time so each trade carries its actual dollar amounts. P&L computed at
+          //   resolution: WIN = maxPay - betAmt, LOSS = -betAmt.
+          betAmt:Number(betAmount)||0,
+          maxPay:Number(maxPayout)||0,
         };
         setTaraCallLog(prev=>{
           if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType))return prev;
@@ -19461,7 +19741,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.2.0
+              9.2.1
             </span>
           </div>
 
@@ -20079,7 +20359,7 @@ function TaraApp(){
                   with no awkward intermediate stage. Tablet users get cleaner stacked layout. */}
         {/* V8.4: min-w-0 on grid + columns prevents content overflow from forcing
             the grid to stretch wider than viewport. auto-rows-fr keeps cols same height. */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0">
+        <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0 pb-16 lg:pb-0">
           
           {/* ── PREDICTION CARD ── */}
           <div className={`bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
@@ -20426,6 +20706,34 @@ function TaraApp(){
           </div>
         )}
         {!isChatOpen&&<button onClick={()=>setIsChatOpen(true)} className={'bg-indigo-500 hover:bg-indigo-400 text-white p-3 rounded-full shadow-lg border border-indigo-400/50 transition-transform hover:scale-105'}><IC.Msg className="w-5 h-5"/></button>}
+      </div>
+
+      {/* V9.2.1: MOBILE STICKY BOTTOM BAR — always visible on phones. Shows current
+          asset, window type, Tara's call direction, and quick-access buttons.
+          Hidden on desktop (lg:hidden). Fixed to bottom with safe-area padding. */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 lg:hidden safe-bottom" style={{background:'rgba(14,16,15,0.95)',borderTop:'1px solid rgba(229,200,112,0.15)',backdropFilter:'blur(8px)'}}>
+        <div className="flex items-center justify-between px-3 py-2 gap-2">
+          {/* Asset + Window */}
+          <div className="flex items-center gap-1.5">
+            <button onClick={()=>setCurrentAsset(currentAsset==='BTC'?'ETH':'BTC')} className="px-2 py-1.5 rounded-md text-xs font-bold min-h-[36px]" style={{background:currentAsset==='BTC'?'rgba(247,147,26,0.15)':'rgba(98,126,234,0.15)',color:currentAsset==='BTC'?'rgb(247,147,26)':'rgb(98,126,234)',border:`1px solid ${currentAsset==='BTC'?'rgba(247,147,26,0.3)':'rgba(98,126,234,0.3)'}`}}>
+              {currentAsset==='BTC'?'₿ BTC':'Ξ ETH'}
+            </button>
+            <button onClick={()=>handleWindowToggle(windowType==='15m'?'5m':'15m')} className="px-2 py-1.5 rounded-md text-xs font-bold min-h-[36px]" style={{background:windowType==='15m'?'rgba(16,185,129,0.15)':'rgba(99,102,241,0.15)',color:windowType==='15m'?'rgb(16,185,129)':'rgb(99,102,241)',border:`1px solid ${windowType==='15m'?'rgba(16,185,129,0.3)':'rgba(99,102,241,0.3)'}`}}>
+              {windowType}
+            </button>
+          </div>
+          {/* Current call direction + price */}
+          <div className="flex items-center gap-2 text-xs tabular-nums">
+            {taraCall?.snapshot?.call&&<span className={'font-bold px-2 py-1 rounded-md '+(taraCall.snapshot.call==='UP'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-rose-500/15 text-rose-400 border border-rose-500/30')}>{taraCall.snapshot.call==='UP'?'▲ UP':'▼ DN'} {taraCall.snapshot.posterior?Math.round(taraCall.snapshot.posterior)+'%':''}</span>}
+            {!taraCall?.snapshot?.call&&<span className="text-[#E8E9E4]/40 italic">scanning</span>}
+            <span className="text-white font-bold">${Number(currentPrice).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+          </div>
+          {/* Quick actions */}
+          <div className="flex items-center gap-1">
+            <button onClick={()=>setShowStats(true)} className="p-2 rounded-md hover:bg-[#E8E9E4]/5 text-[#E8E9E4]/50 min-h-[36px]" title="Stats"><IC.BarChart className="w-4 h-4"/></button>
+            <button onClick={()=>setSyncMenuOpen(true)} className="p-2 rounded-md hover:bg-[#E8E9E4]/5 text-[#E8E9E4]/50 min-h-[36px]" title="Sync"><IC.Globe className="w-4 h-4"/></button>
+          </div>
+        </div>
       </div>
 
       {/* Help */}
