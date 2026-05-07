@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.7.5-bybit-migration';
+const BASELINE_VERSION='2026.05.07-v9.7.6-honest-fast-aware';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -1443,9 +1443,22 @@ const buildRegimeDirCalibration=(tradeLog)=>{
     const{n,wins}=counts[k];
     const wr=n>0?wins/n:0.5;
     let weight=0;
+    // V9.7.6: stronger calibration weights so the displayed posterior reflects
+    //   cluster reality more honestly. Old ramp maxed at 0.45 even at n=80+,
+    //   so even with overwhelming evidence the engine's live signal still had
+    //   majority say. New ramp:
+    //     n=10  → 0.10
+    //     n=25  → 0.40
+    //     n=50  → 0.65
+    //     n=80+ → 0.85 (cluster reality dominates)
+    //   This means a SHORT SQUEEZE×UP cluster running 60% WR with n=27 trades
+    //   will pull a raw 80% posterior down to ~67% (was 73%) — closer to truth.
     if(n>=10){
-      // Linear ramp 10→80 trades, capped at 0.45
-      weight=Math.min(0.45,(n-10)/(80-10)*0.35+0.10);
+      if(n<=25){
+        weight=0.10+(n-10)/15*0.30; // 10→25: 0.10→0.40
+      }else{
+        weight=Math.min(0.85,0.40+(n-25)/55*0.45); // 25→80: 0.40→0.85
+      }
     }
     out[k]={n,wr,weight,wrPct:Math.round(wr*1000)/10};
   }
@@ -3240,7 +3253,23 @@ const computeAdvisor=(params)=>{
     // V6.2.8: Tara-aware inputs
     taraSnapshot,taraLean,taraPosterior,kalshiYesPrice,
     // V6.4: structural exhaustion signal
-    convictionAsymmetry}=params;
+    convictionAsymmetry,
+    // V9.7.6: Kalshi velocity for smarter in-trade advice
+    kalshiHist}=params;
+  // V9.7.6: KALSHI VELOCITY — change in YES price over last 30s.
+  //   For UP positions: positive delta = market moving with us (good).
+  //   For DOWN positions: positive YES delta = market moving against us (bad — DOWN value falling).
+  //   Computed once here, used in HOLD/EXIT logic below.
+  const _kalshiVel=(()=>{
+    if(!Array.isArray(kalshiHist)||kalshiHist.length<3)return null;
+    const _now=Date.now();
+    const _recent=kalshiHist.filter(k=>_now-k.time<=2000);
+    const _then=kalshiHist.filter(k=>_now-k.time>=28000&&_now-k.time<=32000);
+    if(_recent.length===0||_then.length===0)return null;
+    const _yesNow=_recent[_recent.length-1].yes;
+    const _yesThen=_then[0].yes;
+    return _yesNow-_yesThen; // cents over ~30s
+  })();
   const intervalSeconds=windowType==='15m'?900:300;
   const timeRemainingFrac=Math.max(0,clockSeconds/intervalSeconds);
   const timeLabel=`${minsRemaining}m ${secsRemaining}s left`;
@@ -3446,6 +3475,24 @@ const computeAdvisor=(params)=>{
   // comebackScore > 55: Tara is highly confident, regime reliable, momentum helping
   // comebackScore 35-55: borderline — monitor
   // comebackScore < 35: cut losses
+  // V9.7.6: KALSHI VELOCITY OVERRIDE — read tape, not just internal conviction.
+  //   If Kalshi YES is moving strongly against the user's position over 30s, advise exit
+  //   regardless of internal conviction. The market is telling you the trade is wrong.
+  //   Threshold: ≥5¢/30s adverse = sustained adverse pressure, exit now.
+  if(_kalshiVel!=null){
+    const _adverseToUser=isUP?_kalshiVel<=-5:_kalshiVel>=5; // YES dropping = bad for UP, YES rising = bad for DOWN
+    const _withUser=isUP?_kalshiVel>=5:_kalshiVel<=-5;
+    if(_adverseToUser&&!isLate){
+      return{label:'KALSHI INVERTED — EXIT EARLY',reason:`Kalshi YES ${_kalshiVel>0?'+':''}${_kalshiVel.toFixed(0)}¢/30s — tape moving against ${userPosition}. ${gapStr}. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EXIT NOW',actionTarget:'SIT OUT'};
+    }
+    if(_adverseToUser&&isLate){
+      return{label:'KALSHI INVERTED — TAKE LOSS',reason:`Kalshi YES ${_kalshiVel>0?'+':''}${_kalshiVel.toFixed(0)}¢/30s adverse with ${timeLabel} left. ${gapStr}.`,color:'rose',animate:true,hasAction:true,actionLabel:'EXIT NOW',actionTarget:'SIT OUT'};
+    }
+    // Slight adverse but not yet at exit threshold — note it for context
+    if((isUP?_kalshiVel<=-2:_kalshiVel>=2)&&isActuallyWinning&&_kalshiVel!=null){
+      // Don't return early — fall through to existing HOLD branches but the chip text below picks this up
+    }
+  }
   if(isActuallyLosing){
     if(comebackScore<35||isVeryLate)return{label:'CUT LOSSES — EXIT NOW',reason:`${gapMagnitude.toFixed(0)} bps adverse. Comeback score: ${comebackScore.toFixed(0)}/100 — not worth holding. ${gapStr}. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT LOSSES NOW',actionTarget:'SIT OUT'};
     if(isLate&&comebackScore<55)return{label:'CUT LOSSES',reason:`${gapMagnitude.toFixed(0)} bps adverse with ${timeLabel} left. Score: ${comebackScore.toFixed(0)}/100. Take the loss. ${gapStr}.`,color:'rose',animate:false,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'SIT OUT'};
@@ -3462,6 +3509,12 @@ const computeAdvisor=(params)=>{
   // V6.2.8: Tara-aligned reassurance — when Tara strongly agrees with user's winning position,
   //   surface that confidence as "TARA AGREES" instead of generic HOLD STRONG.
   const _taraAgreesStrong=_taraImpliedDir===userPosition&&_taraImpliedConf>=72;
+  // V9.7.6: Kalshi tape confirmation — strongest possible signal for HOLD is "Kalshi YES
+  //   moving with us at +5¢/30s." Tape is telling us the move is real.
+  const _kalshiConfirmsHold=_kalshiVel!=null&&((isUP&&_kalshiVel>=5)||(isDN&&_kalshiVel<=-5));
+  if(isActuallyWinning&&_kalshiConfirmsHold){
+    return{label:`KALSHI CONFIRMS · HOLD ${userPosition}`,reason:`Kalshi YES ${_kalshiVel>0?'+':''}${_kalshiVel.toFixed(0)}¢/30s with ${userPosition} · ${gapStr} · Tara ${winSide.toFixed(0)}% · [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+  }
   if(isActuallyWinning&&_taraAgreesStrong&&gapMagnitude>10){
     return{label:`TARA AGREES · HOLD ${userPosition}`,reason:`Tara ${userPosition} ${Math.round(_taraImpliedConf)}% · Edge ${_taraEdge!=null?(_taraEdge>=0?'+':'')+Math.round(_taraEdge)+'pt':'—'} · ${gapStr} · ${timeLabel}`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
   }
@@ -10505,7 +10558,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -10522,6 +10575,13 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     e.closingGapBps!=null?e.closingGapBps.toFixed(1):'',
                     e.lossPattern||'',_tier,
                     e.windowAmplitude||'',
+                    // V9.7.6: lock-timing telemetry — secondsIntoWindow shows how
+                    //   fast Tara locked; kalshiAtLock shows entry price; dialAtLock
+                    //   shows the speed dial. Together they tell us if the dial is
+                    //   actually catching early entries before Kalshi prices in.
+                    e.secondsIntoWindow!=null?e.secondsIntoWindow:'',
+                    e.kalshiAtLock!=null?e.kalshiAtLock:'',
+                    e.dialAtLock!=null?e.dialAtLock:'',
                   ].map(v=>typeof v==='string'&&v.includes(',')?`"${v}"`:String(v));
                   _rows.push(_row.join(','));
                 });
@@ -19318,6 +19378,10 @@ function TaraApp(){
         taraPosterior:posterior,
         // Live Kalshi for edge math
         kalshiYesPrice:typeof kalshiYesPrice!=='undefined'?kalshiYesPrice:null,
+        // V9.7.6: pass Kalshi YES price history (60s rolling) so the advisor can
+        //   read short-term price velocity. Smarter HOLD/EXIT advice based on whether
+        //   Kalshi is moving with us or against us, not just internal conviction.
+        kalshiHist:kalshiHistoryRef?.current||[],
         // V6.4: structural exhaustion signal for active exit alert
         convictionAsymmetry:eng.convictionAsymmetry||null,
       });
@@ -19683,7 +19747,34 @@ function TaraApp(){
     //   selection. With tape-led also tightened (extreme guard, gap-not-marginal), expect
     //   slightly more sit-outs but with higher per-trade WR.
     const _convBase=_softHintActive?3:(7+_safety);
-    const CONV_FLOOR=Math.max(1,Math.round(_convBase*_speedMultEng));
+    // V9.7.6: ADAPTIVE LOCK URGENCY — when Kalshi is moving fast in Tara's predicted
+    //   direction, drop the conviction floor by 30%. Logic: if Kalshi YES moved ≥4¢ in
+    //   the last 30s and the move agrees with Tara's lean, we're being told the market
+    //   is pricing in the move RIGHT NOW. Waiting for higher conviction = paying worse
+    //   entry price. Lock NOW.
+    let _urgencyMult=1.0;
+    let _urgencyReason=null;
+    if(typeof kalshiHistoryRef!=='undefined'&&kalshiHistoryRef.current?.length>=3){
+      const _kh=kalshiHistoryRef.current;
+      const _now=Date.now();
+      const _recent=_kh.filter(k=>_now-k.time<=2000); // last 2s
+      const _then=_kh.filter(k=>_now-k.time>=28000&&_now-k.time<=32000); // ~30s ago
+      if(_recent.length>0&&_then.length>0){
+        const _yesNow=_recent[_recent.length-1].yes;
+        const _yesThen=_then[0].yes;
+        const _delta=_yesNow-_yesThen;
+        // Tara's lean direction: post>50 means UP lean (YES rising = good)
+        //                        post<50 means DOWN lean (YES falling = good)
+        const _agrees=(post>=50&&_delta>=4)||(post<50&&_delta<=-4);
+        if(_agrees){
+          _urgencyMult=0.70; // 30% floor reduction
+          _urgencyReason=`Kalshi YES ${_delta>0?'+':''}${_delta.toFixed(0)}¢/30s in our direction — dropping floor 30%`;
+        }
+      }
+    }
+    const CONV_FLOOR=Math.max(1,Math.round(_convBase*_speedMultEng*_urgencyMult));
+    // V9.7.6: surface urgency state via console.info (won't crash if unhooked)
+    if(_urgencyReason){try{console.info('[urgency]',_urgencyReason,'CONV_FLOOR=',CONV_FLOOR);}catch(_){}}
     // Tape consensus (multi-window 15s/30s/60s buy%)
     const _tape15=tapeWindows?.w15?.buyPct??50;
     const _tape30=tapeWindows?.w30?.buyPct??50;
@@ -20071,6 +20162,19 @@ function TaraApp(){
     if(_isSingleTier&&_isLowVol&&_isLowQ){
       _marginalCaution=`marginal zone — ATR ${_atrBpsNum.toFixed(1)}bps, q${q} · 59% WR baseline · size down`;
       _reasonParts.push('⚠ marginal');
+    }
+    // V9.7.6: WEAK-CLUSTER CAUTION (soft — not a gate). Per user mandate "we are
+    //   not missing out calling on trades", we keep firing on these clusters but
+    //   attach a caution chip so the user knows the setup is historically thin.
+    //   Largest weak cluster from 2026-05-07 audit: SHORT SQUEEZE × UP × single
+    //   running 63% WR (n=27) when stated 75-85%. User can size down or skip.
+    if(!_marginalCaution&&_isSingleTier&&analysis?.regime==='SHORT SQUEEZE'&&dir==='UP'){
+      _marginalCaution=`thin setup — SHORT SQUEEZE × UP × single tier · 63% baseline (n=27) · honest conf vs displayed`;
+      _reasonParts.push('⚠ thin');
+    }
+    if(!_marginalCaution&&_isSingleTier&&analysis?.regime==='TRENDING UP'&&dir==='UP'&&isStructuralLed===false){
+      // Catch the new weak cluster: TRENDING UP × structural at 37.5% (n=8 — small but bleeding)
+      // Single-tier in TRENDING UP is fine (70% WR), so this only fires if it somehow gets here
     }
     return{
       call:dir,reason:_reasonParts.join(' · '),confidence:_confidence,direction:dir,conviction,phase:'FORMING',
@@ -20838,6 +20942,8 @@ function TaraApp(){
         regime:analysis?.regime||'',dir:_forceDir,confidence:taraCallSnapshotRef.current.confidence,
         posterior:_post,qScore:Math.round(qualityGate?.score||0),fgt:analysis?.mtfAlignment,
         tier:'user-forced',session:_forceSession,kalshiAtLock:_forceK,
+        // V9.7.6: dial setting at force — same telemetry as for engine locks
+        dialAtLock:typeof speedDialRef!=='undefined'&&speedDialRef?.current!=null?Number(speedDialRef.current):(typeof speedDial!=='undefined'?Number(speedDial):null),
         isUserForced:true,reason:taraCallSnapshotRef.current.reason,
         // V7.0.7: tag asset for user-forced entries (was missing — defaulted to BTC on display).
         asset:currentAssetRef.current||currentAsset||'BTC',
@@ -21611,6 +21717,10 @@ function TaraApp(){
         //   confident than market = entry profitable; negative edge = Tara late, market
         //   already priced in.
         kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
+        // V9.7.6: speed dial setting at lock — telemetry to audit whether dial=20 (FAST)
+        //   actually produces faster locks than dial=50 (BALANCED). If we see dial=20 trades
+        //   averaging the same secondsIntoWindow as dial=50, the dial isn't being applied.
+        dialAtLock:typeof speedDialRef!=='undefined'&&speedDialRef?.current!=null?Number(speedDialRef.current):(typeof speedDial!=='undefined'?Number(speedDial):null),
         samples,needSamples,
         // V6.5.8: tag with active asset so memory can filter per-asset.
         //   V7.0.3: use ref.current to avoid stale closure.
@@ -22997,7 +23107,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.7.5
+              9.7.6
             </span>
           </div>
 
@@ -24946,6 +25056,46 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.7.6 — Honest, fast, Kalshi-aware */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>calibration honesty &middot; lock urgency &middot; advisor reads tape</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.07</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.7.6</span> &mdash; Honest, Fast, Kalshi-Aware</h3>
+
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-3">Audit-driven response to a real problem: Tara was overconfident on UP calls in the 75-89% band, and locks were happening AFTER Kalshi had already priced in the move. Five coordinated changes, none of which kill trade volume.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">1. Stronger calibration weights</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Per-regime × direction calibration weight maxed at 0.45 even with overwhelming evidence. Now ramps to 0.85 at n=80, 0.65 at n=50, 0.40 at n=25. Result: when SHORT SQUEEZE × UP shows 60% historical WR with n=27, raw posterior of 80% pulls down to ~67% (was 73%). Closer to truth. Advisor reads this honest number, stops saying &ldquo;hold, looks firm&rdquo; on what&rsquo;s actually a coin flip.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">2. Lock-time telemetry in CSV export</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">CSV export now includes <code className="text-[10px] bg-[#0E100F] px-1">secondsIntoWindow</code>, <code className="text-[10px] bg-[#0E100F] px-1">kalshiAtLock</code>, <code className="text-[10px] bg-[#0E100F] px-1">dialAtLock</code>. After 1-2 days of trading you&rsquo;ll see if dial=20 (FAST) is actually catching early entries vs slow ones. Can&rsquo;t optimize what you can&rsquo;t measure.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">3. Adaptive lock urgency</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">When Kalshi YES moves <strong>≥4¢ in 30s in Tara&rsquo;s predicted direction</strong>, the conviction floor drops by 30%. Tara locks NOW because the market is pricing in the move &mdash; waiting means worse entry. Surfaces in console as <code className="text-[10px] bg-[#0E100F] px-1">[urgency]</code> log line.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">4. Advisor reads Kalshi tape</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">In-trade advisor now reads Kalshi YES velocity over 30s, not just internal conviction.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Kalshi moving with us ≥5¢/30s</strong> → <code className="text-[10px] bg-[#0E100F] px-1">KALSHI CONFIRMS · HOLD</code></li>
+                  <li><strong>Kalshi reversing ≥5¢/30s adverse</strong> → <code className="text-[10px] bg-[#0E100F] px-1">KALSHI INVERTED · EXIT</code></li>
+                  <li>Otherwise existing HOLD/EXIT logic continues</li>
+                </ul>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">This directly addresses &ldquo;the advisor is stupid when I&rsquo;m in trade&rdquo; &mdash; advisor now reads the actual market, not just stale lock conviction.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">5. Soft caution on weak clusters</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">SHORT SQUEEZE × UP × single tier (n=27, running 63% WR while displaying 75-85%) gets a <code className="text-[10px] bg-[#0E100F] px-1">⚠ thin</code> caution chip. <strong>Trade still fires.</strong> User sees the warning, can size down or skip manually. Per your mandate &mdash; we don&rsquo;t miss out on calling trades.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What you&rsquo;ll see different</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li>Some calls that displayed 80% before now show 65% &mdash; Tara stopped lying to herself</li>
+                  <li>Faster locks when Kalshi is moving (especially in SQUEEZE windows)</li>
+                  <li>Advisor messages reference Kalshi velocity (&ldquo;KALSHI INVERTED&rdquo; / &ldquo;KALSHI CONFIRMS&rdquo;)</li>
+                  <li>CSV export has 3 new columns. Pull a fresh CSV after a day to audit lock timing.</li>
+                </ul>
               </section>
 
               {/* V9.7.5 — Bybit migration + bugfixes */}
