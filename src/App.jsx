@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.7.6-honest-fast-aware';
+const BASELINE_VERSION='2026.05.07-v9.7.7-spike-sensitive';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -13844,11 +13844,15 @@ function useSpikeAlert({tickHistoryRef,lockedCallRef,currentAsset,atrBps}){
       if(ticks.length<3)return;
       const now=Date.now();
       const _atr=Number.isFinite(_atrRef.current)&&_atrRef.current>0?_atrRef.current:15;
-      // Multi-window: check 10s, 20s, 30s — pick window with largest |move|
+      // V9.7.7: Lower thresholds — user reported intermittent fires on calm-market days.
+      //   Old: 10s/20bps/1.0×ATR · 20s/30bps/1.3×ATR · 30s/40bps/1.6×ATR
+      //   New: 10s/14bps/0.9×ATR · 20s/22bps/1.1×ATR · 30s/30bps/1.3×ATR
+      //   ~40% reduction in floors, modest reduction in ATR multipliers. Still
+      //   won't fire on tape noise — needs ~$11+ move in 10s on $80K BTC.
       const _windows=[
-        {sec:10,floor:20,mult:1.0},
-        {sec:20,floor:30,mult:1.3},
-        {sec:30,floor:40,mult:1.6},
+        {sec:10,floor:14,mult:0.9},
+        {sec:20,floor:22,mult:1.1},
+        {sec:30,floor:30,mult:1.3},
       ];
       let _bestFire=null;
       for(const w of _windows){
@@ -13867,8 +13871,10 @@ function useSpikeAlert({tickHistoryRef,lockedCallRef,currentAsset,atrBps}){
         }
       }
       if(!_bestFire)return;
-      // Throttle: 30s
-      if(now-_lastFiredRef.current<30000)return;
+      // V9.7.7: Throttle 30s → 20s. Active markets often have multiple spikes
+      //   in a row; 30s was eating real fires. 20s still prevents a single sustained
+      //   move from spamming the overlay.
+      if(now-_lastFiredRef.current<20000)return;
       _lastFiredRef.current=now;
       const dir=_bestFire.moveBps>0?'PUMP':'DUMP';
       const favorable=isLocked&&((dir==='PUMP'&&lock.dir==='UP')||(dir==='DUMP'&&lock.dir==='DOWN'));
@@ -13896,12 +13902,14 @@ function useSpikeAlert({tickHistoryRef,lockedCallRef,currentAsset,atrBps}){
   },[tickHistoryRef,lockedCallRef,_playBeep,_fireSystemNotification]);
   React.useEffect(()=>{
     if(!alert)return;
+    // V9.7.7: 8s → 12s. User reported missing alerts when glancing away from screen.
+    //   Tap-to-dismiss still works for early dismissal; this just gives more buffer.
     const t=setTimeout(()=>{
       setAlert(null);
       try{
         if(_origTitleRef.current!=null){document.title=_origTitleRef.current;_origTitleRef.current=null;}
       }catch(_){}
-    },8000);
+    },12000);
     return()=>clearTimeout(t);
   },[alert]);
   React.useEffect(()=>{
@@ -13912,6 +13920,30 @@ function useSpikeAlert({tickHistoryRef,lockedCallRef,currentAsset,atrBps}){
       }catch(_){}
     };
   },[]);
+  // V9.7.7: TEST FIRE — synthesize a fake PUMP alert so the user can verify their
+  //   browser permissions, audio context, and overlay are all working. Triggered
+  //   from a button in Trading Settings. Uses the same code path as real alerts
+  //   so if the test works, real alerts will too.
+  const fireTestAlert=React.useCallback(()=>{
+    const _asset=_assetRef.current||'BTC';
+    const _testAlert={
+      firedAt:Date.now(),
+      dir:'PUMP',
+      bps:25,
+      windowSec:10,
+      favorable:false,
+      locked:false,
+      asset:_asset,
+      _isTest:true,
+    };
+    setAlert(_testAlert);
+    _playBeep('PUMP');
+    _fireSystemNotification(_testAlert);
+    try{
+      if(_origTitleRef.current==null)_origTitleRef.current=document.title;
+      document.title=`🚀 ${_asset} +25bps · TEST`;
+    }catch(_){}
+  },[_playBeep,_fireSystemNotification]);
   const dismiss=React.useCallback(()=>{
     setAlert(null);
     try{
@@ -13933,7 +13965,18 @@ function useSpikeAlert({tickHistoryRef,lockedCallRef,currentAsset,atrBps}){
       return result;
     }catch(_){return'denied';}
   },[]);
-  return{alert,dismiss,toggleSound,soundEnabled:_soundEnabledRef.current,requestNotifyPermission,notifyPerm};
+  // V9.7.7: Expose test fire on window so the user can verify their browser
+  //   permissions/audio are working. Run `taraTestSpikeAlert()` from devtools
+  //   console — same code path as a real alert. If overlay appears + beep plays,
+  //   real spikes will work too. If only overlay appears (no beep), audio context
+  //   is suspended (Brave often does this until first page click). If nothing
+  //   appears, browser is blocking the rendering somehow.
+  React.useEffect(()=>{
+    if(typeof window==='undefined')return;
+    window.taraTestSpikeAlert=fireTestAlert;
+    return()=>{try{delete window.taraTestSpikeAlert;}catch(_){}};
+  },[fireTestAlert]);
+  return{alert,dismiss,toggleSound,soundEnabled:_soundEnabledRef.current,requestNotifyPermission,notifyPerm,fireTestAlert};
 }
 
 function SpikeAlertOverlay({alert,dismiss,toggleSound,soundEnabled,requestNotifyPermission,notifyPerm}){
@@ -23107,7 +23150,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.7.6
+              9.7.7
             </span>
           </div>
 
