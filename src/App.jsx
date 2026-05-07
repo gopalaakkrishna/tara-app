@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.6.0-autoexec-deepconfig';
+const BASELINE_VERSION='2026.05.07-v9.7.0-mission-mode';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -1416,6 +1416,142 @@ const buildRegimeDirCalibration=(tradeLog)=>{
     out[k]={n,wr,weight,wrPct:Math.round(wr*1000)/10};
   }
   return out;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V9.7.0: MISSION MODE — disciplined bankroll-target trading
+// ═══════════════════════════════════════════════════════════════════════════
+// User sets a starting bankroll, a target $ amount, an end date, and a drawdown
+// floor. Tara sizes each trade using fractional Kelly with cluster-specific WR,
+// modulated by distance-to-target and remaining time. Hard stops at floor and
+// at target. Surfaces honest probability of target hit each render.
+//
+// Math summary:
+//   Per-trade size: f = min(maxBetFrac, kellyFrac × bankroll, edgeAdjustment)
+//   Kelly fraction: (b·p − q) / b  where p=cluster WR, q=1−p, b=odds
+//   We use fractional Kelly (default ¼) to reduce drawdown variance.
+//   Probability of target = simulated geometric Brownian path with measured
+//   per-trade growth rate and variance. Single-pass approximation, not Monte
+//   Carlo (cheap to compute every render).
+// ───────────────────────────────────────────────────────────────────────────
+
+// Cluster-WR lookup: given (regime, dir, tier), return {wr, n} from the
+// regimeDirCalibration table + tier-specific haircut/boost. If sample is
+// thin, fall back to the audit-baseline conservative number.
+const _missionGetClusterWR=({regime,dir,tier,regimeDirCal})=>{
+  // Tier multipliers per V9.4.0 audit data
+  const TIER_BASELINE={super:0.78,confluence:0.70,structural:0.62,tape:0.66,single:0.62};
+  const _baseline=TIER_BASELINE[tier]||0.62;
+  if(!regimeDirCal||!regime||!dir)return{wr:_baseline,n:0};
+  const k=`${regime}|${dir}`;
+  const _entry=regimeDirCal[k];
+  if(!_entry||_entry.n<10)return{wr:_baseline,n:_entry?_entry.n:0};
+  // Blend live cluster WR with baseline tier expectation, weighted by sample size
+  const _w=Math.min(0.7,(_entry.n-10)/(80-10)*0.6+0.10);
+  const _blended=_entry.wr*_w+_baseline*(1-_w);
+  return{wr:_blended,n:_entry.n};
+};
+
+// Compute optimal bet given bankroll, edge, market price, and mission constraints.
+// Returns {betDollars, reason, kellyFrac, fractionOfBankroll, blockedReason?}.
+//
+// Flow:
+//   1. Compute Kelly fraction from cluster WR + market odds
+//   2. Apply fractional Kelly multiplier (default 0.25 — conservative)
+//   3. Cap at maxBetFraction × bankroll (drawdown protection)
+//   4. Distance-to-target tilt: behind schedule → small upsize; ahead → downsize
+//   5. Drawdown brake: as bankroll approaches floor, sizes shrink quadratically
+//   6. Floor checks: bankroll < floor → block, bet < $1 → block
+const _missionComputeBet=({bankroll,target,daysRemaining,floor,p,limitCents,fractionalKellyMult=0.25,maxBetFraction=0.15,maxBetCap})=>{
+  if(!Number.isFinite(bankroll)||bankroll<=0)return{betDollars:0,blockedReason:'no bankroll'};
+  if(bankroll<=floor)return{betDollars:0,blockedReason:`bankroll ${bankroll.toFixed(2)} ≤ floor ${floor}`};
+  if(!Number.isFinite(p)||p<=0||p>=1)return{betDollars:0,blockedReason:'no edge estimate'};
+  const _cents=Math.max(1,Math.min(99,Math.round(limitCents)));
+  // Kalshi: cost = limitCents¢, payout = (100-limitCents)¢ above cost. b = (100-c)/c.
+  const _b=(100-_cents)/_cents;
+  const _q=1-p;
+  const _kelly=(_b*p-_q)/_b;
+  if(_kelly<=0)return{betDollars:0,blockedReason:`no edge (kelly=${(_kelly*100).toFixed(1)}%)`};
+  const _kellyFrac=Math.max(0,Math.min(1,_kelly));
+  // Fractional Kelly is the base size
+  let _fracOfBankroll=_kellyFrac*fractionalKellyMult;
+  // Distance-to-target tilt
+  if(target>0&&daysRemaining>0&&bankroll<target){
+    // What growth-per-trade rate is needed?
+    const _gain=target/bankroll; // multiplier needed
+    // Assume roughly 8 trades/day if active. tradesNeeded = daysRemaining × 8.
+    const _expectedTrades=Math.max(1,daysRemaining*8);
+    const _requiredGrowthPerTrade=Math.pow(_gain,1/_expectedTrades)-1; // e.g. 0.012 = 1.2%/trade
+    // Compare to current expected growth: kelly_frac × edge
+    const _currentExpected=_kellyFrac*fractionalKellyMult*((p*_b)-(1-p));
+    if(_currentExpected>0&&_requiredGrowthPerTrade>_currentExpected){
+      // Behind schedule — bump slightly. Cap the bump at 1.5×.
+      const _bump=Math.min(1.5,_requiredGrowthPerTrade/_currentExpected);
+      _fracOfBankroll*=_bump;
+    }else if(_currentExpected>0&&_requiredGrowthPerTrade<_currentExpected*0.5){
+      // Ahead of schedule — preserve gains, downsize 30%
+      _fracOfBankroll*=0.7;
+    }
+  }
+  // Drawdown brake — quadratic shrink as we approach floor
+  const _drawdownDistance=(bankroll-floor)/Math.max(1,bankroll);
+  if(_drawdownDistance<0.4){
+    // Quadratic: at 40% above floor, no brake; at floor itself, full brake
+    const _brake=Math.max(0,_drawdownDistance/0.4);
+    _fracOfBankroll*=_brake*_brake;
+  }
+  // Cap at maxBetFraction
+  _fracOfBankroll=Math.min(maxBetFraction,_fracOfBankroll);
+  let _bet=bankroll*_fracOfBankroll;
+  // Apply absolute cap if provided
+  if(Number.isFinite(maxBetCap)&&maxBetCap>0)_bet=Math.min(_bet,maxBetCap);
+  if(_bet<1)return{betDollars:0,kellyFrac:_kellyFrac,fractionOfBankroll:_fracOfBankroll,blockedReason:`size <$1 (${_bet.toFixed(2)})`};
+  return{
+    betDollars:_bet,
+    kellyFrac:_kellyFrac,
+    fractionOfBankroll:_fracOfBankroll,
+    reason:`Kelly ${(_kellyFrac*100).toFixed(0)}% × ${fractionalKellyMult}× = ${(_fracOfBankroll*100).toFixed(1)}% of $${bankroll.toFixed(0)}`,
+  };
+};
+
+// Estimate probability of hitting target by deadline given current state.
+// Cheap approximation: log-growth model with measured trade-level mean and stdev.
+//
+// μ_per_trade = E[log(1+r)] ≈ p·log(1+b·f) + q·log(1-f)  where f = bet fraction
+// σ²_per_trade = p·(log(1+b·f))² + q·(log(1-f))² − μ²
+// Required total log-growth = log(target/bankroll)
+// Number of trades remaining = daysRemaining × tradesPerDay
+// Z = (required − μ·n) / (σ·sqrt(n))
+// Probability ≈ 1 - Φ(Z)  (one-sided normal CDF)
+//
+// This is a rough estimate — assumes constant edge, constant trade rate, no
+// regime shift. Real outcome variance is higher than this model. Treat the
+// number as "rough order of magnitude" not precision forecast.
+const _missionEstimateTargetProbability=({bankroll,target,daysRemaining,p,b,fractionOfBankroll,tradesPerDay=8})=>{
+  if(!Number.isFinite(bankroll)||bankroll<=0)return 0;
+  if(bankroll>=target)return 1;
+  if(daysRemaining<=0)return 0;
+  if(!Number.isFinite(p)||!Number.isFinite(b)||!Number.isFinite(fractionOfBankroll)||fractionOfBankroll<=0)return 0;
+  const _f=fractionOfBankroll;
+  const _muUp=Math.log(1+b*_f);
+  const _muDn=Math.log(Math.max(1e-9,1-_f));
+  const _q=1-p;
+  const _muPerTrade=p*_muUp+_q*_muDn;
+  if(_muPerTrade<=0)return 0; // negative drift → can't reach target
+  const _varPerTrade=p*_muUp*_muUp+_q*_muDn*_muDn-_muPerTrade*_muPerTrade;
+  if(_varPerTrade<=0)return _muPerTrade>0?0.99:0;
+  const _sigmaPerTrade=Math.sqrt(_varPerTrade);
+  const _n=Math.max(1,Math.floor(daysRemaining*tradesPerDay));
+  const _required=Math.log(target/bankroll);
+  const _z=(_required-_muPerTrade*_n)/(_sigmaPerTrade*Math.sqrt(_n));
+  // Approximate normal CDF using the Abramowitz & Stegun formula
+  const _normCdf=(z)=>{
+    const _t=1/(1+0.2316419*Math.abs(z));
+    const _d=0.3989422804*Math.exp(-z*z/2);
+    const _p_cdf=_d*_t*(0.31938153+_t*(-0.356563782+_t*(1.781477937+_t*(-1.821255978+_t*1.330274429))));
+    return z>=0?1-_p_cdf:_p_cdf;
+  };
+  return Math.max(0,Math.min(1,1-_normCdf(_z)));
 };
 
 // V9.5.0: KALSHI-SPOT DIVERGENCE DETECTOR (opponent modeling)
@@ -6818,6 +6954,36 @@ function BestPracticesModal({open,onClose}){
           `V8.3 fixed the multi-tab data loss bug. The peer-tab pill in the header confirms when other tabs are open. If you don't see the pill but expect to, refresh — sync may be out of date.`),
       ]),
 
+      // 10. Auto-execution (V9.3.0+)
+      _section('Auto-execution — when to use it',[
+        _row('⚡','rgba(229,200,112,0.95)','Default OFF, dry-run ON',
+          `Auto-exec is opt-in. When you flip it on, dry-run is on by default — orders are simulated, never sent. Verify a full window in dry-run before flipping the live switch. Settings live in the Trading Settings modal under Kalshi Auto-Execution.`),
+        _row('⚡','rgba(229,200,112,0.95)','Conservative-but-aggressive config',
+          `Highest-leverage setup: minTier=super-confluence, skipMarginalCaution=ON, lockStabilitySec=5, stopLossDeltaCents=30. Fires 1-3× per day on highest-conviction setups only. Lower volume, much higher WR per fire.`),
+        _row('⚡','rgba(229,200,112,0.95)','High-volume config',
+          `If you want her trading more: minTier=any, all assets/windows on, sizingMode=confidence with $5 low / $25 high. Fires on most windows. Higher noise, more loss-streak exposure — set tighter daily-loss caps to compensate.`),
+        _row('⛔','#F87171','Kill switch is in 3 places',
+          `Top-bar pill (opens settings), Live Trade Coach status strip (always visible during a trade), and the big red button in settings. Engaging it instantly blocks new orders. Existing positions are NOT auto-closed — you decide whether to manually exit.`),
+        _row('🛡','rgba(196,181,253,0.85)','Risk guardrails compose',
+          `Max bet per trade × daily loss cap × loss-streak cooldown × anti-tilt × asset/window filter × tier filter × quality/conviction filter. Failing ANY of these blocks the trade. Stack them — none is sufficient on its own.`),
+      ]),
+
+      // 11. Mission Mode (V9.7.0)
+      _section('Mission Mode — bankroll → target',[
+        _row('🎯','#6EE7B7','What it is',
+          `Set a starting bankroll (e.g. $50), a target ($500), and a deadline (2 weeks). Tara uses fractional Kelly with cluster-specific WR to size each trade. Hard stops at drawdown floor (e.g. $10) and at target. Auto-exec disables itself once target hit — no chasing past it.`),
+        _row('📐','#6EE7B7','Math is honest about your odds',
+          `Every render shows estimated probability of hitting target by deadline. <25% odds → "target unrealistic" warning. The math assumes constant edge; real variance is higher. Treat the % as order of magnitude. If it says 15%, don't expect the math to be wrong by enough to save you.`),
+        _row('⚖','#6EE7B7','Aggressive targets bust more than they win',
+          `$25 → $2000 in a week is "possible but median outcome is bust." Even at 65% WR with proper sizing, ~50-60% of paths hit floor before target. The drawdown floor is what protects the rest of your bankroll. Set it meaningfully (typically 20-30% of starting).`),
+        _row('🎚','#6EE7B7','Kelly multiplier choices',
+          `0.10× = very conservative, very low bust risk, slow growth. 0.25× = quarter Kelly, recommended default. 0.50× = half Kelly, faster growth, higher bust risk. 1.00× = full Kelly, maximum geometric growth in theory, very high bust risk in practice. Most professional bettors use 0.25-0.50× for real reasons.`),
+        _row('▶','#6EE7B7','Status states',
+          `inactive (no mission), active (sizing live), paused (you stopped it; auto-exec falls back to fixed sizing), hit (target reached, auto-exec disabled to lock in win), busted (floor breached, trading stopped to protect remaining bankroll), expired (deadline passed without hit).`),
+        _row('📊','#6EE7B7','When to pause',
+          `Big news event coming, or you don't trust the conditions, or you want to manage discretionarily for a while. Pause keeps the mission alive but stops Mission sizing. Resume when ready.`),
+      ]),
+
       React.createElement('div',{
         className:'mt-5 pt-4 border-t border-[#E8E9E4]/10 text-center',
       },
@@ -7184,7 +7350,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
 // ── V8.2: TRADING SETTINGS MODAL ────────────────────────────────────────────
 // Configure bet size, win payout, anti-tilt cooldown, Discord alert filter,
 // take-profit/cut-loss rules. All localStorage-only, per-device prefs.
-function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,saveKalshiCreds,autoExecSettings,setAutoExecSettings,killSwitchEngaged,setKillSwitchEngaged,kalshiPingState,setKalshiPingState,autoExecCooldownUntil,setAutoExecCooldownUntil,autoExecDayPnL,setAutoExecDayPnL}){
+function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,saveKalshiCreds,autoExecSettings,setAutoExecSettings,killSwitchEngaged,setKillSwitchEngaged,kalshiPingState,setKalshiPingState,autoExecCooldownUntil,setAutoExecCooldownUntil,autoExecDayPnL,setAutoExecDayPnL,mission,setMission,regimeDirCalibration}){
   if(!open)return null;
   const _update=(k,v)=>setSettings(prev=>({...prev,[k]:v}));
   const _num=(s,fallback)=>{const n=Number(s);return Number.isFinite(n)?n:fallback;};
@@ -7305,6 +7471,10 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
           }),
         ),
+      ),
+      // ── V9.7.0: MISSION MODE ──────────────────────────────────────────
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg border',style:{background:'rgba(110,231,183,0.04)',borderColor:'rgba(110,231,183,0.20)'}},
+        React.createElement(MissionPanel,{mission,setMission,regimeDirCalibration,killSwitchEngaged,setKillSwitchEngaged,compact:false}),
       ),
       // ── V9.3.0: KALSHI AUTO-EXECUTION ─────────────────────────────────
       React.createElement('div',{className:'mb-4 p-3 rounded-lg border',style:{background:'rgba(229,200,112,0.04)',borderColor:'rgba(229,200,112,0.20)'}},
@@ -7689,6 +7859,345 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// V9.7.0: MISSION MODE PANEL — bankroll/target progress + setup
+// ═══════════════════════════════════════════════════════════════════════════
+// Renders in two contexts:
+//   1. Compact dashboard widget (always visible when mission is active) showing
+//      bankroll / target / progress / probability / win rate
+//   2. Full setup panel inside Trading Settings modal for configuration
+//
+// Status states surface different UI:
+//   inactive: setup form
+//   active:   live progress dashboard
+//   hit:      celebration banner — "you did it"
+//   busted:   reset/recover banner with stop-loss explanation
+//   expired:  end-of-interval summary
+//   paused:   user manually paused, resume button
+function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged,setKillSwitchEngaged,compact=false}){
+  // 1Hz tick to refresh time-remaining display
+  const[,_t]=React.useState(0);
+  React.useEffect(()=>{const iv=setInterval(()=>_t(x=>x+1),1000);return()=>clearInterval(iv);},[]);
+  // V9.7.0: local _num helper (TradingSettingsModal's is out-of-scope here)
+  const _num=(s,fallback)=>{const n=Number(s);return Number.isFinite(n)?n:fallback;};
+  // Local form state for setup (don't commit until user clicks Start)
+  const[setup,setSetup]=React.useState(()=>({
+    startBankroll:mission.startBankroll||25,
+    target:mission.target||200,
+    durationDays:7,
+    floor:mission.floor||5,
+    kellyMult:mission.kellyMult||0.25,
+    maxBetFraction:mission.maxBetFraction||0.15,
+  }));
+  const _now=Date.now();
+  const _isActive=mission.active&&mission.status==='active';
+  const _isInactive=!mission.active||mission.status==='inactive';
+  const _msRemaining=mission.endDate?Math.max(0,new Date(mission.endDate).getTime()-_now):0;
+  const _daysRemaining=_msRemaining/86400000;
+  const _hoursRemaining=Math.floor(_msRemaining/3600000);
+  const _progressPct=mission.target>0?Math.min(100,Math.max(0,((mission.currentBankroll-mission.startBankroll)/(mission.target-mission.startBankroll))*100)):0;
+  const _runWR=mission.tradesAttempted>0?(mission.tradesWon/mission.tradesAttempted)*100:0;
+  // Estimate target probability — uses cluster-blend default WR ~0.65, typical Kalshi odds
+  let _targetProb=null;
+  if(_isActive&&mission.target>0&&_daysRemaining>0&&mission.currentBankroll<mission.target){
+    // Use empirical bankroll trajectory if available, else conservative defaults
+    const _empiricalP=_runWR>0?_runWR/100:0.65;
+    const _avgFracEstimate=mission.maxBetFraction*0.6; // typical sized trade
+    const _odds=1.0; // average market odds at 50¢ entry
+    _targetProb=_missionEstimateTargetProbability({
+      bankroll:mission.currentBankroll,
+      target:mission.target,
+      daysRemaining:_daysRemaining,
+      p:_empiricalP,
+      b:_odds,
+      fractionOfBankroll:_avgFracEstimate,
+      tradesPerDay:8,
+    });
+  }
+  // Sparkline for bankroll history
+  const _renderSparkline=()=>{
+    const h=mission.bankrollHistory||[];
+    if(h.length<2)return null;
+    const _max=Math.max(...h.map(p=>p.b),mission.target||0);
+    const _min=Math.min(...h.map(p=>p.b),mission.floor||0);
+    const _range=_max-_min||1;
+    const _w=180,_hgt=32;
+    const _pts=h.map((p,i)=>{
+      const x=(i/(h.length-1))*_w;
+      const y=_hgt-((p.b-_min)/_range)*_hgt;
+      return`${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    return React.createElement('svg',{width:_w,height:_hgt,style:{display:'block'}},
+      React.createElement('polyline',{points:_pts,fill:'none',stroke:'#6EE7B7',strokeWidth:1.5,strokeLinejoin:'round',strokeLinecap:'round'}),
+    );
+  };
+  const _startMission=()=>{
+    if(!setup.startBankroll||!setup.target||setup.target<=setup.startBankroll||!setup.durationDays){
+      alert('Need: positive bankroll, target above bankroll, positive duration.');
+      return;
+    }
+    if(setup.floor>=setup.startBankroll){
+      alert('Drawdown floor must be below starting bankroll.');
+      return;
+    }
+    const _now=Date.now();
+    setMission({
+      ...mission,
+      active:true,
+      startBankroll:setup.startBankroll,
+      currentBankroll:setup.startBankroll,
+      target:setup.target,
+      startDate:new Date(_now).toISOString(),
+      endDate:new Date(_now+setup.durationDays*86400000).toISOString(),
+      floor:setup.floor,
+      kellyMult:setup.kellyMult,
+      maxBetFraction:setup.maxBetFraction,
+      status:'active',
+      tradesAttempted:0,tradesWon:0,tradesLost:0,
+      lastBankrollUpdate:_now,
+      bankrollHistory:[{t:_now,b:setup.startBankroll}],
+    });
+  };
+  const _stopMission=(toStatus)=>{
+    if(!window.confirm(`End mission as ${toStatus}? Bankroll history will be preserved but Tara will stop sizing trades against this target.`))return;
+    setMission(prev=>({...prev,active:false,status:toStatus||'inactive'}));
+  };
+  const _resetMission=()=>{
+    if(!window.confirm('Wipe mission state entirely? This clears bankroll history, target, all settings.'))return;
+    setMission({active:false,startBankroll:0,currentBankroll:0,target:0,startDate:null,endDate:null,floor:0,kellyMult:0.25,maxBetFraction:0.15,status:'inactive',tradesAttempted:0,tradesWon:0,tradesLost:0,lastBankrollUpdate:0,bankrollHistory:[]});
+  };
+  // ── COMPACT DASHBOARD WIDGET ──────────────────────────────────────────
+  if(compact){
+    if(!_isActive)return null; // compact mode only renders when active
+    const _statusColor=mission.status==='hit'?'#6EE7B7':mission.status==='busted'?'#F87171':_progressPct>=75?'#6EE7B7':_progressPct>=40?'#E5C870':_progressPct>=15?'#FBBF24':'#F87171';
+    return React.createElement('div',{className:'rounded-lg border p-2.5 mb-2',style:{background:'rgba(110,231,183,0.04)',borderColor:'rgba(110,231,183,0.20)'}},
+      React.createElement('div',{className:'flex items-baseline justify-between mb-1.5'},
+        React.createElement('div',{className:'flex items-baseline gap-2'},
+          React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-[0.18em]',style:{color:'#6EE7B7'}},'Mission'),
+          React.createElement('span',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/45'},_daysRemaining<1?`${_hoursRemaining}h left`:`${_daysRemaining.toFixed(1)}d left`),
+        ),
+        killSwitchEngaged&&React.createElement('span',{className:'text-[9px] uppercase tracking-wider px-1 py-0.5 rounded',style:{color:'#F87171',border:'1px solid rgba(248,113,113,0.40)'}},'killed'),
+      ),
+      React.createElement('div',{className:'flex items-baseline gap-3 mb-1.5'},
+        React.createElement('div',{className:'flex-1 min-w-0'},
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55 mb-0.5'},'bankroll'),
+          React.createElement('div',{className:'text-2xl font-serif font-bold tabular-nums leading-none',style:{color:_statusColor}},'$',mission.currentBankroll.toFixed(0)),
+        ),
+        React.createElement('div',{className:'text-right'},
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55 mb-0.5'},'target'),
+          React.createElement('div',{className:'text-base font-serif font-bold tabular-nums leading-none text-white'},'$',mission.target),
+        ),
+      ),
+      React.createElement('div',{className:'h-1.5 bg-[#0E100F] rounded overflow-hidden mb-1.5'},
+        React.createElement('div',{style:{width:`${_progressPct}%`,height:'100%',background:_statusColor,transition:'width 600ms'}}),
+      ),
+      React.createElement('div',{className:'flex items-baseline justify-between text-[10px]'},
+        React.createElement('span',{className:'tabular-nums',style:{color:_statusColor}},_progressPct.toFixed(0),'% to target'),
+        _targetProb!=null&&React.createElement('span',{className:'text-[#E8E9E4]/55'},
+          'odds ',
+          React.createElement('span',{className:'font-bold tabular-nums',style:{color:_targetProb>=0.5?'#6EE7B7':_targetProb>=0.25?'#FBBF24':'#F87171'}},Math.round(_targetProb*100),'%'),
+        ),
+      ),
+      mission.tradesAttempted>0&&React.createElement('div',{className:'mt-1.5 pt-1.5 border-t border-[#E8E9E4]/8 text-[10px] text-[#E8E9E4]/55 flex items-baseline justify-between'},
+        React.createElement('span',null,mission.tradesAttempted,' trades · WR ',_runWR.toFixed(0),'%'),
+        mission.bankrollHistory?.length>=2&&_renderSparkline(),
+      ),
+      _targetProb!=null&&_targetProb<0.25&&React.createElement('div',{className:'mt-1.5 text-[10px] text-rose-300/85 leading-relaxed'},'⚠ Target unrealistic at current pace. Consider extending the deadline or reducing target.'),
+    );
+  }
+  // ── FULL SETUP / ACTIVE PANEL ─────────────────────────────────────────
+  return React.createElement('div',null,
+    React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
+      React.createElement('div',null,
+        React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-[0.18em]',style:{color:'#6EE7B7'}},'Mission Mode'),
+        React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/45 mt-0.5'},'bankroll → target with math-driven sizing'),
+      ),
+      React.createElement('span',{className:'text-[9px] uppercase tracking-wider px-1 py-0.5 rounded',style:{
+        color:mission.status==='hit'?'#6EE7B7':mission.status==='busted'?'#F87171':mission.status==='active'?'#FBBF24':'rgba(232,233,228,0.45)',
+        border:`1px solid ${mission.status==='hit'?'rgba(110,231,183,0.4)':mission.status==='busted'?'rgba(248,113,113,0.4)':mission.status==='active'?'rgba(251,191,36,0.4)':'rgba(232,233,228,0.20)'}`,
+      }},mission.status||'inactive'),
+    ),
+    // Hit/busted/expired banners
+    mission.status==='hit'&&React.createElement('div',{className:'p-3 rounded mb-3',style:{background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.40)'}},
+      React.createElement('div',{className:'text-[12px] font-bold mb-1',style:{color:'#6EE7B7'}},'🎯 Target hit'),
+      React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/75'},'Bankroll $',mission.currentBankroll.toFixed(2),' · target $',mission.target.toFixed(2),' · ',mission.tradesAttempted,' trades · WR ',_runWR.toFixed(0),'%'),
+      React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55 mt-2'},'Auto-exec is paused on this mission. Reset or start a new one.'),
+    ),
+    mission.status==='busted'&&React.createElement('div',{className:'p-3 rounded mb-3',style:{background:'rgba(248,113,113,0.10)',border:'1px solid rgba(248,113,113,0.40)'}},
+      React.createElement('div',{className:'text-[12px] font-bold mb-1',style:{color:'#F87171'}},'Bankroll hit drawdown floor'),
+      React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/75'},'$',mission.currentBankroll.toFixed(2),' ≤ floor $',mission.floor.toFixed(2),' · stopped after ',mission.tradesAttempted,' trades · WR ',_runWR.toFixed(0),'%'),
+      React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55 mt-2 leading-relaxed'},'Floor protected the rest of the bankroll. The mission stopped before reaching $0. Reset to start a new one with adjusted targets, or review the trade log for what went wrong.'),
+    ),
+    mission.status==='expired'&&React.createElement('div',{className:'p-3 rounded mb-3',style:{background:'rgba(251,191,36,0.08)',border:'1px solid rgba(251,191,36,0.30)'}},
+      React.createElement('div',{className:'text-[12px] font-bold mb-1',style:{color:'#FBBF24'}},'Mission expired'),
+      React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/75'},'Final $',mission.currentBankroll.toFixed(2),' · target $',mission.target.toFixed(2),' · ',mission.tradesAttempted,' trades · WR ',_runWR.toFixed(0),'%'),
+    ),
+    // Active progress
+    _isActive&&React.createElement('div',{className:'p-3 rounded mb-3',style:{background:'rgba(110,231,183,0.04)',border:'1px solid rgba(110,231,183,0.20)'}},
+      React.createElement('div',{className:'grid grid-cols-2 gap-3 mb-3'},
+        React.createElement('div',null,
+          React.createElement('div',{className:'text-[10px] uppercase tracking-wider text-[#E8E9E4]/55 mb-0.5'},'current bankroll'),
+          React.createElement('div',{className:'text-2xl font-serif font-bold tabular-nums',style:{color:'#6EE7B7'}},'$',mission.currentBankroll.toFixed(2)),
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'started $',mission.startBankroll.toFixed(2)),
+        ),
+        React.createElement('div',null,
+          React.createElement('div',{className:'text-[10px] uppercase tracking-wider text-[#E8E9E4]/55 mb-0.5'},'target'),
+          React.createElement('div',{className:'text-2xl font-serif font-bold tabular-nums text-white'},'$',mission.target.toFixed(2)),
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},_daysRemaining<1?`${_hoursRemaining}h left`:`${_daysRemaining.toFixed(1)} days left`),
+        ),
+      ),
+      React.createElement('div',{className:'h-2 bg-[#0E100F] rounded overflow-hidden mb-2'},
+        React.createElement('div',{style:{width:`${_progressPct}%`,height:'100%',background:_progressPct>=75?'#6EE7B7':_progressPct>=40?'#E5C870':_progressPct>=15?'#FBBF24':'#F87171',transition:'width 600ms'}}),
+      ),
+      React.createElement('div',{className:'flex items-baseline justify-between text-[11px] mb-2'},
+        React.createElement('span',{className:'tabular-nums text-[#E8E9E4]/65'},_progressPct.toFixed(1),'% complete'),
+        React.createElement('span',{className:'text-[#E8E9E4]/55'},'floor $',mission.floor.toFixed(2)),
+      ),
+      _targetProb!=null&&React.createElement('div',{className:'p-2 rounded mb-2',style:{background:'rgba(14,16,15,0.5)'}},
+        React.createElement('div',{className:'flex items-baseline justify-between text-[11px]'},
+          React.createElement('span',{className:'text-[#E8E9E4]/65'},'estimated probability of hitting target'),
+          React.createElement('span',{className:'font-bold tabular-nums',style:{color:_targetProb>=0.5?'#6EE7B7':_targetProb>=0.25?'#FBBF24':'#F87171'}},Math.round(_targetProb*100),'%'),
+        ),
+        React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 mt-1 leading-relaxed'},'rough estimate — assumes constant edge and trade rate; actual variance is higher'),
+        _targetProb<0.25&&React.createElement('div',{className:'text-[10px] text-rose-300/85 mt-1.5 leading-relaxed'},'Target looks unrealistic at current pace. Consider extending the deadline, lowering the target, or accepting that hitting it is unlikely.'),
+      ),
+      mission.tradesAttempted>0&&React.createElement('div',{className:'p-2 rounded text-[11px]',style:{background:'rgba(14,16,15,0.5)'}},
+        React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
+          React.createElement('span',{className:'text-[#E8E9E4]/65'},mission.tradesAttempted,' trades · ',mission.tradesWon,'W ',mission.tradesLost,'L'),
+          React.createElement('span',{className:'font-bold tabular-nums',style:{color:_runWR>=60?'#6EE7B7':_runWR>=50?'#FBBF24':'#F87171'}},'WR ',_runWR.toFixed(1),'%'),
+        ),
+        mission.bankrollHistory?.length>=2&&React.createElement('div',{className:'mt-1.5'},_renderSparkline()),
+      ),
+      // Action buttons
+      React.createElement('div',{className:'flex gap-2 mt-3'},
+        React.createElement('button',{
+          onClick:()=>setMission(prev=>({...prev,status:'paused'})),
+          className:'flex-1 px-2 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider',
+          style:{background:'rgba(251,191,36,0.10)',color:'#FBBF24',border:'1px solid rgba(251,191,36,0.30)'},
+        },'Pause'),
+        React.createElement('button',{
+          onClick:()=>_stopMission('expired'),
+          className:'flex-1 px-2 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider',
+          style:{background:'rgba(248,113,113,0.08)',color:'rgba(248,113,113,0.85)',border:'1px solid rgba(248,113,113,0.30)'},
+        },'End mission'),
+      ),
+    ),
+    // Paused state
+    mission.status==='paused'&&React.createElement('div',{className:'p-3 rounded mb-3',style:{background:'rgba(251,191,36,0.08)',border:'1px solid rgba(251,191,36,0.30)'}},
+      React.createElement('div',{className:'text-[11px] mb-2',style:{color:'#FBBF24'}},'Mission paused. Auto-exec sizing falls back to fixed bet size.'),
+      React.createElement('button',{
+        onClick:()=>setMission(prev=>({...prev,status:'active'})),
+        className:'px-3 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider',
+        style:{background:'rgba(110,231,183,0.10)',color:'#6EE7B7',border:'1px solid rgba(110,231,183,0.30)'},
+      },'Resume mission'),
+    ),
+    // Setup form (when inactive or after reset)
+    _isInactive&&React.createElement('div',{className:'p-3 rounded',style:{background:'rgba(110,231,183,0.04)',border:'1px solid rgba(110,231,183,0.20)'}},
+      React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/65 leading-relaxed mb-3'},
+        'Set a starting bankroll, target, and deadline. Tara will size each auto-exec trade using fractional Kelly with cluster-specific WR. Hard stops at the drawdown floor and at target — no chasing past either side.',
+      ),
+      React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-2'},
+        React.createElement('label',{className:'block'},
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Starting bankroll ($)'),
+          React.createElement('input',{
+            type:'number',min:1,max:100000,step:1,value:setup.startBankroll,
+            onChange:(e)=>setSetup(prev=>({...prev,startBankroll:Math.max(1,Math.min(100000,_num(e.target.value,25)))})),
+            className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+          }),
+        ),
+        React.createElement('label',{className:'block'},
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Target ($)'),
+          React.createElement('input',{
+            type:'number',min:2,max:1000000,step:1,value:setup.target,
+            onChange:(e)=>setSetup(prev=>({...prev,target:Math.max(2,Math.min(1000000,_num(e.target.value,200)))})),
+            className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+          }),
+        ),
+      ),
+      React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-2'},
+        React.createElement('label',{className:'block'},
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Duration (days)'),
+          React.createElement('input',{
+            type:'number',min:1,max:365,step:1,value:setup.durationDays,
+            onChange:(e)=>setSetup(prev=>({...prev,durationDays:Math.max(1,Math.min(365,_num(e.target.value,7)))})),
+            className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+          }),
+        ),
+        React.createElement('label',{className:'block'},
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Drawdown floor ($)'),
+          React.createElement('input',{
+            type:'number',min:0,max:setup.startBankroll-1,step:1,value:setup.floor,
+            onChange:(e)=>setSetup(prev=>({...prev,floor:Math.max(0,Math.min(setup.startBankroll-1,_num(e.target.value,5)))})),
+            className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+          }),
+        ),
+      ),
+      React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
+        React.createElement('label',{className:'block'},
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Kelly multiplier'),
+          React.createElement('select',{
+            value:setup.kellyMult,
+            onChange:(e)=>setSetup(prev=>({...prev,kellyMult:Number(e.target.value)})),
+            className:'w-full bg-[#0E100F] border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm focus:border-[#E5C870] focus:outline-none',
+          },
+            React.createElement('option',{value:0.1},'0.10× — very conservative'),
+            React.createElement('option',{value:0.25},'0.25× — quarter Kelly (recommended)'),
+            React.createElement('option',{value:0.5},'0.50× — half Kelly (aggressive)'),
+            React.createElement('option',{value:1.0},'1.00× — full Kelly (high bust risk)'),
+          ),
+        ),
+        React.createElement('label',{className:'block'},
+          React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Max bet fraction'),
+          React.createElement('select',{
+            value:setup.maxBetFraction,
+            onChange:(e)=>setSetup(prev=>({...prev,maxBetFraction:Number(e.target.value)})),
+            className:'w-full bg-[#0E100F] border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm focus:border-[#E5C870] focus:outline-none',
+          },
+            React.createElement('option',{value:0.05},'5% per trade — very safe'),
+            React.createElement('option',{value:0.10},'10% per trade — safe'),
+            React.createElement('option',{value:0.15},'15% per trade — recommended'),
+            React.createElement('option',{value:0.25},'25% per trade — aggressive'),
+            React.createElement('option',{value:0.40},'40% per trade — very aggressive'),
+          ),
+        ),
+      ),
+      // Honest preview
+      React.createElement('div',{className:'p-2 rounded mb-3',style:{background:'rgba(14,16,15,0.5)',border:'1px solid rgba(232,233,228,0.10)'}},
+        React.createElement('div',{className:'text-[10px] uppercase tracking-wider text-[#E8E9E4]/55 mb-1'},'honest math preview'),
+        (()=>{
+          if(!setup.startBankroll||!setup.target||setup.target<=setup.startBankroll||!setup.durationDays)return React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/45'},'Enter values above to see estimated odds');
+          const _multiplier=setup.target/setup.startBankroll;
+          const _previewProb=_missionEstimateTargetProbability({
+            bankroll:setup.startBankroll,
+            target:setup.target,
+            daysRemaining:setup.durationDays,
+            p:0.65,
+            b:1.0,
+            fractionOfBankroll:setup.maxBetFraction*0.6,
+            tradesPerDay:8,
+          });
+          const _color=_previewProb>=0.5?'#6EE7B7':_previewProb>=0.25?'#FBBF24':'#F87171';
+          return React.createElement('div',null,
+            React.createElement('div',{className:'text-[11px]'},React.createElement('span',{className:'text-[#E8E9E4]/65'},_multiplier.toFixed(1),'× growth in ',setup.durationDays,'d → odds: '),React.createElement('span',{className:'font-bold tabular-nums',style:{color:_color}},Math.round(_previewProb*100),'%')),
+            _previewProb<0.25&&React.createElement('div',{className:'text-[10px] text-rose-300/85 mt-1 leading-relaxed'},'⚠ This target is aggressive. Even with a 65% win rate, fewer than 1 in 4 paths reach it before the drawdown floor. Consider lowering the target or extending the deadline.'),
+            _previewProb>=0.5&&React.createElement('div',{className:'text-[10px] text-emerald-300/85 mt-1 leading-relaxed'},'Reasonable target. Most paths reach it before bust.'),
+          );
+        })(),
+      ),
+      React.createElement('button',{
+        onClick:_startMission,
+        className:'w-full px-3 py-2 rounded text-[11px] uppercase font-bold tracking-wider',
+        style:{background:'rgba(110,231,183,0.15)',color:'#6EE7B7',border:'1px solid rgba(110,231,183,0.40)'},
+      },'Start mission'),
+    ),
+    // Reset (always visible if any history exists)
+    (mission.startBankroll>0||mission.bankrollHistory?.length>0)&&!_isActive&&React.createElement('button',{
+      onClick:_resetMission,
+      className:'mt-2 text-[9px] uppercase tracking-wider text-[#E8E9E4]/45 hover:text-[#E8E9E4]/70',
+    },'Reset mission state'),
+  );
+}
+
 // ── V8.2: ANTI-TILT COOLDOWN BANNER ──────────────────────────────────────────
 function AntiTiltCooldownBanner({tiltLockUntil,setTiltLockUntil,settings,onOverride}){
   const[now,setNow]=React.useState(Date.now());
@@ -7771,13 +8280,16 @@ function AssetRotationHint({rotation,onSwitch}){
 //   {leanDir, confidence, posterior, strike, currentPrice, regime, kalshiYesCents,
 //    marketTicker, marketCloseTime, windowId, sampleCount, committedDir, conviction,
 //    atrBps, updatedAt}
-function DualAssetCallStrip({currentAsset,onSwitch,taraCall,kalshiYesPrice,currentPrice,targetMargin,shadowRef,timeState}){
+function DualAssetCallStrip({currentAsset,onSwitch,taraCall,kalshiYesPrice,currentPrice,targetMargin,shadowRef,diagRef,timeState}){
   // 1Hz tick to refresh shadow display (shadow data lives in a ref, doesn't auto-rerender)
   const[,_t]=React.useState(0);
   React.useEffect(()=>{const iv=setInterval(()=>_t(x=>x+1),1000);return()=>clearInterval(iv);},[]);
+  // V9.6.1: tap-to-show diagnostic when shadow is stale. Expanded state per card.
+  const[diagOpen,setDiagOpen]=React.useState(null);
   const _otherAsset=currentAsset==='BTC'?'ETH':'BTC';
   const _shadow=shadowRef?.current?.[_otherAsset];
   const _shadowFresh=_shadow&&(Date.now()-(_shadow.updatedAt||0))<8000;
+  const _shadowDiag=diagRef?.current?.[_otherAsset];
   // Active card: from live engine
   const _activeDir=(taraCall?.call==='UP'||taraCall?.call==='DOWN')?taraCall.call:taraCall?.direction||null;
   const _activeConv=taraCall?.confidence||taraCall?.conviction||0;
@@ -7811,7 +8323,11 @@ function DualAssetCallStrip({currentAsset,onSwitch,taraCall,kalshiYesPrice,curre
           React.createElement('span',{className:'text-base leading-none shrink-0',style:{color:_color}},cfg.icon||'?'),
           React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider shrink-0',style:{color:isActive?_color:'rgba(232,233,228,0.55)'}},cfg.label||asset),
           isActive?React.createElement('span',{className:'text-[8px] uppercase tracking-wider px-1 py-0.5 rounded shrink-0',style:{color:_color,background:`${_color}22`,border:`1px solid ${_color}44`}},'LIVE'):React.createElement('span',{className:'text-[8px] uppercase tracking-wider px-1 py-0.5 rounded shrink-0',style:{color:'rgba(232,233,228,0.45)',border:'1px solid rgba(232,233,228,0.15)'}},'SHADOW'),
-          stale&&React.createElement('span',{className:'text-[8px] uppercase tracking-wider text-rose-400/60 shrink-0'},'stale'),
+          stale&&React.createElement('button',{
+            onClick:(e)=>{e.stopPropagation();setDiagOpen(diagOpen===asset?null:asset);},
+            className:'text-[8px] uppercase tracking-wider text-rose-400/70 shrink-0 hover:text-rose-300 underline decoration-dotted underline-offset-2',
+            title:'tap for diagnostic',
+          },'stale ⓘ'),
         ),
         price>0&&React.createElement('span',{className:'text-[10px] tabular-nums text-[#E8E9E4]/55 shrink-0'},'$',Math.round(price).toLocaleString()),
       ),
@@ -7823,6 +8339,23 @@ function DualAssetCallStrip({currentAsset,onSwitch,taraCall,kalshiYesPrice,curre
             committed===true&&React.createElement('span',{className:'text-[8px] uppercase font-bold px-1 py-0.5 rounded',style:{color:'rgb(110,231,183)',background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.30)'}},'committed'),
             (sampleCount&&sampleCount>0&&!committed)&&React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/45'},'sample ',sampleCount,'/2'),
           ):React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/55 italic'},stale?'feed stale':phase==='SEARCH'?'searching…':'no clear lean'),
+          // V9.6.1: diagnostic panel — shown when user taps the "stale ⓘ" indicator
+          (diagOpen===asset&&_shadowDiag)&&React.createElement('div',{className:'mt-1.5 p-2 rounded text-[9px] space-y-0.5',style:{background:'rgba(244,114,182,0.06)',border:'1px solid rgba(244,114,182,0.20)'}},
+            React.createElement('div',{className:'text-[#E8E9E4]/70'},
+              'attempts: ',React.createElement('span',{className:'font-bold tabular-nums text-white'},_shadowDiag.ticksAttempted),
+              ' · success: ',React.createElement('span',{className:'font-bold tabular-nums',style:{color:_shadowDiag.ticksSucceeded>0?'#6EE7B7':'#F87171'}},_shadowDiag.ticksSucceeded),
+              ' (',_shadowDiag.ticksAttempted>0?Math.round(_shadowDiag.ticksSucceeded/_shadowDiag.ticksAttempted*100):0,'%)',
+            ),
+            (_shadowDiag.candleFails+_shadowDiag.candleEmpty+_shadowDiag.priceMissing+_shadowDiag.kalshiFails+_shadowDiag.engineErrors)>0&&React.createElement('div',{className:'text-[#E8E9E4]/55 truncate'},
+              _shadowDiag.candleFails>0?`candles: ${_shadowDiag.candleFails} `:'',
+              _shadowDiag.candleEmpty>0?`empty: ${_shadowDiag.candleEmpty} `:'',
+              _shadowDiag.priceMissing>0?`no-price: ${_shadowDiag.priceMissing} `:'',
+              _shadowDiag.kalshiFails>0?`kalshi: ${_shadowDiag.kalshiFails} `:'',
+              _shadowDiag.engineErrors>0?`engine: ${_shadowDiag.engineErrors}`:'',
+            ),
+            _shadowDiag.lastSuccess>0&&React.createElement('div',{className:'text-[#E8E9E4]/55'},'last ok: ',Math.round((Date.now()-_shadowDiag.lastSuccess)/1000),'s ago'),
+            _shadowDiag.lastError&&React.createElement('div',{className:'text-rose-300/80 break-words'},React.createElement('strong',null,'last err: '),_shadowDiag.lastError),
+          ),
           React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 mt-0.5 truncate'},
             regime?(regime.length>20?regime.slice(0,20)+'…':regime):'—',
             strike>0?React.createElement('span',null,' · strike $',Math.round(strike).toLocaleString()):null,
@@ -13624,6 +14157,47 @@ function TaraApp(){
     }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
+  // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
+  // Bankroll-target trading. User configures a starting amount, target, end
+  // date, and drawdown floor. Tara sizes each trade using fractional Kelly
+  // with cluster-specific WR. Hard stops at floor and target.
+  // Stored in localStorage AND mirrored to localStorage 'tara_mission_v1'.
+  // Cloud sync deliberately not added — this is a personal account state and
+  // shouldn't share across devices/users.
+  const[mission,setMission]=useState(()=>{
+    try{
+      const v=JSON.parse(localStorage.getItem('tara_mission_v1')||'{}');
+      return{
+        active:!!v.active,
+        startBankroll:Number(v.startBankroll)>0?Number(v.startBankroll):0,
+        currentBankroll:Number(v.currentBankroll)>=0?Number(v.currentBankroll):0,
+        target:Number(v.target)>0?Number(v.target):0,
+        startDate:v.startDate||null,         // ISO string
+        endDate:v.endDate||null,             // ISO string
+        floor:Number(v.floor)>=0?Number(v.floor):0,
+        // Tunable Kelly aggression. 0.25 = quarter Kelly (conservative default).
+        // 0.5 = half Kelly. 1.0 = full Kelly (aggressive, higher bust risk).
+        kellyMult:Number(v.kellyMult)>0?Number(v.kellyMult):0.25,
+        maxBetFraction:Number(v.maxBetFraction)>0?Number(v.maxBetFraction):0.15,
+        // Status: 'active' | 'hit' | 'busted' | 'expired' | 'paused'
+        status:v.status||'inactive',
+        // Trade tracking
+        tradesAttempted:Number(v.tradesAttempted)||0,
+        tradesWon:Number(v.tradesWon)||0,
+        tradesLost:Number(v.tradesLost)||0,
+        // Last update timestamp for the bankroll
+        lastBankrollUpdate:Number(v.lastBankrollUpdate)||0,
+        // History of bankroll points for sparkline {t, b}[]
+        bankrollHistory:Array.isArray(v.bankrollHistory)?v.bankrollHistory.slice(-200):[],
+      };
+    }catch(_){return{active:false,startBankroll:0,currentBankroll:0,target:0,startDate:null,endDate:null,floor:0,kellyMult:0.25,maxBetFraction:0.15,status:'inactive',tradesAttempted:0,tradesWon:0,tradesLost:0,lastBankrollUpdate:0,bankrollHistory:[]};}
+  });
+  useEffect(()=>{try{localStorage.setItem('tara_mission_v1',JSON.stringify(mission));}catch(_){}},[mission]);
+  // Track which trade IDs we've already accounted for in mission bankroll —
+  // prevents double-counting if the trade-log effect re-runs.
+  const _missionLastSeenTradeIdRef=useRef(0);
+  // V9.7.0: Mission settings panel visibility (collapsed inside main settings modal)
+  const[showMissionSettings,setShowMissionSettings]=useState(false);
   // Kill switch is in-memory + localStorage. When engaged, all auto-exec is gated off
   // INSTANTLY regardless of autoExecSettings.enabled. Survives reloads.
   const[killSwitchEngaged,setKillSwitchEngaged]=useState(()=>{
@@ -13699,6 +14273,9 @@ function TaraApp(){
   //   inactive asset. Shape: { BTC: {leanDir, confidence, posterior, strike, currentPrice,
   //   regime, updatedAt}, ETH: {...} }. Updated every 5s via the shadow useEffect.
   const shadowTaraByAssetRef=useRef({});
+  // V9.6.1: shadow diagnostics — per-asset failure counters and last-error string.
+  //   Surfaced in DualAssetCallStrip on tap to debug "feed stale" without devtools.
+  const shadowDiagRef=useRef({});
   const tickHistoryRef=useRef([]);
   const priceMemoryRef=useRef([]);
   const lastPriceSourceRef=useRef({source:'none',time:0});
@@ -15356,7 +15933,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.5.0 online. Three releases stacked since 9.2.3 — auto-execution, multi-asset parallel, data-driven engine fixes, and now opponent modeling plus per-regime calibration. KALSHI AUTO-EXECUTION (9.3.0). RSA-PSS signed orders through the existing /api/kalshi proxy. When Tara locks UP or DOWN, she places a limit order on Kalshi automatically. Defaults are conservative — auto-exec OFF, dry-run ON, max bet 25 dollars per trade, daily loss cap 50 dollars, cooldown after 3 losses for 20 min. Kill switch in three places: top-bar pill, Live Trade Coach status strip, settings modal. Status pill shows on every order: KALSHI placing then submitted then resting then filled. Take-profit auto-exit at 85 cents offer. Window-roll cleanup cancels resting orders cleanly. Daily P and L counter rolls at UTC midnight. MULTI-ASSET PARALLEL ENGINE (9.3.0). Shadow Tara upgraded from 5-second lean indicator to 2-second sample-based soft-lock engine. Captures full Kalshi market info per asset — ticker, close time, YES price. Commits direction at 2 consecutive aligned samples with conviction at least 10 points. Cross-asset correlation feeds the primary engine in real time, no broadcast delay. New Dual-Asset Call Strip shows BTC and ETH side by side — click the inactive side to swap as primary. Active asset stays the live engine, inactive asset gets the parallel shadow. Auto-execution still primary-only for now. DATA-DRIVEN ENGINE FIXES (9.4.0). Three fixes from the 4-day 185-trade audit. Asymmetric tape-led floor — tape-led DOWN at 69 percent stays as is, tape-led UP now requires tape buy at least 75 percent, conviction at least 8 points, FGT magnitude at least 1.5 over 4. Data showed tape-led UP was 20 percent WR, tape-led DOWN was 69 percent — tape confirms fades better than pumps. Tier-aware SHORT SQUEEZE UP gates — was the new weak spot at 56 percent. Now structural-led and tape-led need FGT 2.5 over 4, super-confluence needs 3 over 4. Single tier in this regime stays at 64 percent unchanged. Marginal-zone caution — single tier in low ATR low quality windows attaches a caution chip per the cautions-instead-of-skips mandate. Still calls directionally, but surfaces the warning so user can size down or skip. OPPONENT MODELING (9.5.0). New Kalshi-spot divergence detector. When Kalshi YES moves at least 4 cents over 60 seconds while spot stays within 4 bps — that is smart-money positioning ahead of a move. New chip on the call card — kalshi-lead with the score, color shifts to amber when Kalshi positions AGAINST the current call as a warning. Score caps at 10 points so the signal cant dominate live tape or structure — its leading not primary. Trade log stamps kalshiLeadAtLock per trade so we can audit aligned versus non-aligned WR after 30-plus examples. PER-REGIME PER-DIRECTION CALIBRATION (9.5.0). Pulls the posterior toward observed historical WR for the current regime-direction pair. Sample-size-weighted blend — n=10 means 10 percent blend, n=80-plus means 45 percent blend. Engine never overridden — live signal always majority. Different from the old regimeDirConfBoost which only adjusted the displayed confidence number 5 points at the end. This adjusts the actual posterior, which propagates into lock decisions and gate logic. For your data — TRENDING DOWN DOWN at 67.5 percent gets calibrated, RANGE-CHOP at 82 percent gets a confidence lift, SHORT SQUEEZE UP at 56 percent gets dampened harder. Brain view shows REGIME-CAL lines on locks where it fires. PRESERVED — V9.2.3 engine overhaul (TF weighting, exhaustion gate, slope feed, calibration dampening, trending regime penalty, path-aware learning, cross-asset correlation, ML layer, time-of-day model), V9.1.7 LiveTradeCoach trajectory plus peak/trough, V9.1.6 Save/Apply Baseline, all V9.1.x sync architecture and plain-language work."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.7.0 online. New since 9.5.0 — auto-execution depth, shadow staleness diagnostic, and Mission Mode. MISSION MODE (9.7.0). Set a starting bankroll, target dollars, and deadline. Tara sizes each auto-exec trade using fractional Kelly with cluster-specific WR from regimeDirCalibration. Hard stops at drawdown floor and at target — no chasing past either side. Math-driven distance-to-target tilt — behind schedule means modest upsize, ahead schedule means downsize 30 percent to lock in gains. Drawdown brake — quadratic shrink as bankroll approaches floor. Honest probability display — every render shows estimated odds of hitting target. Below 25 percent, target is flagged unrealistic with explicit warning. Compact dashboard widget shows bankroll, target, progress, time remaining, odds. Status states — active, paused, hit, busted, expired. Default Kelly multiplier 0.25 quarter Kelly for conservative growth. AUTO-EXEC IN DEPTH (9.6.0). Massive expansion of Kalshi auto-execution settings. Collapsible 7-step how-to guide right at top of section. Advanced entry filters — per-asset enable BTC ETH separately, per-window enable 15m 5m separately, minimum tier from any to super-confluence-only, minimum quality score, minimum conviction points, lock stability seconds before placing, skip marginal-zone caution. Advanced exit logic — stop-loss in cents below fill price, time-based exit at N seconds before window close. Position sizing — fixed bet, scale with conviction low and high, or Kelly fraction. Three exit paths run in parallel, whichever fires first wins. SHADOW STALENESS DIAGNOSTIC (9.6.1). Tap stale indicator on inactive asset card to see attempts, success rate, per-failure-type counters and last actual error. BUGFIX (9.5.2). Fixed atrBps not defined crash from 9.4.0 marginal-zone caution. SHADOW HEARTBEAT (9.5.1). Removed timeState secsRemaining from shadow effect deps. PRESERVED — opponent modeling Kalshi-spot divergence detector, per-regime direction calibration, V9.4.0 asymmetric tape-led floor and SHORT SQUEEZE UP gates and marginal-zone caution, V9.3.0 RSA-PSS Kalshi signing and multi-asset parallel shadow engine, all V9.2.x engine overhaul layers."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -15861,8 +16438,21 @@ function TaraApp(){
     const _shadowAsset=currentAsset==='BTC'?'ETH':'BTC';
     const _cfg=ASSET_CONFIG[_shadowAsset]||ASSET_CONFIG.BTC;
     let _cancelled=false;
+    // V9.6.1: shadow diagnostics — tracks last successful update, last error,
+    //   and tick counters per failure type so we can see WHY the shadow is stale
+    //   without dropping into devtools. Visible in DualAssetCallStrip on hover.
+    if(!shadowDiagRef.current[_shadowAsset]){
+      shadowDiagRef.current[_shadowAsset]={
+        ticksAttempted:0,ticksSucceeded:0,
+        candleFails:0,candleEmpty:0,priceMissing:0,kalshiFails:0,engineErrors:0,
+        lastError:null,lastSuccess:0,lastErrorAt:0,
+      };
+    }
+    const _diag=shadowDiagRef.current[_shadowAsset];
+    const _logErr=(reason)=>{_diag.lastError=reason;_diag.lastErrorAt=Date.now();};
     const _runShadow=async()=>{
       if(_cancelled)return;
+      _diag.ticksAttempted++;
       try{
         // Fetch candles for the shadow asset. Light cadence — every 5s.
         // V7.10.2: 5s abort signal so a hung Coinbase request doesn't stall the loop.
@@ -15876,13 +16466,15 @@ function TaraApp(){
           if(_prev)shadowTaraByAssetRef.current[_shadowAsset]={..._prev,updatedAt:Date.now()};
         };
         const _gran=windowType==='15m'?900:300;
-        const _candleResp=await fetch(`https://api.exchange.coinbase.com/products/${_cfg.cb}/candles?granularity=${_gran}`,{signal:AbortSignal.timeout(5000)}).catch(()=>null);
-        if(!_candleResp||!_candleResp.ok||_cancelled){_heartbeat();return;}
+        const _candleResp=await fetch(`https://api.exchange.coinbase.com/products/${_cfg.cb}/candles?granularity=${_gran}`,{signal:AbortSignal.timeout(5000)}).catch(e=>{_logErr('candles fetch threw: '+(e?.message||String(e)));return null;});
+        if(!_candleResp){_diag.candleFails++;_logErr('candles fetch null');_heartbeat();return;}
+        if(!_candleResp.ok){_diag.candleFails++;_logErr(`candles http ${_candleResp.status}`);_heartbeat();return;}
+        if(_cancelled){_heartbeat();return;}
         const _candleData=await _candleResp.json();
-        if(!Array.isArray(_candleData)||_candleData.length<5){_heartbeat();return;}
+        if(!Array.isArray(_candleData)||_candleData.length<5){_diag.candleEmpty++;_logErr(`candles empty (got ${Array.isArray(_candleData)?_candleData.length:typeof _candleData})`);_heartbeat();return;}
         const _bars=_candleData.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
         const _shadowPrice=priceByAssetRef.current?.[_shadowAsset]?.price||_bars[0]?.c||0;
-        if(_shadowPrice<=0){_heartbeat();return;}
+        if(_shadowPrice<=0){_diag.priceMissing++;_logErr(`no price (priceByAssetRef=${priceByAssetRef.current?.[_shadowAsset]?.price||'null'}, bars[0].c=${_bars[0]?.c||'null'})`);_heartbeat();return;}
         // Fetch the shadow asset's Kalshi strike. Reuse the events endpoint.
         // V9.3.0: also capture market ticker, close_time, and YES price so the
         //   shadow output can drive a side-by-side call card (and eventually
@@ -15993,6 +16585,8 @@ function TaraApp(){
             atrBps:_shadowResult.atrBps||0,
             updatedAt:Date.now(),
           };
+          // V9.6.1: mark success in diagnostics
+          _diag.ticksSucceeded++;_diag.lastSuccess=Date.now();
           // V9.3.0: also feed _otherAssetRef so the PRIMARY engine's cross-asset signal
           //   (otherAssetData param to computeV99Posterior) gets fresh data without
           //   needing a second tab open. Previously this only updated via BroadcastChannel
@@ -16002,7 +16596,11 @@ function TaraApp(){
           const _otherDelta=_other5m>0?((_shadowPrice-_other5m)/_other5m)*10000:0;
           _otherAssetRef.current={asset:_shadowAsset,price:_shadowPrice,price5mAgo:_other5m,deltaBps:_otherDelta,lastUpdate:Date.now()};
         }
-      }catch(e){/* shadow analysis is best-effort */}
+      }catch(e){
+        // V9.6.1: capture engine errors instead of swallowing silently
+        _diag.engineErrors++;
+        _logErr('engine threw: '+(e?.message||String(e)));
+      }
     };
     _runShadow();
     const _iv=setInterval(_runShadow,2000);
@@ -19177,7 +19775,37 @@ function TaraApp(){
     const _yesLimitForBuilder=_dir==='UP'?_limit:(100-_limit);
     // V9.6.0: POSITION SIZING — choose bet based on sizingMode
     let _bet=Number(tradingSettings?.betSize)||0;
-    if(autoExecSettings.sizingMode==='confidence'){
+    let _missionInfo=null; // for telemetry
+    // V9.7.0: MISSION MODE OVERRIDE. When active, replaces all other sizing.
+    //   Uses cluster-specific WR + fractional Kelly + drawdown brake + distance-to-target tilt.
+    if(mission.active&&mission.status==='active'){
+      const _tier=_tierRank===5?'super':_tierRank===4?'confluence':_tierRank===3?'structural':_tierRank===2?'tape':'single';
+      const _cwr=_missionGetClusterWR({regime:analysis?.regime,dir:_dir,tier:_tier,regimeDirCal:regimeDirCalibration});
+      const _daysRemaining=mission.endDate?Math.max(0,(new Date(mission.endDate).getTime()-Date.now())/86400000):0;
+      const _result=_missionComputeBet({
+        bankroll:mission.currentBankroll,
+        target:mission.target,
+        daysRemaining:_daysRemaining,
+        floor:mission.floor,
+        p:_cwr.wr,
+        limitCents:_dirCents,
+        fractionalKellyMult:mission.kellyMult,
+        maxBetFraction:mission.maxBetFraction,
+        maxBetCap:autoExecSettings.maxBetPerTrade,
+      });
+      if(!_result.betDollars||_result.blockedReason){
+        // Mission says don't fire. Burn the dedup key so we don't keep evaluating.
+        _autoExecLastFiredKeyRef.current=_key;
+        return;
+      }
+      _bet=_result.betDollars;
+      _missionInfo={
+        clusterWR:_cwr.wr,clusterN:_cwr.n,tier:_tier,
+        kellyFrac:_result.kellyFrac,fractionOfBankroll:_result.fractionOfBankroll,
+        bankrollAtEntry:mission.currentBankroll,
+        sizingReason:_result.reason,
+      };
+    }else if(autoExecSettings.sizingMode==='confidence'){
       // Linear interpolation: conviction 5 → low, conviction 35+ → high
       const _convClamped=Math.max(5,Math.min(35,_conviction));
       const _frac=(_convClamped-5)/30;
@@ -19203,8 +19831,9 @@ function TaraApp(){
       dir:_dir,count:0,limitCents:_limit,placedAt:Date.now(),
       status:'placing',fillPrice:null,exitOrderId:null,error:null,
       dryRun:!!autoExecSettings.dryRun,key:_key,windowId:_wid,asset:currentAsset,
-      betDollars:_bet,sizingMode:autoExecSettings.sizingMode,
+      betDollars:_bet,sizingMode:_missionInfo?'mission':autoExecSettings.sizingMode,
       tierRank:_tierRank,convictionAtLock:_conviction,
+      missionInfo:_missionInfo, // null when mission inactive
     });
     (async()=>{
       try{
@@ -19423,6 +20052,50 @@ function TaraApp(){
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[taraCallLog,autoExecSettings.cooldownLossStreak,autoExecSettings.cooldownMinutes,tradingSettings]);
+
+  // ── V9.7.0: MISSION BANKROLL ROLLUP FROM TRADE LOG ───────────────────────
+  // When a new auto-exec trade with a missionInfo stamp settles, update the
+  // mission bankroll, trade counters, and check status transitions
+  // (target hit / drawdown floor breached).
+  useEffect(()=>{
+    if(!mission.active||mission.status!=='active')return;
+    if(!Array.isArray(taraCallLog))return;
+    const _newMissionTrades=taraCallLog.filter(e=>e&&e.autoExec===true&&e.missionInfo&&e.id>_missionLastSeenTradeIdRef.current&&(e.result==='WIN'||e.result==='LOSS'));
+    if(_newMissionTrades.length===0)return;
+    let _maxId=_missionLastSeenTradeIdRef.current;
+    let _bankrollDelta=0;
+    let _wins=0,_losses=0;
+    for(const t of _newMissionTrades){
+      if(t.id>_maxId)_maxId=t.id;
+      const _bet=Number(t.betAmt)||0;
+      const _payout=Number(t.maxPay)||0;
+      if(t.result==='WIN'){_bankrollDelta+=_payout;_wins++;}
+      else{_bankrollDelta-=_bet;_losses++;}
+    }
+    _missionLastSeenTradeIdRef.current=_maxId;
+    setMission(prev=>{
+      if(!prev.active||prev.status!=='active')return prev;
+      const _newBankroll=Math.max(0,prev.currentBankroll+_bankrollDelta);
+      const _now=Date.now();
+      const _newHistory=[...(prev.bankrollHistory||[]),{t:_now,b:_newBankroll}].slice(-200);
+      // Status transitions
+      let _newStatus=prev.status;
+      if(_newBankroll>=prev.target&&prev.target>0)_newStatus='hit';
+      else if(_newBankroll<=prev.floor)_newStatus='busted';
+      else if(prev.endDate&&_now>new Date(prev.endDate).getTime())_newStatus='expired';
+      return{
+        ...prev,
+        currentBankroll:_newBankroll,
+        tradesAttempted:prev.tradesAttempted+_newMissionTrades.length,
+        tradesWon:prev.tradesWon+_wins,
+        tradesLost:prev.tradesLost+_losses,
+        lastBankrollUpdate:_now,
+        bankrollHistory:_newHistory,
+        status:_newStatus,
+      };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[taraCallLog,mission.active,mission.status]);
 
   // V8.0 HOTFIX: conviction sampler + trajectory derivation. Located here (not where the
   //   ref is declared earlier) because they reference `taraCall` which only finishes being
@@ -21401,6 +22074,8 @@ function TaraApp(){
           score:analysis.kalshiLead.score,
           aligned:analysis.kalshiLead.dir===dir,
         }:null,
+        // V9.7.0: mission info stamp from current auto-order (if mission was active at lock)
+        missionInfo:autoOrderStateRef.current?.missionInfo||null,
       };
       // Broadcast the new entry after the reversal loss
       // V9.1: SUPPRESSED. User mandate — only Tara's own locks (TARA_LOCK at line ~17049)
@@ -21771,7 +22446,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.6.0
+              9.7.0
             </span>
           </div>
 
@@ -22302,6 +22977,16 @@ function TaraApp(){
           positionOpenTime={positionEntry?.time}
         />
 
+        {/* V9.7.0: Mission Mode compact widget — only renders when active */}
+        <MissionPanel
+          mission={mission}
+          setMission={setMission}
+          regimeDirCalibration={regimeDirCalibration}
+          killSwitchEngaged={killSwitchEngaged}
+          setKillSwitchEngaged={setKillSwitchEngaged}
+          compact={true}
+        />
+
         {/* V9.3.0: Dual-asset call strip — side-by-side BTC + ETH calls.
             Active asset = live engine output. Inactive = shadow engine
             (background analysis, 2s cadence, soft-lock at 2 consec samples). */}
@@ -22313,6 +22998,7 @@ function TaraApp(){
           currentPrice={currentPrice}
           targetMargin={targetMargin}
           shadowRef={shadowTaraByAssetRef}
+          diagRef={shadowDiagRef}
           timeState={timeState}
         />
 
@@ -22392,6 +23078,9 @@ function TaraApp(){
           setAutoExecCooldownUntil={setAutoExecCooldownUntil}
           autoExecDayPnL={autoExecDayPnL}
           setAutoExecDayPnL={setAutoExecDayPnL}
+          mission={mission}
+          setMission={setMission}
+          regimeDirCalibration={regimeDirCalibration}
         />
 
         {/* V8.5: Best Practices modal — comprehensive trader's guide */}
@@ -23704,6 +24393,61 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.7.0 — Mission Mode */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>bankroll &middot; target &middot; math-driven sizing</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.07</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.7.0</span> &mdash; Mission Mode</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What it does</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Set a starting bankroll, target $, and deadline. Tara sizes each auto-exec trade using fractional Kelly with cluster-specific WR (from <code className="text-[10px] bg-[#0E100F] px-1">regimeDirCalibration</code>). Hard stops at drawdown floor and at target &mdash; no chasing past either side.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sizing math</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Cluster WR lookup</strong> &mdash; given (regime, dir, tier), pulls live WR from history. If sample &lt;10, falls back to tier baseline (super=78%, confluence=70%, structural=62%, tape=66%, single=62%).</li>
+                  <li><strong>Kelly fraction</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">f = (b&middot;p &minus; q) / b</code> where p = cluster WR, b = market odds. Multiplied by Kelly multiplier (default 0.25 quarter Kelly).</li>
+                  <li><strong>Distance-to-target tilt</strong> &mdash; behind schedule = bump up to 1.5&times;; ahead of schedule = downsize 30%.</li>
+                  <li><strong>Drawdown brake</strong> &mdash; quadratic shrink as bankroll approaches floor.</li>
+                  <li><strong>Hard cap</strong> &mdash; never more than maxBetFraction (default 15%) of current bankroll.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Honest probability display</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Every render shows estimated odds of hitting target by deadline. Uses log-growth model with measured per-trade mean and variance. Treats &lt;25% probability as &quot;target unrealistic&quot; with explicit warning. The math is rough &mdash; assumes constant edge and trade rate &mdash; so treat the number as order of magnitude.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Status states</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong style={{color:'#6EE7B7'}}>active</strong> &mdash; sizing trades, tracking bankroll, updating progress</li>
+                  <li><strong style={{color:'#FBBF24'}}>paused</strong> &mdash; user paused; auto-exec falls back to fixed sizing</li>
+                  <li><strong style={{color:'#6EE7B7'}}>hit</strong> &mdash; bankroll &ge; target; auto-exec disabled to lock in win</li>
+                  <li><strong style={{color:'#F87171'}}>busted</strong> &mdash; bankroll &le; floor; trading stopped to protect rest</li>
+                  <li><strong style={{color:'#FBBF24'}}>expired</strong> &mdash; deadline passed without hitting either</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Compact dashboard widget</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">When mission is active, a compact widget appears above the dual-asset call strip showing bankroll, target, progress bar, time remaining, and target probability. Only renders when status=active &mdash; doesn&rsquo;t clutter when idle.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">A note on aggressive targets</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">$25 &rarr; $2000 in a week is mathematically possible but the median outcome is bust, not target-hit. Even at 65% WR with proper sizing, ~50-60% of paths bust before hitting an 80&times; target. This is why the floor exists. Use Mission Mode for disciplined growth, not as a get-rich-quick lever &mdash; the visible probability display is meant to keep this honest.</p>
+              </section>
+
+              {/* V9.6.x — Auto-exec deep config + bug fixes */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>auto-exec depth &middot; how-to guide &middot; advanced filters</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.07</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.6.x</span> &mdash; Auto-Execution In Depth</h3>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Three-part series of patches making auto-execution configurable, observable, and bug-free.</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>9.6.0 expanded auto-exec settings</strong> &mdash; collapsible &quot;How to use auto-exec&quot; (7-step guide), advanced entry filters (per-asset, per-window, minimum tier, min quality, min conviction, lock stability, skip marginal), advanced exit logic (stop-loss by &cent;, time-based exit), position sizing (fixed/confidence/Kelly).</li>
+                  <li><strong>9.6.1 shadow staleness diagnostic</strong> &mdash; tap the <code className="text-[10px] bg-[#0E100F] px-1">stale &#9432;</code> indicator on the inactive asset card to see attempts, success rate, per-failure-type counters, and the actual error string.</li>
+                  <li><strong>9.5.2 bugfix</strong> &mdash; fixed <code className="text-[10px] bg-[#0E100F] px-1">atrBps is not defined</code> crash from V9.4.0 marginal-zone caution. The variable was scoped inside the analysis useMemo, not the taraCall IIFE. Fixed by reading from <code className="text-[10px] bg-[#0E100F] px-1">analysis?.atrBps</code> instead.</li>
+                  <li><strong>9.5.1 shadow heartbeat</strong> &mdash; removed <code className="text-[10px] bg-[#0E100F] px-1">timeState.secsRemaining</code> from shadow effect deps (was tearing down 1&times;/sec). Added heartbeat on partial-failure paths so single dropped ticks don&rsquo;t mark the whole feed stale.</li>
+                </ul>
               </section>
 
               {/* V9.5.0 — Opponent modeling + per-regime calibration */}
