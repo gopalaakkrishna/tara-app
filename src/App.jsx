@@ -435,7 +435,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.1.9-derive-from-log-sync-diagnostic';
+const BASELINE_VERSION='2026.05.06-v9.2.0-shared-tara-local-personal-asset-split';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -8246,30 +8246,38 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
   // V7.0.6: default filter to current windowType (passed from card) so modal opens
   //   already aligned. User can click ALL to broaden.
   const[filter,setFilter]=React.useState(initialFilter||'all');
+  // V9.2.0: per-asset filter — separate BTC vs ETH views since they trade independently.
+  //   "all" shows both. Default is 'all' so the user immediately sees the full picture.
+  const[assetFilter,setAssetFilter]=React.useState('all');
   const filtered=React.useMemo(()=>{
     let arr=[...taraCallLog].reverse();
+    if(assetFilter==='BTC')arr=arr.filter(e=>(e.asset||'BTC')==='BTC');
+    else if(assetFilter==='ETH')arr=arr.filter(e=>e.asset==='ETH');
     if(filter==='15m'||filter==='5m')arr=arr.filter(e=>e.windowType===filter);
     else if(filter==='wins')arr=arr.filter(e=>e.result==='WIN');
     else if(filter==='losses')arr=arr.filter(e=>e.result==='LOSS');
     else if(filter==='sitouts')arr=arr.filter(e=>e.result==='SITOUT');
     return arr;
-  },[taraCallLog,filter]);
+  },[taraCallLog,filter,assetFilter]);
   const counts=React.useMemo(()=>{
     // V7.0.6: Counts respect active filter. Previously always counted the full log,
     //   which caused the "modal says 91 / card says 90" mismatch — modal counted both
     //   5m + 15m, card counted only the active window type. Now filter alignment.
+    // V9.2.0: also respects asset filter.
     let arr=taraCallLog;
+    if(assetFilter==='BTC')arr=arr.filter(e=>(e.asset||'BTC')==='BTC');
+    else if(assetFilter==='ETH')arr=arr.filter(e=>e.asset==='ETH');
     if(filter==='15m'||filter==='5m')arr=arr.filter(e=>e.windowType===filter);
-    // wins/losses/sitouts filters narrow the list but stat boxes still show the underlying
-    // wins/losses/sitouts pulled from the windowType filter (or full set if ALL).
     return {
       total:arr.length,
       wins:arr.filter(e=>e.result==='WIN').length,
       losses:arr.filter(e=>e.result==='LOSS').length,
       sitouts:arr.filter(e=>e.result==='SITOUT').length,
       pending:arr.filter(e=>!e.result).length,
+      btcN:taraCallLog.filter(e=>(e.asset||'BTC')==='BTC').length,
+      ethN:taraCallLog.filter(e=>e.asset==='ETH').length,
     };
-  },[taraCallLog,filter]);
+  },[taraCallLog,filter,assetFilter]);
   const _wr=counts.wins+counts.losses>0?Math.round((counts.wins/(counts.wins+counts.losses))*100):null;
   const _resultStyle=(r)=>r==='WIN'?{color:'rgba(110,231,183,0.95)'}:r==='LOSS'?{color:'rgba(244,114,182,0.95)'}:r==='SITOUT'?{color:'rgba(229,200,112,0.85)'}:{color:'rgba(232,233,228,0.4)'};
   const _dirStyle=(d)=>d==='UP'?{color:'rgba(110,231,183,0.85)'}:d==='DOWN'?{color:'rgba(244,114,182,0.85)'}:{color:'rgba(229,200,112,0.7)'};
@@ -8412,6 +8420,21 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           ),
         );
       })(),
+      // V9.2.0: Asset filter — separate BTC vs ETH views
+      React.createElement('div',{className:'flex flex-wrap gap-1 mb-2'},
+        [
+          {k:'all',label:`All assets (${counts.btcN+counts.ethN})`,color:'rgba(232,233,228,0.7)'},
+          {k:'BTC',label:`₿ BTC (${counts.btcN})`,color:'rgb(245,158,11)'},
+          {k:'ETH',label:`Ξ ETH (${counts.ethN})`,color:'rgb(96,165,250)'},
+        ].map(({k,label,color})=>(
+          React.createElement('button',{
+            key:k,
+            onClick:()=>setAssetFilter(k),
+            className:'px-3 py-1 text-[10px] uppercase font-bold tracking-wider rounded-md transition-colors',
+            style:assetFilter===k?{background:'rgba(232,233,228,0.10)',color,border:`1px solid ${color}`}:{border:'1px solid rgba(232,233,228,0.08)',color:'rgba(232,233,228,0.40)'},
+          },label)
+        )),
+      ),
       React.createElement('div',{className:'flex flex-wrap gap-1 mb-4'},
         ['all','calendar','15m','5m','wins','losses','sitouts'].map(f=>(
           React.createElement('button',{
@@ -10162,20 +10185,27 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,for
     setDiagError(null);
     try{
       const _log=await cloudRead('memory/taraCallLog');
-      const _scores=await cloudRead('scorecards/personal');
+      // V9.2.0: scorecards/personal no longer read — local-only path now.
       const _past=await cloudRead('history/pastWindows');
       const _pnl=await cloudRead('state/lifetimePnL');
       const _baseline=await cloudRead('baseline/canonical');
       const _entries=Array.isArray(_log?.entries)?_log.entries:[];
-      const _wins=_entries.filter(e=>e&&e.result==='WIN').length;
-      const _losses=_entries.filter(e=>e&&e.result==='LOSS').length;
-      const _sitouts=_entries.filter(e=>e&&e.result==='SITOUT').length;
+      // V9.2.0: split counts BY ASSET so concurrent BTC/ETH trading is visible.
+      const _btcEntries=_entries.filter(e=>e&&(e.asset||'BTC')==='BTC');
+      const _ethEntries=_entries.filter(e=>e&&e.asset==='ETH');
+      const _winsBtc=_btcEntries.filter(e=>e.result==='WIN').length;
+      const _lossesBtc=_btcEntries.filter(e=>e.result==='LOSS').length;
+      const _sitoutsBtc=_btcEntries.filter(e=>e.result==='SITOUT').length;
+      const _winsEth=_ethEntries.filter(e=>e.result==='WIN').length;
+      const _lossesEth=_ethEntries.filter(e=>e.result==='LOSS').length;
+      const _sitoutsEth=_ethEntries.filter(e=>e.result==='SITOUT').length;
       setCloudDiag({
         log:_entries.length,
-        wins:_wins,
-        losses:_losses,
-        sitouts:_sitouts,
-        legacyScores:_scores?{m15:`${_scores['15m']?.wins||0}W·${_scores['15m']?.losses||0}L`,m5:`${_scores['5m']?.wins||0}W·${_scores['5m']?.losses||0}L`}:null,
+        btc:{n:_btcEntries.length,wins:_winsBtc,losses:_lossesBtc,sitouts:_sitoutsBtc},
+        eth:{n:_ethEntries.length,wins:_winsEth,losses:_lossesEth,sitouts:_sitoutsEth},
+        wins:_winsBtc+_winsEth,
+        losses:_lossesBtc+_lossesEth,
+        sitouts:_sitoutsBtc+_sitoutsEth,
         past:Array.isArray(_past?.entries)?_past.entries.length:0,
         pnl:Number(_pnl?.value)||0,
         baseline:_baseline?{
@@ -10223,7 +10253,9 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,for
         },'✕')
       ),
       React.createElement('div',{className:'px-5 py-4 space-y-3'},
-        // V9.1.9: SIDE-BY-SIDE diagnostic — local vs cloud
+        // V9.2.0: SIDE-BY-SIDE diagnostic — shared (cloud) vs local (this device only).
+        //   Tara's calls + memory are SHARED across all devices/users via Firestore.
+        //   Personal scorecard is LOCAL to this device only — not synced.
         React.createElement('div',{className:'p-3 rounded-md text-xs',style:{background:'rgba(232,233,228,0.03)',border:`1px solid ${_hasDrift?'rgba(244,114,182,0.30)':'rgba(232,233,228,0.08)'}`}},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold',style:{color:_hasDrift?'rgba(244,114,182,0.95)':'rgba(232,233,228,0.55)'}},_hasDrift?'⚠ DRIFT DETECTED':'Sync diagnostic'),
@@ -10234,40 +10266,68 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,for
               style:{color:'rgba(229,200,112,0.85)',borderColor:'rgba(229,200,112,0.30)'},
             },diagLoading?'reading…':'↻ refresh')
           ),
-          // Two columns: local | cloud
-          React.createElement('div',{className:'grid grid-cols-2 gap-3'},
-            // LOCAL column
-            React.createElement('div',null,
-              React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 mb-1'},`THIS DEVICE · ${deviceLabel}`),
-              React.createElement('div',{className:'text-[11px] tabular-nums leading-snug text-[#E8E9E4]/80'},
-                React.createElement('div',null,`${localCounts.taraCallLog} log entries`),
-                React.createElement('div',null,`${localCounts.wins}W·${localCounts.losses}L·${localCounts.sitouts}SO`),
-                React.createElement('div',null,`${localCounts.pastWindows} past windows`),
-                React.createElement('div',{className:localCounts.pnl>=0?'text-emerald-400':'text-rose-400'},`${localCounts.pnl>=0?'+':''}$${localCounts.pnl.toFixed(2)} P&L`)
+          // === SHARED SECTION (cloud-synced) ===
+          React.createElement('div',{className:'mb-3'},
+            React.createElement('div',{className:'flex items-baseline gap-2 mb-2'},
+              React.createElement('span',{className:'text-[10px]'},'☁'),
+              React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(165,180,252,0.95)'}},'Tara\'s shared memory'),
+              React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/40'},'cross-device · cross-user')
+            ),
+            React.createElement('div',{className:'grid grid-cols-2 gap-3'},
+              // LOCAL column
+              React.createElement('div',null,
+                React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 mb-1'},`THIS DEVICE · ${deviceLabel}`),
+                React.createElement('div',{className:'text-[11px] tabular-nums leading-snug text-[#E8E9E4]/80 space-y-0.5'},
+                  React.createElement('div',{className:'font-bold'},`${localCounts.taraCallLog} log entries`),
+                  React.createElement('div',{className:'pl-2'},
+                    React.createElement('span',{className:'text-amber-300/80'},'BTC '),`${localCounts.btc.n} (${localCounts.btc.wins}W·${localCounts.btc.losses}L·${localCounts.btc.sitouts}SO)`
+                  ),
+                  React.createElement('div',{className:'pl-2'},
+                    React.createElement('span',{className:'text-blue-300/80'},'ETH '),`${localCounts.eth.n} (${localCounts.eth.wins}W·${localCounts.eth.losses}L·${localCounts.eth.sitouts}SO)`
+                  ),
+                  React.createElement('div',{className:'pt-1 text-[#E8E9E4]/60'},`${localCounts.pastWindows} past windows`),
+                  React.createElement('div',{className:Number(localCounts.pnl)>=0?'text-emerald-400':'text-rose-400'},`${Number(localCounts.pnl)>=0?'+':''}$${Number(localCounts.pnl).toFixed(2)} P&L`)
+                )
+              ),
+              // CLOUD column
+              React.createElement('div',null,
+                React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 mb-1'},'CLOUD · everyone'),
+                diagError?React.createElement('div',{className:'text-[10px] text-rose-400'},'Read failed: ',diagError):
+                  cloudDiag?React.createElement('div',{className:'text-[11px] tabular-nums leading-snug text-[#E8E9E4]/80 space-y-0.5'},
+                    React.createElement('div',{className:'font-bold '+(Math.abs(cloudDiag.log-localCounts.taraCallLog)>0?'text-amber-300':'')},
+                      `${cloudDiag.log} log entries`,
+                      Math.abs(cloudDiag.log-localCounts.taraCallLog)>0?` (Δ${cloudDiag.log-localCounts.taraCallLog})`:''
+                    ),
+                    React.createElement('div',{className:'pl-2'},
+                      React.createElement('span',{className:'text-amber-300/80'},'BTC '),`${cloudDiag.btc.n} (${cloudDiag.btc.wins}W·${cloudDiag.btc.losses}L·${cloudDiag.btc.sitouts}SO)`
+                    ),
+                    React.createElement('div',{className:'pl-2'},
+                      React.createElement('span',{className:'text-blue-300/80'},'ETH '),`${cloudDiag.eth.n} (${cloudDiag.eth.wins}W·${cloudDiag.eth.losses}L·${cloudDiag.eth.sitouts}SO)`
+                    ),
+                    React.createElement('div',{className:'pt-1 text-[#E8E9E4]/60'},`${cloudDiag.past} past windows`),
+                    React.createElement('div',{className:cloudDiag.pnl>=0?'text-emerald-400':'text-rose-400'},`${cloudDiag.pnl>=0?'+':''}$${cloudDiag.pnl.toFixed(2)} P&L`)
+                  ):
+                  React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/40 italic'},'Reading…')
               )
             ),
-            // CLOUD column
-            React.createElement('div',null,
-              React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 mb-1'},'CLOUD (Firestore)'),
-              diagError?React.createElement('div',{className:'text-[10px] text-rose-400'},'Read failed: ',diagError):
-                cloudDiag?React.createElement('div',{className:'text-[11px] tabular-nums leading-snug text-[#E8E9E4]/80'},
-                  React.createElement('div',{className:Math.abs(cloudDiag.log-localCounts.taraCallLog)>0?'text-amber-300 font-bold':null},
-                    `${cloudDiag.log} log entries`,
-                    Math.abs(cloudDiag.log-localCounts.taraCallLog)>0?` (Δ${cloudDiag.log-localCounts.taraCallLog})`:null
-                  ),
-                  React.createElement('div',null,`${cloudDiag.wins}W·${cloudDiag.losses}L·${cloudDiag.sitouts}SO`),
-                  React.createElement('div',null,`${cloudDiag.past} past windows`),
-                  React.createElement('div',{className:cloudDiag.pnl>=0?'text-emerald-400':'text-rose-400'},`${cloudDiag.pnl>=0?'+':''}$${cloudDiag.pnl.toFixed(2)} P&L`)
-                ):
-                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/40 italic'},'Reading…')
+            // Drift hint
+            _hasDrift&&React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-amber-300 leading-snug',style:{borderTop:'1px solid rgba(232,233,228,0.10)'}},
+              `Local and cloud have different log sizes (Δ ${_logDrift}). Press Force Resync to merge — or save this device as baseline if local has more recent data.`
             )
           ),
-          // Drift hint
-          _hasDrift&&React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-amber-300 leading-snug',style:{borderTop:'1px solid rgba(232,233,228,0.10)'}},
-            `Local and cloud have different log sizes (Δ ${_logDrift}). Press Force Resync to merge — or save this device as baseline if local has more recent data.`
+          // === LOCAL-ONLY SECTION ===
+          React.createElement('div',{className:'pt-3',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
+            React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
+              React.createElement('span',{className:'text-[10px]'},'⌂'),
+              React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(229,200,112,0.85)'}},'Personal scorecard'),
+              React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/40'},'this device only · never synced')
+            ),
+            React.createElement('div',{className:'text-[11px] tabular-nums text-[#E8E9E4]/80'},
+              `15m: ${localCounts.personalW||0}W · ${localCounts.personalL||0}L`
+            )
           ),
           // Baseline cloud info
-          cloudDiag?.baseline&&React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-[#E8E9E4]/55 leading-snug',style:{borderTop:'1px solid rgba(232,233,228,0.10)'}},
+          cloudDiag?.baseline&&React.createElement('div',{className:'mt-3 pt-2 text-[10px] text-[#E8E9E4]/55 leading-snug',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
             'Cloud baseline: ',cloudDiag.baseline.dataLogCount,' entries from ',cloudDiag.baseline.sourceDevice,' on ',new Date(cloudDiag.baseline.savedAt).toLocaleString()
           )
         ),
@@ -12454,15 +12514,11 @@ function TaraApp(){
     try{localStorage.setItem('taraPersonalScorecards_v1',JSON.stringify(scorecards));}catch(e){}
     // No cloud write — derive-from-log is the source of truth now.
   },[scorecards]);
-  useEffect(()=>{
-    // Listen for legacy writes from older devices but ignore them. The log itself
-    //   is what carries scorecard truth now.
-    const unsub=cloudWatch('scorecards/personal',()=>{
-      _scorecardsHydratedRef.current=true;
-      // No-op. Scorecards derive from taraCallLog now.
-    });
-    return unsub;
-  },[]);
+  // V9.2.0: Personal scorecard is LOCAL ONLY — no cloudWatch listener.
+  //   User feedback: "personal record isn't meant for sync, it is local and for
+  //   personal devices only." Removed. The local copy persists via localStorage.
+  //   Other devices keep their own personal record. Tara's call log + memory
+  //   continue to sync globally as a shared learning corpus.
   // V5.6.6: PAST WINDOWS HISTORY — record of how each window resolved. Captured at rollover
   //   regardless of whether Tara called or sat out. Lets users pattern-match recent market
   //   behavior. Capped at 50 most recent. Cloud-synced so the history matches across devices.
@@ -13385,7 +13441,7 @@ function TaraApp(){
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
-  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.1.9 online. The score and record sync issue user reported - fixed at the structural level. Found the actual bug. There were TWO scoreboards in Tara - taraScorecards (derived from taraCallLog, accurate, single source of truth) and a separate scorecards state with broken max-per-cell merge that produced phantom totals across devices. Example - Device A had 50W/30L, Device B had 5W/60L. Max-per-cell merge stamped 50W/60L equals 110 trades that NEITHER device ever had. Plus it kept fighting with the taraScorecards display. STRUCTURAL FIX. Made scorecards a useMemo derived from taraCallLog same as taraScorecards. Same source of truth for both. Single sync path - the call log itself, which already syncs correctly via transactional Firestore RMW with first-write-wins by entry ID. Disabled the broken legacy scorecards/personal write path - it was the source of the drift. Disabled cloudWatch handler too (now no-op for backward compat with V9.1.8 and earlier devices still writing to it). updateScore is now a no-op stub - the log itself drives the count, no separate increment needed. SYNC DIAGNOSTIC ADDED. The Sync menu (click SyncStatusPill) now shows side-by-side LOCAL vs CLOUD comparison. Reads memory/taraCallLog, scorecards/personal, history/pastWindows, state/lifetimePnL, and baseline/canonical from Firestore directly and displays the count of log entries, W L SITOUT, past windows, and P&L on each side. If they differ, the box outlines in rose with DRIFT DETECTED label and shows exactly how many entries are missing. There is a refresh button to re-read cloud anytime. Use this to verify - open the menu on each device. If both show the same numbers in cloud column, sync is working. If local differs from cloud, press Force Resync to merge. APPLY BASELINE no longer overwrites scorecards directly - the call log carries the data, so applying the log alone updates the scoreboard automatically. Force Resync no longer touches scorecards either. Both write the log to live cloud paths so other devices receive within ~1 second. EXISTING PRESERVED - V9.1.8 baseline live-path propagation, V9.1.8 SITOUT gate, V9.1.8 market character badges, V9.1.7 phase/session UTC alignment, V9.1.7 LiveTradeCoach trajectory plus peak/trough plus acceleration, V9.1.6 Save/Apply Baseline buttons, V9.1.6 Brain locked vs scanning fix, V9.1.6 news timezone parseNewsDate, V9.1.4 force-resync MERGE not replace. KNOWN LIMITATIONS - if multiple devices each had unique pre-V9.1.9 calls and never properly synced, those calls live only in the device that has them. Force Resync from the device with the most calls will write them to cloud, then other devices receive via cloudWatch. The diagnostic in the Sync menu lets you verify - look at LOCAL count vs CLOUD count side by side."}]);
+  const[chatLog,setChatLog]=useState([{role:"tara",text:"Tara 9.2.0 online. Big sync architecture clarification. User clarified the intent - Tara calls and memory record SHARED across all devices and all users. Personal scorecard LOCAL only - never synced. Plus BTC and ETH should log save and record in their own sections. Three structural changes. SHARED CORPUS scope confirmed. Tara call log, past windows, learnings, regime memory, weights all sync globally via Firestore at memory/taraCallLog, history/pastWindows, learnings/tara, learnings/regimeMemory, learnings/taraWeights. Every device and every user reads and writes the same docs. This is the intended behavior - Tara learns from collective experience. PERSONAL SCORECARD stripped from sync entirely. Removed scorecards/personal cloudWatch listener (was a no-op stub since V9.1.9 but still subscribed). Removed scorecards/personal from force-resync paths array. Removed scorecards write from saveAsBaseline payload. Removed scorecards write from baseline live-paths push. Removed scorecards write from applyBaseline live-paths push. Personal scorecard now lives only in localStorage taraPersonalScorecards_v1 on each device. Each device tracks its own personal W and L count without ever interfering with another device. BTC PLUS ETH SEPARATE SECTIONS. Asset tagging was already in place - every log entry has asset BTC or ETH and dedup uses asset plus windowId plus windowType as the key. So BTC and ETH already coexist in the SAME shared log doc, separated by their asset field. Tara's call card already filters to current asset via taraScorecards. New explicit splits added. Sync diagnostic in the SyncStatusPill menu now shows BTC and ETH counts separately on both LOCAL and CLOUD sides. Memory modal has new asset filter row at top - All assets, BTC, ETH - so user can isolate one asset's history. Counts respect both window-type and asset filters. Diagnostic also has clear visual separation - SHARED section (cloud icon, cross-device cross-user) above PERSONAL section (house icon, this device only never synced). User asked about Firebase rules. Current rules allow read write if true so wide open - no auth needed. Nothing in Firebase needs to change. The bug fix is purely client-side. EXISTING PRESERVED - V9.1.9 derive-from-log scorecards single source of truth, V9.1.9 cloud diagnostic, V9.1.8 baseline live-path propagation, V9.1.8 SITOUT gate, V9.1.8 market character badges, V9.1.7 phase/session UTC alignment, V9.1.7 LiveTradeCoach trajectory plus peak/trough plus acceleration. KNOWN LIMITATIONS - personal scorecard counts on each device may differ now since they were always separate-but-mistakenly-synced before. That is the intended behavior. The shared call log is the correct source of truth for Tara's collective memory."}]);
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
@@ -18376,9 +18432,11 @@ function TaraApp(){
     setForceResyncing(true);
     try{
       console.info('[V8.6] Force resync starting...');
+      // V9.2.0: scorecards/personal removed from force-resync paths — personal
+      //   scorecard is LOCAL ONLY now. Tara's shared learning corpus (callLog,
+      //   pastWindows, learnings, weights) continues to sync globally.
       const _paths=[
         'memory/taraCallLog',
-        'scorecards/personal',
         'history/pastWindows',
         'state/lifetimePnL',
         'learnings/tara',
@@ -18408,11 +18466,6 @@ function TaraApp(){
               const merged=_mergeCallLogEntries(prev,data.entries);
               return merged;
             });_applied++;
-          } else if(path==='scorecards/personal'){
-            // V9.1.9: No-op. Scorecards derive from taraCallLog. The taraCallLog
-            //   path above already pulled the source-of-truth log; scorecards
-            //   recompute from it automatically.
-            _applied++;
           } else if(path==='history/pastWindows'&&Array.isArray(data.entries)){
             // V9.1.4: MERGE instead of replace. windowId+windowType+asset dedup.
             setPastWindows(prev=>{
@@ -18584,13 +18637,13 @@ function TaraApp(){
     setBaselineBusy(true);
     try{
       // Snapshot ALL local state. Use refs/current values for accuracy.
+      // V9.2.0: scorecards removed from baseline payload — personal data, local only.
       const _payload={
-        v:1,
+        v:2, // bumped — schema change (no scorecards)
         savedAt:Date.now(),
         sourceDevice:_deviceLabel,
         data:{
           taraCallLog:(taraCallLogRef.current||[]).slice(-500),
-          scorecards:_scorecardsRef.current||{'15m':{wins:0,losses:0},'5m':{wins:0,losses:0}},
           pastWindows:(Array.isArray(pastWindows)?pastWindows:[]).slice(-50),
           lifetimePnL:Number(_pnlRef.current)||0,
           pnlUpdatedAt:Number(_pnlUpdatedAtRef.current)||Date.now(),
@@ -18611,19 +18664,17 @@ function TaraApp(){
       await cloudWrite('baseline/canonical',_payload);
       // V9.1.8: ALSO push to live cloud paths so other devices' cloudWatch listeners
       //   receive this state within ~1s without needing to manually Apply Baseline.
-      //   Force Resync from another device will also pull this fresh data instead of
-      //   the stale pre-baseline data.
+      // V9.2.0: scorecards/personal write removed — that's a local-only path now.
       try{
         const _liveWrites=[];
         _liveWrites.push(cloudWrite('memory/taraCallLog',{entries:_payload.data.taraCallLog,_baselineSave:_payload.savedAt}));
-        _liveWrites.push(cloudWrite('scorecards/personal',{..._payload.data.scorecards,_baselineSave:_payload.savedAt}));
         _liveWrites.push(cloudWrite('history/pastWindows',{entries:_payload.data.pastWindows,_baselineSave:_payload.savedAt}));
         _liveWrites.push(cloudWrite('state/lifetimePnL',{value:_payload.data.lifetimePnL,updatedAt:_payload.data.pnlUpdatedAt,_baselineSave:_payload.savedAt}));
         if(_payload.data.taraLearnings){
           _liveWrites.push(cloudWrite('learnings/tara',{..._payload.data.taraLearnings,_baselineSave:_payload.savedAt}));
         }
         await Promise.all(_liveWrites);
-        console.info('[V9.1.8] Pushed baseline to',_liveWrites.length,'live cloud paths.');
+        console.info('[V9.2.0] Pushed baseline to',_liveWrites.length,'live cloud paths (scorecard kept local).');
       }catch(_e){
         console.warn('[V9.1.8] Live-path push partial fail',_e?.message);
       }
@@ -18712,13 +18763,7 @@ function TaraApp(){
         if(Array.isArray(_d.taraCallLog)){
           _writes.push(cloudWrite('memory/taraCallLog',{entries:_d.taraCallLog,_baselineApply:Date.now()}));
         }
-        if(_d.scorecards){
-          _writes.push(cloudWrite('scorecards/personal',{
-            '15m':{wins:Number(_d.scorecards['15m']?.wins)||0,losses:Number(_d.scorecards['15m']?.losses)||0},
-            '5m':{wins:Number(_d.scorecards['5m']?.wins)||0,losses:Number(_d.scorecards['5m']?.losses)||0},
-            _baselineApply:Date.now(),
-          }));
-        }
+        // V9.2.0: scorecards write removed — personal record is local-only.
         if(Array.isArray(_d.pastWindows)){
           _writes.push(cloudWrite('history/pastWindows',{entries:_d.pastWindows,_baselineApply:Date.now()}));
         }
@@ -18729,9 +18774,9 @@ function TaraApp(){
           _writes.push(cloudWrite('learnings/tara',{..._d.taraLearnings,_baselineApply:Date.now()}));
         }
         await Promise.all(_writes);
-        console.info('[V9.1.8] Pushed baseline to',_writes.length,'live cloud paths.');
+        console.info('[V9.2.0] Pushed baseline to',_writes.length,'live cloud paths (scorecard kept local).');
       }catch(_e){
-        console.warn('[V9.1.8] Live-path push partial fail',_e?.message);
+        console.warn('[V9.2.0] Live-path push partial fail',_e?.message);
       }
       try{setChatLog(prev=>[...prev,{role:'tara',text:`Applied baseline from ${_src} (${_savedDate}). Local now has ${_logCount} log entries · ${_winCount}W-${_lossCount}L-${_sitoutCount}SO · ${_pastCount} past windows · $${_pnl.toFixed(2)} lifetime P&L.`}]);}catch(_){}
       console.info('[V9.1.6] Applied baseline:',_sz,'from',_src);
@@ -18740,6 +18785,95 @@ function TaraApp(){
       try{setChatLog(prev=>[...prev,{role:'tara',text:`Apply baseline failed: ${e?.message||'unknown error'}.`}]);}catch(_){}
       alert('Apply baseline failed: '+(e?.message||'unknown error'));
     } finally {
+      setBaselineBusy(false);
+    }
+  };
+
+  // V9.1.10: NUCLEAR RECOVERY OPS — bypass every merge/debounce/hydration guard.
+  //   Use these when normal sync isn't producing convergence and the user just wants
+  //   ONE device's data to be canonical truth.
+
+  // Force push: write THIS device's log + pastWindows + pnl + learnings directly
+  //   to live cloud paths, replacing whatever's there. No merge.
+  const forcePushToCloud=async()=>{
+    if(baselineBusy||forceResyncing)return;
+    const _log=(taraCallLogRef.current||[]).slice(-500);
+    const _logCount=_log.length;
+    const _wins=_log.filter(e=>e&&e.result==='WIN').length;
+    const _losses=_log.filter(e=>e&&e.result==='LOSS').length;
+    const _sitouts=_log.filter(e=>e&&e.result==='SITOUT').length;
+    const _past=(Array.isArray(pastWindows)?pastWindows:[]).slice(-50);
+    const _pnl=Number(_pnlRef.current)||0;
+    const _msg=`FORCE PUSH this device's data to cloud, REPLACING what's there?\n\n`+
+      `• ${_logCount} call log entries (${_wins}W · ${_losses}L · ${_sitouts}SO)\n`+
+      `• ${_past.length} past windows\n`+
+      `• ${_pnl>=0?'+':''}$${_pnl.toFixed(2)} lifetime P&L\n\n`+
+      `This OVERWRITES cloud unconditionally. Other devices listening will receive this data within ~1s.\n\n`+
+      `Use this when normal sync isn't converging and you want THIS device to be the truth.`;
+    if(!window.confirm(_msg))return;
+    setBaselineBusy(true);
+    try{
+      const _writes=[];
+      _writes.push(cloudWrite('memory/taraCallLog',{entries:_log,_forcePush:Date.now(),_pushedBy:_deviceLabel}));
+      _writes.push(cloudWrite('history/pastWindows',{entries:_past,_forcePush:Date.now()}));
+      _writes.push(cloudWrite('state/lifetimePnL',{value:_pnl,updatedAt:Date.now(),_forcePush:Date.now()}));
+      if(taraLearnings)_writes.push(cloudWrite('learnings/tara',{...taraLearnings,_forcePush:Date.now()}));
+      const _results=await Promise.all(_writes);
+      const _ok=_results.filter(r=>r===true).length;
+      try{setChatLog(prev=>[...prev,{role:'tara',text:`Force push complete from ${_deviceLabel}. ${_ok}/${_writes.length} cloud writes succeeded. ${_logCount} log entries · ${_wins}W·${_losses}L·${_sitouts}SO pushed. Other devices will receive within ~1s.`}]);}catch(_){}
+      console.info('[V9.1.10] Force push:',_ok,'/',_writes.length,'writes succeeded');
+      if(_ok<_writes.length){
+        alert(`Force push partially succeeded (${_ok}/${_writes.length} writes). Check the SyncStatusPill for the error.`);
+      }
+    }catch(e){
+      console.warn('[V9.1.10] Force push failed',e?.message);
+      alert('Force push failed: '+(e?.message||'unknown error'));
+    }finally{
+      setBaselineBusy(false);
+    }
+  };
+
+  // Force pull: read live cloud paths and OVERWRITE local with whatever's there.
+  //   No merge, no protection for unique local entries. Use when this device is
+  //   stale and just wants whatever the canonical cloud state is.
+  const forcePullFromCloud=async()=>{
+    if(baselineBusy||forceResyncing)return;
+    setBaselineBusy(true);
+    try{
+      const _log=await cloudRead('memory/taraCallLog');
+      const _past=await cloudRead('history/pastWindows');
+      const _pnl=await cloudRead('state/lifetimePnL');
+      const _learn=await cloudRead('learnings/tara');
+      const _logEntries=Array.isArray(_log?.entries)?_log.entries:[];
+      const _pastEntries=Array.isArray(_past?.entries)?_past.entries:[];
+      const _localCount=Array.isArray(taraCallLogRef.current)?taraCallLogRef.current.length:0;
+      const _wins=_logEntries.filter(e=>e&&e.result==='WIN').length;
+      const _losses=_logEntries.filter(e=>e&&e.result==='LOSS').length;
+      const _sitouts=_logEntries.filter(e=>e&&e.result==='SITOUT').length;
+      const _msg=`FORCE PULL cloud data and REPLACE local?\n\n`+
+        `Cloud has:\n`+
+        `• ${_logEntries.length} call log entries (${_wins}W · ${_losses}L · ${_sitouts}SO)\n`+
+        `• ${_pastEntries.length} past windows\n`+
+        `• $${(Number(_pnl?.value)||0).toFixed(2)} P&L\n\n`+
+        `This device currently has ${_localCount} log entries — they will be REPLACED.\n\n`+
+        `Use this when this device is stale and you want it to mirror cloud exactly.`;
+      if(!window.confirm(_msg)){setBaselineBusy(false);return;}
+      // Hard-replace local state. Bypasses cloudWatch merge logic.
+      setTaraCallLog(_logEntries);
+      setPastWindows(_pastEntries);
+      if(_pnl?.value!=null){
+        setLifetimePnL(Number(_pnl.value)||0);
+        _pnlUpdatedAtRef.current=Number(_pnl.updatedAt)||Date.now();
+      }
+      if(_learn&&typeof _learn==='object'&&_learn.totalResolved>=0){
+        setTaraLearnings(_learn);
+      }
+      try{setChatLog(prev=>[...prev,{role:'tara',text:`Force pull complete on ${_deviceLabel}. Local replaced with ${_logEntries.length} log entries · ${_wins}W·${_losses}L·${_sitouts}SO from cloud.`}]);}catch(_){}
+      console.info('[V9.1.10] Force pull complete:',_logEntries.length,'entries');
+    }catch(e){
+      console.warn('[V9.1.10] Force pull failed',e?.message);
+      alert('Force pull failed: '+(e?.message||'unknown error'));
+    }finally{
       setBaselineBusy(false);
     }
   };
@@ -19069,14 +19203,23 @@ function TaraApp(){
           baselineBusy={baselineBusy}
           baselineMeta={baselineMeta}
           deviceLabel={_deviceLabel}
-          localCounts={{
-            taraCallLog:Array.isArray(taraCallLog)?taraCallLog.length:0,
-            wins:(taraCallLog||[]).filter(e=>e&&e.result==='WIN').length,
-            losses:(taraCallLog||[]).filter(e=>e&&e.result==='LOSS').length,
-            sitouts:(taraCallLog||[]).filter(e=>e&&e.result==='SITOUT').length,
-            pastWindows:Array.isArray(pastWindows)?pastWindows.length:0,
-            pnl:Number(_pnlRef.current)||0,
-          }}
+          localCounts={(()=>{
+            const _btc=(taraCallLog||[]).filter(e=>e&&(e.asset||'BTC')==='BTC');
+            const _eth=(taraCallLog||[]).filter(e=>e&&e.asset==='ETH');
+            return{
+              taraCallLog:Array.isArray(taraCallLog)?taraCallLog.length:0,
+              wins:(taraCallLog||[]).filter(e=>e&&e.result==='WIN').length,
+              losses:(taraCallLog||[]).filter(e=>e&&e.result==='LOSS').length,
+              sitouts:(taraCallLog||[]).filter(e=>e&&e.result==='SITOUT').length,
+              btc:{n:_btc.length,wins:_btc.filter(e=>e.result==='WIN').length,losses:_btc.filter(e=>e.result==='LOSS').length,sitouts:_btc.filter(e=>e.result==='SITOUT').length},
+              eth:{n:_eth.length,wins:_eth.filter(e=>e.result==='WIN').length,losses:_eth.filter(e=>e.result==='LOSS').length,sitouts:_eth.filter(e=>e.result==='SITOUT').length},
+              pastWindows:Array.isArray(pastWindows)?pastWindows.length:0,
+              pnl:Number(_pnlRef.current)||0,
+              // V9.2.0: personal scorecard — local-only, displayed for clarity
+              personalW:Number(scorecards?.['15m']?.wins)||0,
+              personalL:Number(scorecards?.['15m']?.losses)||0,
+            };
+          })()}
         />
       )}
 
@@ -19165,7 +19308,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.1.9
+              9.2.0
             </span>
           </div>
 
@@ -20999,6 +21142,43 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.2.0 — Sync architecture clarified · Asset split */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>Tara shared &middot; personal local &middot; BTC/ETH split</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.06</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.2.0</span> &mdash; Sync Architecture Clarified</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sync scope clarified</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">User: <em>&ldquo;I want Tara&rsquo;s calls and memory record to be synced across devices. Same scorecard and same memory record log for every device and everyone... personal record isn&rsquo;t meant for sync, it is local and for personal devices only.&rdquo;</em></p>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Two scopes:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong style={{color:'rgba(165,180,252,0.95)'}}>SHARED (cloud)</strong> &mdash; <code className="text-[10px] bg-[#0E100F] px-1">memory/taraCallLog</code>, <code className="text-[10px] bg-[#0E100F] px-1">history/pastWindows</code>, <code className="text-[10px] bg-[#0E100F] px-1">learnings/tara</code>, <code className="text-[10px] bg-[#0E100F] px-1">learnings/regimeMemory</code>, <code className="text-[10px] bg-[#0E100F] px-1">learnings/taraWeights</code>. Every device and every user reads and writes the same docs &mdash; Tara learns from collective experience.</li>
+                  <li><strong style={{color:'rgba(229,200,112,0.85)'}}>LOCAL (this device only)</strong> &mdash; personal scorecard. <code className="text-[10px] bg-[#0E100F] px-1">localStorage</code> caches it. Each device tracks its own count without interfering with others.</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Personal scorecard fully decoupled</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Removed every cloud touch-point for <code className="text-[10px] bg-[#0E100F] px-1">scorecards/personal</code>:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">cloudWatch</code> listener (was no-op stub, fully removed)</li>
+                  <li>Force-resync paths array (was already a no-op branch, removed entirely)</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">saveAsBaseline</code> payload (no longer includes scorecards)</li>
+                  <li>Baseline live-paths push (no longer writes to scorecards/personal)</li>
+                  <li><code className="text-[10px] bg-[#0E100F] px-1">applyBaseline</code> live-paths push (no longer writes to scorecards/personal)</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">BTC + ETH separate sections</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">Asset tagging was already in place &mdash; every log entry has <code className="text-[10px] bg-[#0E100F] px-1">asset: 'BTC'</code> or <code className="text-[10px] bg-[#0E100F] px-1">'ETH'</code>, dedup key is <code className="text-[10px] bg-[#0E100F] px-1">asset|windowId|windowType</code>. So BTC and ETH already coexisted in the SAME shared doc separated by asset. New visual splits added:</p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Sync diagnostic</strong>: shows BTC and ETH counts separately on both LOCAL and CLOUD sides</li>
+                  <li><strong>Memory modal</strong>: new asset filter row at top &mdash; <code className="text-[10px] bg-[#0E100F] px-1">All assets · ₿ BTC · &Xi; ETH</code> &mdash; counts respect both window-type and asset filters</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Firebase</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed">User asked: <em>&ldquo;maybe in firebase too?&rdquo;</em> No Firebase changes needed. Current rules are <code className="text-[10px] bg-[#0E100F] px-1">allow read, write: if true</code> (wide open, no auth required). The fix is purely client-side. The <code className="text-[10px] bg-[#0E100F] px-1">scorecards/personal</code> doc may still exist in Firestore from older versions but is no longer read or written &mdash; it can be safely deleted manually if you want to clean up.</p>
               </section>
 
               {/* V9.1.9 — Score derive-from-log · Sync diagnostic */}
