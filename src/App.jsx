@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.7.2-recspeed-eth-fallback';
+const BASELINE_VERSION='2026.05.07-v9.7.3-tz-consistency';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -1394,6 +1394,40 @@ const buildRegimeDirWR=(tradeLog)=>{
 //
 // Returns {<regime>|<dir>: {n, wr, weight, multiplier_target}}.
 //   multiplier_target is the WR×100 that we blend toward — kept here for diagnostics.
+// ═══════════════════════════════════════════════════════════════════════════
+// V9.7.3: TIME FORMAT HELPERS — single source of truth for timezone display
+// ═══════════════════════════════════════════════════════════════════════════
+// Resolves a timeFormat string ('local' | 'est' | 'utc') to a toLocaleString
+// options object that can be spread into any toLocaleTimeString / toLocaleDateString
+// call. Default is 'local' for safety — components that don't pass timeFormat
+// will fall back to device-local (current pre-V9.7.3 behaviour).
+//
+// Usage:
+//   const tz = _tzOptFor(timeFormat);
+//   d.toLocaleTimeString('en-US', {...tz, hour:'2-digit', minute:'2-digit'});
+//
+// Also provides _fmtTimeTz and _fmtDateTz for the two most common patterns
+// (HH:mm time, short date) so the call sites can be one-liners.
+const _tzOptFor=(timeFormat)=>{
+  if(timeFormat==='utc')return{timeZone:'UTC'};
+  if(timeFormat==='est')return{timeZone:'America/New_York'};
+  return{}; // 'local' or undefined → no override
+};
+const _fmtTimeTz=(d,timeFormat,opts={hour:'2-digit',minute:'2-digit',hour12:false})=>{
+  if(!d)return'';
+  const _d=d instanceof Date?d:new Date(d);
+  if(!Number.isFinite(_d.getTime()))return'';
+  try{return _d.toLocaleTimeString('en-US',{..._tzOptFor(timeFormat),...opts});}
+  catch(_){return _d.toLocaleTimeString('en-US',opts);}
+};
+const _fmtDateTz=(d,timeFormat,opts={year:'numeric',month:'2-digit',day:'2-digit'})=>{
+  if(!d)return'';
+  const _d=d instanceof Date?d:new Date(d);
+  if(!Number.isFinite(_d.getTime()))return'';
+  try{return _d.toLocaleDateString('en-US',{..._tzOptFor(timeFormat),...opts});}
+  catch(_){return _d.toLocaleDateString('en-US',opts);}
+};
+
 const buildRegimeDirCalibration=(tradeLog)=>{
   const out={};
   const counts={};
@@ -4953,7 +4987,7 @@ class ErrorBoundary extends React.Component{
 // ═══════════════════════════════════════
 
 // ── FlowPanel — extracted from TaraApp to avoid esbuild IIFE+JSX parse issues ──
-function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,bloomberg,currentPrice,timeState}){
+function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,bloomberg,currentPrice,timeState,timeFormat}){
   if(!showWhaleLog)return null;
   const fs=flowSignal;
   const scoreColor=fs.score>=75?'text-emerald-400':fs.score>=50?'text-amber-400':fs.score>=25?'text-[#E8E9E4]/60':'text-[#E8E9E4]/30';
@@ -5080,7 +5114,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
             {whaleLog.length===0?<div className={'text-xs text-[#E8E9E4]/30 italic'}>No prints yet</div>:whaleLog.slice(0,20).map((w,i)=>{
               const d=new Date(w.time);
               return(<div key={i} className={`flex items-center gap-2 text-xs p-1.5 rounded bg-[#111312] border ${w.side==='BUY'?'border-emerald-500/15':'border-rose-500/15'}`}>
-                <span className={'text-[#E8E9E4]/25 font-mono shrink-0'}>{d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
+                <span className={'text-[#E8E9E4]/25 font-mono shrink-0'}>{_fmtTimeTz(d,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
                 <span className={`font-bold text-[10px] ${w.side==='BUY'?'text-emerald-500':'text-rose-500'}`}>{w.side}</span>
                 <span className={'text-[#E8E9E4]/50'}>${(w.usd*0.001).toFixed(0)}K</span>
                 <span className={'text-[#E8E9E4]/25 text-[10px] ml-auto'}>{w.src}</span>
@@ -6807,7 +6841,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
 //   resolved windows as colored arrows (▲ green = closed UP, ▼ red = closed DOWN). Collapsed
 //   pill displays last 3 outcomes inline. Click to expand into a vertical list with full
 //   timestamps. Filters by current windowType so 15m and 5m have separate histories.
-function PastWindowsPill({pastWindows,windowType}){
+function PastWindowsPill({pastWindows,windowType,timeFormat}){
   const[open,setOpen]=React.useState(false);
   const filtered=React.useMemo(()=>{
     return [...(pastWindows||[])].filter(e=>e&&e.windowType===windowType&&(e.dir==='UP'||e.dir==='DOWN')).reverse();
@@ -6825,8 +6859,8 @@ function PastWindowsPill({pastWindows,windowType}){
   if(filtered.length===0)return null;
   const _fmt=(ms)=>{
     const d=new Date(ms);
-    const _mo=d.toLocaleString([],{month:'short',day:'numeric'});
-    const _t=d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+    const _mo=_fmtDateTz(d,timeFormat,{month:'short',day:'numeric'});
+    const _t=_fmtTimeTz(d,timeFormat,{hour:'numeric',minute:'2-digit'});
     return `${_mo}, ${_t}`;
   };
   return React.createElement('div',{ref:wrapRef,className:'relative'},
@@ -9929,7 +9963,7 @@ function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,time
   const _learnTotal=taraLearnings?.totalResolved||0;
   const _resultColors={WIN:{bg:'rgba(52,211,153,0.18)',fg:'rgba(110,231,183,0.95)'},LOSS:{bg:'rgba(244,114,182,0.18)',fg:'rgba(244,114,182,0.95)'},SITOUT:{bg:'rgba(229,200,112,0.16)',fg:'rgba(229,200,112,0.85)'},pending:{bg:'rgba(232,233,228,0.06)',fg:'rgba(232,233,228,0.5)'}};
   const _dirArrow=(d)=>d==='UP'?'▲':d==='DOWN'?'▼':'·';
-  const _fmtTime=(ms)=>{const d=new Date(ms);return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});};
+  const _fmtTime=(ms)=>_fmtTimeTz(ms,timeFormat,{hour:'2-digit',minute:'2-digit'});
   return React.createElement(React.Fragment,null,
     React.createElement('div',{className:'border-t border-[#E8E9E4]/8 pt-2.5 mt-2.5'},
       React.createElement('div',{className:'flex justify-between items-baseline mb-1.5 gap-2'},
@@ -11176,7 +11210,7 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
 //   Plus an insights surface that pulls 3-5 actionable findings from the data.
 //
 //   Filters out PENDING-VERIFY trades (they aren't truly resolved yet).
-function StatsView({tradeLog,scorecards,taraCallLog,onClose}){
+function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
   const[tab,setTab]=React.useState('today'); // 'today' | 'week' | 'all'
   const[selectedHour,setSelectedHour]=React.useState(null);
 
@@ -11460,7 +11494,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose}){
               </div>
               <div className="space-y-1">
                 {drillTrades.slice(0,12).map((t,i)=>{
-                  const ts=new Date(t.id).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+                  const ts=_fmtTimeTz(new Date(t.id),timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
                   const isWin=t.result==='WIN';
                   const dirCol=t.dir==='UP'?'text-emerald-400':'text-rose-400';
                   const resCol=isWin?'text-emerald-400':'text-rose-400';
@@ -11915,7 +11949,7 @@ function DepthStrip({orderBook,targetMargin}){
 }
 
 // ── V111: NewsFeedCard - external events affecting BTC price ──
-function NewsFeedCard(){
+function NewsFeedCard({timeFormat}={}){
   const[news,setNews]=React.useState([]);
   const[loading,setLoading]=React.useState(true);
   const[err,setErr]=React.useState(null);
@@ -12177,7 +12211,7 @@ function NewsFeedCard(){
             try{
               const _d=new Date(n.time);
               if(isNaN(_d.getTime()))return null;
-              return _d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+              return _fmtTimeTz(_d,timeFormat,{hour:'numeric',minute:'2-digit'});
             }catch(_){return null;}
           })();
           const cls=hot?'p-1.5 rounded bg-amber-500/10 border border-amber-500/20':'p-1.5 rounded hover:bg-[#111312]/50 border border-transparent';
@@ -12198,7 +12232,7 @@ function NewsFeedCard(){
       </div>
       {/* V9.1.2: Expanded news modal */}
       {expandOpen&&(
-        <NewsExpandModal news={news} macroEvents={macroEvents} onClose={()=>setExpandOpen(false)} formatAge={formatAge}/>
+        <NewsExpandModal news={news} macroEvents={macroEvents} onClose={()=>setExpandOpen(false)} formatAge={formatAge} timeFormat={timeFormat}/>
       )}
     </div>
   );
@@ -12698,7 +12732,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose}){
   );
 }
 
-function NewsExpandModal({news,macroEvents,onClose,formatAge}){
+function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
   React.useEffect(()=>{
     const onKey=(e)=>{if(e.key==='Escape')onClose();};
     window.addEventListener('keydown',onKey);
@@ -12753,7 +12787,7 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge}){
               try{
                 const _d=new Date(n.time);
                 if(isNaN(_d.getTime()))return null;
-                return _d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+                return _fmtTimeTz(_d,timeFormat,{hour:'numeric',minute:'2-digit'});
               }catch(_){return null;}
             })();
             return React.createElement('a',{
@@ -12947,7 +12981,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
       {/* V9.2.0: News & Macro — swapped with Schedule per user feedback.
           "put news section in the schedule place." */}
       <div className="shrink-0 pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
-        <NewsFeedCard/>
+        <NewsFeedCard timeFormat={timeFormat}/>
       </div>
       {/* V9.2.0: Schedule on mobile only — desktop schedule moved to projections column */}
       {taraCallLog&&(
@@ -12989,7 +13023,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
           ):whaleLog.slice(0,8).map((w,i)=>{
             const sideCls=w.side==='BUY'?'text-emerald-400':'text-rose-400';
             const t=new Date(w.time);
-            const ts=t.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+            const ts=_fmtTimeTz(t,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
             return(
               <div key={i} className="flex justify-between gap-1.5">
                 <span className={'text-[#E8E9E4]/40 shrink-0'}>{ts}</span>
@@ -15780,11 +15814,11 @@ function TaraApp(){
   //   asset-rotation divergence, Kelly fraction.
   const todayData=useMemo(()=>{
     const _now=new Date();
-    const _todayKey=_now.toLocaleDateString('en-US',{year:'numeric',month:'2-digit',day:'2-digit'});
+    const _todayKey=_fmtDateTz(_now,timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'});
     const _src=(taraCallLog||[]).filter(e=>e&&e.time&&(e.asset||'BTC')===currentAsset);
-    // Today only — same calendar day in viewer's local time
+    // Today only — same calendar day in viewer's selected timezone (V9.7.3)
     const todayCalls=_src.filter(e=>{
-      try{return new Date(e.time).toLocaleDateString('en-US',{year:'numeric',month:'2-digit',day:'2-digit'})===_todayKey;}
+      try{return _fmtDateTz(new Date(e.time),timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'})===_todayKey;}
       catch(_){return false;}
     });
     const wins=todayCalls.filter(e=>e.result==='WIN').length;
@@ -15938,7 +15972,7 @@ function TaraApp(){
       lossPatternStats,
       topLossPattern,
     };
-  },[taraCallLog,currentAsset,tradingSettings]);
+  },[taraCallLog,currentAsset,tradingSettings,timeFormat]);
   // Best windows hint — for the day-of-week we're in, find the user's best historical hours
   //   from the personal scorecards (hour×day grid). Helps user time their sessions.
   // ── V8.2: TILT COOLDOWN AUTO-TRIGGER ───────────────────────────────────
@@ -22440,7 +22474,7 @@ function TaraApp(){
       
       {/* V134: Session-start status check */}
       <SessionStartCheck open={showSessionStart} onClose={()=>setShowSessionStart(false)} windowType={windowType} scorecards={scorecards} tradeLog={tradeLog} regime={analysis?.regime} velocityRegime={analysis?.velocityRegime} calibration={calibration} baselineDrift={baselineDrift} resetToLatestBaseline={resetToLatestBaseline} runSyncWithProgress={runSyncWithProgress} syncState={syncState} resetDirectionalBias={resetDirectionalBias} resetFreshStart={resetFreshStart}/>
-      {showStats&&<StatsView tradeLog={tradeLog} scorecards={scorecards} taraCallLog={displayedCallLog} onClose={()=>setShowStats(false)}/>}
+      {showStats&&<StatsView tradeLog={tradeLog} scorecards={scorecards} taraCallLog={displayedCallLog} onClose={()=>setShowStats(false)} timeFormat={timeFormat}/>}
       {/* V9.2.2: Dedicated Analytics Page */}
       {analyticsPageOpen&&<TaraAnalyticsPage taraCallLog={taraCallLog} taraMLModel={taraMLModel} onClose={()=>setAnalyticsPageOpen(false)}/>}
       {showBrain&&<BrainView analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>setShowBrain(false)}/>}
@@ -22584,7 +22618,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.7.2
+              9.7.3
             </span>
           </div>
 
@@ -23290,7 +23324,7 @@ function TaraApp(){
                   {analysis?.isPostDecay&&<span className="text-amber-400">⚡</span>}
                 </div>
                 {/* V5.6.6: Past-windows tracker — Kalshi-style outcome history pill */}
-                <PastWindowsPill pastWindows={pastWindows} windowType={windowType}/>
+                <PastWindowsPill pastWindows={pastWindows} windowType={windowType} timeFormat={timeFormat}/>
               </div>
               <button onClick={()=>{
                 // Force exit: score based on whether offer > bet (profit) or position in loss
@@ -23466,7 +23500,7 @@ function TaraApp(){
         <ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution} asset={currentAsset}/>
 
       {/* ── FLOW INTELLIGENCE PANEL ── */}
-      <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState}/>
+      <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState} timeFormat={timeFormat}/>
 
       {/* Settings */}
       {showSettings&&(
@@ -23967,7 +24001,7 @@ function TaraApp(){
                       <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className={`font-bold text-sm ${selected.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{selected.dir}</span>
-                          <span className={'text-xs text-[#E8E9E4]/50'}>{new Date(selected.id).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
+                          <span className={'text-xs text-[#E8E9E4]/50'}>{_fmtTimeTz(new Date(selected.id),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
                           <span className={'text-xs text-[#E8E9E4]/40 hidden sm:inline'}>{selected.posterior?.toFixed(0)}% · {selected.regime}</span>
                           {selected.manuallyEdited&&<span className={'text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded'}>edited</span>}
                         </div>
@@ -24011,8 +24045,8 @@ function TaraApp(){
                           :t.result==='LOSS'?'border-rose-500/20 bg-rose-500/5 hover:border-rose-500/40'
                           :'border-[#E8E9E4]/5 hover:border-[#E8E9E4]/15'}`}>
                         <div className={`w-2 h-2 rounded-full shrink-0 ${isSel?'bg-indigo-400':t.result==='WIN'?'bg-emerald-500':t.result==='LOSS'?'bg-rose-500':'bg-[#E8E9E4]/20'}`}/>
-                        <span className={'text-[#E8E9E4]/40 font-mono shrink-0 text-[10px] hidden sm:inline'}>{d.toLocaleDateString('en-US',{month:'short',day:'numeric'})} </span>
-                        <span className={'text-[#E8E9E4]/40 font-mono shrink-0 text-[10px]'}>{d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
+                        <span className={'text-[#E8E9E4]/40 font-mono shrink-0 text-[10px] hidden sm:inline'}>{_fmtDateTz(d,timeFormat,{month:'short',day:'numeric'})} </span>
+                        <span className={'text-[#E8E9E4]/40 font-mono shrink-0 text-[10px]'}>{_fmtTimeTz(d,timeFormat,{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
                         <span className={`font-bold shrink-0 ${t.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{t.dir}</span>
                         <span className={'text-[#E8E9E4]/40 text-[10px] shrink-0'}>{t.posterior?.toFixed(0)}%</span>
                         <span className={'text-[#E8E9E4]/25 text-[10px] truncate hidden md:block'}>{t.regime}</span>
@@ -24212,7 +24246,7 @@ function TaraApp(){
                   [...tradeLog].filter(t=>t.result).reverse().forEach(t=>{
                     const d=new Date(t.id/1);
                     const isValidDate=!isNaN(d.getTime())&&d.getFullYear()>2020;
-                    const key=isValidDate?d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}):'Unknown date';
+                    const key=isValidDate?_fmtDateTz(d,timeFormat,{weekday:'short',month:'short',day:'numeric',year:'numeric'}):'Unknown date';
                     if(!byDay[key])byDay[key]=[];
                     byDay[key].push(t);
                   });
@@ -24533,6 +24567,33 @@ function TaraApp(){
 
                 <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">For later</div>
                 <p className="text-xs text-[#E8E9E4]/55 leading-relaxed italic">An always-active server-side Tara would obviate this client-side mechanism by having one canonical engine instance regardless of how many browsers connect. User explicitly noted that&rsquo;s a future direction.</p>
+              </section>
+
+              {/* V9.7.3 — Timezone consistency sweep */}
+              <section className="mb-2 pb-3" style={{borderBottom:'1px solid '+T2_GOLD_GLOW}}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:T2_GOLD}}>tz everywhere &middot; respects header selector</span>
+                  <span className="text-[9px] uppercase tracking-wider text-[#E8E9E4]/30">2026.05.07</span>
+                </div>
+                <h3 className="font-serif text-2xl mb-2 tracking-tight text-white">Tara <span style={{color:T2_GOLD}}>9.7.3</span> &mdash; Timezone Consistency</h3>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">What changed</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">The header time-format selector (LOCAL / UTC / EST) now controls every visible timestamp inside the app. Previously about a dozen places hardcoded device-local time and ignored the header setting — confusing if you set EST but your device was in IST.</p>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">Sites fixed</div>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] mb-3">
+                  <li><strong>Flow Intelligence whale rows</strong> &mdash; the HH:mm:ss timestamps in the panel</li>
+                  <li><strong>Past Windows pill</strong> &mdash; date + time of historical windows</li>
+                  <li><strong>Tara&rsquo;s Memory strip</strong> &mdash; recent calls list</li>
+                  <li><strong>Stats view trade rows</strong> &mdash; per-trade timestamps in the modal</li>
+                  <li><strong>Right panel whale prints</strong> &mdash; the compact whale log under the engine</li>
+                  <li><strong>News feed</strong> &mdash; absolute time alongside relative age, in both compact and expanded views</li>
+                  <li><strong>Trade history modal</strong> &mdash; per-day grouping AND time of selected entry</li>
+                  <li><strong>Today filter</strong> &mdash; &ldquo;today&rsquo;s trades&rdquo; now means today in your selected zone, not your device&rsquo;s zone</li>
+                </ul>
+
+                <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/55 mt-3 mb-2">How it works</div>
+                <p className="text-xs text-[#E8E9E4]/70 leading-relaxed mb-2">New module-level helpers <code className="text-[10px] bg-[#0E100F] px-1">_tzOptFor(timeFormat)</code>, <code className="text-[10px] bg-[#0E100F] px-1">_fmtTimeTz()</code>, and <code className="text-[10px] bg-[#0E100F] px-1">_fmtDateTz()</code> wrap <code className="text-[10px] bg-[#0E100F] px-1">toLocaleTimeString</code>/<code className="text-[10px] bg-[#0E100F] px-1">toLocaleDateString</code> with the right timezone option resolved from the header setting. Existing components that already used the <code className="text-[10px] bg-[#0E100F] px-1">_tzOpt</code> pattern (TradeScheduleStrip, TradeScheduleModal, TaraMemoryModal, the main clock) are unchanged — they already worked.</p>
               </section>
 
               {/* V9.7.2 — Session-card recommended speed + ETH shadow corsproxy fallback */}
