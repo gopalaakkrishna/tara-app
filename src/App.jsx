@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.5.0-opponent-regimecal';
+const BASELINE_VERSION='2026.05.07-v9.5.2-atrbps-scopefix';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -15613,14 +15613,23 @@ function TaraApp(){
       try{
         // Fetch candles for the shadow asset. Light cadence — every 5s.
         // V7.10.2: 5s abort signal so a hung Coinbase request doesn't stall the loop.
+        // V9.5.1: heartbeat bumps to updatedAt on partial-failure paths so the UI
+        //   doesn't show "feed stale" just because one Coinbase tick failed. The shadow
+        //   posterior data carries forward; only the timestamp gets a heartbeat.
+        const _heartbeat=()=>{
+          if(_cancelled)return;
+          if(!shadowTaraByAssetRef.current)shadowTaraByAssetRef.current={};
+          const _prev=shadowTaraByAssetRef.current[_shadowAsset];
+          if(_prev)shadowTaraByAssetRef.current[_shadowAsset]={..._prev,updatedAt:Date.now()};
+        };
         const _gran=windowType==='15m'?900:300;
         const _candleResp=await fetch(`https://api.exchange.coinbase.com/products/${_cfg.cb}/candles?granularity=${_gran}`,{signal:AbortSignal.timeout(5000)}).catch(()=>null);
-        if(!_candleResp||!_candleResp.ok||_cancelled)return;
+        if(!_candleResp||!_candleResp.ok||_cancelled){_heartbeat();return;}
         const _candleData=await _candleResp.json();
-        if(!Array.isArray(_candleData)||_candleData.length<5)return;
+        if(!Array.isArray(_candleData)||_candleData.length<5){_heartbeat();return;}
         const _bars=_candleData.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
         const _shadowPrice=priceByAssetRef.current?.[_shadowAsset]?.price||_bars[0]?.c||0;
-        if(_shadowPrice<=0)return;
+        if(_shadowPrice<=0){_heartbeat();return;}
         // Fetch the shadow asset's Kalshi strike. Reuse the events endpoint.
         // V9.3.0: also capture market ticker, close_time, and YES price so the
         //   shadow output can drive a side-by-side call card (and eventually
@@ -15745,7 +15754,16 @@ function TaraApp(){
     _runShadow();
     const _iv=setInterval(_runShadow,2000);
     return()=>{_cancelled=true;clearInterval(_iv);};
-  },[currentAsset,windowType,timeState.minsRemaining,timeState.secsRemaining,regimeMemory]);
+  // V9.5.1: REMOVED timeState.minsRemaining and timeState.secsRemaining from deps.
+  //   With those in the array, the effect was tearing down 1× per second — the
+  //   2s setInterval literally never fired, and the immediate fetch call got
+  //   cancelled mid-flight on slow networks. Result: "feed stale" almost any
+  //   time the network was anything less than instant.
+  //   The shadow loop reads windowType+regimeMemory (which are the only
+  //   things it actually depends on) and gets time-of-day fresh on each tick
+  //   from Date.now() inside _runShadow. The tick itself is the cadence, not
+  //   the effect re-run.
+  },[currentAsset,windowType,regimeMemory]);
 
   // Heavy data
   useEffect(()=>{const _cbSym=ASSET_CONFIG[currentAsset]?.cb||'BTC-USD';const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const f=async()=>{try{const gran=windowType==='15m'?900:300;const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/candles?granularity=${gran}`);if(r.ok){const d=await r.json();if(Array.isArray(d))setHistory(d.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])})));}const r2=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/book?level=2`);if(r2.ok){const d2=await r2.json();if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});
@@ -18809,7 +18827,10 @@ function TaraApp(){
     //   card surfaces the warning chip and the user can size down.
     let _marginalCaution=null;
     const _isSingleTier=!isSuperConfluent&&!isConfluent&&!isStructuralLed&&!isTapeLed&&!isRisingConfluence;
-    const _atrBpsNum=Number(atrBps)||0;
+    // V9.5.2: BUGFIX — atrBps is not in scope inside the taraCall IIFE (it's a local
+    //   inside the analysis useMemo). Read it from the analysis object instead.
+    //   This was crashing every render with ReferenceError: atrBps is not defined.
+    const _atrBpsNum=Number(analysis?.atrBps)||0;
     const _isLowVol=_atrBpsNum>0&&_atrBpsNum<8;
     const _isLowQ=q<50;
     if(_isSingleTier&&_isLowVol&&_isLowQ){
@@ -21439,7 +21460,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.5.0
+              9.5.2
             </span>
           </div>
 
