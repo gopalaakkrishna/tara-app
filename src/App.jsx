@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.7.9-gate-telemetry';
+const BASELINE_VERSION='2026.05.07-v9.8.0-urgent-lock-protocol';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -10652,7 +10652,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -10686,6 +10686,8 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     e.kalshiAtClose!=null?e.kalshiAtClose:'',
                     e.kalshiVelocityAtLock!=null?e.kalshiVelocityAtLock.toFixed(1):'',
                     e.urgencyApplied?'Y':'N',
+                    e.ulpApplied?'Y':'N',
+                    e.samplesNeededOriginal!=null?e.samplesNeededOriginal:'',
                     e.reversalDamperApplied?'Y':'N',
                     e.reversalDamperMult!=null?e.reversalDamperMult.toFixed(2):'',
                     e.recentCandleDirsAtLock||'',
@@ -19881,9 +19883,30 @@ function TaraApp(){
     //   dial=75 → 15s, dial=100 → 20s. Aggressive low-end so dial 25 feels truly fast.
     const _dialSearch=Math.max(0,Math.min(100,speedDialRef.current||50));
     const _searchMultS=_dialSearch<=50?(0.1+(_dialSearch/50)*0.9):(1.0+((_dialSearch-50)/50)*1.0);
-    const _searchPhase=Math.max(2,Math.round(10*_searchMultS));
+    let _searchPhase=Math.max(2,Math.round(10*_searchMultS));
+    // V9.8.0: URGENT LOCK PROTOCOL — when Kalshi is moving in our direction, halve
+    //   the search phase. Combined with the lifecycle ULP (50% needSamples cut), a
+    //   moving market gets locked in ~12s instead of ~33s. Detect urgency inline
+    //   here too rather than relying on _v97DiagRef (which updates from this same
+    //   function — circular dependency for first tick of urgency).
+    let _ulpEngActive=false;
+    if(typeof kalshiHistoryRef!=='undefined'&&kalshiHistoryRef.current?.length>=3){
+      const _khE=kalshiHistoryRef.current;
+      const _nowE=Date.now();
+      const _recentE=_khE.filter(k=>_nowE-k.time<=2000);
+      const _thenE=_khE.filter(k=>_nowE-k.time>=28000&&_nowE-k.time<=32000);
+      if(_recentE.length>0&&_thenE.length>0){
+        const _deltaE=_recentE[_recentE.length-1].yes-_thenE[0].yes;
+        // post is computed earlier in taraCall; if available use it, else fall back to lean
+        const _postE=typeof post!=='undefined'?post:50;
+        if((_postE>=50&&_deltaE>=4)||(_postE<50&&_deltaE<=-4)){
+          _ulpEngActive=true;
+          _searchPhase=Math.max(1,Math.round(_searchPhase*0.5));
+        }
+      }
+    }
     if(_elapsed<_searchPhase){
-      return{call:'SIT_OUT',reason:`Searching for direction (${_searchPhase-_elapsed}s of observation remaining)`,confidence:0,direction:dir,conviction,phase:'SEARCH'};
+      return{call:'SIT_OUT',reason:`Searching for direction (${_searchPhase-_elapsed}s of observation remaining${_ulpEngActive?' · ULP':''})`,confidence:0,direction:dir,conviction,phase:'SEARCH'};
     }
     // V9.2.0: ROLLOVER GRACE — force SEARCH mode for 5s after window rollover.
     //   Bug: when window rolls over, timeState.minsRemaining might still be 0 from the
@@ -21681,14 +21704,34 @@ function TaraApp(){
     needSamples=Math.max(1,Math.round(needSamples*_speedMultLc));
     // Cap so lock has time to be scored after committing
     needSamples=Math.min(needSamples,Math.max(15,remaining-90));
+    // V9.8.0: URGENT LOCK PROTOCOL — when V9.7.6 urgency is active (Kalshi YES
+    //   moving ≥4¢/30s in Tara's direction), cut needSamples by 50% and skip
+    //   remaining search phase. Stops Tara from waiting 30s while Kalshi prices
+    //   in the move from 50¢ → 70¢. The previous V9.7.6 only dropped the
+    //   conviction floor by 30% — it didn't change samples. So lock still took
+    //   25-40 seconds even when the market was actively moving.
+    //   With ULP: lock fires in ~12s instead of ~33s on a moving market.
+    let _ulpApplied=false;
+    let _samplesNeededOriginal=needSamples;
+    let _searchPhaseSkipped=false;
+    if(_v97DiagRef?.current?.urgencyApplied){
+      _ulpApplied=true;
+      // Cut samples by 50%, floor of 1
+      needSamples=Math.max(1,Math.round(needSamples*0.5));
+      // Mark for telemetry that search phase will be force-skipped if past 50%
+      _searchPhaseSkipped=true; // signal — actual skip happens in search check below
+      try{console.info('[ULP] urgency active — needSamples',_samplesNeededOriginal,'→',needSamples,'· search phase fast-tracked');}catch(_){}
+    }
     // V6.5.7: ETA — expose how many seconds until commit at current dial. Engine ticks
     //   roughly 1Hz, so samplesRemaining ≈ secondsRemaining. Plus search phase if still in it.
     const _etaSamplesRem=Math.max(0,needSamples-samples);
     // V7.5: search phase floor 3 → 2 at low dial; multiplier same as samples
     const _searchPhaseLc=Math.max(2,Math.round(10*_speedMultLc));
-    const _etaSearchRem=Math.max(0,_searchPhaseLc-elapsedSec);
+    // V9.8.0: when ULP active, cut search phase to 50% — if past that, skip entirely
+    const _effectiveSearchPhase=_ulpApplied?Math.max(1,Math.round(_searchPhaseLc*0.5)):_searchPhaseLc;
+    const _etaSearchRem=Math.max(0,_effectiveSearchPhase-elapsedSec);
     const _lockEtaSec=_etaSearchRem+_etaSamplesRem;
-    if(tc&&tc._ctx){tc._ctx.lockEtaSec=_lockEtaSec;tc._ctx.samples=samples;tc._ctx.needSamples=needSamples;tc._ctx.tierLabel=tierLabel;}
+    if(tc&&tc._ctx){tc._ctx.lockEtaSec=_lockEtaSec;tc._ctx.samples=samples;tc._ctx.needSamples=needSamples;tc._ctx.tierLabel=tierLabel;tc._ctx.ulpApplied=_ulpApplied;tc._ctx.samplesNeededOriginal=_samplesNeededOriginal;}
     if(taraCallSnapshotRef.current!==null)return; // already committed — don't overwrite
     // V6.5.7 INVERSION RELEASE: stop the "original lean held through flip" failure mode.
     //   The user screenshot showed Tara locking DOWN even though tape was 98% super-strong UP
@@ -21905,6 +21948,9 @@ function TaraApp(){
         urgencyApplied:_v97DiagRef?.current?.urgencyApplied||false,
         urgencyMult:_v97DiagRef?.current?.urgencyMult??1.0,
         kalshiVelocityAtLock:_v97DiagRef?.current?.kalshiVelocity30s??null,
+        // ── URGENT LOCK PROTOCOL (V9.8.0) — fast-track when Kalshi confirms direction
+        ulpApplied:tc?._ctx?.ulpApplied||false,
+        samplesNeededOriginal:tc?._ctx?.samplesNeededOriginal??null,
         // ──────────────────────────────────────────────────────────────────
         // V6.4: conviction asymmetry at lock
         asymmetryAtLock:analysis?.convictionAsymmetry?{
@@ -23310,7 +23356,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.7.9
+              9.8.0
             </span>
           </div>
 
