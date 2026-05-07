@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.7.4-entry-ladder';
+const BASELINE_VERSION='2026.05.07-v9.7.4.1-ladder-tdz-fix';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -20139,6 +20139,20 @@ function TaraApp(){
     return()=>{_stopped=true;clearInterval(iv);};
   },[autoOrderState?.orderId,autoOrderState?.status,autoOrderState?.dryRun,kalshiCreds,killSwitchEngaged]);
 
+  // V9.7.4: 1Hz tick used by the ladder lifecycle effect below to re-evaluate
+  //   the age check every second while resting. Declared HERE (before the
+  //   effect that references it in its deps) to avoid a TDZ ReferenceError.
+  //   The interval is only ARMED when the ladder is enabled and an order is
+  //   actually resting — see the small useEffect right after this state.
+  const[_ladderTick,setLadderTick]=useState(0);
+  useEffect(()=>{
+    if(!autoExecSettings.entryLadderEnabled)return;
+    if(!autoOrderState||!autoOrderState.ladderEnabled)return;
+    if(autoOrderState.status!=='resting'&&autoOrderState.status!=='submitted')return;
+    const iv=setInterval(()=>setLadderTick(x=>x+1),1000);
+    return()=>clearInterval(iv);
+  },[autoExecSettings.entryLadderEnabled,autoOrderState?.ladderEnabled,autoOrderState?.status]);
+
   // ── V9.7.4: ENTRY LADDER LIFECYCLE EFFECT ────────────────────────────────
   // Watches resting auto-exec orders that were placed via the entry ladder
   // (`ladderEnabled === true`). When the current step has been resting for
@@ -20238,18 +20252,6 @@ function TaraApp(){
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[autoOrderState?.status,autoOrderState?.ladderStep,autoOrderState?.ladderStartedAt,kalshiYesPrice,autoExecSettings.entryLadderEnabled,autoExecSettings.entryLadderStepSec,autoExecSettings.entryLadderMaxSteps,autoExecSettings.slippageCents,kalshiCreds,killSwitchEngaged,_ladderTick]);
-
-  // V9.7.4: separate 1Hz tick so the ladder effect re-evaluates the age check
-  //   every second while resting (otherwise it'd only fire on status changes
-  //   and the bump would never trigger).
-  const[_ladderTick,setLadderTick]=useState(0);
-  useEffect(()=>{
-    if(!autoExecSettings.entryLadderEnabled)return;
-    if(!autoOrderState||!autoOrderState.ladderEnabled)return;
-    if(autoOrderState.status!=='resting'&&autoOrderState.status!=='submitted')return;
-    const iv=setInterval(()=>setLadderTick(x=>x+1),1000);
-    return()=>clearInterval(iv);
-  },[autoExecSettings.entryLadderEnabled,autoOrderState?.ladderEnabled,autoOrderState?.status]);
 
   // ── EXIT EFFECT ───────────────────────────────────────────────────────────
   // After an order fills, three exit paths (whichever fires first):
