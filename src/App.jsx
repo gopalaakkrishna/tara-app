@@ -10725,11 +10725,14 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
           })}
         </div>
       </div>
-      {/* V9.1.1: Trade Schedule strip — relocated from top of main render. Sits
-          between Engine Log and Live Feeds. Clicking the ⊕ button opens a full
-          schedule modal with extended detail. */}
+      {/* V9.2.0: News & Macro — swapped with Schedule per user feedback.
+          "put news section in the schedule place." */}
+      <div className="shrink-0 pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
+        <NewsFeedCard/>
+      </div>
+      {/* V9.2.0: Schedule on mobile only — desktop schedule moved to projections column */}
       {taraCallLog&&(
-        <div className="shrink-0 pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
+        <div className="shrink-0 pt-3 lg:hidden" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
           <TradeScheduleStrip
             taraCallLog={taraCallLog}
             currentAsset={currentAsset}
@@ -10778,10 +10781,8 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
           })}
         </div>
       </div>
-      {/* News Feed — V9.2.0: moved to projections column on desktop. Kept here for mobile. */}
-      <div className="pt-3 lg:hidden" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
-        <NewsFeedCard/>
-      </div>
+      {/* V9.2.0: News now renders above (in right panel) for all screen sizes.
+          Schedule modal still accessible via ⊕ button on the schedule strip in projections column. */}
       {/* V9.1.1: Full-schedule modal — opens via ⊕ on schedule strip header */}
       {scheduleModalOpen&&taraCallLog&&(
         <TradeScheduleModal
@@ -12020,6 +12021,10 @@ function TaraApp(){
   //   count. If the engine simply didn't form a call during a normal window, we no
   //   longer log it as a SITOUT — let the window roll over without an entry.
   const _mountTimeRef=useRef(Date.now());
+  // V9.2.0: Rollover grace — timestamp of last window transition. Engine IIFE checks
+  //   this to force SEARCH mode for 5s after rollover, preventing stale-analysis
+  //   instant-lock on the new window.
+  const _rolloverGraceRef=useRef(0);
   // ── V8.5: WITHIN-WINDOW CONTEXT TRACKING ────────────────────────────────
   // Captures whale activity + macro shocks DURING the active window so we can
   //   classify loss patterns at close (LATE_REVERSAL vs WHALE_SPIKE vs MACRO_SHOCK).
@@ -15588,6 +15593,10 @@ function TaraApp(){
         _clearLock(); // V5.6: wipe cloud lock — new window starts clean
         _hasRestoredLockRef.current=false; // allow restore on next window if user refreshes
         _cloudRestoreCompletedRef.current=false; // V7.10.3: re-arm cloud-restore gate for new window
+        // V9.2.0: Stamp rollover time. Engine IIFE checks this to force SEARCH mode for
+        //   5 seconds after rollover — prevents stale analysis from instant-locking the
+        //   new window before fresh price data arrives.
+        _rolloverGraceRef.current=Date.now();
         }},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights,userPosition]);
 
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
@@ -16783,6 +16792,15 @@ function TaraApp(){
     const _searchPhase=Math.max(2,Math.round(10*_searchMultS));
     if(_elapsed<_searchPhase){
       return{call:'SIT_OUT',reason:`Searching for direction (${_searchPhase-_elapsed}s of observation remaining)`,confidence:0,direction:dir,conviction,phase:'SEARCH'};
+    }
+    // V9.2.0: ROLLOVER GRACE — force SEARCH mode for 5s after window rollover.
+    //   Bug: when window rolls over, timeState.minsRemaining might still be 0 from the
+    //   OLD window → _elapsed computes as 900 → search phase gate passes → engine
+    //   instantly forms a call from stale analysis. This grace period ensures Tara
+    //   always observes fresh price data before locking the new window.
+    const _msSinceRollover=Date.now()-(_rolloverGraceRef.current||0);
+    if(_rolloverGraceRef.current>0&&_msSinceRollover<5000){
+      return{call:'SIT_OUT',reason:`New window — observing fresh data (${Math.ceil((5000-_msSinceRollover)/1000)}s)`,confidence:0,direction:dir,conviction,phase:'SEARCH'};
     }
     // V5.6.4: HARD floors — no time-decay shenanigans. If conviction is below this, sit out
     //   no matter how late in the window. Coin-flip detection.
@@ -18722,6 +18740,8 @@ function TaraApp(){
   const[baselineMeta,setBaselineMeta]=React.useState(null); // {savedAt, sourceDevice, sizes}
   const[baselineBusy,setBaselineBusy]=React.useState(false);
   const[syncMenuOpen,setSyncMenuOpen]=React.useState(false);
+  // V9.2.0: Schedule modal state for projections-column schedule (separate from RightPanel's)
+  const[scheduleModalMain,setScheduleModalMain]=React.useState(false);
   // Lightweight device label so user can distinguish baselines they saved earlier
   const _deviceLabel=React.useMemo(()=>{
     try{
@@ -19195,7 +19215,7 @@ function TaraApp(){
 
   const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast`;setChatLog([...log,{role:'tara',text:r}]);},400);};
 
-  const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false;_cloudRestoreCompletedRef.current=false;/* V7.10.4: also clear snapshot+samples so 15m↔5m doesn't carry stale state across window types */if(taraCallSnapshotRef.current!==undefined)taraCallSnapshotRef.current=null;if(taraCallSampleRef.current)taraCallSampleRef.current={dir:null,count:0};setForceRender(p=>p+1);};
+  const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false;_cloudRestoreCompletedRef.current=false;/* V7.10.4: also clear snapshot+samples so 15m↔5m doesn't carry stale state across window types */if(taraCallSnapshotRef.current!==undefined)taraCallSnapshotRef.current=null;if(taraCallSampleRef.current)taraCallSampleRef.current={dir:null,count:0};_rolloverGraceRef.current=Date.now();setForceRender(p=>p+1);};
   // V6.5.8: Asset switch handler. Same state-reset pattern as window toggle, plus
   //   clears price history (since BTC ticks are useless for ETH). Triggers re-fetch
   //   of Kalshi market for the new asset on next poll.
@@ -20217,12 +20237,19 @@ function TaraApp(){
 
             <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType}/>
 
-            {/* V9.2.0: News & Macro relocated from RightPanel to here — fills the blank
-                space in the projections column per user feedback. Sits between the
-                predictions/signals content and the PerformanceCard. */}
+            {/* V9.2.0: Schedule relocated from RightPanel to projections column.
+                User feedback: "put schedule in the news place." */}
             <div className="pt-3 min-w-0 hidden lg:block" style={{borderTop:'1px solid rgba(232,233,228,0.08)'}}>
-              <NewsFeedCard/>
+              <TradeScheduleStrip taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} onOpenFullSchedule={()=>setScheduleModalMain(true)}/>
             </div>
+            {scheduleModalMain&&taraCallLog&&(
+              <TradeScheduleModal
+                taraCallLog={taraCallLog}
+                currentAsset={currentAsset}
+                timeFormat={timeFormat}
+                onClose={()=>setScheduleModalMain(false)}
+              />
+            )}
 
             {/* V8.4: Performance card moved here from above-grid stack. mt-auto pins it to
                 the column bottom so it fills the blank space when PredictionContent is short.
