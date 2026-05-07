@@ -365,6 +365,97 @@ const IC={
 const formatUSD=(val)=>{const abs=Math.abs(val);if(abs>=1e6)return(val/1e6).toFixed(2)+'M';if(abs>=1e3)return(val/1e3).toFixed(1)+'K';return val.toFixed(0);};
 // V5.7.3: Single source of truth for duration formatting. Returns "Xs" under 60s,
 //   "Mm SSs" otherwise. Handles null/NaN gracefully. Used everywhere a countdown is shown.
+// ═══════════════════════════════════════
+// V9.2.2: TARA ML LAYER — in-browser logistic regression
+// ═══════════════════════════════════════
+// Trains on signalScoresAtLock features from resolved trades. Outputs a
+// predicted WIN probability that feeds into the posterior as an additional
+// signal (+/-10 pts max). Activates when ≥50 resolved trades with signal
+// data exist. Retrains on every new resolved trade.
+//
+// Features: gap, momentum, flow, structure, technical, regime, rangePosition,
+//   reversal, meanReversion, crossAsset + regime_encoded + channelPos + atrBps.
+// Target: 1 = WIN, 0 = LOSS.
+// Model: L2-regularized logistic regression (no external libraries).
+const TARA_ML_FEATURES=['gap','momentum','flow','structure','technical','regime','rangePosition','reversal','meanReversion','crossAsset'];
+const TARA_ML_MIN_TRADES=50;
+const TARA_ML_LEARNING_RATE=0.01;
+const TARA_ML_EPOCHS=100;
+const TARA_ML_L2=0.001;
+
+const _sigmoid=(z)=>1/(1+Math.exp(-Math.max(-20,Math.min(20,z))));
+
+const taraMLExtractFeatures=(entry)=>{
+  const sigs=entry.signalScoresAtLock||{};
+  const features=TARA_ML_FEATURES.map(k=>Number(sigs[k])||0);
+  // Extra features: channelPos (0-1), atrBps (normalized), posterior at lock
+  features.push(Number(entry.calibratedPosteriorAtLock)||50);
+  features.push(Number(entry.atrBpsAtLock)||15);
+  // Regime one-hot: 5 regimes
+  const _regimes=['TRENDING UP','TRENDING DOWN','RANGE-CHOP','SHORT SQUEEZE','HIGH VOL CHOP'];
+  _regimes.forEach(r=>features.push(entry.regime===r?1:0));
+  return features;
+};
+
+const taraMLTrain=(entries)=>{
+  // Filter to resolved trades with signal data
+  const data=entries.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&e.signalScoresAtLock);
+  if(data.length<TARA_ML_MIN_TRADES)return null;
+  const nFeatures=taraMLExtractFeatures(data[0]).length;
+  // Initialize weights to small random values
+  let weights=new Array(nFeatures).fill(0).map(()=>(Math.random()-0.5)*0.1);
+  let bias=0;
+  // Normalize features: compute mean + std per feature
+  const sums=new Array(nFeatures).fill(0);
+  const sqSums=new Array(nFeatures).fill(0);
+  const allX=data.map(e=>taraMLExtractFeatures(e));
+  allX.forEach(x=>x.forEach((v,i)=>{sums[i]+=v;sqSums[i]+=v*v;}));
+  const means=sums.map(s=>s/data.length);
+  const stds=sqSums.map((sq,i)=>{const v=sq/data.length-means[i]*means[i];return Math.sqrt(Math.max(1e-8,v));});
+  const normX=allX.map(x=>x.map((v,i)=>(v-means[i])/stds[i]));
+  const y=data.map(e=>e.result==='WIN'?1:0);
+  // SGD with L2 regularization
+  for(let epoch=0;epoch<TARA_ML_EPOCHS;epoch++){
+    // Shuffle indices
+    const idx=[...Array(data.length).keys()];
+    for(let i=idx.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[idx[i],idx[j]]=[idx[j],idx[i]];}
+    let totalLoss=0;
+    for(const i of idx){
+      const x=normX[i];
+      const z=x.reduce((s,v,j)=>s+v*weights[j],bias);
+      const pred=_sigmoid(z);
+      const err=pred-y[i];
+      totalLoss+=-y[i]*Math.log(pred+1e-8)-(1-y[i])*Math.log(1-pred+1e-8);
+      // Update weights with L2
+      for(let j=0;j<nFeatures;j++){
+        weights[j]-=TARA_ML_LEARNING_RATE*(err*x[j]+TARA_ML_L2*weights[j]);
+      }
+      bias-=TARA_ML_LEARNING_RATE*err;
+    }
+  }
+  // Compute training accuracy
+  let correct=0;
+  normX.forEach((x,i)=>{
+    const z=x.reduce((s,v,j)=>s+v*weights[j],bias);
+    const pred=_sigmoid(z)>=0.5?1:0;
+    if(pred===y[i])correct++;
+  });
+  const accuracy=correct/data.length;
+  // Feature importance: absolute weight values
+  const importance=TARA_ML_FEATURES.map((name,i)=>({name,weight:weights[i],absWeight:Math.abs(weights[i])}));
+  importance.sort((a,b)=>b.absWeight-a.absWeight);
+  return{weights,bias,means,stds,nFeatures,nTrades:data.length,accuracy,importance,trainedAt:Date.now()};
+};
+
+const taraMLPredict=(model,entry)=>{
+  if(!model||!model.weights)return null;
+  const raw=taraMLExtractFeatures(entry);
+  if(raw.length!==model.nFeatures)return null;
+  const norm=raw.map((v,i)=>(v-(model.means[i]||0))/(model.stds[i]||1));
+  const z=norm.reduce((s,v,j)=>s+v*(model.weights[j]||0),model.bias||0);
+  return _sigmoid(z); // 0-1 probability of WIN
+};
+
 const formatDuration=(seconds)=>{
   if(seconds==null||isNaN(seconds))return'—';
   const s=Math.max(0,Math.round(seconds));
@@ -464,7 +555,7 @@ const saveWeights=(w)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.06-v9.2.1-cross-asset-sound-csv-timing';
+const BASELINE_VERSION='2026.05.06-v9.2.2-ml-layer-analytics-page';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -3731,6 +3822,29 @@ const computeV99Posterior=(params)=>{
         reasoning.push(`[CROSS-ASSET] ${_otherA.asset} moved ${_otherDelta>0?'+':''}${Math.round(_otherDelta)}bps → CONTRARY to our ${_ourDir>0?'UP':'DOWN'} lean (-${_corrBoost.toFixed(1)})`);
       }
       rawSignalScores.crossAsset=_aligned?_corrBoost:-_corrBoost;
+    }
+  }
+  // V9.2.2: ML MODEL SIGNAL — logistic regression trained on historical trades.
+  //   Outputs a WIN probability (0-1). If model thinks this setup has high/low WIN
+  //   chance, boost/penalize the posterior by up to ±10 pts.
+  const _mlModel=params.mlModel;
+  if(_mlModel&&_mlModel.weights){
+    // Build a synthetic entry with current signal scores for prediction
+    const _mlEntry={
+      signalScoresAtLock:{...rawSignalScores},
+      calibratedPosteriorAtLock:50+totalScore*0.95, // approximate current posterior
+      atrBpsAtLock:atrBps,
+      regime:params.currentRegime||'RANGE-CHOP',
+    };
+    const _mlProb=taraMLPredict(_mlModel,_mlEntry);
+    if(_mlProb!=null){
+      // Convert 0-1 probability to a score. 0.5 = neutral, 0.7 = +10, 0.3 = -10.
+      const _mlScore=Math.round((_mlProb-0.5)*20); // range: -10 to +10
+      if(Math.abs(_mlScore)>=2){
+        totalScore+=_mlScore;
+        rawSignalScores.ml=_mlScore;
+        reasoning.push(`[ML] Model predicts ${(_mlProb*100).toFixed(0)}% WIN chance → ${_mlScore>0?'+':''}${_mlScore} (trained on ${_mlModel.nTrades} trades, ${(_mlModel.accuracy*100).toFixed(0)}% accuracy)`);
+      }
     }
   }
   // Convert to posterior
@@ -10718,6 +10832,215 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,for
 }
 
 // V9.1.2: Expanded news modal — full list, larger rows, with impact arrows.
+// V9.2.2: DEDICATED ANALYTICS PAGE — full-screen modal with deep performance analysis.
+//   Accessible via header button. Shows: WR heatmap by hour×day, P&L curve by asset,
+//   ML model status + feature importance, loss pattern distribution, regime×direction
+//   performance matrix, signal attribution chart.
+function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose}){
+  React.useEffect(()=>{
+    const onKey=(e)=>{if(e.key==='Escape')onClose();};
+    window.addEventListener('keydown',onKey);
+    return()=>window.removeEventListener('keydown',onKey);
+  },[onClose]);
+  const resolved=React.useMemo(()=>(taraCallLog||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')),[taraCallLog]);
+  // ── WR Heatmap by UTC hour × day of week ──
+  const heatmap=React.useMemo(()=>{
+    const grid={};
+    const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    days.forEach(d=>{grid[d]={};for(let h=0;h<24;h++)grid[d][h]={W:0,L:0};});
+    resolved.forEach(e=>{
+      const dt=new Date(e.id||e.time);
+      const day=days[dt.getDay()];
+      const hour=dt.getUTCHours();
+      if(grid[day]&&grid[day][hour]){
+        if(e.result==='WIN')grid[day][hour].W++;else grid[day][hour].L++;
+      }
+    });
+    return{grid,days};
+  },[resolved]);
+  // ── Loss pattern breakdown ──
+  const lossPatterns=React.useMemo(()=>{
+    const p={};
+    resolved.filter(e=>e.result==='LOSS').forEach(e=>{
+      const pat=e.lossPattern||'UNKNOWN';
+      if(!p[pat])p[pat]={n:0};
+      p[pat].n++;
+    });
+    return Object.entries(p).sort((a,b)=>b[1].n-a[1].n);
+  },[resolved]);
+  // ── Regime × Direction matrix ──
+  const regimeDir=React.useMemo(()=>{
+    const m={};
+    resolved.forEach(e=>{
+      const k=`${e.regime||'?'}|${e.dir||'?'}`;
+      if(!m[k])m[k]={W:0,L:0};
+      if(e.result==='WIN')m[k].W++;else m[k].L++;
+    });
+    return Object.entries(m).map(([k,v])=>{const[regime,dir]=k.split('|');const n=v.W+v.L;return{regime,dir,W:v.W,L:v.L,n,wr:n>0?v.W/n:0};}).filter(r=>r.n>=3).sort((a,b)=>b.n-a.n);
+  },[resolved]);
+  // ── P&L by asset ──
+  const pnlByAsset=React.useMemo(()=>{
+    const out={BTC:{trades:0,pnl:0,curve:[]},ETH:{trades:0,pnl:0,curve:[]}};
+    const sorted=[...resolved].filter(e=>e.betAmt>0).sort((a,b)=>(a.id||0)-(b.id||0));
+    sorted.forEach(e=>{
+      const a=e.asset||'BTC';
+      if(!out[a])out[a]={trades:0,pnl:0,curve:[]};
+      const d=e.result==='WIN'?(e.maxPay||0)-(e.betAmt||0):-(e.betAmt||0);
+      out[a].pnl+=d;out[a].trades++;
+      out[a].curve.push({pnl:out[a].pnl,i:out[a].curve.length});
+    });
+    return out;
+  },[resolved]);
+  // ── Signal attribution (from ML model) ──
+  const mlInfo=taraMLModel;
+  const _wrPct=resolved.length>0?Math.round((resolved.filter(e=>e.result==='WIN').length/resolved.length)*100):0;
+  // Mini SVG curve renderer
+  const _renderCurve=(curve,width=300,height=40)=>{
+    if(curve.length<2)return null;
+    const _min=Math.min(0,...curve.map(c=>c.pnl));
+    const _max=Math.max(0,...curve.map(c=>c.pnl));
+    const _range=Math.max(1,_max-_min);
+    const _points=curve.map((c,i)=>`${(i/(curve.length-1))*width},${height-((c.pnl-_min)/_range)*height}`).join(' ');
+    const _zeroY=height-((-_min/_range)*height);
+    const _final=curve[curve.length-1]?.pnl||0;
+    return React.createElement('svg',{viewBox:`0 0 ${width} ${height}`,className:'w-full',style:{height}},
+      React.createElement('line',{x1:0,y1:_zeroY,x2:width,y2:_zeroY,stroke:'rgba(232,233,228,0.12)',strokeDasharray:'3,3'}),
+      React.createElement('polyline',{points:_points,fill:'none',stroke:_final>=0?'rgb(110,231,183)':'rgb(244,114,182)',strokeWidth:1.5,strokeLinejoin:'round'})
+    );
+  };
+  return React.createElement('div',{
+    className:'fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto',
+    style:{background:'rgba(0,0,0,0.88)',backdropFilter:'blur(6px)'},
+    onClick:onClose,
+  },
+    React.createElement('div',{
+      className:'w-full max-w-4xl mx-2 my-4 sm:my-8 rounded-xl',
+      style:{background:'#181A19',border:'1px solid rgba(229,200,112,0.20)',boxShadow:'0 0 60px rgba(229,200,112,0.10)'},
+      onClick:e=>e.stopPropagation(),
+    },
+      // Header
+      React.createElement('div',{className:'sticky top-0 z-10 flex items-center justify-between px-5 py-4 rounded-t-xl',style:{background:'#181A19',borderBottom:'1px solid rgba(232,233,228,0.10)'}},
+        React.createElement('div',{className:'flex items-baseline gap-3'},
+          React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Analytics'),
+          React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:T2_GOLD}},`${resolved.length} resolved · ${_wrPct}% WR`),
+          mlInfo&&React.createElement('span',{className:'text-[10px] uppercase tracking-[0.14em] px-2 py-0.5 rounded',style:{background:'rgba(165,180,252,0.10)',color:'rgba(165,180,252,0.85)',border:'1px solid rgba(165,180,252,0.25)'}},`ML: ${(mlInfo.accuracy*100).toFixed(0)}% acc · ${mlInfo.nTrades}t`)
+        ),
+        React.createElement('button',{onClick:onClose,className:'w-8 h-8 rounded flex items-center justify-center text-[#E8E9E4]/50 hover:text-white hover:bg-[#E8E9E4]/5 text-xl'},'✕')
+      ),
+      React.createElement('div',{className:'p-5 space-y-6'},
+        // ═══ WR HEATMAP ═══
+        React.createElement('div',null,
+          React.createElement('div',{className:'text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/50 mb-3'},'Win Rate Heatmap · UTC Hour × Day'),
+          React.createElement('div',{className:'overflow-x-auto'},
+            React.createElement('table',{className:'w-full text-[10px] tabular-nums',style:{minWidth:600}},
+              React.createElement('thead',null,
+                React.createElement('tr',null,
+                  React.createElement('th',{className:'text-left text-[#E8E9E4]/40 p-1'},''),
+                  ...[...Array(24)].map((_,h)=>React.createElement('th',{key:h,className:'text-center text-[#E8E9E4]/30 p-0.5',style:{fontSize:'8px'}},h))
+                )
+              ),
+              React.createElement('tbody',null,
+                heatmap.days.map(day=>React.createElement('tr',{key:day},
+                  React.createElement('td',{className:'text-[#E8E9E4]/50 font-bold pr-2 py-0.5'},day),
+                  ...[...Array(24)].map((_,h)=>{
+                    const cell=heatmap.grid[day][h];
+                    const n=cell.W+cell.L;
+                    const wr=n>0?cell.W/n:null;
+                    const bg=wr==null?'transparent':wr>=0.7?'rgba(110,231,183,0.35)':wr>=0.55?'rgba(110,231,183,0.15)':wr>=0.45?'rgba(232,233,228,0.08)':wr>=0.3?'rgba(244,114,182,0.15)':'rgba(244,114,182,0.35)';
+                    return React.createElement('td',{key:h,className:'text-center p-0.5',style:{background:bg,borderRadius:2},title:`${day} ${h}:00 UTC — ${n} trades, ${wr!=null?Math.round(wr*100)+'%':'no data'}`},
+                      n>0?React.createElement('span',{style:{color:wr>=0.55?'rgb(110,231,183)':wr<0.45?'rgb(244,114,182)':'rgba(232,233,228,0.6)',fontSize:'9px'}},n):null
+                    );
+                  })
+                ))
+              )
+            )
+          )
+        ),
+        // ═══ P&L BY ASSET ═══
+        React.createElement('div',{className:'grid grid-cols-1 sm:grid-cols-2 gap-4'},
+          ['BTC','ETH'].map(asset=>{
+            const d=pnlByAsset[asset];
+            if(!d||d.trades===0)return React.createElement('div',{key:asset,className:'p-3 rounded-lg bg-[#111312] border border-[#E8E9E4]/5'},
+              React.createElement('div',{className:'text-[10px] uppercase tracking-wider font-bold',style:{color:asset==='BTC'?'rgb(247,147,26)':'rgb(98,126,234)'}},`${asset} P&L`),
+              React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/40 italic mt-1'},'No trades with bet amounts yet')
+            );
+            return React.createElement('div',{key:asset,className:'p-3 rounded-lg bg-[#111312] border border-[#E8E9E4]/5'},
+              React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
+                React.createElement('span',{className:'text-[10px] uppercase tracking-wider font-bold',style:{color:asset==='BTC'?'rgb(247,147,26)':'rgb(98,126,234)'}},`${asset} · ${d.trades} trades`),
+                React.createElement('span',{className:'text-sm font-bold tabular-nums',style:{color:d.pnl>=0?'rgb(110,231,183)':'rgb(244,114,182)'}},`${d.pnl>=0?'+':''}$${d.pnl.toFixed(2)}`)
+              ),
+              _renderCurve(d.curve)
+            );
+          })
+        ),
+        // ═══ REGIME × DIRECTION MATRIX ═══
+        React.createElement('div',null,
+          React.createElement('div',{className:'text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/50 mb-3'},'Regime × Direction Performance'),
+          React.createElement('div',{className:'grid grid-cols-1 sm:grid-cols-2 gap-2'},
+            regimeDir.map((r,i)=>{
+              const wrPct=Math.round(r.wr*100);
+              const color=wrPct>=65?'rgb(110,231,183)':wrPct>=50?'rgba(229,200,112,0.85)':'rgb(244,114,182)';
+              return React.createElement('div',{key:i,className:'flex items-center justify-between p-2 rounded bg-[#111312] border border-[#E8E9E4]/5'},
+                React.createElement('div',{className:'flex items-center gap-2 min-w-0'},
+                  React.createElement('span',{className:'text-[10px] font-bold',style:{color:r.dir==='UP'?'rgb(110,231,183)':'rgb(244,114,182)'}},r.dir==='UP'?'▲':'▼'),
+                  React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/70 truncate'},r.regime)
+                ),
+                React.createElement('div',{className:'flex items-center gap-3 shrink-0'},
+                  React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40 tabular-nums'},`${r.W}W·${r.L}L`),
+                  React.createElement('span',{className:'text-[12px] font-bold tabular-nums',style:{color}},`${wrPct}%`)
+                )
+              );
+            })
+          )
+        ),
+        // ═══ LOSS PATTERNS ═══
+        lossPatterns.length>0&&React.createElement('div',null,
+          React.createElement('div',{className:'text-[10px] uppercase tracking-[0.18em] font-bold text-[#E8E9E4]/50 mb-3'},'Loss Pattern Distribution'),
+          React.createElement('div',{className:'space-y-1.5'},
+            lossPatterns.map(([pat,{n}],i)=>{
+              const _total=resolved.filter(e=>e.result==='LOSS').length;
+              const pct=_total>0?(n/_total)*100:0;
+              const _labels={LATE_REVERSAL:'Late reversal — was winning, flipped',MID_REVERSAL:'Mid-window fade',EARLY_PEAK:'Early peak, sustained loss',WRONG_FROM_START:'Never above water',WHALE_SPIKE:'Contrary whale spike',MACRO_SHOCK:'Macro event shock',UNKNOWN:'Unclassified'};
+              return React.createElement('div',{key:i,className:'flex items-center gap-3 text-[11px]'},
+                React.createElement('span',{className:'text-[#E8E9E4]/50 w-32 shrink-0 truncate'},_labels[pat]||pat),
+                React.createElement('div',{className:'flex-1 h-2 bg-[#111312] rounded-full overflow-hidden'},
+                  React.createElement('div',{className:'h-full rounded-full transition-all',style:{width:`${pct}%`,background:'rgba(244,114,182,0.6)'}})
+                ),
+                React.createElement('span',{className:'text-[#E8E9E4]/40 tabular-nums w-16 text-right'},`${n} (${pct.toFixed(0)}%)`)
+              );
+            })
+          )
+        ),
+        // ═══ ML MODEL STATUS ═══
+        mlInfo?React.createElement('div',null,
+          React.createElement('div',{className:'text-[10px] uppercase tracking-[0.18em] font-bold mb-3',style:{color:'rgba(165,180,252,0.85)'}},'ML Model · Feature Importance'),
+          React.createElement('div',{className:'p-3 rounded-lg bg-[#111312] border border-[#E8E9E4]/5'},
+            React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
+              React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/70'},`Logistic regression · ${mlInfo.nTrades} training samples · ${(mlInfo.accuracy*100).toFixed(1)}% accuracy`),
+              React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40'},`Trained ${new Date(mlInfo.trainedAt).toLocaleTimeString()}`)
+            ),
+            React.createElement('div',{className:'space-y-1'},
+              (mlInfo.importance||[]).slice(0,10).map((f,i)=>{
+                const maxW=Math.max(...(mlInfo.importance||[]).map(x=>x.absWeight));
+                const barPct=maxW>0?(f.absWeight/maxW)*100:0;
+                return React.createElement('div',{key:i,className:'flex items-center gap-2 text-[11px]'},
+                  React.createElement('span',{className:'text-[#E8E9E4]/60 w-28 shrink-0 truncate'},f.name),
+                  React.createElement('div',{className:'flex-1 h-1.5 bg-[#0E100F] rounded-full overflow-hidden'},
+                    React.createElement('div',{className:'h-full rounded-full',style:{width:`${barPct}%`,background:f.weight>=0?'rgb(110,231,183)':'rgb(244,114,182)'}})
+                  ),
+                  React.createElement('span',{className:'tabular-nums w-14 text-right',style:{color:f.weight>=0?'rgb(110,231,183)':'rgb(244,114,182)',fontSize:'10px'}},`${f.weight>=0?'+':''}${f.weight.toFixed(3)}`)
+                );
+              })
+            )
+          )
+        ):React.createElement('div',{className:'p-3 rounded-lg bg-[#111312] border border-[#E8E9E4]/5 text-[11px] text-[#E8E9E4]/40'},
+          `ML model needs ≥${TARA_ML_MIN_TRADES} resolved trades with signal data. Currently: ${resolved.filter(e=>e.signalScoresAtLock).length}.`
+        ),
+      )
+    )
+  );
+}
+
 function NewsExpandModal({news,macroEvents,onClose,formatAge}){
   React.useEffect(()=>{
     const onKey=(e)=>{if(e.key==='Escape')onClose();};
@@ -12264,6 +12587,15 @@ function TaraApp(){
   //   this to force SEARCH mode for 5s after rollover, preventing stale-analysis
   //   instant-lock on the new window.
   const _rolloverGraceRef=useRef(0);
+  // V9.2.2: ML model state — declared here, training effect runs after taraCallLog is available (below).
+  const[taraMLModel,setTaraMLModel]=useState(()=>{
+    try{
+      const stored=localStorage.getItem('taraML_model_v1');
+      if(stored)return JSON.parse(stored);
+    }catch(_){}
+    return null;
+  });
+  const _mlTrainDebounceRef=useRef(null);
   // V9.2.1: Cross-asset correlation. Stores the OTHER asset's recent price data
   //   received via BroadcastChannel from the other tab. Used by the engine to
   //   detect correlation (BTC dumps → penalize ETH UP, etc).
@@ -12562,6 +12894,26 @@ function TaraApp(){
   React.useEffect(()=>{
     try{localStorage.setItem('taraCallScorecards_v1',JSON.stringify(taraScorecards));}catch(e){}
   },[taraScorecards]);
+  // V9.2.2: ML auto-retrain — runs after taraCallLog is in scope. Debounced 2s.
+  useEffect(()=>{
+    if(_mlTrainDebounceRef.current)clearTimeout(_mlTrainDebounceRef.current);
+    _mlTrainDebounceRef.current=setTimeout(()=>{
+      const resolved=(taraCallLog||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&e.signalScoresAtLock);
+      if(resolved.length<TARA_ML_MIN_TRADES){
+        try{console.info(`[ML] ${resolved.length}/${TARA_ML_MIN_TRADES} resolved trades with signals — need more data`);}catch(_){}
+        return;
+      }
+      const model=taraMLTrain(resolved);
+      if(model){
+        setTaraMLModel(model);
+        try{
+          localStorage.setItem('taraML_model_v1',JSON.stringify(model));
+          console.info(`[ML] Trained on ${model.nTrades} trades — ${(model.accuracy*100).toFixed(1)}% acc. Top: ${model.importance.slice(0,3).map(f=>`${f.name}(${f.weight>=0?'+':''}${f.weight.toFixed(3)})`).join(', ')}`);
+        }catch(_){}
+      }
+    },2000);
+    return()=>{if(_mlTrainDebounceRef.current)clearTimeout(_mlTrainDebounceRef.current);};
+  },[taraCallLog]);
   const taraCallLogRef=useRef(taraCallLog);
   taraCallLogRef.current=taraCallLog;
   // V8.1: Track if we have user-action writes pending pre-hydration. If true, force a
@@ -15988,7 +16340,7 @@ function TaraApp(){
       // V3.1.7: tapeRef and ticksRef passed for volume-flow signal computation
       // V3.1.7+: windowHighRef/windowLowRef passed for window-amplitude awareness
       // V3.1.9: windowHighTime/windowLowTime/windowOpenTime for structure detection (TRENDING/WHIPSAW/etc.)
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current});
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
@@ -19020,8 +19372,9 @@ function TaraApp(){
   const[baselineMeta,setBaselineMeta]=React.useState(null); // {savedAt, sourceDevice, sizes}
   const[baselineBusy,setBaselineBusy]=React.useState(false);
   const[syncMenuOpen,setSyncMenuOpen]=React.useState(false);
-  // V9.2.0: Schedule modal state for projections-column schedule (separate from RightPanel's)
   const[scheduleModalMain,setScheduleModalMain]=React.useState(false);
+  // V9.2.2: Dedicated analytics page
+  const[analyticsPageOpen,setAnalyticsPageOpen]=React.useState(false);
   // Lightweight device label so user can distinguish baselines they saved earlier
   const _deviceLabel=React.useMemo(()=>{
     try{
@@ -19620,6 +19973,8 @@ function TaraApp(){
       {/* V134: Session-start status check */}
       <SessionStartCheck open={showSessionStart} onClose={()=>setShowSessionStart(false)} windowType={windowType} scorecards={scorecards} tradeLog={tradeLog} regime={analysis?.regime} velocityRegime={analysis?.velocityRegime} calibration={calibration} baselineDrift={baselineDrift} resetToLatestBaseline={resetToLatestBaseline} runSyncWithProgress={runSyncWithProgress} syncState={syncState} resetDirectionalBias={resetDirectionalBias} resetFreshStart={resetFreshStart}/>
       {showStats&&<StatsView tradeLog={tradeLog} scorecards={scorecards} taraCallLog={displayedCallLog} onClose={()=>setShowStats(false)}/>}
+      {/* V9.2.2: Dedicated Analytics Page */}
+      {analyticsPageOpen&&<TaraAnalyticsPage taraCallLog={taraCallLog} taraMLModel={taraMLModel} onClose={()=>setAnalyticsPageOpen(false)}/>}
       {showBrain&&<BrainView analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>setShowBrain(false)}/>}
 
       {/* V9.1.6: Sync menu — opens when SyncStatusPill is clicked. Three options:
@@ -19741,7 +20096,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.2.1
+              9.2.2
             </span>
           </div>
 
@@ -19858,7 +20213,8 @@ function TaraApp(){
             {/* Hidden on mobile — accessible via mobile tab nav or sm+ */}
             <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="hidden sm:flex"/>
             <button onClick={()=>setShowSettings(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors'}><IC.Link className="w-3.5 h-3.5"/></button>
-            <button onClick={()=>setShowAnalytics(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors'} title="Analytics"><IC.BarChart className="w-3.5 h-3.5"/></button>
+            <button onClick={()=>setShowAnalytics(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors'} title="Training Engine"><IC.BarChart className="w-3.5 h-3.5"/></button>
+            <button onClick={()=>setAnalyticsPageOpen(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-indigo-500/20 text-indigo-400/60 hover:text-indigo-400 transition-colors'} title="Analytics Page">📊</button>
             <button onClick={()=>setShowHelp(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors'}><IC.Help className="w-3.5 h-3.5"/></button>
           </div>
         </div>
