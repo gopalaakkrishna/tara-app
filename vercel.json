@@ -1,14 +1,12 @@
 {
-  "functions": {
-    "api/news.js": {
-      "memory": 1024,
-      "maxDuration": 10
-    }
-  },
   "rewrites": [
     {
       "source": "/api/kalshi/:path*",
       "destination": "https://api.elections.kalshi.com/trade-api/v2/:path*"
+    },
+    {
+      "source": "/api/news",
+      "destination": "https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fwww.coindesk.com%2Farc%2Foutboundfeeds%2Frss%2F"
     }
   ],
   "headers": [
