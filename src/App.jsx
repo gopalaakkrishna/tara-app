@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.8.4-stale-feed-guard';
+const BASELINE_VERSION='2026.05.07-v9.8.5-source-aware-candles';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -885,14 +885,19 @@ const PRICE_SOURCES={
     url:(cfg,asset)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/ticker`,
     parsePrice:(d)=>d?.price?parseFloat(d.price):null,
     parseSize:(d)=>d?.size?parseFloat(d.size):0.1,
+    // Coinbase candles: granularity in seconds (60, 300, 900, 3600, ...)
+    //   Returns: [[time, low, high, open, close, volume], ...] newest-first
+    candleUrl:(cfg,asset,granSec)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/candles?granularity=${granSec}`,
+    parseCandles:(d)=>{
+      if(!Array.isArray(d))return[];
+      return d.map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
+    },
   },
   kraken:{
     name:'Kraken',
     label:'KR',
     url:(_cfg,asset)=>`https://api.kraken.com/0/public/Ticker?pair=${asset==='BTC'?'XBTUSD':'ETHUSD'}`,
     parsePrice:(d)=>{
-      // Kraken returns {result:{XXBTZUSD:{c:["79642.90","0.001"],...}}}.
-      // Pair key varies (XXBTZUSD vs XBTUSD), so grab whatever's first.
       const _r=d?.result||{};const _k=Object.keys(_r)[0];
       const _last=_r[_k]?.c?.[0];return _last?parseFloat(_last):null;
     },
@@ -900,15 +905,55 @@ const PRICE_SOURCES={
       const _r=d?.result||{};const _k=Object.keys(_r)[0];
       const _sz=_r[_k]?.c?.[1];return _sz?parseFloat(_sz):0.1;
     },
+    // Kraken OHLC: interval in MINUTES (1, 5, 15, 30, 60, 240, 1440)
+    //   Returns: {result: {XXBTZUSD: [[time, open, high, low, close, vwap, volume, count], ...], last: ...}}
+    //   Oldest-first natively → reverse to newest-first to match Coinbase consumer shape.
+    candleUrl:(_cfg,asset,granSec)=>{
+      const _granToMin={60:1,180:3,300:5,900:15,1800:30,3600:60,14400:240,86400:1440};
+      const _intvl=_granToMin[granSec]||1;
+      return `https://api.kraken.com/0/public/OHLC?pair=${asset==='BTC'?'XBTUSD':'ETHUSD'}&interval=${_intvl}`;
+    },
+    parseCandles:(d)=>{
+      const _r=d?.result||{};
+      // Pair key varies (XBTUSD vs XXBTZUSD vs ETHUSD vs XETHZUSD). Skip 'last' meta key.
+      const _k=Object.keys(_r).find(k=>k!=='last'&&Array.isArray(_r[k]));
+      if(!_k)return[];
+      return _r[_k].map(c=>({
+        time:parseInt(c[0]),
+        o:parseFloat(c[1]),
+        h:parseFloat(c[2]),
+        l:parseFloat(c[3]),
+        c:parseFloat(c[4]),
+        v:parseFloat(c[6]), // index 5 is vwap, 6 is volume
+      })).reverse(); // newest-first to match Coinbase
+    },
   },
   bitstamp:{
     name:'Bitstamp',
     label:'BS',
     url:(_cfg,asset)=>`https://www.bitstamp.net/api/v2/ticker/${asset==='BTC'?'btcusd':'ethusd'}/`,
     parsePrice:(d)=>d?.last?parseFloat(d.last):null,
-    // Bitstamp ticker doesn't expose last-trade size. Use placeholder; it only
-    // affects tape volume bookkeeping and isn't a primary signal at this level.
     parseSize:(_d)=>0.1,
+    // Bitstamp OHLC: step in SECONDS (60, 300, 900, 3600, ...). Same units as Coinbase.
+    //   Returns: {data: {pair, ohlc: [{timestamp, open, high, low, close, volume}, ...]}}
+    //   Oldest-first natively → reverse for newest-first.
+    candleUrl:(_cfg,asset,granSec)=>{
+      const _supportedSteps=[60,180,300,900,1800,3600,7200,14400,21600,43200,86400,259200];
+      const _step=_supportedSteps.includes(granSec)?granSec:60;
+      return `https://www.bitstamp.net/api/v2/ohlc/${asset==='BTC'?'btcusd':'ethusd'}/?step=${_step}&limit=300`;
+    },
+    parseCandles:(d)=>{
+      const _ohlc=d?.data?.ohlc;
+      if(!Array.isArray(_ohlc))return[];
+      return _ohlc.map(c=>({
+        time:parseInt(c.timestamp),
+        o:parseFloat(c.open),
+        h:parseFloat(c.high),
+        l:parseFloat(c.low),
+        c:parseFloat(c.close),
+        v:parseFloat(c.volume),
+      })).reverse(); // newest-first to match Coinbase
+    },
   },
 };
 const PRICE_SOURCE_KEYS=Object.keys(PRICE_SOURCES);
@@ -2975,7 +3020,8 @@ const computeVolumeProfile=(history)=>{
 // This hook only fetches the depth endpoint, which is the time-critical one.
 // V134: Fetch candles at 1m, 3m, 5m, 15m for HPotter FGT analysis
 // Returns { c1m: [...], c3m: [...], c5m: [...], c15m: [...] }
-const useMultiTFCandles=(asset)=>{
+// V9.8.5: priceSource arg (Coinbase / Kraken / Bitstamp). Re-runs effect on switch.
+const useMultiTFCandles=(asset,priceSource)=>{
   const[tfCandles,setTfCandles]=useState({c1m:[],c3m:[],c5m:[],c15m:[]});
   useEffect(()=>{
     if(typeof window==='undefined')return;
@@ -2983,14 +3029,17 @@ const useMultiTFCandles=(asset)=>{
     const _cfg=ASSET_CONFIG[asset]||ASSET_CONFIG.BTC;
     const _cbSym=_cfg.cb||'BTC-USD';
     const _bnSym=_cfg.binance||'BTCUSDT';
+    // V9.8.5: resolve active source once per effect run
+    const _src=(priceSource&&PRICE_SOURCES[priceSource])||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];
     const fetchInterval=async(label,gran)=>{
       try{
-        // Coinbase first (more permissive CORS)
-        const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/candles?granularity=${gran}`,{cache:'no-store'});
-        if(!r.ok)throw new Error('CB '+r.status);
+        // V9.8.5: use active price source (was Coinbase only)
+        const r=await fetch(_src.candleUrl(_cfg,asset,gran),{cache:'no-store'});
+        if(!r.ok)throw new Error(_src.label+' '+r.status);
         const d=await r.json();
-        if(!Array.isArray(d))throw new Error('bad shape');
-        return d.slice(0,300).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
+        const _candles=_src.parseCandles(d);
+        if(_candles.length===0)throw new Error('empty');
+        return _candles.slice(0,300);
       }catch(e){
         // V9.7.5: Fallback Bybit (Binance global blocked in US).
         //   Bybit kline returns [start, o, h, l, c, vol, turnover], newest first.
@@ -3035,7 +3084,7 @@ const useMultiTFCandles=(asset)=>{
     fetchAll();
     const iv=setInterval(fetchAll,30000);
     return()=>{mounted=false;clearInterval(iv);};
-  },[asset]);
+  },[asset,priceSource]);
   return tfCandles;
 };
 
@@ -16722,7 +16771,7 @@ function TaraApp(){
   const velocityRef=useVelocity(tickHistoryRef,currentPrice,targetMargin);
   const bloomberg=useBloomberg();
   const depthFlash=useDepthFlash(); // V134: 2.5s order book polling
-  const tfCandles=useMultiTFCandles(currentAsset); // V134: HPotter FGT multi-timeframe data
+  const tfCandles=useMultiTFCandles(currentAsset,priceSource); // V134: HPotter FGT multi-timeframe data — V9.8.5 source-aware
   const{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal,tapeWindows}=useGlobalTape(currentAsset);
   const marketSessions=useMemo(()=>getMarketSessions(),[timeState.currentHour]);
   const[klines,setKlines]=useState([]);
@@ -16933,22 +16982,27 @@ function TaraApp(){
     }
   },[currentPrice]);
 
-  // Kline fetch with dual fallback
+  // Kline fetch with dual fallback — V9.8.5 source-aware (was Coinbase only)
   useEffect(()=>{
     const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;
-    const _cbSym=_cfg.cb||'BTC-USD';
     const _bnSym=_cfg.binance||'BTCUSDT';
+    const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];
     const fetch_=async()=>{
       try{
         const cbMap={'1m':60,'3m':60,'5m':300,'15m':900,'30m':900,'1h':3600};
         const gran=cbMap[chartRes]||60;
-        const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/candles?granularity=${gran}`);
-        if(!r.ok)throw new Error('CB fail');
+        const r=await fetch(_src.candleUrl(_cfg,currentAsset,gran),{cache:'no-store'});
+        if(!r.ok)throw new Error(_src.label+' '+r.status);
         const d=await r.json();
-        const f=d.map(c=>({time:c[0],o:parseFloat(c[3]),h:parseFloat(c[2]),l:parseFloat(c[1]),c:parseFloat(c[4]),v:parseFloat(c[5])})).reverse();
+        const _candles=_src.parseCandles(d);
+        if(_candles.length===0)throw new Error('empty');
+        // Chart consumer wants oldest-first → reverse from newest-first
+        const f=_candles.map(c=>({time:c.time,o:c.o,h:c.h,l:c.l,c:c.c,v:c.v})).reverse();
         setKlines(f);
       }catch(e){
-        // V9.7.5: Bybit fallback (Binance global blocked in US).
+        // V9.7.5: Bybit fallback (Binance global blocked in US). Kept as last resort
+        //   even though it's typically blocked too — better than nothing if both
+        //   primary and active source fail simultaneously.
         try{
           const ivMap={'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60'};
           const ivb=ivMap[chartRes]||'1';
@@ -16961,7 +17015,7 @@ function TaraApp(){
       }
     };
     fetch_();const iv=setInterval(fetch_,10000);return()=>clearInterval(iv);
-  },[chartRes,currentAsset]);
+  },[chartRes,currentAsset,priceSource]);
 
   // Live price — V9.8.4 source-aware (Coinbase / Kraken / Bitstamp via PRICE_SOURCES)
   //   Tracks lastPriceChangeRef so the stale-tick guard can detect frozen feeds.
@@ -17068,24 +17122,20 @@ function TaraApp(){
           if(_prev)shadowTaraByAssetRef.current[_shadowAsset]={..._prev,updatedAt:Date.now()};
         };
         const _gran=windowType==='15m'?900:300;
-        // V9.7.2: dual-source candle fetch with corsproxy fallback (same pattern V7.10.7 uses
-        //   for Kalshi). Coinbase rate-limits per-endpoint-per-IP; when active loop also polls
-        //   /candles every 5s plus shadow polls /candles every 2s, we sometimes hit the limit.
-        //   Try direct first (fast path), then fall back to corsproxy.io. Any error gets logged
-        //   to console.warn so it surfaces in devtools without needing to tap the diag panel.
-        const _cbCandlesUrl=`https://api.exchange.coinbase.com/products/${_cfg.cb}/candles?granularity=${_gran}`;
-        let _candleResp=await fetch(_cbCandlesUrl,{signal:AbortSignal.timeout(5000)}).catch(e=>{_logErr('candles fetch threw: '+(e?.message||String(e)));console.warn(`[shadow ${_shadowAsset}] direct candles failed:`,e?.message||e);return null;});
-        if(!_candleResp||!_candleResp.ok){
-          if(_candleResp&&!_candleResp.ok)console.warn(`[shadow ${_shadowAsset}] direct candles http ${_candleResp.status}, trying corsproxy`);
-          // Fallback through corsproxy
-          _candleResp=await fetch(`https://corsproxy.io/?url=${encodeURIComponent(_cbCandlesUrl)}`,{signal:AbortSignal.timeout(7000)}).catch(e=>{_logErr('candles corsproxy threw: '+(e?.message||String(e)));console.warn(`[shadow ${_shadowAsset}] corsproxy candles failed:`,e?.message||e);return null;});
-        }
-        if(!_candleResp){_diag.candleFails++;_logErr('candles both sources null');_heartbeat();return;}
-        if(!_candleResp.ok){_diag.candleFails++;_logErr(`candles http ${_candleResp.status} (both sources)`);console.warn(`[shadow ${_shadowAsset}] both candle sources failed, last status:`,_candleResp.status);_heartbeat();return;}
+        // V9.8.5: source-aware candle fetch (was Coinbase only with corsproxy fallback).
+        //   When user is on Kraken or Bitstamp, those sources don't share Coinbase's rate
+        //   limit, so the corsproxy retry isn't needed. If active source fails, heartbeat
+        //   and let the next poll (2s later) try again — same effective resilience.
+        const _shadowSrc=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];
+        const _candleUrl=_shadowSrc.candleUrl(_cfg,_shadowAsset,_gran);
+        let _candleResp=await fetch(_candleUrl,{signal:AbortSignal.timeout(5000)}).catch(e=>{_logErr('candles fetch threw: '+(e?.message||String(e)));console.warn(`[shadow ${_shadowAsset}] ${_shadowSrc.label} candles failed:`,e?.message||e);return null;});
+        if(!_candleResp){_diag.candleFails++;_logErr('candles null');_heartbeat();return;}
+        if(!_candleResp.ok){_diag.candleFails++;_logErr(`candles http ${_candleResp.status} (${_shadowSrc.label})`);console.warn(`[shadow ${_shadowAsset}] ${_shadowSrc.label} candles failed, status:`,_candleResp.status);_heartbeat();return;}
         if(_cancelled){_heartbeat();return;}
         const _candleData=await _candleResp.json();
-        if(!Array.isArray(_candleData)||_candleData.length<5){_diag.candleEmpty++;_logErr(`candles empty (got ${Array.isArray(_candleData)?_candleData.length:typeof _candleData})`);console.warn(`[shadow ${_shadowAsset}] empty candle response`);_heartbeat();return;}
-        const _bars=_candleData.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
+        const _parsedCandles=_shadowSrc.parseCandles(_candleData);
+        if(!Array.isArray(_parsedCandles)||_parsedCandles.length<5){_diag.candleEmpty++;_logErr(`candles empty (got ${_parsedCandles?.length||0} parsed from ${_shadowSrc.label})`);console.warn(`[shadow ${_shadowAsset}] empty candle response from ${_shadowSrc.label}`);_heartbeat();return;}
+        const _bars=_parsedCandles.slice(0,60);
         const _shadowPrice=priceByAssetRef.current?.[_shadowAsset]?.price||_bars[0]?.c||0;
         if(_shadowPrice<=0){_diag.priceMissing++;_logErr(`no price (priceByAssetRef=${priceByAssetRef.current?.[_shadowAsset]?.price||'null'}, bars[0].c=${_bars[0]?.c||'null'})`);console.warn(`[shadow ${_shadowAsset}] no price extractable`);_heartbeat();return;}
         // Fetch the shadow asset's Kalshi strike. Reuse the events endpoint.
@@ -17227,10 +17277,14 @@ function TaraApp(){
   //   things it actually depends on) and gets time-of-day fresh on each tick
   //   from Date.now() inside _runShadow. The tick itself is the cadence, not
   //   the effect re-run.
-  },[currentAsset,windowType,regimeMemory]);
+  //   V9.8.5: priceSource added so shadow follows the active source toggle.
+  },[currentAsset,windowType,regimeMemory,priceSource]);
 
-  // Heavy data
-  useEffect(()=>{const _cbSym=ASSET_CONFIG[currentAsset]?.cb||'BTC-USD';const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const f=async()=>{try{const gran=windowType==='15m'?900:300;const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/candles?granularity=${gran}`);if(r.ok){const d=await r.json();if(Array.isArray(d))setHistory(d.slice(0,60).map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])})));}const r2=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/book?level=2`);if(r2.ok){const d2=await r2.json();if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});
+  // Heavy data — V9.8.5: candles use active source, book stays Coinbase
+  //   Order book stays on Coinbase because Kraken/Bitstamp use different response
+  //   shapes and book data isn't critical for direction signals (only liquidity
+  //   awareness around the strike).
+  useEffect(()=>{const _cbSym=ASSET_CONFIG[currentAsset]?.cb||'BTC-USD';const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const gran=windowType==='15m'?900:300;try{const r=await fetch(_src.candleUrl(_cfg,currentAsset,gran),{cache:'no-store'});if(r.ok){const d=await r.json();const _candles=_src.parseCandles(d);if(_candles.length>0)setHistory(_candles.slice(0,60));}}catch(_e){}const r2=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/book?level=2`);if(r2.ok){const d2=await r2.json();if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});
     // V9.1.4: multi-band depth — TIGHT (0.05%), CLOSE (0.1%), STANDARD (0.2%), WIDE (0.5%).
     //   Each band captures bid and ask sizes within that distance from strike. Fed to
     //   DepthStrip for the 4-column breakdown that mirrors TapeStrip's time windows.
@@ -17241,7 +17295,7 @@ function TaraApp(){
       d2.bids.forEach(([p,s])=>{const _p=parseFloat(p),_sz=parseFloat(s);if(!Number.isFinite(_p)||!Number.isFinite(_sz)||_p>_strike)return;const _diff=_strike-_p;if(_diff<=_r05)_bands.tight.b+=_sz*_p;if(_diff<=_r10)_bands.close.b+=_sz*_p;if(_diff<=_r20)_bands.std.b+=_sz*_p;if(_diff<=_r50)_bands.wide.b+=_sz*_p;});
       d2.asks.forEach(([p,s])=>{const _p=parseFloat(p),_sz=parseFloat(s);if(!Number.isFinite(_p)||!Number.isFinite(_sz)||_p<_strike)return;const _diff=_p-_strike;if(_diff<=_r05)_bands.tight.a+=_sz*_p;if(_diff<=_r10)_bands.close.a+=_sz*_p;if(_diff<=_r20)_bands.std.a+=_sz*_p;if(_diff<=_r50)_bands.wide.a+=_sz*_p;});
     }
-    setOrderBook({localBuy:lb,localSell:ls,imbalance:ls===0?1:lb/ls,bands:_bands});}}setIsLoading(false);}catch(e){setIsLoading(false);}};f();const iv=setInterval(f,5000);return()=>clearInterval(iv);},[targetMargin,windowType,currentAsset]);
+    setOrderBook({localBuy:lb,localSell:ls,imbalance:ls===0?1:lb/ls,bands:_bands});}}setIsLoading(false);}catch(e){setIsLoading(false);}};f();const iv=setInterval(f,5000);return()=>clearInterval(iv);},[targetMargin,windowType,currentAsset,priceSource]);
 
   // ── AUTO-STRIKE: Kalshi (15m) / Polymarket (5m) / Coinbase fallback ──
   const[strikeSource,setStrikeSource]=useState('auto');
@@ -23370,7 +23424,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.4
+              9.8.5
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → Bitstamp.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s). */}
