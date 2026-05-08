@@ -924,10 +924,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.08-v9.8.19-news-impact-toasts';
+const BASELINE_VERSION='2026.05.08-v9.9.0-predictive-reversal';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.8.19';
+const TARA_VERSION_DISPLAY='Tara 9.9.0';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -6686,7 +6686,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   );
 }
 
-function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition}){
+function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,reversalRisk}){
   if(!taraCall)return null;
     const tc=taraCall;
     const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
@@ -7494,6 +7494,26 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           bestWindowsToday={bestWindowsToday}
         />
 
+        {/* V9.9.0: Predictive reversal — chip + Tara-native forecast SVG. Renders only
+            when reversalRisk.flag is WATCH or EXPECTED (NONE keeps clean locks visually
+            clean). Wrapped in min-w-0 + overflow-hidden so the SVG never causes horizontal
+            overflow on narrow viewports. */}
+        {reversalRisk&&reversalRisk.flag&&reversalRisk.flag!=='NONE'?React.createElement('div',{
+          className:'flex flex-col gap-2 mt-2 min-w-0 overflow-hidden',
+        },[
+          React.createElement(ReversalRiskChip,{key:'chip',reversalRisk}),
+          React.createElement(ReversalForecastSVG,{
+            key:'svg',
+            reversalRisk,
+            dir:taraCall?.direction||taraCall?.call,
+            currentPrice:analysis?.currentPrice,
+            strikePrice:analysis?.targetMargin,
+            atrBps:analysis?.atrBps,
+            timeRemainingSec:timeState?.totalSecondsRemaining||((timeState?.minsRemaining||0)*60+(timeState?.secsRemaining||0)),
+            totalWindowSec:windowType==='5m'?300:900,
+          }),
+        ]):null}
+
         {/* V5.6.1: Tara's Memory — last 6 calls with results. Synced to Firestore so it
             survives refresh + spans devices. Click "all" to see the full history. */}
         {/* V5.6.4: Always render. Empty-state placeholder ensures users know where to find it
@@ -7770,7 +7790,7 @@ function BestPracticesModal({open,onClose}){
 //     3. ACCELERATION detection (last 10s velocity vs prior 30s) — sharper alert
 //        than just "risk elevated" because it reflects what's happening RIGHT
 //        NOW, not what conditions look like.
-function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef,autoOrderState,killSwitchEngaged,onKillSwitch,onUrgentCoachAlert}){
+function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef,autoOrderState,killSwitchEngaged,onKillSwitch,onUrgentCoachAlert,reversalRisk}){
   // V9.1.7: Per-position peak/trough refs. Reset on position open or direction flip.
   const _peakBpsRef=React.useRef({pos:null,peak:-Infinity,trough:Infinity,openTime:0});
   // V9.2.1: Sound alert tracking — only beep when a NEW urgent card appears, not on every render.
@@ -8009,6 +8029,30 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
             clock:`${timeState?.minsRemaining||0}m ${timeState?.secsRemaining||0}s`,
           });
         }catch(_){}
+      }
+    }
+
+    // V9.9.0: Persistent reversal-risk card. Surfaces the risk flag throughout the
+    //   trade so the user sees it not just at lock but all the way through. Inserted
+    //   at the front of the cards array (highest priority spot) when EXPECTED, just
+    //   below urgent cards when WATCH. NONE keeps the coach visually clean.
+    if(reversalRisk&&reversalRisk.flag&&reversalRisk.flag!=='NONE'){
+      const _isExp=reversalRisk.flag==='EXPECTED';
+      const _topSig=(reversalRisk.signals||[]).filter(s=>s.fired).sort((a,b)=>b.weight-a.weight).slice(0,2);
+      const _signalSummary=_topSig.length>0?_topSig.map(s=>s.reason).join(' · '):'No specific factors fired';
+      const _reversalCard={
+        tone:_isExp?'urgent':'watch',
+        icon:_isExp?'⚠':'⚡',
+        title:_isExp?`Reversal expected · entered with caution`:`Reversal watch · monitor closely`,
+        body:`${_signalSummary}. Score ${reversalRisk.score}/100. ${_isExp?'Tighten exit before peak adverse — these patterns reverse mid-window historically.':'Watch for retracement after favorable move.'}`,
+      };
+      // Insert position: EXPECTED goes first (highest urgency); WATCH goes after any
+      //   pre-existing urgent cards (price-spike, stop-hit) but before info/good cards.
+      if(_isExp){cards.unshift(_reversalCard);}
+      else {
+        const _firstNonUrgent=cards.findIndex(c=>c.tone!=='urgent');
+        if(_firstNonUrgent<0)cards.push(_reversalCard);
+        else cards.splice(_firstNonUrgent,0,_reversalCard);
       }
     }
 
@@ -11064,7 +11108,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -11117,6 +11161,10 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     // Bonus context fields the V6.x entries already had but weren't exported
                     e.fgt!=null?(typeof e.fgt==='number'?e.fgt.toFixed(1):e.fgt):'',
                     e.qScore!=null?e.qScore:'',
+                    // V9.9.0: reversalRisk telemetry — flag, score, top-3 signal keys (joined with |)
+                    e.reversalRisk?.flag||'',
+                    e.reversalRisk?.score!=null?e.reversalRisk.score:'',
+                    e.reversalRisk?.signals?(e.reversalRisk.signals.filter(s=>s&&s.fired).sort((a,b)=>(b.weight||0)-(a.weight||0)).slice(0,3).map(s=>s.key).join('|')):'',
                   ].map(v=>typeof v==='string'&&v.includes(',')?`"${v}"`:String(v));
                   _rows.push(_row.join(','));
                 });
@@ -11563,7 +11611,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -11581,7 +11629,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
           V6.2.3: hidden lg:block (was md:block). */}
-      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} className="hidden lg:block"/>
+      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={reversalRisk} className="hidden lg:block"/>
 
       {/* V9.1.5: Tape + Depth render as upgraded compact strips next to the small
           DOM bar at the top of the analysis card. No big panels here anymore. */}
@@ -15109,6 +15157,270 @@ const scoreNewsImpact=(title)=>{
   return{score,direction,category};
 };
 
+// ════════════════════════════════════════════════════════════════════════════
+// V9.9.0: PREDICTIVE REVERSAL SYSTEM
+// ════════════════════════════════════════════════════════════════════════════
+// At lock formation, Tara now confesses what she doesn't trust about her own
+// commit. Conviction% alone is too coarse — the CSV showed 80% conviction in
+// TRENDING UP × structural × UP delivers 37.5% WR. Hidden dimensions (tier,
+// regime sub-bucket, contrary whale flow, FGT disagreement) collapse into a
+// single overconfident number.
+//
+// computeReversalRisk takes the lock context and returns:
+//   {flag: 'NONE'|'WATCH'|'EXPECTED', score: 0-100, signals: [...], computedAt}
+//
+// Score thresholds (calibrated from 2026-05-08 CSV audit):
+//   • 0-29:  NONE — no chip rendered, lock looks clean
+//   • 30-59: WATCH — amber chip, hover/tap for signal list
+//   • 60+:   EXPECTED — rose chip, top-3 signals shown inline
+//
+// Weights are CSV-validated where possible (structural-tier, regime sub-buckets,
+// fgt opposition, qScore) and heuristic where data is thin (contrary-whale,
+// late-lock, day-of-week safety net). Heuristic weights will be recalibrated in
+// V9.9.2 once we have 200+ stamped locks with reversalRisk + actualPeakDrawdown
+// from V9.8.14's mid-trade timeSeries capture.
+//
+// Architecture: pure advisory (option A from spec). Always lock if conviction
+// qualifies; surface reversalRisk as chip + coach + Discord field. No gating.
+// ────────────────────────────────────────────────────────────────────────────
+const computeReversalRisk=(params)=>{
+  const{tier,regime,dir,qScore,mtfAlignment,secondsIntoWindow,whaleLog,dayContext}=params||{};
+  const signals=[];
+  let score=0;
+  // ── Tier check (CSV-validated: structural 52.8% WR, n=36) ──
+  if(tier==='structural'){
+    signals.push({key:'structural-tier',weight:30,fired:true,reason:'Structural tier locks ran 52.8% WR — barely above coin flip'});
+    score+=30;
+  }
+  // ── Regime checks (CSV-validated) ──
+  if(regime==='TRENDING UP'){
+    signals.push({key:'trending-up-regime',weight:12,fired:true,reason:'TRENDING UP regime ran 58.3% WR — problem zone'});
+    score+=12;
+    if(tier==='structural'&&dir==='UP'){
+      signals.push({key:'tup-struct-up',weight:20,fired:true,reason:'TRENDING UP × structural × UP ran 37.5% WR — worst sub-bucket observed'});
+      score+=20;
+    }
+  }else if(regime==='SHORT SQUEEZE'){
+    signals.push({key:'short-squeeze-regime',weight:10,fired:true,reason:'SHORT SQUEEZE regime ran 61.9% WR'});
+    score+=10;
+  }
+  // ── FGT (multi-TF alignment) opposes lock direction ──
+  // mtfAlignment ranges roughly -1..+1. Negative opposes UP, positive opposes DOWN.
+  if(typeof mtfAlignment==='number'&&Number.isFinite(mtfAlignment)){
+    const _opposing=(dir==='UP'&&mtfAlignment<=-0.4)||(dir==='DOWN'&&mtfAlignment>=0.4);
+    if(_opposing){
+      signals.push({key:'fgt-opposes',weight:15,fired:true,reason:`FGT ${mtfAlignment>=0?'+':''}${mtfAlignment.toFixed(1)} opposes lock direction`});
+      score+=15;
+    }
+  }
+  // ── Quality score below 40 ──
+  if(typeof qScore==='number'&&qScore<40&&qScore>=0){
+    signals.push({key:'q-low',weight:10,fired:true,reason:`Quality score ${qScore}/100 — below 40 threshold`});
+    score+=10;
+  }
+  // ── Recent contrary whale ≥$500K within 10min (heuristic — not CSV-validated) ──
+  // The 2026-05-08 14:16 screenshot loss had a fresh contrary BUY whale 8min before
+  //   lock. The pattern showed up across multiple losing locks but we don't have
+  //   "contrary whale at lock" in CSV columns yet — V9.9.2 will add and recalibrate.
+  if(Array.isArray(whaleLog)&&whaleLog.length>0){
+    const _now=Date.now();
+    let _recent=null;
+    for(const w of whaleLog){
+      if(!w||!w.time||!w.usd||!w.side)continue;
+      if(_now-w.time>10*60*1000)continue; // beyond 10min — not "recent"
+      if(w.usd<500000)continue; // below threshold — not "whale"
+      // Contrary: BUY opposes DOWN; SELL opposes UP
+      const _isContrary=(dir==='DOWN'&&w.side==='BUY')||(dir==='UP'&&w.side==='SELL');
+      if(!_isContrary)continue;
+      if(!_recent||w.usd>_recent.usd)_recent=w; // pick the largest contrary
+    }
+    if(_recent){
+      const _ageMin=Math.max(1,Math.round((_now-_recent.time)/60000));
+      signals.push({key:'contrary-whale',weight:25,fired:true,reason:`$${Math.round(_recent.usd/1000)}K ${_recent.side} whale ${_ageMin}m ago opposes your ${dir}`});
+      score+=25;
+    }
+  }
+  // ── Late lock (>10min into 15m window — entry has less time to develop) ──
+  if(typeof secondsIntoWindow==='number'&&secondsIntoWindow>600){
+    signals.push({key:'late-lock',weight:8,fired:true,reason:`Locked ${secondsIntoWindow}s into 15m window — late entry (less reversal margin)`});
+    score+=8;
+  }
+  // ── Today's day-of-week historical WR < 50% with n≥10 (safety net) ──
+  if(dayContext&&dayContext.todayEntry&&dayContext.todayEntry.n>=10&&dayContext.todayEntry.wr<0.50){
+    const _wrPct=Math.round(dayContext.todayEntry.wr*100);
+    signals.push({key:'day-poor',weight:10,fired:true,reason:`${dayContext.todayLong||'today'}s historically run ${_wrPct}% WR (n=${dayContext.todayEntry.n})`});
+    score+=10;
+  }
+  // ── US holiday (light institutional flow context) ──
+  if(dayContext&&dayContext.holiday){
+    signals.push({key:'holiday',weight:5,fired:true,reason:`${dayContext.holiday} — institutional flow lighter than usual`});
+    score+=5;
+  }
+  let flag='NONE';
+  if(score>=60)flag='EXPECTED';
+  else if(score>=30)flag='WATCH';
+  return{flag,score,signals,computedAt:Date.now()};
+};
+
+// V9.9.0: ReversalRiskChip — compact, color-coded, tap-to-expand. Renders only
+//   when reversalRisk.flag is WATCH or EXPECTED (NONE is silent — clean locks
+//   stay visually clean). Layout is single row when collapsed; expanded form
+//   stays inside the parent container width (no overflow on mobile).
+function ReversalRiskChip({reversalRisk,className}){
+  const[expanded,setExpanded]=React.useState(false);
+  if(!reversalRisk||reversalRisk.flag==='NONE')return null;
+  const isExpected=reversalRisk.flag==='EXPECTED';
+  const _color=isExpected?'#f472b6':'#fbbf24';
+  const _label=isExpected?'REVERSAL EXPECTED':'REVERSAL WATCH';
+  const _icon=isExpected?'⚠':'⚡';
+  const _firedSignals=(reversalRisk.signals||[]).filter(s=>s.fired).sort((a,b)=>b.weight-a.weight);
+  const _topThree=_firedSignals.slice(0,3);
+  return React.createElement('div',{
+    className:'flex flex-col gap-1.5 '+(className||''),
+  },[
+    React.createElement('button',{
+      key:'chip',
+      type:'button',
+      onClick:()=>setExpanded(v=>!v),
+      className:'flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide transition-all w-full',
+      style:{
+        background:`${_color}1c`,
+        border:`1px solid ${_color}55`,
+        color:_color,
+        ...(isExpected?{animation:'taraReversalPulse 2.5s ease-in-out infinite'}:{}),
+      },
+      'aria-expanded':expanded,
+      'aria-label':`${_label} — tap for details`,
+    },[
+      React.createElement('span',{key:'l',className:'flex items-center gap-1.5 min-w-0'},[
+        React.createElement('span',{key:'icon',style:{fontSize:'12px'}},_icon),
+        React.createElement('span',{key:'lbl',className:'truncate'},_label),
+      ]),
+      React.createElement('span',{key:'r',className:'flex items-center gap-1.5 shrink-0'},[
+        React.createElement('span',{key:'score',className:'text-[9px] opacity-70 font-mono'},`${reversalRisk.score}`),
+        React.createElement('span',{key:'caret',className:'text-[10px] opacity-70',style:{transform:expanded?'rotate(180deg)':'none',transition:'transform 0.2s'}},'▾'),
+      ]),
+    ]),
+    expanded?React.createElement('div',{
+      key:'details',
+      className:'flex flex-col gap-1 px-2.5 py-2 rounded-md text-[10px]',
+      style:{background:'rgba(14,16,15,0.6)',border:`1px solid ${_color}33`,color:'rgba(232,233,228,0.85)'},
+    },_firedSignals.length===0?[
+      React.createElement('span',{key:'none',style:{opacity:0.6}},'No specific risk factors fired (defensive flag).'),
+    ]:[
+      ..._firedSignals.map((s,i)=>React.createElement('div',{
+        key:s.key||i,
+        className:'flex items-start gap-2 leading-snug',
+      },[
+        React.createElement('span',{key:'w',className:'shrink-0 font-mono text-[9px] mt-0.5',style:{color:_color,opacity:0.85}},`+${s.weight}`),
+        React.createElement('span',{key:'r',className:'flex-1',style:{wordBreak:'break-word'}},s.reason),
+      ])),
+    ]):null,
+  ].filter(Boolean));
+}
+
+// V9.9.0: ReversalForecastSVG — Tara-native predicted price path. Compact chart
+//   shows current price → predicted closing price, with bend at predicted reversal
+//   time when flag is WATCH or EXPECTED. Strike line drawn as horizontal reference.
+//   Confidence band fills around path width proportional to ATR. ViewBox-based
+//   so it scales cleanly across viewports — width: 100% with maxWidth 380px caps
+//   it on desktop while mobile gets the full container width.
+//
+// Path generation:
+//   • NONE: gentle curve from now → predicted close (slightly past strike, favorable)
+//   • WATCH: mild bend — price runs favorable past strike, then small retracement
+//   • EXPECTED: prominent bend — favorable peak ~midway, retraces back through strike
+//
+// The bend timing (peak at ~45% of remaining time) is heuristic — V9.9.2 will
+// recalibrate from V9.8.14's timeSeries data once we have peak-adverse timestamps.
+function ReversalForecastSVG({reversalRisk,dir,currentPrice,strikePrice,atrBps,timeRemainingSec,totalWindowSec}){
+  if(!Number.isFinite(currentPrice)||!Number.isFinite(strikePrice)||currentPrice<=0||strikePrice<=0)return null;
+  if(!dir||(dir!=='UP'&&dir!=='DOWN'))return null;
+  const W=380,H=110;
+  const PAD_X=14,PAD_Y=14;
+  const innerW=W-2*PAD_X;
+  const innerH=H-2*PAD_Y;
+  // Establish y-range: center the chart on the price corridor between current and strike,
+  //   with extra padding so the bend has room to render visually. Minimum 6 bps each way
+  //   so flat regimes still show a meaningful chart.
+  const _corridor=Math.abs(currentPrice-strikePrice);
+  const _minPadPx=Math.max(currentPrice*0.0006,_corridor*0.5); // ≥6bps or 50% of corridor
+  const yLow=Math.min(currentPrice,strikePrice)-_minPadPx;
+  const yHigh=Math.max(currentPrice,strikePrice)+_minPadPx;
+  const yRange=yHigh-yLow;
+  const priceToY=(p)=>PAD_Y+((yHigh-p)/yRange)*innerH;
+  const tToX=(t)=>PAD_X+t*innerW;
+  const yNow=priceToY(currentPrice);
+  const yStrike=priceToY(strikePrice);
+  const xStart=tToX(0);
+  const xEnd=tToX(1);
+  const flag=reversalRisk?.flag||'NONE';
+  // Predicted close price depends on flag:
+  //   NONE     — favorable past strike (winning prediction)
+  //   WATCH    — barely past strike (marginal win)
+  //   EXPECTED — wrong side of strike (losing prediction — that's the "expected reversal")
+  const _favSign=dir==='UP'?1:-1;
+  const _strikeFavor=Math.max(currentPrice*0.0008,_corridor*0.10); // small offset past strike
+  let _predictedClose;
+  if(flag==='NONE')_predictedClose=strikePrice+_favSign*_strikeFavor*1.4;
+  else if(flag==='WATCH')_predictedClose=strikePrice+_favSign*_strikeFavor*0.3;
+  else _predictedClose=strikePrice-_favSign*_strikeFavor*0.4; // EXPECTED ends wrong side
+  const yClose=priceToY(_predictedClose);
+  // Peak (favorable extreme) — visible only on WATCH/EXPECTED flags
+  const _peakOffset=Math.max(currentPrice*0.0012,_corridor*0.4);
+  const _yPeak=priceToY(strikePrice+_favSign*_peakOffset*(flag==='EXPECTED'?1.0:0.6));
+  const xPeak=tToX(0.45);
+  // Build path
+  let pathD;
+  if(flag==='NONE'){
+    // Smooth ease toward predicted close
+    const _xMid=tToX(0.55);
+    const _yMid=priceToY((currentPrice+_predictedClose)/2+_favSign*_corridor*0.05);
+    pathD=`M ${xStart} ${yNow} Q ${_xMid} ${_yMid} ${xEnd} ${yClose}`;
+  }else if(flag==='WATCH'){
+    // Cubic with mild bend — favorable peak, mild retracement
+    const _yEarly=priceToY(strikePrice+_favSign*_strikeFavor*0.7);
+    pathD=`M ${xStart} ${yNow} C ${tToX(0.30)} ${_yEarly} ${xPeak} ${_yPeak} ${tToX(0.65)} ${priceToY(strikePrice+_favSign*_strikeFavor*0.35)} S ${xEnd} ${yClose} ${xEnd} ${yClose}`;
+  }else{
+    // EXPECTED — prominent bend, ends past strike on the WRONG side
+    pathD=`M ${xStart} ${yNow} C ${tToX(0.25)} ${priceToY(strikePrice+_favSign*_peakOffset*0.5)} ${xPeak} ${_yPeak} ${tToX(0.65)} ${yStrike} S ${xEnd} ${yClose} ${xEnd} ${yClose}`;
+  }
+  const _flagColor=flag==='EXPECTED'?'#f472b6':flag==='WATCH'?'#fbbf24':'#6ee7b7';
+  // Confidence band — wider transparent stroke under main path
+  const _bandWidth=Math.max(8,Math.min(22,(atrBps||10)*0.5));
+  // Time remaining display
+  const _minsLeft=timeRemainingSec!=null?Math.max(0,Math.floor(timeRemainingSec/60)):null;
+  const _secsLeft=timeRemainingSec!=null?Math.max(0,timeRemainingSec%60):null;
+  return React.createElement('svg',{
+    viewBox:`0 0 ${W} ${H}`,
+    preserveAspectRatio:'xMidYMid meet',
+    role:'img',
+    'aria-label':`Predicted price path · reversal risk ${flag.toLowerCase()}`,
+    style:{width:'100%',maxWidth:`${W}px`,height:'auto',display:'block'},
+  },[
+    // Background panel
+    React.createElement('rect',{key:'bg',x:0,y:0,width:W,height:H,rx:6,fill:'rgba(14,16,15,0.45)'}),
+    // Strike line (dashed gold horizontal)
+    React.createElement('line',{key:'strike',x1:PAD_X,y1:yStrike,x2:W-PAD_X,y2:yStrike,stroke:'#E5C870',strokeWidth:1,strokeDasharray:'4 3',opacity:0.55}),
+    // Strike label (right side)
+    React.createElement('text',{key:'sl',x:W-PAD_X-2,y:yStrike-4,textAnchor:'end',fontSize:9,fill:'#E5C870',opacity:0.9},`Strike $${Math.round(strikePrice).toLocaleString()}`),
+    // Confidence band (faint wide stroke under main path)
+    React.createElement('path',{key:'band',d:pathD,stroke:_flagColor,strokeWidth:_bandWidth,strokeLinecap:'round',strokeLinejoin:'round',fill:'none',opacity:0.10}),
+    // Predicted path (main stroke)
+    React.createElement('path',{key:'path',d:pathD,stroke:_flagColor,strokeWidth:2,strokeLinecap:'round',strokeLinejoin:'round',fill:'none'}),
+    // Reversal bend marker (only on WATCH/EXPECTED)
+    flag!=='NONE'?React.createElement('circle',{key:'peak',cx:xPeak,cy:_yPeak,r:3.5,fill:_flagColor,opacity:0.9}):null,
+    flag!=='NONE'?React.createElement('text',{key:'peakLabel',x:xPeak,y:_yPeak-7,textAnchor:'middle',fontSize:8,fill:_flagColor,opacity:0.85},'reversal'):null,
+    // Now marker (left)
+    React.createElement('circle',{key:'now',cx:xStart,cy:yNow,r:3.5,fill:'#E8E9E4'}),
+    React.createElement('text',{key:'nowLabel',x:xStart+5,y:yNow+(yNow>H/2?-5:11),fontSize:9,fill:'#E8E9E4',opacity:0.8},`now $${Math.round(currentPrice).toLocaleString()}`),
+    // Predicted close marker (right)
+    React.createElement('circle',{key:'end',cx:xEnd,cy:yClose,r:3,fill:_flagColor,opacity:0.85}),
+    // Time-remaining label (bottom right)
+    _minsLeft!=null?React.createElement('text',{key:'tr',x:W-PAD_X-2,y:H-3,textAnchor:'end',fontSize:8,fill:'rgba(232,233,228,0.45)'},`${_minsLeft}m ${String(_secsLeft).padStart(2,'0')}s left`):null,
+  ].filter(Boolean));
+}
+
 function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
   const[showSessionStart,setShowSessionStart]=useState(false); // V6.5.7: no auto-open on load — click 📋 button (which pulses for attention).
@@ -18279,11 +18591,15 @@ function TaraApp(){
         timestamp:new Date().toISOString(),
       };
 
-      else if(type==='LOCK')embed={
-        title:`ENGINE  ${data.dir}  CONFIRMED`,
-        color:data.dir==='UP'?3404125:16478549,
-        description:data.summary||`Engine confirmed ${data.dir}.`,
-        fields:[
+      else if(type==='LOCK'){
+        // V9.9.0: Tint embed border by reversal risk. EXPECTED → rose tint regardless
+        //   of dir; WATCH → amber; NONE/absent → keep direction-based green/rose. The
+        //   reversalRisk.flag is added as an inline field with top signals so the user
+        //   reading on phone gets the same heads-up the dashboard chip shows.
+        const _rr=data.reversalRisk;
+        const _baseColor=data.dir==='UP'?3404125:16478549;
+        const _embedColor=_rr?.flag==='EXPECTED'?16478549:_rr?.flag==='WATCH'?16498744:_baseColor;
+        const _fields=[
           {name:'Price',value:`$${data.price.toFixed(2)}`,inline:true},
           {name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},
           {name:'Gap',value:`${data.gap.toFixed(1)} bps`,inline:true},
@@ -18291,10 +18607,21 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-        ],
-        footer:{text:`${TARA_VERSION_DISPLAY}  |  lock`},
-        timestamp:new Date().toISOString(),
-      };
+        ];
+        if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
+          const _topSig=(_rr.signals||[]).filter(s=>s.fired).sort((a,b)=>b.weight-a.weight).slice(0,3);
+          const _signalLines=_topSig.map(s=>`• ${s.reason}`).join('\n')||'—';
+          _fields.push({name:`Reversal Risk: ${_rr.flag} (score ${_rr.score})`,value:_signalLines,inline:false});
+        }
+        embed={
+          title:`ENGINE  ${data.dir}  CONFIRMED${_rr?.flag==='EXPECTED'?'  ⚠':''}`,
+          color:_embedColor,
+          description:data.summary||`Engine confirmed ${data.dir}.`,
+          fields:_fields,
+          footer:{text:`${TARA_VERSION_DISPLAY}  |  lock`},
+          timestamp:new Date().toISOString(),
+        };
+      }
 
       else if(type==='CLOSE'){
         const gap=data.strike>0?((data.price-data.strike)/data.strike*10000):0;
@@ -18375,11 +18702,14 @@ function TaraApp(){
         timestamp:new Date().toISOString(),
       };
 
-      else if(type==='TARA_LOCK')embed={
-        title:`TARA · ${_assetTag} · ${data.dir} LOCKED`,
-        color:data.dir==='UP'?3404125:16478549,
-        description:data.reason||`Committed ${data.dir} for this round.`,
-        fields:[
+      else if(type==='TARA_LOCK'){
+        // V9.9.0: Tint embed by reversal risk + add reversal risk field with top
+        //   signals so phone-only users see the same heads-up the dashboard chip
+        //   shows. EXPECTED → rose tint regardless of dir; WATCH → amber.
+        const _rr=data.reversalRisk;
+        const _baseColor=data.dir==='UP'?3404125:16478549;
+        const _embedColor=_rr?.flag==='EXPECTED'?16478549:_rr?.flag==='WATCH'?16498744:_baseColor;
+        const _fields=[
           {name:'Direction',value:data.dir||'—',inline:true},
           {name:'Confidence',value:`${data.confidence||0}%`,inline:true},
           {name:'Posterior',value:`${(data.posterior||0).toFixed(0)}`,inline:true},
@@ -18390,10 +18720,21 @@ function TaraApp(){
           {name:'FGT',value:`${(data.fgtAbs||0).toFixed(1)}/4 ${data.fgtDir||''}`,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
-        ],
-        footer:{text:`${TARA_VERSION_DISPLAY}  |  lock`},
-        timestamp:new Date().toISOString(),
-      };
+        ];
+        if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
+          const _topSig=(_rr.signals||[]).filter(s=>s.fired).sort((a,b)=>b.weight-a.weight).slice(0,3);
+          const _signalLines=_topSig.map(s=>`• ${s.reason}`).join('\n')||'—';
+          _fields.push({name:`Reversal Risk: ${_rr.flag} (score ${_rr.score})`,value:_signalLines,inline:false});
+        }
+        embed={
+          title:`TARA · ${_assetTag} · ${data.dir} LOCKED${_rr?.flag==='EXPECTED'?'  ⚠':''}`,
+          color:_embedColor,
+          description:data.reason||`Committed ${data.dir} for this round.`,
+          fields:_fields,
+          footer:{text:`${TARA_VERSION_DISPLAY}  |  lock`},
+          timestamp:new Date().toISOString(),
+        };
+      }
 
       else if(type==='TARA_SITOUT')embed={
         title:`TARA · ${_assetTag} · SITTING OUT`,
@@ -22060,6 +22401,19 @@ function TaraApp(){
         regime:analysis?.regime||'',dir:_forceDir,confidence:taraCallSnapshotRef.current.confidence,
         posterior:_post,qScore:Math.round(qualityGate?.score||0),fgt:analysis?.mtfAlignment,
         tier:'user-forced',session:_forceSession,kalshiAtLock:_forceK,
+        // V9.9.0: reversal risk on forced locks too — user may want awareness even
+        //   when overriding. tier='user-forced' is its own bucket so structural-tier
+        //   weight doesn't apply here, but regime/whale/FGT signals still fire.
+        reversalRisk:computeReversalRisk({
+          tier:'user-forced',
+          regime:analysis?.regime||'',
+          dir:_forceDir,
+          qScore:Math.round(qualityGate?.score||0),
+          mtfAlignment:analysis?.mtfAlignment,
+          secondsIntoWindow:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
+          whaleLog,
+          dayContext,
+        }),
         // V9.7.6: dial setting at force — same telemetry as for engine locks
         dialAtLock:typeof speedDialRef!=='undefined'&&speedDialRef?.current!=null?Number(speedDialRef.current):(typeof speedDial!=='undefined'?Number(speedDial):null),
         isUserForced:true,reason:taraCallSnapshotRef.current.reason,
@@ -22801,12 +23155,33 @@ function TaraApp(){
         playAlert(_committedCall==='UP'?'lock-up':'lock-down');
       }
       _persistLock(); // V5.6: cloud-save LOCKED snapshot
+      // V9.9.0: PREDICTIVE REVERSAL — compute reversal risk at the moment of commit.
+      //   One-shot snapshot of the lock context: tier, regime, FGT, qScore, recent
+      //   contrary whale, late-lock flag, day-of-week, holiday. Returns a structured
+      //   risk object that gets surfaced as chip + coach + Discord field, and stamped
+      //   on the call log entry so we can post-hoc audit "did EXPECTED locks reverse
+      //   more often?" once V9.9.2 ships peak-adverse drawdown capture.
+      const _reversalRisk=computeReversalRisk({
+        tier:tierLabel,
+        regime:analysis?.regime||'',
+        dir:_committedCall,
+        qScore:Math.round(qualityGate?.score||0),
+        mtfAlignment:analysis?.mtfAlignment,
+        secondsIntoWindow:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
+        whaleLog,
+        dayContext,
+      });
+      // Mutate lockedCallRef so UI (TaraCallCard, LiveTradeCoach) can read this without
+      //   waiting for setTaraCallLog to flush. Refs are observed via forceRender ticks.
+      if(lockedCallRef.current){lockedCallRef.current.reversalRisk=_reversalRisk;}
       // V5.6.1: log entry — committed UP/DOWN
       // V5.6.9: windowId added so cross-device entries dedupe to one log row per window.
       const _wid=computeWindowId(windowType);
       const _entry={
         id:Date.now(),time:Date.now(),windowType,
         windowId:_wid,
+        // V9.9.0: stamp reversalRisk on the entry for CSV audit + post-hoc analysis
+        reversalRisk:_reversalRisk,
         // V6.4: explicit lock timestamp + window-open timestamp so we can analyze how long
         //   Tara takes to lock under different conditions. secondsIntoWindow = lockedAt - windowOpenedAt.
         lockedAt:Date.now(),
@@ -23083,7 +23458,7 @@ function TaraApp(){
         // skip Discord push — still set the broadcastRef flag so we don't retry
         taraBroadcastRef.current.sentLock=true;
       }else{
-        broadcastToDiscord('TARA_LOCK',{..._lockBaseData,dir:snap.call,confidence:snap.confidence,reason:snap.reason,gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0});
+        broadcastToDiscord('TARA_LOCK',{..._lockBaseData,dir:snap.call,confidence:snap.confidence,reason:snap.reason,gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0,reversalRisk:lockedCallRef.current?.reversalRisk||null});
       }
     }
     // SITOUT: V7.0.8 — DISABLED per user request. SITOUT means Tara decided NOT to trade,
@@ -24180,6 +24555,10 @@ function TaraApp(){
           0%, 100% { transform: scale(1); }
           50% { transform: scale(1.015); }
         }
+        @keyframes taraReversalPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(244,114,182,0.0); }
+          50%      { box-shadow: 0 0 0 4px rgba(244,114,182,0.10); }
+        }
       `}</style>
       <SpikeAlertHookHost
         tickHistoryRef={tickHistoryRef}
@@ -24334,7 +24713,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.19
+              9.9.0
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
@@ -24978,6 +25357,7 @@ function TaraApp(){
           killSwitchEngaged={killSwitchEngaged}
           onKillSwitch={()=>setKillSwitchEngaged(v=>!v)}
           onUrgentCoachAlert={(payload)=>broadcastToDiscord('COACH_ALERT',payload)}
+          reversalRisk={lockedCallRef.current?.reversalRisk||null}
         />
 
         {/* V8.2: Asset rotation suggestion */}
@@ -25244,7 +25624,7 @@ function TaraApp(){
 
             {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab.
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
-            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
+            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
 
             {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
 
@@ -25275,7 +25655,7 @@ function TaraApp(){
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} pushToast={pushToast}/>
