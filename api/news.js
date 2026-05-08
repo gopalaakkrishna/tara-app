@@ -1,23 +1,22 @@
-// api/news.js — Vercel serverless function
+// api/news.js — Vercel serverless function (V9.8.2)
 //
 // Server-side news proxy. Browser fetches /api/news with no CORS issues.
 // Tries multiple sources in fallback order, returns first that succeeds.
 // In-memory cache for 2 minutes to avoid hammering source APIs.
 //
-// Sources (in order):
-//   1. CryptoCompare — free public BTC news feed
-//   2. Reddit r/CryptoCurrency — community discussion + breaking news
-//   3. CryptoPanic — aggregator with sentiment tagging
+// V9.8.2 sources (in order — most-reliable-from-Vercel first):
+//   1. CoinDesk RSS    (direct XML fetch + parse)
+//   2. Decrypt RSS     (direct XML fetch + parse)
+//   3. CoinTelegraph RSS (direct XML fetch + parse)
+//   4. rss2json (fallback if direct RSS feeds rate-limit Vercel)
+//   5. CryptoPanic     (last resort)
 //
-// Same fallback approach as the old client-side code, but server-side, so
-// no CORS proxies needed. corsproxy.io / codetabs / allorigins / rss2json
-// were all eventually getting blocked or rate-limited per-IP. Server-to-
-// server fetches bypass all of that.
+// Why these and not Reddit/CryptoCompare:
+//   - Reddit aggressively blocks AWS/Vercel datacenter IP ranges (429/403)
+//   - CryptoCompare moved to API-key model — free public tier rejected
+//   - Direct RSS feeds usually accept any User-Agent and have no per-IP limits
 
-const CACHE_TTL_MS = 120000; // 2 minutes — keeps source APIs happy
-
-// Module-level cache. Vercel functions can be cold-started, but warm instances
-// share this. Worst case: cache miss = source fetch.
+const CACHE_TTL_MS = 120000; // 2 minutes
 let _cache = null;
 
 const tryFetch = async (url, timeoutMs = 6000) => {
@@ -27,10 +26,9 @@ const tryFetch = async (url, timeoutMs = 6000) => {
     const r = await fetch(url, {
       signal: ctrl.signal,
       headers: {
-        // Some APIs (Reddit especially) reject fetch with default Node user-agent.
-        // Real-looking UA gets through.
-        'User-Agent': 'Mozilla/5.0 (compatible; TaraNewsBot/1.0; +https://tara11.vercel.app)',
-        'Accept': 'application/json, text/plain, */*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept': 'application/rss+xml, application/xml, text/xml, application/json, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
       },
     });
     clearTimeout(timer);
@@ -42,10 +40,56 @@ const tryFetch = async (url, timeoutMs = 6000) => {
   }
 };
 
+// Minimal RSS 2.0 parser — handles standard <item> structure for all feeds
+// we care about. No external deps. Returns array of {title, url, time, description}.
+const parseRss = (xml) => {
+  const items = [];
+  if (typeof xml !== 'string' || !xml.includes('<item')) return items;
+  const itemRegex = /<item[^>]*>([\s\S]*?)<\/item>/g;
+  const tagRegex = (tag) =>
+    new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
+  const stripCdata = (s) => s.replace(/^<!\[CDATA\[/, '').replace(/\]\]>$/, '').trim();
+  const stripTags = (s) => s.replace(/<\/?[^>]+>/g, '').trim();
+  let match;
+  while ((match = itemRegex.exec(xml)) !== null) {
+    const block = match[1];
+    const title = stripTags(stripCdata((block.match(tagRegex('title')) || [])[1] || ''));
+    const link = stripTags(stripCdata((block.match(tagRegex('link')) || [])[1] || ''));
+    const pubDate = stripTags(stripCdata((block.match(tagRegex('pubDate')) || [])[1] || ''));
+    const description = stripTags(stripCdata((block.match(tagRegex('description')) || [])[1] || ''));
+    if (!title || !link) continue;
+    items.push({
+      title,
+      url: link,
+      time: pubDate ? new Date(pubDate).getTime() : Date.now(),
+      description: description.slice(0, 200),
+    });
+  }
+  return items;
+};
+
 const respond = (res, payload, status = 200) => {
   res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=300');
   res.setHeader('Content-Type', 'application/json');
   return res.status(status).json(payload);
+};
+
+const tryRssFeed = async (url, sourceName) => {
+  try {
+    const r = await tryFetch(url, 6000);
+    const xml = await r.text();
+    const parsed = parseRss(xml);
+    return parsed.slice(0, 15).map((it) => ({
+      title: it.title,
+      source: sourceName,
+      url: it.url,
+      time: Number.isFinite(it.time) ? it.time : Date.now(),
+      categories: [],
+    }));
+  } catch (e) {
+    console.warn(`[news] ${sourceName} RSS failed:`, e.message);
+    return [];
+  }
 };
 
 export default async function handler(req, res) {
@@ -59,55 +103,61 @@ export default async function handler(req, res) {
     });
   }
 
-  // ── Source 1: CryptoCompare ─────────────────────────────────────────
+  // ── Source 1-3: Direct RSS feeds (parallel) ─────────────────────────
+  const rssAttempts = [
+    tryRssFeed('https://www.coindesk.com/arc/outboundfeeds/rss/', 'CoinDesk'),
+    tryRssFeed('https://decrypt.co/feed', 'Decrypt'),
+    tryRssFeed('https://cointelegraph.com/rss', 'CoinTelegraph'),
+  ];
   try {
-    const r = await tryFetch(
-      'https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=BTC',
-      5000
-    );
-    const data = await r.json();
-    const items = (data?.Data || []).slice(0, 15).map(n => ({
-      title: n.title,
-      source: n.source_info?.name || n.source || 'News',
-      url: n.url,
-      time: n.published_on * 1000,
-      categories: (n.categories || '').split('|').filter(Boolean),
-    }));
-    if (items.length > 0) {
-      _cache = { at: Date.now(), items, source: 'cryptocompare' };
-      return respond(res, { items, source: 'cryptocompare' });
+    const results = await Promise.allSettled(rssAttempts);
+    let best = null;
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value.length > 0) {
+        if (!best || r.value.length > best.length) best = r.value;
+      }
+    }
+    if (best && best.length > 0) {
+      const sourceName = best[0]?.source || 'rss';
+      _cache = { at: Date.now(), items: best, source: sourceName };
+      return respond(res, { items: best, source: sourceName });
     }
   } catch (e) {
-    console.warn('[news] CryptoCompare failed:', e.message);
+    console.warn('[news] all RSS feeds failed:', e.message);
   }
 
-  // ── Source 2: Reddit r/CryptoCurrency ───────────────────────────────
+  // ── Source 4: rss2json (fallback) ──────────────────────────────────
   try {
-    const r = await tryFetch(
-      'https://www.reddit.com/r/CryptoCurrency/hot.json?limit=20',
-      6000
-    );
-    const data = await r.json();
-    const children = data?.data?.children || [];
-    const items = children
-      .filter(c => c?.data && !c.data.stickied)
-      .slice(0, 15)
-      .map(c => ({
-        title: c.data.title,
-        source: 'r/CryptoCurrency',
-        url: 'https://reddit.com' + c.data.permalink,
-        time: c.data.created_utc * 1000,
-        categories: [c.data.link_flair_text || 'Discussion'].filter(Boolean),
-      }));
-    if (items.length > 0) {
-      _cache = { at: Date.now(), items, source: 'reddit' };
-      return respond(res, { items, source: 'reddit' });
+    const feeds = [
+      { url: 'https://www.coindesk.com/arc/outboundfeeds/rss/', name: 'CoinDesk' },
+      { url: 'https://decrypt.co/feed', name: 'Decrypt' },
+      { url: 'https://cointelegraph.com/rss', name: 'CoinTelegraph' },
+    ];
+    for (const f of feeds) {
+      try {
+        const r = await tryFetch(
+          `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(f.url)}`,
+          6000
+        );
+        const data = await r.json();
+        if (data?.status === 'ok' && Array.isArray(data.items) && data.items.length > 0) {
+          const items = data.items.slice(0, 15).map((it) => ({
+            title: it.title,
+            source: f.name,
+            url: it.link,
+            time: it.pubDate ? new Date(it.pubDate).getTime() : Date.now(),
+            categories: Array.isArray(it.categories) ? it.categories.slice(0, 3) : [],
+          }));
+          _cache = { at: Date.now(), items, source: `rss2json-${f.name}` };
+          return respond(res, { items, source: `rss2json-${f.name}` });
+        }
+      } catch (_) { /* try next feed */ }
     }
   } catch (e) {
-    console.warn('[news] Reddit failed:', e.message);
+    console.warn('[news] rss2json failed:', e.message);
   }
 
-  // ── Source 3: CryptoPanic free public posts ─────────────────────────
+  // ── Source 5: CryptoPanic (last resort) ─────────────────────────────
   try {
     const r = await tryFetch(
       'https://cryptopanic.com/api/free/v1/posts/?public=true&currencies=BTC',
@@ -115,12 +165,12 @@ export default async function handler(req, res) {
     );
     const data = await r.json();
     const results = data?.results || [];
-    const items = results.slice(0, 15).map(p => ({
+    const items = results.slice(0, 15).map((p) => ({
       title: p.title,
       source: p.source?.title || 'CryptoPanic',
       url: p.url || p.original_url || '#',
       time: p.published_at ? new Date(p.published_at).getTime() : Date.now(),
-      categories: (p.currencies || []).map(c => c.code).slice(0, 3),
+      categories: (p.currencies || []).map((c) => c.code).slice(0, 3),
     }));
     if (items.length > 0) {
       _cache = { at: Date.now(), items, source: 'cryptopanic' };
@@ -130,7 +180,7 @@ export default async function handler(req, res) {
     console.warn('[news] CryptoPanic failed:', e.message);
   }
 
-  // ── All sources failed — serve stale cache if we have one ──────────
+  // ── All failed — serve stale cache if we have one ──────────────────
   if (_cache) {
     return respond(res, {
       items: _cache.items,
@@ -140,7 +190,6 @@ export default async function handler(req, res) {
     });
   }
 
-  // Nothing — actual failure
   return respond(
     res,
     { error: 'All sources unavailable', items: [] },
