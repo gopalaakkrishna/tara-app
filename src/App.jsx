@@ -924,10 +924,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.08-v9.8.18-toasts-and-day-aware-schedule';
+const BASELINE_VERSION='2026.05.08-v9.8.19-news-impact-toasts';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.8.18';
+const TARA_VERSION_DISPLAY='Tara 9.8.19';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -12741,18 +12741,63 @@ function DepthStrip({orderBook,targetMargin}){
 }
 
 // ── V111: NewsFeedCard - external events affecting BTC price ──
-function NewsFeedCard({timeFormat}={}){
+function NewsFeedCard({timeFormat,pushToast}={}){
   const[news,setNews]=React.useState([]);
   const[loading,setLoading]=React.useState(true);
   const[err,setErr]=React.useState(null);
   // V134: also fetch macro event countdown — always shown even if news fails
   const[macroEvents,setMacroEvents]=React.useState([]);
+  // V9.8.19: track URLs we've already seen so each fetch doesn't re-toast the same
+  //   article. On first mount we silently populate the seen-set with the initial
+  //   batch — only NEW arrivals after first load can trigger toasts. This prevents
+  //   the page-load spam case where 10 stale impactful headlines all fire at once.
+  const _seenNewsUrlsRef=React.useRef(null); // null until first fetch completes; then Set
   // V9.0: ref to fetchNews so the retry button can trigger a fresh fetch
   //   without re-running the entire useEffect (which would also restart the macro
   //   interval). Set inside useEffect, called from the retry button below.
   const fetchNewsRef=React.useRef(null);
   // V9.1.2: expand modal for full news view
   const[expandOpen,setExpandOpen]=React.useState(false);
+  // V9.8.19: NEWS IMPACT TOAST DETECTOR. Whenever the news state updates, scan
+  //   the items for high-impact headlines (score ≥6 from scoreNewsImpact). For
+  //   each newly-arrived impactful item (URL not in seen-set, AND time within
+  //   last 15 min so we don't toast stale articles), push a toast via pushToast.
+  //   First fetch silently populates the seen-set so initial page load doesn't
+  //   spam. Color/direction-coded: bullish=green, bearish=rose, neutral=amber.
+  React.useEffect(()=>{
+    if(!Array.isArray(news)||news.length===0)return;
+    if(typeof pushToast!=='function')return;
+    // First-fetch path: silently seed the seen-set, no toasts
+    if(_seenNewsUrlsRef.current===null){
+      const seed=new Set();
+      for(const item of news){if(item&&item.url)seed.add(item.url);}
+      _seenNewsUrlsRef.current=seed;
+      return;
+    }
+    const _now=Date.now();
+    const _seen=_seenNewsUrlsRef.current;
+    for(const item of news){
+      if(!item||!item.url||!item.title)continue;
+      if(_seen.has(item.url))continue;
+      _seen.add(item.url);
+      // Skip stale articles — only toast news under 15 min old (handles the case
+      //   where news fetch returns mostly old items mixed with one new one).
+      const _ageMs=_now-(item.time||0);
+      if(_ageMs>15*60*1000)continue;
+      const{score,direction,category}=scoreNewsImpact(item.title);
+      if(score<6)continue; // subthreshold
+      // Color/icon by direction
+      const _color=direction==='down'?'#f472b6':direction==='up'?'#6ee7b7':'#fbbf24';
+      const _icon=direction==='down'?'📰▼':direction==='up'?'📰▲':category==='macro'?'🏛':category==='regulatory'?'⚖':category==='security'?'⚠':'📰';
+      const _catLabel=category?category.toUpperCase():'NEWS';
+      pushToast(
+        `news-${item.url}`, // unique kind per URL — natural dedup, but we use seen-set as primary guard
+        `${_catLabel} · ${item.title.length>78?item.title.slice(0,75)+'…':item.title}`,
+        item.source?`${item.source} · ${Math.round(_ageMs/60000)}m ago`:`${Math.round(_ageMs/60000)}m ago`,
+        {color:_color,icon:_icon,durationMs:8000,cooldown:0,url:item.url}
+      );
+    }
+  },[news,pushToast]);
   React.useEffect(()=>{
     const computeMacros=()=>{
       // Find next 3 upcoming macro events in next 8 hours
@@ -13528,7 +13573,7 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
 }
 
 // ── V111: RightPanel - Engine Log + Live Feeds + News (col 3) ──
-function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,taraCallLog,currentAsset,timeFormat}){
+function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,taraCallLog,currentAsset,timeFormat,pushToast}){
   // V9.1.1: full-schedule popup state
   const[scheduleModalOpen,setScheduleModalOpen]=React.useState(false);
   const reasoning=analysis?.reasoning||[];
@@ -13689,7 +13734,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
       {/* V9.2.0: News & Macro — swapped with Schedule per user feedback.
           "put news section in the schedule place." */}
       <div className="shrink-0 pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
-        <NewsFeedCard timeFormat={timeFormat}/>
+        <NewsFeedCard timeFormat={timeFormat} pushToast={pushToast}/>
       </div>
       {/* V9.2.0: Schedule on mobile only — desktop schedule moved to projections column */}
       {taraCallLog&&(
@@ -14839,13 +14884,19 @@ function TaraToastStack({toasts,onDismiss}){
       border:`1px solid ${t.color||'#E5C870'}66`,
       boxShadow:`0 4px 20px ${t.color||'#E5C870'}22, 0 1px 0 rgba(255,255,255,0.04) inset`,
     },
-    onClick:()=>onDismiss([t.id]),
-    title:'click to dismiss',
+    onClick:()=>{
+      // V9.8.19: if toast carries a URL, open in new tab on click. Always dismiss
+      //   the toast itself afterward so the click is single-action.
+      if(t.url){try{window.open(t.url,'_blank','noopener,noreferrer');}catch(_){}}
+      onDismiss([t.id]);
+    },
+    title:t.url?'click to read article':'click to dismiss',
   },[
     React.createElement('div',{key:'r1',className:'flex items-center gap-2'},[
       React.createElement('span',{key:'icon',style:{fontSize:'15px',lineHeight:1}},t.icon||'⚡'),
-      React.createElement('span',{key:'title',className:'text-[13px] font-bold tracking-wide',style:{color:t.color||'#E5C870'}},t.title),
-    ]),
+      React.createElement('span',{key:'title',className:'text-[13px] font-bold tracking-wide flex-1',style:{color:t.color||'#E5C870'}},t.title),
+      t.url?React.createElement('span',{key:'open',className:'text-[10px] opacity-60',style:{color:t.color||'#E5C870'}},'↗'):null,
+    ].filter(Boolean)),
     t.body?React.createElement('div',{key:'body',className:'text-[11px] mt-1 leading-snug',style:{color:'rgba(232,233,228,0.78)'}},t.body):null,
   ].filter(Boolean))));
 }
@@ -14996,6 +15047,67 @@ function DayAwareScheduleHeader({dayContext}){
     ):null,
   ].filter(Boolean));
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// V9.8.19: NEWS IMPACT SCORING
+// ════════════════════════════════════════════════════════════════════════════
+// Scans a news headline for keywords associated with high-impact crypto/macro
+// events. Returns {score, direction, category}. Scores ≥6 are considered toast-
+// worthy. Direction inference picks bullish/bearish/neutral based on which set
+// of price-direction keywords are present.
+//
+// Categories tracked:
+//   • macro     — Fed, CPI, rate, inflation, FOMC, NFP, recession (highest impact)
+//   • regulatory — SEC, ETF, lawsuit, approve/reject, regulation
+//   • security   — hack, exploit, breach, halt, bankruptcy
+//   • flow       — large institutional buys/sells, ETF flows
+//   • generic    — has crypto keyword but no specific category match
+//
+// Required: title must mention BTC/Bitcoin/ETH/Ethereum/crypto OR be in macro
+// category. Pure tech-stock news, weather, etc. score 0 and are ignored.
+// ────────────────────────────────────────────────────────────────────────────
+const scoreNewsImpact=(title)=>{
+  if(!title||typeof title!=='string')return{score:0,direction:null,category:null};
+  const _t=title.toLowerCase();
+  const hasAny=(arr)=>arr.some(k=>_t.includes(k));
+  // Crypto-relevance gate (one match required, OR matches macro category)
+  const cryptoKeywords=['bitcoin','btc','ethereum','eth','crypto','blockchain','solana','sol','dogecoin','xrp','altcoin','stablecoin','defi','nft'];
+  const isCryptoRelated=hasAny(cryptoKeywords);
+  // Category scoring
+  let score=0;
+  let category=null;
+  // Macro — highest impact (always trigger-eligible regardless of crypto mention)
+  const macroKeywords=['fed ','federal reserve','fomc','rate hike','rate cut','interest rate','inflation','cpi','ppi','pce','jobs report','nfp','non-farm','unemployment','recession','gdp','treasury','jerome powell','janet yellen','lagarde'];
+  if(hasAny(macroKeywords)){score+=6;category='macro';}
+  // Regulatory
+  const regKeywords=['sec ','spot etf','etf approval','etf reject','etf flows','lawsuit','indictment','indicted','sentenced','charges','regulation','ban on','approves','approved','rejected','denied','crackdown'];
+  if(hasAny(regKeywords)){score+=5;if(!category)category='regulatory';}
+  // Security/exchange events
+  const secKeywords=['hack','hacked','exploit','exploited','breach','stolen','rugpull','rug pull','bankruptcy','bankrupt','halt','frozen','suspended','default','collapse','liquidation','liquidations'];
+  if(hasAny(secKeywords)){score+=5;if(!category)category='security';}
+  // Institutional flow
+  const flowKeywords=['microstrategy','blackrock','fidelity','bought','buys','accumulates','accumulation','outflow','inflow','whale','treasury holding','institutional'];
+  if(hasAny(flowKeywords)){score+=2;if(!category)category='flow';}
+  // Direction-strong keywords (crash/soar tier — usually big move accompanying)
+  const downStrong=['crash','plunge','plunges','tanks','tanked','collapse','collapses','dives','dump','plummet','plummets','sell-off','selloff','wipeout','breaks below','below $','liquidated'];
+  const upStrong=['soar','soars','rocket','surge','surges','skyrocket','rally','rallies','breakout','all-time high','record high','ath','breaks above','above $'];
+  let direction=null;
+  if(hasAny(downStrong)){score+=3;direction='down';}
+  if(hasAny(upStrong)){score+=3;direction=direction==='down'?'mixed':'up';}
+  // Direction-mild keywords (drops/rises tier — modest signal)
+  const downMild=['drop','drops','dropping','falls','falling','slides','slipping','slumps','bearish','bear ','sell pressure','hawkish','retreats'];
+  const upMild=['rises','rising','climbs','jumps','gains','gaining','bullish','bull ','buy pressure','dovish','recovers','recovery'];
+  if(!direction){
+    if(hasAny(downMild)){score+=1;direction='down';}
+    if(hasAny(upMild)){score+=1;direction=direction==='down'?'mixed':'up';}
+  }
+  // Crypto-relevance bonus for the score (matched and crypto-related ⇒ +1)
+  if(isCryptoRelated&&score>0)score+=1;
+  // If category is macro, allow non-crypto news through (Fed news affects everything).
+  //   Otherwise require crypto-relevance for the toast to fire.
+  if(category!=='macro'&&!isCryptoRelated)score=Math.min(score,2); // cap non-crypto non-macro at 2 (subthreshold)
+  return{score,direction,category};
+};
 
 function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
@@ -15418,7 +15530,7 @@ function TaraApp(){
     const expireAt=_now+(_opts.durationMs||5500);
     setToasts(prev=>{
       const trimmed=prev.length>=3?prev.slice(prev.length-2):prev;
-      return[...trimmed,{id,kind,title,body,expireAt,color:_opts.color,icon:_opts.icon}];
+      return[...trimmed,{id,kind,title,body,expireAt,color:_opts.color,icon:_opts.icon,url:_opts.url}];
     });
   },[]);
   const dismissToasts=React.useCallback((idsOrAll)=>{
@@ -24222,7 +24334,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.18
+              9.8.19
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
@@ -25166,7 +25278,7 @@ function TaraApp(){
           <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
-          <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat}/>
+          <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} pushToast={pushToast}/>
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
