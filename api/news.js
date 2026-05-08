@@ -1,20 +1,18 @@
-// api/news.js — Vercel serverless function (V9.8.2)
+// api/news.js — Vercel serverless function (V9.8.3)
+//
+// ESM syntax — the project's package.json has "type": "module" so this is
+// the correct format. The 404 on previous V9.8.1/V9.8.2 deploys was likely
+// a Vercel build cache or redeploy issue, NOT a syntax issue.
 //
 // Server-side news proxy. Browser fetches /api/news with no CORS issues.
 // Tries multiple sources in fallback order, returns first that succeeds.
-// In-memory cache for 2 minutes to avoid hammering source APIs.
 //
-// V9.8.2 sources (in order — most-reliable-from-Vercel first):
+// Source order (most-reliable-from-Vercel first):
 //   1. CoinDesk RSS    (direct XML fetch + parse)
 //   2. Decrypt RSS     (direct XML fetch + parse)
 //   3. CoinTelegraph RSS (direct XML fetch + parse)
 //   4. rss2json (fallback if direct RSS feeds rate-limit Vercel)
 //   5. CryptoPanic     (last resort)
-//
-// Why these and not Reddit/CryptoCompare:
-//   - Reddit aggressively blocks AWS/Vercel datacenter IP ranges (429/403)
-//   - CryptoCompare moved to API-key model — free public tier rejected
-//   - Direct RSS feeds usually accept any User-Agent and have no per-IP limits
 
 const CACHE_TTL_MS = 120000; // 2 minutes
 let _cache = null;
@@ -40,8 +38,6 @@ const tryFetch = async (url, timeoutMs = 6000) => {
   }
 };
 
-// Minimal RSS 2.0 parser — handles standard <item> structure for all feeds
-// we care about. No external deps. Returns array of {title, url, time, description}.
 const parseRss = (xml) => {
   const items = [];
   if (typeof xml !== 'string' || !xml.includes('<item')) return items;
@@ -93,7 +89,7 @@ const tryRssFeed = async (url, sourceName) => {
 };
 
 export default async function handler(req, res) {
-  // Cache hit — fast path
+  // Cache hit
   if (_cache && Date.now() - _cache.at < CACHE_TTL_MS) {
     return respond(res, {
       items: _cache.items,
@@ -126,7 +122,7 @@ export default async function handler(req, res) {
     console.warn('[news] all RSS feeds failed:', e.message);
   }
 
-  // ── Source 4: rss2json (fallback) ──────────────────────────────────
+  // ── Source 4: rss2json fallback ─────────────────────────────────────
   try {
     const feeds = [
       { url: 'https://www.coindesk.com/arc/outboundfeeds/rss/', name: 'CoinDesk' },
@@ -157,7 +153,7 @@ export default async function handler(req, res) {
     console.warn('[news] rss2json failed:', e.message);
   }
 
-  // ── Source 5: CryptoPanic (last resort) ─────────────────────────────
+  // ── Source 5: CryptoPanic ─────────────────────────────────────────────
   try {
     const r = await tryFetch(
       'https://cryptopanic.com/api/free/v1/posts/?public=true&currencies=BTC',
@@ -180,7 +176,6 @@ export default async function handler(req, res) {
     console.warn('[news] CryptoPanic failed:', e.message);
   }
 
-  // ── All failed — serve stale cache if we have one ──────────────────
   if (_cache) {
     return respond(res, {
       items: _cache.items,
