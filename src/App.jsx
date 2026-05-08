@@ -924,7 +924,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.08-v9.8.15-tz-consistency';
+const BASELINE_VERSION='2026.05.08-v9.8.16-discord-coach-bridge';
+// V9.8.16: short-form display version used in Discord footers (was hardcoded
+//   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
+const TARA_VERSION_DISPLAY='Tara 9.8.16';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -7764,11 +7767,15 @@ function BestPracticesModal({open,onClose}){
 //     3. ACCELERATION detection (last 10s velocity vs prior 30s) — sharper alert
 //        than just "risk elevated" because it reflects what's happening RIGHT
 //        NOW, not what conditions look like.
-function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef,autoOrderState,killSwitchEngaged,onKillSwitch}){
+function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef,autoOrderState,killSwitchEngaged,onKillSwitch,onUrgentCoachAlert}){
   // V9.1.7: Per-position peak/trough refs. Reset on position open or direction flip.
   const _peakBpsRef=React.useRef({pos:null,peak:-Infinity,trough:Infinity,openTime:0});
   // V9.2.1: Sound alert tracking — only beep when a NEW urgent card appears, not on every render.
   const _lastCoachBeepRef=React.useRef({key:'',at:0});
+  // V9.8.16: Discord broadcast tracking — separate dedup ref with longer throttle (90s)
+  //   so we don't spam Discord on the same condition. Sound beep can fire every 10s
+  //   for the same key (audio fade is short); Discord shouldn't.
+  const _lastDiscordAlertRef=React.useRef({key:'',at:0});
   React.useEffect(()=>{
     // When position opens or flips, reset
     const _curPos=userPosition;
@@ -7972,6 +7979,33 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
       if(_cardKey!==_lastCoachBeepRef.current.key||_now2-_lastCoachBeepRef.current.at>10000){
         _lastCoachBeepRef.current={key:_cardKey,at:_now2};
         _taraWinBeep(); // rising beep for favorable spike
+      }
+    }
+
+    // V9.8.16: Discord broadcast — mirror of the sound-beep dedup above but with a 90s
+    //   throttle (sound beeps are fine more often, Discord is for substantive alerts).
+    //   Fires only on urgent cards. Bridges the in-trade coach detection to Discord
+    //   so phone-monitoring users get warned when a locked trade starts going wrong
+    //   — the gap that the 2026-05-08 screenshot exposed (DOWN locked, price ran up,
+    //   dashboard coach screamed reversal, Discord stayed silent).
+    if(cards.length>0&&cards[0].tone==='urgent'&&typeof onUrgentCoachAlert==='function'){
+      const _cardKey=cards[0].title;
+      const _nowD=Date.now();
+      if(_cardKey!==_lastDiscordAlertRef.current.key||_nowD-_lastDiscordAlertRef.current.at>90000){
+        _lastDiscordAlertRef.current={key:_cardKey,at:_nowD};
+        try{
+          onUrgentCoachAlert({
+            title:cards[0].title,
+            body:cards[0].body,
+            tone:cards[0].tone,
+            position:userPosition,
+            gap:_favoredGap,
+            posterior:_taraConf,
+            price:Number(currentPrice)||null,
+            strike:Number(targetMargin)||null,
+            clock:`${timeState?.minsRemaining||0}m ${timeState?.secsRemaining||0}s`,
+          });
+        }catch(_){}
       }
     }
 
@@ -17217,7 +17251,7 @@ function TaraApp(){
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
       // Username migration: always sync to current version, never keep stale Vxxx strings
       const du=localStorage.getItem('taraV110DU');
-      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:'Tara 7.10.6'; // no regex literal — esbuild safe
+      const cleanDU=(du&&!new RegExp('V1[0-9][0-9]').test(du||''))?du:TARA_VERSION_DISPLAY; // V9.8.16: dynamic version (was hardcoded "Tara 7.10.6")
       setDiscordUsername(cleanDU);
       if(cleanDU!==du)localStorage.setItem('taraV110DU',cleanDU); // write back corrected value
       const da=localStorage.getItem('taraV110DA');if(da)setDiscordAvatar(da);}catch(e){};},[]);
@@ -17823,7 +17857,7 @@ function TaraApp(){
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'State',value:data.prediction||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.6  |  signal'},
+        footer:{text:`${TARA_VERSION_DISPLAY}  |  signal`},
         timestamp:new Date().toISOString(),
       };
 
@@ -17837,7 +17871,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.10.6  |  stand-down'},
+        footer:{text:`${TARA_VERSION_DISPLAY}  |  stand-down`},
         timestamp:new Date().toISOString(),
       };
 
@@ -17851,7 +17885,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Confidence',value:`${(data.posterior||0).toFixed(1)}%`,inline:true},
         ],
-        footer:{text:'Tara 7.10.6  |  search'},
+        footer:{text:`${TARA_VERSION_DISPLAY}  |  search`},
         timestamp:new Date().toISOString(),
       };
 
@@ -17868,7 +17902,7 @@ function TaraApp(){
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ],
-        footer:{text:'Tara 7.10.6  |  lock'},
+        footer:{text:`${TARA_VERSION_DISPLAY}  |  lock`},
         timestamp:new Date().toISOString(),
       };
 
@@ -17885,7 +17919,7 @@ function TaraApp(){
             {name:'Gap',value:`${gap>=0?'+':''}${gap.toFixed(1)} bps  (${data.won?'correct side':'wrong side'})`,inline:true},
             {name:'Record',value:`${data.wins}W / ${data.losses}L  ${data.wins+data.losses>0?((data.wins/(data.wins+data.losses))*100).toFixed(1):'—'}%`,inline:false},
           ],
-          footer:{text:'Tara 7.10.6  |  close'},
+          footer:{text:`${TARA_VERSION_DISPLAY}  |  close`},
           timestamp:new Date().toISOString(),
         };
       }
@@ -17906,7 +17940,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
         ],
-        footer:{text:'Tara 7.10.6  |  exit'},
+        footer:{text:`${TARA_VERSION_DISPLAY}  |  exit`},
         timestamp:new Date().toISOString(),
       };
 
@@ -17927,7 +17961,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.6  |  scanning'},
+        footer:{text:`${TARA_VERSION_DISPLAY}  |  scanning`},
         timestamp:new Date().toISOString(),
       };
 
@@ -17947,7 +17981,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.6  |  signal'},
+        footer:{text:`${TARA_VERSION_DISPLAY}  |  signal`},
         timestamp:new Date().toISOString(),
       };
 
@@ -17967,7 +18001,7 @@ function TaraApp(){
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.6  |  lock'},
+        footer:{text:`${TARA_VERSION_DISPLAY}  |  lock`},
         timestamp:new Date().toISOString(),
       };
 
@@ -17984,7 +18018,7 @@ function TaraApp(){
           {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ],
-        footer:{text:'Tara 7.10.6  |  sit-out'},
+        footer:{text:`${TARA_VERSION_DISPLAY}  |  sit-out`},
         timestamp:new Date().toISOString(),
       };
 
@@ -18006,7 +18040,58 @@ function TaraApp(){
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
-          footer:{text:'Tara 7.10.6  |  result'},
+          footer:{text:`${TARA_VERSION_DISPLAY}  |  result`},
+          timestamp:new Date().toISOString(),
+        };
+      }
+
+      // V9.8.16: COACH_ALERT — bridges in-trade dashboard coach alerts to Discord. The
+      //   dashboard's LiveTradeCoach (V9.8.13 made it live + position-aware) already
+      //   detects TARA REVERSED, CONDITIONS ERODING, STRUCTURE BROKE, PRICE SPIKING
+      //   AGAINST YOU, drawdown-from-peak, late-window contrary whale, etc. Pre-V9.8.16
+      //   none of these reached Discord — phone/away users had no warning when a locked
+      //   trade started going wrong. Now: when an urgent coach card key changes (same
+      //   dedup as the sound beep) AND throttle (90s) has elapsed for that key, fire a
+      //   broadcast. Body of the card lands as the description so the user gets full
+      //   context, not just a label.
+      else if(type==='COACH_ALERT'){
+        const _color=data.tone==='urgent'?16478549:data.tone==='watch'?15974710:9807270;
+        const _gapStr=data.gap!=null?`${data.gap>0?'+':''}${data.gap.toFixed(1)} bps`:'—';
+        embed={
+          title:`TARA · ${_assetTag} · ${data.title||'COACH ALERT'}`,
+          color:_color,
+          description:data.body||'',
+          fields:[
+            data.position?{name:'Position',value:data.position,inline:true}:null,
+            data.gap!=null?{name:'Gap',value:_gapStr,inline:true}:null,
+            data.posterior!=null?{name:'Tara conf',value:`${Math.round(data.posterior)}%`,inline:true}:null,
+            data.clock?{name:'Clock',value:data.clock,inline:true}:null,
+            data.price!=null?{name:'Price',value:`$${data.price.toFixed(0)}`,inline:true}:null,
+            data.strike!=null?{name:'Strike',value:`$${data.strike.toFixed(0)}`,inline:true}:null,
+          ].filter(Boolean),
+          footer:{text:`${TARA_VERSION_DISPLAY}  |  coach alert`},
+          timestamp:new Date().toISOString(),
+        };
+      }
+
+      // V9.8.16: WHALE_RETRACTION — fires ~75s after a WHALE broadcast that claimed a
+      //   whale flow "aligns" with the user's position, IF subsequent price action
+      //   contradicts the alignment. Example from real screenshot 2026-05-08: 2:17 PM
+      //   "WHALE SELL $1013K — aligns with your DOWN position", then price rallied
+      //   ~+9 bps within minutes. The original alignment claim was misleading; this
+      //   retraction fires so the user isn't anchored to a stale read.
+      else if(type==='WHALE_RETRACTION'){
+        const _direction=data.moveBps>0?'rallied':'dropped';
+        const _sign=data.moveBps>0?'+':'';
+        embed={
+          title:`TARA · ${_assetTag} — WHALE READ INVALIDATED`,
+          color:15974710, // amber — heads-up, not full panic
+          description:[
+            `Earlier $${(data.whaleUsd/1000).toFixed(0)}K ${data.whaleSide} whale at $${data.whalePrice.toFixed(0)} appeared to align with your ${data.position} position.`,
+            `Since then price has ${_direction} to $${data.nowPrice.toFixed(0)} (${_sign}${data.moveBps.toFixed(0)} bps from whale price).`,
+            `Tape signal looks absorbed or contradicted — reassess. The "alignment" read no longer holds.`,
+          ].join('\n'),
+          footer:{text:`${TARA_VERSION_DISPLAY}  |  futures tape retraction`},
           timestamp:new Date().toISOString(),
         };
       }
@@ -18043,7 +18128,7 @@ function TaraApp(){
             `${reliabilityNote}`,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:'Tara 7.10.6  |  futures tape  |  not financial advice'},
+          footer:{text:`${TARA_VERSION_DISPLAY}  |  futures tape  |  not financial advice`},
           timestamp:new Date().toISOString(),
         };
       }
@@ -18054,6 +18139,41 @@ function TaraApp(){
         const parts=_webhookForAsset.replace('https://discord.com/api/webhooks/','').split('/');
         const entry={id:Date.now(),type,label:embed.title||type,ts:_fmtTimeTz(new Date(),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:true}),messageId:msg.id,webhookId:parts[0],webhookToken:parts[1],embed,asset:_activeAsset};
         setDiscordLog(prev=>[entry,...prev].slice(0,50));
+        // V9.8.16: schedule a WHALE_RETRACTION check 75s after a WHALE alert that
+        //   claimed alignment with the user's position. If price has meaningfully
+        //   moved AGAINST the user since the whale fired, the original alignment
+        //   read was wrong and we send a retraction so the user isn't anchored.
+        if(type==='WHALE'&&data?.whaleAdvisory?.action==='HOLD'&&data?.userPosition&&data?.price){
+          const _whaleSnapshot={
+            price:Number(data.price),
+            side:data.netFlow>0?'BUY':'SELL',
+            position:data.userPosition,
+            whaleUsd:Math.abs(Number(data.netFlow)||0),
+            at:Date.now(),
+          };
+          setTimeout(()=>{
+            try{
+              const _nowPrice=Number(currentPriceRef.current);
+              if(!_nowPrice||!_whaleSnapshot.price)return;
+              const _moveBps=((_nowPrice-_whaleSnapshot.price)/_whaleSnapshot.price)*10000;
+              // Contradiction = user position is DOWN and price moved up >=8bps,
+              //   or user position is UP and price moved down <=-8bps. The 8-bps
+              //   threshold filters noise — small wobble after a whale isn't a
+              //   retraction-worthy event.
+              const _contradicted=(_whaleSnapshot.position==='DOWN'&&_moveBps>=8)||(_whaleSnapshot.position==='UP'&&_moveBps<=-8);
+              if(_contradicted){
+                broadcastToDiscord('WHALE_RETRACTION',{
+                  whaleUsd:_whaleSnapshot.whaleUsd,
+                  whaleSide:_whaleSnapshot.side,
+                  whalePrice:_whaleSnapshot.price,
+                  nowPrice:_nowPrice,
+                  moveBps:_moveBps,
+                  position:_whaleSnapshot.position,
+                });
+              }
+            }catch(_){}
+          },75000);
+        }
       }
     }catch(e){}
   };
@@ -23773,7 +23893,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.15
+              9.8.16
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
@@ -24416,6 +24536,7 @@ function TaraApp(){
           autoOrderState={autoOrderState}
           killSwitchEngaged={killSwitchEngaged}
           onKillSwitch={()=>setKillSwitchEngaged(v=>!v)}
+          onUrgentCoachAlert={(payload)=>broadcastToDiscord('COACH_ALERT',payload)}
         />
 
         {/* V8.2: Asset rotation suggestion */}
