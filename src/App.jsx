@@ -81,30 +81,114 @@ const _crossTab=(typeof BroadcastChannel!=='undefined')?(()=>{try{return new Bro
 //   Each tab broadcasts its current asset + price every 5s. Other-asset tabs read it
 //   to detect correlation (e.g., BTC dumping → penalize ETH UP calls).
 
-// V9.2.1: Sound alerts via Web Audio API. Minimal beep function — no audio files needed.
-//   Called by spike alerts + trade coach urgent cards. User can mute via localStorage.
-const _taraBeep=(freq=880,durationMs=150,vol=0.15)=>{
+// V9.2.1 → V9.8.14: Sound alerts via Web Audio API. Minimal beep function — no audio
+//   files needed. Called by spike alerts + trade coach urgent cards. User can mute via
+//   localStorage.
+// V9.8.14: Singleton AudioContext + audio-thread scheduling. Old V9.2.1 implementation
+//   created a new AudioContext on every beep call — browsers cap context creation
+//   (~6 in Chrome, fewer on iOS) so after enough beeps new contexts came back
+//   suspended-and-stuck and no further sound played. Multi-tone beeps used setTimeout
+//   for sequencing, which is throttled to >=1s when a tab is backgrounded — sequenced
+//   beeps fired as a single muffled tone or not at all.
+//   Now: one shared module-level context, lazily created, resumed on first user
+//   gesture and on every visibilitychange→visible. Multi-tone sequences scheduled via
+//   internal AudioContext timing (oscillator.start(ctx.currentTime + delay)) which
+//   the audio thread honors regardless of JS event-loop throttling. Reliable across
+//   visible-but-unfocused tabs. Truly backgrounded tabs (different tab focused) still
+//   suspended — that's a browser-level constraint, fixable only via Notifications API.
+let _sharedAudioCtx=null;
+const _getAudioCtx=()=>{
+  if(typeof window==='undefined')return null;
+  if(_sharedAudioCtx)return _sharedAudioCtx;
   try{
-    if(typeof window==='undefined')return;
-    if(localStorage.getItem('taraSoundMuted')==='true')return;
-    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const Ctx=window.AudioContext||window.webkitAudioContext;
+    if(!Ctx)return null;
+    _sharedAudioCtx=new Ctx();
+    return _sharedAudioCtx;
+  }catch(_){return null;}
+};
+if(typeof window!=='undefined'){
+  // Bootstrap on first user gesture. Browsers require a user gesture to unlock audio,
+  //   so without this any sound that fires before the user has clicked anywhere goes
+  //   silently into a suspended context and dies.
+  const _bootCtx=()=>{
+    const c=_getAudioCtx();
+    if(c&&c.state==='suspended')c.resume().catch(()=>{});
+    window.removeEventListener('pointerdown',_bootCtx,true);
+    window.removeEventListener('keydown',_bootCtx,true);
+  };
+  try{
+    window.addEventListener('pointerdown',_bootCtx,true);
+    window.addEventListener('keydown',_bootCtx,true);
+    // Resume on tab return — backgrounded tabs suspend audio and visibilitychange is
+    //   the cleanest place to wake it.
+    document.addEventListener('visibilitychange',()=>{
+      if(document.visibilityState==='visible'){
+        const c=_sharedAudioCtx;
+        if(c&&c.state==='suspended')c.resume().catch(()=>{});
+      }
+    });
+  }catch(_){}
+}
+// Schedule a single beep at ctx.currentTime + offsetSec. Audio-thread timing — survives
+//   JS throttling when tab is unfocused (as long as not fully backgrounded).
+const _scheduleBeep=(ctx,freq,durationMs,vol,offsetSec)=>{
+  try{
     const osc=ctx.createOscillator();
     const gain=ctx.createGain();
     osc.connect(gain);gain.connect(ctx.destination);
     osc.frequency.value=freq;osc.type='sine';
-    gain.gain.value=vol;
-    osc.start();
-    gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+durationMs/1000);
-    osc.stop(ctx.currentTime+durationMs/1000+0.05);
-    setTimeout(()=>{try{ctx.close();}catch(_){}},durationMs+200);
+    const t0=ctx.currentTime+(offsetSec||0);
+    const dur=durationMs/1000;
+    gain.gain.setValueAtTime(0.0001,t0);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001,vol),t0+0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    osc.start(t0);
+    osc.stop(t0+dur+0.05);
   }catch(_){}
 };
-// Double beep for urgent alerts
-const _taraUrgentBeep=()=>{_taraBeep(1000,120,0.2);setTimeout(()=>_taraBeep(1200,120,0.2),180);};
-// Triple descending beep for spike-against alerts
-const _taraSpikeBeep=()=>{_taraBeep(1200,100,0.25);setTimeout(()=>_taraBeep(900,100,0.2),140);setTimeout(()=>_taraBeep(600,150,0.15),300);};
-// Rising beep for favorable spike
-const _taraWinBeep=()=>{_taraBeep(600,100,0.15);setTimeout(()=>_taraBeep(900,100,0.15),140);setTimeout(()=>_taraBeep(1200,150,0.2),300);};
+const _taraBeep=(freq=880,durationMs=150,vol=0.15)=>{
+  try{
+    if(typeof window==='undefined')return;
+    if(localStorage.getItem('taraSoundMuted')==='true')return;
+    const ctx=_getAudioCtx();if(!ctx)return;
+    if(ctx.state==='suspended')ctx.resume().catch(()=>{});
+    _scheduleBeep(ctx,freq,durationMs,vol,0);
+  }catch(_){}
+};
+// Multi-tone beeps — offsets in seconds (formerly setTimeout delays in ms).
+const _taraUrgentBeep=()=>{
+  try{
+    if(typeof window==='undefined')return;
+    if(localStorage.getItem('taraSoundMuted')==='true')return;
+    const ctx=_getAudioCtx();if(!ctx)return;
+    if(ctx.state==='suspended')ctx.resume().catch(()=>{});
+    _scheduleBeep(ctx,1000,120,0.2,0);
+    _scheduleBeep(ctx,1200,120,0.2,0.180);
+  }catch(_){}
+};
+const _taraSpikeBeep=()=>{
+  try{
+    if(typeof window==='undefined')return;
+    if(localStorage.getItem('taraSoundMuted')==='true')return;
+    const ctx=_getAudioCtx();if(!ctx)return;
+    if(ctx.state==='suspended')ctx.resume().catch(()=>{});
+    _scheduleBeep(ctx,1200,100,0.25,0);
+    _scheduleBeep(ctx,900,100,0.2,0.140);
+    _scheduleBeep(ctx,600,150,0.15,0.300);
+  }catch(_){}
+};
+const _taraWinBeep=()=>{
+  try{
+    if(typeof window==='undefined')return;
+    if(localStorage.getItem('taraSoundMuted')==='true')return;
+    const ctx=_getAudioCtx();if(!ctx)return;
+    if(ctx.state==='suspended')ctx.resume().catch(()=>{});
+    _scheduleBeep(ctx,600,100,0.15,0);
+    _scheduleBeep(ctx,900,100,0.15,0.140);
+    _scheduleBeep(ctx,1200,150,0.2,0.300);
+  }catch(_){}
+};
 const _crossAssetChannel=(typeof BroadcastChannel!=='undefined')?(()=>{try{return new BroadcastChannel('tara-cross-asset-v1');}catch(_){return null;}})():null;
 const broadcastToOtherTabs=(type,payload)=>{
   if(!_crossTab)return;
@@ -840,7 +924,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.08-v9.8.12-cb-stale-cdn-guard';
+const BASELINE_VERSION='2026.05.08-v9.8.14-sound-singleton-sticky-lock-timeseries';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -3585,6 +3669,36 @@ const computeAdvisor=(params)=>{
   }
 
   // ── IN-TRADE ADVISOR ──
+  // V9.8.13: LIVE-direction variables for in-trade reversal detection. The pre-entry
+  //   path uses _taraImpliedDir (derived from taraSnapshot.call — frozen at lock time).
+  //   That's correct pre-entry: it shows what Tara COMMITTED to. But in-trade, we need
+  //   the LIVE read — when the engine's continuously-updating posterior flips against
+  //   the user, the TARA REVERSED branch should fire, the AGREES branch should re-
+  //   evaluate, etc. Mirrors the pre-entry stale-lock detection (L3525-3550) which
+  //   only ran before entry; now applied throughout the trade.
+  const _liveDir = taraPosterior!=null ? (taraPosterior>=50?'UP':'DOWN') : null;
+  const _liveConf = taraPosterior!=null ? (taraPosterior>=50?taraPosterior:(100-taraPosterior)) : 50;
+  // Lock-direction conviction at lock time and now — for measuring how far the live
+  //   posterior has drifted from the lock-time conviction in the lock's direction.
+  //   Used to decide if the trade conditions have meaningfully inverted (≥25pt drop)
+  //   even when the live direction hasn't crossed 50 yet.
+  const _lockDir = (taraSnapshot?.call==='UP'||taraSnapshot?.call==='DOWN')?taraSnapshot.call:(lockInfo?.dir||null);
+  const _lockDirConfAtLock = (taraSnapshot?.atPosterior!=null&&_lockDir)
+    ?(_lockDir==='UP'?taraSnapshot.atPosterior:(100-taraSnapshot.atPosterior))
+    :null;
+  const _lockDirConfNow = (taraPosterior!=null&&_lockDir)
+    ?(_lockDir==='UP'?taraPosterior:(100-taraPosterior))
+    :null;
+  const _livePosteriorInverted = _lockDirConfAtLock!=null&&_lockDirConfNow!=null
+    &&_lockDirConfNow<=_lockDirConfAtLock-25;
+  const _kalshiAtLockDirConf = (taraSnapshot?.kalshiAtLock!=null&&_lockDir)
+    ?(_lockDir==='UP'?taraSnapshot.kalshiAtLock:(100-taraSnapshot.kalshiAtLock))
+    :null;
+  const _kalshiNowDirConf = (_kPctNow!=null&&_lockDir)
+    ?(_lockDir==='UP'?_kPctNow:(100-_kPctNow))
+    :null;
+  const _kalshiLiveInverted = _kalshiAtLockDirConf!=null&&_kalshiNowDirConf!=null
+    &&_kalshiNowDirConf<=_kalshiAtLockDirConf-30;
   const pnlPct=positionStatus?.pnlPct||0;
   const offerAboveBet=offerVal>betAmount;
   const profitPct=offerAboveBet?((offerVal-betAmount)/Math.max(1,betAmount))*100:0;
@@ -3639,20 +3753,37 @@ const computeAdvisor=(params)=>{
   //   the OPPOSITE direction with strong conviction, surface that as urgency. Doesn't
   //   force exit (user might have their own read), but flags the disagreement clearly.
   //   Three escalating tiers based on Tara's conviction in the opposite direction.
-  if(_taraImpliedDir&&_taraImpliedDir!==userPosition&&_taraImpliedConf>=58){
-    const _opposingConf=Math.round(_taraImpliedConf);
+  // V9.8.13: now reads LIVE posterior (_liveDir / _liveConf), not the frozen lock
+  //   snapshot. The original code used _taraImpliedDir which was derived from
+  //   taraSnapshot.call — meaning if user locked UP and live posterior rotated to
+  //   70% DOWN mid-window, this branch could not fire because _taraImpliedDir was
+  //   still 'UP'. That was exactly the "stale-anchor" bug the user reported as
+  //   "calls for opposite position which feels stupid": engine had genuinely flipped
+  //   off their side, advisor stayed silent. Live read fixes it.
+  if(_liveDir&&_liveDir!==userPosition&&_liveConf>=58){
+    const _opposingConf=Math.round(_liveConf);
     const _gapStr=`Gap: ${gapForPosition>=0?'+':''}${gapForPosition.toFixed(1)} bps`;
-    if(_taraImpliedConf>=72){
+    if(_liveConf>=72){
       // High conviction opposite — Tara says you're on the wrong side, urgent
-      return{label:`⚠ TARA REVERSED · ${_taraImpliedDir}`,reason:`Tara now leans ${_taraImpliedDir} ${_opposingConf}% — opposite of your ${userPosition} position · ${_gapStr} · ${timeLabel}`,color:'rose',animate:true,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+      return{label:`⚠ TARA REVERSED · ${_liveDir}`,reason:`Tara now leans ${_liveDir} ${_opposingConf}% — opposite of your ${userPosition} position · ${_gapStr} · ${timeLabel}`,color:'rose',animate:true,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
     }
-    if(_taraImpliedConf>=65){
+    if(_liveConf>=65){
       // Medium conviction opposite — flag it, but action depends on profit/gap
       const _action=offerAboveBet?'TAKE PROFIT NOW':'EXIT NOW';
-      return{label:`⚠ Tara opposes · ${_taraImpliedDir} ${_opposingConf}%`,reason:`Tara reading conditions for ${_taraImpliedDir} now · ${_gapStr} · ${timeLabel}`,color:'amber',animate:true,hasAction:true,actionLabel:_action,actionTarget:offerAboveBet?'CASH':'SIT OUT'};
+      return{label:`⚠ Tara opposes · ${_liveDir} ${_opposingConf}%`,reason:`Tara reading conditions for ${_liveDir} now · ${_gapStr} · ${timeLabel}`,color:'amber',animate:true,hasAction:true,actionLabel:_action,actionTarget:offerAboveBet?'CASH':'SIT OUT'};
     }
     // Mild opposition — informational, no forced action
-    return{label:`Tara leaning ${_taraImpliedDir} ${_opposingConf}%`,reason:`Mild disagreement with your ${userPosition} · ${_gapStr} · ${timeLabel}`,color:'amber',animate:false,hasAction:false};
+    return{label:`Tara leaning ${_liveDir} ${_opposingConf}%`,reason:`Mild disagreement with your ${userPosition} · ${_gapStr} · ${timeLabel}`,color:'amber',animate:false,hasAction:false};
+  }
+  // V9.8.13: even when live direction still matches user, fire a softer warning if the
+  //   conviction in the lock direction has eroded ≥25pt (live posterior drift) OR Kalshi
+  //   has flipped 30+pt against. The position hasn't formally inverted but the conditions
+  //   that justified the lock are gone. This is the "STRUCTURE BROKE" early signal.
+  if((_livePosteriorInverted||_kalshiLiveInverted)&&!isActuallyLosing){
+    const _why=[];
+    if(_livePosteriorInverted)_why.push(`posterior conviction ${Math.round(_lockDirConfAtLock)}→${Math.round(_lockDirConfNow)}%`);
+    if(_kalshiLiveInverted)_why.push(`Kalshi ${Math.round(_kalshiAtLockDirConf)}→${Math.round(_kalshiNowDirConf)}%`);
+    return{label:`CONDITIONS ERODING · ${userPosition}`,reason:`Lock-time edge fading: ${_why.join(' · ')} · ${gapStr} · ${timeLabel}`,color:'amber',animate:false,hasAction:true,actionLabel:offerAboveBet?'TAKE PROFIT':'TIGHTEN EXIT',actionTarget:'CASH'};
   }
 
   // ── 2. DEEP ADVERSE — always cut regardless of model confidence ───────────
@@ -3675,6 +3806,15 @@ const computeAdvisor=(params)=>{
   // ── 3. REAL PROFIT ON TABLE — offer above your bet ────────────────────────
   if(profitPct>40&&momentumAgainst)return{label:'TAKE MAX PROFIT',reason:`+${profitPct.toFixed(0)}% on offer. Momentum reversing — lock in now before it fades. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:true,hasAction:true,actionLabel:'CASHOUT — MAX PROFIT',actionTarget:'CASH'};
   if(profitPct>20&&drawdownFromPeak>0.12)return{label:'TRAILING STOP HIT',reason:`Offer pulled back ${(drawdownFromPeak*100).toFixed(0)}% from its peak. Protect your gains now. [${timeLabel}]`,color:'emerald',animate:true,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'CASH'};
+  // V9.8.13: MID-WINDOW PROFIT-PROTECTION — fills the gap between TRAILING STOP (always-on,
+  //   needs 20%+ profit and 12%+ drawdown) and SCALP/SECURE PROFIT (gated on isLate, only
+  //   fires under ~2:15 left). Pre-V9.8.13 a profit at minute 5-12 of a 15m window with
+  //   momentum turning got just `HOLD FIRM` while the offer eroded — user reported this
+  //   directly as "cashout calls come late". These mid-window triggers fire earlier on
+  //   tighter thresholds when the trade is past its halfway point.
+  const isMidLate = !isLate && timeRemainingFrac < 0.50; // ~7:30+ elapsed in a 15m window
+  if(profitPct>=22&&drawdownFromPeak>=0.08&&isMidLate)return{label:'SECURE PROFIT — DRAWING DOWN',reason:`+${profitPct.toFixed(0)}% on offer, gave back ${(drawdownFromPeak*100).toFixed(0)}% from peak. Don't wait for full reversal. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:true,hasAction:true,actionLabel:'SECURE PROFIT NOW',actionTarget:'CASH'};
+  if(profitPct>=15&&momentumAgainst&&isMidLate)return{label:'SECURE PROFIT — MOMENTUM TURNING',reason:`+${profitPct.toFixed(0)}% with momentum reversing and ${timeLabel}. Secure now before it fades. ${gapStr}.`,color:'emerald',animate:false,hasAction:true,actionLabel:'SECURE PROFIT NOW',actionTarget:'CASH'};
   if(profitPct>12&&momentumAgainst&&isLate)return{label:'SCALP PROFIT',reason:`+${profitPct.toFixed(0)}% with ${timeLabel} left. Momentum turning — good time to scalp. ${gapStr}.`,color:'emerald',animate:false,hasAction:true,actionLabel:'SCALP CASHOUT',actionTarget:'CASH'};
   if(profitPct>8&&isLate)return{label:'SECURE PROFIT',reason:`Profit on table (+${profitPct.toFixed(0)}%) and time running out. Consider locking in. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'CASH'};
   if(offerAboveBet&&momentumAgainst&&winSide<60)return{label:'SECURE PROFIT',reason:`+${profitPct.toFixed(0)}% profit but odds slipping. Consider exit. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'CASH'};
@@ -3716,7 +3856,11 @@ const computeAdvisor=(params)=>{
   // ── 6. WINNING POSITION ────────────────────────────────────────────────────
   // V6.2.8: Tara-aligned reassurance — when Tara strongly agrees with user's winning position,
   //   surface that confidence as "TARA AGREES" instead of generic HOLD STRONG.
-  const _taraAgreesStrong=_taraImpliedDir===userPosition&&_taraImpliedConf>=72;
+  // V9.8.13: now reads LIVE direction. Old code used _taraImpliedDir from lock snapshot,
+  //   which always matched userPosition if the user followed Tara's call — making this
+  //   branch fire trivially even when the live engine had drifted off-side. Now: only
+  //   fires when Tara's CURRENT read still agrees with user at high conviction.
+  const _taraAgreesStrong=_liveDir===userPosition&&_liveConf>=72;
   // V9.7.6: Kalshi tape confirmation — strongest possible signal for HOLD is "Kalshi YES
   //   moving with us at +5¢/30s." Tape is telling us the move is real.
   const _kalshiConfirmsHold=_kalshiVel!=null&&((isUP&&_kalshiVel>=5)||(isDN&&_kalshiVel<=-5));
@@ -3724,7 +3868,11 @@ const computeAdvisor=(params)=>{
     return{label:`KALSHI CONFIRMS · HOLD ${userPosition}`,reason:`Kalshi YES ${_kalshiVel>0?'+':''}${_kalshiVel.toFixed(0)}¢/30s with ${userPosition} · ${gapStr} · Tara ${winSide.toFixed(0)}% · [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
   }
   if(isActuallyWinning&&_taraAgreesStrong&&gapMagnitude>10){
-    return{label:`TARA AGREES · HOLD ${userPosition}`,reason:`Tara ${userPosition} ${Math.round(_taraImpliedConf)}% · Edge ${_taraEdge!=null?(_taraEdge>=0?'+':'')+Math.round(_taraEdge)+'pt':'—'} · ${gapStr} · ${timeLabel}`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+    // V9.8.13: edge computed from LIVE conf vs current Kalshi (was using lock-time confidence)
+    const _liveEdge = _kPctNow!=null
+      ? (_liveDir==='UP'?_liveConf-_kPctNow:_liveConf-(100-_kPctNow))
+      : null;
+    return{label:`TARA AGREES · HOLD ${userPosition}`,reason:`Tara ${userPosition} ${Math.round(_liveConf)}% · Edge ${_liveEdge!=null?(_liveEdge>=0?'+':'')+Math.round(_liveEdge)+'pt':'—'} · ${gapStr} · ${timeLabel}`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
   }
   if(isActuallyWinning&&winSide>80&&!offerAboveBet)return{label:'MAX PROFIT ZONE',reason:`${gapForPosition.toFixed(0)} bps favorable. Tara: ${winSide.toFixed(0)}% confident. Wait for offer to appear. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT IF OFFERED',actionTarget:'CASH'};
   if(isActuallyWinning&&momentumWith&&gapMagnitude>10)return{label:'HOLD STRONG',reason:`${gapForPosition.toFixed(0)} bps above/below strike. Momentum aligned. ${gapStr}. Tara: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
@@ -6928,22 +7076,44 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const genPost=analysis.rawProbAbove||50;
           const genDir=genPred.includes('UP')?'UP':genPred.includes('DOWN')?'DOWN':null;
           const genState=genPred.includes('CONFIRMED')?'CONFIRMED':genPred.includes('FORMING')?'FORMING':genPred.includes('SEARCHING')?'SEARCHING':genPred.includes('SITTING')?'SIT OUT':genPred.includes('REJECTED')?'REJECTED':'WATCHING';
-          // Comparison logic — only valid once Tara has committed
+          // V9.8.13: panel is now position-aware. When user has a position (manual or
+          //   following Tara's lock), the comparison reframes from "engine vs Tara" to
+          //   "engine vs YOUR position" — which is what actually matters once committed.
+          //   Previously: user locks DOWN, engine drifts UP mid-trade, panel shows green
+          //   ▲ "UP CONFIRMED 65% · DISAGREED — split with engine" — user skims the big
+          //   green arrow and brain-flips to "system thinks UP is winning" while DOWN.
+          //   Now: same situation reads rose ▲ "engine now leans UP — against your DOWN".
+          //   The arrow color signals "are you still favored," not raw price direction.
           let tagLabel,tagColor;
-          if(!snap){
+          let posWarning=false; // true when engine direction is against the user's position
+          if(userPosition&&genDir){
+            if(genDir===userPosition){
+              tagLabel=`engine confirms your ${userPosition}`;
+              tagColor='text-emerald-400/85';
+            }else{
+              tagLabel=`against your ${userPosition} — engine leans ${genDir}`;
+              tagColor='text-rose-400/90';
+              posWarning=true;
+            }
+          }else if(!snap){
             tagLabel='ANALYZING — engine shown for reference';
             tagColor='text-[#E8E9E4]/45';
           } else if(isSatOutSnap){
             tagLabel=genDir?`OVERRODE — engine said ${genDir}, Tara wasn't convinced`:'SAT OUT — engine also unsure';
             tagColor='text-amber-400/85';
           } else {
-            // Tara locked UP or DOWN
+            // Tara locked UP or DOWN, no user position yet
             if(genDir===snap.call){tagLabel='AGREED — same direction';tagColor='text-emerald-400/85';}
             else if(genDir&&genDir!==snap.call){tagLabel='DISAGREED — split with engine';tagColor='text-rose-400/85';}
             else{tagLabel='TARA LOCKED — engine still searching';tagColor='text-[#E8E9E4]/55';}
           }
           const genArrow=genDir==='UP'?'▲':genDir==='DOWN'?'▼':'—';
-          const genColor=genDir==='UP'?'text-emerald-400/65':genDir==='DOWN'?'text-rose-400/65':'text-[#E8E9E4]/45';
+          // V9.8.13: arrow color now reflects "favored for user" semantics when in-trade,
+          //   not raw direction. Eliminates the misread where ▼ DOWN shows rose even
+          //   though the user is DOWN and the engine is confirming them.
+          const genColor = (userPosition&&genDir)
+            ? (genDir===userPosition?'text-emerald-400/75':'text-rose-400/85')
+            : (genDir==='UP'?'text-emerald-400/65':genDir==='DOWN'?'text-rose-400/65':'text-[#E8E9E4]/45');
           // V6.4.1: live Kalshi % alongside engine for direct comparison
           const _kPctEng=kalshiYesPrice;
           const _kalshiLiveEng=_kPctEng!=null&&!isNaN(_kPctEng);
@@ -15103,6 +15273,10 @@ function TaraApp(){
   //   any lock release, engine must scan for 45s before re-locking. This kills the visible
   //   "advisor keeps flipping" behavior the user reported.
   const lockReleasedAtRef=useRef(0);
+  // V9.8.14: throttle ref for mid-trade time-series capture. Engine ticks fire sub-second
+  //   while a lock is active; we only want a snapshot every ~5s so call-log entries don't
+  //   bloat. ~17 minutes of 5s samples = 200 entries × ~80 bytes = 16 KB per call. Safe.
+  const _lastTimeSeriesAtRef=useRef(0);
   // V5.7.8: Confluence state ref — engine cooldown reads this to shorten the post-release
   //   window (45s → 15s) when current candidate is confluent. Updated each cycle by the
   //   Tara's call gate based on _ctx.isConfluent / isSuperConfluent.
@@ -18680,6 +18854,12 @@ function TaraApp(){
                   ..._capturedWindowCtx,
                   closingGapBps:_gap,
                   kalshiAtClose:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
+                  // V9.8.14: copy mid-trade time-series + sticky-lock shadow-release history
+                  //   from the lock object onto the resolved call-log entry. Both default to
+                  //   the entry's existing values (in case lockedCallRef has already been
+                  //   cleared by a window rollover that happened between expiry and this merge).
+                  timeSeries:(typeof lockedCallRef!=='undefined'&&lockedCallRef.current?.timeSeries)||idx.e.timeSeries||[],
+                  releaseSignalsHistory:(typeof lockedCallRef!=='undefined'&&lockedCallRef.current?.releaseSignalsHistory)||idx.e.releaseSignalsHistory||[],
                 };
                 // Classify loss pattern only on LOSS — uses the just-merged entry. V8.7 guarded.
                 if(_resolvedResult==='LOSS'){
@@ -19586,25 +19766,73 @@ function TaraApp(){
           (lock.dir==='DOWN'&&_lockedInBearishRg&&!_nowInBearishRg&&_trajLeansUp)
         );
         if(deepWrong||catastrophicRugpull||catastrophicSpike||decayCollapse||signalRegimeChange||trajFlipAgainst||fgtFlipAgainst||regimeRevalidation){
-          lockedCallRef.current=null;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};
-          // V5.6.11: stamp release timestamp so the cooldown blocks re-lock for 45s
-          lockReleasedAtRef.current=Date.now();
-          // V134: reset window-direction commitment so flip to opposite direction is allowed
-          windowSignalDirRef.current=null;
-          taraAdviceRef.current='SIGNAL CLEARED';
-          _persistLock(); // V5.6: reflect the now-released state in cloud
-          if(catastrophicRugpull)reasoning.push(`[LOCK] Released — catastrophic rug pull (UP lock)`);
-          else if(catastrophicSpike)reasoning.push(`[LOCK] Released — catastrophic upward spike (DOWN lock)`);
-          else if(signalRegimeChange)reasoning.push(`[LOCK] Released — signal regime flipped (${flippedSignals.join(',')} now against ${lock.dir})`);
-          else if(decayCollapse)reasoning.push(`[LOCK] Released — posterior decayed ${postDelta.toFixed(0)} pts since lock${_severeCollapse&&!_postLockStable?' (severe — bypassed stability window)':''}`);
-          else if(trajFlipAgainst)reasoning.push(`[LOCK] Released — trajectory flipped against ${lock.dir} (${eng.trajectoryAdj.toFixed(0)})`);
-          else if(fgtFlipAgainst)reasoning.push(`[LOCK] Released — FGT now ${eng.mtfAlignment>0?'UP':'DOWN'} ${Math.abs(eng.mtfAlignment).toFixed(1).replace(/\.0$/,'')}/4 against ${lock.dir}`);
-          else if(regimeRevalidation)reasoning.push(`[LOCK] Released — ${lock.lockedRegime} regime gone, trajectory ${(eng.trajectoryAdj||0).toFixed(0)} now leans ${lock.dir==='UP'?'DOWN':'UP'}`);
-          else if(deepWrong)reasoning.push(`[LOCK] Released — adverse gap ${gapBps.toFixed(0)} bps past threshold`);
-          else reasoning.push(`[LOCK] Released — extreme adverse gap (${gapBps.toFixed(0)} bps)`);
-        } else {
-          // Hold the lock regardless of posterior fluctuation
-          taraAdviceRef.current=lock.dir==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';
+          // V9.8.14: STICKY LOCK (Option A) — release reasons are now advisor-only signals.
+          //   The lock itself NEVER clears mid-window. Pre-V9.8.14 these conditions ran
+          //   `lockedCallRef.current = null` + 45s cooldown + allowed an opposite-direction
+          //   re-lock in the same window. User feedback: "i don't want tara's call to flip
+          //   her lock once locked." Now: every Tara call lives the full window and resolves
+          //   on its committed direction at expiry. Cleaner W/L data, no whipsaw.
+          //   The user-facing warnings still fire — V9.8.13 made the in-trade coach read
+          //   live posterior, so TARA REVERSED / STRUCTURE BROKE / CONDITIONS ERODING all
+          //   surface from the live-engine path independently of this block.
+          //   We DO record the would-have-released signals on the lock object as a history
+          //   array, useful for CSV audit ("the engine wanted to release at +6:42 — was the
+          //   trade actually compromised at that moment?").
+          if(!lockedCallRef.current.releaseSignalsHistory)lockedCallRef.current.releaseSignalsHistory=[];
+          lockedCallRef.current.releaseSignalsHistory.push({
+            at:Date.now(),
+            secsIntoLock:Math.round((Date.now()-(lockedCallRef.current.lockedAt||Date.now()))/1000),
+            deepWrong:!!deepWrong,catastrophicRugpull:!!catastrophicRugpull,
+            catastrophicSpike:!!catastrophicSpike,decayCollapse:!!decayCollapse,
+            signalRegimeChange:!!signalRegimeChange,trajFlipAgainst:!!trajFlipAgainst,
+            fgtFlipAgainst:!!fgtFlipAgainst,regimeRevalidation:!!regimeRevalidation,
+            posteriorAtSignal:Math.round(posterior),
+            gapBpsAtSignal:Math.round(gapBps),
+            trajAtSignal:eng.trajectoryAdj!=null?Math.round(eng.trajectoryAdj*10)/10:null,
+            fgtAtSignal:eng.mtfAlignment!=null?Math.round(eng.mtfAlignment*10)/10:null,
+          });
+          // Cap history at 50 entries to keep call-log size bounded
+          if(lockedCallRef.current.releaseSignalsHistory.length>50){
+            lockedCallRef.current.releaseSignalsHistory=lockedCallRef.current.releaseSignalsHistory.slice(-50);
+          }
+          if(catastrophicRugpull)reasoning.push(`[STICKY-LOCK] Would have released (catastrophic rug pull) — lock held`);
+          else if(catastrophicSpike)reasoning.push(`[STICKY-LOCK] Would have released (catastrophic upward spike) — lock held`);
+          else if(signalRegimeChange)reasoning.push(`[STICKY-LOCK] Would have released (signal regime flipped: ${flippedSignals.join(',')}) — lock held`);
+          else if(decayCollapse)reasoning.push(`[STICKY-LOCK] Would have released (posterior decayed ${postDelta.toFixed(0)} pts) — lock held`);
+          else if(trajFlipAgainst)reasoning.push(`[STICKY-LOCK] Would have released (trajectory ${(eng.trajectoryAdj||0).toFixed(0)} flipped against ${lock.dir}) — lock held`);
+          else if(fgtFlipAgainst)reasoning.push(`[STICKY-LOCK] Would have released (FGT now ${(eng.mtfAlignment||0)>0?'UP':'DOWN'} ${Math.abs(eng.mtfAlignment||0).toFixed(1).replace(/\.0$/,'')}/4 against ${lock.dir}) — lock held`);
+          else if(regimeRevalidation)reasoning.push(`[STICKY-LOCK] Would have released (${lock.lockedRegime} regime gone) — lock held`);
+          else if(deepWrong)reasoning.push(`[STICKY-LOCK] Would have released (adverse gap ${gapBps.toFixed(0)} bps) — lock held`);
+        }
+        // Always — hold the lock, regardless of any signals above. Lock is sticky.
+        taraAdviceRef.current=lock.dir==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';
+      }
+
+      // ── V9.8.14: MID-TRADE TIME-SERIES CAPTURE ─────────────────────────────
+      //   Logs a snapshot every ~5s while a Tara call is locked. Foundation for
+      //   V9.9.0 predictive reversal training data and post-hoc audit of "would-
+      //   have-released" sticky-lock signals. No UI change, no behavior change —
+      //   pure data accumulation. Each snapshot ~80 bytes; capped at 200 entries
+      //   (~17 minutes of 5s sampling, well over a 15m window) to bound memory.
+      //   Resolution merge (line ~18860) copies this onto the call-log entry at
+      //   window expiry so it lands in the CSV/JSON exports.
+      if(lockedCallRef.current){
+        const _now=Date.now();
+        if(_now-_lastTimeSeriesAtRef.current>=5000){
+          _lastTimeSeriesAtRef.current=_now;
+          if(!lockedCallRef.current.timeSeries)lockedCallRef.current.timeSeries=[];
+          if(lockedCallRef.current.timeSeries.length<200){
+            const _kPctTs=kalshiYesPrice!=null&&Number.isFinite(kalshiYesPrice)?Number(kalshiYesPrice):null;
+            lockedCallRef.current.timeSeries.push({
+              t:Math.round((_now-(lockedCallRef.current.lockedAt||_now))/1000), // seconds since lock
+              p:Math.round(posterior),
+              g:Math.round(realGapBps||0),
+              k:_kPctTs!=null?Math.round(_kPctTs):null,
+              f:eng.mtfAlignment!=null?Math.round(eng.mtfAlignment*10)/10:null,
+              tr:eng.trajectoryAdj!=null?Math.round(eng.trajectoryAdj*10)/10:null,
+              rg:regime||null,
+            });
+          }
         }
       }
 
@@ -23540,7 +23768,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.12
+              9.8.14
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
