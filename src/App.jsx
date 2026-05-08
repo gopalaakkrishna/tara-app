@@ -924,7 +924,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.08-v9.8.14-sound-singleton-sticky-lock-timeseries';
+const BASELINE_VERSION='2026.05.08-v9.8.15-tz-consistency';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -9721,7 +9721,7 @@ function StreakTiltPill({todayData}){
 // Collapsible card showing today's at-a-glance trader analytics. Designed to slide
 // below the market context strip without cluttering. Open/closed state remembered
 // in localStorage.
-function RecentCallsHeatmap({recent,size=14}){
+function RecentCallsHeatmap({recent,size=14,timeFormat}){
   if(!recent||recent.length===0){
     return React.createElement('div',{className:'flex items-center gap-1 text-[10px] text-[#E8E9E4]/35 italic'},'No resolved calls yet');
   }
@@ -9729,7 +9729,7 @@ function RecentCallsHeatmap({recent,size=14}){
     recent.map((e,i)=>{
       const _w=e.result==='WIN';
       const _bg=_w?'rgba(110,231,183,0.85)':'rgba(244,114,182,0.85)';
-      const _t=e.time?new Date(e.time).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false}):'';
+      const _t=e.time?_fmtTimeTz(new Date(e.time),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:false}):'';
       return React.createElement('div',{
         key:e.id||i,
         title:`${e.result} · ${e.dir} · ${_t} · ${e.regime||''}`,
@@ -9824,7 +9824,7 @@ function VolatilitySparkline({tickHistoryRef,height=30}){
   );
 }
 
-function TodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMacro}){
+function TodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMacro,timeFormat}){
   const[expanded,setExpanded]=React.useState(()=>{
     try{return localStorage.getItem('taraTodayCardExpanded_v1')!=='false';}catch(_){return true;}
   });
@@ -9858,7 +9858,7 @@ function TodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMacro}){
           React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/40'},'Recent calls (newest right)'),
           React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/30 tabular-nums'},`last ${recentForHeatmap.length}`),
         ),
-        React.createElement(RecentCallsHeatmap,{recent:recentForHeatmap,size:12}),
+        React.createElement(RecentCallsHeatmap,{recent:recentForHeatmap,size:12,timeFormat}),
       ),
       // P&L curve
       todayCalls.filter(e=>e.result==='WIN'||e.result==='LOSS').length>=2&&React.createElement('div',null,
@@ -11032,8 +11032,13 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
                   const _d=e.id?new Date(e.id):new Date();
-                  const _date=_d.toLocaleDateString();
-                  const _time=_d.toLocaleTimeString();
+                  // V9.8.15: CSV date/time honor the user's selected timeFormat (local | utc | est)
+                  //   instead of hardcoded local. Previously the CSV always exported in the
+                  //   exporter's local timezone — meaning two users on the same data would get
+                  //   different timestamps in their downloads, and the displayed times in the
+                  //   memory modal didn't match the times in the export they just downloaded.
+                  const _date=_fmtDateTz(_d,timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'});
+                  const _time=_fmtTimeTz(_d,timeFormat,{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
                   const _tier=e.isStructuralLed?'structural':e.isSuperConfluent?'super':e.isConfluent?'confluence':e.isTapeLed?'tape':e.isRisingConfluence?'rising':e.isUserForced?'forced':'single';
                   const _row=[
                     _date,_time,e.asset||'BTC',e.windowType||'15m',
@@ -13193,7 +13198,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
 //   Accessible via header button. Shows: WR heatmap by hour×day, P&L curve by asset,
 //   ML model status + feature importance, loss pattern distribution, regime×direction
 //   performance matrix, signal attribution chart.
-function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose}){
+function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
   React.useEffect(()=>{
     const onKey=(e)=>{if(e.key==='Escape')onClose();};
     window.addEventListener('keydown',onKey);
@@ -13374,7 +13379,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose}){
           React.createElement('div',{className:'p-3 rounded-lg bg-[#111312] border border-[#E8E9E4]/5'},
             React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
               React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/70'},`Logistic regression · ${mlInfo.nTrades} training samples · ${(mlInfo.accuracy*100).toFixed(1)}% accuracy`),
-              React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40'},`Trained ${new Date(mlInfo.trainedAt).toLocaleTimeString()}`)
+              React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40'},`Trained ${_fmtTimeTz(new Date(mlInfo.trainedAt),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:false})}`)
             ),
             React.createElement('div',{className:'space-y-1'},
               (mlInfo.importance||[]).slice(0,10).map((f,i)=>{
@@ -18047,7 +18052,7 @@ function TaraApp(){
       if(res.ok){
         const msg=await res.json();
         const parts=_webhookForAsset.replace('https://discord.com/api/webhooks/','').split('/');
-        const entry={id:Date.now(),type,label:embed.title||type,ts:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}),messageId:msg.id,webhookId:parts[0],webhookToken:parts[1],embed,asset:_activeAsset};
+        const entry={id:Date.now(),type,label:embed.title||type,ts:_fmtTimeTz(new Date(),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:true}),messageId:msg.id,webhookId:parts[0],webhookToken:parts[1],embed,asset:_activeAsset};
         setDiscordLog(prev=>[entry,...prev].slice(0,50));
       }
     }catch(e){}
@@ -18062,7 +18067,7 @@ function TaraApp(){
       const updatedEmbed={
         ...originalEmbed,
         description:(originalEmbed.description?originalEmbed.description+'\n\n':'')+'Note: '+noteText,
-        footer:{text:`Tara · edited ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}`},
+        footer:{text:`Tara · edited ${_fmtTimeTz(new Date(),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:true})}`},
       };
       const res=await fetch(url,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({embeds:[updatedEmbed]})});
       return res.ok;
@@ -23498,7 +23503,7 @@ function TaraApp(){
     });
   };
 
-  const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${d.toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast`;setChatLog([...log,{role:'tara',text:r}]);},400);};
+  const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${_fmtTimeTz(d,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast`;setChatLog([...log,{role:'tara',text:r}]);},400);};
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setManualAction(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false;_cloudRestoreCompletedRef.current=false;/* V7.10.4: also clear snapshot+samples so 15m↔5m doesn't carry stale state across window types */if(taraCallSnapshotRef.current!==undefined)taraCallSnapshotRef.current=null;if(taraCallSampleRef.current)taraCallSampleRef.current={dir:null,count:0};_rolloverGraceRef.current=Date.now();setForceRender(p=>p+1);};
   // V6.5.8: Asset switch handler. Same state-reset pattern as window toggle, plus
@@ -23626,7 +23631,7 @@ function TaraApp(){
       <SessionStartCheck open={showSessionStart} onClose={()=>setShowSessionStart(false)} windowType={windowType} scorecards={scorecards} tradeLog={tradeLog} regime={analysis?.regime} velocityRegime={analysis?.velocityRegime} calibration={calibration} baselineDrift={baselineDrift} resetToLatestBaseline={resetToLatestBaseline} runSyncWithProgress={runSyncWithProgress} syncState={syncState} resetDirectionalBias={resetDirectionalBias} resetFreshStart={resetFreshStart}/>
       {showStats&&<StatsView tradeLog={tradeLog} scorecards={scorecards} taraCallLog={displayedCallLog} onClose={()=>setShowStats(false)} timeFormat={timeFormat}/>}
       {/* V9.2.2: Dedicated Analytics Page */}
-      {analyticsPageOpen&&<TaraAnalyticsPage taraCallLog={taraCallLog} taraMLModel={taraMLModel} onClose={()=>setAnalyticsPageOpen(false)}/>}
+      {analyticsPageOpen&&<TaraAnalyticsPage taraCallLog={taraCallLog} taraMLModel={taraMLModel} onClose={()=>setAnalyticsPageOpen(false)} timeFormat={timeFormat}/>}
       {showBrain&&<BrainView analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>setShowBrain(false)}/>}
 
       {/* V9.1.6: Sync menu — opens when SyncStatusPill is clicked. Three options:
@@ -23768,7 +23773,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.14
+              9.8.15
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
@@ -23879,10 +23884,14 @@ function TaraApp(){
 
           {/* Right controls — on mobile show only 3 most critical: sound, ?, whale */}
           <div className="flex items-center gap-1 shrink-0">
-            {/* V8.9.3: 3-way time format toggle. local → utc → est → local */}
-            <div className="hidden xl:flex flex-col items-end cursor-pointer mr-1" onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')} title={`Time format: ${timeFormat.toUpperCase()} · click to cycle (LOCAL → UTC → EST)`}>
-              <span className={'text-xs text-[#E8E9E4]/40 uppercase'}>{timeFormat.toUpperCase()}</span>
-              <span className={'text-sm font-mono text-[#E8E9E4]/80'}>{timeState.currentTime||'--:--:--'}</span>
+            {/* V8.9.3: 3-way time format toggle. local → utc → est → local
+                V9.8.15: pill is now always visible (was hidden xl:flex — only on 1280px+ screens
+                meaning mobile/tablet users couldn't switch the timezone, so any time-display
+                inconsistency they saw was unfixable). On smaller screens shows just the
+                format abbreviation; xl+ also shows the live current time. */}
+            <div className="flex flex-col items-end cursor-pointer mr-1 px-1.5 py-0.5 rounded-md border border-[#E8E9E4]/8 hover:border-indigo-500/30 transition-colors" onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')} title={`Time format: ${timeFormat.toUpperCase()} · click to cycle (LOCAL → UTC → EST). Affects all timestamps across Tara — header, memory, CSV exports, Discord broadcasts, charts.`}>
+              <span className={'text-[10px] sm:text-xs text-[#E8E9E4]/55 uppercase tracking-wider font-bold'}>{timeFormat.toUpperCase()}</span>
+              <span className={'hidden xl:inline text-sm font-mono text-[#E8E9E4]/80'}>{timeState.currentTime||'--:--:--'}</span>
             </div>
             {/* Always visible — sound is essential */}
             <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`} title={soundEnabled?'Sound on — click to mute':'Sound off — click to enable'}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
@@ -24439,6 +24448,7 @@ function TaraApp(){
           bestWindowsToday={bestWindowsToday}
           tickHistoryRef={tickHistoryRef}
           upcomingMacro={getUpcomingMacroEvents(new Date(),24)}
+          timeFormat={timeFormat}
         />
 
         {/* V8.4: PerformanceCard moved into the prediction column (bottom) — fills the
@@ -25481,7 +25491,8 @@ function TaraApp(){
                         <div className="space-y-1">
                           {trades.map((t,i)=>{
                             const d=new Date(t.id/1);
-                            const timeStr=isNaN(d.getTime())?'—':d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+                            // V9.8.15: trade-history time honors timeFormat (was hardcoded local)
+                            const timeStr=isNaN(d.getTime())?'—':_fmtTimeTz(d,timeFormat,{hour:'2-digit',minute:'2-digit',hour12:true});
                             // V145: if expanded telemetry present, show entry → close and Kalshi edge
                             const hasV145=t.entryPrice!=null&&t.entryPrice>0&&t.closingPrice!=null;
                             const moveBps=hasV145&&t.entryPrice>0?Math.round(((t.closingPrice-t.entryPrice)/t.entryPrice)*10000):null;
