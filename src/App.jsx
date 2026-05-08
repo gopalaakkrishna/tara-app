@@ -924,10 +924,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.08-v9.8.16-discord-coach-bridge';
+const BASELINE_VERSION='2026.05.08-v9.8.18-toasts-and-day-aware-schedule';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.8.16';
+const TARA_VERSION_DISPLAY='Tara 9.8.18';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -5085,6 +5085,9 @@ const computeV99Posterior=(params)=>{
         reasoning.push(`[REGIME-CAL] ${_regime}×${_engineDir} historical WR ${_entry.wrPct}% (n=${_entry.n}, w=${_entry.weight.toFixed(2)}) → posterior ${dirCalibrated.toFixed(1)}%→${_newCal.toFixed(1)}%`);
         // V9.7.9 telemetry
         _diagRegimeCal={applied:true,key:_key,wr:_entry.wrPct,weight:_entry.weight,shift:_delta,n:_entry.n};
+        // V9.8.17: console.info trace so we can confirm fire-rate from devtools after
+        //   the L16837 data-source fix lands. Mirrors the urgency console.info at L20495.
+        try{console.info('[regime-cal]',_key,'n='+_entry.n,'wr='+_entry.wrPct+'%','w='+_entry.weight.toFixed(2),'shift='+(_delta>=0?'+':'')+_delta.toFixed(1)+'pt');}catch(_){}
         dirCalibrated=_newCal;
       }
     }
@@ -13691,6 +13694,14 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
       {/* V9.2.0: Schedule on mobile only — desktop schedule moved to projections column */}
       {taraCallLog&&(
         <div className="shrink-0 pt-3 lg:hidden" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
+          {/* V9.8.18: day-aware banner on mobile schedule too. Local useMemo since RightPanel
+              already receives taraCallLog; cheap recompute on log change is fine here. */}
+          <DayAwareScheduleHeader dayContext={(()=>{
+            try{
+              const _filtered=(taraCallLog||[]).filter(t=>t&&(t.asset||'BTC')===currentAsset);
+              return buildDayContext(buildDayHourPerf(_filtered),new Date());
+            }catch(_){return null;}
+          })()}/>
           <TradeScheduleStrip
             taraCallLog={taraCallLog}
             currentAsset={currentAsset}
@@ -14775,6 +14786,217 @@ function SmartMoneyStrip({signals,lockDir}){
   );
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// V9.8.18: TARA TOAST SYSTEM
+// ════════════════════════════════════════════════════════════════════════════
+// Lightweight popup notifications for high-value transient events: price pumps,
+// price dumps, velocity regime jumps. Mirrors the FlowPanel auto-open behavior
+// (appears on event, auto-closes after a few seconds, throttled to avoid spam),
+// but adds outside-click dismiss for one-tap clearing while reading the screen.
+//
+// Trigger sources (pushed via `pushToast` from TaraApp effects):
+//   • price-pump  — currentPrice up ≥20 bps in 30s
+//   • price-dump  — currentPrice down ≥20 bps in 30s
+//   • vel-fast    — velocityRegime jumped NORMAL/SLOW → FAST
+//   • vel-extreme — velocityRegime reached EXTREME (news-spike pace)
+//
+// Per-kind 60-90s cooldown enforced inside pushToast itself. Stack capped at 3
+// concurrent toasts to avoid covering the dashboard.
+// ────────────────────────────────────────────────────────────────────────────
+function TaraToastStack({toasts,onDismiss}){
+  // V9.8.18: outside-click dismiss. Anywhere outside a toast clears the entire
+  //   stack. Click on a toast itself dismisses just that one (handled by inner onClick).
+  //   50ms delay so the click that triggered a toast doesn't immediately dismiss it.
+  React.useEffect(()=>{
+    if(!toasts||toasts.length===0)return;
+    const handler=(e)=>{
+      try{if(e.target&&e.target.closest&&e.target.closest('[data-tara-toast]'))return;}catch(_){}
+      onDismiss('all');
+    };
+    const tid=setTimeout(()=>document.addEventListener('mousedown',handler),50);
+    return()=>{clearTimeout(tid);document.removeEventListener('mousedown',handler);};
+  },[toasts.length>0,onDismiss]);
+  // V9.8.18: auto-expire poll. Every 250ms, evict toasts whose expireAt has passed.
+  React.useEffect(()=>{
+    if(!toasts||toasts.length===0)return;
+    const id=setInterval(()=>{
+      const now=Date.now();
+      const expired=toasts.filter(t=>t.expireAt<=now).map(t=>t.id);
+      if(expired.length>0)onDismiss(expired);
+    },250);
+    return()=>clearInterval(id);
+  },[toasts,onDismiss]);
+  if(!toasts||toasts.length===0)return null;
+  return React.createElement('div',{
+    className:'fixed top-20 right-4 z-[100] flex flex-col gap-2 pointer-events-none',
+    style:{maxWidth:'340px',minWidth:'280px'},
+  },toasts.map(t=>React.createElement('div',{
+    key:t.id,
+    'data-tara-toast':'1',
+    className:'pointer-events-auto rounded-lg backdrop-blur-md px-4 py-3 cursor-pointer transition-opacity',
+    style:{
+      background:'rgba(14,16,15,0.92)',
+      border:`1px solid ${t.color||'#E5C870'}66`,
+      boxShadow:`0 4px 20px ${t.color||'#E5C870'}22, 0 1px 0 rgba(255,255,255,0.04) inset`,
+    },
+    onClick:()=>onDismiss([t.id]),
+    title:'click to dismiss',
+  },[
+    React.createElement('div',{key:'r1',className:'flex items-center gap-2'},[
+      React.createElement('span',{key:'icon',style:{fontSize:'15px',lineHeight:1}},t.icon||'⚡'),
+      React.createElement('span',{key:'title',className:'text-[13px] font-bold tracking-wide',style:{color:t.color||'#E5C870'}},t.title),
+    ]),
+    t.body?React.createElement('div',{key:'body',className:'text-[11px] mt-1 leading-snug',style:{color:'rgba(232,233,228,0.78)'}},t.body):null,
+  ].filter(Boolean))));
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// V9.8.18: DAY-AWARE SCHEDULE
+// ════════════════════════════════════════════════════════════════════════════
+// Crypto trades 24/7 but flows shift dramatically across days — institutional
+// volume falls off Saturday/Sunday, US holidays lighten flow, Mondays often have
+// catch-up volume from weekend news. Tara should know what day she's in.
+//
+// `buildDayHourPerf(callLog)` produces three views from taraCallLog:
+//   • grid  — `${dayIdx}-${hour}` → {n, wins, wr}  (per-day-per-hour)
+//   • byDay — `${dayIdx}` → {n, wins, wr}          (per day-of-week aggregate)
+//   • byHour — `${hour}` → {n, wins, wr}            (per-hour aggregate, all days)
+//
+// `buildDayContext(perf, now)` derives today's character: name, weekend flag,
+// holiday flag, rank vs other days, activity label, today's best hours, next
+// upcoming high-WR window. Powers the day-aware schedule header.
+// ────────────────────────────────────────────────────────────────────────────
+const buildDayHourPerf=(callLog)=>{
+  const grid={},byDay={},byHour={};
+  for(const t of(callLog||[])){
+    if(!t||(t.result!=='WIN'&&t.result!=='LOSS'))continue;
+    const date=new Date(t.id||t.lockedAt||0);
+    if(isNaN(date.getTime()))continue;
+    const dayIdx=date.getDay();
+    const hour=date.getHours();
+    const k=`${dayIdx}-${hour}`;
+    if(!grid[k])grid[k]={n:0,wins:0};
+    grid[k].n++;if(t.result==='WIN')grid[k].wins++;
+    if(!byDay[dayIdx])byDay[dayIdx]={n:0,wins:0};
+    byDay[dayIdx].n++;if(t.result==='WIN')byDay[dayIdx].wins++;
+    if(!byHour[hour])byHour[hour]={n:0,wins:0};
+    byHour[hour].n++;if(t.result==='WIN')byHour[hour].wins++;
+  }
+  for(const k of Object.keys(grid))grid[k].wr=grid[k].n>0?grid[k].wins/grid[k].n:0;
+  for(const k of Object.keys(byDay))byDay[k].wr=byDay[k].n>0?byDay[k].wins/byDay[k].n:0;
+  for(const k of Object.keys(byHour))byHour[k].wr=byHour[k].n>0?byHour[k].wins/byHour[k].n:0;
+  return{grid,byDay,byHour};
+};
+
+// V9.8.18: hardcoded US federal + observed holidays for 2026. Crypto trades 24/7
+//   but institutional flows lighten meaningfully on these days — Tara should warn
+//   the user that today's pattern may diverge from typical weekday behavior.
+const US_HOLIDAYS_2026={
+  '2026-01-01':"New Year's Day",
+  '2026-01-19':'MLK Day',
+  '2026-02-16':'Presidents Day',
+  '2026-05-25':'Memorial Day',
+  '2026-06-19':'Juneteenth',
+  '2026-07-03':'July 4th (observed)',
+  '2026-07-04':'Independence Day',
+  '2026-09-07':'Labor Day',
+  '2026-10-12':'Columbus Day',
+  '2026-11-11':'Veterans Day',
+  '2026-11-26':'Thanksgiving',
+  '2026-11-27':'Day After Thanksgiving',
+  '2026-12-24':'Christmas Eve',
+  '2026-12-25':'Christmas Day',
+};
+const _ymdLocalKey=(date)=>{
+  const y=date.getFullYear();
+  const m=String(date.getMonth()+1).padStart(2,'0');
+  const d=String(date.getDate()).padStart(2,'0');
+  return`${y}-${m}-${d}`;
+};
+
+const buildDayContext=(dayHourPerf,now)=>{
+  if(!dayHourPerf)return null;
+  const _now=now||new Date();
+  const days=['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  const dayLong=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const todayIdx=_now.getDay();
+  const todayName=days[todayIdx];
+  const todayLong=dayLong[todayIdx];
+  const isWeekend=todayIdx===0||todayIdx===6;
+  const holiday=US_HOLIDAYS_2026[_ymdLocalKey(_now)]||null;
+  const byDay=dayHourPerf.byDay||{};
+  // Day ranking by WR (require ≥10 trades for meaningful rank)
+  const dayRanking=Object.entries(byDay)
+    .filter(([_,v])=>v.n>=10)
+    .map(([k,v])=>({dayIdx:parseInt(k),wr:v.wr,n:v.n,name:days[parseInt(k)]}))
+    .sort((a,b)=>b.wr-a.wr);
+  const todayEntry=dayRanking.find(d=>d.dayIdx===todayIdx)||(byDay[todayIdx]?{dayIdx:todayIdx,wr:byDay[todayIdx].wr,n:byDay[todayIdx].n,name:todayName}:null);
+  const todayRank=dayRanking.findIndex(d=>d.dayIdx===todayIdx)+1;
+  const totalRanked=dayRanking.length;
+  // Activity level — based on # trades observed for this day-of-week as a proxy
+  //   for flow activity. Many trades = active flow; few trades = quiet flow.
+  const dayTradeCounts=Object.values(byDay).map(v=>v.n);
+  const avgTrades=dayTradeCounts.length>0?dayTradeCounts.reduce((a,b)=>a+b,0)/dayTradeCounts.length:0;
+  const todayN=byDay[todayIdx]?.n||0;
+  let activityLabel='unknown';
+  if(todayN>0){
+    if(avgTrades>0&&todayN>=avgTrades*1.2)activityLabel='active';
+    else if(avgTrades>0&&todayN<=avgTrades*0.6)activityLabel='quiet';
+    else activityLabel='average';
+  }
+  // Today's best/worst hours (need ≥3 trades per hour for any signal)
+  const grid=dayHourPerf.grid||{};
+  const todayHours=[];
+  for(let h=0;h<24;h++){
+    const cell=grid[`${todayIdx}-${h}`];
+    if(cell&&cell.n>=3)todayHours.push({hour:h,n:cell.n,wins:cell.wins,wr:cell.wr});
+  }
+  const todayBest=todayHours.filter(h=>h.wr>=0.65).sort((a,b)=>b.wr-a.wr).slice(0,3);
+  // Next upcoming best window (after current local hour)
+  const curH=_now.getHours();
+  const curMin=_now.getMinutes();
+  const upcomingBest=todayBest
+    .map(h=>({...h,minsUntil:h.hour>curH?(h.hour-curH)*60-curMin:null}))
+    .filter(h=>h.minsUntil!=null&&h.minsUntil>0)
+    .sort((a,b)=>a.minsUntil-b.minsUntil)[0]||null;
+  return{
+    todayName,todayLong,todayIdx,isWeekend,holiday,
+    dayRanking,todayEntry,todayRank,totalRanked,
+    activityLabel,todayBest,upcomingBest,
+  };
+};
+
+// V9.8.18: day-aware schedule banner. Renders above TradeScheduleStrip with
+//   today's character: weekday/weekend, holiday flag, activity level, rank vs
+//   other days, next upcoming strong window. Compact one or two-row strip.
+function DayAwareScheduleHeader({dayContext}){
+  if(!dayContext)return null;
+  const{todayLong,isWeekend,holiday,todayEntry,todayRank,totalRanked,activityLabel,upcomingBest}=dayContext;
+  const _activityColor=activityLabel==='active'?'#6ee7b7':activityLabel==='quiet'?'#94a3b8':activityLabel==='average'?'#E5C870':'#94a3b8';
+  return React.createElement('div',{
+    className:'flex flex-col gap-1 px-3 py-2 rounded-lg mb-2',
+    style:{background:'rgba(229,200,112,0.04)',border:'1px solid rgba(229,200,112,0.12)'},
+  },[
+    React.createElement('div',{key:'r1',className:'flex items-center justify-between gap-2 text-[11px] flex-wrap'},[
+      React.createElement('div',{key:'left',className:'flex items-center gap-1.5 flex-wrap'},[
+        React.createElement('span',{key:'name',className:'font-bold uppercase tracking-wide',style:{color:'#E8E9E4'}},todayLong),
+        isWeekend?React.createElement('span',{key:'we',className:'px-1.5 py-0.5 rounded text-[9px] font-bold uppercase',style:{background:'rgba(148,163,184,0.15)',color:'#94a3b8'}},'WEEKEND'):null,
+        activityLabel!=='unknown'?React.createElement('span',{key:'act',className:'px-1.5 py-0.5 rounded text-[9px] font-bold uppercase',style:{background:`${_activityColor}1c`,color:_activityColor}},activityLabel):null,
+      ].filter(Boolean)),
+      todayEntry&&todayEntry.n>0?React.createElement('div',{key:'right',className:'text-[10px]',style:{color:'rgba(232,233,228,0.66)'}},
+        `WR ${(todayEntry.wr*100).toFixed(0)}% · n=${todayEntry.n}${todayRank>0&&totalRanked>=3?` · #${todayRank}/${totalRanked}`:''}`
+      ):null,
+    ].filter(Boolean)),
+    holiday?React.createElement('div',{key:'hol',className:'text-[10px] flex items-center gap-1.5',style:{color:'#fbbf24'}},[
+      React.createElement('span',{key:'i',style:{fontSize:'10px'}},'🇺🇸'),
+      React.createElement('span',{key:'t'},`${holiday} — institutional flow may be lighter than usual`),
+    ]):null,
+    upcomingBest?React.createElement('div',{key:'up',className:'text-[10px]',style:{color:'rgba(232,233,228,0.55)'}},
+      `▸ Next strong window: ${String(upcomingBest.hour).padStart(2,'0')}:00 (in ${upcomingBest.minsUntil}m) · ${(upcomingBest.wr*100).toFixed(0)}% WR (n=${upcomingBest.n})`
+    ):null,
+  ].filter(Boolean));
+}
+
 function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
   const[showSessionStart,setShowSessionStart]=useState(false); // V6.5.7: no auto-open on load — click 📋 button (which pulses for attention).
@@ -15179,6 +15401,36 @@ function TaraApp(){
   const[currentPrice,setCurrentPrice]=useState(null);
   const[tickDirection,setTickDirection]=useState(null);
   const currentPriceRef=useRef(null);
+  // ─── V9.8.18: TARA TOAST SYSTEM ─────────────────────────────────────────
+  // Stack of active popup notifications. State is array-of-toasts; per-kind cooldowns
+  //   live on a ref so successive setToasts calls don't lose dedup state. pushToast
+  //   enforces cooldown and a 3-toast cap. dismissToasts handles single + 'all'.
+  const[toasts,setToasts]=useState([]);
+  const _toastCooldownRef=useRef({}); // {kind: lastFiredMs}
+  const pushToast=React.useCallback((kind,title,body,options)=>{
+    const _opts=options||{};
+    const _now=Date.now();
+    const _cooldown=_opts.cooldown!=null?_opts.cooldown:60000;
+    const _lastFired=_toastCooldownRef.current[kind]||0;
+    if(_now-_lastFired<_cooldown)return; // throttled — drop silently
+    _toastCooldownRef.current[kind]=_now;
+    const id=_now+Math.random();
+    const expireAt=_now+(_opts.durationMs||5500);
+    setToasts(prev=>{
+      const trimmed=prev.length>=3?prev.slice(prev.length-2):prev;
+      return[...trimmed,{id,kind,title,body,expireAt,color:_opts.color,icon:_opts.icon}];
+    });
+  },[]);
+  const dismissToasts=React.useCallback((idsOrAll)=>{
+    if(idsOrAll==='all'){setToasts([]);return;}
+    setToasts(prev=>prev.filter(t=>!idsOrAll.includes(t.id)));
+  },[]);
+  // V9.8.18: rolling 60s price trail for pump/dump detection. Captures every
+  //   currentPrice tick so we can compute "price change over last 30s" cheaply
+  //   on each new tick. Trimmed to 60s window so memory stays bounded.
+  const _priceTrailRef=useRef([]); // [{t, p}]
+  const _prevVelRegimeRef=useRef('NORMAL');
+  // ────────────────────────────────────────────────────────────────────────
   // V7.6: per-asset price cache. Background feed keeps the inactive asset's price warm
   //   so tab switches don't show stale data. Shape: { BTC: {price, time}, ETH: {...} }
   const priceByAssetRef=useRef({});
@@ -16834,9 +17086,22 @@ function TaraApp(){
   //   performance. ETH starts with empty data (will be SCANNING-heavy until 10-20
   //   trades accumulate); BTC keeps its full history. Trades without an asset tag
   //   (legacy pre-V7.1) default to BTC. Cross-asset pollution is now impossible.
+  // V9.8.17 — DATA SOURCE FIX. Previously this filtered `tradeLog` (the user's
+  //   manual-trades log), which has been a no-op since V6.2.5 stubbed `saveTradeLog`.
+  //   That meant every learning structure built off this — buildCalibration,
+  //   buildRegimeDirWR, buildRegimeDirCalibration, buildSessionRegimeThresh,
+  //   buildSignalAccuracy, buildSessionPerf, buildHourlyPerf — was being fed an
+  //   empty array and silently returning default-prior data. The most visible
+  //   symptom: V9.7.6's `regimeCalApplied` gate (L5077) requires `_entry.n >= 10`
+  //   and never saw a non-empty entry, so calibration of overconfident posteriors
+  //   never happened. CSV audit on 2026-05-08 confirmed regimeCalApplied=N in
+  //   258/258 resolved BTC trades, while 75-94% conviction buckets ran 10-28pt
+  //   below stated WR — the exact gap the gate was designed to close.
+  //   Fix: source from `taraCallLog` (which has been accumulating Tara's resolved
+  //   calls all along). Filter by asset for cross-asset isolation.
   const _tradeLogForCurrentAsset=useMemo(()=>{
-    return(tradeLog||[]).filter(t=>(t&&(t.asset||'BTC')===currentAsset));
-  },[tradeLog,currentAsset]);
+    return(taraCallLog||[]).filter(t=>(t&&(t.asset||'BTC')===currentAsset));
+  },[taraCallLog,currentAsset]);
   const calibration=useMemo(()=>buildCalibration(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
   const regimeDirWR=useMemo(()=>buildRegimeDirWR(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]); // V134
   // V9.5.0: per-(regime,dir) blend weights for posterior calibration. Different from
@@ -16847,6 +17112,19 @@ function TaraApp(){
   const signalAccuracy=useMemo(()=>buildSignalAccuracy(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
   const sessionPerf=useMemo(()=>buildSessionPerf(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
   const hourlyPerf=useMemo(()=>buildHourlyPerf(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
+  // V9.8.18: per-(day-of-week, hour) performance grid + day-of-week aggregate.
+  //   Powers DayAwareScheduleHeader. Rebuilt whenever the call log changes.
+  const dayHourPerf=useMemo(()=>buildDayHourPerf(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
+  // V9.8.18: derived day context — today's name, weekend/holiday flag, activity
+  //   level, rank vs other days, today's best hours, next upcoming strong window.
+  //   Recomputed every minute so "minsUntil next window" stays fresh; also
+  //   rebuilds when the call log changes.
+  const[_dayContextTick,setDayContextTick]=useState(0);
+  useEffect(()=>{
+    const id=setInterval(()=>setDayContextTick(t=>t+1),60000);
+    return()=>clearInterval(id);
+  },[]);
+  const dayContext=useMemo(()=>buildDayContext(dayHourPerf,new Date()),[dayHourPerf,_dayContextTick]);
   const[manualAction,setManualAction]=useState(null);
   const[forceRender,setForceRender]=useState(0);
   const[isChatOpen,setIsChatOpen]=useState(false);
@@ -22715,6 +22993,53 @@ function TaraApp(){
   //   Without this, switching ETH→BTC could fire a Discord message with ETH price/strike
   //   in the embed since some refs/state hadn't repopulated yet.
   const lastAssetSwitchAtRef=useRef(0);
+  // ── V9.8.18: PUMP/DUMP + VELOCITY-FLIP TOAST DETECTORS ──────────────
+  // Runs every currentPrice tick. Maintains a 60s rolling price trail; on each
+  //   tick, computes the bps move over the last 30s. ≥20 bps in either direction
+  //   fires a price-pump or price-dump toast. 60s per-kind cooldown enforced
+  //   inside pushToast. Skips during initial mount / asset switch (no trail yet).
+  useEffect(()=>{
+    if(!Number.isFinite(currentPrice)||!currentPrice||currentPrice<=0)return;
+    const _now=Date.now();
+    const arr=_priceTrailRef.current;
+    arr.push({t:_now,p:currentPrice});
+    // Trim to last 60s
+    while(arr.length>0&&_now-arr[0].t>60000)arr.shift();
+    if(arr.length<2)return;
+    // Find oldest point that's at least 25s old (gives a 25-30s reference window).
+    //   If we don't have 25s of data yet, skip — too noisy on partial samples.
+    const _25sAgo=_now-25000;
+    const _ref=arr.find(e=>e.t<=_25sAgo);
+    if(!_ref||_ref.p<=0)return;
+    const _bps=(currentPrice-_ref.p)/_ref.p*10000;
+    if(Math.abs(_bps)>=20){
+      const _isUp=_bps>0;
+      pushToast(
+        _isUp?'price-pump':'price-dump',
+        `${currentAsset||'BTC'} ${_isUp?'pumping ▲':'dumping ▼'}`,
+        `${_bps>0?'+':''}${_bps.toFixed(0)} bps in 30s · $${currentPrice.toFixed(0)}`,
+        {color:_isUp?'#6ee7b7':'#f472b6',icon:_isUp?'⚡':'⚡',durationMs:6000,cooldown:60000}
+      );
+    }
+  },[currentPrice,currentAsset,pushToast]);
+  // V9.8.18: velocity regime flip — when the engine's velocity classification
+  //   jumps from NORMAL/SLOW into FAST or EXTREME, surface as toast. Captures
+  //   "tape pace just changed" without requiring a 30s lag like price-bps.
+  //   Cooldown 90s so a flickering NORMAL↔FAST regime doesn't spam.
+  useEffect(()=>{
+    const _cur=analysis?.velocityRegime||'NORMAL';
+    const _prev=_prevVelRegimeRef.current;
+    _prevVelRegimeRef.current=_cur;
+    if(_cur===_prev)return;
+    if(_cur==='FAST'&&(_prev==='NORMAL'||_prev==='SLOW')){
+      pushToast('vel-fast',`${currentAsset||'BTC'} velocity → FAST`,'Tape pace picking up · windows may shorten',
+        {color:'#fbbf24',icon:'〰',durationMs:5500,cooldown:90000});
+    }else if(_cur==='EXTREME'){
+      pushToast('vel-extreme',`${currentAsset||'BTC'} velocity → EXTREME`,'News-spike pace · use caution',
+        {color:'#f472b6',icon:'⚡⚡',durationMs:7000,cooldown:90000});
+    }
+  },[analysis?.velocityRegime,currentAsset,pushToast]);
+
   // ── V134: FLOW INTELLIGENCE — STRICTLY EVENT-TRIGGERED ──────────────
   // Opens ONLY on concerning events. Auto-collapses after 30s unless activity continues.
   // Triggers: whale-print STRONG cross, streak ≥5, $750K delta, velocity regime jump,
@@ -23729,6 +24054,10 @@ function TaraApp(){
 
   return(
     <div className={'min-h-screen bg-[#111312] text-[#E8E9E4] font-sans flex flex-col selection:bg-[#E8E9E4]/20'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
+      {/* V9.8.18: Toast notifications — pump/dump + velocity-flip alerts. Fixed
+          top-right, auto-close after a few seconds, dismiss on outside-click or
+          tap. Stack capped at 3 concurrent. */}
+      <TaraToastStack toasts={toasts} onDismiss={dismissToasts}/>
       {/* V8.8.8: Spike alert keyframes + overlay */}
       <style>{`
         @keyframes taraSpikeAlertIn {
@@ -23893,7 +24222,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.16
+              9.8.18
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
@@ -24812,6 +25141,8 @@ function TaraApp(){
             {/* V9.2.0: Schedule relocated from RightPanel to projections column.
                 User feedback: "put schedule in the news place." */}
             <div className="pt-3 min-w-0 hidden lg:block" style={{borderTop:'1px solid rgba(232,233,228,0.08)'}}>
+              {/* V9.8.18: day-aware schedule banner — shows today's character (weekday/weekend, holiday flag, activity level, rank vs other days, next strong window). */}
+              <DayAwareScheduleHeader dayContext={dayContext}/>
               <TradeScheduleStrip taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} onOpenFullSchedule={()=>setScheduleModalMain(true)}/>
             </div>
             {scheduleModalMain&&taraCallLog&&(
