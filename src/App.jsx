@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.8.11-okx-back-for-candles';
+const BASELINE_VERSION='2026.05.08-v9.8.12-cb-stale-cdn-guard';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -887,6 +887,16 @@ const PRICE_SOURCES={
     url:(cfg,asset)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/ticker`,
     parsePrice:(d)=>d?.price?parseFloat(d.price):null,
     parseSize:(d)=>d?.size?parseFloat(d.size):0.1,
+    // V9.8.12: parseTradeId — Coinbase ticker returns a monotonically increasing
+    //   trade_id. Used by the live-ticker effect to detect stale CDN responses:
+    //   if a new fetch comes back with an id LOWER than the last id we accepted,
+    //   it's a Cloudflare/edge-cached response from earlier (browser cache:'no-store'
+    //   doesn't stop upstream caching). After Coinbase's outage on 2026-05-07,
+    //   stale cached values from the frozen period kept flashing into Tara for
+    //   1-2s at a time before the next poll returned a fresh edge node. This
+    //   guard discards those flashes deterministically — no thresholds, no false
+    //   positives. Kraken / OKX don't define this so the guard is skipped for them.
+    parseTradeId:(d)=>d?.trade_id?Number(d.trade_id):null,
     candleUrl:(cfg,asset,granSec)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/candles?granularity=${granSec}`,
     parseCandles:(d)=>{
       if(!Array.isArray(d))return[];
@@ -17117,7 +17127,7 @@ function TaraApp(){
 
   // Live price — V9.8.4 source-aware (Coinbase / Kraken / Bitstamp via PRICE_SOURCES)
   //   Tracks lastPriceChangeRef so the stale-tick guard can detect frozen feeds.
-  useEffect(()=>{let last=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);},[currentAsset,priceSource]);
+  useEffect(()=>{let last=0;let _lastTradeId=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();/* V9.8.12: stale CDN guard — Coinbase ticker has monotonic trade_id. If a fetch returns an older id than we've already seen, the edge cache is replaying a stale response (this happened post-CB-outage 2026-05-07: 1-2s flashes back to last night's frozen price). Discard. Sources without parseTradeId (Kraken, OKX) skip this check. */if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_newId&&_lastTradeId&&_newId<_lastTradeId)return;if(_newId)_lastTradeId=_newId;}const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);},[currentAsset,priceSource]);
 
   // V9.8.4: Stale-tick monitor — runs once per second, computes age of last
   //   price change. UI reads feedStaleSeconds for banner + lock-gate decisions.
@@ -17138,12 +17148,21 @@ function TaraApp(){
     const _otherAsset=currentAsset==='BTC'?'ETH':'BTC';
     const _otherCfg=ASSET_CONFIG[_otherAsset]||ASSET_CONFIG.BTC;
     const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];
+    let _lastTradeId=0; // V9.8.12: stale CDN guard, see live-ticker effect comment above
     const f=async()=>{
       try{
         const _url=_src.url(_otherCfg,_otherAsset);
         const r=await fetch(_url,{cache:'no-store'});
         if(!r.ok)return;
         const d=await r.json();
+        // V9.8.12: same stale-CDN-response check as the active ticker. The inactive
+        //   asset's price feeds priceByAssetRef which the shadow engine reads — a
+        //   stale flash here would propagate into shadow posteriors.
+        if(typeof _src.parseTradeId==='function'){
+          const _newId=_src.parseTradeId(d);
+          if(_newId&&_lastTradeId&&_newId<_lastTradeId)return;
+          if(_newId)_lastTradeId=_newId;
+        }
         const p=_src.parsePrice(d);
         if(p&&Number.isFinite(p)){
           if(!priceByAssetRef.current)priceByAssetRef.current={};
@@ -23521,7 +23540,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.11
+              9.8.12
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
