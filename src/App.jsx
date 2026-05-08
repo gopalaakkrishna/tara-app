@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.8.6-tv-source-book-speed';
+const BASELINE_VERSION='2026.05.07-v9.8.7-okx-futures';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -3113,22 +3113,26 @@ const useDepthFlash=()=>{
   useEffect(()=>{
     if(typeof window==='undefined')return;
     let mp=0;
+    // V9.8.7: OKX via /api/okx/* rewrite (was Bybit V9.7.5, now blocked from Vercel).
+    //   Same flow: get mark price first, then orderbook. Apply CT_VAL=0.01 to convert
+    //   contract sizes to BTC units before computing USD wall depth.
+    const SWAP='BTC-USDT-SWAP';
+    const CT_VAL=0.01;
     const f=async()=>{
       try{
-        // V9.7.5: Bybit replaces Binance global (US geo-block).
-        //   Single tickers call gives mark price; orderbook call gives depth.
-        const pR=await fetch('https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT');
+        const pR=await fetch(`/api/okx/public/mark-price?instType=SWAP&instId=${SWAP}`);
         const pJ=await pR.json();
-        if(pJ?.retCode===0&&pJ?.result?.list?.[0]){
-          mp=parseFloat(pJ.result.list[0].markPrice)||mp;
+        if(pJ?.code==='0'&&pJ?.data?.[0]){
+          mp=parseFloat(pJ.data[0].markPx)||mp;
         }
         if(!mp)return;
-        const dR=await fetch('https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=50');
+        const dR=await fetch(`/api/okx/market/books?instId=${SWAP}&sz=50`);
         const dJ=await dR.json();
-        if(dJ?.retCode!==0||!dJ?.result?.b||!dJ?.result?.a)return;
+        if(dJ?.code!=='0'||!dJ?.data?.[0]?.bids||!dJ?.data?.[0]?.asks)return;
+        const _bk=dJ.data[0];
         let mBW=0,mBP=0,tBL=0,mAW=0,mAP=0,tAL=0;
-        dJ.result.b.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((mp-pr)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tBL+=usd;if(usd>mBW){mBW=usd;mBP=pr;}}});
-        dJ.result.a.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((pr-mp)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt;tAL+=usd;if(usd>mAW){mAW=usd;mAP=pr;}}});
+        _bk.bids.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((mp-pr)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt*CT_VAL;tBL+=usd;if(usd>mBW){mBW=usd;mBP=pr;}}});
+        _bk.asks.forEach(([p,q])=>{const pr=parseFloat(p),qt=parseFloat(q),dist=((pr-mp)/mp)*100;if(dist<2&&dist>0){const usd=pr*qt*CT_VAL;tAL+=usd;if(usd>mAW){mAW=usd;mAP=pr;}}});
         const obImbal=tBL+tAL>0?(tBL-tAL)/(tBL+tAL):0; // -1=asks heavy, +1=bids heavy
         setDepth({obImbalanceLive:obImbal,liqLongWallLive:mAP,liqShortWallLive:mBP,liqLongUSDLive:tAL,liqShortUSDLive:tBL,depthUpdateAge:0,depthLastUpdate:Date.now()});
       }catch(e){/* silent fail */}
@@ -3140,25 +3144,35 @@ const useDepthFlash=()=>{
   return depth;
 };
 
-// V9.7.5: BYBIT MIGRATION — Binance global (fapi.binance.com) is geo-blocked
-//   from US IPs since 2019. This hook now uses Bybit V5 API which is CORS-open
-//   and US-allowed. Same return shape as before so all downstream consumers
-//   (FlowPanel, engine FGT, Bloomberg/Liq signals, etc) work unchanged.
+// V9.8.7: OKX MIGRATION — Bybit (V9.7.5) was reachable from browsers but blocked
+//   from Vercel datacenter IPs (geographic + perimeter), and inconsistent from
+//   US residential IPs as well. OKX has no equivalent block on its public API
+//   and is reached via the /api/okx/* Vercel URL rewrite (same pattern as the
+//   /api/kalshi/* and /api/news rewrites). No CORS, no auth, no API keys needed
+//   for read-only public endpoints.
 //
-// Bybit endpoint mapping:
-//   - tickers (one call) → markPrice, indexPrice, fundingRate, nextFundingTime,
-//                          openInterest, openInterestValue, turnover24h, basisRate
-//   - funding/history    → fundingRatePrev (one call back)
-//   - account-ratio      → buyRatio/sellRatio → longShortRatio
-//   - orderbook          → liquidation walls (same shape as Binance)
+// OKX endpoint mapping (BTC-USDT-SWAP perp + BTC-USD index):
+//   - /public/mark-price         → markPrice
+//   - /market/index-tickers      → indexPrice (basis = markPrice - indexPrice)
+//   - /public/funding-rate       → fundingRate, nextFundingTime
+//   - /public/funding-rate-history (limit=2) → fundingRatePrev (last realized)
+//   - /public/open-interest      → openInterest (BTC), openInterestUSD
+//   - /rubik/stat/contracts/long-short-account-ratio → longShortRatio
+//   - /market/books              → liquidation walls (apply 0.01 contract size)
 //
-// One signal degraded: topTraderLSPositions. Bybit doesn't expose a separate
-//   "top trader" position ratio. We set it to the same value as longShortRatio
-//   so the engine's interface is preserved, but the dual-signal becomes effectively
-//   single. This is acceptable — both signals were measuring overlapping things.
+// Same return shape as the Bybit version, so no downstream consumer changes
+// needed (FlowPanel, engine FGT, Bloomberg/Liq signals, etc).
 //
-// Field name `binanceFuturesVol24h` kept for back-compat (it's now Bybit volume,
-//   but renaming would touch ~10 call sites and isn't worth the churn).
+// Differences vs Bybit:
+//   - 24h volume (binanceFuturesVol24h) defaults to 0 since OKX doesn't include
+//     it in the same call set. Field kept for back-compat only — no signal uses
+//     it as a primary input.
+//   - longShortRatio comes pre-computed from OKX (single number) instead of
+//     buy/sell ratios that we'd divide. Same downstream value.
+//   - topTraderLSPositions still mirrors longShortRatio (OKX top-trader
+//     endpoint requires auth, mirroring is acceptable).
+//   - Order book sizes are CONTRACTS not coins. Multiplied by ctVal=0.01 BTC
+//     for BTC-USDT-SWAP to get USD value of each level.
 const useBloomberg=()=>{
   const[data,setData]=useState({
     fundingRate:0,fundingRatePrev:0,nextFundingTime:0,
@@ -3169,87 +3183,116 @@ const useBloomberg=()=>{
     liqLongWall:0,liqShortWall:0,liqLongUSD:0,liqShortUSD:0,
     longWallAgeMs:0,shortWallAgeMs:0,
     lastUpdate:0,status:'connecting',
-    _source:'bybit', // V9.7.5: tag for diagnostics
+    _source:'okx', // V9.8.7: tag for diagnostics
   });
   const oiSnaps=useRef([]);
   const wallHistRef=useRef([]);
   useEffect(()=>{
     if(typeof window==='undefined')return;
-    const SYM='BTCUSDT';
+    const SWAP='BTC-USDT-SWAP'; // OKX perpetual symbol
+    const IDX='BTC-USD';        // OKX spot index symbol
+    const CT_VAL=0.01;          // BTC-USDT-SWAP contract face = 0.01 BTC
     const f=async()=>{
       try{
         const R=await Promise.allSettled([
-          fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${SYM}`).then(r=>r.json()),
-          fetch(`https://api.bybit.com/v5/market/funding/history?category=linear&symbol=${SYM}&limit=3`).then(r=>r.json()),
-          fetch(`https://api.bybit.com/v5/market/account-ratio?category=linear&symbol=${SYM}&period=5min&limit=1`).then(r=>r.json()),
-          fetch(`https://api.bybit.com/v5/market/orderbook?category=linear&symbol=${SYM}&limit=50`).then(r=>r.json()),
+          fetch(`/api/okx/public/mark-price?instType=SWAP&instId=${SWAP}`).then(r=>r.json()),
+          fetch(`/api/okx/market/index-tickers?instId=${IDX}`).then(r=>r.json()),
+          fetch(`/api/okx/public/funding-rate?instId=${SWAP}`).then(r=>r.json()),
+          fetch(`/api/okx/public/funding-rate-history?instId=${SWAP}&limit=2`).then(r=>r.json()),
+          fetch(`/api/okx/public/open-interest?instType=SWAP&instId=${SWAP}`).then(r=>r.json()),
+          fetch(`/api/okx/rubik/stat/contracts/long-short-account-ratio?ccy=BTC&period=5m`).then(r=>r.json()),
+          fetch(`/api/okx/market/books?instId=${SWAP}&sz=50`).then(r=>r.json()),
         ]);
-        const[tR,fR,aR,oR]=R;
+        const[mpR,idxR,frR,frhR,oiR,lsR,bkR]=R;
         const now=Date.now();
-        let u={lastUpdate:now,status:'live',_source:'bybit'};
+        let u={lastUpdate:now,status:'live',_source:'okx'};
 
-        // ── TICKER (consolidates 4 of the old Binance calls) ────────────────
-        if(tR.status==='fulfilled'&&tR.value?.retCode===0&&tR.value?.result?.list?.[0]){
-          const t=tR.value.result.list[0];
-          const mk=parseFloat(t.markPrice)||0;
-          const ix=parseFloat(t.indexPrice)||0;
-          u.markPrice=mk;
-          u.indexPrice=ix;
-          u.fundingRate=parseFloat(t.fundingRate)||0;
-          u.nextFundingTime=parseInt(t.nextFundingTime)||0;
-          // Prefer Bybit's basisRate when present, else compute from mark-index
-          const _br=parseFloat(t.basisRate);
-          u.basisBps=Number.isFinite(_br)?_br*10000:(ix>0?((mk-ix)/ix)*10000:0);
-          u.binanceFuturesVol24h=parseFloat(t.turnover24h)||0; // kept name for back-compat
-          // Open interest. Bybit linear: openInterest in coins, openInterestValue in USD.
-          const oi=parseFloat(t.openInterest)||0;
+        // ── MARK PRICE ──────────────────────────────────────────────────
+        // OKX mark-price returns {code:"0", data:[{markPx, ts, ...}]}
+        if(mpR.status==='fulfilled'&&mpR.value?.code==='0'&&mpR.value?.data?.[0]){
+          u.markPrice=parseFloat(mpR.value.data[0].markPx)||0;
+        }
+
+        // ── INDEX PRICE ─────────────────────────────────────────────────
+        // OKX index-tickers returns {code:"0", data:[{idxPx, ...}]}
+        if(idxR.status==='fulfilled'&&idxR.value?.code==='0'&&idxR.value?.data?.[0]){
+          u.indexPrice=parseFloat(idxR.value.data[0].idxPx)||0;
+        }
+
+        // ── BASIS ───────────────────────────────────────────────────────
+        // (mark - index) / index in basis points. 100 bps = 1%.
+        if(u.markPrice>0&&u.indexPrice>0){
+          u.basisBps=((u.markPrice-u.indexPrice)/u.indexPrice)*10000;
+        }
+
+        // ── FUNDING RATE (current + next) ───────────────────────────────
+        // OKX funding-rate returns {code:"0", data:[{fundingRate, nextFundingRate,
+        //   fundingTime, nextFundingTime, ...}]}.
+        if(frR.status==='fulfilled'&&frR.value?.code==='0'&&frR.value?.data?.[0]){
+          const _fr=frR.value.data[0];
+          u.fundingRate=parseFloat(_fr.fundingRate)||0;
+          u.nextFundingTime=parseInt(_fr.nextFundingTime)||0;
+        }
+
+        // ── FUNDING RATE HISTORY (previous, for trend detection) ───────
+        // OKX funding-rate-history returns {code:"0", data:[{realizedRate, fundingRate,
+        //   fundingTime, ...}, ...]} most-recent-first. realizedRate is the actual
+        //   settled rate (preferred); fundingRate falls back if realizedRate absent.
+        if(frhR.status==='fulfilled'&&frhR.value?.code==='0'&&Array.isArray(frhR.value?.data)){
+          const _h=frhR.value.data;
+          if(_h[0]){
+            u.fundingRatePrev=parseFloat(_h[0].realizedRate)||parseFloat(_h[0].fundingRate)||0;
+          }
+        }
+
+        // ── OPEN INTEREST ───────────────────────────────────────────────
+        // OKX open-interest returns {code:"0", data:[{oi, oiCcy, oiUsd, ts, ...}]}.
+        //   oiCcy = OI in BTC (matches Bybit's openInterest semantics).
+        //   oiUsd = OI in USD (matches Bybit's openInterestValue).
+        if(oiR.status==='fulfilled'&&oiR.value?.code==='0'&&oiR.value?.data?.[0]){
+          const _oi=oiR.value.data[0];
+          const oi=parseFloat(_oi.oiCcy)||0;
           oiSnaps.current.push({oi,time:now});
           oiSnaps.current=oiSnaps.current.filter(s=>now-s.time<600000);
           const o5=oiSnaps.current.find(s=>now-s.time>=270000&&now-s.time<=330000);
           u.openInterest=oi;
-          u.openInterestUSD=parseFloat(t.openInterestValue)||(oi*mk);
+          u.openInterestUSD=parseFloat(_oi.oiUsd)||(oi*u.markPrice);
           u.oiChange5m=o5?((oi-o5.oi)/o5.oi)*100:0;
         }
 
-        // ── FUNDING HISTORY (previous funding rate, for trend) ─────────────
-        if(fR.status==='fulfilled'&&fR.value?.retCode===0&&Array.isArray(fR.value?.result?.list)){
-          const _list=fR.value.result.list;
-          if(_list.length>=2)u.fundingRatePrev=parseFloat(_list[1]?.fundingRate)||0;
-          else if(_list.length>=1)u.fundingRatePrev=parseFloat(_list[0]?.fundingRate)||0;
-        }
-
-        // ── ACCOUNT RATIO (long/short positioning) ─────────────────────────
-        // Bybit returns buyRatio/sellRatio. Convert to longShortRatio = buy/sell.
-        // Use same value for both longShortRatio and topTraderLSPositions because
-        // Bybit doesn't expose a separate top-trader endpoint.
-        if(aR.status==='fulfilled'&&aR.value?.retCode===0&&aR.value?.result?.list?.[0]){
-          const a=aR.value.result.list[0];
-          const _buy=parseFloat(a.buyRatio)||0.5;
-          const _sell=parseFloat(a.sellRatio)||0.5;
-          if(_sell>0){
-            u.longShortRatio=_buy/_sell;
-            u.topTraderLSPositions=u.longShortRatio; // same source — see comment above
+        // ── LONG/SHORT ACCOUNT RATIO ────────────────────────────────────
+        // OKX rubik long-short-account-ratio returns {code:"0",
+        //   data:[[ts, ratio], ...]} most-recent-first.
+        //   ratio = longs / shorts directly (single number, no division needed).
+        if(lsR.status==='fulfilled'&&lsR.value?.code==='0'&&Array.isArray(lsR.value?.data)&&lsR.value.data[0]){
+          const _r=parseFloat(lsR.value.data[0][1])||1;
+          if(_r>0){
+            u.longShortRatio=_r;
+            u.topTraderLSPositions=_r; // OKX top-trader needs auth — mirror as before
           }
         }
 
-        // ── ORDERBOOK (liquidation walls — same shape as Binance) ──────────
-        // Bybit linear orderbook: result.b is bids, result.a is asks, each [price, size].
-        // Same parsing as before: scan ±2% from mark price for biggest single-level USD,
-        // total USD on that side, persistence age over 60s.
-        if(oR.status==='fulfilled'&&oR.value?.retCode===0&&oR.value?.result?.b&&oR.value?.result?.a){
+        // ── ORDERBOOK (liquidation walls) ────────────────────────────────
+        // OKX books returns {code:"0", data:[{asks:[[price, size, liqOrders, orderCt], ...],
+        //   bids:[...], ts}]}. Size is in CONTRACTS — multiply by CT_VAL (0.01 BTC for
+        //   BTC-USDT-SWAP) to get coin units, then by price to get USD value.
+        //   Scan ±2% from mark price for biggest single-level USD + total USD on each side.
+        //   Track persistence over 60s window for wall-age calculation.
+        if(bkR.status==='fulfilled'&&bkR.value?.code==='0'&&bkR.value?.data?.[0]){
+          const _bk=bkR.value.data[0];
           const mp=u.markPrice||0;
-          if(mp>0){
+          if(mp>0&&Array.isArray(_bk.bids)&&Array.isArray(_bk.asks)){
             let mBW=0,mBP=0,tBL=0,mAW=0,mAP=0,tAL=0;
-            oR.value.result.b.forEach(([p,q])=>{
+            _bk.bids.forEach(([p,q])=>{
               const pr=parseFloat(p),qt=parseFloat(q),dist=((mp-pr)/mp)*100;
-              if(dist<2&&dist>0){const usd=pr*qt;tBL+=usd;if(usd>mBW){mBW=usd;mBP=pr;}}
+              if(dist<2&&dist>0){const usd=pr*qt*CT_VAL;tBL+=usd;if(usd>mBW){mBW=usd;mBP=pr;}}
             });
-            oR.value.result.a.forEach(([p,q])=>{
+            _bk.asks.forEach(([p,q])=>{
               const pr=parseFloat(p),qt=parseFloat(q),dist=((pr-mp)/mp)*100;
-              if(dist<2&&dist>0){const usd=pr*qt;tAL+=usd;if(usd>mAW){mAW=usd;mAP=pr;}}
+              if(dist<2&&dist>0){const usd=pr*qt*CT_VAL;tAL+=usd;if(usd>mAW){mAW=usd;mAP=pr;}}
             });
             u.liqLongWall=mAP;u.liqShortWall=mBP;u.liqLongUSD=tAL;u.liqShortUSD=tBL;
-            // Wall persistence tracking (unchanged from Binance version)
+            // Wall persistence tracking — unchanged from Bybit/Binance versions
             const wH=wallHistRef.current;
             wH.push({t:now,longWall:mAP,shortWall:mBP});
             while(wH.length>0&&now-wH[0].t>60000)wH.shift();
@@ -3263,7 +3306,7 @@ const useBloomberg=()=>{
 
         setData(prev=>({...prev,...u}));
       }catch(e){
-        setData(prev=>({...prev,status:'error',_source:'bybit'}));
+        setData(prev=>({...prev,status:'error',_source:'okx'}));
       }
     };
     f();
@@ -23459,7 +23502,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.6
+              9.8.7
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → Bitstamp.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s). */}
