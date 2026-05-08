@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.8.0-urgent-lock-protocol';
+const BASELINE_VERSION='2026.05.07-v9.8.1-server-news-proxy';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -12361,21 +12361,13 @@ function NewsFeedCard({timeFormat}={}){
     const macroIv=setInterval(computeMacros,60000);
     
     const fetchNews=async()=>{
-      // V8.8.7: Multi-proxy parallel fetch + localStorage cache + Reddit fallback.
-      //   Prior versions tried CryptoCompare direct + CoinGecko status_updates direct.
-      //   Both endpoints have been deprecated/restricted since: CryptoCompare moved
-      //   to API-key model (free public tier rejected), CoinGecko status_updates is
-      //   gone. Same multi-proxy strategy as Kalshi (V5.2) for resilience.
-      const tryFetch=async(url,timeoutMs=6000)=>{
-        const ctrl=new AbortController();
-        const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
-        try{
-          const r=await fetch(url,{cache:'no-store',signal:ctrl.signal});
-          clearTimeout(timer);
-          if(!r.ok)throw new Error(`HTTP ${r.status}`);
-          return await r.json();
-        }catch(e){clearTimeout(timer);throw e;}
-      };
+      // V9.8.1: SERVER-SIDE NEWS PROXY. Browser fetches /api/news, which is a
+      //   Vercel serverless function that does the source fallback chain
+      //   server-side. No CORS proxies needed (corsproxy.io / codetabs /
+      //   allorigins / rss2json were all eventually getting blocked or rate-
+      //   limited per-IP in some networks). The api/news.js function tries
+      //   CryptoCompare → Reddit → CryptoPanic in order and returns the first
+      //   that works, plus a 2-minute server-side cache.
       const _writeCache=(items)=>{
         try{localStorage.setItem('taraNewsCache_v1',JSON.stringify({at:Date.now(),items}));}catch(_){}
       };
@@ -12389,113 +12381,31 @@ function NewsFeedCard({timeFormat}={}){
           return c;
         }catch(_){return null;}
       };
-      // ── Source 1: CryptoCompare via parallel multi-proxy ──────────────
-      const _ccUrl='https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=BTC';
-      const _proxyAttempts=[
-        // direct first — some users still get through (mobile/unblocked IPs)
-        tryFetch(_ccUrl,5000).then(d=>({_via:'direct',data:d})),
-        tryFetch(`https://corsproxy.io/?url=${encodeURIComponent(_ccUrl)}`,6000).then(d=>({_via:'corsproxy',data:d})),
-        tryFetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(_ccUrl)}`,6000).then(d=>({_via:'codetabs',data:d})),
-        tryFetch(`https://api.allorigins.win/get?url=${encodeURIComponent(_ccUrl)}`,7000).then(r=>{
-          // allorigins wraps the response: {contents: "<json string>"}
-          if(!r||typeof r.contents!=='string')throw new Error('allorigins empty');
-          return{_via:'allorigins',data:JSON.parse(r.contents)};
-        }),
-      ];
-      let _ccWin=null;
-      try{_ccWin=await Promise.any(_proxyAttempts);}catch(_){}
-      if(_ccWin&&_ccWin.data?.Data?.length>0){
-        const items=_ccWin.data.Data.slice(0,15).map(n=>({
-          title:n.title,
-          source:n.source_info?.name||n.source||'News',
-          url:n.url,
-          time:n.published_on*1000,
-          categories:(n.categories||'').split('|').filter(Boolean),
-        }));
-        setNews(items);
-        setErr(null);
-        setLoading(false);
-        _writeCache(items);
-        return;
+      try{
+        const ctrl=new AbortController();
+        const timer=setTimeout(()=>ctrl.abort(),8000);
+        const r=await fetch('/api/news',{cache:'no-store',signal:ctrl.signal});
+        clearTimeout(timer);
+        if(r.ok){
+          const data=await r.json();
+          if(Array.isArray(data?.items)&&data.items.length>0){
+            setNews(data.items);
+            // Show source/cache state in error slot for diagnostic transparency
+            if(data.stale)setErr(`stale (${Math.round((data.ageSec||0)/60)}m) — sources offline`);
+            else if(data.cached)setErr(null); // fresh enough cache, treat as live
+            else setErr(null);
+            setLoading(false);
+            _writeCache(data.items);
+            return;
+          }
+          // 200 OK but empty — fall through to localStorage cache
+        }else{
+          try{console.warn('[Tara news] /api/news returned',r.status);}catch(_){}
+        }
+      }catch(e){
+        try{console.warn('[Tara news] /api/news fetch failed:',e?.message||String(e));}catch(_){}
       }
-      // ── Source 2: Reddit r/CryptoCurrency JSON (free, no key) ─────────
-      try{
-        const _redditUrl='https://www.reddit.com/r/CryptoCurrency/hot.json?limit=20';
-        const _rd=await tryFetch(`https://corsproxy.io/?url=${encodeURIComponent(_redditUrl)}`,6000);
-        const _children=_rd?.data?.children||[];
-        if(_children.length>0){
-          const items=_children
-            .filter(c=>c?.data&&!c.data.stickied)
-            .slice(0,15)
-            .map(c=>({
-              title:c.data.title,
-              source:'r/CryptoCurrency',
-              url:'https://reddit.com'+c.data.permalink,
-              time:c.data.created_utc*1000,
-              categories:[c.data.link_flair_text||'Discussion'].filter(Boolean),
-            }));
-          if(items.length>0){
-            setNews(items);
-            setErr(null);
-            setLoading(false);
-            _writeCache(items);
-            return;
-          }
-        }
-      }catch(_){/* fall through */}
-      // ── V9.1.1 Source 3: rss2json proxy with CoinDesk RSS ────────────────
-      //   rss2json.com offers 10k free requests/day with proper CORS headers.
-      //   Reliable when CryptoCompare proxies are blocked at the network level.
-      try{
-        const _rssFeeds=[
-          'https://www.coindesk.com/arc/outboundfeeds/rss/',
-          'https://decrypt.co/feed',
-          'https://cointelegraph.com/rss',
-        ];
-        // Try each RSS feed until one works
-        for(const _rss of _rssFeeds){
-          try{
-            const _r2j=await tryFetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(_rss)}`,6000);
-            if(_r2j?.status==='ok'&&Array.isArray(_r2j.items)&&_r2j.items.length>0){
-              const items=_r2j.items.slice(0,15).map(it=>({
-                title:it.title,
-                source:_r2j.feed?.title||(_rss.includes('coindesk')?'CoinDesk':_rss.includes('decrypt')?'Decrypt':'CoinTelegraph'),
-                url:it.link,
-                time:parseNewsDate(it.pubDate||Date.now()),
-                categories:Array.isArray(it.categories)?it.categories.slice(0,3):[],
-              }));
-              setNews(items);
-              setErr(null);
-              setLoading(false);
-              _writeCache(items);
-              return;
-            }
-          }catch(_e){/* try next feed */}
-        }
-      }catch(_){/* fall through */}
-      // ── V9.1.1 Source 4: CryptoPanic free public posts ───────────────────
-      try{
-        const _cpUrl='https://cryptopanic.com/api/free/v1/posts/?public=true&currencies=BTC';
-        const _cp=await tryFetch(`https://api.allorigins.win/get?url=${encodeURIComponent(_cpUrl)}`,7000);
-        if(_cp?.contents){
-          const _cpData=JSON.parse(_cp.contents);
-          if(Array.isArray(_cpData?.results)&&_cpData.results.length>0){
-            const items=_cpData.results.slice(0,15).map(p=>({
-              title:p.title,
-              source:p.source?.title||'CryptoPanic',
-              url:p.url||p.original_url||'#',
-              time:parseNewsDate(p.published_at||Date.now()),
-              categories:(p.currencies||[]).map(c=>c.code).slice(0,3),
-            }));
-            setNews(items);
-            setErr(null);
-            setLoading(false);
-            _writeCache(items);
-            return;
-          }
-        }
-      }catch(_){/* fall through to cache */}
-      // ── Source 5: localStorage cache (≤4h old) ────────────────────────
+      // ── Fallback: localStorage cache (≤4h old) ─────────────────────────
       const _cached=_readCache();
       if(_cached){
         setNews(_cached.items);
@@ -12504,10 +12414,7 @@ function NewsFeedCard({timeFormat}={}){
         setLoading(false);
         return;
       }
-      // V9.1.1: log diagnostic info to console so user can check DevTools
-      try{console.warn('[Tara news] All 4 sources failed: CryptoCompare(4 proxies) + Reddit + rss2json(3 feeds) + CryptoPanic. Check Network tab for blocked requests.');}catch(_){}
-      // Truly nothing
-      setErr('All sources blocked — see browser console for details');
+      setErr('News API offline — see browser console for details');
       setLoading(false);
     };
     fetchNewsRef.current=fetchNews; // V9.0: expose for retry button
@@ -23356,7 +23263,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.0
+              9.8.1
             </span>
           </div>
 
