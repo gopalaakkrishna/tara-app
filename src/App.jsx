@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.8.2-news-rss-direct';
+const BASELINE_VERSION='2026.05.07-v9.8.3-news-cjs-fix';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -12388,17 +12388,26 @@ function NewsFeedCard({timeFormat}={}){
         clearTimeout(timer);
         if(r.ok){
           const data=await r.json();
-          if(Array.isArray(data?.items)&&data.items.length>0){
-            setNews(data.items);
-            // Show source/cache state in error slot for diagnostic transparency
-            if(data.stale)setErr(`stale (${Math.round((data.ageSec||0)/60)}m) — sources offline`);
-            else if(data.cached)setErr(null); // fresh enough cache, treat as live
-            else setErr(null);
+          // V9.8.3: /api/news is now a Vercel rewrite to rss2json+CoinDesk RSS.
+          //   Response is rss2json's format: {status:'ok', items:[{title,link,pubDate,...}], feed:{...}}
+          //   Map directly into Tara's expected shape. Single source — if rss2json
+          //   or CoinDesk is down, news fails (no fallback chain). Trade-off for
+          //   avoiding Vercel Serverless Function configuration entirely.
+          if(data?.status==='ok'&&Array.isArray(data.items)&&data.items.length>0){
+            const items=data.items.slice(0,15).map(it=>({
+              title:it.title,
+              source:data.feed?.title||'CoinDesk',
+              url:it.link,
+              time:it.pubDate?new Date(it.pubDate).getTime():Date.now(),
+              categories:Array.isArray(it.categories)?it.categories.slice(0,3):[],
+            }));
+            setNews(items);
+            setErr(null);
             setLoading(false);
-            _writeCache(data.items);
+            _writeCache(items);
             return;
           }
-          // 200 OK but empty — fall through to localStorage cache
+          try{console.warn('[Tara news] /api/news bad shape:',data?.status||'no status');}catch(_){}
         }else{
           try{console.warn('[Tara news] /api/news returned',r.status);}catch(_){}
         }
@@ -23263,7 +23272,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.2
+              9.8.3
             </span>
           </div>
 
