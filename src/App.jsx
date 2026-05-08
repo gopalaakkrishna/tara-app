@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.8.5-source-aware-candles';
+const BASELINE_VERSION='2026.05.07-v9.8.6-tv-source-book-speed';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -892,6 +892,15 @@ const PRICE_SOURCES={
       if(!Array.isArray(d))return[];
       return d.map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
     },
+    // Coinbase order book: level=2 returns aggregated bids/asks
+    //   Shape: {bids:[[price, size, count], ...], asks:[[price, size, count], ...]}
+    //   Strings are parsed lazily by consumers via parseFloat.
+    bookUrl:(cfg,asset)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/book?level=2`,
+    parseBook:(d)=>{
+      if(!d?.bids||!d?.asks)return null;
+      // Already in [price,size,...] tuple shape — pass through
+      return{bids:d.bids,asks:d.asks};
+    },
   },
   kraken:{
     name:'Kraken',
@@ -906,8 +915,6 @@ const PRICE_SOURCES={
       const _sz=_r[_k]?.c?.[1];return _sz?parseFloat(_sz):0.1;
     },
     // Kraken OHLC: interval in MINUTES (1, 5, 15, 30, 60, 240, 1440)
-    //   Returns: {result: {XXBTZUSD: [[time, open, high, low, close, vwap, volume, count], ...], last: ...}}
-    //   Oldest-first natively → reverse to newest-first to match Coinbase consumer shape.
     candleUrl:(_cfg,asset,granSec)=>{
       const _granToMin={60:1,180:3,300:5,900:15,1800:30,3600:60,14400:240,86400:1440};
       const _intvl=_granToMin[granSec]||1;
@@ -915,7 +922,6 @@ const PRICE_SOURCES={
     },
     parseCandles:(d)=>{
       const _r=d?.result||{};
-      // Pair key varies (XBTUSD vs XXBTZUSD vs ETHUSD vs XETHZUSD). Skip 'last' meta key.
       const _k=Object.keys(_r).find(k=>k!=='last'&&Array.isArray(_r[k]));
       if(!_k)return[];
       return _r[_k].map(c=>({
@@ -924,8 +930,18 @@ const PRICE_SOURCES={
         h:parseFloat(c[2]),
         l:parseFloat(c[3]),
         c:parseFloat(c[4]),
-        v:parseFloat(c[6]), // index 5 is vwap, 6 is volume
-      })).reverse(); // newest-first to match Coinbase
+        v:parseFloat(c[6]),
+      })).reverse();
+    },
+    // Kraken Depth: count = max levels per side (100 matches Coinbase default density)
+    //   Shape: {result: {XXBTZUSD: {bids:[[price, volume, timestamp], ...], asks:[...]}}}
+    //   Normalize to Coinbase shape so consumers' forEach loops work unchanged.
+    bookUrl:(_cfg,asset)=>`https://api.kraken.com/0/public/Depth?pair=${asset==='BTC'?'XBTUSD':'ETHUSD'}&count=100`,
+    parseBook:(d)=>{
+      const _r=d?.result||{};
+      const _k=Object.keys(_r).find(k=>_r[k]?.bids&&_r[k]?.asks);
+      if(!_k)return null;
+      return{bids:_r[_k].bids,asks:_r[_k].asks};
     },
   },
   bitstamp:{
@@ -934,9 +950,6 @@ const PRICE_SOURCES={
     url:(_cfg,asset)=>`https://www.bitstamp.net/api/v2/ticker/${asset==='BTC'?'btcusd':'ethusd'}/`,
     parsePrice:(d)=>d?.last?parseFloat(d.last):null,
     parseSize:(_d)=>0.1,
-    // Bitstamp OHLC: step in SECONDS (60, 300, 900, 3600, ...). Same units as Coinbase.
-    //   Returns: {data: {pair, ohlc: [{timestamp, open, high, low, close, volume}, ...]}}
-    //   Oldest-first natively → reverse for newest-first.
     candleUrl:(_cfg,asset,granSec)=>{
       const _supportedSteps=[60,180,300,900,1800,3600,7200,14400,21600,43200,86400,259200];
       const _step=_supportedSteps.includes(granSec)?granSec:60;
@@ -952,7 +965,14 @@ const PRICE_SOURCES={
         l:parseFloat(c.low),
         c:parseFloat(c.close),
         v:parseFloat(c.volume),
-      })).reverse(); // newest-first to match Coinbase
+      })).reverse();
+    },
+    // Bitstamp order_book: returns {bids:[[price, volume], ...], asks:[[price, volume], ...]}
+    //   Already string-tuple format, compatible with Coinbase consumer forEach.
+    bookUrl:(_cfg,asset)=>`https://www.bitstamp.net/api/v2/order_book/${asset==='BTC'?'btcusd':'ethusd'}/`,
+    parseBook:(d)=>{
+      if(!d?.bids||!d?.asks)return null;
+      return{bids:d.bids,asks:d.asks};
     },
   },
 };
@@ -3281,13 +3301,19 @@ const generateSyntheticBTC=(basePrice=84000,candles=120,intervalSec=60)=>{
 // ═══════════════════════════════════════
 const TV_INTERVAL_MAP={'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60'};
 
-const TradingViewChart=({resolution,onResolutionChange,asset})=>{
+const TradingViewChart=({resolution,onResolutionChange,asset,priceSource})=>{
   const interval=TV_INTERVAL_MAP[resolution]||'1';
-  // V7.0.2: per-asset TradingView symbol. Coinbase USD pairs.
+  // V7.0.2: per-asset TradingView symbol. V9.8.6: per-source exchange code.
+  //   When user switches FEED in the header, the embedded TradingView chart
+  //   follows. Maps cleanly: COINBASE / KRAKEN / BITSTAMP all have BTCUSD + ETHUSD
+  //   pairs that TradingView recognizes.
   const _tvSym={BTC:'BTCUSD',ETH:'ETHUSD'}[asset||'BTC']||'BTCUSD';
+  const _tvExchMap={coinbase:'COINBASE',kraken:'KRAKEN',bitstamp:'BITSTAMP'};
+  const _tvExch=_tvExchMap[priceSource||'coinbase']||'COINBASE';
+  const _tvFullSym=`${_tvExch}:${_tvSym}`;
   const src=[
     'https://www.tradingview.com/widgetembed/?frameElementId=tv_tara_101',
-    `&symbol=COINBASE%3A${_tvSym}`,
+    `&symbol=${_tvExch}%3A${_tvSym}`,
     `&interval=${interval}`,
     '&hidesidetoolbar=1',
     '&hidetoptoolbar=0',
@@ -3316,12 +3342,12 @@ const TradingViewChart=({resolution,onResolutionChange,asset})=>{
             </button>
           ))}
         </div>
-        <span className={'text-xs text-[#E8E9E4]/25 hidden sm:inline font-mono'}>COINBASE:BTCUSD · TradingView</span>
+        <span className={'text-xs text-[#E8E9E4]/25 hidden sm:inline font-mono'}>{_tvFullSym} · TradingView</span>
       </div>
 
-      {/* iframe — key={resolution+asset} forces clean remount on interval OR asset change */}
+      {/* iframe — key remount on interval, asset, OR source change */}
       <iframe
-        key={`${resolution}-${asset||'BTC'}`}
+        key={`${resolution}-${asset||'BTC'}-${priceSource||'coinbase'}`}
         src={src}
         className="tv-chart-container"
         style={{
@@ -3333,7 +3359,7 @@ const TradingViewChart=({resolution,onResolutionChange,asset})=>{
           display:'block',
         }}
         allowFullScreen
-        title="Tara Live Chart — COINBASE:BTCUSD"
+        title={`Tara Live Chart — ${_tvFullSym}`}
         sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
       />
     </div>
@@ -10205,7 +10231,10 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
           const _rec=Math.max(0,Math.min(100,Math.round(_r/5)*5));
           const _cur=Math.max(0,Math.min(100,speedDial||50));
           const _delta=Math.abs(_rec-_cur);
-          if(_delta<10)return null;
+          // V9.8.6: Always visible (was: hidden when delta<10). User wants the rec
+          //   in view at all times so they know whether their dial matches conditions.
+          //   When current = recommended, render dimmed with a ✓ instead of "rec".
+          const _atRec=_delta<5;
           const _label=_rec<=20?'⚡ FAST':_rec<=40?'fast':_rec<=60?'balanced':_rec<=80?'patient':'🛡 PATIENT';
           const _color=_rec<=30?'rgb(244,114,182)':_rec<=70?T2_GOLD:'rgb(110,231,183)';
           const _reason=_vr==='EXTREME'?'extreme velocity — slow locks miss'
@@ -10215,11 +10244,18 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
             :_vr==='FAST'?'fast tape — slight speed bias'
             :'normal conditions';
           return React.createElement('button',{
-            onClick:(e)=>{e.stopPropagation();setSpeedDial(_rec);},
+            onClick:(e)=>{e.stopPropagation();if(!_atRec)setSpeedDial(_rec);},
             className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded hover:bg-[#E8E9E4]/5 transition-colors',
-            style:{color:_color,background:'rgba(232,233,228,0.04)',border:`1px solid ${_color}33`},
-            title:`Recommended speed: ${_rec} (${_label}). Reason: ${_reason}. You're at ${_cur}. Tap to apply.`,
-          },'speed: ',_rec,' rec');
+            style:{
+              color:_atRec?'rgba(232,233,228,0.50)':_color,
+              background:_atRec?'rgba(232,233,228,0.03)':'rgba(232,233,228,0.04)',
+              border:`1px solid ${_atRec?'rgba(232,233,228,0.12)':_color+'33'}`,
+              cursor:_atRec?'default':'pointer',
+            },
+            title:_atRec
+              ?`Current dial (${_cur}) matches recommended ${_rec} (${_label}). Conditions: ${_reason}.`
+              :`Recommended speed: ${_rec} (${_label}). Reason: ${_reason}. You're at ${_cur}. Tap to apply.`,
+          },'speed: ',_rec,_atRec?' ✓':' rec');
         })(),
         // V8.7.2: Your-WR-this-session pill — only when we have ≥5 trades to be meaningful
         _sessionAdvice&&React.createElement('span',{
@@ -13438,7 +13474,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
 }
 
 // ── V111: ChartBottomCard - TradingView at bottom, full width ──
-function ChartBottomCard({mobileTab,resolution,setResolution,asset}){
+function ChartBottomCard({mobileTab,resolution,setResolution,asset,priceSource}){
   return(
     <div className={'bg-[#181A19] p-3 sm:p-4 rounded-xl border border-[#E8E9E4]/10 shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
       <div className="flex justify-between items-center mb-2 shrink-0">
@@ -13452,7 +13488,7 @@ function ChartBottomCard({mobileTab,resolution,setResolution,asset}){
         </div>
       </div>
       <div className="flex-1 min-h-[280px] sm:min-h-[360px] lg:min-h-[440px]">
-        <TradingViewChart resolution={resolution} onResolutionChange={setResolution} asset={asset}/>
+        <TradingViewChart resolution={resolution} onResolutionChange={setResolution} asset={asset} priceSource={priceSource}/>
       </div>
     </div>
   );
@@ -17280,11 +17316,10 @@ function TaraApp(){
   //   V9.8.5: priceSource added so shadow follows the active source toggle.
   },[currentAsset,windowType,regimeMemory,priceSource]);
 
-  // Heavy data — V9.8.5: candles use active source, book stays Coinbase
-  //   Order book stays on Coinbase because Kraken/Bitstamp use different response
-  //   shapes and book data isn't critical for direction signals (only liquidity
-  //   awareness around the strike).
-  useEffect(()=>{const _cbSym=ASSET_CONFIG[currentAsset]?.cb||'BTC-USD';const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const gran=windowType==='15m'?900:300;try{const r=await fetch(_src.candleUrl(_cfg,currentAsset,gran),{cache:'no-store'});if(r.ok){const d=await r.json();const _candles=_src.parseCandles(d);if(_candles.length>0)setHistory(_candles.slice(0,60));}}catch(_e){}const r2=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/book?level=2`);if(r2.ok){const d2=await r2.json();if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});
+  // Heavy data — V9.8.6: candles AND order book follow active source
+  //   Both endpoints normalize to a common shape via parseCandles/parseBook so the
+  //   downstream forEach + band math works identically across all 3 sources.
+  useEffect(()=>{const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const gran=windowType==='15m'?900:300;try{const r=await fetch(_src.candleUrl(_cfg,currentAsset,gran),{cache:'no-store'});if(r.ok){const d=await r.json();const _candles=_src.parseCandles(d);if(_candles.length>0)setHistory(_candles.slice(0,60));}}catch(_e){}const r2=await fetch(_src.bookUrl(_cfg,currentAsset),{cache:'no-store'});if(r2.ok){const d2raw=await r2.json();const d2=_src.parseBook(d2raw);if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});
     // V9.1.4: multi-band depth — TIGHT (0.05%), CLOSE (0.1%), STANDARD (0.2%), WIDE (0.5%).
     //   Each band captures bid and ask sizes within that distance from strike. Fed to
     //   DepthStrip for the 4-column breakdown that mirrors TapeStrip's time windows.
@@ -23424,7 +23459,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.5
+              9.8.6
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → Bitstamp.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s). */}
@@ -24359,7 +24394,7 @@ function TaraApp(){
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
-        <ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution} asset={currentAsset}/>
+        <ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution} asset={currentAsset} priceSource={priceSource}/>
 
       {/* ── FLOW INTELLIGENCE PANEL ── */}
       <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState} timeFormat={timeFormat}/>
