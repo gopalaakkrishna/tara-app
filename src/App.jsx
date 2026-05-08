@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.8.7-okx-futures';
+const BASELINE_VERSION='2026.05.07-v9.8.11-okx-back-for-candles';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -882,29 +882,27 @@ const PRICE_SOURCES={
   coinbase:{
     name:'Coinbase',
     label:'CB',
+    tvExch:'COINBASE',
+    tvSymbol:(asset)=>asset==='BTC'?'BTCUSD':'ETHUSD',
     url:(cfg,asset)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/ticker`,
     parsePrice:(d)=>d?.price?parseFloat(d.price):null,
     parseSize:(d)=>d?.size?parseFloat(d.size):0.1,
-    // Coinbase candles: granularity in seconds (60, 300, 900, 3600, ...)
-    //   Returns: [[time, low, high, open, close, volume], ...] newest-first
     candleUrl:(cfg,asset,granSec)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/candles?granularity=${granSec}`,
     parseCandles:(d)=>{
       if(!Array.isArray(d))return[];
       return d.map(c=>({time:c[0],l:parseFloat(c[1]),h:parseFloat(c[2]),o:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])}));
     },
-    // Coinbase order book: level=2 returns aggregated bids/asks
-    //   Shape: {bids:[[price, size, count], ...], asks:[[price, size, count], ...]}
-    //   Strings are parsed lazily by consumers via parseFloat.
     bookUrl:(cfg,asset)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/book?level=2`,
     parseBook:(d)=>{
       if(!d?.bids||!d?.asks)return null;
-      // Already in [price,size,...] tuple shape — pass through
       return{bids:d.bids,asks:d.asks};
     },
   },
   kraken:{
     name:'Kraken',
     label:'KR',
+    tvExch:'KRAKEN',
+    tvSymbol:(asset)=>asset==='BTC'?'BTCUSD':'ETHUSD',
     url:(_cfg,asset)=>`https://api.kraken.com/0/public/Ticker?pair=${asset==='BTC'?'XBTUSD':'ETHUSD'}`,
     parsePrice:(d)=>{
       const _r=d?.result||{};const _k=Object.keys(_r)[0];
@@ -914,7 +912,6 @@ const PRICE_SOURCES={
       const _r=d?.result||{};const _k=Object.keys(_r)[0];
       const _sz=_r[_k]?.c?.[1];return _sz?parseFloat(_sz):0.1;
     },
-    // Kraken OHLC: interval in MINUTES (1, 5, 15, 30, 60, 240, 1440)
     candleUrl:(_cfg,asset,granSec)=>{
       const _granToMin={60:1,180:3,300:5,900:15,1800:30,3600:60,14400:240,86400:1440};
       const _intvl=_granToMin[granSec]||1;
@@ -933,9 +930,6 @@ const PRICE_SOURCES={
         v:parseFloat(c[6]),
       })).reverse();
     },
-    // Kraken Depth: count = max levels per side (100 matches Coinbase default density)
-    //   Shape: {result: {XXBTZUSD: {bids:[[price, volume, timestamp], ...], asks:[...]}}}
-    //   Normalize to Coinbase shape so consumers' forEach loops work unchanged.
     bookUrl:(_cfg,asset)=>`https://api.kraken.com/0/public/Depth?pair=${asset==='BTC'?'XBTUSD':'ETHUSD'}&count=100`,
     parseBook:(d)=>{
       const _r=d?.result||{};
@@ -944,35 +938,60 @@ const PRICE_SOURCES={
       return{bids:_r[_k].bids,asks:_r[_k].asks};
     },
   },
-  bitstamp:{
-    name:'Bitstamp',
-    label:'BS',
-    url:(_cfg,asset)=>`https://www.bitstamp.net/api/v2/ticker/${asset==='BTC'?'btcusd':'ethusd'}/`,
-    parsePrice:(d)=>d?.last?parseFloat(d.last):null,
-    parseSize:(_d)=>0.1,
+  // V9.8.11: OKX replaces Gemini. Gemini's $30-50M/day spot volume produced thin
+  //   1-minute candles (small bodies, sparse activity) — visually unreadable for
+  //   pattern detection compared to Coinbase's $2-3B/day. User compared screenshots
+  //   side-by-side; Gemini's chart was visibly less alive. OKX has the highest BTC
+  //   spot volume globally (~$1-2B/day) so candles look full and patterns form
+  //   cleanly. TV widget OKX:BTCUSDT renders correctly.
+  //
+  // Tradeoff vs Gemini: OKX is BTC/USDT not BTC/USD. Typical spread to Coinbase is
+  //   $5-30 USD (under 0.04% on $79K BTC). Gemini was tighter ($5-10) but the
+  //   accuracy gain was inside Kalshi's existing $250 strike granularity + $20-50
+  //   bid/ask noise — practically invisible to actual trade outcomes. Visual chart
+  //   quality matters more for pattern reading.
+  //
+  // Routed through /api/okx/* Vercel rewrite (already in vercel.json from V9.8.7
+  //   for futures endpoints used by useBloomberg + useDepthFlash).
+  okx:{
+    name:'OKX',
+    label:'OK',
+    tvExch:'OKX',
+    tvSymbol:(asset)=>asset==='BTC'?'BTCUSDT':'ETHUSDT',
+    // OKX SPOT ticker: /market/ticker?instId=BTC-USDT
+    //   Response: {code:"0", data:[{last, lastSz, askPx, bidPx, ts, ...}]}
+    url:(_cfg,asset)=>`/api/okx/market/ticker?instId=${asset==='BTC'?'BTC-USDT':'ETH-USDT'}`,
+    parsePrice:(d)=>d?.data?.[0]?.last?parseFloat(d.data[0].last):null,
+    parseSize:(d)=>d?.data?.[0]?.lastSz?parseFloat(d.data[0].lastSz):0.1,
+    // OKX candles: bar = '1m', '3m', '5m', '15m', '30m', '1H', '4H', '1D'
+    //   Response: {code:"0", data:[[ts_ms, o, h, l, c, vol, volCcy, volCcyQuote, confirm], ...]}
+    //   Already newest-first (matches Coinbase consumer convention). Timestamps are in MS,
+    //   normalize to seconds via /1000 to match the standard Coinbase consumer expectation.
     candleUrl:(_cfg,asset,granSec)=>{
-      const _supportedSteps=[60,180,300,900,1800,3600,7200,14400,21600,43200,86400,259200];
-      const _step=_supportedSteps.includes(granSec)?granSec:60;
-      return `https://www.bitstamp.net/api/v2/ohlc/${asset==='BTC'?'btcusd':'ethusd'}/?step=${_step}&limit=300`;
+      const _granToBar={60:'1m',180:'3m',300:'5m',900:'15m',1800:'30m',3600:'1H',14400:'4H',86400:'1D'};
+      const _bar=_granToBar[granSec]||'1m';
+      return `/api/okx/market/candles?instId=${asset==='BTC'?'BTC-USDT':'ETH-USDT'}&bar=${_bar}&limit=300`;
     },
     parseCandles:(d)=>{
-      const _ohlc=d?.data?.ohlc;
-      if(!Array.isArray(_ohlc))return[];
-      return _ohlc.map(c=>({
-        time:parseInt(c.timestamp),
-        o:parseFloat(c.open),
-        h:parseFloat(c.high),
-        l:parseFloat(c.low),
-        c:parseFloat(c.close),
-        v:parseFloat(c.volume),
-      })).reverse();
+      if(!d?.data||!Array.isArray(d.data))return[];
+      return d.data.map(c=>({
+        time:parseInt(c[0])/1000, // OKX returns ms → convert to seconds
+        o:parseFloat(c[1]),
+        h:parseFloat(c[2]),
+        l:parseFloat(c[3]),
+        c:parseFloat(c[4]),
+        v:parseFloat(c[5]),
+      }));
     },
-    // Bitstamp order_book: returns {bids:[[price, volume], ...], asks:[[price, volume], ...]}
-    //   Already string-tuple format, compatible with Coinbase consumer forEach.
-    bookUrl:(_cfg,asset)=>`https://www.bitstamp.net/api/v2/order_book/${asset==='BTC'?'btcusd':'ethusd'}/`,
+    // OKX SPOT order book: /market/books?instId=BTC-USDT&sz=50
+    //   Response: {code:"0", data:[{asks:[[price, size, "0", count], ...], bids:[...], ts}]}
+    //   IMPORTANT: SPOT sizes are in BTC (base currency), unlike SWAP which uses contracts.
+    //   No CT_VAL multiplier needed. Matches Coinbase + Kraken spot book semantics.
+    bookUrl:(_cfg,asset)=>`/api/okx/market/books?instId=${asset==='BTC'?'BTC-USDT':'ETH-USDT'}&sz=50`,
     parseBook:(d)=>{
-      if(!d?.bids||!d?.asks)return null;
-      return{bids:d.bids,asks:d.asks};
+      const _b=d?.data?.[0];
+      if(!_b?.bids||!_b?.asks)return null;
+      return{bids:_b.bids,asks:_b.asks};
     },
   },
 };
@@ -3346,13 +3365,13 @@ const TV_INTERVAL_MAP={'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60
 
 const TradingViewChart=({resolution,onResolutionChange,asset,priceSource})=>{
   const interval=TV_INTERVAL_MAP[resolution]||'1';
-  // V7.0.2: per-asset TradingView symbol. V9.8.6: per-source exchange code.
-  //   When user switches FEED in the header, the embedded TradingView chart
-  //   follows. Maps cleanly: COINBASE / KRAKEN / BITSTAMP all have BTCUSD + ETHUSD
-  //   pairs that TradingView recognizes.
-  const _tvSym={BTC:'BTCUSD',ETH:'ETHUSD'}[asset||'BTC']||'BTCUSD';
-  const _tvExchMap={coinbase:'COINBASE',kraken:'KRAKEN',bitstamp:'BITSTAMP'};
-  const _tvExch=_tvExchMap[priceSource||'coinbase']||'COINBASE';
+  // V9.8.9: TV symbol mapping moved into PRICE_SOURCES registry. Each source
+  //   declares its own tvExch + tvSymbol(asset) function so adding/removing
+  //   sources requires no changes here. OKX (V9.8.9) uses USDT-quoted pairs
+  //   (BTCUSDT/ETHUSDT) where Coinbase + Kraken use USD pairs.
+  const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];
+  const _tvExch=_src?.tvExch||'COINBASE';
+  const _tvSym=_src?.tvSymbol?_src.tvSymbol(asset||'BTC'):(asset==='ETH'?'ETHUSD':'BTCUSD');
   const _tvFullSym=`${_tvExch}:${_tvSym}`;
   const src=[
     'https://www.tradingview.com/widgetembed/?frameElementId=tv_tara_101',
@@ -23502,10 +23521,15 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.7
+              9.8.11
             </span>
-            {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → Bitstamp.
-                        Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s). */}
+            {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
+                        Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
+                        V9.8.11: Gemini (V9.8.10) reverted to OKX. Gemini's $30-50M/day spot
+                        volume produced thin candles unreadable for pattern detection vs
+                        Coinbase's $2-3B/day. OKX has $1-2B/day → candles look full like
+                        Coinbase. USDT-vs-USD spread ($5-30) is well within Kalshi's $250
+                        strike granularity + bid/ask noise. */}
             <button
               onClick={()=>{
                 const _i=PRICE_SOURCE_KEYS.indexOf(priceSource);
@@ -23518,7 +23542,7 @@ function TaraApp(){
                 borderColor:feedFrozen?'rgba(244,63,94,0.45)':feedSlow?'rgba(229,200,112,0.40)':'rgba(255,255,255,0.15)',
                 color:feedFrozen?'#fb7185':feedSlow?'#E5C870':'rgba(232,233,228,0.55)',
               }}
-              title={`Live price source: ${PRICE_SOURCES[priceSource].name}. Click to cycle (Coinbase → Kraken → Bitstamp). ${feedFrozen?`FROZEN ${feedStaleSeconds}s — new locks paused.`:feedSlow?`Slow (${feedStaleSeconds}s since last change).`:'Live'}`}
+              title={`Live price source: ${PRICE_SOURCES[priceSource].name}. Click to cycle (Coinbase → Kraken → Bitfinex). ${feedFrozen?`FROZEN ${feedStaleSeconds}s — new locks paused.`:feedSlow?`Slow (${feedStaleSeconds}s since last change).`:'Live'}`}
             >
               <span>FEED</span>
               <span className="opacity-60">·</span>
