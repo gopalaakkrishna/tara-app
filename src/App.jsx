@@ -840,7 +840,7 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.07-v9.8.3-news-cjs-fix';
+const BASELINE_VERSION='2026.05.07-v9.8.4-stale-feed-guard';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -865,6 +865,54 @@ const ASSET_CONFIG={
 };
 const ASSET_KEYS=Object.keys(ASSET_CONFIG);
 const ASSET_DEFAULT='BTC';
+
+// V9.8.4: PRICE_SOURCES — multi-exchange live tick registry. Coinbase is default
+//   but if their feed freezes (which happened tonight — see TradingView "Data
+//   issue: delayed streaming" banner, Tara's price stuck for an extended period),
+//   user can toggle to Kraken or Bitstamp via the FEED pill in the header.
+//   All three are US-accessible, CORS-enabled, and high-liquidity. Prices typically
+//   track within $5-15 of each other on BTC, $0.50-2 on ETH, well within the noise
+//   that already shapes Kalshi prediction outcomes.
+//   - Coinbase: same endpoint Tara has used for months (api.exchange.coinbase.com)
+//   - Kraken:   api.kraken.com/0/public/Ticker — XBTUSD pair for BTC, ETHUSD for ETH
+//   - Bitstamp: www.bitstamp.net/api/v2/ticker — btcusd / ethusd
+//   Each source defines: name (display), label (3-char tape ex code), url(cfg,asset),
+//   parsePrice (returns float or null), parseSize (best-effort tape size).
+const PRICE_SOURCES={
+  coinbase:{
+    name:'Coinbase',
+    label:'CB',
+    url:(cfg,asset)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/ticker`,
+    parsePrice:(d)=>d?.price?parseFloat(d.price):null,
+    parseSize:(d)=>d?.size?parseFloat(d.size):0.1,
+  },
+  kraken:{
+    name:'Kraken',
+    label:'KR',
+    url:(_cfg,asset)=>`https://api.kraken.com/0/public/Ticker?pair=${asset==='BTC'?'XBTUSD':'ETHUSD'}`,
+    parsePrice:(d)=>{
+      // Kraken returns {result:{XXBTZUSD:{c:["79642.90","0.001"],...}}}.
+      // Pair key varies (XXBTZUSD vs XBTUSD), so grab whatever's first.
+      const _r=d?.result||{};const _k=Object.keys(_r)[0];
+      const _last=_r[_k]?.c?.[0];return _last?parseFloat(_last):null;
+    },
+    parseSize:(d)=>{
+      const _r=d?.result||{};const _k=Object.keys(_r)[0];
+      const _sz=_r[_k]?.c?.[1];return _sz?parseFloat(_sz):0.1;
+    },
+  },
+  bitstamp:{
+    name:'Bitstamp',
+    label:'BS',
+    url:(_cfg,asset)=>`https://www.bitstamp.net/api/v2/ticker/${asset==='BTC'?'btcusd':'ethusd'}/`,
+    parsePrice:(d)=>d?.last?parseFloat(d.last):null,
+    // Bitstamp ticker doesn't expose last-trade size. Use placeholder; it only
+    // affects tape volume bookkeeping and isn't a primary signal at this level.
+    parseSize:(_d)=>0.1,
+  },
+};
+const PRICE_SOURCE_KEYS=Object.keys(PRICE_SOURCES);
+const PRICE_SOURCE_DEFAULT='coinbase';
 
 // V2.1: Direction C design tokens — two-tone gold/copper palette + utility classes.
 // Centralized so the visual language is consistent across all UI consumers.
@@ -14514,6 +14562,31 @@ function TaraApp(){
   const currentAssetRef=useRef(currentAsset);
   currentAssetRef.current=currentAsset;
   useEffect(()=>{try{localStorage.setItem('tara_current_asset',currentAsset);}catch(e){}},[currentAsset]);
+  // V9.8.4: Live price source — Coinbase by default, user-switchable to Kraken
+  //   or Bitstamp via the FEED pill in the header. See PRICE_SOURCES registry.
+  //   Persists per-device. Switching doesn't affect candle history (still Coinbase).
+  const[priceSource,setPriceSourceState]=useState(()=>{
+    try{const v=localStorage.getItem('tara_price_source')||PRICE_SOURCE_DEFAULT;return PRICE_SOURCES[v]?v:PRICE_SOURCE_DEFAULT;}catch(e){return PRICE_SOURCE_DEFAULT;}
+  });
+  const setPriceSource=(s)=>{
+    if(!PRICE_SOURCES[s])return;
+    setPriceSourceState(s);
+    try{localStorage.setItem('tara_price_source',s);}catch(_){}
+    // Reset stale tracker on switch — fresh source, fresh clock
+    lastPriceChangeRef.current={price:null,time:Date.now()};
+  };
+  const priceSourceRef=useRef(priceSource);
+  priceSourceRef.current=priceSource;
+  // V9.8.4: STALE-TICK GUARD. Tracks when price ACTUALLY CHANGED (not just polled).
+  //   If frozen >60s, banner shows + new locks blocked. Prevents Tara from acting
+  //   on dead data when an exchange has a streaming-side incident (Coinbase did
+  //   tonight per TradingView "Data issue" banner).
+  const lastPriceChangeRef=useRef({price:null,time:Date.now()});
+  const[feedStaleSeconds,setFeedStaleSeconds]=useState(0);
+  const feedFrozen=feedStaleSeconds>=60; // hard threshold — locks paused
+  const feedSlow=feedStaleSeconds>=30&&feedStaleSeconds<60; // soft warning
+  const feedFrozenRef=useRef(feedFrozen);
+  feedFrozenRef.current=feedFrozen;
   // V6.5.7: SPEED DIAL — 0-100, 50 default. Lower = faster lock (fewer samples,
   //   shorter search phase, lower thresholds). Higher = more patient. Persists.
   const[speedDial,setSpeedDial]=useState(()=>{
@@ -16890,23 +16963,37 @@ function TaraApp(){
     fetch_();const iv=setInterval(fetch_,10000);return()=>clearInterval(iv);
   },[chartRes,currentAsset]);
 
-  // Live price
-  useEffect(()=>{let last=0;const _cbSym=ASSET_CONFIG[currentAsset]?.cb||'BTC-USD';const f=async()=>{try{const r=await fetch(`https://api.exchange.coinbase.com/products/${_cbSym}/ticker`);if(!r.ok)return;const d=await r.json();if(d.price){const p=parseFloat(d.price),now=Date.now();currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}tickHistoryRef.current.push({p,s:parseFloat(d.size||0.1),t:'B',time:Date.now(),ex:'CB'});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);},[currentAsset]);
+  // Live price — V9.8.4 source-aware (Coinbase / Kraken / Bitstamp via PRICE_SOURCES)
+  //   Tracks lastPriceChangeRef so the stale-tick guard can detect frozen feeds.
+  useEffect(()=>{let last=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);},[currentAsset,priceSource]);
+
+  // V9.8.4: Stale-tick monitor — runs once per second, computes age of last
+  //   price change. UI reads feedStaleSeconds for banner + lock-gate decisions.
+  useEffect(()=>{
+    const iv=setInterval(()=>{
+      const _ageSec=Math.round((Date.now()-lastPriceChangeRef.current.time)/1000);
+      setFeedStaleSeconds(_ageSec);
+    },1000);
+    return()=>clearInterval(iv);
+  },[]);
 
   // V7.6: BACKGROUND PRICE FEED for the INACTIVE asset. Keeps the other asset's price
   //   warm so when user switches tabs, there's no cold start. Stored in a per-asset map
   //   ref accessible via `priceByAssetRef.current[asset]`. When user switches, the active-
   //   asset feed effect above takes over.
+  //   V9.8.4: Source-aware — uses same priceSource as primary feed.
   useEffect(()=>{
     const _otherAsset=currentAsset==='BTC'?'ETH':'BTC';
-    const _otherSym=ASSET_CONFIG[_otherAsset]?.cb||'ETH-USD';
+    const _otherCfg=ASSET_CONFIG[_otherAsset]||ASSET_CONFIG.BTC;
+    const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];
     const f=async()=>{
       try{
-        const r=await fetch(`https://api.exchange.coinbase.com/products/${_otherSym}/ticker`);
+        const _url=_src.url(_otherCfg,_otherAsset);
+        const r=await fetch(_url,{cache:'no-store'});
         if(!r.ok)return;
         const d=await r.json();
-        if(d.price){
-          const p=parseFloat(d.price);
+        const p=_src.parsePrice(d);
+        if(p&&Number.isFinite(p)){
           if(!priceByAssetRef.current)priceByAssetRef.current={};
           priceByAssetRef.current[_otherAsset]={price:p,time:Date.now()};
         }
@@ -16915,7 +17002,7 @@ function TaraApp(){
     f();
     const iv=setInterval(f,2000); // slightly slower cadence for the background asset
     return()=>clearInterval(iv);
-  },[currentAsset]);
+  },[currentAsset,priceSource]);
 
   // V7.7: SHADOW TARA — background analysis for the INACTIVE asset. User: "tara's decision
   //   only happens when i open the tab. i want her to make the decision already in the
@@ -21672,6 +21759,17 @@ function TaraApp(){
     // V6.5.7: Hard-force is now a TRUE instant lock. If pressed AND any directional lean
     //   exists (claimed or current), commit RIGHT NOW with whatever data we have.
     const _instantForceReady=_hardForceActive&&(claimedDir==='UP'||claimedDir==='DOWN'||tc.call==='UP'||tc.call==='DOWN');
+    // V9.8.4: STALE-FEED GUARD — refuse to commit a new lock when live tick feed
+    //   has been frozen ≥60s. Tara would otherwise lock on dead data the engine
+    //   thinks is real. User can switch to backup feed via FEED pill in header.
+    //   _instantForceReady (hard user-force) bypasses this — if the user is
+    //   manually forcing a lock, they've made the call.
+    if(feedFrozenRef.current&&!_instantForceReady){
+      // Don't fire lock. Engine continues running so user sees what it would do,
+      // but no entry is created and no sound fires. UI shows the FEED FROZEN
+      // banner; the call card will show a stale-feed footer note.
+      return;
+    }
     if(samples>=needSamples||analysis?.isSystemLocked||_instantForceReady){
       // V5.5d: Snapshot uses CLAIMED direction (the first formed direction this window),
       //   not current tc.call. If tc.call has flipped temporarily, we still commit to
@@ -23272,8 +23370,29 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.8.3
+              9.8.4
             </span>
+            {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → Bitstamp.
+                        Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s). */}
+            <button
+              onClick={()=>{
+                const _i=PRICE_SOURCE_KEYS.indexOf(priceSource);
+                const _next=PRICE_SOURCE_KEYS[(_i+1)%PRICE_SOURCE_KEYS.length];
+                setPriceSource(_next);
+              }}
+              className="hidden sm:flex items-center gap-1 text-[9px] font-sans font-bold tracking-wider px-2 py-0.5 rounded-md border transition-colors"
+              style={{
+                background:feedFrozen?'rgba(244,63,94,0.12)':feedSlow?'rgba(229,200,112,0.12)':'rgba(255,255,255,0.04)',
+                borderColor:feedFrozen?'rgba(244,63,94,0.45)':feedSlow?'rgba(229,200,112,0.40)':'rgba(255,255,255,0.15)',
+                color:feedFrozen?'#fb7185':feedSlow?'#E5C870':'rgba(232,233,228,0.55)',
+              }}
+              title={`Live price source: ${PRICE_SOURCES[priceSource].name}. Click to cycle (Coinbase → Kraken → Bitstamp). ${feedFrozen?`FROZEN ${feedStaleSeconds}s — new locks paused.`:feedSlow?`Slow (${feedStaleSeconds}s since last change).`:'Live'}`}
+            >
+              <span>FEED</span>
+              <span className="opacity-60">·</span>
+              <span>{PRICE_SOURCES[priceSource].label}</span>
+              {feedFrozen&&<span className="opacity-90">·{feedStaleSeconds}s</span>}
+            </button>
           </div>
 
           {/* Live Price — shrinks gracefully, never truncates on sm+ */}
@@ -23420,6 +23539,41 @@ function TaraApp(){
           </div>
         </div>
       </header>
+
+      {/* V9.8.4: STALE-FEED BANNER. Only visible when feed is frozen (>=60s).
+              Tucks below the sticky header. Provides one-click switching to
+              backup sources without making the user fish for the FEED pill.
+              Slow (30-60s) state is shown only via the FEED pill — not loud
+              enough yet to deserve a banner. */}
+      {feedFrozen&&(
+        <div className="sticky top-[44px] sm:top-[52px] z-40 px-2 sm:px-4 py-2 border-b" style={{
+          background:'linear-gradient(180deg, rgba(244,63,94,0.18), rgba(244,63,94,0.08))',
+          borderColor:'rgba(244,63,94,0.45)',
+        }}>
+          <div className="max-w-[1600px] mx-auto flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] sm:text-xs">
+            <span className="font-bold tracking-wide text-rose-300">⚠ FEED FROZEN</span>
+            <span className="text-rose-200/85">
+              {PRICE_SOURCES[priceSource].name} · last change {feedStaleSeconds}s ago · new locks paused
+            </span>
+            <div className="flex items-center gap-1.5 ml-auto">
+              {PRICE_SOURCE_KEYS.filter(k=>k!==priceSource).map(k=>(
+                <button
+                  key={k}
+                  onClick={()=>setPriceSource(k)}
+                  className="px-2 py-1 rounded border text-[10px] sm:text-[11px] font-bold tracking-wide transition-colors hover:bg-white/10"
+                  style={{
+                    borderColor:'rgba(232,233,228,0.25)',
+                    color:'#E8E9E4',
+                    background:'rgba(255,255,255,0.05)',
+                  }}
+                >
+                  Try {PRICE_SOURCES[k].name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* V2.1: Top stat strip — sticky 3-stat indicator. Always visible: Posterior · Quality · FGT.
               Provides a constant pulse-check without scanning multiple panels. */}
