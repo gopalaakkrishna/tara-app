@@ -924,10 +924,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.09-v9.9.4-reversal-risk-engine-lock-fix';
+const BASELINE_VERSION='2026.05.09-v9.9.5-tier-display-and-discord';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.9.4';
+const TARA_VERSION_DISPLAY='Tara 9.9.5';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -6917,10 +6917,27 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           </div>
         </div>
         <div className="flex items-center justify-between gap-3 mb-1.5">
-          <div className={`flex items-baseline gap-2 ${callColor}`}>
+          <div className={`flex items-baseline gap-2 flex-wrap ${callColor}`}>
             <span className="text-2xl">{arrow}</span>
             <span className="text-3xl font-serif font-bold tracking-tight leading-none">{callLabel}</span>
             {isLockedSnap&&<span className="text-lg tabular-nums opacity-75 self-baseline">{dispConfidence}%</span>}
+            {/* V9.9.5: tier chip on the locked card. Reads from snap.tier (V9.9.5 added
+                 it to taraCallSnapshotRef). Color-coded by tier quality so user can see
+                 at a glance whether this is a Tier-1 lock (super-confluence, confluence,
+                 structural-led, tape-led, rising-confluence, patient — green) or a Tier-3
+                 lock (single, time-cap-commit, no-go-data, no-go-edge — amber/rose).
+                 Helps user enforce "skip Tier 3" rule manually. */}
+            {isLockedSnap&&snap.tier&&(()=>{
+              const _t=snap.tier;
+              const _isTier1=_t==='super-confluence'||_t==='confluence'||_t==='structural-led'||_t==='tape-led'||_t==='rising-confluence'||_t==='patient'||_t==='exceptional';
+              const _isTier3=_t==='single'||_t==='time-cap-commit'||_t==='timer-commit'||_t==='no-go-data'||_t==='no-go-edge';
+              const _color=_isTier1?'#6ee7b7':_isTier3?'#f472b6':'#E5C870';
+              return <span
+                className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded self-baseline tabular-nums"
+                style={{color:_color,background:`${_color}1c`,border:`1px solid ${_color}55`}}
+                title={_isTier1?'Tier-1 setup — strong setup':_isTier3?'Tier-3 setup — marginal, consider skipping':'Tier-2 setup'}
+              >{_t}</span>;
+            })()}
             {/* V6.0.5: show conviction next to WATCHING headline so user sees lean strength inline */}
             {isWatching&&<span className="text-sm tabular-nums opacity-75 self-baseline">{Math.round(_liveLeanConv)}pt</span>}
           </div>
@@ -19126,6 +19143,11 @@ function TaraApp(){
         const _fields=[
           {name:'Direction',value:data.dir||'—',inline:true},
           {name:'Confidence',value:`${data.confidence||0}%`,inline:true},
+          // V9.9.5: tier shown alongside confidence so the user instantly knows whether
+          //   this is a Tier-1 (super, confluence, structural-led, tape-led, rising,
+          //   patient) lock vs Tier 3 (single, time-cap-commit, no-go-data). Critical
+          //   for the "skip Tier 3" rule the user is enforcing manually.
+          {name:'Tier',value:data.tier||'—',inline:true},
           {name:'Posterior',value:`${(Number(data.posterior)||0).toFixed(0)}`,inline:true},
           {name:'Strike',value:`$${(Number(data.strike)||0).toFixed(2)}`,inline:true},
           {name:'Price',value:`$${(Number(data.price)||0).toFixed(2)}`,inline:true},
@@ -20814,7 +20836,7 @@ function TaraApp(){
                 whaleLog:typeof whaleLog!=='undefined'?whaleLog:[],
                 dayContext:typeof dayContext!=='undefined'?dayContext:null,
               });
-              lockedCallRef.current={dir:'UP',lockedAt:Date.now(),_committedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,reversalRisk:_rrUp}; // V134/V9.1.3: snapshot signals at lock + first-write-wins stamp
+              lockedCallRef.current={dir:'UP',lockedAt:Date.now(),_committedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,reversalRisk:_rrUp,tier:_ucTier}; // V134/V9.1.3: snapshot signals at lock + first-write-wins stamp; V9.9.5: tier persisted so card can display it
               taraAdviceRef.current='UP - CONFIRMED';
               biasCountRef.current={UP:0,DOWN:0};
               _persistLock(); // V5.6: cloud-save so refresh restores this lock
@@ -20932,7 +20954,7 @@ function TaraApp(){
                 whaleLog:typeof whaleLog!=='undefined'?whaleLog:[],
                 dayContext:typeof dayContext!=='undefined'?dayContext:null,
               });
-              lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),_committedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,rugPullLock:isRugPull,reversalRisk:_rrDown};
+              lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),_committedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,rugPullLock:isRugPull,reversalRisk:_rrDown,tier:_dcTier}; // V9.9.5: tier persisted so card can display it
               if(isRugPull&&bearCount<CONSECUTIVE_NEEDED_DN)reasoning.push(`[RUG-FIRE] Rug pull detected — DOWN locked early at posterior ${posterior.toFixed(0)}`); // V134: snapshot signals at lock
               taraAdviceRef.current='DOWN - CONFIRMED';
               biasCountRef.current={UP:0,DOWN:0};
@@ -23558,6 +23580,10 @@ function TaraApp(){
       const _committedReason=ref.dir===tc.call?tc.reason:`Locked ${_committedCall} — original lean held through flip`;
       taraCallSnapshotRef.current={
         call:_committedCall,direction:_committedCall,confidence:tc.confidence,reason:_committedReason,
+        // V9.9.5: tier label persisted on snapshot so Discord broadcast can render it,
+        //   and so the call card has an authoritative source after lock formation. Mirrors
+        //   the value written to the call log entry at L23673.
+        tier:tierLabel,
         atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
         atPosterior:analysis?.rawProbAbove,
         // V6.5.7: lock-time price + strike + quality + FGT + regime persisted in snapshot.
@@ -23923,6 +23949,9 @@ function TaraApp(){
         regime:snap.regime||baseData.regime,
         strike:snap.strike||baseData.strike,
         price:snap.lockPrice||baseData.price,
+        // V9.9.5: tier from the snapshot so the Discord lock embed can show
+        //   confidence tier (single, structural-led, super-confluence, etc).
+        tier:snap.tier||baseData.tier||null,
       };
       // V9.0: SUPPRESS Discord broadcast for override commits. When the lock is the
       //   V8.9.2 directional promotion of what would have been NO_TRADE or SIT_OUT
@@ -25189,7 +25218,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.9.4
+              9.9.5
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
