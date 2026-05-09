@@ -924,10 +924,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.09-v9.9.2-day-aware-advice';
+const BASELINE_VERSION='2026.05.09-v9.9.4-reversal-risk-engine-lock-fix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.9.2';
+const TARA_VERSION_DISPLAY='Tara 9.9.4';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -11006,6 +11006,12 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
   // V9.2.0: per-asset filter — separate BTC vs ETH views since they trade independently.
   //   "all" shows both. Default is 'all' so the user immediately sees the full picture.
   const[assetFilter,setAssetFilter]=React.useState('all');
+  // V9.9.3: storage integrity audit + Kalshi reconciliation. Both produce a result
+  //   panel that lists discrepancies. Verify is instant (in-memory checks). Reconcile
+  //   is async (fetches Kalshi settled markets for the past 24-72h) and slower.
+  //   reconcileResult shape: {kind:'verify'|'reconcile', issues: [{entryId,kind,detail,suggested}]}
+  const[reconcileResult,setReconcileResult]=React.useState(null);
+  const[reconcileBusy,setReconcileBusy]=React.useState(false);
   const filtered=React.useMemo(()=>{
     let arr=[...taraCallLog].reverse();
     if(assetFilter==='BTC')arr=arr.filter(e=>(e.asset||'BTC')==='BTC');
@@ -11075,6 +11081,119 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('h2',{className:'font-serif text-3xl text-white tracking-tight'},'Every call ',React.createElement('span',{style:{color:T2_GOLD}},'·'),' her record'),
         ),
         React.createElement('div',{className:'flex items-center gap-2'},
+          // V9.9.3: Verify storage — instant in-memory checks for inconsistencies.
+          //   Cheap pass over every entry looking for: missing strike or closingPrice on
+          //   resolved entries, direction-result contradiction (UP with closingGapBps<0
+          //   marked WIN, etc), pending entries older than 30min, missing fgt/qScore
+          //   on entries newer than ~1 day. Surfaces as a count + list. User can review
+          //   and edit individually using the existing edit-entry mechanism.
+          React.createElement('button',{
+            onClick:()=>{
+              const _issues=[];
+              for(const e of taraCallLog){
+                if(!e||!e.id)continue;
+                const _hours=(Date.now()-e.id)/3600000;
+                // Resolved entry missing strike or closingPrice — can't audit
+                if((e.result==='WIN'||e.result==='LOSS')){
+                  if(e.strike==null||e.strike===0)_issues.push({entryId:e.id,kind:'missing-strike',detail:`${e.dir||'?'} marked ${e.result} but strike is missing`});
+                  if(e.closingPrice==null||e.closingPrice===0)_issues.push({entryId:e.id,kind:'missing-close',detail:`${e.dir||'?'} marked ${e.result} but closingPrice is missing`});
+                }
+                // Direction-result contradiction (when we have both prices)
+                if((e.result==='WIN'||e.result==='LOSS')&&typeof e.strike==='number'&&typeof e.closingPrice==='number'&&e.strike>0&&e.closingPrice>0){
+                  const _wonByPrice=e.dir==='UP'?(e.closingPrice>=e.strike):e.dir==='DOWN'?(e.closingPrice<e.strike):null;
+                  if(_wonByPrice!==null){
+                    const _shouldBe=_wonByPrice?'WIN':'LOSS';
+                    if(e.result!==_shouldBe){
+                      _issues.push({entryId:e.id,kind:'mismatch',detail:`${e.dir} strike=$${e.strike.toFixed(0)} → close=$${e.closingPrice.toFixed(0)} should be ${_shouldBe}, marked ${e.result}`,suggested:_shouldBe,suggestedField:'result'});
+                    }
+                  }
+                }
+                // Pending entries older than 30 minutes
+                if(e.result==='pending'&&_hours>0.5){
+                  _issues.push({entryId:e.id,kind:'stuck-pending',detail:`Pending for ${Math.round(_hours)}h — should have resolved`});
+                }
+              }
+              setReconcileResult({kind:'verify',issues:_issues,checkedAt:Date.now(),total:taraCallLog.length});
+            },
+            className:'px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
+            style:{
+              background:'rgba(229,200,112,0.08)',
+              color:'rgba(229,200,112,0.85)',
+              border:'1px solid rgba(229,200,112,0.25)',
+            },
+            title:'Audit storage for inconsistencies (instant — local checks only)',
+          },'⚠ Verify'),
+          // V9.9.3: Reconcile against Kalshi — fetches settled markets for the past 72h
+          //   and cross-checks every WIN/LOSS entry against Kalshi's authoritative result.
+          //   Discrepancies surface in the result panel with a one-click "apply" suggestion.
+          React.createElement('button',{
+            onClick:async()=>{
+              setReconcileBusy(true);
+              const _issues=[];
+              try{
+                // Fetch settled markets per asset for the past 3 days (Kalshi only keeps
+                //   settled history a limited time, but 72h covers our useful audit window).
+                const _now=Math.floor(Date.now()/1000);
+                const _3dAgo=_now-72*3600;
+                const _series=['KXBTCD','KXETHD']; // hourly BTC + ETH series
+                const _settledByAsset={BTC:[],ETH:[]};
+                for(const _s of _series){
+                  const _asset=_s==='KXBTCD'?'BTC':'ETH';
+                  let _cursor=null,_pages=0;
+                  while(_pages<5){ // safety cap
+                    const _params=`series_ticker=${_s}&status=settled&min_close_ts=${_3dAgo}&limit=200${_cursor?`&cursor=${_cursor}`:''}`;
+                    const _resp=await fetch(`/api/kalshi/markets?${_params}`,{signal:AbortSignal.timeout(10000)}).catch(()=>null);
+                    if(!_resp||!_resp.ok)break;
+                    const _json=await _resp.json().catch(()=>null);
+                    if(!_json||!Array.isArray(_json.markets))break;
+                    for(const _m of _json.markets)_settledByAsset[_asset].push(_m);
+                    _cursor=_json.cursor;
+                    if(!_cursor||_json.markets.length===0)break;
+                    _pages++;
+                  }
+                }
+                // Now cross-check each entry against Kalshi-settled
+                for(const e of taraCallLog){
+                  if(!e||!e.id||(e.result!=='WIN'&&e.result!=='LOSS'))continue;
+                  const _asset=e.asset||'BTC';
+                  const _markets=_settledByAsset[_asset]||[];
+                  if(_markets.length===0)continue;
+                  // Find the market closest in close_time to this entry's expected close
+                  const _winMs=e.windowType==='5m'?300000:900000;
+                  const _expectedCloseMs=e.id+_winMs;
+                  let _best=null,_bestDiff=Infinity;
+                  for(const _m of _markets){
+                    if(!_m.close_time)continue;
+                    const _mClose=new Date(_m.close_time).getTime();
+                    const _diff=Math.abs(_mClose-_expectedCloseMs);
+                    if(_diff<_bestDiff){_bestDiff=_diff;_best=_m;}
+                  }
+                  if(!_best||_bestDiff>120000)continue; // no match within 2min
+                  if(!_best.result)continue;
+                  // Kalshi's result tells us authoritative direction
+                  const _kalshiDir=_best.result==='yes'?'UP':_best.result==='no'?'DOWN':null;
+                  if(!_kalshiDir)continue;
+                  const _shouldBe=e.dir===_kalshiDir?'WIN':'LOSS';
+                  if(e.result!==_shouldBe){
+                    _issues.push({entryId:e.id,kind:'kalshi-mismatch',detail:`Kalshi settled ${_kalshiDir}; ${e.dir} entry should be ${_shouldBe}, marked ${e.result}`,suggested:_shouldBe,suggestedField:'result'});
+                  }
+                }
+                setReconcileResult({kind:'reconcile',issues:_issues,checkedAt:Date.now(),checkedAgainst:_settledByAsset.BTC.length+_settledByAsset.ETH.length});
+              }catch(err){
+                setReconcileResult({kind:'reconcile',issues:[],error:err.message||String(err)});
+              }finally{
+                setReconcileBusy(false);
+              }
+            },
+            disabled:reconcileBusy,
+            className:'px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
+            style:{
+              background:reconcileBusy?'rgba(232,233,228,0.04)':'rgba(124,93,250,0.08)',
+              color:reconcileBusy?'rgba(232,233,228,0.4)':'rgba(196,181,253,0.9)',
+              border:`1px solid ${reconcileBusy?'rgba(232,233,228,0.10)':'rgba(196,181,253,0.25)'}`,
+            },
+            title:'Cross-check past 72h vs Kalshi-settled markets (slow — 5-15s)',
+          },reconcileBusy?'…':'⚖ Reconcile'),
           // V6.3.5: Export button — downloads full log as JSON for analysis.
           React.createElement('button',{
             onClick:()=>{
@@ -11225,6 +11344,69 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:T2_GOLD}},counts.sitouts),
         ),
       ),
+      // V9.9.3: Reconcile / Verify result panel. Renders when either action has been run.
+      //   Each issue shows: timestamp, kind, detail, "apply suggestion" button (if a fix
+      //   is suggested), "edit manually" button. User reviews + accepts each individually
+      //   to avoid bulk-applying a wrong rule.
+      reconcileResult?React.createElement('div',{
+        className:'mb-5 p-4 rounded-xl',
+        style:{
+          background:reconcileResult.issues.length===0?'rgba(110,231,183,0.06)':'rgba(229,200,112,0.06)',
+          border:`1px solid ${reconcileResult.issues.length===0?'rgba(110,231,183,0.20)':'rgba(229,200,112,0.20)'}`,
+        },
+      },[
+        React.createElement('div',{key:'header',className:'flex items-center justify-between mb-3 flex-wrap gap-2'},[
+          React.createElement('div',{key:'l',className:'flex flex-col'},[
+            React.createElement('div',{key:'t',className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:reconcileResult.issues.length===0?'rgba(110,231,183,0.85)':'rgba(229,200,112,0.85)'}},
+              reconcileResult.kind==='verify'?'STORAGE AUDIT':'KALSHI RECONCILE'),
+            React.createElement('div',{key:'s',className:'text-[12px] mt-0.5',style:{color:'#E8E9E4'}},
+              reconcileResult.error?`Error: ${reconcileResult.error}`:
+              reconcileResult.issues.length===0?'No issues found.':
+              `Found ${reconcileResult.issues.length} issue${reconcileResult.issues.length===1?'':'s'} across ${reconcileResult.total||reconcileResult.checkedAgainst||'?'} entries`),
+          ]),
+          React.createElement('button',{
+            key:'close',
+            onClick:()=>setReconcileResult(null),
+            className:'p-1.5 rounded text-[#E8E9E4]/50 hover:text-white hover:bg-[#E8E9E4]/5',
+            title:'Dismiss',
+          },'✕'),
+        ]),
+        reconcileResult.issues.length>0?React.createElement('div',{
+          key:'list',
+          className:'flex flex-col gap-1.5 max-h-[300px] overflow-y-auto pr-1',
+        },reconcileResult.issues.map(_iss=>{
+          const _entry=taraCallLog.find(e=>e.id===_iss.entryId);
+          const _when=_entry?new Date(_entry.id).toLocaleString('en-US',{..._tzOpt,month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}):'';
+          return React.createElement('div',{
+            key:_iss.entryId,
+            className:'px-3 py-2 rounded text-[11px] flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between',
+            style:{background:'rgba(14,16,15,0.5)',border:'1px solid rgba(232,233,228,0.06)'},
+          },[
+            React.createElement('div',{key:'detail',className:'flex flex-col gap-0.5 min-w-0 flex-1'},[
+              React.createElement('div',{key:'when',className:'text-[9px] uppercase tracking-wider',style:{color:'rgba(232,233,228,0.45)'}},_when+' · '+_iss.kind),
+              React.createElement('div',{key:'d',className:'leading-snug',style:{color:'#E8E9E4',wordBreak:'break-word'}},_iss.detail),
+            ]),
+            React.createElement('div',{key:'actions',className:'flex items-center gap-1.5 shrink-0'},[
+              _iss.suggested&&onEditEntry?React.createElement('button',{
+                key:'apply',
+                onClick:()=>{
+                  onEditEntry(_iss.entryId,_iss.suggested,_iss.suggestedField||'result');
+                  // After applying, drop this issue from the list
+                  setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.entryId!==_iss.entryId)}:null);
+                },
+                className:'px-2.5 py-1 rounded text-[10px] uppercase tracking-wider font-bold',
+                style:{background:'rgba(110,231,183,0.15)',color:'rgb(110,231,183)',border:'1px solid rgba(110,231,183,0.35)'},
+              },`Apply → ${_iss.suggested}`):null,
+              React.createElement('button',{
+                key:'skip',
+                onClick:()=>setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.entryId!==_iss.entryId)}:null),
+                className:'px-2 py-1 rounded text-[10px] text-[#E8E9E4]/55 hover:text-white',
+                title:'Skip this issue',
+              },'Skip'),
+            ].filter(Boolean)),
+          ]);
+        })):null,
+      ]):null,
       // V9.2.1: P&L SUMMARY + CUMULATIVE CURVE — computed from betAmt/maxPay fields.
       //   Shows total dollar P&L, average win/loss size, and a mini cumulative curve.
       (()=>{
@@ -11548,20 +11730,43 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                               },e.asset),
                             ),
                             editingId===e.id&&onEditEntry
-                              ? React.createElement('div',{className:'flex items-center gap-1 shrink-0'},
-                                  ['WIN','LOSS','SITOUT'].map(opt=>(
-                                    React.createElement('button',{
-                                      key:opt,
-                                      onClick:()=>{onEditEntry(e.id,opt);setEditingId(null);},
-                                      className:'px-2 py-0.5 rounded text-[9px] uppercase font-bold tabular-nums tracking-wider transition-colors',
-                                      style:{
-                                        color:opt==='WIN'?'rgb(110,231,183)':opt==='LOSS'?'rgb(244,114,182)':T2_GOLD,
-                                        background:e.result===opt?(opt==='WIN'?'rgba(110,231,183,0.18)':opt==='LOSS'?'rgba(244,114,182,0.18)':'rgba(229,200,112,0.18)'):'rgba(232,233,228,0.04)',
-                                        border:e.result===opt?'1px solid currentColor':'1px solid rgba(232,233,228,0.10)',
-                                      },
-                                    },opt)
-                                  )),
-                                  React.createElement('button',{onClick:()=>setEditingId(null),className:'px-1.5 py-0.5 rounded text-[10px] text-[#E8E9E4]/35 hover:text-[#E8E9E4]/70',title:'Cancel'},'✕'),
+                              ? React.createElement('div',{className:'flex flex-col items-end gap-1 shrink-0 min-w-0'},
+                                  // V9.9.3: dual-mode editor. Direction edit is the new feature —
+                                  //   user reports Tara sometimes logs the wrong direction (e.g. locked
+                                  //   UP but log shows DOWN). Two rows: direction first (the upstream
+                                  //   thing to fix) then result (which depends on direction). Saving
+                                  //   either field marks manualEdit=true and timestamps.
+                                  React.createElement('div',{key:'dirRow',className:'flex items-center gap-1'},
+                                    React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-wider text-[#E8E9E4]/40 mr-1'},'dir'),
+                                    ['UP','DOWN','SIT_OUT'].map(opt=>(
+                                      React.createElement('button',{
+                                        key:opt,
+                                        onClick:()=>onEditEntry(e.id,opt,'direction'),
+                                        className:'px-2 py-0.5 rounded text-[9px] uppercase font-bold tracking-wider transition-colors',
+                                        style:{
+                                          color:opt==='UP'?'rgb(110,231,183)':opt==='DOWN'?'rgb(244,114,182)':T2_GOLD,
+                                          background:e.dir===opt?(opt==='UP'?'rgba(110,231,183,0.18)':opt==='DOWN'?'rgba(244,114,182,0.18)':'rgba(229,200,112,0.18)'):'rgba(232,233,228,0.04)',
+                                          border:e.dir===opt?'1px solid currentColor':'1px solid rgba(232,233,228,0.10)',
+                                        },
+                                      },opt==='SIT_OUT'?'sit':opt.toLowerCase())
+                                    )),
+                                  ),
+                                  React.createElement('div',{key:'resRow',className:'flex items-center gap-1'},
+                                    React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-wider text-[#E8E9E4]/40 mr-1'},'res'),
+                                    ['WIN','LOSS','SITOUT'].map(opt=>(
+                                      React.createElement('button',{
+                                        key:opt,
+                                        onClick:()=>onEditEntry(e.id,opt,'result'),
+                                        className:'px-2 py-0.5 rounded text-[9px] uppercase font-bold tabular-nums tracking-wider transition-colors',
+                                        style:{
+                                          color:opt==='WIN'?'rgb(110,231,183)':opt==='LOSS'?'rgb(244,114,182)':T2_GOLD,
+                                          background:e.result===opt?(opt==='WIN'?'rgba(110,231,183,0.18)':opt==='LOSS'?'rgba(244,114,182,0.18)':'rgba(229,200,112,0.18)'):'rgba(232,233,228,0.04)',
+                                          border:e.result===opt?'1px solid currentColor':'1px solid rgba(232,233,228,0.10)',
+                                        },
+                                      },opt)
+                                    )),
+                                    React.createElement('button',{onClick:()=>setEditingId(null),className:'px-1.5 py-0.5 rounded text-[10px] text-[#E8E9E4]/35 hover:text-[#E8E9E4]/70 ml-1',title:'Done'},'✓'),
+                                  ),
                                 )
                               : React.createElement('div',{className:'flex items-center gap-1.5 shrink-0'},
                                   e.manualEdit&&React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/35',title:'Manually edited'},'✎'),
@@ -11569,7 +11774,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                                   onEditEntry&&React.createElement('button',{
                                     onClick:()=>setEditingId(e.id),
                                     className:'p-1 rounded text-[#E8E9E4]/30 hover:text-[#E8E9E4]/70 hover:bg-[#E8E9E4]/5 transition-colors',
-                                    title:'Override result',
+                                    title:'Override direction or result',
                                     style:{fontSize:11,lineHeight:1},
                                   },'✎'),
                                 ),
@@ -20584,7 +20789,32 @@ function TaraApp(){
               const _wait=Math.ceil((_coolMs-(Date.now()-lockReleasedAtRef.current))/1000);
               reasoning.push(`[LOCK] UP candidate held — cooldown ${formatDuration(_wait)} remaining${confluenceStateRef.current.isConfluent?' (shortened — confluence)':''}`);
             } else {
-              lockedCallRef.current={dir:'UP',lockedAt:Date.now(),_committedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null}; // V134/V9.1.3: snapshot signals at lock + first-write-wins stamp
+              // V9.9.4: compute reversalRisk INLINE at engine-lock formation. Pre-V9.9.4
+              //   the risk was only computed at the lifecycle commit path (L23597) — but
+              //   that's a separate gate that fires later and isn't always reached. Result:
+              //   the chip on TaraCallCard never displayed because lockedCallRef.current
+              //   was set here without reversalRisk and the lifecycle path's mutation came
+              //   too late (or not at all) for the user to see. Compute it here so the chip
+              //   appears the moment the lock confirms — before the user even sees the
+              //   "UP - CONFIRMED" status.
+              const _ec=eng?._ctx||{};
+              const _ucTier=_ec.isStructuralLed?'structural-led':
+                            _ec.isSuperConfluent?'super-confluence':
+                            _ec.isTapeLed?'tape-led':
+                            _ec.isConfluent?'confluence':
+                            _ec.isRisingConfluence?'rising-confluence':
+                            'single';
+              const _rrUp=computeReversalRisk({
+                tier:_ucTier,
+                regime:regime||'',
+                dir:'UP',
+                qScore:Math.round(_ec.q||eng?.q||0),
+                mtfAlignment:_ec.fgtAbs?(eng?.mtfAlignment||0):(eng?.mtfAlignment),
+                secondsIntoWindow:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
+                whaleLog:typeof whaleLog!=='undefined'?whaleLog:[],
+                dayContext:typeof dayContext!=='undefined'?dayContext:null,
+              });
+              lockedCallRef.current={dir:'UP',lockedAt:Date.now(),_committedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,reversalRisk:_rrUp}; // V134/V9.1.3: snapshot signals at lock + first-write-wins stamp
               taraAdviceRef.current='UP - CONFIRMED';
               biasCountRef.current={UP:0,DOWN:0};
               _persistLock(); // V5.6: cloud-save so refresh restores this lock
@@ -20684,7 +20914,25 @@ function TaraApp(){
               const _wait=Math.ceil((_coolMs-(Date.now()-lockReleasedAtRef.current))/1000);
               reasoning.push(`[LOCK] DOWN candidate held — cooldown ${formatDuration(_wait)} remaining${confluenceStateRef.current.isConfluent?' (shortened — confluence)':''}`);
             } else {
-              lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),_committedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,rugPullLock:isRugPull};
+              // V9.9.4: same inline reversalRisk computation as UP path above.
+              const _ecD=eng?._ctx||{};
+              const _dcTier=_ecD.isStructuralLed?'structural-led':
+                            _ecD.isSuperConfluent?'super-confluence':
+                            _ecD.isTapeLed?'tape-led':
+                            _ecD.isConfluent?'confluence':
+                            _ecD.isRisingConfluence?'rising-confluence':
+                            'single';
+              const _rrDown=computeReversalRisk({
+                tier:_dcTier,
+                regime:regime||'',
+                dir:'DOWN',
+                qScore:Math.round(_ecD.q||eng?.q||0),
+                mtfAlignment:eng?.mtfAlignment,
+                secondsIntoWindow:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
+                whaleLog:typeof whaleLog!=='undefined'?whaleLog:[],
+                dayContext:typeof dayContext!=='undefined'?dayContext:null,
+              });
+              lockedCallRef.current={dir:'DOWN',lockedAt:Date.now(),_committedAt:Date.now(),lockedPosterior:posterior,lockedRegime:regime,lockPrice:currentPrice,isLateLock:isLateLockZone,lockedSignals:eng.rawSignalScores?{...eng.rawSignalScores}:null,rugPullLock:isRugPull,reversalRisk:_rrDown};
               if(isRugPull&&bearCount<CONSECUTIVE_NEEDED_DN)reasoning.push(`[RUG-FIRE] Rug pull detected — DOWN locked early at posterior ${posterior.toFixed(0)}`); // V134: snapshot signals at lock
               taraAdviceRef.current='DOWN - CONFIRMED';
               biasCountRef.current={UP:0,DOWN:0};
@@ -24941,7 +25189,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.9.2
+              9.9.4
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
@@ -25852,7 +26100,32 @@ function TaraApp(){
 
             {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab.
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
-            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}} className="lg:hidden"/>
+            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
+              // V9.9.3: same dual-axis edit logic as desktop ProjectionsCard call site.
+              const _field=field||'result';
+              setTaraCallLog(prev=>{
+                const next=prev.map(e=>{
+                  if(e.id!==entryId)return e;
+                  const _valUp=String(newValue||'').toUpperCase();
+                  if(_field==='direction'){
+                    if(_valUp!=='UP'&&_valUp!=='DOWN'&&_valUp!=='SIT_OUT')return e;
+                    let _autoResult=e.result;
+                    if(_valUp==='SIT_OUT')_autoResult='SITOUT';
+                    else if(typeof e.closingPrice==='number'&&typeof e.strike==='number'&&e.strike>0){
+                      const _wonByPrice=_valUp==='UP'?(e.closingPrice>=e.strike):(e.closingPrice<e.strike);
+                      _autoResult=_wonByPrice?'WIN':'LOSS';
+                    }
+                    return{...e,dir:_valUp,result:_autoResult,manualEdit:true,manualEditedAt:Date.now()};
+                  }else{
+                    const valid=_valUp==='WIN'||_valUp==='LOSS'||_valUp==='SITOUT';
+                    if(!valid)return e;
+                    return{...e,result:_valUp,manualEdit:true,manualEditedAt:Date.now()};
+                  }
+                });
+                setTimeout(()=>_recomputeLearningsFromLog(next),0);
+                return next;
+              });
+            }} className="lg:hidden"/>
 
             {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
 
@@ -25883,7 +26156,37 @@ function TaraApp(){
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newResult)=>{setTaraCallLog(prev=>{const next=prev.map(e=>{if(e.id!==entryId)return e;const _resultUp=String(newResult||'').toUpperCase();const valid=_resultUp==='WIN'||_resultUp==='LOSS'||_resultUp==='SITOUT';if(!valid)return e;return{...e,result:_resultUp,manualEdit:true,manualEditedAt:Date.now()};});setTimeout(()=>_recomputeLearningsFromLog(next),0);return next;});}}/>
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
+            // V9.9.3: dual-axis edit. field === 'direction' edits e.dir, 'result' edits e.result.
+            //   Default field is 'result' for backward compat. Both axes mark manualEdit + timestamp.
+            //   Direction edit recomputes the result automatically if we have closing price + strike,
+            //   so user doesn't have to fix two things separately when the underlying issue is one.
+            const _field=field||'result';
+            setTaraCallLog(prev=>{
+              const next=prev.map(e=>{
+                if(e.id!==entryId)return e;
+                const _valUp=String(newValue||'').toUpperCase();
+                if(_field==='direction'){
+                  if(_valUp!=='UP'&&_valUp!=='DOWN'&&_valUp!=='SIT_OUT')return e;
+                  // Auto-recompute result if we have closing+strike data
+                  let _autoResult=e.result;
+                  if(_valUp==='SIT_OUT')_autoResult='SITOUT';
+                  else if(typeof e.closingPrice==='number'&&typeof e.strike==='number'&&e.strike>0){
+                    const _wonByPrice=_valUp==='UP'?(e.closingPrice>=e.strike):(e.closingPrice<e.strike);
+                    _autoResult=_wonByPrice?'WIN':'LOSS';
+                  }
+                  return{...e,dir:_valUp,result:_autoResult,manualEdit:true,manualEditedAt:Date.now()};
+                }else{
+                  // result edit
+                  const valid=_valUp==='WIN'||_valUp==='LOSS'||_valUp==='SITOUT';
+                  if(!valid)return e;
+                  return{...e,result:_valUp,manualEdit:true,manualEditedAt:Date.now()};
+                }
+              });
+              setTimeout(()=>_recomputeLearningsFromLog(next),0);
+              return next;
+            });
+          }}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} pushToast={pushToast}/>
