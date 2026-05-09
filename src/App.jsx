@@ -924,10 +924,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.08-v9.9.0-predictive-reversal';
+const BASELINE_VERSION='2026.05.09-v9.9.1-tier-match-fix-and-regimecal-cap';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.9.0';
+const TARA_VERSION_DISPLAY='Tara 9.9.1';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -5078,16 +5078,24 @@ const computeV99Posterior=(params)=>{
       const _engineConf=_engineDir==='UP'?dirCalibrated:(100-dirCalibrated);
       const _observedConf=_entry.wr*100;
       const _blended=_engineConf*(1-_entry.weight)+_observedConf*_entry.weight;
-      const _newCal=_engineDir==='UP'?_blended:(100-_blended);
+      // V9.9.1: Cap the calibration pull at ±5pt. The V9.8.17 source fix made this gate
+      //   actually fire for the first time. Yesterday's CSV showed 5/50 fires, with shifts
+      //   ranging up to -10.7pt on TRENDING UP × UP — pulling 80% engine conviction down to
+      //   70% in one tick. That's pinning conviction below lock floor and stalling commits
+      //   ("by the time tara locks the entry is already at 70-80%"). ±5pt cap keeps the
+      //   corrective signal (gentle nudge toward observed reality) but prevents over-reach.
+      //   Recalibrate the cap once we have 200+ stamped locks with reversalRisk + outcomes
+      //   to logistic-regress against.
+      const _rawDelta=_blended-_engineConf;
+      const _cappedConfDelta=Math.max(-5,Math.min(5,_rawDelta));
+      const _cappedConf=_engineConf+_cappedConfDelta;
+      const _newCal=_engineDir==='UP'?_cappedConf:(100-_cappedConf);
       const _delta=_newCal-dirCalibrated;
       // Only apply if the shift is meaningful (≥1pt) — avoids log noise on tiny adjustments
       if(Math.abs(_delta)>=1){
         reasoning.push(`[REGIME-CAL] ${_regime}×${_engineDir} historical WR ${_entry.wrPct}% (n=${_entry.n}, w=${_entry.weight.toFixed(2)}) → posterior ${dirCalibrated.toFixed(1)}%→${_newCal.toFixed(1)}%`);
         // V9.7.9 telemetry
         _diagRegimeCal={applied:true,key:_key,wr:_entry.wrPct,weight:_entry.weight,shift:_delta,n:_entry.n};
-        // V9.8.17: console.info trace so we can confirm fire-rate from devtools after
-        //   the L16837 data-source fix lands. Mirrors the urgency console.info at L20495.
-        try{console.info('[regime-cal]',_key,'n='+_entry.n,'wr='+_entry.wrPct+'%','w='+_entry.weight.toFixed(2),'shift='+(_delta>=0?'+':'')+_delta.toFixed(1)+'pt');}catch(_){}
         dirCalibrated=_newCal;
       }
     }
@@ -15187,8 +15195,25 @@ const computeReversalRisk=(params)=>{
   const{tier,regime,dir,qScore,mtfAlignment,secondsIntoWindow,whaleLog,dayContext}=params||{};
   const signals=[];
   let score=0;
+  // V9.9.1: tier-name normalization. The engine emits long-form labels like
+  //   'structural-led' and 'tape-led' (set at L22960 area), while the CSV export
+  //   at L11133 derives short-form labels from boolean flags ('structural', 'tape').
+  //   V9.9.0's checks compared only to the short form — so at runtime, when called
+  //   with the engine label 'structural-led', the +30 structural-tier weight and
+  //   the +20 trending-up-structural-up combo BOTH silently failed. Result: every
+  //   structural-led lock in TRENDING UP scored exactly 12 (regime-only), flag NONE,
+  //   chip never rendered. The 4 stamped reversalRisk entries from 2026-05-08 evening
+  //   all show this exact pattern. Fix: collapse both forms to a canonical short form
+  //   on entry, then compare to that throughout the function.
+  const _tierCanon=
+    tier==='structural-led'||tier==='structural'?'structural':
+    tier==='tape-led'||tier==='tape'?'tape':
+    tier==='super-confluence'||tier==='super'?'super':
+    tier==='rising-confluence'||tier==='rising'?'rising':
+    tier==='confluence'?'confluence':
+    tier||'';
   // ── Tier check (CSV-validated: structural 52.8% WR, n=36) ──
-  if(tier==='structural'){
+  if(_tierCanon==='structural'){
     signals.push({key:'structural-tier',weight:30,fired:true,reason:'Structural tier locks ran 52.8% WR — barely above coin flip'});
     score+=30;
   }
@@ -15196,7 +15221,7 @@ const computeReversalRisk=(params)=>{
   if(regime==='TRENDING UP'){
     signals.push({key:'trending-up-regime',weight:12,fired:true,reason:'TRENDING UP regime ran 58.3% WR — problem zone'});
     score+=12;
-    if(tier==='structural'&&dir==='UP'){
+    if(_tierCanon==='structural'&&dir==='UP'){
       signals.push({key:'tup-struct-up',weight:20,fired:true,reason:'TRENDING UP × structural × UP ran 37.5% WR — worst sub-bucket observed'});
       score+=20;
     }
@@ -18599,24 +18624,26 @@ function TaraApp(){
         const _rr=data.reversalRisk;
         const _baseColor=data.dir==='UP'?3404125:16478549;
         const _embedColor=_rr?.flag==='EXPECTED'?16478549:_rr?.flag==='WATCH'?16498744:_baseColor;
+        // V9.9.1: null-safe field values — previously `data.price.toFixed(2)` would
+        //   throw if data.price was undefined, killing the whole broadcast silently.
         const _fields=[
-          {name:'Price',value:`$${data.price.toFixed(2)}`,inline:true},
-          {name:'Strike',value:`$${data.strike.toFixed(2)}`,inline:true},
-          {name:'Gap',value:`${data.gap.toFixed(1)} bps`,inline:true},
-          {name:'Clock',value:data.clock,inline:true},
+          {name:'Price',value:`$${(Number(data.price)||0).toFixed(2)}`,inline:true},
+          {name:'Strike',value:`$${(Number(data.strike)||0).toFixed(2)}`,inline:true},
+          {name:'Gap',value:`${(Number(data.gap)||0).toFixed(1)} bps`,inline:true},
+          {name:'Clock',value:data.clock||'—',inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.record||'—',inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
         ];
         if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
-          const _topSig=(_rr.signals||[]).filter(s=>s.fired).sort((a,b)=>b.weight-a.weight).slice(0,3);
-          const _signalLines=_topSig.map(s=>`• ${s.reason}`).join('\n')||'—';
-          _fields.push({name:`Reversal Risk: ${_rr.flag} (score ${_rr.score})`,value:_signalLines,inline:false});
+          const _topSig=(_rr.signals||[]).filter(s=>s&&s.fired).sort((a,b)=>(b.weight||0)-(a.weight||0)).slice(0,3);
+          const _signalLines=_topSig.map(s=>`• ${s.reason||s.key}`).join('\n')||'—';
+          _fields.push({name:`Reversal Risk: ${_rr.flag} (score ${_rr.score||0})`,value:_signalLines,inline:false});
         }
         embed={
-          title:`ENGINE  ${data.dir}  CONFIRMED${_rr?.flag==='EXPECTED'?'  ⚠':''}`,
+          title:`ENGINE  ${data.dir||'—'}  CONFIRMED${_rr?.flag==='EXPECTED'?'  ⚠':''}`,
           color:_embedColor,
-          description:data.summary||`Engine confirmed ${data.dir}.`,
+          description:data.summary||`Engine confirmed ${data.dir||'—'}.`,
           fields:_fields,
           footer:{text:`${TARA_VERSION_DISPLAY}  |  lock`},
           timestamp:new Date().toISOString(),
@@ -18706,30 +18733,32 @@ function TaraApp(){
         // V9.9.0: Tint embed by reversal risk + add reversal risk field with top
         //   signals so phone-only users see the same heads-up the dashboard chip
         //   shows. EXPECTED → rose tint regardless of dir; WATCH → amber.
+        // V9.9.1: hardened null-safety on signals iteration so a malformed reversalRisk
+        //   object can't throw and silently kill the broadcast.
         const _rr=data.reversalRisk;
         const _baseColor=data.dir==='UP'?3404125:16478549;
         const _embedColor=_rr?.flag==='EXPECTED'?16478549:_rr?.flag==='WATCH'?16498744:_baseColor;
         const _fields=[
           {name:'Direction',value:data.dir||'—',inline:true},
           {name:'Confidence',value:`${data.confidence||0}%`,inline:true},
-          {name:'Posterior',value:`${(data.posterior||0).toFixed(0)}`,inline:true},
-          {name:'Strike',value:`$${(data.strike||0).toFixed(2)}`,inline:true},
-          {name:'Price',value:`$${(data.price||0).toFixed(2)}`,inline:true},
-          {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
+          {name:'Posterior',value:`${(Number(data.posterior)||0).toFixed(0)}`,inline:true},
+          {name:'Strike',value:`$${(Number(data.strike)||0).toFixed(2)}`,inline:true},
+          {name:'Price',value:`$${(Number(data.price)||0).toFixed(2)}`,inline:true},
+          {name:'Gap',value:`${(Number(data.gap)||0).toFixed(1)} bps`,inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-          {name:'FGT',value:`${(data.fgtAbs||0).toFixed(1)}/4 ${data.fgtDir||''}`,inline:true},
+          {name:'FGT',value:`${(Number(data.fgtAbs)||0).toFixed(1)}/4 ${data.fgtDir||''}`,inline:true},
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:false},
         ];
         if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
-          const _topSig=(_rr.signals||[]).filter(s=>s.fired).sort((a,b)=>b.weight-a.weight).slice(0,3);
-          const _signalLines=_topSig.map(s=>`• ${s.reason}`).join('\n')||'—';
-          _fields.push({name:`Reversal Risk: ${_rr.flag} (score ${_rr.score})`,value:_signalLines,inline:false});
+          const _topSig=(_rr.signals||[]).filter(s=>s&&s.fired).sort((a,b)=>(b.weight||0)-(a.weight||0)).slice(0,3);
+          const _signalLines=_topSig.map(s=>`• ${s.reason||s.key}`).join('\n')||'—';
+          _fields.push({name:`Reversal Risk: ${_rr.flag} (score ${_rr.score||0})`,value:_signalLines,inline:false});
         }
         embed={
-          title:`TARA · ${_assetTag} · ${data.dir} LOCKED${_rr?.flag==='EXPECTED'?'  ⚠':''}`,
+          title:`TARA · ${_assetTag} · ${data.dir||'—'} LOCKED${_rr?.flag==='EXPECTED'?'  ⚠':''}`,
           color:_embedColor,
-          description:data.reason||`Committed ${data.dir} for this round.`,
+          description:data.reason||`Committed ${data.dir||'—'} for this round.`,
           fields:_fields,
           footer:{text:`${TARA_VERSION_DISPLAY}  |  lock`},
           timestamp:new Date().toISOString(),
@@ -18864,7 +18893,22 @@ function TaraApp(){
         };
       }
 
+      // V9.9.1: validity guard — if embed is null or empty (type didn't match any
+      //   branch in the cascade), skip the POST. Logged as error so devtools shows it
+      //   only when something genuinely went wrong (zero noise on success path).
+      if(!embed||typeof embed!=='object'||Object.keys(embed).length===0){
+        try{console.error('[discord-broadcast]',type,'skipped — embed was empty');}catch(_){}
+        return;
+      }
       const res=await fetch(_webhookForAsset+'?wait=true',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:discordUsername||'Tara',avatar_url:discordAvatar||undefined,embeds:[embed]})});
+      // V9.9.1: HTTP failure surfaced. 401 = bad token, 404 = bad webhook URL,
+      //   429 = rate-limited, 400 = malformed embed. Silent on the success path.
+      if(!res.ok){
+        try{
+          const _bodyText=await res.text();
+          console.error('[discord-broadcast]',type,'HTTP',res.status,res.statusText,'body:',_bodyText.slice(0,500));
+        }catch(_){console.error('[discord-broadcast]',type,'HTTP',res.status);}
+      }
       if(res.ok){
         const msg=await res.json();
         const parts=_webhookForAsset.replace('https://discord.com/api/webhooks/','').split('/');
@@ -18906,7 +18950,11 @@ function TaraApp(){
           },75000);
         }
       }
-    }catch(e){}
+    }catch(e){
+      // V9.9.1: was previously a silent swallow. If embed construction or fetch threw,
+      //   the user had no way to know. Now log to devtools so future regressions show up.
+      try{console.error('[discord-broadcast]',type,'threw:',e&&e.message?e.message:e);}catch(_){}
+    }
   };
 
   const editDiscordMessage=async(entry,noteText)=>{
@@ -24713,7 +24761,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.9.0
+              9.9.1
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
