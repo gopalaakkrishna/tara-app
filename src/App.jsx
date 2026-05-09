@@ -924,10 +924,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.09-v9.9.1-tier-match-fix-and-regimecal-cap';
+const BASELINE_VERSION='2026.05.09-v9.9.2-day-aware-advice';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.9.1';
+const TARA_VERSION_DISPLAY='Tara 9.9.2';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -14982,15 +14982,39 @@ const buildDayHourPerf=(callLog)=>{
     const dayIdx=date.getDay();
     const hour=date.getHours();
     const k=`${dayIdx}-${hour}`;
-    if(!grid[k])grid[k]={n:0,wins:0};
+    // V9.9.2: price-action characteristics per cell. closingGapBps captures the
+    //   magnitude of moves (high abs = volatile, low abs = marginal/rangebound);
+    //   atrBpsAtLock captures volatility regime at lock time. Sums + counts let us
+    //   compute means cheaply per cell or per day-of-week.
+    const _gap=typeof t.closingGapBps==='number'&&Number.isFinite(t.closingGapBps)?Math.abs(t.closingGapBps):null;
+    const _atr=typeof t.atrBpsAtLock==='number'&&Number.isFinite(t.atrBpsAtLock)?t.atrBpsAtLock:null;
+    if(!grid[k])grid[k]={n:0,wins:0,gapSum:0,gapN:0,atrSum:0,atrN:0};
     grid[k].n++;if(t.result==='WIN')grid[k].wins++;
-    if(!byDay[dayIdx])byDay[dayIdx]={n:0,wins:0};
+    if(_gap!=null){grid[k].gapSum+=_gap;grid[k].gapN++;}
+    if(_atr!=null){grid[k].atrSum+=_atr;grid[k].atrN++;}
+    if(!byDay[dayIdx])byDay[dayIdx]={n:0,wins:0,gapSum:0,gapN:0,atrSum:0,atrN:0,winGapSum:0,winGapN:0,lossGapSum:0,lossGapN:0};
     byDay[dayIdx].n++;if(t.result==='WIN')byDay[dayIdx].wins++;
+    if(_gap!=null){
+      byDay[dayIdx].gapSum+=_gap;byDay[dayIdx].gapN++;
+      if(t.result==='WIN'){byDay[dayIdx].winGapSum+=_gap;byDay[dayIdx].winGapN++;}
+      else{byDay[dayIdx].lossGapSum+=_gap;byDay[dayIdx].lossGapN++;}
+    }
+    if(_atr!=null){byDay[dayIdx].atrSum+=_atr;byDay[dayIdx].atrN++;}
     if(!byHour[hour])byHour[hour]={n:0,wins:0};
     byHour[hour].n++;if(t.result==='WIN')byHour[hour].wins++;
   }
-  for(const k of Object.keys(grid))grid[k].wr=grid[k].n>0?grid[k].wins/grid[k].n:0;
-  for(const k of Object.keys(byDay))byDay[k].wr=byDay[k].n>0?byDay[k].wins/byDay[k].n:0;
+  for(const k of Object.keys(grid)){
+    grid[k].wr=grid[k].n>0?grid[k].wins/grid[k].n:0;
+    grid[k].avgGap=grid[k].gapN>0?grid[k].gapSum/grid[k].gapN:null;
+    grid[k].avgAtr=grid[k].atrN>0?grid[k].atrSum/grid[k].atrN:null;
+  }
+  for(const k of Object.keys(byDay)){
+    byDay[k].wr=byDay[k].n>0?byDay[k].wins/byDay[k].n:0;
+    byDay[k].avgGap=byDay[k].gapN>0?byDay[k].gapSum/byDay[k].gapN:null;
+    byDay[k].avgAtr=byDay[k].atrN>0?byDay[k].atrSum/byDay[k].atrN:null;
+    byDay[k].avgWinGap=byDay[k].winGapN>0?byDay[k].winGapSum/byDay[k].winGapN:null;
+    byDay[k].avgLossGap=byDay[k].lossGapN>0?byDay[k].lossGapSum/byDay[k].lossGapN:null;
+  }
   for(const k of Object.keys(byHour))byHour[k].wr=byHour[k].n>0?byHour[k].wins/byHour[k].n:0;
   return{grid,byDay,byHour};
 };
@@ -15035,9 +15059,9 @@ const buildDayContext=(dayHourPerf,now)=>{
   // Day ranking by WR (require ≥10 trades for meaningful rank)
   const dayRanking=Object.entries(byDay)
     .filter(([_,v])=>v.n>=10)
-    .map(([k,v])=>({dayIdx:parseInt(k),wr:v.wr,n:v.n,name:days[parseInt(k)]}))
+    .map(([k,v])=>({dayIdx:parseInt(k),wr:v.wr,n:v.n,name:days[parseInt(k)],avgGap:v.avgGap,avgAtr:v.avgAtr,avgWinGap:v.avgWinGap,avgLossGap:v.avgLossGap}))
     .sort((a,b)=>b.wr-a.wr);
-  const todayEntry=dayRanking.find(d=>d.dayIdx===todayIdx)||(byDay[todayIdx]?{dayIdx:todayIdx,wr:byDay[todayIdx].wr,n:byDay[todayIdx].n,name:todayName}:null);
+  const todayEntry=dayRanking.find(d=>d.dayIdx===todayIdx)||(byDay[todayIdx]?{dayIdx:todayIdx,wr:byDay[todayIdx].wr,n:byDay[todayIdx].n,name:todayName,avgGap:byDay[todayIdx].avgGap,avgAtr:byDay[todayIdx].avgAtr,avgWinGap:byDay[todayIdx].avgWinGap,avgLossGap:byDay[todayIdx].avgLossGap}:null);
   const todayRank=dayRanking.findIndex(d=>d.dayIdx===todayIdx)+1;
   const totalRanked=dayRanking.length;
   // Activity level — based on # trades observed for this day-of-week as a proxy
@@ -15056,9 +15080,10 @@ const buildDayContext=(dayHourPerf,now)=>{
   const todayHours=[];
   for(let h=0;h<24;h++){
     const cell=grid[`${todayIdx}-${h}`];
-    if(cell&&cell.n>=3)todayHours.push({hour:h,n:cell.n,wins:cell.wins,wr:cell.wr});
+    if(cell&&cell.n>=3)todayHours.push({hour:h,n:cell.n,wins:cell.wins,wr:cell.wr,avgGap:cell.avgGap,avgAtr:cell.avgAtr});
   }
   const todayBest=todayHours.filter(h=>h.wr>=0.65).sort((a,b)=>b.wr-a.wr).slice(0,3);
+  const todayWorst=todayHours.filter(h=>h.wr<=0.45).sort((a,b)=>a.wr-b.wr).slice(0,3);
   // Next upcoming best window (after current local hour)
   const curH=_now.getHours();
   const curMin=_now.getMinutes();
@@ -15066,10 +15091,91 @@ const buildDayContext=(dayHourPerf,now)=>{
     .map(h=>({...h,minsUntil:h.hour>curH?(h.hour-curH)*60-curMin:null}))
     .filter(h=>h.minsUntil!=null&&h.minsUntil>0)
     .sort((a,b)=>a.minsUntil-b.minsUntil)[0]||null;
+  // V9.9.2: Coming "danger" window — next worst-hour today the user might walk into.
+  //   Surfaced separately from upcomingBest so the schedule can warn ahead of time.
+  const upcomingWorst=todayWorst
+    .map(h=>({...h,minsUntil:h.hour>curH?(h.hour-curH)*60-curMin:null}))
+    .filter(h=>h.minsUntil!=null&&h.minsUntil>0&&h.minsUntil<=180) // only flag within next 3h
+    .sort((a,b)=>a.minsUntil-b.minsUntil)[0]||null;
+
+  // V9.9.2: CHARACTER CLASSIFICATION + ADVICE
+  // ─────────────────────────────────────────
+  // Combines WR rank, sample size, and price-action volatility (avgAtr, avgGap)
+  // into a single "character" label + an actionable mode.
+  //
+  // Modes drive both UI tone and how computeReversalRisk weighs the day-disadvantage
+  // signal. Five buckets:
+  //
+  //   • prime         — top WR day, healthy sample, normal-to-high volatility
+  //   • aggressive    — solid WR + high vol (fast moves, room for edge)
+  //   • normal        — middle of the pack, no alarm
+  //   • selective     — below-average WR or compressed volatility (be picky)
+  //   • defensive     — bottom WR + low sample or low vol (high confluence only)
+  //
+  // The text adapts to your actual numbers, not a generic template — Tuesday at
+  // 75% WR with 12bps avgAtr says "your strongest day, take normal positions";
+  // Sunday at 56% with 7bps avgAtr says "marginal moves, only enter on confluence".
+  let dayMode='normal',dayHeadline='',dayAdvice='',dayAdviceColor='#94a3b8';
+  if(todayEntry&&todayEntry.n>=10){
+    const _wrPct=Math.round(todayEntry.wr*100);
+    const _atr=todayEntry.avgAtr;
+    const _winGap=todayEntry.avgWinGap;
+    const _lossGap=todayEntry.avgLossGap;
+    // Rank tiers: top-2 / mid / bottom-2 in dayRanking
+    const _isTopRanked=todayRank>0&&todayRank<=2;
+    const _isBottomRanked=totalRanked>=4&&todayRank>=totalRanked-1;
+    // Volatility classification — ATR-bps thresholds derived from observed BTC 15m windows
+    const _highVol=_atr!=null&&_atr>=12;
+    const _lowVol=_atr!=null&&_atr<=8;
+    // Activity-WR coupling
+    if(_isTopRanked&&_highVol){
+      dayMode='aggressive';
+      dayAdviceColor='#6ee7b7';
+      dayHeadline=`Strong day · ${_wrPct}% WR with ${_atr.toFixed(0)}bps avg vol`;
+      dayAdvice=`${todayLong}s have been your edge. Take aggressive sizing, hold marginal locks longer.`;
+    }else if(_isTopRanked){
+      dayMode='prime';
+      dayAdviceColor='#6ee7b7';
+      dayHeadline=`Top WR day · ${_wrPct}% (rank ${todayRank}/${totalRanked})`;
+      dayAdvice=`Lean in on confluent setups. Volatility is ${_lowVol?'compressed':'normal'}, so trust signal quality over breakout chasing.`;
+    }else if(_isBottomRanked&&_lowVol){
+      dayMode='defensive';
+      dayAdviceColor='#f472b6';
+      dayHeadline=`Tough day · ${_wrPct}% WR, ${_atr?_atr.toFixed(0)+'bps':'low'} vol${_winGap&&_lossGap?` · wins ${_winGap.toFixed(0)}bps / losses ${_lossGap.toFixed(0)}bps`:''}`;
+      dayAdvice=`Marginal moves, narrow edge. Only enter on confluence+ tier. Skip single-signal setups.`;
+    }else if(_isBottomRanked){
+      dayMode='selective';
+      dayAdviceColor='#fbbf24';
+      dayHeadline=`Below-avg day · ${_wrPct}% WR (rank ${todayRank}/${totalRanked})`;
+      dayAdvice=`Be picky. Skip weak-conviction locks; the day's distribution doesn't favor marginal entries.`;
+    }else if(_lowVol){
+      dayMode='selective';
+      dayAdviceColor='#fbbf24';
+      dayHeadline=`Compressed vol · ${_atr.toFixed(0)}bps avg`;
+      dayAdvice=`Range-bound conditions. Watch for false breakouts. Wait for clean structural setups.`;
+    }else{
+      dayMode='normal';
+      dayAdviceColor='#94a3b8';
+      dayHeadline=`Normal day · ${_wrPct}% WR${_atr?` · ${_atr.toFixed(0)}bps vol`:''}`;
+      dayAdvice=`No special bias. Trade your usual selectivity.`;
+    }
+  }else if(holiday){
+    dayMode='selective';dayAdviceColor='#fbbf24';
+    dayHeadline=`Holiday · light flow expected`;
+    dayAdvice=`Institutional flow lighter than usual on ${holiday}. Reduce sizing, expect choppy execution.`;
+  }else if(isWeekend){
+    dayMode='selective';dayAdviceColor='#fbbf24';
+    dayHeadline=`Weekend · marginal moves typical`;
+    dayAdvice=`Crypto-only flow without traditional finance. Smaller moves, tighter ranges. Be patient with entries.`;
+  }else{
+    dayHeadline=`${todayLong} — building day-character (need ≥10 trades)`;
+    dayAdvice=`Not enough history yet. Trade your normal selectivity; we'll refine guidance after more data.`;
+  }
   return{
     todayName,todayLong,todayIdx,isWeekend,holiday,
     dayRanking,todayEntry,todayRank,totalRanked,
-    activityLabel,todayBest,upcomingBest,
+    activityLabel,todayBest,todayWorst,upcomingBest,upcomingWorst,
+    dayMode,dayHeadline,dayAdvice,dayAdviceColor,
   };
 };
 
@@ -15077,30 +15183,92 @@ const buildDayContext=(dayHourPerf,now)=>{
 //   today's character: weekday/weekend, holiday flag, activity level, rank vs
 //   other days, next upcoming strong window. Compact one or two-row strip.
 function DayAwareScheduleHeader({dayContext}){
+  const[expanded,setExpanded]=React.useState(false);
   if(!dayContext)return null;
-  const{todayLong,isWeekend,holiday,todayEntry,todayRank,totalRanked,activityLabel,upcomingBest}=dayContext;
+  const{todayLong,isWeekend,holiday,todayEntry,todayRank,totalRanked,activityLabel,upcomingBest,upcomingWorst,dayMode,dayHeadline,dayAdvice,dayAdviceColor,dayRanking,todayBest,todayWorst}=dayContext;
   const _activityColor=activityLabel==='active'?'#6ee7b7':activityLabel==='quiet'?'#94a3b8':activityLabel==='average'?'#E5C870':'#94a3b8';
+  // V9.9.2: mode-driven container tint. Visual reinforces the advice without
+  //   needing to read it — green-bordered = aggressive day, rose-bordered = defensive.
+  const _modeColor=dayMode==='aggressive'||dayMode==='prime'?'#6ee7b7':
+                    dayMode==='defensive'?'#f472b6':
+                    dayMode==='selective'?'#fbbf24':
+                    'rgba(229,200,112,0.5)';
+  const _modeLabel=dayMode==='aggressive'?'AGGRESSIVE':dayMode==='prime'?'PRIME':dayMode==='defensive'?'DEFENSIVE':dayMode==='selective'?'SELECTIVE':'NORMAL';
   return React.createElement('div',{
-    className:'flex flex-col gap-1 px-3 py-2 rounded-lg mb-2',
-    style:{background:'rgba(229,200,112,0.04)',border:'1px solid rgba(229,200,112,0.12)'},
+    className:'flex flex-col gap-1.5 px-3 py-2 rounded-lg mb-2 min-w-0 overflow-hidden',
+    style:{background:`${_modeColor}0c`,border:`1px solid ${_modeColor}33`},
   },[
-    React.createElement('div',{key:'r1',className:'flex items-center justify-between gap-2 text-[11px] flex-wrap'},[
-      React.createElement('div',{key:'left',className:'flex items-center gap-1.5 flex-wrap'},[
-        React.createElement('span',{key:'name',className:'font-bold uppercase tracking-wide',style:{color:'#E8E9E4'}},todayLong),
-        isWeekend?React.createElement('span',{key:'we',className:'px-1.5 py-0.5 rounded text-[9px] font-bold uppercase',style:{background:'rgba(148,163,184,0.15)',color:'#94a3b8'}},'WEEKEND'):null,
-        activityLabel!=='unknown'?React.createElement('span',{key:'act',className:'px-1.5 py-0.5 rounded text-[9px] font-bold uppercase',style:{background:`${_activityColor}1c`,color:_activityColor}},activityLabel):null,
+    // Row 1: day name + mode badge + WR/rank
+    React.createElement('div',{key:'r1',className:'flex items-center justify-between gap-2 text-[11px] flex-wrap min-w-0'},[
+      React.createElement('div',{key:'left',className:'flex items-center gap-1.5 flex-wrap min-w-0'},[
+        React.createElement('span',{key:'name',className:'font-bold uppercase tracking-wide truncate',style:{color:'#E8E9E4'}},todayLong),
+        isWeekend?React.createElement('span',{key:'we',className:'px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0',style:{background:'rgba(148,163,184,0.15)',color:'#94a3b8'}},'WEEKEND'):null,
+        dayMode!=='normal'&&dayMode!=='unknown'?React.createElement('span',{key:'mode',className:'px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0',style:{background:`${_modeColor}1c`,color:_modeColor,border:`1px solid ${_modeColor}55`}},_modeLabel):null,
+        activityLabel!=='unknown'&&activityLabel!=='average'?React.createElement('span',{key:'act',className:'px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0',style:{background:`${_activityColor}1c`,color:_activityColor}},activityLabel):null,
       ].filter(Boolean)),
-      todayEntry&&todayEntry.n>0?React.createElement('div',{key:'right',className:'text-[10px]',style:{color:'rgba(232,233,228,0.66)'}},
-        `WR ${(todayEntry.wr*100).toFixed(0)}% · n=${todayEntry.n}${todayRank>0&&totalRanked>=3?` · #${todayRank}/${totalRanked}`:''}`
-      ):null,
+      todayEntry&&todayEntry.n>0?React.createElement('button',{
+        key:'right',
+        type:'button',
+        onClick:()=>setExpanded(v=>!v),
+        className:'flex items-center gap-1.5 text-[10px] shrink-0',
+        style:{color:'rgba(232,233,228,0.66)'},
+        title:'tap for full day breakdown',
+      },[
+        React.createElement('span',{key:'t'},`WR ${(todayEntry.wr*100).toFixed(0)}% · n=${todayEntry.n}${todayRank>0&&totalRanked>=3?` · #${todayRank}/${totalRanked}`:''}`),
+        React.createElement('span',{key:'c',className:'text-[9px] opacity-60',style:{transform:expanded?'rotate(180deg)':'none',transition:'transform 0.2s'}},'▾'),
+      ]):null,
     ].filter(Boolean)),
+    // Row 2: dayHeadline (mode-tinted)
+    dayHeadline?React.createElement('div',{key:'head',className:'text-[10px] font-medium leading-snug',style:{color:dayAdviceColor||'rgba(232,233,228,0.85)'}},dayHeadline):null,
+    // Row 3: dayAdvice (the actionable text)
+    dayAdvice?React.createElement('div',{key:'adv',className:'text-[10px] leading-snug',style:{color:'rgba(232,233,228,0.7)'}},dayAdvice):null,
+    // Row 4: holiday warning (separate so it stays visible even if collapsed)
     holiday?React.createElement('div',{key:'hol',className:'text-[10px] flex items-center gap-1.5',style:{color:'#fbbf24'}},[
       React.createElement('span',{key:'i',style:{fontSize:'10px'}},'🇺🇸'),
       React.createElement('span',{key:'t'},`${holiday} — institutional flow may be lighter than usual`),
     ]):null,
-    upcomingBest?React.createElement('div',{key:'up',className:'text-[10px]',style:{color:'rgba(232,233,228,0.55)'}},
+    // Row 5: next strong / next weak window — quick glance ahead
+    upcomingBest?React.createElement('div',{key:'up',className:'text-[10px]',style:{color:'rgba(110,231,183,0.85)'}},
       `▸ Next strong window: ${String(upcomingBest.hour).padStart(2,'0')}:00 (in ${upcomingBest.minsUntil}m) · ${(upcomingBest.wr*100).toFixed(0)}% WR (n=${upcomingBest.n})`
     ):null,
+    upcomingWorst?React.createElement('div',{key:'down',className:'text-[10px]',style:{color:'rgba(244,114,182,0.85)'}},
+      `▸ Caution window ahead: ${String(upcomingWorst.hour).padStart(2,'0')}:00 (in ${upcomingWorst.minsUntil}m) · ${(upcomingWorst.wr*100).toFixed(0)}% WR (n=${upcomingWorst.n})`
+    ):null,
+    // Expanded detail: full day ranking + best/worst hours today
+    expanded?React.createElement('div',{
+      key:'detail',
+      className:'flex flex-col gap-2 mt-1 pt-2 text-[10px]',
+      style:{borderTop:'1px solid rgba(232,233,228,0.08)',color:'rgba(232,233,228,0.75)'},
+    },[
+      // Day ranking
+      dayRanking&&dayRanking.length>=3?React.createElement('div',{key:'rank',className:'flex flex-col gap-0.5'},[
+        React.createElement('div',{key:'h',className:'text-[9px] uppercase font-bold tracking-wide',style:{color:'rgba(232,233,228,0.5)'}},'Day-of-week ranking'),
+        ...dayRanking.map(d=>React.createElement('div',{
+          key:d.dayIdx,
+          className:'flex items-center justify-between gap-2 min-w-0',
+          style:d.dayIdx===dayContext.todayIdx?{color:'#E5C870',fontWeight:'600'}:undefined,
+        },[
+          React.createElement('span',{key:'n',className:'truncate'},`${d.dayIdx===dayContext.todayIdx?'▸ ':'  '}${d.name}`),
+          React.createElement('span',{key:'s',className:'shrink-0 font-mono',style:{fontSize:'9px',opacity:0.85}},`${(d.wr*100).toFixed(0)}% · n=${d.n}${d.avgAtr?` · ${d.avgAtr.toFixed(0)}bps`:''}`),
+        ])),
+      ]):null,
+      // Today's best hours
+      todayBest&&todayBest.length>0?React.createElement('div',{key:'best',className:'flex flex-col gap-0.5'},[
+        React.createElement('div',{key:'h',className:'text-[9px] uppercase font-bold tracking-wide',style:{color:'rgba(110,231,183,0.7)'}},`Today's strongest hours`),
+        ...todayBest.map(h=>React.createElement('div',{key:'b'+h.hour,className:'flex items-center justify-between gap-2'},[
+          React.createElement('span',{key:'h'},`${String(h.hour).padStart(2,'0')}:00`),
+          React.createElement('span',{key:'s',className:'font-mono',style:{fontSize:'9px',opacity:0.85}},`${(h.wr*100).toFixed(0)}% · n=${h.n}`),
+        ])),
+      ]):null,
+      // Today's worst hours
+      todayWorst&&todayWorst.length>0?React.createElement('div',{key:'worst',className:'flex flex-col gap-0.5'},[
+        React.createElement('div',{key:'h',className:'text-[9px] uppercase font-bold tracking-wide',style:{color:'rgba(244,114,182,0.7)'}},`Today's weakest hours`),
+        ...todayWorst.map(h=>React.createElement('div',{key:'w'+h.hour,className:'flex items-center justify-between gap-2'},[
+          React.createElement('span',{key:'h'},`${String(h.hour).padStart(2,'0')}:00`),
+          React.createElement('span',{key:'s',className:'font-mono',style:{fontSize:'9px',opacity:0.85}},`${(h.wr*100).toFixed(0)}% · n=${h.n}`),
+        ])),
+      ]):null,
+    ].filter(Boolean)):null,
   ].filter(Boolean));
 }
 
@@ -15270,11 +15438,23 @@ const computeReversalRisk=(params)=>{
     signals.push({key:'late-lock',weight:8,fired:true,reason:`Locked ${secondsIntoWindow}s into 15m window — late entry (less reversal margin)`});
     score+=8;
   }
-  // ── Today's day-of-week historical WR < 50% with n≥10 (safety net) ──
-  if(dayContext&&dayContext.todayEntry&&dayContext.todayEntry.n>=10&&dayContext.todayEntry.wr<0.50){
-    const _wrPct=Math.round(dayContext.todayEntry.wr*100);
-    signals.push({key:'day-poor',weight:10,fired:true,reason:`${dayContext.todayLong||'today'}s historically run ${_wrPct}% WR (n=${dayContext.todayEntry.n})`});
-    score+=10;
+  // ── V9.9.2: day-mode signal. Replaces V9.9.0's binary "day-poor" with a
+  //   richer, three-tier signal driven by buildDayContext's character classification:
+  //     • defensive day (low WR + low vol)        → +12 (high reversal risk)
+  //     • selective day (low WR or compressed)    → +6  (medium reversal risk)
+  //     • aggressive/prime/normal                 → 0   (no signal)
+  //   Day-of-week historical WR alone was too coarse — a high-WR day with
+  //   compressed vol is still risky for marginal entries; a low-WR day with high
+  //   vol may not be risky for confluent locks. Mode classification combines both.
+  if(dayContext&&dayContext.dayMode){
+    if(dayContext.dayMode==='defensive'){
+      const _wrPct=dayContext.todayEntry?Math.round(dayContext.todayEntry.wr*100):null;
+      signals.push({key:'day-defensive',weight:12,fired:true,reason:`${dayContext.todayLong||'Today'} runs defensive — ${_wrPct?_wrPct+'% WR':'low WR'}, marginal moves`});
+      score+=12;
+    }else if(dayContext.dayMode==='selective'){
+      signals.push({key:'day-selective',weight:6,fired:true,reason:dayContext.dayHeadline||'Selective day — be picky on entries'});
+      score+=6;
+    }
   }
   // ── US holiday (light institutional flow context) ──
   if(dayContext&&dayContext.holiday){
@@ -24761,7 +24941,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.9.1
+              9.9.2
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
