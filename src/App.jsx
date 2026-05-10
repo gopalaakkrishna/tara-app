@@ -1000,10 +1000,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.10-v9.9.6-tier1-mode-and-sound-enhance';
+const BASELINE_VERSION='2026.05.10-v9.9.9-direct-toggles-and-responsive';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.9.6';
+const TARA_VERSION_DISPLAY='Tara 9.9.9';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -8330,15 +8330,28 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       ),
       // V9.9.6: TIER-1 ONLY MODE — mechanically prevents marginal-tier locks
       React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8'},
-        React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
-          React.createElement('div',null,
+        React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer gap-2'},
+          React.createElement('div',{className:'min-w-0 flex-1'},
             React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-0.5'},'Tier-1 only mode'),
             React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Auto-skip single, time-cap-commit, no-go-data, and other marginal-tier locks'),
           ),
-          React.createElement('input',{type:'checkbox',checked:settings.tier1OnlyMode,onChange:(e)=>_update('tier1OnlyMode',e.target.checked),className:'ml-2'}),
+          React.createElement('input',{type:'checkbox',checked:settings.tier1OnlyMode,onChange:(e)=>_update('tier1OnlyMode',e.target.checked),className:'ml-2 shrink-0'}),
         ),
         settings.tier1OnlyMode&&React.createElement('div',{className:'mt-2 text-[10px] text-[#E8E9E4]/55 leading-snug'},
           'When ON, Tara only commits on confluence / super-confluence / structural-led / tape-led / rising-confluence / patient / exceptional / strong+ tiers. All other locks convert to SIT_OUT.',
+        ),
+      ),
+      // V9.9.8: SPEED-DIAL AUTO MODE — Tara auto-applies the conditions-driven recommended dial value
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8'},
+        React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer gap-2'},
+          React.createElement('div',{className:'min-w-0 flex-1'},
+            React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-0.5'},'Speed dial · auto mode'),
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Auto-apply Tara\u2019s recommended speed based on velocity, ATR, and amplitude'),
+          ),
+          React.createElement('input',{type:'checkbox',checked:settings.speedAutoMode,onChange:(e)=>_update('speedAutoMode',e.target.checked),className:'ml-2 shrink-0'}),
+        ),
+        settings.speedAutoMode&&React.createElement('div',{className:'mt-2 text-[10px] text-[#E8E9E4]/55 leading-snug'},
+          'Tara picks the dial: ⚡FAST in extreme velocity, 🛡PATIENT in whipsaw / dead phases, balanced otherwise. Header shows "auto · NN" instead of "speed: NN rec." Toggle off to set manually.',
         ),
       ),
       // Anti-tilt
@@ -10510,7 +10523,7 @@ const regimeToShortPlain=(regime)=>{
   return map[regime]||regime;
 };
 
-function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset,analysis,currentStreak,speedDial,setSpeedDial}){
+function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset,analysis,currentStreak,speedDial,setSpeedDial,speedAutoMode,setSpeedAutoMode}){
   const[ctx,setCtx]=React.useState(()=>getMarketContext(new Date()));
   const[expanded,setExpanded]=React.useState(false);
   React.useEffect(()=>{
@@ -10521,6 +10534,36 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
     const iv=setInterval(tick,30000);
     return()=>clearInterval(iv);
   },[]);
+  // V9.9.8: Auto-mode — when speedAutoMode is ON, the dial automatically follows the
+  //   conditions-driven recommendation. Computes the rec from analysis (mirrors the
+  //   button's rec logic below). Only writes to setSpeedDial when there's a meaningful
+  //   delta (≥5 steps) AND the rec has actually changed since last write — avoids
+  //   constant ticking on small fluctuations and respects the user toggling auto off
+  //   then immediately back on with no actual conditions change.
+  const _lastAppliedRecRef=React.useRef(null);
+  React.useEffect(()=>{
+    if(!speedAutoMode||typeof setSpeedDial!=='function'||!analysis)return;
+    const _vr=analysis?.velocityRegime||'NORMAL';
+    const _wa=analysis?.windowAmplitude?.label||'NORMAL';
+    const _atr=Number(analysis?.atrBps)||0;
+    let _r=50;
+    if(_vr==='EXTREME')_r-=20;
+    else if(_vr==='FAST')_r-=10;
+    else if(_vr==='SLOW')_r+=15;
+    if(_wa==='WILD')_r-=10;
+    else if(_wa==='DEAD'||_wa==='OPENING')_r+=15;
+    else if(_wa==='WHIPSAW')_r+=20;
+    if(_atr>0&&_atr<6)_r=Math.max(_r,55);
+    if(_atr>30)_r=Math.min(_r,40);
+    const _rec=Math.max(0,Math.min(100,Math.round(_r/5)*5));
+    const _cur=Math.max(0,Math.min(100,speedDial||50));
+    // Only apply when rec changed from our last write AND it's actually different
+    //   from the current dial. Prevents an apply→user-adjust→apply ping-pong.
+    if(_rec===_lastAppliedRecRef.current)return;
+    if(Math.abs(_rec-_cur)<5)return;
+    _lastAppliedRecRef.current=_rec;
+    setSpeedDial(_rec);
+  },[speedAutoMode,analysis?.velocityRegime,analysis?.windowAmplitude?.label,analysis?.atrBps,setSpeedDial,speedDial]);
   if(!ctx||!ctx.phase)return null;
   // V8.7.2: Compute the user's actual win rate in the CURRENT session bucket.
   //   Sessions = ASIA / EU / US (matches the session field stamped on each call).
@@ -10671,6 +10714,9 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
           // V9.8.6: Always visible (was: hidden when delta<10). User wants the rec
           //   in view at all times so they know whether their dial matches conditions.
           //   When current = recommended, render dimmed with a ✓ instead of "rec".
+          // V9.9.8: when auto-mode is ON, show "AUTO" instead of "rec" / ✓ and disable
+          //   the click-to-apply (auto-effect handles it). Distinct visual so user knows
+          //   the dial is being managed.
           const _atRec=_delta<5;
           const _label=_rec<=20?'⚡ FAST':_rec<=40?'fast':_rec<=60?'balanced':_rec<=80?'patient':'🛡 PATIENT';
           const _color=_rec<=30?'rgb(244,114,182)':_rec<=70?T2_GOLD:'rgb(110,231,183)';
@@ -10680,6 +10726,19 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
             :_wa==='WILD'?'wild swings — go fast'
             :_vr==='FAST'?'fast tape — slight speed bias'
             :'normal conditions';
+          if(speedAutoMode){
+            return React.createElement('button',{
+              onClick:(e)=>e.stopPropagation(),
+              className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded',
+              style:{
+                color:_color,
+                background:`${_color.replace('rgb','rgba').replace(')',',0.10)')}`,
+                border:`1px solid ${_color}55`,
+                cursor:'default',
+              },
+              title:`Auto-mode ON · Tara managing dial at ${_rec} (${_label}). Reason: ${_reason}. Toggle off in trading settings to control manually.`,
+            },'auto · ',_rec);
+          }
           return React.createElement('button',{
             onClick:(e)=>{e.stopPropagation();if(!_atRec)setSpeedDial(_rec);},
             className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded hover:bg-[#E8E9E4]/5 transition-colors',
@@ -10694,6 +10753,19 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
               :`Recommended speed: ${_rec} (${_label}). Reason: ${_reason}. You're at ${_cur}. Tap to apply.`,
           },'speed: ',_rec,_atRec?' ✓':' rec');
         })(),
+        // V9.9.9: Direct AUTO/MANUAL toggle right next to the speed pill. Replaces
+        //   the previous "buried in trading settings" pattern. Tap to flip between
+        //   auto (Tara manages dial per conditions) and manual (user controls dial).
+        (typeof setSpeedAutoMode==='function')&&React.createElement('button',{
+          onClick:(e)=>{e.stopPropagation();setSpeedAutoMode(!speedAutoMode);},
+          className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded transition-colors',
+          style:speedAutoMode
+            ?{color:'rgb(110,231,183)',background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.35)'}
+            :{color:'rgba(232,233,228,0.55)',background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.15)'},
+          title:speedAutoMode
+            ?'Auto mode ON — Tara adjusts dial per conditions. Tap to take manual control.'
+            :'Manual mode — you control the dial. Tap to let Tara auto-adjust per conditions.',
+        },speedAutoMode?'auto ✓':'manual'),
         // V8.7.2: Your-WR-this-session pill — only when we have ≥5 trades to be meaningful
         _sessionAdvice&&React.createElement('span',{
           className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded tabular-nums',
@@ -11258,30 +11330,75 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     _pages++;
                   }
                 }
-                // Now cross-check each entry against Kalshi-settled
+                // Now cross-check each entry against Kalshi-settled. V9.9.7: completely
+                //   reworked. The pre-V9.9.7 logic took whichever Kalshi market closed at
+                //   the same wall-clock moment and used its yes/no settlement as "Kalshi's
+                //   direction" — but Kalshi has MULTIPLE markets per window (different
+                //   strikes), and an arbitrary market's settlement has nothing to do with
+                //   Tara's directional call against HER strike. Result: false-positive
+                //   mismatches like "13:46 UP at strike $81,341, price closed $81,463
+                //   (UP correctly won) but reconcile claimed Kalshi settled DOWN because
+                //   the *adjacent* strike at $81,500 settled NO."
+                //
+                //   V9.9.7 logic: extract Kalshi's authoritative close PRICE from any
+                //   market in the window (settlement_value_dollars is consistent across
+                //   all strikes for the same window — it's the underlying BTC close),
+                //   then compute what Tara's call SHOULD resolve to given her strike vs
+                //   that close. Compare to logged result. Only flag if Kalshi's data
+                //   contradicts what Tara recorded.
+                const _extractKalshiClose=(market)=>{
+                  // Mirror V4.4 extraction order from L19925
+                  if(market.settlement_value_dollars!=null){
+                    const v=parseFloat(market.settlement_value_dollars);
+                    if(isFinite(v))return v;
+                  }
+                  if(market.settlement_value!=null){
+                    const v=Number(market.settlement_value);
+                    if(isFinite(v)&&v>1000)return v; // settlement_value is in dollars for KXBTCD
+                  }
+                  if(market.expected_expiration_value!=null){
+                    const v=Number(market.expected_expiration_value);
+                    if(isFinite(v)&&v>1000)return v;
+                  }
+                  return null;
+                };
                 for(const e of taraCallLog){
                   if(!e||!e.id||(e.result!=='WIN'&&e.result!=='LOSS'))continue;
+                  if(e.dir!=='UP'&&e.dir!=='DOWN')continue; // need a directional call
+                  if(typeof e.strike!=='number'||!e.strike)continue; // need Tara's strike
                   const _asset=e.asset||'BTC';
                   const _markets=_settledByAsset[_asset]||[];
                   if(_markets.length===0)continue;
-                  // Find the market closest in close_time to this entry's expected close
+                  // Find all Kalshi markets closing at the same wall-clock moment as
+                  //   this entry's window. ANY of them carries the underlying BTC close
+                  //   price — they all share the same expiration value.
                   const _winMs=e.windowType==='5m'?300000:900000;
                   const _expectedCloseMs=e.id+_winMs;
-                  let _best=null,_bestDiff=Infinity;
+                  let _kalshiClose=null;
+                  let _matched=0;
                   for(const _m of _markets){
                     if(!_m.close_time)continue;
                     const _mClose=new Date(_m.close_time).getTime();
-                    const _diff=Math.abs(_mClose-_expectedCloseMs);
-                    if(_diff<_bestDiff){_bestDiff=_diff;_best=_m;}
+                    if(Math.abs(_mClose-_expectedCloseMs)>120000)continue; // 2-min tolerance
+                    _matched++;
+                    const _price=_extractKalshiClose(_m);
+                    if(_price!=null){_kalshiClose=_price;break;}
                   }
-                  if(!_best||_bestDiff>120000)continue; // no match within 2min
-                  if(!_best.result)continue;
-                  // Kalshi's result tells us authoritative direction
-                  const _kalshiDir=_best.result==='yes'?'UP':_best.result==='no'?'DOWN':null;
-                  if(!_kalshiDir)continue;
-                  const _shouldBe=e.dir===_kalshiDir?'WIN':'LOSS';
+                  if(_kalshiClose==null)continue; // no usable Kalshi price for this window
+                  // Compute what the result SHOULD be: UP wins if close ≥ strike, DOWN
+                  //   wins if close < strike (strict less-than mirrors Kalshi's tiebreaker)
+                  const _shouldBe=
+                    e.dir==='UP'?(_kalshiClose>=e.strike?'WIN':'LOSS'):
+                    (_kalshiClose<e.strike?'WIN':'LOSS');
                   if(e.result!==_shouldBe){
-                    _issues.push({entryId:e.id,kind:'kalshi-mismatch',detail:`Kalshi settled ${_kalshiDir}; ${e.dir} entry should be ${_shouldBe}, marked ${e.result}`,suggested:_shouldBe,suggestedField:'result'});
+                    const _gap=((_kalshiClose-e.strike)/e.strike)*10000;
+                    _issues.push({
+                      entryId:e.id,
+                      kind:'kalshi-mismatch',
+                      detail:`${e.dir} strike $${e.strike.toFixed(0)} · Kalshi close $${_kalshiClose.toFixed(0)} (${_gap>=0?'+':''}${_gap.toFixed(1)} bps) · should be ${_shouldBe}, marked ${e.result}`,
+                      suggested:_shouldBe,
+                      suggestedField:'result',
+                    });
                   }
                 }
                 setReconcileResult({kind:'reconcile',issues:_issues,checkedAt:Date.now(),checkedAgainst:_settledByAsset.BTC.length+_settledByAsset.ETH.length});
@@ -11548,7 +11665,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             React.createElement('span',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 font-bold'},'P&L Summary'),
             React.createElement('span',{className:'text-[10px] tabular-nums text-[#E8E9E4]/50'},`${_withBets.length} trades with bet amounts`)
           ),
-          React.createElement('div',{className:'grid grid-cols-4 gap-3 mb-3'},
+          React.createElement('div',{className:'grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3'},
             React.createElement('div',null,
               React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/35'},'Total P&L'),
               React.createElement('div',{className:'text-lg font-bold tabular-nums',style:{color:_totalPnl>=0?'rgb(110,231,183)':'rgb(244,114,182)'}},`${_totalPnl>=0?'+':''}$${_totalPnl.toFixed(2)}`)
@@ -16146,8 +16263,14 @@ function TaraApp(){
         //   user can't accidentally take a marginal trade because Tara won't offer it.
         //   Default OFF for backward compatibility — user opts in via Settings panel.
         tier1OnlyMode:!!v.tier1OnlyMode,
+        // V9.9.8: Speed dial auto-mode. When ON, the dial automatically follows Tara's
+        //   conditions-driven recommendation (computed in MarketContextStrip from
+        //   velocityRegime + windowAmplitude + ATR). When OFF (default), user controls
+        //   the dial manually as before. User toggles in trading settings; visual state
+        //   shows in the MarketContextStrip speed pill.
+        speedAutoMode:!!v.speedAutoMode,
       };
-    }catch(_){return{betSize:10,winPayout:8.5,antiTiltEnabled:true,antiTiltMinutes:15,antiTiltStreakLen:4,highEdgeAlertOnly:false,highEdgeMinPp:15,takeProfitEnabled:false,takeProfitOffer:0.85,cutLossEnabled:false,cutLossMinutes:3,tier1OnlyMode:false};}
+    }catch(_){return{betSize:10,winPayout:8.5,antiTiltEnabled:true,antiTiltMinutes:15,antiTiltStreakLen:4,highEdgeAlertOnly:false,highEdgeMinPp:15,takeProfitEnabled:false,takeProfitOffer:0.85,cutLossEnabled:false,cutLossMinutes:3,tier1OnlyMode:false,speedAutoMode:false};}
   });
   useEffect(()=>{try{localStorage.setItem('taraTradingSettings_v1',JSON.stringify(tradingSettings));}catch(_){}},[tradingSettings]);
   const[showTradingSettings,setShowTradingSettings]=useState(false);
@@ -25358,7 +25481,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.9.6
+              9.9.9
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
@@ -25401,6 +25524,35 @@ function TaraApp(){
 
           {/* V8.0: Today's P&L + streak/tilt awareness pills — fits between sessions and asset selector */}
           <TodayPnLPill todayData={todayData} onClick={()=>setShowTradingSettings(true)}/>
+          {/* V9.9.9: Tier-1 Only Mode pill — ALWAYS visible. When ON: filled green
+               ★ TIER-1. When OFF: subtle outlined TIERS · ALL. Single click toggles
+               the mode directly. Long-press opens trading settings for context. The
+               always-visible pattern surfaces the toggle without requiring users to
+               dig through settings; the icon/color tells them at a glance what mode
+               Tara is in. Drops the V9.9.8 "show only when ON" rule. */}
+          {(()=>{
+            const _on=!!tradingSettings?.tier1OnlyMode;
+            // Long-press timer to differentiate tap (toggle) from press (settings)
+            const _pressRef={current:null};
+            return (
+              <button
+                onPointerDown={()=>{_pressRef.current=setTimeout(()=>{_pressRef.current=null;setShowTradingSettings(true);},500);}}
+                onPointerUp={()=>{if(_pressRef.current){clearTimeout(_pressRef.current);_pressRef.current=null;setTradingSettings(prev=>({...prev,tier1OnlyMode:!prev?.tier1OnlyMode}));}}}
+                onPointerLeave={()=>{if(_pressRef.current){clearTimeout(_pressRef.current);_pressRef.current=null;}}}
+                className="px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider shrink-0 transition-colors select-none"
+                style={_on
+                  ?{color:'rgb(110,231,183)',background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.35)'}
+                  :{color:'rgba(232,233,228,0.55)',background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.15)'}
+                }
+                title={_on
+                  ?'Tier-1 Only ON — single / time-cap-commit / no-go-* locks auto-skip. Tap to allow all tiers. Long-press for settings.'
+                  :'All tiers allowed. Tap to enable Tier-1 Only Mode (auto-skip marginal locks). Long-press for settings.'
+                }
+              >
+                {_on?'★ TIER-1':'TIERS · ALL'}
+              </button>
+            );
+          })()}
           {/* V9.3.0: Kalshi auto-exec status pill. Visible whenever auto-exec is enabled OR
               kill switch is engaged. Click to open settings; long-press effect not needed —
               the kill switch button on LiveTradeCoach is the always-instant kill. */}
@@ -25934,6 +26086,8 @@ function TaraApp(){
           currentStreak={currentStreak}
           speedDial={speedDial}
           setSpeedDial={setSpeedDial}
+          speedAutoMode={tradingSettings?.speedAutoMode}
+          setSpeedAutoMode={(v)=>setTradingSettings(prev=>({...prev,speedAutoMode:!!v}))}
         />
 
         {/* V9.1.1: TradeScheduleStrip relocated — now renders inside RightPanel
