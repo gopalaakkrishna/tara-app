@@ -1000,10 +1000,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.10-v9.10.0-reconcile-strike-match';
+const BASELINE_VERSION='2026.05.11-v9.10.2-unified-today-card';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.10.0';
+const TARA_VERSION_DISPLAY='Tara 9.10.2';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -5154,14 +5154,14 @@ const computeV99Posterior=(params)=>{
       const _engineConf=_engineDir==='UP'?dirCalibrated:(100-dirCalibrated);
       const _observedConf=_entry.wr*100;
       const _blended=_engineConf*(1-_entry.weight)+_observedConf*_entry.weight;
-      // V9.9.1: Cap the calibration pull at ±5pt. The V9.8.17 source fix made this gate
-      //   actually fire for the first time. Yesterday's CSV showed 5/50 fires, with shifts
-      //   ranging up to -10.7pt on TRENDING UP × UP — pulling 80% engine conviction down to
-      //   70% in one tick. That's pinning conviction below lock floor and stalling commits
-      //   ("by the time tara locks the entry is already at 70-80%"). ±5pt cap keeps the
-      //   corrective signal (gentle nudge toward observed reality) but prevents over-reach.
-      //   Recalibrate the cap once we have 200+ stamped locks with reversalRisk + outcomes
-      //   to logistic-regress against.
+      // V9.9.1: Cap the calibration pull at ±5pt. Symmetric cap protects against
+      //   regimeCal becoming the dominant signal — historical WR is one input among
+      //   many, not the truth. Per data review on 2026-05-11: this cap is correct.
+      //   V9.10.1 attempted an asymmetric cap (-15/+5) thinking it would have prevented
+      //   May 10's bad day, but simulation against actual data showed 0 of the 26 losses
+      //   would have been blocked — historical WR for those regime×dir combos is around
+      //   67-70%, only 5-8pt below the at-lock conviction, well within the existing cap.
+      //   The May 10 losses were variance + market regime shape, not miscalibrated weights.
       const _rawDelta=_blended-_engineConf;
       const _cappedConfDelta=Math.max(-5,Math.min(5,_rawDelta));
       const _cappedConf=_engineConf+_cappedConfDelta;
@@ -9696,6 +9696,198 @@ function PerformanceCard({todayData,settings}){
         ),
         todayData.topLossPattern&&React.createElement('div',{className:'mt-1 text-[10px] text-[#E8E9E4]/45 italic leading-tight'},
           LOSS_PATTERN_LABELS[todayData.topLossPattern.key]?.hint||'',
+        ),
+      ),
+    ),
+  );
+}
+
+// ── V9.10.2: UNIFIED TODAY + PERFORMANCE + INSIGHT CARD ────────────────────
+// Replaces three previously-stacked components:
+//   • DailyInsightCard (one-line dynamic insight, dismissable)
+//   • TodayCard (W/L count, heatmap, P&L curve, volatility, best-hours)
+//   • PerformanceCard (7d/30d/lifetime WR, edge bucket WR, Kelly)
+//
+// Designed around the user's actual decision workflow: glance to calibrate
+// confidence ("am I hot or cold today? does it match recent record?") rather
+// than read every stat. Three zones, top-to-bottom by attention priority:
+//   Zone 1 (always visible): today W/L count + WR color + recent calls heatmap
+//   Zone 2 (always visible): today vs 7d delta + edge sparkline + insight line
+//   Zone 3 (expandable):     full 7d/30d/lifetime, P&L curve, volatility
+//
+// The expandable zone defaults collapsed so most-of-the-time view is just
+// Zones 1+2 — about 1/3 the vertical space of the three old cards stacked.
+function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMacro,timeFormat,settings}){
+  const[expanded,setExpanded]=React.useState(()=>{
+    try{return localStorage.getItem('taraUnifiedTodayExpanded_v1')==='true';}catch(_){return false;}
+  });
+  const _toggle=()=>setExpanded(p=>{const n=!p;try{localStorage.setItem('taraUnifiedTodayExpanded_v1',String(n));}catch(_){}return n;});
+
+  if(!todayData)return null;
+  const{wins=0,losses=0,sitouts=0,wr,recentForHeatmap=[],todayCalls=[],wr7d,wr30d,wrLifetime,edgeBuckets,strongTilt,heater,streak}=todayData;
+  const _hasData=(wins+losses)>0||recentForHeatmap.length>0;
+  if(!_hasData)return null;
+
+  // Today vs 7d delta — calibrates "trust today's read"
+  const _delta7d=(wr!=null&&wr7d?.wr!=null&&wr7d.total>=10)?(wr-wr7d.wr):null;
+  const _deltaColor=_delta7d==null?'rgba(232,233,228,0.5)':
+    _delta7d>=10?'rgb(110,231,183)':
+    _delta7d>=-5?'rgba(232,233,228,0.7)':
+    _delta7d>=-12?'rgba(229,200,112,0.85)':
+    'rgb(244,114,182)';
+  const _deltaLabel=_delta7d==null?null:
+    _delta7d>=10?'hot':
+    _delta7d>=-5?'on pace':
+    _delta7d>=-12?'cooling':
+    'cold';
+
+  // WR color helper (shared)
+  const _wrColor=(w,total)=>{
+    if(w==null||total<5)return'rgba(232,233,228,0.4)';
+    return w>=70?'rgb(110,231,183)':w>=55?'rgba(232,233,228,0.85)':w>=45?'rgba(229,200,112,0.85)':'rgb(244,114,182)';
+  };
+
+  // ZONE 2 insight — single line, no dismiss button (just doesn't render when nothing applies)
+  let insight=null,insightColor='rgba(232,233,228,0.7)';
+  const _eb=edgeBuckets||{};
+  const _tightTotal=(_eb.tight?.wins||0)+(_eb.tight?.losses||0);
+  const _tightWR=_tightTotal>0?(_eb.tight.wins/_tightTotal):0;
+  const _bigTotal=(_eb['big-edge']?.wins||0)+(_eb['big-edge']?.losses||0);
+  const _bigWR=_bigTotal>0?(_eb['big-edge'].wins/_bigTotal):0;
+  if(strongTilt){insight=`Tilt: ${streak} losses in a row — step away for 15-30m`;insightColor='rgb(244,114,182)';}
+  else if(heater){insight=`Heater: ${streak}-win streak — trust read, don't oversize`;insightColor='rgb(110,231,183)';}
+  else if(_tightTotal>=8&&_tightWR<0.5&&_bigTotal>=5&&_bigWR>0.65){insight=`TIGHT edges ${Math.round(_tightWR*100)}% · BIG edges ${Math.round(_bigWR*100)}% — wait for clear edge`;insightColor='rgba(229,200,112,0.9)';}
+  else if(bestWindowsToday?.nextBest&&bestWindowsToday.nextBest.minsUntil<120){insight=`Best ${bestWindowsToday.dayName} hour (${String(bestWindowsToday.nextBest.hour).padStart(2,'0')}:00) in ${bestWindowsToday.nextBest.minsUntil}m · ${bestWindowsToday.nextBest.wr}% WR`;insightColor='rgba(110,231,183,0.85)';}
+  else if(_delta7d!=null&&_delta7d<=-12){insight=`Today running ${Math.abs(_delta7d).toFixed(0)}pp under 7d — regime may not fit current weights`;insightColor='rgba(229,200,112,0.85)';}
+
+  // Edge bucket micro-bars for Zone 2
+  const _edgeBars=edgeBuckets?[
+    {key:'big-edge',label:'BIG',color:'rgb(110,231,183)'},
+    {key:'good-edge',label:'GOOD',color:'rgba(110,231,183,0.7)'},
+    {key:'tight',label:'TIGHT',color:'rgba(229,200,112,0.85)'},
+    {key:'late',label:'LATE',color:'rgba(244,114,182,0.85)'},
+  ]:[];
+
+  return React.createElement('div',{
+    className:'rounded-lg overflow-hidden mb-2 sm:mb-3',
+    style:{border:'1px solid rgba(232,233,228,0.10)',background:'rgba(232,233,228,0.015)'},
+  },
+    // ── ZONE 1: Header + today summary (always visible) ──
+    React.createElement('div',{
+      className:'flex items-center justify-between gap-2 sm:gap-3 px-3 sm:px-4 py-2 cursor-pointer hover:bg-[#E8E9E4]/3',
+      onClick:_toggle,
+    },
+      React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
+        React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold shrink-0',style:{color:T2_GOLD}},'Today'),
+        React.createElement('span',{className:'text-[11px] tabular-nums text-[#E8E9E4]/75 font-bold shrink-0'},`${wins}W·${losses}L`,sitouts>0?` · ${sitouts}so`:''),
+        wr!=null&&React.createElement('span',{className:'text-[10px] tabular-nums shrink-0',style:{color:_wrColor(wr,wins+losses)}},`${wr}% WR`),
+        // Delta vs 7d — the "should I trust today?" cue
+        _delta7d!=null&&React.createElement('span',{
+          className:'text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-bold shrink-0',
+          style:{color:_deltaColor,background:`${_deltaColor.replace('rgb','rgba').replace(')',',0.10)')}`,border:`1px solid ${_deltaColor}33`},
+          title:`Today ${wr}% vs 7-day ${wr7d.wr}% (${_delta7d>0?'+':''}${_delta7d.toFixed(0)}pp)`,
+        },_deltaLabel),
+        bestWindowsToday&&bestWindowsToday.inBestWindow&&React.createElement('span',{className:'text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-bold shrink-0',style:{background:'rgba(110,231,183,0.10)',color:'rgba(110,231,183,0.95)',border:'1px solid rgba(110,231,183,0.25)'}},'★ best hour'),
+      ),
+      React.createElement('span',{className:'text-[#E8E9E4]/30 text-xs shrink-0',style:{transition:'transform 0.2s',transform:expanded?'rotate(180deg)':'rotate(0deg)'}},'▾'),
+    ),
+    // ── ZONE 2: Always-visible compact body (heatmap + edge sparkline + insight) ──
+    React.createElement('div',{className:'px-3 sm:px-4 pb-2 space-y-2'},
+      // Recent calls heatmap — biggest "hot/cold" visual
+      recentForHeatmap.length>0&&React.createElement('div',null,
+        React.createElement(RecentCallsHeatmap,{recent:recentForHeatmap,size:12,timeFormat}),
+      ),
+      // Edge bucket micro-bars — one row, compact
+      edgeBuckets&&_edgeBars.length>0&&React.createElement('div',{className:'flex items-center gap-1.5 min-w-0'},
+        React.createElement('span',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/35 shrink-0',style:{minWidth:'46px'}},'by edge'),
+        ..._edgeBars.map(({key,label,color})=>{
+          const b=edgeBuckets[key]||{wins:0,losses:0};
+          const total=b.wins+b.losses;
+          const wrPct=total>0?Math.round((b.wins/total)*100):null;
+          return React.createElement('div',{key,className:'flex items-baseline gap-1 min-w-0 flex-1',title:`${label} edge: ${b.wins}W-${b.losses}L`},
+            React.createElement('span',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/45 shrink-0'},label),
+            React.createElement('span',{className:'text-[9px] tabular-nums font-bold shrink-0',style:{color:total>=3?color:'rgba(232,233,228,0.3)'}},wrPct!=null?`${wrPct}%`:'—'),
+          );
+        }),
+      ),
+      // Insight line — only when relevant
+      insight&&React.createElement('div',{
+        className:'text-[10px] leading-snug px-2 py-1.5 rounded',
+        style:{color:insightColor,background:`${insightColor.replace('rgb','rgba').replace(')',',0.06)')}`,border:`1px solid ${insightColor.replace('rgb','rgba').replace(')',',0.20)')}`},
+      },insight),
+    ),
+    // ── ZONE 3: Expandable detail (collapsed by default) ──
+    expanded&&React.createElement('div',{className:'border-t border-[#E8E9E4]/5 px-3 sm:px-4 py-3 space-y-3'},
+      // WR by recency — 3 compact cards
+      wrLifetime&&React.createElement('div',null,
+        React.createElement('div',{className:'text-[8px] uppercase font-bold tracking-[0.12em] text-[#E8E9E4]/40 mb-1'},'WR by recency'),
+        React.createElement('div',{className:'grid grid-cols-3 gap-1.5'},
+          [{label:'7d',d:wr7d},{label:'30d',d:wr30d},{label:'all',d:wrLifetime}].map(({label,d})=>(
+            React.createElement('div',{key:label,className:'p-1.5 rounded min-w-0',style:{background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.06)'}},
+              React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#E8E9E4]/40 mb-0.5'},label),
+              React.createElement('div',{className:'flex items-baseline gap-1 flex-wrap'},
+                React.createElement('span',{className:'text-sm font-bold tabular-nums',style:{color:_wrColor(d?.wr,d?.total||0)}},d?.wr==null?'—':`${d.wr}%`),
+                React.createElement('span',{className:'text-[9px] tabular-nums text-[#E8E9E4]/40'},`${d?.wins||0}-${d?.losses||0}`),
+              ),
+            )
+          )),
+        ),
+      ),
+      // Full edge bucket detail
+      edgeBuckets&&React.createElement('div',null,
+        React.createElement('div',{className:'text-[8px] uppercase font-bold tracking-[0.12em] text-[#E8E9E4]/40 mb-1'},'WR by edge vs Kalshi'),
+        React.createElement('div',{className:'space-y-0.5'},
+          [
+            {key:'big-edge',label:'BIG',sub:'+15+',color:'rgb(110,231,183)'},
+            {key:'good-edge',label:'GOOD',sub:'+5/15',color:'rgba(110,231,183,0.75)'},
+            {key:'tight',label:'TIGHT',sub:'±5',color:'rgba(229,200,112,0.85)'},
+            {key:'late',label:'LATE',sub:'<-5',color:'rgba(244,114,182,0.85)'},
+          ].map(({key,label,sub,color})=>{
+            const b=edgeBuckets[key]||{wins:0,losses:0};
+            const total=b.wins+b.losses;
+            const wrPct=total>0?Math.round((b.wins/total)*100):null;
+            const maxTotal=Math.max(1,Object.values(edgeBuckets).reduce((s,v)=>Math.max(s,v.wins+v.losses),1));
+            const _barW=Math.max(2,Math.min(100,(total/maxTotal)*100));
+            return React.createElement('div',{key,className:'flex items-baseline gap-1.5 min-w-0'},
+              React.createElement('span',{className:'text-[9px] uppercase tracking-wider shrink-0 font-bold',style:{color,minWidth:'40px'}},label),
+              React.createElement('span',{className:'text-[8px] tabular-nums text-[#E8E9E4]/40 shrink-0',style:{minWidth:'42px'}},sub),
+              React.createElement('div',{className:'flex-1 h-1.5 rounded-full overflow-hidden',style:{background:'rgba(232,233,228,0.06)'}},
+                React.createElement('div',{className:'h-full rounded-full',style:{width:`${_barW}%`,background:color,opacity:total>=3?1:0.4}}),
+              ),
+              React.createElement('span',{className:'text-[9px] tabular-nums font-bold shrink-0',style:{color:total>=3?color:'rgba(232,233,228,0.3)',minWidth:'34px',textAlign:'right'}},wrPct!=null?`${wrPct}%`:'—'),
+              React.createElement('span',{className:'text-[8px] tabular-nums text-[#E8E9E4]/35 shrink-0',style:{minWidth:'32px',textAlign:'right'}},`${b.wins}-${b.losses}`),
+            );
+          }),
+        ),
+      ),
+      // P&L curve
+      todayCalls.filter(e=>e.result==='WIN'||e.result==='LOSS').length>=2&&React.createElement('div',null,
+        React.createElement('div',{className:'flex items-baseline justify-between gap-2 mb-1'},
+          React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/40'},'P&L curve'),
+          React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/30'},'cumulative W-L'),
+        ),
+        React.createElement(DailyPnLCurve,{todayCalls,height:36}),
+      ),
+      // Volatility sparkline
+      tickHistoryRef&&React.createElement('div',null,
+        React.createElement('div',{className:'flex items-baseline justify-between gap-2 mb-1'},
+          React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/40'},'Live volatility'),
+          React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/30'},'2-min rolling'),
+        ),
+        React.createElement(VolatilitySparkline,{tickHistoryRef,height:28}),
+      ),
+      // Best windows hint
+      bestWindowsToday&&bestWindowsToday.best&&bestWindowsToday.best.length>0&&React.createElement('div',{className:'pt-1.5 border-t border-[#E8E9E4]/5'},
+        React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
+          React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/40'},`Best ${bestWindowsToday.dayName} hours`),
+          React.createElement('span',{className:'text-[9px] text-[#E8E9E4]/30'},'historical ≥3'),
+        ),
+        React.createElement('div',{className:'flex flex-wrap gap-1.5'},
+          bestWindowsToday.best.map(h=>React.createElement('span',{
+            key:h.hour,
+            className:'text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded tabular-nums',
+            style:{background:'rgba(110,231,183,0.06)',color:'rgba(110,231,183,0.85)',border:'1px solid rgba(110,231,183,0.20)'},
+          },`${String(h.hour).padStart(2,'0')}:00 ${h.wr}%`)),
         ),
       ),
     ),
@@ -25470,7 +25662,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.10.0
+              9.10.2
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
@@ -26169,16 +26361,16 @@ function TaraApp(){
           currentAsset={currentAsset}
         />
 
-        {/* V8.2: Daily insight — once-per-day actionable observation */}
-        <DailyInsightCard todayData={todayData} bestWindowsToday={bestWindowsToday}/>
-
-        {/* V8.0: Today card — heatmap + P&L curve + volatility sparkline + best-windows + 24h macro */}
-        <TodayCard
+        {/* V9.10.2: Unified Today card — replaces DailyInsightCard + TodayCard +
+            PerformanceCard. Single component, three internal zones (header, body,
+            expandable detail). See L9707 for component definition. */}
+        <UnifiedTodayCard
           todayData={todayData}
           bestWindowsToday={bestWindowsToday}
           tickHistoryRef={tickHistoryRef}
           upcomingMacro={getUpcomingMacroEvents(new Date(),24)}
           timeFormat={timeFormat}
+          settings={tradingSettings}
         />
 
         {/* V8.4: PerformanceCard moved into the prediction column (bottom) — fills the
@@ -26459,12 +26651,12 @@ function TaraApp(){
               />
             )}
 
-            {/* V8.4: Performance card moved here from above-grid stack. mt-auto pins it to
-                the column bottom so it fills the blank space when PredictionContent is short.
-                Card is internally responsive — fits cleanly in the 1.3fr column at any width. */}
-            <div className="mt-auto pt-3 min-w-0">
-              <PerformanceCard todayData={todayData} settings={tradingSettings}/>
-            </div>
+            {/* V9.10.2: PerformanceCard removed — consolidated into UnifiedTodayCard
+                above. The mt-auto + pt-3 wrapper that pinned it to column bottom no
+                longer has content; left empty to preserve the layout's auto-rows-fr
+                column height behavior. If the prediction column ever needs a bottom
+                element again, this is the spot. */}
+            <div className="mt-auto pt-3 min-w-0"/>
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
@@ -27113,7 +27305,14 @@ function TaraApp(){
                 <h3 className="text-xs font-bold uppercase tracking-wide text-indigo-400 mb-3">Per-Regime Signal Weights</h3>
                 <div className="space-y-3">
                   {Object.entries(regimeWeights).map(([rg,w])=>{
-                    const rgTrades=tradeLog.filter(t=>t.result&&t.regime===rg);
+                    // V9.10.1: was reading from `tradeLog` which is the legacy USER-trade
+                    //   log that was stubbed to no-op in V5.5b per user request. That made
+                    //   every regime panel show "0 trades · no data" even though weights
+                    //   were actually learning from 400+ Tara calls. The underlying
+                    //   adaptive weights (the numbers below) ARE correctly updated from
+                    //   taraCallLog via V7.10.5's self-learn path at L20445. This was
+                    //   purely a display bug — fix is to read from the right source.
+                    const rgTrades=(taraCallLog||[]).filter(t=>(t.result==='WIN'||t.result==='LOSS')&&t.regime===rg);
                     const rgWins=rgTrades.filter(t=>t.result==='WIN').length;
                     const isActive=lastRegimeRef.current===rg;
                     return(
@@ -27140,7 +27339,11 @@ function TaraApp(){
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-indigo-400 mb-3">Performance Patterns</h3>
                 {(()=>{
-                  const completed=tradeLog.filter(t=>t.result);
+                  // V9.10.1: same fix as Per-Regime Signal Weights above — was reading
+                  //   `tradeLog` (the legacy user-trade log stubbed in V5.5b) instead of
+                  //   taraCallLog. Hour/day/session breakdowns all said "no data" even
+                  //   with 400+ Tara calls populated.
+                  const completed=(taraCallLog||[]).filter(t=>t.result==='WIN'||t.result==='LOSS');
                   if(completed.length===0)return<div className={'text-xs text-[#E8E9E4]/30 italic'}>No completed trades yet.</div>;
 
                   // Aggregate by hour of day (0-23)
