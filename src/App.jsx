@@ -1000,10 +1000,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.10-v9.9.9-direct-toggles-and-responsive';
+const BASELINE_VERSION='2026.05.10-v9.10.0-reconcile-strike-match';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.9.9';
+const TARA_VERSION_DISPLAY='Tara 9.10.0';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -11330,72 +11330,61 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     _pages++;
                   }
                 }
-                // Now cross-check each entry against Kalshi-settled. V9.9.7: completely
-                //   reworked. The pre-V9.9.7 logic took whichever Kalshi market closed at
-                //   the same wall-clock moment and used its yes/no settlement as "Kalshi's
-                //   direction" — but Kalshi has MULTIPLE markets per window (different
-                //   strikes), and an arbitrary market's settlement has nothing to do with
-                //   Tara's directional call against HER strike. Result: false-positive
-                //   mismatches like "13:46 UP at strike $81,341, price closed $81,463
-                //   (UP correctly won) but reconcile claimed Kalshi settled DOWN because
-                //   the *adjacent* strike at $81,500 settled NO."
-                //
-                //   V9.9.7 logic: extract Kalshi's authoritative close PRICE from any
-                //   market in the window (settlement_value_dollars is consistent across
-                //   all strikes for the same window — it's the underlying BTC close),
-                //   then compute what Tara's call SHOULD resolve to given her strike vs
-                //   that close. Compare to logged result. Only flag if Kalshi's data
-                //   contradicts what Tara recorded.
-                const _extractKalshiClose=(market)=>{
-                  // Mirror V4.4 extraction order from L19925
-                  if(market.settlement_value_dollars!=null){
-                    const v=parseFloat(market.settlement_value_dollars);
-                    if(isFinite(v))return v;
-                  }
-                  if(market.settlement_value!=null){
-                    const v=Number(market.settlement_value);
-                    if(isFinite(v)&&v>1000)return v; // settlement_value is in dollars for KXBTCD
-                  }
-                  if(market.expected_expiration_value!=null){
-                    const v=Number(market.expected_expiration_value);
-                    if(isFinite(v)&&v>1000)return v;
+                // V9.10.0: Match each entry against the SPECIFIC Kalshi market whose
+                //   floor_strike equals Tara's strike. The earlier approaches were wrong:
+                //   V9.9.3 picked any market at the close time (different strike = different
+                //   yes/no) and V9.9.7 misread settlement_value_dollars (which is the cash
+                //   payout 0 or 1, not the BTC close price). Right approach: Tara's `strike`
+                //   field IS a Kalshi floor_strike — find the matching market and read its
+                //   `result` field directly. yes = price went above this strike (UP wins).
+                //   no = price stayed at or below (DOWN wins). Defensive: skip entries
+                //   where no strike-matched market is found — better to flag nothing than
+                //   to flag wrong things.
+                const _extractKalshiStrike=(m)=>{
+                  // Mirror V4.4 logic at L19796 — floor_strike is the standard, with fallbacks
+                  const fields=[m.floor_strike,m.cap_strike,m.strike_price,m.strike];
+                  for(const f of fields){
+                    const v=Number(f);
+                    if(Number.isFinite(v)&&v>0)return v;
                   }
                   return null;
                 };
                 for(const e of taraCallLog){
                   if(!e||!e.id||(e.result!=='WIN'&&e.result!=='LOSS'))continue;
-                  if(e.dir!=='UP'&&e.dir!=='DOWN')continue; // need a directional call
-                  if(typeof e.strike!=='number'||!e.strike)continue; // need Tara's strike
+                  if(e.dir!=='UP'&&e.dir!=='DOWN')continue;
+                  if(typeof e.strike!=='number'||!e.strike)continue;
                   const _asset=e.asset||'BTC';
                   const _markets=_settledByAsset[_asset]||[];
                   if(_markets.length===0)continue;
-                  // Find all Kalshi markets closing at the same wall-clock moment as
-                  //   this entry's window. ANY of them carries the underlying BTC close
-                  //   price — they all share the same expiration value.
+                  // Match by close_time first (window-level), then by strike (specific market)
                   const _winMs=e.windowType==='5m'?300000:900000;
                   const _expectedCloseMs=e.id+_winMs;
-                  let _kalshiClose=null;
-                  let _matched=0;
+                  let _matched=null;
                   for(const _m of _markets){
-                    if(!_m.close_time)continue;
+                    if(!_m.close_time||!_m.result)continue;
                     const _mClose=new Date(_m.close_time).getTime();
-                    if(Math.abs(_mClose-_expectedCloseMs)>120000)continue; // 2-min tolerance
-                    _matched++;
-                    const _price=_extractKalshiClose(_m);
-                    if(_price!=null){_kalshiClose=_price;break;}
+                    if(Math.abs(_mClose-_expectedCloseMs)>120000)continue;
+                    const _mStrike=_extractKalshiStrike(_m);
+                    if(_mStrike==null)continue;
+                    // Strict match — ±$1 to absorb any rounding. Strikes are integers in
+                    //   Kalshi's data; Tara's strike is read directly from there.
+                    if(Math.abs(_mStrike-e.strike)<=1){_matched=_m;break;}
                   }
-                  if(_kalshiClose==null)continue; // no usable Kalshi price for this window
-                  // Compute what the result SHOULD be: UP wins if close ≥ strike, DOWN
-                  //   wins if close < strike (strict less-than mirrors Kalshi's tiebreaker)
+                  if(!_matched)continue; // defensive: no strike-matched market = no claim
+                  // Kalshi's `result` is authoritative on this exact strike-direction question
+                  const _yes=_matched.result==='yes';   // price closed above strike
+                  const _no=_matched.result==='no';     // price closed at or below
+                  if(!_yes&&!_no)continue;              // void/cancelled markets — skip
+                  // Translate to Tara's UP/DOWN call result
+                  const _wasUpRight=_yes; // UP wins when result==='yes'
                   const _shouldBe=
-                    e.dir==='UP'?(_kalshiClose>=e.strike?'WIN':'LOSS'):
-                    (_kalshiClose<e.strike?'WIN':'LOSS');
+                    e.dir==='UP'?(_wasUpRight?'WIN':'LOSS'):
+                    (_wasUpRight?'LOSS':'WIN');
                   if(e.result!==_shouldBe){
-                    const _gap=((_kalshiClose-e.strike)/e.strike)*10000;
                     _issues.push({
                       entryId:e.id,
                       kind:'kalshi-mismatch',
-                      detail:`${e.dir} strike $${e.strike.toFixed(0)} · Kalshi close $${_kalshiClose.toFixed(0)} (${_gap>=0?'+':''}${_gap.toFixed(1)} bps) · should be ${_shouldBe}, marked ${e.result}`,
+                      detail:`${e.dir} at strike $${e.strike.toFixed(0)} · Kalshi market settled ${_matched.result.toUpperCase()} (price ${_yes?'went above':'stayed at/below'}) · should be ${_shouldBe}, marked ${e.result}`,
                       suggested:_shouldBe,
                       suggestedField:'result',
                     });
@@ -25481,7 +25470,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.9.9
+              9.10.0
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
