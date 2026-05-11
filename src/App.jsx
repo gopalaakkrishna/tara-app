@@ -1000,10 +1000,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.11-v9.10.2-unified-today-card';
+const BASELINE_VERSION='2026.05.11-v9.10.4-per-asset-write-dedup-fix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.10.2';
+const TARA_VERSION_DISPLAY='Tara 9.10.4';
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -10919,11 +10919,15 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
             :_vr==='FAST'?'fast tape — slight speed bias'
             :'normal conditions';
           if(speedAutoMode){
+            // V9.10.3: white text instead of gold-on-gold for readability. Border keeps
+            //   the regime color so the conditions cue is still visible. Pre-V9.10.3 the
+            //   text used `_color` (T2_GOLD for balanced regimes) on a gold-tinted bg —
+            //   text was essentially invisible against the background.
             return React.createElement('button',{
               onClick:(e)=>e.stopPropagation(),
               className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded',
               style:{
-                color:_color,
+                color:'rgba(232,233,228,0.95)',
                 background:`${_color.replace('rgb','rgba').replace(')',',0.10)')}`,
                 border:`1px solid ${_color}55`,
                 cursor:'default',
@@ -19571,6 +19575,32 @@ function TaraApp(){
         };
       }
 
+      // V9.10.3: TARA_SKIP — fires when Tier-1 Only Mode converts a non-Tier-1 lock
+      //   to SIT_OUT. Tells the user what was rejected so they know the toggle is
+      //   actively filtering trades. Visually distinct from TARA_LOCK (rose-tinted
+      //   warning color) and from TARA_SITOUT (which is disabled per V7.0.8).
+      else if(type==='TARA_SKIP'){
+        const _whb=data.wouldHaveBeen||'—';
+        embed={
+          title:`TARA · ${_assetTag} · ${_whb} SKIPPED  ✦ Tier-1 only`,
+          color:11371468, // muted indigo — neither alarm-red nor confident-green
+          description:`Would have locked ${_whb} (${data.wouldHaveBeenTier||'—'} tier). Tier-1 only mode active — skipped.`,
+          fields:[
+            {name:'Would-have-been',value:_whb,inline:true},
+            {name:'Tier',value:data.wouldHaveBeenTier||'—',inline:true},
+            {name:'Engine Confidence',value:`${data.confidence||0}%`,inline:true},
+            {name:'Strike',value:`$${(Number(data.strike)||0).toFixed(2)}`,inline:true},
+            {name:'Price',value:`$${(Number(data.price)||0).toFixed(2)}`,inline:true},
+            {name:'Regime',value:data.regime||'—',inline:true},
+            {name:'Quality',value:`${data.quality||0}/100`,inline:true},
+            {name:'FGT',value:`${(Number(data.fgtAbs)||0).toFixed(1)}/4 ${data.fgtDir||''}`,inline:true},
+            {name:'Record',value:data.taraRecord||'—',inline:false},
+          ],
+          footer:{text:`${TARA_VERSION_DISPLAY}  |  tier-1 skip`},
+          timestamp:new Date().toISOString(),
+        };
+      }
+
       else if(type==='TARA_SITOUT')embed={
         title:`TARA · ${_assetTag} · SITTING OUT`,
         color:14935562, // amber
@@ -23319,7 +23349,11 @@ function TaraApp(){
         result:null,
       };
       setTaraCallLog(prev=>{
-        if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType))return prev;
+        // V9.10.4: dedup includes asset so BTC + ETH writes for the same window don't
+        //   clobber each other. Was missing asset → cross-asset writes at the same window
+        //   slot silently dropped the second one.
+        const _entryAsset=_entry.asset||'BTC';
+        if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType&&(e.asset||'BTC')===_entryAsset))return prev;
         return [...prev,_entry].slice(-500);
       });
       return;
@@ -23365,7 +23399,9 @@ function TaraApp(){
           result:null, // populated at rollover
         };
         setTaraCallLog(prev=>{
-          if(prev.some(e=>e&&e.windowId===_sitWid&&e.windowType===windowType))return prev;
+          // V9.10.4: per-asset dedup (see V9.10.4 comment above)
+          const _sitAsset=_entry.asset||'BTC';
+          if(prev.some(e=>e&&e.windowId===_sitWid&&e.windowType===windowType&&(e.asset||'BTC')===_sitAsset))return prev;
           return [...prev,_entry].slice(-500);
         });
       }
@@ -23555,7 +23591,11 @@ function TaraApp(){
           maxPay:Number(maxPayout)||0,
         };
         setTaraCallLog(prev=>{
-          if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType))return prev;
+          // V9.10.4: per-asset dedup so BTC + ETH snapshots for the same window slot
+          //   don't clobber each other. Was bug: when both assets locked the same
+          //   window, second one's entry got silently dropped.
+          const _logAsset=_entry.asset||'BTC';
+          if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType&&(e.asset||'BTC')===_logAsset))return prev;
           return [...prev,_entry].slice(-500);
         });
       }catch(e){try{console.error('[V7.10.1] _logSnapshotEntry failed',e);}catch(_){}}
@@ -24246,9 +24286,16 @@ function TaraApp(){
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
       //   exists (from a re-render, race condition, or another device replicating to cloud),
-      //   skip. WindowId+type is unique per window so this is the correct dedup key.
+      //   skip. Dedup key is asset+windowId+windowType.
+      // V9.10.4: ADDED asset to dedup key. Previously was windowId+windowType only — meant
+      //   BTC + ETH entries for the same time-aligned 15m window silently dropped the
+      //   second one. User reported "memory iffy, last 3 windows didn't log" — root cause.
+      //   Cross-tab merge and load-time sanitize were already using the correct 3-field
+      //   key (per V8.8.6), but local writes from THIS tab were using the broken 2-field
+      //   key. So a BTC lock at 00:30 + ETH lock at 00:30 → only one entry saved.
       setTaraCallLog(prev=>{
-        if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType))return prev;
+        const _commitAsset=_entry.asset||'BTC';
+        if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType&&(e.asset||'BTC')===_commitAsset))return prev;
         return [...prev,_entry].slice(-500);
       });
     } else {
@@ -24397,17 +24444,42 @@ function TaraApp(){
         //   confidence tier (single, structural-led, super-confluence, etc).
         tier:snap.tier||baseData.tier||null,
       };
-      // V9.0: SUPPRESS Discord broadcast for override commits. When the lock is the
-      //   V8.9.2 directional promotion of what would have been NO_TRADE or SIT_OUT
-      //   (wasOverriddenNoTrade or wasOverriddenSitOut flags), skip the LOCK message.
-      //   These are low-conviction commits with cautions attached — the user wants
-      //   to see them on-screen but not push to Discord (where they're noise).
-      const _isOverrideCommit=snap?.wasOverriddenNoTrade===true||snap?.wasOverriddenSitOut===true;
-      if(_isOverrideCommit){
-        // skip Discord push — still set the broadcastRef flag so we don't retry
+      // V9.10.3: Discord broadcast philosophy reworked. User explicit request:
+      //   "I want every lock to fire as it shows on the screen. if tier 1 is enabled
+      //    and its a sitout, it can send that. but as long as tara is locking up or
+      //    down it should be sent to discord."
+      //
+      //   New rules:
+      //   • snap.call === 'UP' or 'DOWN' → ALWAYS broadcast TARA_LOCK, regardless of
+      //     override flags. Even NO_TRADE / SIT_OUT overrides that promote a direction
+      //     get broadcast (with caution text surfaced in the embed). Screen and Discord
+      //     stay in sync.
+      //   • snap.call === 'SIT_OUT' + wasOverriddenSitOut + wouldHaveBeen filled
+      //     (Tier-1 Only Mode skip) → broadcast TARA_SKIP showing what was rejected.
+      //   • snap.call === 'SIT_OUT' otherwise (engine sit-out, edge-too-low, etc.)
+      //     → stay silent per V7.0.8 (non-actionable noise).
+      //
+      //   Pre-V9.10.3: any override commit suppressed Discord. Result: when Tier-1
+      //   Only Mode + screen showed "LOCKED DOWN 77% NO-GO-DATA", Discord was silent
+      //   for hours. User missed entries they thought they were getting notified about.
+      const _wouldHaveBeen=snap?.wouldHaveBeen;
+      const _isTier1Skip=snap?.call==='SIT_OUT'&&snap?.wasOverriddenSitOut===true&&(_wouldHaveBeen==='UP'||_wouldHaveBeen==='DOWN');
+      if(snap?.call==='UP'||snap?.call==='DOWN'){
+        // Always broadcast directional locks. Override cautions surface in the embed.
+        broadcastToDiscord('TARA_LOCK',{..._lockBaseData,dir:snap.call,confidence:snap.confidence,reason:snap.reason,gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0,reversalRisk:lockedCallRef.current?.reversalRisk||null});
+      }else if(_isTier1Skip){
+        // Tier-1 Only Mode skipped this lock — tell Discord what was rejected.
+        broadcastToDiscord('TARA_SKIP',{
+          ..._lockBaseData,
+          wouldHaveBeen:_wouldHaveBeen,
+          wouldHaveBeenTier:snap?.wouldHaveBeenTier||snap?.tier||'unknown',
+          reason:snap.reason||'Tier-1 only mode active',
+          confidence:snap.confidence||0,
+        });
         taraBroadcastRef.current.sentLock=true;
       }else{
-        broadcastToDiscord('TARA_LOCK',{..._lockBaseData,dir:snap.call,confidence:snap.confidence,reason:snap.reason,gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0,reversalRisk:lockedCallRef.current?.reversalRisk||null});
+        // Engine sit-out — stay silent. Just mark broadcast as sent so we don't retry.
+        taraBroadcastRef.current.sentLock=true;
       }
     }
     // SITOUT: V7.0.8 — DISABLED per user request. SITOUT means Tara decided NOT to trade,
@@ -25517,7 +25589,9 @@ function TaraApp(){
       />
       
       {/* V134: Session-start status check */}
-      <SessionStartCheck open={showSessionStart} onClose={()=>setShowSessionStart(false)} windowType={windowType} scorecards={scorecards} tradeLog={tradeLog} regime={analysis?.regime} velocityRegime={analysis?.velocityRegime} calibration={calibration} baselineDrift={baselineDrift} resetToLatestBaseline={resetToLatestBaseline} runSyncWithProgress={runSyncWithProgress} syncState={syncState} resetDirectionalBias={resetDirectionalBias} resetFreshStart={resetFreshStart}/>
+      {/* V9.10.3: SessionStartCheck removed per user request — was triggered by the
+          pulsing 📋 button (also removed). Component definition retained in the file
+          but unused; can be cleaned up in a follow-up. */}
       {showStats&&<StatsView tradeLog={tradeLog} scorecards={scorecards} taraCallLog={displayedCallLog} onClose={()=>setShowStats(false)} timeFormat={timeFormat}/>}
       {/* V9.2.2: Dedicated Analytics Page */}
       {analyticsPageOpen&&<TaraAnalyticsPage taraCallLog={taraCallLog} taraMLModel={taraMLModel} onClose={()=>setAnalyticsPageOpen(false)} timeFormat={timeFormat}/>}
@@ -25662,7 +25736,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.10.2
+              9.10.4
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
@@ -25825,7 +25899,10 @@ function TaraApp(){
                 />
               </div>
             )}
-            <button onClick={()=>setShowSessionStart(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 transition-all text-xs font-bold animate-pulse'} style={{boxShadow:'0 0 12px rgba(16,185,129,0.25)'}} title="Session Status Check">📋</button>
+            {/* V9.10.3: Session start check button removed per user request. The
+                pulsing 📋 button used to open a pre-trading checklist modal. State +
+                modal definition still exist in the file for now but are unreachable
+                from UI. Will fully clean up in a future ship if confirmed not needed. */}
             {/* V2.7: Stats button — gold accent matches the analytics view.
                 V3.2.2: hidden on tiny screens (<sm) to free header space. */}
             <button onClick={()=>setShowStats(true)} className={'hidden sm:flex p-1.5 rounded-lg transition-colors text-xs font-bold'} style={{
@@ -25865,7 +25942,10 @@ function TaraApp(){
               _popup.document.write(`<!DOCTYPE html><html><head><title>Tara Widget</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0E100F;color:#E8E9E4;font-family:Inter,system-ui,sans-serif;overflow:hidden;cursor:move;-webkit-app-region:drag}#w{padding:10px 14px;height:100vh;display:flex;flex-direction:column;justify-content:center;gap:4px}.r1{display:flex;align-items:center;justify-content:space-between;gap:8px}.dir{font-size:18px;font-weight:800;letter-spacing:0.04em}.up{color:#6ee7b7}.dn{color:#f472b6}.scan{color:#666;font-style:italic;font-size:12px}.price{font-size:14px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums}.r2{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#E8E9E466}.asset{font-weight:700;letter-spacing:0.08em}.streak-w{color:#6ee7b7;font-weight:700}.streak-l{color:#f472b6;font-weight:700}</style></head><body><div id="w"><div class="r1"><span id="call" class="scan">scanning</span><span id="price" class="price">---</span></div><div class="r2"><span id="asset" class="asset">BTC 15m</span><span id="timer">--:--</span><span id="streak"></span></div></div><script>setInterval(()=>{try{const o=window.opener;if(!o||o.closed){close();return;}const d=o.__taraWidgetData;if(!d)return;const c=document.getElementById('call');const p=document.getElementById('price');const a=document.getElementById('asset');const t=document.getElementById('timer');const s=document.getElementById('streak');if(d.dir==='UP'){c.className='dir up';c.textContent='▲ UP '+d.conf+'%';}else if(d.dir==='DOWN'){c.className='dir dn';c.textContent='▼ DN '+d.conf+'%';}else{c.className='scan';c.textContent='scanning...';}p.textContent='$'+Number(d.price||0).toLocaleString(undefined,{maximumFractionDigits:0});a.textContent=d.asset+' '+d.wt;t.textContent=d.timer;if(d.streakType&&d.streakCount>=3){s.className=d.streakType==='WIN'?'streak-w':'streak-l';s.textContent=(d.streakType==='WIN'?'🔥':'⚠')+d.streakCount+(d.streakType==='WIN'?'W':'L');}else{s.textContent='';}}catch(_){}},500);<\/script></body></html>`);
               _popup.document.close();
             }} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-emerald-400 transition-colors'} title="Widget Mode (mini popup)">⬡</button>
-            <button onClick={()=>setShowHelp(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-white transition-colors'}><IC.Help className="w-3.5 h-3.5"/></button>
+            {/* V9.10.3: What's New button removed per user request. Modal at L27804
+                still exists but unreachable from UI. Modal definition can be cleaned
+                up in a follow-up. The "How Tara Works" guide button (showGuide) and
+                Best Practices remain. */}
           </div>
         </div>
       </header>
