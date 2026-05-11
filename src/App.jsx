@@ -1000,10 +1000,18 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.11-v9.10.5-timeseries-and-cleanup';
+const BASELINE_VERSION='2026.05.11-v9.10.6-raise-log-cap-to-2000';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.10.5';
+const TARA_VERSION_DISPLAY='Tara 9.10.6';
+
+// V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
+//   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
+//   = 499) and new entries were silently dropping oldest one-for-one. At ~150-200
+//   entries/day across BTC+ETH the new 2000 cap gives ~10-13 days of headroom. If
+//   localStorage quota is exceeded the setItem try/catch swallows it and cloud sync
+//   continues; on next load, hydration merges cloud→memory so nothing's lost.
+const TARA_CALL_LOG_CAP=2000;
 
 // V6.5.8: ASSET_CONFIG — per-asset settings for multi-pair support. Tara was BTC-only
 //   through V6.5.7. This table parameterizes everything that changes per asset:
@@ -16683,17 +16691,17 @@ function TaraApp(){
       if(!ex)byKey.set(k,e);
       else if(_shouldReplace(ex,e))byKey.set(k,e);
     });
-    return Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-500);
+    return Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-TARA_CALL_LOG_CAP);
   },[]);
   useEffect(()=>{
-    try{localStorage.setItem('taraCallLog_v1',JSON.stringify(taraCallLog.slice(-500)));}catch(e){}
+    try{localStorage.setItem('taraCallLog_v1',JSON.stringify(taraCallLog.slice(-TARA_CALL_LOG_CAP)));}catch(e){}
     if(_callLogHydratedRef.current){
       // V8.3: Switch from simple cloudWriteDebounced to RMW. Reads current cloud first,
       //   merges with local, writes union — protects against last-write-wins clobbering
       //   when multiple tabs (BTC + ETH) write to the same memory/taraCallLog doc.
       cloudWriteDebouncedRMW(
         'memory/taraCallLog',
-        ()=>taraCallLogRef.current.slice(-500),
+        ()=>taraCallLogRef.current.slice(-TARA_CALL_LOG_CAP),
         (cloudData,localEntries)=>{
           const cloudEntries=(cloudData&&Array.isArray(cloudData.entries))?cloudData.entries:[];
           const merged=_mergeCallLogEntries(cloudEntries,localEntries);
@@ -16873,7 +16881,7 @@ function TaraApp(){
         // Detect if prev itself had duplicates that backfill would now collapse
         if(!changed&&Array.from(byKey.values()).length!==prev.length)changed=true;
         if(!changed)return prev;
-        return Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-500);
+        return Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-TARA_CALL_LOG_CAP);
       });
       // V8.1: Force-flush any pending pre-hydration writes. Without this, calls made
       //   during the first 1-3s of page load (before cloudWatch hydrates) were silently
@@ -16889,7 +16897,7 @@ function TaraApp(){
             if(_curr.length>0){
               cloudWriteDebouncedRMW(
                 'memory/taraCallLog',
-                ()=>taraCallLogRef.current.slice(-500),
+                ()=>taraCallLogRef.current.slice(-TARA_CALL_LOG_CAP),
                 (cloudData,localEntries)=>{
                   const cloudEntries=(cloudData&&Array.isArray(cloudData.entries))?cloudData.entries:[];
                   const merged=_mergeCallLogEntries(cloudEntries,localEntries);
@@ -22943,7 +22951,7 @@ function TaraApp(){
         //   slot silently dropped the second one.
         const _entryAsset=_entry.asset||'BTC';
         if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType&&(e.asset||'BTC')===_entryAsset))return prev;
-        return [...prev,_entry].slice(-500);
+        return [...prev,_entry].slice(-TARA_CALL_LOG_CAP);
       });
       return;
     }
@@ -22991,7 +22999,7 @@ function TaraApp(){
           // V9.10.4: per-asset dedup (see V9.10.4 comment above)
           const _sitAsset=_entry.asset||'BTC';
           if(prev.some(e=>e&&e.windowId===_sitWid&&e.windowType===windowType&&(e.asset||'BTC')===_sitAsset))return prev;
-          return [...prev,_entry].slice(-500);
+          return [...prev,_entry].slice(-TARA_CALL_LOG_CAP);
         });
       }
       return;
@@ -23185,7 +23193,7 @@ function TaraApp(){
           //   window, second one's entry got silently dropped.
           const _logAsset=_entry.asset||'BTC';
           if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType&&(e.asset||'BTC')===_logAsset))return prev;
-          return [...prev,_entry].slice(-500);
+          return [...prev,_entry].slice(-TARA_CALL_LOG_CAP);
         });
       }catch(e){try{console.error('[V7.10.1] _logSnapshotEntry failed',e);}catch(_){}}
     };
@@ -23885,7 +23893,7 @@ function TaraApp(){
       setTaraCallLog(prev=>{
         const _commitAsset=_entry.asset||'BTC';
         if(prev.some(e=>e&&e.windowId===_wid&&e.windowType===windowType&&(e.asset||'BTC')===_commitAsset))return prev;
-        return [...prev,_entry].slice(-500);
+        return [...prev,_entry].slice(-TARA_CALL_LOG_CAP);
       });
     } else {
       // V5.6: Mid-formation persist — refresh during ANALYZING/FORMING restores sample
@@ -24605,7 +24613,7 @@ function TaraApp(){
         savedAt:Date.now(),
         sourceDevice:_deviceLabel,
         data:{
-          taraCallLog:(taraCallLogRef.current||[]).slice(-500),
+          taraCallLog:(taraCallLogRef.current||[]).slice(-TARA_CALL_LOG_CAP),
           pastWindows:(Array.isArray(pastWindows)?pastWindows:[]).slice(-50),
           lifetimePnL:Number(_pnlRef.current)||0,
           pnlUpdatedAt:Number(_pnlUpdatedAtRef.current)||Date.now(),
@@ -24759,7 +24767,7 @@ function TaraApp(){
   //   to live cloud paths, replacing whatever's there. No merge.
   const forcePushToCloud=async()=>{
     if(baselineBusy||forceResyncing)return;
-    const _log=(taraCallLogRef.current||[]).slice(-500);
+    const _log=(taraCallLogRef.current||[]).slice(-TARA_CALL_LOG_CAP);
     const _logCount=_log.length;
     const _wins=_log.filter(e=>e&&e.result==='WIN').length;
     const _losses=_log.filter(e=>e&&e.result==='LOSS').length;
@@ -25347,7 +25355,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.10.5
+              9.10.6
             </span>
             {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
                         Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
