@@ -1,11 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc, deleteDoc, onSnapshot, serverTimestamp, runTransaction } from 'firebase/firestore';
-// V10.1.0: Supabase client for the post-Firestore migration. Loaded alongside
-//   Firestore during the parallel-write phase (Sessions 1-3 of the migration
-//   spec at ~L40). Once Session 4 removes Firestore, this becomes the only
-//   cloud backend. Import is conditional via try/catch at init time so a
-//   build without @supabase/supabase-js still runs (degrades to Firestore-only).
+// V10.2.0: Firestore RETIRED. Supabase is now the only cloud backend.
+//   Removed imports: 'firebase/app', 'firebase/firestore'. The Firebase package
+//   may still be in package.json but is no longer imported or used at runtime.
+//   Was a parallel-write backend during Sessions 1-2; now fully removed in Session 3+4.
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 // ═══════════════════════════════════════
@@ -37,10 +34,8 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 //
 // Test-mode caveat: Firestore rules are wide open for ~30 days. Lock down in V5.7 with
 // proper rules.
-const FIREBASE_CONFIG={apiKey:"AIzaSyD8jltDNdmXPE0JolUSX6fXzSQUdsYjLcY",authDomain:"tara-app-ee39d.firebaseapp.com",projectId:"tara-app-ee39d",storageBucket:"tara-app-ee39d.firebasestorage.app",messagingSenderId:"512450573817",appId:"1:512450573817:web:b1659b8f28f894900f7928"};
-let _fbApp=null,_fbDb=null;
-try{_fbApp=initializeApp(FIREBASE_CONFIG);_fbDb=getFirestore(_fbApp);console.info('[Firestore] init ok — shared Tara, no namespacing');}
-catch(e){console.warn('[Firestore] init failed — falling back to localStorage only:',e?.message);}
+const FIREBASE_CONFIG=null; // V10.2.0: retired. Kept declared to avoid breaking any leftover references; set to null permanently.
+let _fbApp=null,_fbDb=null; // V10.2.0: permanently null. All cloud ops now route through Supabase. See `_sbClient` below.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // V10.1.0 — SUPABASE MIGRATION SPEC (locked 2026-05-14)
@@ -406,12 +401,10 @@ const _cloudSupabaseFlushAllRMW=()=>{
   return _flushed;
 };
 
-const _fbDoc=(path)=>{
-  if(!_fbDb)return null;
-  // V5.6.3: paths are 2-segment globals (collection/doc). One Tara, everyone shares.
-  const segs=path.split('/');
-  return doc(_fbDb,...segs);
-};
+// V10.2.0: stubbed. Firestore retired; `doc()` from firebase/firestore is no longer
+//   imported. Returns null so any leftover reference fails the standard `if(!ref)` guard
+//   that all helpers used to perform. No-op safety net rather than removed-and-crash.
+const _fbDoc=(_path)=>null;
 // V5.6.1: Cloud sync status — subscribers (React components) get notified on state change.
 //   States: 'idle' (no recent activity), 'writing' (debounced or in-flight), 'ok' (last
 //   write succeeded), 'error' (last write/read failed). Used for a visible indicator dot.
@@ -419,7 +412,8 @@ const _fbDoc=(path)=>{
 //   and changes from any device propagate within ~1s without refresh. If listeners = 0
 //   but Firestore is initialized, something's wrong (rules, network, etc.).
 const _cloudSyncListeners=new Set();
-let _cloudSyncStatus={state:_fbDb?'idle':'disabled',lastOk:null,lastError:null,writes:0,reads:0,listeners:0};
+// V10.2.0: tracks Supabase health (was Firestore). State terminology unchanged so UI components don't need updating.
+let _cloudSyncStatus={state:_sbClient?'idle':'disabled',lastOk:null,lastError:null,writes:0,reads:0,listeners:0};
 const _setCloudStatus=(patch)=>{_cloudSyncStatus={..._cloudSyncStatus,...patch};_cloudSyncListeners.forEach(l=>l(_cloudSyncStatus));};
 const subscribeCloudStatus=(fn)=>{_cloudSyncListeners.add(fn);fn(_cloudSyncStatus);return()=>_cloudSyncListeners.delete(fn);};
 // V8.8.7: Active-write counter. Each cloudWrite / cloudWriteDebouncedRMW transaction
@@ -669,155 +663,52 @@ if(_crossTab){
 const subscribeToPeerTabs=(fn)=>{_peerListeners.add(fn);fn(Array.from(_peerTabs.entries()));return()=>_peerListeners.delete(fn);};
 const getCurrentTabId=()=>_tabId;
 
+// V10.2.0: cloudRead now reads from Supabase. Signature unchanged so call sites work as-is.
 const cloudRead=async(path)=>{
-  const ref=_fbDoc(path);if(!ref)return null;
+  if(!path)return null;
   try{
-    const s=await getDoc(ref);
+    const data=await cloudSupabaseRead(path);
     _setCloudStatus({state:'ok',lastOk:Date.now(),reads:_cloudSyncStatus.reads+1});
-    return s.exists()?s.data():null;
+    return data;
   }catch(e){
-    console.warn('[Firestore read failed]',path,e?.message);
+    console.warn('[Cloud read failed]',path,e?.message);
     _setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});
     return null;
   }
 };
+// V10.2.0: cloudWrite now writes to Supabase only. Was dual-write (Firestore + Supabase)
+//   in Session 2. Firestore retired. Call sites still see the same (path, data) signature.
 const cloudWrite=async(path,data)=>{
-  // V10.1.0 Session 2 — PARALLEL SUPABASE WRITE.
-  //   Mirrors the RMW helper's pattern. Every one-shot Firestore write also
-  //   dispatches a parallel Supabase upsert. Call sites untouched.
-  //
-  //   Use cases covered: Save as Baseline, Apply Baseline, Force Push (Sync tab),
-  //   and any direct cloudWrite() invocations. After this change, the Sync tab's
-  //   Save-as-Baseline action writes to BOTH backends — so even if Firestore
-  //   silently fails (quota), Supabase still receives the data.
-  try{cloudSupabaseWrite(path,data);}catch(_){}
-  const ref=_fbDoc(path);if(!ref)return false;
-  _incActiveWrites(); // V8.8.7
+  if(!path)return false;
+  _incActiveWrites();
   let _ok=false;
   try{
-    await setDoc(ref,{...data,_updatedAt:serverTimestamp()});
-    _ok=true;
-    return true;
+    _ok=await cloudSupabaseWrite(path,data);
+    if(!_ok){
+      _setCloudStatus({state:'error',lastError:{path,message:'Supabase write returned false',at:Date.now()}});
+    }
+    return _ok;
   }catch(e){
-    console.warn('[Firestore write failed]',path,e?.message);
+    console.warn('[Cloud write failed]',path,e?.message);
     _setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});
     return false;
   }finally{
-    _decActiveWrites(_ok); // V8.8.7
+    _decActiveWrites(_ok);
   }
 };
+// V10.2.0: cloudDelete now removes from Supabase. Signature unchanged.
 const cloudDelete=async(path)=>{
-  const ref=_fbDoc(path);if(!ref)return false;
-  try{await deleteDoc(ref);_setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});return true;}
-  catch(e){console.warn('[Firestore delete failed]',path,e?.message);_setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});return false;}
+  if(!path)return false;
+  try{
+    const ok=await cloudSupabaseDelete(path);
+    if(ok)_setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
+    return ok;
+  }catch(e){
+    console.warn('[Cloud delete failed]',path,e?.message);
+    _setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});
+    return false;
+  }
 };
-
-// ═══════════════════════════════════════════════════════════════════════════
-// V10.1.0 — ONE-SHOT FIRESTORE → SUPABASE MIGRATION (Session 2)
-// ═══════════════════════════════════════════════════════════════════════════
-// Reads every Firestore document path the app uses and upserts it into
-//   Supabase tara_state. Run from DevTools console:
-//
-//     window.__taraMigrate('dryrun')  → reads Firestore, logs sizes, NO writes
-//     window.__taraMigrate('real')    → reads Firestore + upserts to Supabase
-//
-// Idempotent: Supabase upsert is keyed on doc_path PK. Multiple runs just
-//   overwrite each path with the latest Firestore value.
-//
-// IMPORTANT: This migrates whatever is currently in Firestore. If local data
-//   is ahead of cloud (Sync tab shows drift), click "Save as Baseline" FIRST
-//   to push local → Firestore, then run this migration to copy Firestore →
-//   Supabase. Otherwise local-only entries will be lost in transit.
-//
-// Remove this hook in Session 4 once Firestore is fully retired.
-const _MIGRATION_PATHS=[
-  'state/currentLock',
-  'state/lifetimePnL',
-  'memory/taraCallLog',
-  'history/pastWindows',
-  'baseline/canonical',
-  'learnings/tara',
-  'learnings/taraWeights',
-  'learnings/regimeMemory',
-];
-
-const _taraMigrate=async(mode='dryrun')=>{
-  if(mode!=='dryrun'&&mode!=='real'){
-    console.error('[Migration] mode must be "dryrun" or "real". Got:',mode);
-    return;
-  }
-  if(!_fbDb){console.error('[Migration] Firestore not initialized — cannot read.');return;}
-  if(!_sbClient){console.error('[Migration] Supabase not initialized — cannot write.');return;}
-
-  console.group(`[Migration] ${mode.toUpperCase()} — Firestore → Supabase`);
-  console.info('Paths to migrate:',_MIGRATION_PATHS.length);
-  const _results=[];
-
-  for(const path of _MIGRATION_PATHS){
-    const _t0=Date.now();
-    try{
-      const _data=await cloudRead(path);
-      const _readMs=Date.now()-_t0;
-
-      if(_data===null){
-        console.warn(`  ⊘ ${path} — empty (no doc in Firestore, skipping)`);
-        _results.push({path,status:'empty',readMs:_readMs});
-        continue;
-      }
-
-      // Strip Firestore-only metadata fields before writing to Supabase.
-      //   _updatedAt is a Firestore serverTimestamp (not portable). The Supabase
-      //   write helper sets its own updated_at column.
-      const _cleaned={..._data};
-      delete _cleaned._updatedAt;
-
-      let _sizeBytes=0;
-      try{_sizeBytes=new Blob([JSON.stringify(_cleaned)]).size;}catch(_){_sizeBytes=-1;}
-      const _entryCount=Array.isArray(_cleaned.entries)
-        ?_cleaned.entries.length
-        :(_cleaned.value!==undefined?1:Object.keys(_cleaned).length);
-      const _shape=Array.isArray(_cleaned.entries)?'entries':'keys';
-
-      console.info(`  ✓ ${path} — ${(_sizeBytes/1024).toFixed(1)} KB, ${_entryCount} ${_shape}, read in ${_readMs}ms`);
-
-      if(mode==='real'){
-        const _w0=Date.now();
-        const _ok=await cloudSupabaseWrite(path,_cleaned);
-        const _writeMs=Date.now()-_w0;
-        if(_ok){
-          // Verify by reading back from Supabase.
-          const _back=await cloudSupabaseRead(path);
-          const _verified=_back!==null;
-          console.info(`    ↳ wrote to Supabase in ${_writeMs}ms, verified=${_verified}`);
-          _results.push({path,status:_verified?'ok':'wrote-but-readback-empty',sizeBytes:_sizeBytes,entryCount:_entryCount,writeMs:_writeMs});
-        }else{
-          console.error(`    ↳ Supabase write FAILED for ${path}`);
-          _results.push({path,status:'write-failed',sizeBytes:_sizeBytes});
-        }
-      }else{
-        _results.push({path,status:'dryrun-ok',sizeBytes:_sizeBytes,entryCount:_entryCount});
-      }
-    }catch(e){
-      console.error(`  ✗ ${path} — error:`,e?.message);
-      _results.push({path,status:'error',error:e?.message});
-    }
-  }
-
-  console.groupEnd();
-  console.info('[Migration] Summary:');
-  try{console.table(_results);}catch(_){console.info(_results);}
-
-  if(mode==='dryrun'){
-    console.info('[Migration] Dry run complete. To execute for real:  window.__taraMigrate("real")');
-  }else{
-    const _okCount=_results.filter(r=>r.status==='ok').length;
-    const _failCount=_results.filter(r=>['write-failed','error','wrote-but-readback-empty'].includes(r.status)).length;
-    console.info(`[Migration] Real run complete: ${_okCount} ok, ${_failCount} failed/issues out of ${_results.length}.`);
-  }
-  return _results;
-};
-
-try{if(typeof window!=='undefined'){window.__taraMigrate=_taraMigrate;console.info('[Migration] hook ready — run window.__taraMigrate("dryrun") in console');}}catch(_){}
 
 
 // ── V9.10.7: AUDIT LOG for silent log-write failures ────────────────────────
@@ -882,24 +773,30 @@ try{if(typeof window!=='undefined'){window._tara_audit=()=>_loadAuditBuffer();}}
 //   Returns an unsubscribe function the caller stores in a useEffect cleanup.
 // V5.6.3: Tracks active listener count in sync status — so the badge can show whether
 //   real-time sync is actually established vs. just one-shot reads happening.
+// V10.2.0: cloudWatch now uses Supabase Realtime (postgres_changes). Mirrors the prior
+//   Firestore onSnapshot semantics: an initial read fires the callback once with current
+//   data, then subsequent row changes stream in. Callback signature preserved
+//   (data, status) — status is one of 'ok'|'error'|'disabled'.
 const cloudWatch=(path,callback)=>{
-  const ref=_fbDoc(path);
-  if(!ref){callback(null,'disabled');return()=>{};}
+  if(!path||typeof callback!=='function'){try{callback&&callback(null,'disabled');}catch(_){}return()=>{};}
   _setCloudStatus({listeners:_cloudSyncStatus.listeners+1});
-  const unsub=onSnapshot(ref,
-    (snap)=>{
-      _setCloudStatus({state:'ok',lastOk:Date.now(),reads:_cloudSyncStatus.reads+1});
-      callback(snap.exists()?snap.data():null,'ok');
-    },
-    (err)=>{
-      console.warn('[Firestore listen failed]',path,err?.message);
-      _setCloudStatus({state:'error',lastError:{path,message:err?.message,at:Date.now()}});
-      callback(null,'error');
-    }
-  );
+  // Initial read so the callback fires with current state (matches old onSnapshot behavior).
+  cloudSupabaseRead(path).then(d=>{
+    _setCloudStatus({state:'ok',lastOk:Date.now(),reads:_cloudSyncStatus.reads+1});
+    try{callback(d,'ok');}catch(_){}
+  }).catch(err=>{
+    console.warn('[Cloud watch initial-read failed]',path,err?.message);
+    _setCloudStatus({state:'error',lastError:{path,message:err?.message,at:Date.now()}});
+    try{callback(null,'error');}catch(_){}
+  });
+  // Subscribe to subsequent changes.
+  const unsub=cloudSupabaseWatch(path,(d)=>{
+    _setCloudStatus({state:'ok',lastOk:Date.now(),reads:_cloudSyncStatus.reads+1});
+    try{callback(d,'ok');}catch(_){}
+  });
   return()=>{
     _setCloudStatus({listeners:Math.max(0,_cloudSyncStatus.listeners-1)});
-    unsub();
+    try{unsub();}catch(_){}
   };
 };
 // Coalesces rapid updates per-path into a single Firestore write (saves quota + bandwidth).
@@ -949,90 +846,49 @@ const cloudFlushAll=()=>{
 // getLocalData is a function (not a value) so we get the freshest local state when
 // the timer fires, even if state changed during the debounce window.
 // mergeFn returns null to skip the write entirely (e.g., no changes after merge).
+// V10.2.0: now Supabase-only. Was dual-write (Firestore transaction + Supabase upsert)
+//   during Session 2. Firestore retired. This helper is a thin wrapper over
+//   cloudSupabaseWriteDebouncedRMW which implements optimistic-concurrency RMW
+//   (read → merge → conditional update keyed on updated_at). The `_writeQueueRMW`
+//   / `_writePendingRMW` Maps remain referenced by `_cloudFlushAllRMW` for the
+//   tab-close grace flush — kept in sync below for that use case only.
 const _writeQueueRMW=new Map();
 const _writePendingRMW=new Map();
 const cloudWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
-  // V10.1.0 Session 2 — PARALLEL SUPABASE WRITE.
-  //   Every Firestore RMW write also dispatches a Supabase RMW write with the
-  //   SAME args (path, getLocalData, mergeFn, delayMs). Each backend independently
-  //   transacts against its own current state. Convergence happens naturally:
-  //   identical local data → identical merged result on both sides.
-  //
-  //   Failures isolated: Firestore failing doesn't block Supabase, and vice versa.
-  //   Debouncing per-path per-backend means rapid re-invocations collapse correctly.
-  //
-  //   No call site changes needed. Replaces the explicit per-site parallel-write
-  //   pattern (which was only wired at state/lifetimePnL during Session 1).
-  try{cloudSupabaseWriteDebouncedRMW(path,getLocalData,mergeFn,delayMs);}catch(_){}
+  // Mirror into the queue maps so the tab-close flush has visibility.
   if(_writeQueueRMW.has(path))clearTimeout(_writeQueueRMW.get(path));
   _writePendingRMW.set(path,{getLocalData,mergeFn});
-  const tid=setTimeout(async()=>{
+  const tid=setTimeout(()=>{
     _writeQueueRMW.delete(path);
     _writePendingRMW.delete(path);
-    const ref=_fbDoc(path);
-    if(!ref||!_fbDb){
-      // Firestore not initialized — best-effort write of local data without merge
-      try{
-        const localData=getLocalData();
-        const merged=mergeFn(null,localData);
-        if(merged!=null)await cloudWrite(path,merged);
-      }catch(_){}
-      return;
-    }
-    try{
-      _incActiveWrites(); // V8.8.7
-      let _ok=false;
-      try{
-        // True atomic transaction. Firestore auto-retries (up to 5x by default) if
-        //   another tab/device modifies the doc between our read and write inside the tx.
-        //   This guarantees that concurrent writes serialize — no clobbering possible.
-        await runTransaction(_fbDb,async(tx)=>{
-          const snap=await tx.get(ref);
-          const cloudData=snap.exists()?snap.data():null;
-          const localData=getLocalData();
-          const merged=mergeFn(cloudData,localData);
-          if(merged!=null){
-            tx.set(ref,{...merged,_updatedAt:serverTimestamp()});
-          }
-        });
-        _ok=true;
-      }finally{
-        _decActiveWrites(_ok); // V8.8.7
-      }
-    }catch(e){
-      try{console.warn('[V8.3] RMW transaction failed',path,e?.message);}catch(_){}
-      _setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});
-    }
-  },delayMs);
+  },delayMs+50);
   _writeQueueRMW.set(path,tid);
+  // Actual write goes through the Supabase RMW helper.
+  try{cloudSupabaseWriteDebouncedRMW(path,getLocalData,mergeFn,delayMs);}catch(_){}
 };
 // V8.3: Force-flush all RMW writes synchronously on tab close. Cloud reads can't
 //   complete in pagehide grace window, so we write local data without merge — better
 //   than losing the write entirely. cloudWatch on other tabs will re-merge.
+// V10.2.0: tab-close grace flush. Was a Firestore-only flush that wrote local data
+//   without merge. Now delegates to the Supabase-side flush which performs the same
+//   role for Supabase pending RMW writes. The Maps maintained above are also cleared.
 const _cloudFlushAllRMW=()=>{
-  let flushed=0;
-  for(const[path,tid]of _writeQueueRMW.entries()){
-    clearTimeout(tid);
-    const entry=_writePendingRMW.get(path);
-    if(entry&&typeof entry.getLocalData==='function'){
-      try{
-        const localData=entry.getLocalData();
-        // Call merge with null cloudData — caller's mergeFn handles this case
-        const merged=entry.mergeFn(null,localData);
-        if(merged!=null){cloudWrite(path,merged);flushed++;}
-      }catch(_){}
-    }
-  }
+  let cleared=0;
+  for(const[,tid]of _writeQueueRMW.entries()){clearTimeout(tid);cleared++;}
   _writeQueueRMW.clear();
   _writePendingRMW.clear();
-  return flushed;
+  try{cleared+=_cloudSupabaseFlushAllRMW();}catch(_){}
+  return cleared;
 };
 // Combined flush — called on tab close
 // V10.1.0: cloudFlushAllCombined now also drains pending Supabase RMW writes.
 //   During the parallel-write phase, this fires both Firestore and Supabase
 //   pending writes on tab close. Once Session 4 removes Firestore, this will
 //   simplify back to just _cloudSupabaseFlushAllRMW.
-const cloudFlushAllCombined=()=>cloudFlushAll()+_cloudFlushAllRMW()+_cloudSupabaseFlushAllRMW();
+// V10.2.0: simplified — _cloudFlushAllRMW now internally drains the Supabase RMW queue,
+//   so the explicit _cloudSupabaseFlushAllRMW call is no longer needed here (was needed
+//   during Session 2's dual-write phase).
+const cloudFlushAllCombined=()=>cloudFlushAll()+_cloudFlushAllRMW();
 if(typeof window!=='undefined'){
   const _onLeave=()=>{try{cloudFlushAllCombined();}catch(_){}};
   window.addEventListener('pagehide',_onLeave);
@@ -3287,10 +3143,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.1.0-supabase-session1-spec-and-helpers';
+const BASELINE_VERSION='2026.05.14-v10.2.0-firestore-retired-supabase-primary';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.1.0';
+const TARA_VERSION_DISPLAY='Tara 10.2.0';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -23278,7 +23134,7 @@ function TaraApp(){
   //   committed FIRST (earliest _committedAt on the snapshot) wins. Other browsers defer.
   const _cloudLockMirrorRef=useRef(null);
   const _persistLock=()=>{
-    if(!_fbDb)return;
+    if(!_sbClient)return; // V10.2.0: now gates on Supabase, not Firestore
     // Stamp _committedAt on the snapshot the FIRST time we persist with non-null data.
     //   This is the canonical "when did this browser commit" timestamp, used for first-
     //   write-wins comparison across devices. Set once, never updated.
@@ -26585,7 +26441,7 @@ function TaraApp(){
   //   the same earlier commit in its mirror and defers. This converges both browsers to the
   //   FIRST commit, not the last (which last-write-wins would do).
   useEffect(()=>{
-    if(!currentPrice||!_fbDb||!currentAsset||!windowType)return;
+    if(!currentPrice||!_sbClient||!currentAsset||!windowType)return; // V10.2.0: was _fbDb
     let cancelled=false;
     const expectedWid=computeWindowId(windowType);
     const _expectedAsset=currentAssetRef.current||currentAsset||'BTC';
@@ -32041,7 +31897,7 @@ function TaraApp(){
   },[]);
   // Read existing baseline metadata on mount so the UI can display "last saved"
   React.useEffect(()=>{
-    if(!_fbDb)return;
+    if(!_sbClient)return; // V10.2.0: was _fbDb
     let cancelled=false;
     cloudRead('baseline/canonical').then(d=>{
       if(cancelled||!d)return;
