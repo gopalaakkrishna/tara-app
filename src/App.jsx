@@ -2191,10 +2191,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v9.19.12-kalshi-single-price-field';
+const BASELINE_VERSION='2026.05.14-v9.19.13-restore-isEarlyWindow';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.19.12';
+const TARA_VERSION_DISPLAY='Tara 9.19.13';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -25204,6 +25204,11 @@ function TaraApp(){
       const clockSeconds=(timeState.minsRemaining*60)+timeState.secsRemaining;
       const timeFraction=Math.max(0,Math.min(1,1-(clockSeconds/intervalSeconds)));
       const isEndgameLock=is15m?(clockSeconds<90):(clockSeconds<45);
+      // V9.19.13: restore isEarlyWindow — engine returns it in analysis object
+      //   (line ~26207). V9.19.8 cleanup removed the declaration thinking it was
+      //   dead because my grep only checked local-scope readers, not the return
+      //   object referencing it via shorthand. Caused MATH CRASH on the live UI.
+      const isEarlyWindow=is15m?((intervalSeconds-clockSeconds)<300):((intervalSeconds-clockSeconds)<90);
 
       // V110 weighted posterior (adaptive)
       // V3.1.7: tapeRef and ticksRef passed for volume-flow signal computation
@@ -30987,7 +30992,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.19.12
+              9.19.13
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
