@@ -2132,10 +2132,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v9.19.2-phase3-real-wr-pnl';
+const BASELINE_VERSION='2026.05.14-v9.19.3-personal-scorecard-removed';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.19.2';
+const TARA_VERSION_DISPLAY='Tara 9.19.3';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -30985,7 +30985,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.19.2
+              9.19.3
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
@@ -31617,33 +31617,7 @@ function TaraApp(){
                     <span className={`text-xs font-bold uppercase ${positionStatus.isStopHit?'text-rose-500 animate-pulse':'text-[#E8E9E4]/30'}`}>{positionStatus.isStopHit?'STOP HIT':'SAFE'}</span>
                   </div>
                 </div>
-              ):(
-                <div>
-                  <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide mb-1 flex items-center gap-1'}><IC.Terminal className="w-4 h-4"/> YOUR {windowType.toUpperCase()}</div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex flex-col items-center"><div className="flex items-center gap-1 text-xs text-emerald-400"><button onClick={()=>updateScore(windowType,'wins',-1)} className={'hover:bg-emerald-500/20 rounded px-0.5'}>-</button>W<button onClick={()=>updateScore(windowType,'wins',1)} className={'hover:bg-emerald-500/20 rounded px-0.5'}>+</button></div><span className="text-2xl sm:text-3xl font-serif text-emerald-400 font-bold">{Number(scorecards[windowType]?.wins||0)}</span></div>
-                    <div className={'h-6 w-px bg-[#E8E9E4]/10'}></div>
-                    <div className="flex flex-col items-center"><div className="flex items-center gap-1 text-xs text-rose-400"><button onClick={()=>updateScore(windowType,'losses',-1)} className={'hover:bg-rose-500/20 rounded px-0.5'}>-</button>L<button onClick={()=>updateScore(windowType,'losses',1)} className={'hover:bg-rose-500/20 rounded px-0.5'}>+</button></div><span className="text-2xl sm:text-3xl font-serif text-rose-400 font-bold">{Number(scorecards[windowType]?.losses||0)}</span></div>
-                    <div className={'text-xs text-[#E8E9E4]/30'}>{(Number(scorecards[windowType]?.wins||0)/(Math.max(1,Number(scorecards[windowType]?.wins||0)+Number(scorecards[windowType]?.losses||0)))*100).toFixed(0)}%</div>
-                  </div>
-                  {/* Session + Lifetime P&L */}
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    {sessionPnL!==0&&(
-                      <div className="flex items-center gap-1">
-                        <span className={'text-[9px] text-[#E8E9E4]/30 uppercase'}>Session</span>
-                        <span className={`text-[11px] font-mono font-bold ${sessionPnL>0?'text-emerald-400':'text-rose-400'}`}>{sessionPnL>0?'+':''}{sessionPnL>=0?'$'+sessionPnL.toFixed(2):'-$'+Math.abs(sessionPnL).toFixed(2)}</span>
-                      </div>
-                    )}
-                    {lifetimePnL!==0&&(
-                      <div className="flex items-center gap-1">
-                        <span className={'text-[9px] text-[#E8E9E4]/30 uppercase'}>All-time</span>
-                        <span className={`text-[11px] font-mono font-bold ${lifetimePnL>0?'text-emerald-300':'text-rose-300'}`}>{lifetimePnL>0?'+':''}{lifetimePnL>=0?'$'+lifetimePnL.toFixed(2):'-$'+Math.abs(lifetimePnL).toFixed(2)}</span>
-                        <button onClick={()=>{if(confirm('Reset lifetime P&L to zero?')){setLifetimePnL(0);try{localStorage.removeItem('taraV110PnL');}catch(e){}}}} className={'text-[8px] text-[#E8E9E4]/20 hover:text-rose-400 ml-0.5'} title="Reset lifetime P&L">✕</button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+              ):null /* V9.19.3: Personal Scorecard UI removed per user — manual W/L tracking deprecated in favor of taraCallLog-derived stats (V9.19.2 WR pill + Predictor P&L strip). Underlying `scorecards` state + localStorage `taraPersonalScorecards_v1` preserved so loss-streak cooldown and Discord broadcasts keep working. */}
             </div>
           </div>
 
