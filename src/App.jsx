@@ -2065,10 +2065,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.13-v9.18.7-ticket-respects-signalsource';
+const BASELINE_VERSION='2026.05.13-v9.18.8-exit-tick-visible-fillprice-fallback';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.18.7';
+const TARA_VERSION_DISPLAY='Tara 9.18.8';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -19664,6 +19664,49 @@ ${_d.responseBody||'(empty)'}`;
               `${_cashOutCents}¢ · +$${_cashOutProfit.toFixed(2)}`,
             ),
           ),
+          // V9.18.8: VISIBLE EXIT TICK. While position is filled, show what
+          //   the exit-tick code is evaluating in real time. No more "smart
+          //   exits don't fire" mystery — you see the decision every render.
+          _liveValid&&_liveStatus==='filled'&&autoOrderState&&(()=>{
+            const _aos=autoOrderState;
+            const _fp=_aos.fillPrice!=null
+              ?_aos.fillPrice
+              :(Date.now()-(_aos.placedAt||Date.now())>15000&&Number.isFinite(_aos.limitCents)?_aos.limitCents:null);
+            const _fpLabel=_fp==null?'—':`${_fp}¢${_aos.fillPrice==null?' [est]':''}`;
+            const _cur=_liveCurOurCents;
+            const _curLabel=_cur==null?'—':`${_cur}¢`;
+            const _tp=Number(autoExecSettings?.autoExitOffer)||85;
+            const _tpFires=_cur!=null&&_cur>=_tp;
+            const _sl=Number(autoExecSettings?.stopLossDeltaCents)||0;
+            const _slDrop=_fp!=null&&_cur!=null?(_fp-_cur):null;
+            const _slFires=_sl>0&&_slDrop!=null&&_slDrop>=_sl;
+            const _msLeft=(timeState?.minsRemaining||0)*60000+(timeState?.secsRemaining||0)*1000;
+            const _te=Number(autoExecSettings?.timeExitSecLeft)||0;
+            const _teFires=_te>0&&_msLeft>0&&_msLeft<=_te*1000;
+            const _smartOn=!!autoExecSettings?.smartExitsEnabled;
+            const _smartDir=scalperRead?.dir||taraCall?.direction||taraCall?.call||null;
+            const _smartConv=scalperRead?.dir?Number(scalperRead.conviction)||0:Number(taraCall?.confidence)||0;
+            const _smartSrc=scalperRead?.dir?'tape':'tara';
+            return React.createElement('div',{key:'exit-tick',className:'pt-2 mt-2 border-t border-[#E8E9E4]/5'},
+              React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-wider text-[#E8E9E4]/45 mb-1'},'exit tick (live)'),
+              React.createElement('div',{className:'text-[10px] tabular-nums leading-relaxed',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace',color:'rgba(232,233,228,0.70)'}},
+                React.createElement('div',null,`fill ${_fpLabel} · cur ${_curLabel}`),
+                React.createElement('div',{style:{color:_tpFires?'rgb(110,231,183)':'rgba(232,233,228,0.55)'}},
+                  `TP @${_tp}¢ → ${_tpFires?'FIRES':`needs ≥${_tp}¢`}`,
+                ),
+                _sl>0&&React.createElement('div',{style:{color:_slFires?'rgba(244,114,182,0.92)':'rgba(232,233,228,0.55)'}},
+                  `SL @-${_sl}¢ → drop ${_slDrop==null?'—':_slDrop+'¢'} · ${_slFires?'FIRES':`needs ≥${_sl}¢drop`}`,
+                ),
+                _sl===0&&React.createElement('div',{style:{color:'rgba(232,233,228,0.40)'}},'SL OFF (set stop-loss delta in settings)'),
+                _te>0&&React.createElement('div',{style:{color:_teFires?'#E5C870':'rgba(232,233,228,0.55)'}},
+                  `time-exit @${_te}s → ${Math.round(_msLeft/1000)}s left · ${_teFires?'FIRES':'OK'}`,
+                ),
+                _smartOn&&React.createElement('div',{style:{color:'rgba(232,233,228,0.55)'}},
+                  `smart-exit · ${_smartSrc}=${_smartDir||'(none)'} conv=${_smartConv}% · needs ≥${autoExecSettings.smartExitReverseConviction||70}%+profit≥${autoExecSettings.smartExitMinProfitCents||5}¢`,
+                ),
+              ),
+            );
+          })(),
           // exiting status — show exit reason inline if available
           _liveStatus==='exiting'&&autoOrderState?.exitReason&&React.createElement('div',{key:'exiting',className:'pt-2 border-t border-[#E8E9E4]/5 text-[10px]',style:{color:'rgba(251,191,36,0.85)'}},
             `exiting · ${autoOrderState.exitReason}`,
@@ -27526,6 +27569,19 @@ function TaraApp(){
     const _yes=Number(kalshiYesPrice);
     if(!Number.isFinite(_yes))return;
     const _ourSideCents=_aos.dir==='UP'?_yes:(100-_yes);
+    // V9.18.8: EFFECTIVE FILL PRICE with fallback. If Kalshi never populates
+    //   fill_price (sometimes it returns null even on filled orders), fall
+    //   back to limitCents after 15s of position being open. This guarantees
+    //   stop-loss and smart-exit logic can fire on every position, not just
+    //   ones that got a clean fill_price response. Without this, a missing
+    //   fill_price kills exits entirely.
+    let _effectiveFillPrice=_aos.fillPrice;
+    if(_effectiveFillPrice==null){
+      const _ageMs=Date.now()-(_aos.placedAt||Date.now());
+      if(_ageMs>15000&&Number.isFinite(_aos.limitCents)){
+        _effectiveFillPrice=_aos.limitCents; // conservative estimate
+      }
+    }
     // V9.6.0: classify which exit path is firing for status reason
     let _exitReason=null;
     // V9.17.5: SMART EXITS — when enabled, check tape direction vs position.
@@ -27565,24 +27621,35 @@ function TaraApp(){
         }catch(_){}
       }
     }
-    if(autoExecSettings.smartExitsEnabled&&scalperRead?.dir&&_aos.fillPrice!=null){
-      const _tapeConv=Number(scalperRead.conviction)||0;
-      const _profitCents=_ourSideCents-_aos.fillPrice;
-      const _tapeAgainst=(_aos.dir==='UP'&&scalperRead.dir==='DOWN')||(_aos.dir==='DOWN'&&scalperRead.dir==='UP');
-      const _tapeWith=scalperRead.dir===_aos.dir;
+    if(autoExecSettings.smartExitsEnabled&&_effectiveFillPrice!=null){
+      // V9.18.8: DECOUPLED FROM SCALPER. Previously smart-exits required
+      //   scalperRead.dir to be populated — which depends on Bybit/OKX feeds
+      //   that may be broken. Now: fall back to Tara's own engine direction
+      //   (taraCall.direction) and confidence when scalper isn't producing.
+      //   Tara's posterior IS the canonical signal — it's what generates the
+      //   67% WR data. Using it for smart-exit is correct, not a workaround.
+      const _smartDir=scalperRead?.dir||taraCall?.direction||taraCall?.call||null;
+      const _smartConv=scalperRead?.dir?Number(scalperRead.conviction)||0:Number(taraCall?.confidence)||0;
+      const _smartSource=scalperRead?.dir?'scalper-tape':'tara-engine';
+      if(_smartDir){
+      const _tapeConv=_smartConv;
+      const _profitCents=_ourSideCents-_effectiveFillPrice;
+      const _tapeAgainst=(_aos.dir==='UP'&&_smartDir==='DOWN')||(_aos.dir==='DOWN'&&_smartDir==='UP');
+      const _tapeWith=_smartDir===_aos.dir;
       // (1) Early exit on reversal
       if(_tapeAgainst&&_tapeConv>=(autoExecSettings.smartExitReverseConviction||70)&&_profitCents>=(autoExecSettings.smartExitMinProfitCents||5)){
-        _exitReason=`smart early exit · tape reversed ${_tapeConv}% against position (+${_profitCents}¢ profit locked)`;
+        _exitReason=`smart early exit · ${_smartSource} reversed ${_tapeConv}% against position (+${_profitCents}¢ profit locked)`;
       }
       // (2) Extend target when tape strong WITH us
       else if(_tapeWith&&_tapeConv>=70&&autoExecSettings.smartExitExtendOnStrength){
         _effectiveExitOffer=autoExecSettings.autoExitOffer+(autoExecSettings.smartExitExtendCents||5);
       }
+      }
     }
     if(!_exitReason&&_ourSideCents>=_effectiveExitOffer){
       _exitReason=`take-profit at ${_ourSideCents}¢${_effectiveExitOffer!==autoExecSettings.autoExitOffer?' (extended target — strong tape)':''}`;
-    }else if(!_exitReason&&autoExecSettings.stopLossDeltaCents>0&&_aos.fillPrice!=null&&(_aos.fillPrice-_ourSideCents)>=autoExecSettings.stopLossDeltaCents){
-      _exitReason=`stop-loss at ${_ourSideCents}¢ (down ${_aos.fillPrice-_ourSideCents}¢ from ${_aos.fillPrice}¢)`;
+    }else if(!_exitReason&&autoExecSettings.stopLossDeltaCents>0&&_effectiveFillPrice!=null&&(_effectiveFillPrice-_ourSideCents)>=autoExecSettings.stopLossDeltaCents){
+      _exitReason=`stop-loss at ${_ourSideCents}¢ (down ${_effectiveFillPrice-_ourSideCents}¢ from ${_effectiveFillPrice}¢${_aos.fillPrice==null?' [est]':''})`;
     }else if(!_exitReason&&autoExecSettings.timeExitSecLeft>0){
       const _msLeft=(timeState?.minsRemaining||0)*60000+(timeState?.secsRemaining||0)*1000;
       if(_msLeft>0&&_msLeft<=autoExecSettings.timeExitSecLeft*1000){
@@ -30594,7 +30661,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.18.7
+              9.18.8
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
