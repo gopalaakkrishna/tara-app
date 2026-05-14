@@ -1969,8 +1969,14 @@ const kalshiBuildOrder=({ticker,dir,limitCents,betDollars})=>{
   if(costPerContractCents<=0)return{ok:false,reason:'bad-cost'};
   // Floor to integer contracts; cap at 250 contracts as a per-order safety bound.
   const count=Math.max(1,Math.min(250,Math.floor((stake*100)/costPerContractCents)));
-  const expiration_ts=Math.floor(Date.now()/1000)+90; // IOC-ish: cancel if not filled in 90s
+  const expiration_ts=Math.floor(Date.now()/1000)+90; // 90s TTL (will expire if unfilled)
   const client_order_id=`tara_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+  // V9.19.4: ALSO send fixed-point dollar strings (yes_price_dollars / no_price_dollars).
+  //   Per Kalshi's API changelog, legacy integer cents fields (yes_price, no_price) are
+  //   deprecated and will be removed. The _dollars variants are recommended. We send BOTH
+  //   to be compatible with current AND future Kalshi behavior. Same root-cause family as
+  //   V9.18.10's response normalizer fix.
+  const _priceDollarsStr=(c)=>(c/100).toFixed(4);
   const body={
     ticker,
     client_order_id,
@@ -1980,9 +1986,13 @@ const kalshiBuildOrder=({ticker,dir,limitCents,betDollars})=>{
     count,
     expiration_ts,
   };
-  // Limit price field name depends on side — yes_price for YES, no_price for NO.
-  if(side==='yes')body.yes_price=lim;
-  else body.no_price=100-lim;
+  if(side==='yes'){
+    body.yes_price=lim;                              // legacy integer cents
+    body.yes_price_dollars=_priceDollarsStr(lim);    // V9.19.4: new fixed-point string
+  }else{
+    body.no_price=100-lim;                           // legacy integer cents
+    body.no_price_dollars=_priceDollarsStr(100-lim); // V9.19.4: new fixed-point string
+  }
   return{ok:true,body,count,costPerContractCents,side,client_order_id};
 };
 
@@ -2112,7 +2122,16 @@ const kalshiExitPosition=async({apiKeyId,privateKeyPem,ticker,side,count,limitCe
     count:Math.max(1,Math.floor(Number(count)||0)),
     expiration_ts:Math.floor(Date.now()/1000)+30,
   };
-  if(side==='yes')body.yes_price=lim;else body.no_price=100-lim;
+  // V9.19.4: send both legacy integer cents and new _dollars string fields.
+  //   Same change as kalshiBuildOrder — Kalshi deprecation hedge.
+  const _priceDollarsStr=(c)=>(c/100).toFixed(4);
+  if(side==='yes'){
+    body.yes_price=lim;
+    body.yes_price_dollars=_priceDollarsStr(lim);
+  }else{
+    body.no_price=100-lim;
+    body.no_price_dollars=_priceDollarsStr(100-lim);
+  }
   if(dryRun){
     return{ok:true,dryRun:true,order:{order_id:`DRY_${client_order_id}`,client_order_id,ticker,side,action:'sell',count:body.count,status:'filled',_simulated:true}};
   }
@@ -2132,10 +2151,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v9.19.3-personal-scorecard-removed';
+const BASELINE_VERSION='2026.05.14-v9.19.6-edit-window-key-fix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.19.3';
+const TARA_VERSION_DISPLAY='Tara 9.19.6';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -19058,7 +19077,16 @@ function ScalperAdvisorPanel({
   //   wraps to a new window), we put any in-flight edits back to whatever
   //   the user had configured globally. This prevents per-window overrides
   //   from silently sticking across windows.
-  const _editWindowKey=`${windowType||'?'}_${Math.floor((timeState?.minsRemaining||0)/15)}_${currentAsset||'?'}`;
+  // V9.19.6: was `${windowType}_${Math.floor(minsRemaining/15)}_${asset}`.
+  //   The middle term is always 0 within any single 15m window (minsRemaining
+  //   range 0-14) AND always 0 within any 5m window (range 0-4). So this key
+  //   never changed between two consecutive windows of the same type+asset,
+  //   meaning the window-roll restore effect never fired. Edits made to
+  //   stake/cashOut/cutLoss persisted into the next window — violating the
+  //   "scoped to this window" UI promise. Fixed by using computeWindowId()
+  //   which is the same canonical window identifier used everywhere else
+  //   (auto-exec, lock state, hard-cap).
+  const _editWindowKey=`${windowType||'?'}_${computeWindowId(windowType)}_${currentAsset||'?'}`;
   React.useEffect(()=>{
     if(_editLastWindowIdRef.current==null){
       _editLastWindowIdRef.current=_editWindowKey;return;
@@ -19328,6 +19356,181 @@ function ScalperAdvisorPanel({
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // V9.19.5 — PREDICTOR HEADER (extracted helper, rendered in every state).
+  //   Was inline in the LOCKED render path only (V9.19.0-V9.19.4). User
+  //   wanted AUTO/MANUAL + signal source + mode toggles to be reachable
+  //   regardless of Tara's state — to toggle BEFORE a trade fires (when
+  //   she's scanning), not just after she locks. Now defined here and
+  //   called at the top of every return path.
+  // ─────────────────────────────────────────────────────────────────────────
+  const _renderPredictorHeader=()=>React.createElement('div',{key:'predictor-header',className:'mb-3 pb-3 border-b border-[#E8E9E4]/8'},
+    // Title row: "Predictor"
+    React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
+      React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.18em]',style:{color:'#E5C870'}},'predictor'),
+    ),
+    // Row 1: AUTO / MANUAL toggle
+    React.createElement('div',{className:'flex gap-0 mb-2 rounded overflow-hidden',style:{border:'1px solid rgba(232,233,228,0.10)'}},
+      (()=>{
+        const _isAuto=!!autoExecSettings?.enabled;
+        const _btnBase='flex-1 px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider text-center transition-colors cursor-pointer';
+        return [
+          React.createElement('button',{
+            key:'auto',
+            className:_btnBase,
+            style:_isAuto
+              ?{background:'rgba(110,231,183,0.16)',color:'rgb(110,231,183)',borderRight:'1px solid rgba(110,231,183,0.30)'}
+              :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)',borderRight:'1px solid rgba(232,233,228,0.06)'},
+            onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,enabled:true}));},
+            title:'auto-exec ON: place orders automatically when Tara locks',
+          },'auto'),
+          React.createElement('button',{
+            key:'manual',
+            className:_btnBase,
+            style:!_isAuto
+              ?{background:'rgba(229,200,112,0.16)',color:'#E5C870'}
+              :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)'},
+            onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,enabled:false}));},
+            title:'manual only: Tara still locks but no orders fire automatically',
+          },'manual'),
+        ];
+      })(),
+    ),
+    // Row 2: Tara's Call / Tara's Trade toggle
+    React.createElement('div',{className:'flex gap-0 mb-2 rounded overflow-hidden',style:{border:'1px solid rgba(232,233,228,0.10)'}},
+      (()=>{
+        const _src=autoExecSettings?.signalSource||'snapshot';
+        const _isCall=_src==='snapshot';
+        const _btnBase='flex-1 px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider text-center transition-colors cursor-pointer';
+        return [
+          React.createElement('button',{
+            key:'call',
+            className:_btnBase,
+            style:_isCall
+              ?{background:'rgba(229,200,112,0.16)',color:'#E5C870',borderRight:'1px solid rgba(229,200,112,0.30)'}
+              :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)',borderRight:'1px solid rgba(232,233,228,0.06)'},
+            onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,signalSource:'snapshot'}));},
+            title:"use Tara's settled call (snapshot) — public read, 67% WR baseline",
+          },"tara's call"),
+          React.createElement('button',{
+            key:'trade',
+            className:_btnBase,
+            style:!_isCall
+              ?{background:'rgba(110,231,183,0.16)',color:'rgb(110,231,183)'}
+              :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)'},
+            onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,signalSource:'lock'}));},
+            title:"use Tara's engine lock — fires earlier, may diverge from snapshot. real 'Tara's Trade' model is phase 4 work.",
+          },[
+            "tara's trade",
+            React.createElement('span',{key:'lbl',className:'ml-1 normal-case opacity-50',style:{fontSize:'8px'}},'(engine lock)'),
+          ]),
+        ];
+      })(),
+    ),
+    // Row 3: Mode preset buttons (Patient A / Fast B)
+    React.createElement('div',{className:'flex items-center gap-1.5'},
+      React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'rgba(232,233,228,0.40)'}},'mode'),
+      (()=>{
+        const _PATIENT={
+          patientEntryEnabled:true,
+          patientEntryMaxCents:40,
+          patientEntryMaxWaitSec:120,
+          entryLadderEnabled:false,
+          slippageCents:0,
+          stopLossDeltaCents:15,
+          autoExitOffer:90,
+          smartExitsEnabled:true,
+          smartExitMinProfitCents:5,
+        };
+        const _FAST={
+          patientEntryEnabled:false,
+          entryLadderEnabled:false,
+          slippageCents:2,
+          stopLossDeltaCents:25,
+          autoExitOffer:80,
+          smartExitsEnabled:true,
+          smartExitMinProfitCents:8,
+          minTier:'structural',
+        };
+        const _isPatientActive=
+          autoExecSettings?.patientEntryEnabled===true
+          &&autoExecSettings?.autoExitOffer===90
+          &&autoExecSettings?.stopLossDeltaCents===15;
+        const _isFastActive=
+          autoExecSettings?.patientEntryEnabled===false
+          &&autoExecSettings?.autoExitOffer===80
+          &&autoExecSettings?.stopLossDeltaCents===25
+          &&autoExecSettings?.minTier==='structural';
+        const _applyMode=(preset)=>{
+          if(typeof setAutoExecSettings!=='function')return;
+          setAutoExecSettings(prev=>({...prev,...preset}));
+        };
+        const _btnStyleActive={background:'rgba(110,231,183,0.14)',color:'rgb(110,231,183)',border:'1px solid rgba(110,231,183,0.32)'};
+        const _btnStyleIdle={background:'rgba(232,233,228,0.04)',color:'rgba(232,233,228,0.55)',border:'1px solid rgba(232,233,228,0.10)'};
+        return React.createElement('div',{className:'flex gap-1 flex-1'},
+          React.createElement('button',{
+            key:'patient',
+            className:'flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer',
+            style:_isPatientActive?_btnStyleActive:_btnStyleIdle,
+            onClick:()=>_applyMode(_PATIENT),
+            title:'patient: wait for cheap entries (max 40¢, up to 120s wait), tight stops (SL 15¢), let winners run (TP 90¢), smart-exit on small profits. accept lower WR for bigger winners.',
+          },[
+            React.createElement('span',{key:'a',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'A'),
+            'patient',
+          ]),
+          React.createElement('button',{
+            key:'fast',
+            className:'flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer',
+            style:_isFastActive?_btnStyleActive:_btnStyleIdle,
+            onClick:()=>_applyMode(_FAST),
+            title:'fast: fire at offer +2¢ slip, structural+ tier only, SL 25¢, TP 80¢, smart-exit on bigger profits. higher WR with smaller winners.',
+          },[
+            React.createElement('span',{key:'b',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'B'),
+            'fast',
+          ]),
+        );
+      })(),
+    ),
+    // P&L strip
+    (()=>{
+      const _log=Array.isArray(taraCallLog)?taraCallLog:[];
+      const _today=new Date().toISOString().slice(0,10);
+      const _todayAuto=_log.filter(e=>e
+        &&e.autoExec===true
+        &&(e.result==='WIN'||e.result==='LOSS')
+        &&String(e.resolvedTimestampISO||e.timestampISO||'').slice(0,10)===_today);
+      const _n=_todayAuto.length;
+      const _wins=_todayAuto.filter(e=>e.result==='WIN').length;
+      const _wr=_n>0?Math.round((_wins/_n)*100):null;
+      let _pnl=null;
+      if(_n>0){
+        _pnl=0;
+        let _haveAny=false;
+        for(const e of _todayAuto){
+          if(Number.isFinite(e.realizedPnLDollars)){
+            _pnl+=e.realizedPnLDollars;
+            _haveAny=true;
+          }
+        }
+        if(!_haveAny)_pnl=null;
+      }
+      const _pnlSign=_pnl==null?'':_pnl>=0?'+':'';
+      const _pnlColor=_pnl==null?'rgba(232,233,228,0.55)':_pnl>0?'rgb(110,231,183)':_pnl<0?'rgba(244,114,182,0.92)':'rgba(232,233,228,0.65)';
+      return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#E8E9E4]/5 text-[10px] tabular-nums flex items-baseline gap-2',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
+        React.createElement('span',{style:{color:'rgba(232,233,228,0.40)'}},'today'),
+        React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'·'),
+        React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'P&L'),
+        React.createElement('span',{style:{color:_pnlColor,fontWeight:600}},
+          _pnl==null?'--':`${_pnlSign}$${_pnl.toFixed(2)}`),
+        React.createElement('span',{style:{color:'rgba(232,233,228,0.40)'}},'·'),
+        React.createElement('span',{style:{color:'rgba(232,233,228,0.65)'}},`${_n} trade${_n===1?'':'s'}`),
+        React.createElement('span',{style:{color:'rgba(232,233,228,0.40)'}},'·'),
+        React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'WR'),
+        React.createElement('span',{style:{color:'rgba(232,233,228,0.85)'}},_wr==null?'--':`${_wr}%`),
+      );
+    })(),
+  );
+
   // ── ENTRY PROMPT ──────────────────────────────────────────────────────
   if(showEntryPrompt){
     const _sideLabel=showEntryPrompt==='LONG_YES'?'long yes':'long no';
@@ -19336,6 +19539,7 @@ function ScalperAdvisorPanel({
       className:'p-4 rounded-lg',
       style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid rgba(245,245,244,0.06)'},
     },
+      _renderPredictorHeader(),
       React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
         React.createElement('span',{className:'text-[11px] font-bold',style:{color:_sideColor,letterSpacing:'0.02em',textTransform:'none'}},`confirm ${_sideLabel}`),
         React.createElement('button',{onClick:()=>setShowEntryPrompt(null),className:'text-[10px] text-[#E8E9E4]/45 hover:text-[#E8E9E4]/75'},'cancel'),
@@ -19378,6 +19582,7 @@ function ScalperAdvisorPanel({
       className:'p-4 rounded-lg',
       style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid rgba(229,200,112,0.30)'},
     },
+      _renderPredictorHeader(),
       React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
         React.createElement('span',{className:'text-[11px] font-bold',style:{color:'#E5C870',letterSpacing:'0.02em',textTransform:'none'}},'confirm exit'),
         React.createElement('button',{onClick:()=>setShowExitPrompt(false),className:'text-[10px] text-[#E8E9E4]/45 hover:text-[#E8E9E4]/75'},'cancel'),
@@ -19436,6 +19641,7 @@ function ScalperAdvisorPanel({
       className:'p-4 rounded-lg',
       style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid '+_recColor.replace('0.92','0.25').replace('0.85','0.25').replace('rgb(','rgba(').replace(')',',0.25)')},
     },
+      _renderPredictorHeader(),
       _topEl,
       React.createElement('div',{className:'space-y-0 mb-3'},
         React.createElement('div',{className:'flex items-baseline justify-between py-1.5'},
@@ -19479,6 +19685,7 @@ function ScalperAdvisorPanel({
       className:'p-4 rounded-lg',
       style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid '+_sideColor.replace('rgb(','rgba(').replace(')',',0.30)').replace('0.92','0.30')},
     },
+      _renderPredictorHeader(),
       _topEl,
       React.createElement('div',{className:'mb-3'},
         React.createElement('div',{className:'text-[10px] mb-1 font-bold',style:{color:_sideColor,letterSpacing:'0.02em',textTransform:'none'}},'suggest entry'),
@@ -19536,192 +19743,7 @@ function ScalperAdvisorPanel({
       className:'p-4 rounded-lg',
       style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid '+_taraDirColor.replace('rgb(','rgba(').replace(')',',0.25)').replace('0.92','0.25')},
     },
-      // ─────────────────────────────────────────────────────────────────────
-      // V9.19.0 — PREDICTOR HEADER STRIP (Phase 1: render only, NO behavior)
-      //   Two toggles + two mode presets. Reads autoExecSettings to show what
-      //   is currently selected. Buttons are visually styled connected/idle
-      //   but clicking does NOT yet mutate state (that ships in Phase 2 /
-      //   V9.19.1). This phase verifies the UI sits right on the card before
-      //   wiring any handlers — avoids a UI+behavior change in one ship.
-      // ─────────────────────────────────────────────────────────────────────
-      React.createElement('div',{key:'predictor-header',className:'mb-3 pb-3 border-b border-[#E8E9E4]/8'},
-        // Title row: "Predictor"
-        React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
-          React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.18em]',style:{color:'#E5C870'}},'predictor'),
-        ),
-        // Row 1: AUTO / MANUAL toggle (pair of buttons, joined)
-        React.createElement('div',{className:'flex gap-0 mb-2 rounded overflow-hidden',style:{border:'1px solid rgba(232,233,228,0.10)'}},
-          (()=>{
-            const _isAuto=!!autoExecSettings?.enabled;
-            const _btnBase='flex-1 px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider text-center transition-colors cursor-pointer';
-            return [
-              React.createElement('button',{
-                key:'auto',
-                className:_btnBase,
-                style:_isAuto
-                  ?{background:'rgba(110,231,183,0.16)',color:'rgb(110,231,183)',borderRight:'1px solid rgba(110,231,183,0.30)'}
-                  :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)',borderRight:'1px solid rgba(232,233,228,0.06)'},
-                onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,enabled:true}));},
-                title:'auto-exec ON: place orders automatically when Tara locks',
-              },'auto'),
-              React.createElement('button',{
-                key:'manual',
-                className:_btnBase,
-                style:!_isAuto
-                  ?{background:'rgba(229,200,112,0.16)',color:'#E5C870'}
-                  :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)'},
-                onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,enabled:false}));},
-                title:'manual only: Tara still locks but no orders fire automatically',
-              },'manual'),
-            ];
-          })(),
-        ),
-        // Row 2: Tara's Call / Tara's Trade toggle
-        React.createElement('div',{className:'flex gap-0 mb-2 rounded overflow-hidden',style:{border:'1px solid rgba(232,233,228,0.10)'}},
-          (()=>{
-            const _src=autoExecSettings?.signalSource||'snapshot';
-            const _isCall=_src==='snapshot';
-            const _btnBase='flex-1 px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider text-center transition-colors cursor-pointer';
-            return [
-              React.createElement('button',{
-                key:'call',
-                className:_btnBase,
-                style:_isCall
-                  ?{background:'rgba(229,200,112,0.16)',color:'#E5C870',borderRight:'1px solid rgba(229,200,112,0.30)'}
-                  :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)',borderRight:'1px solid rgba(232,233,228,0.06)'},
-                onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,signalSource:'snapshot'}));},
-                title:"use Tara's settled call (snapshot) — public read, 67% WR baseline",
-              },"tara's call"),
-              React.createElement('button',{
-                key:'trade',
-                className:_btnBase,
-                style:!_isCall
-                  ?{background:'rgba(110,231,183,0.16)',color:'rgb(110,231,183)'}
-                  :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)'},
-                onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,signalSource:'lock'}));},
-                title:"use Tara's engine lock — fires earlier, may diverge from snapshot. real 'Tara's Trade' model is phase 4 work.",
-              },[
-                "tara's trade",
-                React.createElement('span',{key:'lbl',className:'ml-1 normal-case opacity-50',style:{fontSize:'8px'}},'(engine lock)'),
-              ]),
-            ];
-          })(),
-        ),
-        // Row 3: Mode preset buttons (Patient A / Fast B)
-        React.createElement('div',{className:'flex items-center gap-1.5'},
-          React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'rgba(232,233,228,0.40)'}},'mode'),
-          (()=>{
-            // V9.19.1: mode presets. Each preset sets a coherent bundle of
-            //   settings. Clicking either button overwrites those keys; other
-            //   settings (kelly blend, hard cap, kill switch, etc) are untouched.
-            //   This lets the user one-click between "patient" and "fast" without
-            //   manually fiddling 7 inputs in the deeper settings modal.
-            const _PATIENT={
-              patientEntryEnabled:true,
-              patientEntryMaxCents:40,
-              patientEntryMaxWaitSec:120,
-              entryLadderEnabled:false,
-              slippageCents:0,
-              stopLossDeltaCents:15,
-              autoExitOffer:90,
-              smartExitsEnabled:true,
-              smartExitMinProfitCents:5,
-            };
-            const _FAST={
-              patientEntryEnabled:false,
-              entryLadderEnabled:false,
-              slippageCents:2,
-              stopLossDeltaCents:25,
-              autoExitOffer:80,
-              smartExitsEnabled:true,
-              smartExitMinProfitCents:8,
-              minTier:'structural',
-            };
-            // Detect which mode is currently active by checking key signature
-            // settings. Use 2-3 distinctive fields per mode to avoid false
-            // positives when user has mixed values from settings modal.
-            const _isPatientActive=
-              autoExecSettings?.patientEntryEnabled===true
-              &&autoExecSettings?.autoExitOffer===90
-              &&autoExecSettings?.stopLossDeltaCents===15;
-            const _isFastActive=
-              autoExecSettings?.patientEntryEnabled===false
-              &&autoExecSettings?.autoExitOffer===80
-              &&autoExecSettings?.stopLossDeltaCents===25
-              &&autoExecSettings?.minTier==='structural';
-            const _applyMode=(preset)=>{
-              if(typeof setAutoExecSettings!=='function')return;
-              setAutoExecSettings(prev=>({...prev,...preset}));
-            };
-            const _btnStyleActive={background:'rgba(110,231,183,0.14)',color:'rgb(110,231,183)',border:'1px solid rgba(110,231,183,0.32)'};
-            const _btnStyleIdle={background:'rgba(232,233,228,0.04)',color:'rgba(232,233,228,0.55)',border:'1px solid rgba(232,233,228,0.10)'};
-            return React.createElement('div',{className:'flex gap-1 flex-1'},
-              React.createElement('button',{
-                key:'patient',
-                className:'flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer',
-                style:_isPatientActive?_btnStyleActive:_btnStyleIdle,
-                onClick:()=>_applyMode(_PATIENT),
-                title:'patient: wait for cheap entries (max 40¢, up to 120s wait), tight stops (SL 15¢), let winners run (TP 90¢), smart-exit on small profits. accept lower WR for bigger winners.',
-              },[
-                React.createElement('span',{key:'a',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'A'),
-                'patient',
-              ]),
-              React.createElement('button',{
-                key:'fast',
-                className:'flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer',
-                style:_isFastActive?_btnStyleActive:_btnStyleIdle,
-                onClick:()=>_applyMode(_FAST),
-                title:'fast: fire at offer +2¢ slip, structural+ tier only, SL 25¢, TP 80¢, smart-exit on bigger profits. higher WR with smaller winners.',
-              },[
-                React.createElement('span',{key:'b',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'B'),
-                'fast',
-              ]),
-            );
-          })(),
-        ),
-        // V9.19.2 Phase 3: Predictor P&L strip — computed live from
-        //   taraCallLog. Filters today's autoExec trades, sums dollar P&L,
-        //   computes WR. Null/zero state shows em-dashes so user can see the
-        //   strip is alive even before first trade of the day.
-        (()=>{
-          const _log=Array.isArray(taraCallLog)?taraCallLog:[];
-          const _today=new Date().toISOString().slice(0,10);
-          const _todayAuto=_log.filter(e=>e
-            &&e.autoExec===true
-            &&(e.result==='WIN'||e.result==='LOSS')
-            &&String(e.resolvedTimestampISO||e.timestampISO||'').slice(0,10)===_today);
-          const _n=_todayAuto.length;
-          const _wins=_todayAuto.filter(e=>e.result==='WIN').length;
-          const _wr=_n>0?Math.round((_wins/_n)*100):null;
-          // Sum dollar P&L from entries that have realizedPnLDollars stamped
-          let _pnl=null;
-          if(_n>0){
-            _pnl=0;
-            let _haveAny=false;
-            for(const e of _todayAuto){
-              if(Number.isFinite(e.realizedPnLDollars)){
-                _pnl+=e.realizedPnLDollars;
-                _haveAny=true;
-              }
-            }
-            if(!_haveAny)_pnl=null;
-          }
-          const _pnlSign=_pnl==null?'':_pnl>=0?'+':'';
-          const _pnlColor=_pnl==null?'rgba(232,233,228,0.55)':_pnl>0?'rgb(110,231,183)':_pnl<0?'rgba(244,114,182,0.92)':'rgba(232,233,228,0.65)';
-          return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#E8E9E4]/5 text-[10px] tabular-nums flex items-baseline gap-2',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
-            React.createElement('span',{style:{color:'rgba(232,233,228,0.40)'}},'today'),
-            React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'·'),
-            React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'P&L'),
-            React.createElement('span',{style:{color:_pnlColor,fontWeight:600}},
-              _pnl==null?'--':`${_pnlSign}$${_pnl.toFixed(2)}`),
-            React.createElement('span',{style:{color:'rgba(232,233,228,0.40)'}},'·'),
-            React.createElement('span',{style:{color:'rgba(232,233,228,0.65)'}},`${_n} trade${_n===1?'':'s'}`),
-            React.createElement('span',{style:{color:'rgba(232,233,228,0.40)'}},'·'),
-            React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'WR'),
-            React.createElement('span',{style:{color:'rgba(232,233,228,0.85)'}},_wr==null?'--':`${_wr}%`),
-          );
-        })(),
-      ),
+      _renderPredictorHeader(),
       // Header: "this round" + window label + LOCKED badge
       React.createElement('div',{className:'flex items-baseline justify-between mb-3 pb-2 border-b border-[#E8E9E4]/8'},
         React.createElement('div',{className:'flex flex-col'},
@@ -20209,6 +20231,7 @@ ${_d.responseBody||'(empty)'}`;
       className:'p-4 rounded-lg',
       style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid rgba(245,245,244,0.06)'},
     },
+      _renderPredictorHeader(),
       _topEl,
       React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
         React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45 font-bold',style:{letterSpacing:'0.02em',textTransform:'none'}},'paused'),
@@ -20227,6 +20250,7 @@ ${_d.responseBody||'(empty)'}`;
       className:'p-4 rounded-lg',
       style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid rgba(245,245,244,0.06)'},
     },
+      _renderPredictorHeader(),
       _topEl,
       React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
         React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45 font-bold',style:{letterSpacing:'0.02em',textTransform:'none'}},'scalper off'),
@@ -20247,6 +20271,7 @@ ${_d.responseBody||'(empty)'}`;
     className:'p-4 rounded-lg',
     style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid rgba(245,245,244,0.06)'},
   },
+    _renderPredictorHeader(),
     _topEl,
     React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
       React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45 font-bold',style:{letterSpacing:'0.02em',textTransform:'none'}},'watching'),
@@ -21000,7 +21025,55 @@ function TaraApp(){
   //   the entry effect — windowId in key naturally invalidates old entries).
   //   Manual override clears the specific windowId so the next entry-effect
   //   re-fire is allowed exactly once.
-  const _attemptedWindowsRef=useRef(new Set());
+  // V9.19.4: persisted to localStorage with 24h TTL. Survives page refresh so
+  //   a refresh mid-window can't bypass the cap. Auto-prunes stale entries.
+  //   Storage shape: { [attemptKey]: epochMs }. attemptKey = `${windowId}|${asset}`.
+  //   We keep a parallel Map(key→ts) so persists preserve original add timestamps
+  //   (otherwise every persist refreshed TTL and entries never expired).
+  const _attemptedWindowsTsRef=useRef(new Map());
+  const _attemptedWindowsRef=useRef((()=>{
+    try{
+      const _raw=localStorage.getItem('taraAttemptedWindows_v1');
+      if(!_raw)return new Set();
+      const _parsed=JSON.parse(_raw);
+      if(!_parsed||typeof _parsed!=='object')return new Set();
+      const _now=Date.now();
+      const _maxAge=24*60*60*1000; // 24h
+      const _alive=new Set();
+      for(const k of Object.keys(_parsed)){
+        const t=Number(_parsed[k])||0;
+        if(_now-t<_maxAge){
+          _alive.add(k);
+          _attemptedWindowsTsRef.current.set(k,t);
+        }
+      }
+      try{console.info('[V9.19.4] hard-cap hydrated:',_alive.size,'live entries (TTL 24h)');}catch(_){}
+      return _alive;
+    }catch(_){return new Set();}
+  })());
+  // V9.19.4: persist write helper. Preserves each key's original timestamp.
+  //   New keys (in set but not in ts map) get stamped now; existing keys keep
+  //   their original stamp so TTL counts from first attempt, not last persist.
+  const _persistAttemptedWindows=React.useCallback(()=>{
+    try{
+      const _now=Date.now();
+      const _obj={};
+      // Sync ts map with current set membership
+      for(const k of _attemptedWindowsRef.current){
+        if(!_attemptedWindowsTsRef.current.has(k)){
+          _attemptedWindowsTsRef.current.set(k,_now);
+        }
+        _obj[k]=_attemptedWindowsTsRef.current.get(k);
+      }
+      // Drop ts entries whose set membership was removed
+      for(const k of [..._attemptedWindowsTsRef.current.keys()]){
+        if(!_attemptedWindowsRef.current.has(k)){
+          _attemptedWindowsTsRef.current.delete(k);
+        }
+      }
+      localStorage.setItem('taraAttemptedWindows_v1',JSON.stringify(_obj));
+    }catch(_){}
+  },[]);
   // V9.18.4: rate-limit smart-exit diagnostic logs to once per ~3s.
   const _smartExitLogLastRef=useRef(0);
   // V6.2.6: Force-call refs. User-initiated overrides via buttons on Tara's Call card.
@@ -27084,6 +27157,17 @@ function TaraApp(){
       return;
     }
     // Synthesize a manual lock from Tara's snapshot.
+    // V9.19.4 NOTE: this always writes to lockedCallRef even when the user is
+    //   in signalSource='snapshot' mode. The entry effect's snapshot path
+    //   carries through the _bypassAutoExecFilters/_manualTrigger flags below
+    //   (see L27156-ish), so this is fine for snapshot mode. BUT — if the
+    //   user is in signalSource='lock' mode, this write directly drives the
+    //   ref the auto-exec reads from, skipping the snapshot-stability path
+    //   entirely. The manual click goes straight to fire regardless of the
+    //   sticky-lock state machine. This is intentional for "manual override
+    //   means I'm overriding everything", but it's a subtle asymmetry. If a
+    //   future bug ever traces back to "manual click in lock mode bypassed
+    //   stability checks", remember it lives here.
     try{console.info('[V9.17.21] No existing matching lock — synthesizing manual lock');}catch(_){}
     lockedCallRef.current={
       dir:_td,
@@ -27208,6 +27292,7 @@ function TaraApp(){
       //   proceeds. (The dedup-key check below will still de-dupe identical
       //   re-clicks within the same render.)
       _attemptedWindowsRef.current.delete(_attemptKey);
+      _persistAttemptedWindows(); // V9.19.4
       if(_shouldLogManual)try{console.info('[V9.18.3] Manual override — clearing window attempt mark for',_attemptKey);}catch(_){}
     }
     // V9.18.3: SIGNAL SOURCE LOGGING — every auto-exec evaluation logs which
@@ -27511,6 +27596,7 @@ function TaraApp(){
     //   errors / cancels / never fills, the entry effect will NOT re-fire on
     //   this window for this asset. Manual override clears it (handled above).
     _attemptedWindowsRef.current.add(_attemptKey);
+    _persistAttemptedWindows(); // V9.19.4
     try{console.info('[V9.18.3] window attempt marked:',_attemptKey,'· stake=$',_bet.toFixed(2),'dir=',_dir);}catch(_){}
     // V9.18.3: log full stake provenance so any "why did it bet $X" question
     //   can be answered from console. Compares each potential source.
@@ -30985,7 +31071,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.19.3
+              9.19.6
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
