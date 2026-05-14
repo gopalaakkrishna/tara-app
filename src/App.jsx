@@ -2784,7 +2784,7 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.0.0-session2-shadow';
+const BASELINE_VERSION='2026.05.14-v10.0.0-session2-shadow-hotfix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
 const TARA_VERSION_DISPLAY='Tara 10.0.0';
@@ -28491,22 +28491,33 @@ function TaraApp(){
     // Phase 4 result is stored in a ref so the call-log entry writer can
     // attach it to the trade record (CSV columns added below).
     const _timingMode=autoExecSettings?.tradeTimingMode||'shadow';
+    // V10.0.0 hotfix: unconditional "entered Phase 4" log so we can see in
+    //   the console whether the entry effect even reaches here. If you see
+    //   this log but not the DECISION log below, Phase 4 errored on inputs.
+    //   If you don't see this log at all, the entry effect isn't running for
+    //   your lock (likely auto-exec OFF, hard cap consumed, or earlier gate).
+    try{console.info('[V10.0.0] Phase 4 reached. mode=',_timingMode,' dir=',_dir,' tier=',_signal?.tier);}catch(_){}
     let _phase4Decision=null;
     if(_timingMode!=='off'){
       try{
         // Build inputs object per the V10.0.0 spec
         // Many fields come from existing refs/analysis; missing ones degrade
         // gracefully inside evaluateTradeTimingV1.
+        // V10.0.0 hotfix: removed references to undefined variables that
+        //   were throwing silent ReferenceErrors:
+        //   • _kalshiYes30sAgoRef — doesn't exist (no 30s-ago Kalshi history)
+        //   • depthFlashRef — wrong; depthFlash is direct, not a ref
+        //   • whalePulse — wrong; whale data is in whaleLog/globalFlow
+        //   • tapeMetricsRef — doesn't exist; tape signals via tapeWindows
+        //   • bloombergData — wrong name; the variable is bloomberg
+        //   The errors silently failed inside try/catch, so no DECISION was
+        //   produced. Fixed by reading from the actual variables that exist.
         const _kYesNow=Number(kalshiYesPrice);
-        const _kYes30=_kalshiYes30sAgoRef?.current||null; // may not exist yet
-        const _bloom=bloombergData||{};
-        const _depthFlash=depthFlashRef?.current||null;
-        const _gf=globalFlow||{};
-        const _wp=whalePulse||{}; // whale info
-        const _tapeMetrics=tapeMetricsRef?.current||{};
+        const _bloom=(typeof bloomberg!=='undefined'?bloomberg:null)||{};
+        const _depthFlash=(typeof depthFlash!=='undefined'?depthFlash:null)||{};
+        const _gf=(typeof globalFlow!=='undefined'?globalFlow:null)||{};
         const _ctx=taraCall?._ctx||{};
         const _signalForTiming=_signal||{};
-        const _stateGate=stateGate||{};
         const _phase4Inputs={
           call:{
             direction:_dir,
@@ -28523,18 +28534,27 @@ function TaraApp(){
           },
           market:{
             kalshiYes:_kYesNow,
-            kalshiYes30sAgo:_kYes30,
+            kalshiYes30sAgo:null, // V10.0.0 TODO: add 30s history ring for Kalshi prices (Session 3+)
             kalshiSpread:Number(_bloom?.kalshiSpread||0),
             spotPrice:Number(analysis?.currentPrice||0),
             spotDrift1m:Number(analysis?.drift1m||0),
             spotDrift10s:Number(analysis?.drift10s||0),
-            tapeBuySell30s:Number(_tapeMetrics?.buyRatio30s||0.5),
-            whaleNetUSD30s:Number(_wp?.netUSD30s||0),
+            // V10.0.0: tape buy-sell ratio derived from globalFlow.imbalance.
+            //   globalFlow.imbalance is 1.0 neutral, >1 = buy-dom, <1 = sell-dom.
+            //   Convert to 0-1 buy ratio: imbalance/(1+imbalance) roughly.
+            tapeBuySell30s:(()=>{
+              const _imb=Number(_gf?.imbalance);
+              if(!Number.isFinite(_imb)||_imb<=0)return 0.5;
+              // imbalance 1 = 50/50, 2 = 67/33 buy-heavy, 0.5 = 33/67 sell-heavy
+              return _imb/(1+_imb);
+            })(),
+            // V10.0.0: whale net flow from globalFlow.deltaUSD
+            whaleNetUSD30s:Number(_gf?.deltaUSD||0),
             orderBookImbalance:(()=>{
               const _ll=Number(_bloom?.liqLongUSD||0);
               const _ls=Number(_bloom?.liqShortUSD||0);
               if(_ll+_ls<=0)return 0;
-              return (_ls-_ll)/(_ll+_ls); // positive = bids heavy (ASKS heavier per V114 inverted)
+              return (_ls-_ll)/(_ll+_ls);
             })(),
             liqLongUSD:Number(_bloom?.liqLongUSD||0),
             liqShortUSD:Number(_bloom?.liqShortUSD||0),
@@ -28570,7 +28590,25 @@ function TaraApp(){
             similarWindowsN:Number(taraScorecards?.similarWindows?.n||0),
             similarWindowsWR:Number(taraScorecards?.similarWindows?.wr||0.6),
             recentRegimeWR:Number(taraScorecards?.recentRegimeWR||0.6),
-            sessionWR:Number(_todaySessionWR?.wr||0.6),
+            // V10.0.0 hotfix: _todaySessionWR is scoped inside MarketContextStrip,
+            //   not accessible here. Compute inline from taraCallLog for today's
+            //   resolved trades on this asset. Cheap O(n) over log capped at 500.
+            sessionWR:(()=>{
+              try{
+                if(!Array.isArray(taraCallLog))return 0.6;
+                const _today=new Date().toDateString();
+                let _w=0,_n=0;
+                for(const e of taraCallLog){
+                  if(!e||(e.result!=='WIN'&&e.result!=='LOSS'))continue;
+                  if((e.asset||'BTC')!==currentAsset)continue;
+                  const _d=new Date(e.id||e.time||0);
+                  if(_d.toDateString()!==_today)continue;
+                  _n++;
+                  if(e.result==='WIN')_w++;
+                }
+                return _n>=3?(_w/_n):0.6;
+              }catch(_){return 0.6;}
+            })(),
             coldStreak:!!currentStreak&&currentStreak.type==='L'&&currentStreak.count>=3,
           },
           fgt:{
@@ -28581,9 +28619,14 @@ function TaraApp(){
           },
           exec:{
             edgePt:(()=>{
-              if(!Number.isFinite(_post)||!Number.isFinite(_yes))return null;
-              const _tc=_dir==='UP'?_post:(100-_post);
-              const _kc=_dir==='UP'?_yes:(100-_yes);
+              // V10.0.0 hotfix: re-derive _post and _yes here. The edge filter
+              //   scopes its own copies inside its if-block, so they're not
+              //   visible here. Recompute from same sources for consistency.
+              const _postLocal=Number(analysis?.rawProbAbove);
+              const _yesLocal=Number(kalshiYesPrice);
+              if(!Number.isFinite(_postLocal)||!Number.isFinite(_yesLocal))return null;
+              const _tc=_dir==='UP'?_postLocal:(100-_postLocal);
+              const _kc=_dir==='UP'?_yesLocal:(100-_yesLocal);
               return _tc-_kc;
             })(),
             sizingDecision:'fire', // sizing hasn't run yet at this point — we're before it
