@@ -897,6 +897,143 @@ if(typeof window!=='undefined'){
     if(document.visibilityState==='hidden')_onLeave();
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.2.0 — PHASE 4 LATEST-DECISION PUB/SUB (cross-component bridge)
+// ═══════════════════════════════════════════════════════════════════════════
+// The Phase 4 evaluation runs inside TaraApp's auto-exec entry effect. The lock
+//   UI badge that needs to display the decision lives in a different component
+//   (ScalperAdvisorPanel) that doesn't share refs with TaraApp.
+//
+// Solution: small module-level pub/sub. TaraApp's Phase 4 effect calls
+//   _setPhase4Decision(d) after each evaluation. Any component can subscribe via
+//   the _usePhase4Decision() hook to receive the latest value reactively.
+//
+// Decision shape: { decision, score, reason, mode, ts } — same shape as
+//   _phase4DecisionRef.current. Subscribers re-render on each new decision.
+let _phase4LatestDecision=null;
+const _phase4Subscribers=new Set();
+const _setPhase4Decision=(d)=>{
+  _phase4LatestDecision=d;
+  _phase4Subscribers.forEach(fn=>{try{fn(d);}catch(_){}});
+};
+const _usePhase4Decision=()=>{
+  const[d,setD]=React.useState(_phase4LatestDecision);
+  React.useEffect(()=>{
+    _phase4Subscribers.add(setD);
+    return ()=>{_phase4Subscribers.delete(setD);};
+  },[]);
+  return d;
+};
+
+// V10.2.0 — Phase 4 status badge. Subscribes to _phase4LatestDecision via the
+//   pub/sub above. Renders nothing when mode is 'off' or no decision exists yet.
+//   Used by _renderPredictorHeader to surface what Phase 4 is doing right now,
+//   without affecting any trading logic. Color coded: fire-now=emerald,
+//   wait=gold, abort=rose, error=gray.
+const _Phase4Badge=({mode})=>{
+  const d=_usePhase4Decision();
+  if(mode==='off'||!mode)return null;
+  if(!d||!d.decision)return React.createElement('div',{
+    className:'text-[9px] tracking-wider mb-2 px-2 py-0.5 rounded text-center',
+    style:{background:'rgba(232,233,228,0.04)',color:'rgba(232,233,228,0.35)'},
+    title:`Phase 4 is in '${mode}' mode but no decision yet — waiting for next lock.`,
+  },`phase 4 · ${mode} · waiting`);
+  const _palette={
+    'fire-now':{bg:'rgba(110,231,183,0.10)',fg:'rgb(110,231,183)',border:'rgba(110,231,183,0.25)'},
+    'wait':    {bg:'rgba(229,200,112,0.10)',fg:'#E5C870',         border:'rgba(229,200,112,0.25)'},
+    'abort':   {bg:'rgba(244,114,128,0.10)',fg:'rgb(244,114,128)',border:'rgba(244,114,128,0.25)'},
+    'error':   {bg:'rgba(232,233,228,0.05)',fg:'rgba(232,233,228,0.40)',border:'rgba(232,233,228,0.12)'},
+  };
+  const c=_palette[d.decision]||_palette.error;
+  const _ageSec=d.ts?Math.max(0,Math.floor((Date.now()-d.ts)/1000)):null;
+  const _ageLabel=_ageSec==null?'':(_ageSec<60?`${_ageSec}s ago`:`${Math.floor(_ageSec/60)}m ago`);
+  return React.createElement('div',{
+    className:'text-[9px] tracking-wider mb-2 px-2 py-0.5 rounded text-center flex items-center justify-center gap-1.5',
+    style:{background:c.bg,color:c.fg,border:`1px solid ${c.border}`},
+    title:`Phase 4 (${mode}) · decision: ${d.decision} · score: ${d.score!=null?d.score:'n/a'}\nTop reasons: ${d.reason||'n/a'}\n${_ageLabel}`,
+  },[
+    React.createElement('span',{key:'mode',style:{opacity:0.55}},`phase 4 · ${mode} ·`),
+    React.createElement('span',{key:'dec',className:'font-bold uppercase'},d.decision),
+    d.score!=null&&React.createElement('span',{key:'score',style:{opacity:0.55}},`(${d.score>=0?'+':''}${d.score})`),
+  ]);
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.2.0 — PHASE 4 SHADOW DATA ANALYZER (DevTools console hook)
+// ═══════════════════════════════════════════════════════════════════════════
+// Reads taraCallLog from localStorage, groups by tradeTimingDecision, computes
+//   per-group WR + sample stats + top reasons.
+//
+// Run in DevTools console:
+//
+//   window.__taraPhase4Stats()
+//
+// Returns a summary array and prints a console.table. Also checks the graduation
+//   gate for advisory promotion (≥50 resolved samples per decision class, with
+//   Phase 4 'abort' WR ≥10pt below 'fire-now' WR).
+//
+// IMPORTANT: only counts entries where Phase 4 was running (mode≠off and a
+//   decision was logged). Pre-V10.0.0 trades have no Phase 4 data and show up
+//   as 'no-decision'. Expect this bucket to be large early on; ignore it.
+if(typeof window!=='undefined'){
+  window.__taraPhase4Stats=()=>{
+    try{
+      const raw=localStorage.getItem('taraCallLog_v1');
+      if(!raw){console.warn('[Phase4Stats] no call log in localStorage');return null;}
+      const log=JSON.parse(raw);
+      if(!Array.isArray(log)){console.warn('[Phase4Stats] call log malformed');return null;}
+      const groups={'fire-now':[],'wait':[],'abort':[],'error':[],'no-decision':[]};
+      log.forEach(e=>{
+        if(!e)return;
+        const d=e.tradeTimingDecision;
+        const key=(d&&groups[d]!==undefined)?d:'no-decision';
+        groups[key].push(e);
+      });
+      const summary=Object.entries(groups).map(([decision,entries])=>{
+        const resolved=entries.filter(e=>e.result==='W'||e.result==='L');
+        const wins=resolved.filter(e=>e.result==='W').length;
+        const losses=resolved.filter(e=>e.result==='L').length;
+        const wrNum=resolved.length>0?(wins/resolved.length*100):null;
+        const scores=entries.map(e=>Number(e.tradeTimingScore)).filter(n=>Number.isFinite(n));
+        const avgScore=scores.length>0?(scores.reduce((a,b)=>a+b,0)/scores.length):null;
+        const reasons=entries.map(e=>e.tradeTimingReason).filter(r=>r);
+        const reasonCounts={};
+        reasons.forEach(r=>{reasonCounts[r]=(reasonCounts[r]||0)+1;});
+        const topReasons=Object.entries(reasonCounts).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([r,c])=>`${r}(${c})`).join(' | ');
+        return{
+          decision,
+          count:entries.length,
+          resolved:resolved.length,
+          wins,
+          losses,
+          winRate:wrNum!=null?wrNum.toFixed(1)+'%':'n/a',
+          avgScore:avgScore!=null?avgScore.toFixed(1):'n/a',
+          topReasons:topReasons||'n/a',
+        };
+      }).filter(r=>r.count>0);
+      console.info('━━━ Phase 4 Shadow Stats ━━━');
+      try{console.table(summary);}catch(_){console.info(summary);}
+      // Graduation gate check
+      const fireGate=summary.find(s=>s.decision==='fire-now');
+      const abortGate=summary.find(s=>s.decision==='abort');
+      const GATE_N=50;
+      if(fireGate&&abortGate&&fireGate.resolved>=GATE_N&&abortGate.resolved>=GATE_N){
+        const fireWR=parseFloat(fireGate.winRate);
+        const abortWR=parseFloat(abortGate.winRate);
+        const delta=fireWR-abortWR;
+        console.info(`Graduation gate: fire-now WR=${fireWR.toFixed(1)}%, abort WR=${abortWR.toFixed(1)}%, delta=${delta.toFixed(1)}pt`);
+        if(delta>=10){console.info('✓ Phase 4 has signal — ready for ADVISORY promotion');}
+        else{console.warn(`Phase 4 abort decisions only ${delta.toFixed(1)}pt below fire-now. Needs ≥10pt gap or tuning.`);}
+      }else{
+        console.info(`Graduation gate: need ≥${GATE_N} resolved per decision. Current: fire-now=${fireGate?fireGate.resolved:0}, abort=${abortGate?abortGate.resolved:0}.`);
+      }
+      return summary;
+    }catch(e){console.error('[Phase4Stats] failed:',e&&e.message);return null;}
+  };
+  try{console.info('[Phase4Stats] hook ready — run window.__taraPhase4Stats() in console');}catch(_){}
+}
+
 // Deterministic ID for the current trading window (UTC ISO of window-open boundary).
 // Refresh during the same window → same ID → restore the same lock.
 const computeWindowId=(windowType)=>{
@@ -20548,6 +20685,9 @@ function ScalperAdvisorPanel({
         ];
       })(),
     ),
+    // V10.2.0: Phase 4 status badge. Subscribes to the module-level pub/sub so it
+    //   updates live as Phase 4 evaluates each lock. Hidden when mode is 'off'.
+    React.createElement(_Phase4Badge,{key:'phase4-badge',mode:autoExecSettings?.tradeTimingMode}),
     // Row 3: Mode preset buttons (Patient A / Fast B)
     React.createElement('div',{className:'flex items-center gap-1.5'},
       React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'rgba(232,233,228,0.40)'}},'mode'),
@@ -21848,16 +21988,30 @@ function TaraApp(){
         //   When ON, auto-exec skips these. Manual click still fires them.
         skipTimeCapCommit:!!v.skipTimeCapCommit,
         // V10.0.0: Tara's Trade timing engine mode (Phase 4).
-        //   'off'      — Phase 4 disabled entirely [CURRENT DEFAULT — dormant during Firestore migration work]
-        //   'shadow'   — runs on every lock, logs decision to CSV, does NOT affect trades
+        //   'off'      — Phase 4 disabled entirely
+        //   'shadow'   — runs on every lock, logs decision to call log, does NOT affect trades
         //   'advisory' — decision shown in UI but doesn't block (Session 4+)
         //   'pregate'  — live, blocks/delays per decision (Session 4+, manual click bypasses)
         //   Session 2 (current): only 'off' and 'shadow' are functional.
         //   advisory/pregate are stubbed until Session 4 promotes them.
-        //   Default flipped to 'off' on 2026-05-14 to free up focus during the
-        //   Supabase migration. User can flip back to 'shadow' anytime after
-        //   migration is stable to resume data collection toward Session 3.
-        tradeTimingMode:(['off','shadow','advisory','pregate'].includes(v.tradeTimingMode))?v.tradeTimingMode:'off',
+        //
+        //   V10.2.0: Default flipped from 'off' to 'shadow' now that the Supabase
+        //   migration is complete. One-shot upgrade below: existing users who saved
+        //   'off' in localStorage during V10.0.0/V10.1.0 are auto-bumped to 'shadow'
+        //   on first load after this deploy. Sentinel key 'tara_phase4_v10_2_upgraded'
+        //   ensures this happens only once — after upgrade, explicit user choices
+        //   (including reverting to 'off') are fully respected.
+        tradeTimingMode:(()=>{
+          let _m=v.tradeTimingMode;
+          try{
+            if(!localStorage.getItem('tara_phase4_v10_2_upgraded')){
+              _m='shadow';
+              localStorage.setItem('tara_phase4_v10_2_upgraded','1');
+              try{console.info('[Phase4] V10.2.0 upgrade — tradeTimingMode set to shadow (was '+(v.tradeTimingMode||'unset')+')');}catch(_){}
+            }
+          }catch(_){}
+          return(['off','shadow','advisory','pregate'].includes(_m))?_m:'shadow';
+        })(),
         // V9.19.24: edge filter cap. Default 15pt — based on May 14 audit of 642
         //   resolved trades. WR by edge bucket: +0-10pt → 70.6%, +10-20pt → 65.1%,
         //   +20-30pt → 60.2%, +30+pt → 65.2%. Cap at 15pt keeps the sweet-spot
@@ -29012,6 +29166,8 @@ function TaraApp(){
           mode:_timingMode,
           ts:Date.now(),
         };
+        // V10.2.0: also publish to module-level pub/sub so the lock UI badge can render.
+        try{_setPhase4Decision(_phase4DecisionRef.current);}catch(_){}
         // Log every shadow decision so we can see what's happening at runtime
         try{console.info(`[V10.0.0-${_timingMode}] DECISION`,{
           decision:_phase4Decision.decision,
@@ -29035,6 +29191,8 @@ function TaraApp(){
           mode:_timingMode,
           ts:Date.now(),
         };
+        // V10.2.0: publish error state too so badge can show error indicator.
+        try{_setPhase4Decision(_phase4DecisionRef.current);}catch(_){}
       }
     }
     const _dirCents=_dir==='UP'?_yes:(100-_yes);
