@@ -2381,10 +2381,10 @@ const computeAutoExecSize=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v9.19.25-settings-clarity';
+const BASELINE_VERSION='2026.05.14-v9.19.26-timecap-filter';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.19.25';
+const TARA_VERSION_DISPLAY='Tara 9.19.26';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -10797,6 +10797,30 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 return `= sit out if Tara is more than ${_eff}pt above Kalshi on her direction. Audit: edge >${_eff}pt trades won at 65% (would have lifted last week to ~70%). Manual click bypasses.`;
               })()),
               _tipBox('edge-cap','Blocks auto-trades where Tara is too far ahead of Kalshi on the same side. May 14 audit of 642 trades: edge >25pt won only 65%, edge 0-10pt won 70.6%, edge negative (Kalshi ahead) won 80%+. The pattern: HIGH positive edge = "market already priced this" = bad trade. Default 15. Manual click bypasses. Set to 0 to disable filter entirely (not recommended).'),
+            ),
+          ),
+          // V9.19.26: Skip time-cap-commit toggle. Sits inside Risk Guardrails
+          //   right below Edge cap — both are data-backed gates from May 14 audit.
+          React.createElement('div',{className:'mt-2 pt-2',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
+            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
+              React.createElement('div',{className:'flex-1 pr-2'},
+                React.createElement('div',{className:'flex items-baseline gap-2 mb-0.5'},
+                  _labelTip('skip-timecap','Skip time-cap-commit locks','When Tara hits her decision deadline without genuine conviction, she fires a "time-cap-commit" lock — basically "I had to pick something." May 14 audit of 642 trades: time-cap commits made up 50% of trades and won 62.4% (vs 78.5% for normal commits, 65.7% for early locks). Worst sub-band: 90-119s lock window won only 54.6% — pure coin flip. This filter blocks them at auto-exec gate. Manual click still fires them. Default OFF for A/B testing — turn ON to filter the lowest-WR cluster.'),
+                  React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#E5C870'}},'V9.19.26'),
+                ),
+                React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 leading-relaxed mt-0.5'},
+                  autoExecSettings?.skipTimeCapCommit
+                    ? '= ON — auto-exec sits out on time-cap and timer commits (manual click still fires them)'
+                    : '= OFF — auto-exec fires on all lock types including time-cap (May 14 audit: time-cap WR was 62.4% vs 78.5% normal — consider turning ON to A/B test)',
+                ),
+                _tipBox('skip-timecap','When Tara hits her decision deadline without genuine conviction, she fires a "time-cap-commit" lock — basically "I had to pick something." May 14 audit of 642 trades: time-cap commits made up 50% of trades and won 62.4% (vs 78.5% for normal commits, 65.7% for early locks). Worst sub-band: 90-119s lock window won only 54.6% — pure coin flip. This filter blocks them at auto-exec gate. Manual click still fires them. Default OFF for A/B testing — turn ON to filter the lowest-WR cluster.'),
+              ),
+              React.createElement('input',{
+                type:'checkbox',
+                checked:!!autoExecSettings?.skipTimeCapCommit,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,skipTimeCapCommit:e.target.checked})),
+                className:'ml-2 mt-1',
+              }),
             ),
           ),
         ),
@@ -21013,6 +21037,12 @@ function TaraApp(){
         slippageCents:Number(v.slippageCents)>=0?Number(v.slippageCents):2,
         autoExitOffer:Number(v.autoExitOffer)>0?Number(v.autoExitOffer):85, // exit at 85¢ offer
         autoExitSecLeft:Number(v.autoExitSecLeft)>0?Number(v.autoExitSecLeft):20,
+        // V9.19.26: opt-in skip of time-cap-commit / timer-commit locks.
+        //   Default OFF — A/B test by enabling. May 14 audit: 322 of 642 resolved
+        //   trades (50.2%) were time-cap commits, won only 62.4% (vs 78.5% for
+        //   normal commits). The 90-119s sub-band was 54.6% (coin flip).
+        //   When ON, auto-exec skips these. Manual click still fires them.
+        skipTimeCapCommit:!!v.skipTimeCapCommit,
         // V9.19.24: edge filter cap. Default 15pt — based on May 14 audit of 642
         //   resolved trades. WR by edge bucket: +0-10pt → 70.6%, +10-20pt → 65.1%,
         //   +20-30pt → 60.2%, +30+pt → 65.2%. Cap at 15pt keeps the sweet-spot
@@ -21106,7 +21136,7 @@ function TaraApp(){
         smartExitExtendCents:Number(v.smartExitExtendCents)>=0?Number(v.smartExitExtendCents):5, // extend target by N¢ when extending
         signalSource:(v.signalSource==='lock'||v.signalSource==='snapshot')?v.signalSource:'snapshot', // V9.17.22
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,maxEdgePt:15,enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
@@ -27811,7 +27841,7 @@ function TaraApp(){
       }
       _autoExecLastFiredKeyRef.current=_key;return;
     }
-    if(autoOrderState&&autoOrderState.status!=='canceled'&&autoOrderState.status!=='exited'&&autoOrderState.status!=='patient-waiting'&&autoOrderState.status!=='sit-out'&&autoOrderState.status!=='sit-out-cap'&&autoOrderState.status!=='sit-out-edge'){
+    if(autoOrderState&&autoOrderState.status!=='canceled'&&autoOrderState.status!=='exited'&&autoOrderState.status!=='patient-waiting'&&autoOrderState.status!=='sit-out'&&autoOrderState.status!=='sit-out-cap'&&autoOrderState.status!=='sit-out-edge'&&autoOrderState.status!=='sit-out-timecap'){
       // V9.17.23: REMOVED 'error' from the re-fire allow-list. Previous behavior
       //   re-fired on error status, which caused a tight loop when Kalshi returned
       //   401/403 (auth failures aren't transient — they fail every retry, banging
@@ -27876,6 +27906,44 @@ function TaraApp(){
     if(!_bypassSoftFilters&&autoExecSettings.blockUrgencyApplied&&_v97DiagRef?.current?.urgencyApplied){
       if(_shouldLogManual)try{console.info('[V9.18.9] auto-exec blocked: urgency-applied call (blockUrgencyApplied=ON)');}catch(_){}
       _autoExecLastFiredKeyRef.current=_key;return;
+    }
+    // ── V9.19.26: SKIP TIME-CAP-COMMIT (opt-in) ───────────────────────────
+    // Audit of 642 resolved trades (May 14):
+    //   • Normal commit (real conviction): N=107  WR=78.5%
+    //   • Early lock (signal fired fast):  N=213  WR=65.7%
+    //   • Time-cap-commit (deadline forced lock): N=322  WR=62.4%  ← problem cluster
+    //   • Worst sub-band: 90-119s lock window: N=97  WR=54.6% (coin flip)
+    //
+    // The tier 'time-cap-commit' is set at L29484 when hardCap elapses with no
+    // genuine conviction. 'timer-commit' (L29515) is the smaller cousin —
+    // engine-ETA expired but the call wasn't a coin-flip. Both are
+    // "Tara picked something because she had to."
+    //
+    // Default OFF — user can A/B test by enabling. Manual click bypasses via
+    // _bypassSoftFilters. When ON, blocks the bottom-WR cluster entirely;
+    // backtest projects 66% → 70%+ WR on remaining trades.
+    if(!_bypassSoftFilters&&autoExecSettings.skipTimeCapCommit){
+      const _isTimeCap=_sigTier==='time-cap-commit'||_sigTier==='timer-commit';
+      if(_isTimeCap){
+        if(_shouldLogManual)try{console.info('[V9.19.26] auto-exec blocked: time-cap-commit (skipTimeCapCommit=ON, tier=',_sigTier,')');}catch(_){}
+        try{console.info('[V9.19.26] TIME-CAP BLOCKED',{
+          tier:_sigTier,
+          dir:_signal.dir,
+          posterior:analysis?.rawProbAbove,
+          reason:'deadline-forced lock — historical WR 62%',
+        });}catch(_){}
+        _autoExecLastFiredKeyRef.current=_key;
+        // Emit visible UI state so user sees "sit-out: time-cap"
+        setAutoOrderState({
+          status:'sit-out-timecap',
+          reason:`time-cap-commit blocked — deadline-forced lock has historical WR 62% (this filter is opt-in via settings)`,
+          dir:_signal.dir,
+          placedAt:Date.now(),
+          asset:currentAsset,
+          _tier:_sigTier,
+        });
+        return;
+      }
     }
     const _g=_autoExecGuardrailCheck();
     if(!_g.ok){
@@ -31609,7 +31677,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.19.25
+              9.19.26
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
