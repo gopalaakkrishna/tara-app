@@ -32722,7 +32722,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              10.0.0
+              {TARA_VERSION_DISPLAY.replace(/^Tara\s+/,'')}
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
