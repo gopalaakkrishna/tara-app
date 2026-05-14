@@ -2132,10 +2132,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v9.19.1-phase2-predictor-toggles-wired';
+const BASELINE_VERSION='2026.05.14-v9.19.2-phase3-real-wr-pnl';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.19.1';
+const TARA_VERSION_DISPLAY='Tara 9.19.2';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -8914,10 +8914,24 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           <div className={`flex items-baseline gap-2 flex-wrap ${callColor}`}>
             <span className="text-2xl">{arrow}</span>
             <span className="text-3xl font-serif font-bold tracking-tight leading-none">{callLabel}</span>
-            {/* V9.19.0 Phase 1 stub: Tara WR pill. Renders placeholder; real
-                 computation from taraCallLog ships in V9.19.2. */}
-            {isLockedSnap&&<span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded self-baseline tabular-nums" style={{color:'rgba(110,231,183,0.65)',background:'rgba(110,231,183,0.06)',border:'1px solid rgba(110,231,183,0.18)'}} title="Tara's directional accuracy on last N windows. Computes in V9.19.2.">WR · -- <span className="opacity-60 normal-case">(last 30)</span></span>}
-            {isLockedSnap&&<span className="text-[11px] tabular-nums opacity-50 self-baseline" title="Raw posterior — not WR-calibrated. Tier (chip) is the calibrated signal.">{dispConfidence}% <span className="opacity-60">raw</span></span>}
+            {/* V9.19.2 Phase 3: Tara WR pill — real numbers from taraCallLog.
+                 Computes WR on last 30 resolved windows (WIN+LOSS only,
+                 SITOUT excluded). This is Tara's directional accuracy
+                 regardless of whether you traded. */}
+            {isLockedSnap&&(()=>{
+              const _log=Array.isArray(taraCallLog)?taraCallLog:[];
+              const _resolved=_log.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS'));
+              const _last30=_resolved.slice(-30);
+              const _n=_last30.length;
+              if(_n===0)return null;
+              const _wins=_last30.filter(e=>e.result==='WIN').length;
+              const _wr=Math.round((_wins/_n)*100);
+              const _color=_wr>=70?'rgb(110,231,183)':_wr>=60?'#E5C870':'rgba(244,114,182,0.85)';
+              const _bg=_wr>=70?'rgba(110,231,183,0.08)':_wr>=60?'rgba(229,200,112,0.08)':'rgba(244,114,182,0.06)';
+              const _border=_wr>=70?'rgba(110,231,183,0.30)':_wr>=60?'rgba(229,200,112,0.30)':'rgba(244,114,182,0.22)';
+              return <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded self-baseline tabular-nums" style={{color:_color,background:_bg,border:`1px solid ${_border}`}} title={`Tara's directional accuracy on last ${_n} resolved windows. Target: ≥70%. Excludes sit-outs.`}>WR · {_wr}% <span className="opacity-60 normal-case">(last {_n})</span></span>;
+            })()}
+            {isLockedSnap&&<span className="text-[11px] tabular-nums opacity-50 self-baseline" title="Raw posterior — not WR-calibrated. WR pill above is the calibrated signal.">{dispConfidence}% <span className="opacity-60">raw</span></span>}
             {/* V9.9.5: tier chip on the locked card. Reads from snap.tier (V9.9.5 added
                  it to taraCallSnapshotRef). Color-coded by tier quality so user can see
                  at a glance whether this is a Tier-1 lock (super-confluence, confluence,
@@ -18956,6 +18970,9 @@ function ScalperAdvisorPanel({
   // V9.17.26: clear autoOrderState error so the trade ticket error banner can
   //   reset the state (lets user retry on the next click).
   onClearAutoOrder,
+  // V9.19.2 Phase 3: taraCallLog for predictor P&L computation. Filters to
+  //   today's autoExec trades and sums realizedPnLDollars + computes WR.
+  taraCallLog,
   // V9.17.18: Tara's committed snapshot (from taraCallSnapshotRef). When engine
   //   lock is null but the snapshot has committed via time-cap-commit / timer-
   //   commit / no-go paths, we still want to show the trade ticket and the
@@ -19662,11 +19679,48 @@ function ScalperAdvisorPanel({
             );
           })(),
         ),
-        // Placeholder P&L strip (Phase 3 V9.19.2 fills with real numbers)
-        React.createElement('div',{className:'mt-2 pt-2 border-t border-[#E8E9E4]/5 text-[10px] tabular-nums',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace',color:'rgba(232,233,228,0.35)'}},
-          'today · P&L: -- · trades: -- · WR: --',
-          React.createElement('span',{className:'ml-1 opacity-60',style:{fontSize:'8px'}},'(wires v9.19.2)'),
-        ),
+        // V9.19.2 Phase 3: Predictor P&L strip — computed live from
+        //   taraCallLog. Filters today's autoExec trades, sums dollar P&L,
+        //   computes WR. Null/zero state shows em-dashes so user can see the
+        //   strip is alive even before first trade of the day.
+        (()=>{
+          const _log=Array.isArray(taraCallLog)?taraCallLog:[];
+          const _today=new Date().toISOString().slice(0,10);
+          const _todayAuto=_log.filter(e=>e
+            &&e.autoExec===true
+            &&(e.result==='WIN'||e.result==='LOSS')
+            &&String(e.resolvedTimestampISO||e.timestampISO||'').slice(0,10)===_today);
+          const _n=_todayAuto.length;
+          const _wins=_todayAuto.filter(e=>e.result==='WIN').length;
+          const _wr=_n>0?Math.round((_wins/_n)*100):null;
+          // Sum dollar P&L from entries that have realizedPnLDollars stamped
+          let _pnl=null;
+          if(_n>0){
+            _pnl=0;
+            let _haveAny=false;
+            for(const e of _todayAuto){
+              if(Number.isFinite(e.realizedPnLDollars)){
+                _pnl+=e.realizedPnLDollars;
+                _haveAny=true;
+              }
+            }
+            if(!_haveAny)_pnl=null;
+          }
+          const _pnlSign=_pnl==null?'':_pnl>=0?'+':'';
+          const _pnlColor=_pnl==null?'rgba(232,233,228,0.55)':_pnl>0?'rgb(110,231,183)':_pnl<0?'rgba(244,114,182,0.92)':'rgba(232,233,228,0.65)';
+          return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#E8E9E4]/5 text-[10px] tabular-nums flex items-baseline gap-2',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
+            React.createElement('span',{style:{color:'rgba(232,233,228,0.40)'}},'today'),
+            React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'·'),
+            React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'P&L'),
+            React.createElement('span',{style:{color:_pnlColor,fontWeight:600}},
+              _pnl==null?'--':`${_pnlSign}$${_pnl.toFixed(2)}`),
+            React.createElement('span',{style:{color:'rgba(232,233,228,0.40)'}},'·'),
+            React.createElement('span',{style:{color:'rgba(232,233,228,0.65)'}},`${_n} trade${_n===1?'':'s'}`),
+            React.createElement('span',{style:{color:'rgba(232,233,228,0.40)'}},'·'),
+            React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'WR'),
+            React.createElement('span',{style:{color:'rgba(232,233,228,0.85)'}},_wr==null?'--':`${_wr}%`),
+          );
+        })(),
       ),
       // Header: "this round" + window label + LOCKED badge
       React.createElement('div',{className:'flex items-baseline justify-between mb-3 pb-2 border-b border-[#E8E9E4]/8'},
@@ -24578,6 +24632,26 @@ function TaraApp(){
                 /* V145 closing telemetry */ closingGapBps:_closingGap,
                 kalshiAtClose:kalshiYesPrice!=null?Number(kalshiYesPrice):null,
                 resolvedTimestampISO:new Date().toISOString(),
+                // V9.19.2 Phase 3: capture entry/exit fill prices from autoOrderState
+                //   for predictor P&L computation. Only meaningful for autoExec
+                //   trades — manual trades leave these null. Stored as integer
+                //   cents (our side). realizedPnLCents = exit - entry per contract.
+                //   For dollar P&L: realizedPnLCents * count / 100.
+                ...((()=>{
+                  const _aos=autoOrderStateRef.current;
+                  if(!_aos||!pendingTradeRef.current?.autoExec)return{};
+                  const _entry=Number.isFinite(_aos.fillPrice)?_aos.fillPrice:null;
+                  const _exit=Number.isFinite(_aos.exitFillPrice)?_aos.exitFillPrice:null;
+                  const _contracts=Number.isFinite(_aos.count)?_aos.count:0;
+                  const _realized=(_entry!=null&&_exit!=null)?(_exit-_entry):null;
+                  return{
+                    entryFillCents:_entry,
+                    exitFillCents:_exit,
+                    contractsFilled:_contracts,
+                    realizedPnLCents:_realized,
+                    realizedPnLDollars:_realized!=null?Number(((_realized*_contracts)/100).toFixed(2)):null,
+                  };
+                })()),
                 ..._winCtx,
               };
               if(_isMarginal){
@@ -30911,7 +30985,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.19.1
+              9.19.2
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
@@ -32162,6 +32236,7 @@ function TaraApp(){
                 killSwitchEngaged={killSwitchEngaged}
                 onClearKillSwitch={()=>setKillSwitchEngaged(false)}
                 onClearAutoOrder={()=>setAutoOrderState(null)}
+                taraCallLog={taraCallLog}
                 taraSnapshotForTicket={taraCallSnapshotRef.current?{
                   call:taraCallSnapshotRef.current.call,
                   direction:taraCallSnapshotRef.current.direction,
