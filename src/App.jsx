@@ -2191,10 +2191,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v9.19.13-restore-isEarlyWindow';
+const BASELINE_VERSION='2026.05.14-v9.19.15-simplified-trade-ticket';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.19.13';
+const TARA_VERSION_DISPLAY='Tara 9.19.15';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -18898,6 +18898,11 @@ function ScalperAdvisorPanel({
   const[editEntry,setEditEntry]=React.useState('');
   const[editCashOut,setEditCashOut]=React.useState('');
   const[editCutDelta,setEditCutDelta]=React.useState('');
+  // V9.19.15: simplified trade ticket. tappedTip = which row's explanation is
+  //   currently expanded inline (mobile). Desktop users get hover via title.
+  //   showMonitoring = whether the engineer-mode exit-tick details are visible.
+  const[tappedTip,setTappedTip]=React.useState(null);
+  const[showMonitoring,setShowMonitoring]=React.useState(false);
   const _editOriginalsRef=React.useRef(null); // {betSize, autoExitOffer, stopLossDeltaCents, entryOverride}
   const _editLastWindowIdRef=React.useRef(null);
   // V9.19.9: Persist edit originals to localStorage so a refresh mid-edit doesn't
@@ -19259,7 +19264,11 @@ function ScalperAdvisorPanel({
   const _isYesLive=Number.isFinite(_yes);
   const _entryCents=_isYesLive&&_taraDir?(_taraDir==='UP'?Math.round(_yes):Math.round(100-_yes)):null;
   const _betSize=Number(tradingSettings?.betSize)||10;
-  const _contracts=_entryCents?Math.max(1,Math.round(_betSize/(_entryCents*0.01))):1;
+  // V9.19.14: was Math.round — diverged from kalshiBuildOrder's Math.floor and
+  //   caused UI to show N+1 contracts pre-fill while order placed N. Now matches.
+  //   Example: $1 at 35¢: round=3 (wrong), floor=2 (what places). The order
+  //   builder uses floor because partial contracts can't be bought.
+  const _contracts=_entryCents?Math.max(1,Math.floor(_betSize/(_entryCents*0.01))):1;
   const _maxPayout=_contracts*1.0; // dollars (each contract pays $1 at settle if right)
   const _maxProfit=_maxPayout-_betSize;
   const _cashOutCents=Number(autoExecSettings?.autoExitOffer)||85;
@@ -19881,108 +19890,200 @@ ${_d.responseBody||'(empty)'}`;
             ),
           ),
         ]:[
-          // ── ACTIVE TRADE or GENERIC SUGGESTION ──
-          // enter at — actual fill price + count when in trade, suggested otherwise
-          (_liveValid?_liveEntryCents:_entryCents)!=null&&React.createElement('div',{key:'entry',className:'flex items-baseline justify-between py-2 border-t border-[#E8E9E4]/5'},
-            React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/55',style:{letterSpacing:'0.02em'}},_liveValid?'entry (filled)':'enter at'),
-            React.createElement('span',{className:'text-base tabular-nums font-medium',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
-              _liveValid?`${_liveEntryCents}¢ × ${_liveContractsActual} contract${_liveContractsActual===1?'':'s'}`:`${_entryCents}¢ × ${_contracts} contracts`,
-            ),
-          ),
-          // stake — actual when in trade, suggested otherwise
-          React.createElement('div',{key:'stake',className:'flex items-baseline justify-between py-2 border-t border-[#E8E9E4]/5'},
-            React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/55',style:{letterSpacing:'0.02em'}},'stake'),
-            React.createElement('span',{className:'text-[13px] tabular-nums text-[#E8E9E4]/85',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},`$${(_liveValid?_liveStakeDollars:_betSize).toFixed(2)}`),
-          ),
-          // current offer (NEW row when in trade only)
-          _liveValid&&_liveCurOurCents!=null&&React.createElement('div',{key:'now',className:'flex items-baseline justify-between py-2 border-t border-[#E8E9E4]/5'},
-            React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/55',style:{letterSpacing:'0.02em'}},'current offer'),
-            React.createElement('span',{className:'text-base tabular-nums font-medium',style:{
-              color:_liveUnrealCents==null||_liveUnrealCents===0?'#E8E9E4':(_liveUnrealCents>0?'rgb(110,231,183)':'rgba(244,114,182,0.92)'),
-              fontFamily:'IBM Plex Mono,ui-monospace,monospace',
-            }},
-              `${_liveCurOurCents}¢`+(_liveUnrealCents!=null?` · ${_liveUnrealCents>=0?'+':''}${_liveUnrealCents}¢ = ${_liveUnrealDollars>=0?'+':'-'}$${Math.abs(_liveUnrealDollars).toFixed(2)}`:''),
-            ),
-          ),
-          // max payout if right — actual count × $1 when in trade, suggested otherwise
-          React.createElement('div',{key:'max',className:'flex items-baseline justify-between py-2 border-t border-[#E8E9E4]/5'},
-            React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/55',style:{letterSpacing:'0.02em'}},'max payout if right'),
-            React.createElement('span',{className:'text-[13px] tabular-nums font-medium',style:{color:'rgb(110,231,183)',fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
-              _liveValid?`$${_liveMaxPayout.toFixed(2)} · +$${_liveMaxNet.toFixed(2)} net`:`$${_maxPayout.toFixed(2)} · +$${_maxProfit.toFixed(2)} net`,
-            ),
-          ),
-          // cash out at — only in generic mode (when in trade, current offer row replaces this)
-          !_liveValid&&_cashOutCents&&_entryCents!=null&&React.createElement('div',{key:'cash',className:'flex items-baseline justify-between py-2 border-t border-[#E8E9E4]/5'},
-            React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/55',style:{letterSpacing:'0.02em'}},'cash out at'),
-            React.createElement('span',{className:'text-[13px] tabular-nums font-medium text-[#E8E9E4]/85',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
-              `${_cashOutCents}¢ · +$${_cashOutProfit.toFixed(2)}`,
-            ),
-          ),
-          // V9.18.8: VISIBLE EXIT TICK. While position is filled, show what
-          //   the exit-tick code is evaluating in real time. No more "smart
-          //   exits don't fire" mystery — you see the decision every render.
-          _liveValid&&_liveStatus==='filled'&&autoOrderState&&(()=>{
-            const _aos=autoOrderState;
-            const _fp=_aos.fillPrice!=null
-              ?_aos.fillPrice
-              :(Date.now()-(_aos.placedAt||Date.now())>15000&&Number.isFinite(_aos.limitCents)?_aos.limitCents:null);
-            const _fpLabel=_fp==null?'—':`${_fp}¢${_aos.fillPrice==null?' [est]':''}`;
-            const _cur=_liveCurOurCents;
-            const _curLabel=_cur==null?'—':`${_cur}¢`;
-            const _tp=Number(autoExecSettings?.autoExitOffer)||85;
-            const _tpFires=_cur!=null&&_cur>=_tp;
-            const _sl=Number(autoExecSettings?.stopLossDeltaCents)||0;
-            const _slDrop=_fp!=null&&_cur!=null?(_fp-_cur):null;
-            const _slFires=_sl>0&&_slDrop!=null&&_slDrop>=_sl;
-            const _msLeft=(timeState?.minsRemaining||0)*60000+(timeState?.secsRemaining||0)*1000;
-            const _te=Number(autoExecSettings?.timeExitSecLeft)||0;
-            const _teFires=_te>0&&_msLeft>0&&_msLeft<=_te*1000;
-            const _smartOn=!!autoExecSettings?.smartExitsEnabled;
-            const _smartDir=scalperRead?.dir||taraCall?.direction||taraCall?.call||null;
-            const _smartConv=scalperRead?.dir?Number(scalperRead.conviction)||0:Number(taraCall?.confidence)||0;
-            const _smartSrc=scalperRead?.dir?'tape':'tara';
-            return React.createElement('div',{key:'exit-tick',className:'pt-2 mt-2 border-t border-[#E8E9E4]/5'},
-              React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-wider text-[#E8E9E4]/45 mb-1'},'exit tick (live)'),
-              React.createElement('div',{className:'text-[10px] tabular-nums leading-relaxed',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace',color:'rgba(232,233,228,0.70)'}},
-                React.createElement('div',null,`fill ${_fpLabel} · cur ${_curLabel}`),
-                React.createElement('div',{style:{color:_tpFires?'rgb(110,231,183)':'rgba(232,233,228,0.55)'}},
-                  `TP @${_tp}¢ → ${_tpFires?'FIRES':`needs ≥${_tp}¢`}`,
+          // ═════════════════════════════════════════════════════════════════
+          // V9.19.15: SIMPLIFIED TRADE TICKET
+          //   Goal: every row reads in plain English. Hover (desktop) and tap
+          //   (mobile) reveal an explanation. Engineering-mode monitoring data
+          //   moved behind a "show monitoring" toggle so the default view stays
+          //   readable. The TipRow helper below is local — same closure, same
+          //   trade ticket. Used here only.
+          // ═════════════════════════════════════════════════════════════════
+          (()=>{
+            // TipRow: a single row with label + value + tap-to-expand tooltip.
+            // - On desktop: native `title` attr fires hover tooltip.
+            // - On mobile: tap the label area → inline expansion below the row.
+            // - Visual: label has a tiny dotted underline + ⓘ icon when tip exists.
+            const _renderTip=(id,label,value,tip,valColor)=>{
+              const _isOpen=tappedTip===id;
+              return React.createElement('div',{key:id},
+                React.createElement('div',{className:'flex items-baseline justify-between py-2 border-t border-[#E8E9E4]/5'},
+                  React.createElement('button',{
+                    type:'button',
+                    onClick:()=>setTappedTip(_isOpen?null:id),
+                    title:tip,
+                    className:'flex items-center gap-1 text-[11px] text-[#E8E9E4]/55 cursor-pointer hover:text-[#E8E9E4]/75 transition-colors',
+                    style:{letterSpacing:'0.02em',background:'none',border:'none',padding:0,textAlign:'left'},
+                  },
+                    React.createElement('span',{style:{borderBottom:'1px dotted rgba(232,233,228,0.30)'}},label),
+                    React.createElement('span',{className:'text-[9px] opacity-50 ml-0.5'},'ⓘ'),
+                  ),
+                  React.createElement('span',{className:'text-base tabular-nums font-medium text-right',style:{
+                    color:valColor||'#E8E9E4',
+                    fontFamily:'IBM Plex Mono,ui-monospace,monospace',
+                  }},value),
                 ),
-                _sl>0&&React.createElement('div',{style:{color:_slFires?'rgba(244,114,182,0.92)':'rgba(232,233,228,0.55)'}},
-                  `SL @-${_sl}¢ → drop ${_slDrop==null?'—':_slDrop+'¢'} · ${_slFires?'FIRES':`needs ≥${_sl}¢drop`}`,
+                _isOpen&&React.createElement('div',{
+                  className:'pb-2 -mt-1 text-[10px] leading-relaxed',
+                  style:{color:'rgba(232,233,228,0.55)',paddingLeft:'2px'},
+                },tip),
+              );
+            };
+            const _rows=[];
+            // direction
+            _rows.push(_renderTip(
+              'direction',
+              'direction',
+              (_taraDir==='UP'?'▲ long up':_taraDir==='DOWN'?'▼ long down':'flat'),
+              `Tara called ${_taraDir==='UP'?'long up — she thinks price will be ABOVE the strike at window close':_taraDir==='DOWN'?'long down — she thinks price will be BELOW the strike at window close':'no direction yet'}. ${autoExecSettings?.signalSource==='lock'?'(engine-lock signal)':'(snapshot signal — public 67% WR call)'}`,
+              _taraDirColor,
+            ));
+            // position: contracts × price OR placed/filled detail
+            if((_liveValid?_liveEntryCents:_entryCents)!=null){
+              const _n=_liveValid?_liveContractsActual:_contracts;
+              const _px=_liveValid?_liveEntryCents:_entryCents;
+              _rows.push(_renderTip(
+                'position',
+                _liveValid?'position':'will buy',
+                `${_n} contract${_n===1?'':'s'} @ ${_px}¢`,
+                _liveValid
+                  ?`You hold ${_n} ${_taraDir==='UP'?'YES':'NO'} contract${_n===1?'':'s'}, each bought at ${_px}¢. Each contract pays $1.00 if Tara is right, $0 if wrong. Max possible profit: $${((100-_px)*_n*0.01).toFixed(2)}. Max possible loss: $${(_px*_n*0.01).toFixed(2)}.`
+                  :`Tara plans to buy ${_n} ${_taraDir==='UP'?'YES':'NO'} contract${_n===1?'':'s'} at ${_px}¢ each. Each contract pays $1.00 if right. Counts are floored — partial contracts can't be bought, so the actual fill may be ≤ this.`,
+              ));
+            }
+            // stake
+            _rows.push(_renderTip(
+              'stake',
+              'stake',
+              `$${(_liveValid?_liveStakeDollars:_betSize).toFixed(2)}`,
+              `Total dollars you're risking on this trade. This is the maximum loss if everything goes wrong (price settles against you). Set in Trading Settings → bet size.`,
+            ));
+            // current offer + unrealized P&L (only when in-trade)
+            if(_liveValid&&_liveCurOurCents!=null){
+              const _color=_liveUnrealCents==null||_liveUnrealCents===0
+                ?'#E8E9E4'
+                :_liveUnrealCents>0?'rgb(110,231,183)':'rgba(244,114,182,0.92)';
+              const _arrow=_liveUnrealCents==null?'':_liveUnrealCents>0?'↑':_liveUnrealCents<0?'↓':'→';
+              const _pnl=_liveUnrealCents!=null?`  ${_arrow}${_liveUnrealCents>=0?'+':''}${_liveUnrealCents}¢ = ${_liveUnrealDollars>=0?'+':'-'}$${Math.abs(_liveUnrealDollars).toFixed(2)}`:'';
+              _rows.push(_renderTip(
+                'now',
+                'now',
+                `${_liveCurOurCents}¢${_pnl}`,
+                `Current market price for your side. The arrow + cents shows how far it has moved since you filled. The $ is what you'd pocket (profit) or lose if you sold now. This updates every tick — auto-exec compares it to your target and stop levels.`,
+                _color,
+              ));
+            }
+            // target (take profit)
+            const _tpCents=Number(autoExecSettings?.autoExitOffer)||85;
+            if(_tpCents>0&&(_liveValid?_liveEntryCents:_entryCents)!=null){
+              const _n=_liveValid?_liveContractsActual:_contracts;
+              const _entry=_liveValid?_liveEntryCents:_entryCents;
+              const _winDollars=((_tpCents-_entry)*_n*0.01);
+              _rows.push(_renderTip(
+                'target',
+                'target',
+                `${_tpCents}¢  (${_winDollars>=0?'+':'-'}$${Math.abs(_winDollars).toFixed(2)} if hits)`,
+                `Auto-cash-out target. If the price reaches ${_tpCents}¢, Tara automatically sells everything to lock in profit. Higher target = bigger winners but more trades that never reach it. Adjust in the Predictor card (Fast = 80¢, Patient = 90¢) or in auto-exec settings.`,
+                'rgb(110,231,183)',
+              ));
+            }
+            // stop (cut loss)
+            const _slDelta=Number(autoExecSettings?.stopLossDeltaCents)||0;
+            if(_slDelta>0&&(_liveValid?_liveEntryCents:_entryCents)!=null){
+              const _entry=_liveValid?_liveEntryCents:_entryCents;
+              const _n=_liveValid?_liveContractsActual:_contracts;
+              const _stopAt=Math.max(0,_entry-_slDelta);
+              const _lossDollars=((_stopAt-_entry)*_n*0.01);
+              _rows.push(_renderTip(
+                'stop',
+                'stop',
+                `${_stopAt}¢  (${_lossDollars>=0?'+':'-'}$${Math.abs(_lossDollars).toFixed(2)} if hits)`,
+                `Auto-stop-loss. If the price drops ${_slDelta}¢ below your fill (to ${_stopAt}¢), Tara automatically sells to cut the loss. Tighter stop = smaller losses but more whipsaws. Adjust in the Predictor card (Fast = 25¢, Patient = 15¢) or in auto-exec settings.`,
+                'rgba(244,114,182,0.92)',
+              ));
+            }else if(_liveValid===false&&_slDelta===0){
+              // No-stop-loss warning in pre-fill state
+              _rows.push(React.createElement('div',{key:'nostop',className:'pt-2 mt-1 border-t border-[#E8E9E4]/5'},
+                React.createElement('div',{className:'text-[10px] italic',style:{color:'rgba(232,233,228,0.40)'}},'no stop loss · position rides to settlement or target'),
+                React.createElement('button',{
+                  onClick:()=>{if(typeof setShowTradingSettings==='function')setShowTradingSettings(true);},
+                  className:'mt-1 text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded',
+                  style:{color:'#E5C870',border:'1px solid rgba(229,200,112,0.30)',background:'rgba(229,200,112,0.05)'},
+                },'⚙ enable stop loss'),
+              ));
+            }
+            // exit-when summary (plain English)
+            if(_liveValid&&_liveStatus==='filled'){
+              const _bits=[];
+              if(_tpCents>0)_bits.push(`hits ${_tpCents}¢ (target)`);
+              if(_slDelta>0)_bits.push(`drops ${_slDelta}¢ (stop)`);
+              const _te=Number(autoExecSettings?.timeExitSecLeft)||0;
+              if(_te>0)_bits.push(`${_te}s before window close`);
+              _bits.push('window closes');
+              if(autoExecSettings?.smartExitsEnabled)_bits.push("Tara's read flips");
+              if(_bits.length>0){
+                _rows.push(_renderTip(
+                  'exits',
+                  'exits when',
+                  _bits.length<=3?_bits.join(' · '):_bits.slice(0,3).join(' · ')+' · ⋯',
+                  `Tara will automatically close this position as soon as ANY of these conditions hit (whichever comes first):\n\n• ${_bits.join('\n• ')}\n\nIf none of them trigger before window close, the position settles at the strike: YES pays $1 if BTC ended above strike, $0 if below.`,
+                  'rgba(229,200,112,0.85)',
+                ));
+              }
+            }
+            // exiting status banner (when in the middle of exiting)
+            if(_liveStatus==='exiting'&&autoOrderState?.exitReason){
+              _rows.push(React.createElement('div',{key:'exiting',className:'pt-2 mt-1 border-t border-[#E8E9E4]/5 text-[10px]',style:{color:'rgba(251,191,36,0.95)'}},
+                `exiting · ${autoOrderState.exitReason}`,
+              ));
+            }
+            // collapsible engineering monitoring
+            if(_liveValid&&_liveStatus==='filled'&&autoOrderState){
+              const _aos=autoOrderState;
+              const _fp=_aos.fillPrice!=null
+                ?_aos.fillPrice
+                :(Date.now()-(_aos.placedAt||Date.now())>15000&&Number.isFinite(_aos.limitCents)?_aos.limitCents:null);
+              const _fpLabel=_fp==null?'—':`${_fp}¢${_aos.fillPrice==null?' [est]':''}`;
+              const _cur=_liveCurOurCents;
+              const _curLabel=_cur==null?'—':`${_cur}¢`;
+              const _tp=_tpCents;
+              const _tpFires=_cur!=null&&_cur>=_tp;
+              const _sl=_slDelta;
+              const _slDrop=_fp!=null&&_cur!=null?(_fp-_cur):null;
+              const _slFires=_sl>0&&_slDrop!=null&&_slDrop>=_sl;
+              const _msLeft=(timeState?.minsRemaining||0)*60000+(timeState?.secsRemaining||0)*1000;
+              const _te=Number(autoExecSettings?.timeExitSecLeft)||0;
+              const _teFires=_te>0&&_msLeft>0&&_msLeft<=_te*1000;
+              const _smartOn=!!autoExecSettings?.smartExitsEnabled;
+              const _smartDir=scalperRead?.dir||taraCall?.direction||taraCall?.call||null;
+              const _smartConv=scalperRead?.dir?Number(scalperRead.conviction)||0:Number(taraCall?.confidence)||0;
+              const _smartSrc=scalperRead?.dir?'tape':'tara';
+              _rows.push(React.createElement('div',{key:'mon-toggle',className:'pt-2 mt-1 border-t border-[#E8E9E4]/5'},
+                React.createElement('button',{
+                  type:'button',
+                  onClick:()=>setShowMonitoring(v=>!v),
+                  className:'text-[10px] uppercase font-bold tracking-wider text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70 transition-colors',
+                  style:{background:'none',border:'none',padding:0,cursor:'pointer'},
+                },showMonitoring?'▾ hide monitoring':'▸ show monitoring'),
+                showMonitoring&&React.createElement('div',{className:'mt-2 text-[10px] tabular-nums leading-relaxed',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace',color:'rgba(232,233,228,0.65)'}},
+                  React.createElement('div',null,`fill ${_fpLabel} · cur ${_curLabel}`),
+                  React.createElement('div',{style:{color:_tpFires?'rgb(110,231,183)':'rgba(232,233,228,0.55)'}},
+                    `TP @${_tp}¢ → ${_tpFires?'FIRES':`needs ≥${_tp}¢`}`,
+                  ),
+                  _sl>0&&React.createElement('div',{style:{color:_slFires?'rgba(244,114,182,0.92)':'rgba(232,233,228,0.55)'}},
+                    `SL @-${_sl}¢ → drop ${_slDrop==null?'—':_slDrop+'¢'} · ${_slFires?'FIRES':`needs ≥${_sl}¢drop`}`,
+                  ),
+                  _sl===0&&React.createElement('div',{style:{color:'rgba(232,233,228,0.40)'}},'SL OFF (set stop-loss delta in settings)'),
+                  _te>0&&React.createElement('div',{style:{color:_teFires?'#E5C870':'rgba(232,233,228,0.55)'}},
+                    `time-exit @${_te}s → ${Math.round(_msLeft/1000)}s left · ${_teFires?'FIRES':'OK'}`,
+                  ),
+                  _smartOn&&React.createElement('div',{style:{color:'rgba(232,233,228,0.55)'}},
+                    `smart-exit · ${_smartSrc}=${_smartDir||'(none)'} conv=${_smartConv}% · needs ≥${autoExecSettings.smartExitReverseConviction||70}%+profit≥${autoExecSettings.smartExitMinProfitCents||5}¢`,
+                  ),
                 ),
-                _sl===0&&React.createElement('div',{style:{color:'rgba(232,233,228,0.40)'}},'SL OFF (set stop-loss delta in settings)'),
-                _te>0&&React.createElement('div',{style:{color:_teFires?'#E5C870':'rgba(232,233,228,0.55)'}},
-                  `time-exit @${_te}s → ${Math.round(_msLeft/1000)}s left · ${_teFires?'FIRES':'OK'}`,
-                ),
-                _smartOn&&React.createElement('div',{style:{color:'rgba(232,233,228,0.55)'}},
-                  `smart-exit · ${_smartSrc}=${_smartDir||'(none)'} conv=${_smartConv}% · needs ≥${autoExecSettings.smartExitReverseConviction||70}%+profit≥${autoExecSettings.smartExitMinProfitCents||5}¢`,
-                ),
-              ),
-            );
+              ));
+            }
+            return _rows;
           })(),
-          // exiting status — show exit reason inline if available
-          _liveStatus==='exiting'&&autoOrderState?.exitReason&&React.createElement('div',{key:'exiting',className:'pt-2 border-t border-[#E8E9E4]/5 text-[10px]',style:{color:'rgba(251,191,36,0.85)'}},
-            `exiting · ${autoOrderState.exitReason}`,
-          ),
-          // cut loss at (only if configured, generic mode only)
-          !_liveValid&&_cutCents!=null&&React.createElement('div',{key:'cut',className:'flex items-baseline justify-between py-2 border-t border-[#E8E9E4]/5'},
-            React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/55',style:{letterSpacing:'0.02em'}},'cut loss at'),
-            React.createElement('span',{className:'text-[13px] tabular-nums font-medium',style:{color:'rgba(244,114,182,0.92)',fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
-              `${_cutCents}¢ · ${_cutLoss>=0?'+':''}$${_cutLoss.toFixed(2)}`,
-            ),
-          ),
-          !_liveValid&&_cutCents==null&&React.createElement('div',{key:'nocut',className:'pt-2 border-t border-[#E8E9E4]/5 text-[10px]'},
-            // V9.17.22: actionable empty state. Stop-loss IS configurable in
-            //   auto-exec settings (stopLossDeltaCents) but defaults to 0/off.
-            //   Tell the user where to enable it.
-            React.createElement('div',{className:'text-[#E8E9E4]/40 italic mb-1'},'no stop loss configured · position rides to settlement or take-profit'),
-            React.createElement('button',{
-              onClick:()=>{if(typeof setShowTradingSettings==='function')setShowTradingSettings(true);},
-              className:'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded',
-              style:{color:'#E5C870',border:'1px solid rgba(229,200,112,0.30)',background:'rgba(229,200,112,0.05)'},
-            },'⚙ enable stop loss in settings'),
-          ),
         ],
       ),
       // V9.17.18: MANUAL "place order on Tara's call" button.
@@ -30992,7 +31093,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.19.13
+              9.19.15
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
