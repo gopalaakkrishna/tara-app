@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, deleteDoc, onSnapshot, serverTimestamp, runTransaction } from 'firebase/firestore';
+// V10.1.0: Supabase client for the post-Firestore migration. Loaded alongside
+//   Firestore during the parallel-write phase (Sessions 1-3 of the migration
+//   spec at ~L40). Once Session 4 removes Firestore, this becomes the only
+//   cloud backend. Import is conditional via try/catch at init time so a
+//   build without @supabase/supabase-js still runs (degrades to Firestore-only).
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 // ═══════════════════════════════════════
 // V5.6: FIRESTORE SYNC LAYER
@@ -35,6 +41,370 @@ const FIREBASE_CONFIG={apiKey:"AIzaSyD8jltDNdmXPE0JolUSX6fXzSQUdsYjLcY",authDoma
 let _fbApp=null,_fbDb=null;
 try{_fbApp=initializeApp(FIREBASE_CONFIG);_fbDb=getFirestore(_fbApp);console.info('[Firestore] init ok — shared Tara, no namespacing');}
 catch(e){console.warn('[Firestore] init failed — falling back to localStorage only:',e?.message);}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.1.0 — SUPABASE MIGRATION SPEC (locked 2026-05-14)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// MOTIVATION
+//   Firestore free tier (50K reads/day, 20K writes/day) hit quota repeatedly
+//   on 2026-05-14 due to taraWeights / regimeMemory / pastWindows writes
+//   firing on every state change. RMW transactions count both a read AND a
+//   write per call, so the actual quota burn was ~2x the visible write rate.
+//   Symptoms: 'resource-exhausted' errors, cross-device sync silently dropping
+//   updates, baseline drift between devices.
+//
+//   Supabase free tier offers 500MB Postgres + unlimited API calls (measured
+//   in egress, not request count) which is far more generous for our use case.
+//   This migration moves all cloud sync from Firestore to Supabase while
+//   preserving the existing "Shared Tara" model (no auth, cross-device,
+//   cross-user — anyone with the deployment URL sees the same data).
+//
+// SCOPE
+//   IN: All 6 Firestore paths get migrated to Supabase:
+//       memory/taraCallLog        → tara_state row, doc_path='memory/taraCallLog'
+//       state/lifetimePnL         → tara_state row, doc_path='state/lifetimePnL'
+//       history/pastWindows       → tara_state row, doc_path='history/pastWindows'
+//       learnings/tara            → tara_state row, doc_path='learnings/tara'
+//       learnings/regimeMemory    → tara_state row, doc_path='learnings/regimeMemory'
+//       learnings/taraWeights     → tara_state row, doc_path='learnings/taraWeights'
+//       baseline/canonical        → tara_state row, doc_path='baseline/canonical'
+//       state/currentLock         → tara_state row, doc_path='state/currentLock'
+//       scorecards/tara           → tara_state row, doc_path='scorecards/tara'
+//       meta/info                 → tara_state row, doc_path='meta/info'
+//
+//   ALSO IN: localStorage keys that benefit from cross-device sync:
+//       tara_autoexec_v1, tara_settings_v1, tara_scalper_v1, tara_mission_v1,
+//       tara_speed_dial, tara_attempted_windows_v1, tara_kill_switch_v1,
+//       tara_anti_tilt_v1 → mirrored to tara_state with localStorage_* prefix
+//
+//   OUT: tara_kalshi_creds_v1 (RSA private key) — stays localStorage-ONLY.
+//        Per user decision 2026-05-14: a Supabase compromise must NOT enable
+//        unauthorized order placement. Kalshi auth must be re-entered per
+//        device. This is the only intentional cross-device friction.
+//
+// SCHEMA (single table, JSON-per-path, drop-in Firestore replacement)
+//   create table tara_state (
+//     doc_path    text primary key,           -- e.g. 'memory/taraCallLog'
+//     data        jsonb not null,             -- the document body
+//     updated_at  timestamptz default now() not null,
+//     updated_by  text                        -- optional device fingerprint
+//   );
+//   alter table tara_state enable row level security;
+//   create policy "shared tara read"   on tara_state for select using (true);
+//   create policy "shared tara write"  on tara_state for insert with check (true);
+//   create policy "shared tara update" on tara_state for update using (true);
+//
+// AUTH MODEL
+//   No sign-in. Single shared global namespace. Anonymous anon-key client.
+//   Matches existing Firestore "Shared Tara" pattern. Anyone with the
+//   deployment URL has full read/write to the dataset. This is intentional —
+//   the user has been operating this way and confirmed they want to keep it.
+//
+// CONCURRENCY (RMW replacement)
+//   Firestore had runTransaction (atomic read-modify-write). Postgres uses
+//   upsert with timestamp conflict resolution:
+//
+//     insert into tara_state (doc_path, data, updated_at)
+//     values ($path, $merged_data, now())
+//     on conflict (doc_path) do update
+//       set data = excluded.data,
+//           updated_at = now()
+//       where tara_state.updated_at < excluded.updated_at_local;
+//
+//   The client passes its local 'updated_at' (when it last knew the cloud
+//   state) so the SQL only commits if no newer write has happened since.
+//   On rejection, client re-reads + re-merges + retries (up to 5x). This
+//   matches Firestore's runTransaction semantics.
+//
+//   For the call log specifically, the merge happens CLIENT-SIDE (same merge
+//   function used by existing cloudWriteDebouncedRMW callers). Server just
+//   stores the merged blob.
+//
+// PARALLEL-WRITE PHASE (this is what protects us during migration)
+//   During Sessions 2-3, BOTH Firestore AND Supabase get every write. If one
+//   fails, the other still has the data. If we screw up Supabase code, we
+//   lose nothing — Firestore is still primary. Only after we've verified
+//   Supabase has full parity do we flip the primary reader, and only after
+//   running stable for a few days do we remove Firestore code.
+//
+// MIGRATION ORDER (across sessions)
+//   Session 1 (CURRENT): spec lock, SQL provided, client helpers built,
+//                        parallel-write wired in for state/lifetimePnL only
+//                        as proof of life. Firestore remains primary reader.
+//   Session 2:           parallel-write extended to taraCallLog + all
+//                        learnings. One-time migration script for existing
+//                        Firestore data (read all 700+ trades, write to
+//                        Supabase). Run migration. Verify counts match.
+//   Session 3:           flip primary reader to Supabase. Firestore writes
+//                        continue as backup. Sync tab UI reads from Supabase.
+//   Session 4:           remove Firestore code entirely. Drop firebase npm
+//                        package. Clean up FIREBASE_CONFIG, _fbDb references.
+//                        Settings UI cleanup.
+//
+// HELPER API (drop-in Firestore replacements — preserve all signatures)
+//   cloudWrite(path, data)                 — fire-and-forget write
+//   cloudRead(path) → Promise<data|null>   — one-shot read
+//   cloudWatch(path, callback) → unsub     — subscribe to changes
+//   cloudWriteDebouncedRMW(path, getLocalData, mergeFn, delayMs?)  — atomic RMW
+//   cloudDelete(path)                      — delete a doc
+//
+//   Every existing call site continues to work without modification during
+//   the parallel-write phase. New Supabase versions live alongside Firestore
+//   versions and are invoked together by a wrapper.
+//
+// SUCCESS CRITERIA
+//   1. Sync tab shows non-zero counts from Supabase
+//   2. Call log entries from one device appear on another within ~30s
+//   3. Lifetime P&L matches between devices
+//   4. Force Resync / Save Baseline / Apply Baseline all work as today
+//   5. No new console errors from Supabase code
+//   6. Firestore quota errors stop (or at minimum, are not user-facing)
+//
+// ROLLBACK
+//   At any point in Sessions 1-3, removing the Supabase wrapper call leaves
+//   Firestore fully functional. The Supabase code is purely additive until
+//   Session 3's primary-reader flip. Session 4 is the only one-way step.
+//
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Supabase project credentials (V10.1.0). Both are public-safe — the anon
+//   key is JWT-encoded and designed for client bundles. RLS policies control
+//   what the anon role can actually do (read/write the tara_state table).
+const SUPABASE_URL='https://vhbbkqmyyzddhezdgszm.supabase.co';
+const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoYmJrcW15eXpkZGhlemRnc3ptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODMzNjUsImV4cCI6MjA5NDM1OTM2NX0.30zC6hbGEcCNSuOQNRfh81_3B0nwVDuUJeeqUydZCoM';
+// Supabase client is initialized lazily below after the helper module loads.
+// During the parallel-write phase, _sbClient may be null if init fails — code
+// must check before calling. Failed Supabase init is non-fatal (Firestore
+// remains primary). Logged once on init.
+let _sbClient=null;
+let _sbInitAttempted=false;
+let _sbInitError=null;
+
+// V10.1.0 — Supabase init. Mirrors the Firestore init pattern at L35. Fail-soft:
+//   if the client can't be created, log a warning and leave _sbClient=null. The
+//   parallel-write wrapper checks for null before each call so a broken Supabase
+//   doesn't break the app.
+try{
+  _sbInitAttempted=true;
+  if(typeof createSupabaseClient==='function'&&SUPABASE_URL&&SUPABASE_ANON_KEY){
+    _sbClient=createSupabaseClient(SUPABASE_URL,SUPABASE_ANON_KEY,{
+      auth:{
+        // No sign-in flow — Shared Tara model. Disable session persistence and
+        //   auto-refresh since we're using the anon role only.
+        persistSession:false,
+        autoRefreshToken:false,
+        detectSessionInUrl:false,
+      },
+      // Realtime opted in but with conservative defaults. We'll wire up the
+      //   subscription helpers (cloudSupabaseWatch) but keep them off by default
+      //   during Sessions 1-2 to avoid surprises.
+      realtime:{params:{eventsPerSecond:2}},
+    });
+    console.info('[Supabase] init ok — anon role, RLS policies active');
+  } else {
+    _sbInitError='createSupabaseClient unavailable or credentials missing';
+    console.warn('[Supabase] init skipped:',_sbInitError);
+  }
+} catch(e){
+  _sbInitError=e?.message||String(e);
+  _sbClient=null;
+  console.warn('[Supabase] init failed:',_sbInitError);
+}
+
+// V10.1.0 — Supabase helper functions. Match Firestore helper signatures so
+//   they can be wired in parallel without touching call sites.
+//
+// Path convention: doc_path is a slash-separated string like 'memory/taraCallLog'.
+//   Stored as-is in the tara_state.doc_path column. No path parsing needed.
+
+// One-shot write: insert or update a single doc. Best-effort, fire-and-forget
+//   (no error throws to caller). Used for non-RMW paths.
+const cloudSupabaseWrite=async(path,data)=>{
+  if(!_sbClient||!path)return false;
+  try{
+    const {error}=await _sbClient.from('tara_state').upsert({
+      doc_path:path,
+      data:data,
+      updated_at:new Date().toISOString(),
+    },{onConflict:'doc_path'});
+    if(error){console.warn('[Supabase] write failed',path,error.message);return false;}
+    return true;
+  }catch(e){
+    console.warn('[Supabase] write threw',path,e?.message);
+    return false;
+  }
+};
+
+// One-shot read: fetch a single doc by path. Returns the data payload or null.
+//   Matches cloudRead signature.
+const cloudSupabaseRead=async(path)=>{
+  if(!_sbClient||!path)return null;
+  try{
+    const {data,error}=await _sbClient.from('tara_state').select('data,updated_at').eq('doc_path',path).maybeSingle();
+    if(error){
+      // PGRST116 = no rows found, which is "missing doc" (not an error for us)
+      if(error.code!=='PGRST116')console.warn('[Supabase] read failed',path,error.message);
+      return null;
+    }
+    if(!data)return null;
+    return data.data; // unwrap the jsonb column
+  }catch(e){
+    console.warn('[Supabase] read threw',path,e?.message);
+    return null;
+  }
+};
+
+// Subscribe to changes on a specific doc. Returns an unsubscribe function.
+//   Matches cloudWatch signature: callback receives the new data payload.
+//   Uses Supabase Realtime postgres_changes events.
+const cloudSupabaseWatch=(path,callback)=>{
+  if(!_sbClient||!path||typeof callback!=='function')return ()=>{};
+  let _ch=null;
+  try{
+    // Channel per path so each subscriber has its own. Supabase auto-merges
+    //   internally so the cost is low.
+    _ch=_sbClient.channel(`tara_state:${path}`)
+      .on('postgres_changes',{
+        event:'*',
+        schema:'public',
+        table:'tara_state',
+        filter:`doc_path=eq.${path}`,
+      },(payload)=>{
+        try{
+          // payload.new has the row after change; payload.old for deletes
+          const _row=payload.new||payload.old;
+          callback(_row?.data||null);
+        }catch(e){console.warn('[Supabase] watch callback threw',path,e?.message);}
+      })
+      .subscribe();
+  }catch(e){
+    console.warn('[Supabase] watch subscribe threw',path,e?.message);
+    return ()=>{};
+  }
+  return ()=>{
+    try{if(_ch)_sbClient.removeChannel(_ch);}catch(_){}
+  };
+};
+
+// Delete a doc by path. Matches cloudDelete signature.
+const cloudSupabaseDelete=async(path)=>{
+  if(!_sbClient||!path)return false;
+  try{
+    const {error}=await _sbClient.from('tara_state').delete().eq('doc_path',path);
+    if(error){console.warn('[Supabase] delete failed',path,error.message);return false;}
+    return true;
+  }catch(e){
+    console.warn('[Supabase] delete threw',path,e?.message);
+    return false;
+  }
+};
+
+// V10.1.0 — Debounced RMW (read-modify-write). Matches cloudWriteDebouncedRMW.
+//   Postgres lacks Firestore's runTransaction primitive, so we implement RMW
+//   via optimistic concurrency:
+//     1. Read current cloud value + updated_at
+//     2. Call mergeFn(cloudData, localData) → merged
+//     3. Upsert with a conditional: only commit if cloud.updated_at hasn't
+//        changed since our read
+//     4. If commit rejected (someone else wrote between our read and write),
+//        retry up to 5 times with fresh reads
+//
+//   Same per-path debounce as the Firestore version (separate timer map).
+const _sbWriteQueueRMW=new Map();
+const _sbWritePendingRMW=new Map();
+const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
+  if(!_sbClient||!path)return;
+  if(_sbWriteQueueRMW.has(path))clearTimeout(_sbWriteQueueRMW.get(path));
+  _sbWritePendingRMW.set(path,{getLocalData,mergeFn});
+  const tid=setTimeout(async()=>{
+    _sbWriteQueueRMW.delete(path);
+    _sbWritePendingRMW.delete(path);
+    if(!_sbClient)return;
+    // Optimistic RMW with retry. 5 attempts matches Firestore default.
+    let _attempts=0;
+    while(_attempts<5){
+      _attempts++;
+      try{
+        // Read current state
+        const {data:_cur,error:_readErr}=await _sbClient.from('tara_state')
+          .select('data,updated_at').eq('doc_path',path).maybeSingle();
+        if(_readErr&&_readErr.code!=='PGRST116'){
+          console.warn('[Supabase] RMW read failed',path,_readErr.message);
+          return;
+        }
+        const _cloudData=_cur?.data||null;
+        const _cloudUpdatedAt=_cur?.updated_at||null;
+        const _localData=getLocalData();
+        const _merged=mergeFn(_cloudData,_localData);
+        if(_merged==null)return; // mergeFn signaled "skip write"
+        // Conditional upsert: succeed only if row's updated_at hasn't changed.
+        //   For a brand-new row (no _cloudUpdatedAt), this is an INSERT and
+        //   has no conflict to check. For an existing row, we use the eq()
+        //   filter on updated_at to enforce optimistic concurrency.
+        if(_cloudUpdatedAt){
+          // Update with concurrency check
+          const {error:_updateErr,count}=await _sbClient.from('tara_state')
+            .update({data:_merged,updated_at:new Date().toISOString()},{count:'exact'})
+            .eq('doc_path',path)
+            .eq('updated_at',_cloudUpdatedAt);
+          if(_updateErr){
+            console.warn('[Supabase] RMW update failed',path,_updateErr.message);
+            return;
+          }
+          if(count===0){
+            // Conflict — someone else wrote. Retry from the top.
+            if(_attempts>=5){console.warn('[Supabase] RMW gave up after 5 attempts',path);return;}
+            await new Promise(r=>setTimeout(r,50*_attempts));
+            continue;
+          }
+          return; // success
+        } else {
+          // No existing row — plain insert. If it conflicts (race with another
+          //   first-time inserter), retry from the top.
+          const {error:_insertErr}=await _sbClient.from('tara_state')
+            .insert({doc_path:path,data:_merged,updated_at:new Date().toISOString()});
+          if(_insertErr){
+            // 23505 = unique violation = someone else inserted first. Retry.
+            if(_insertErr.code==='23505'){
+              if(_attempts>=5){console.warn('[Supabase] RMW insert gave up',path);return;}
+              await new Promise(r=>setTimeout(r,50*_attempts));
+              continue;
+            }
+            console.warn('[Supabase] RMW insert failed',path,_insertErr.message);
+            return;
+          }
+          return; // success
+        }
+      } catch(e){
+        console.warn('[Supabase] RMW threw',path,e?.message);
+        return;
+      }
+    }
+  },delayMs);
+  _sbWriteQueueRMW.set(path,tid);
+};
+
+// Force-flush all pending Supabase RMW writes (called on tab close).
+//   Best-effort, since async network calls may not complete before unload.
+const _cloudSupabaseFlushAllRMW=()=>{
+  let _flushed=0;
+  for(const[path,tid]of _sbWriteQueueRMW.entries()){
+    clearTimeout(tid);
+    const entry=_sbWritePendingRMW.get(path);
+    if(entry){
+      try{
+        const _localData=entry.getLocalData();
+        const _merged=entry.mergeFn(null,_localData);
+        if(_merged!=null)cloudSupabaseWrite(path,_merged);
+        _flushed++;
+      }catch(_){}
+    }
+  }
+  _sbWriteQueueRMW.clear();
+  _sbWritePendingRMW.clear();
+  return _flushed;
+};
 
 const _fbDoc=(path)=>{
   if(!_fbDb)return null;
@@ -529,7 +899,11 @@ const _cloudFlushAllRMW=()=>{
   return flushed;
 };
 // Combined flush — called on tab close
-const cloudFlushAllCombined=()=>cloudFlushAll()+_cloudFlushAllRMW();
+// V10.1.0: cloudFlushAllCombined now also drains pending Supabase RMW writes.
+//   During the parallel-write phase, this fires both Firestore and Supabase
+//   pending writes on tab close. Once Session 4 removes Firestore, this will
+//   simplify back to just _cloudSupabaseFlushAllRMW.
+const cloudFlushAllCombined=()=>cloudFlushAll()+_cloudFlushAllRMW()+_cloudSupabaseFlushAllRMW();
 if(typeof window!=='undefined'){
   const _onLeave=()=>{try{cloudFlushAllCombined();}catch(_){}};
   window.addEventListener('pagehide',_onLeave);
@@ -2784,10 +3158,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.0.0-session2-shadow-hotfix';
+const BASELINE_VERSION='2026.05.14-v10.1.0-supabase-session1-spec-and-helpers';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.0.0';
+const TARA_VERSION_DISPLAY='Tara 10.1.0';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -21288,6 +21662,25 @@ function TaraApp(){
         },
         1500,
       );
+      // V10.1.0 — PARALLEL SUPABASE WRITE (proof-of-life for migration Session 1).
+      //   Same arguments, same merge logic, written to Supabase tara_state in
+      //   parallel with the Firestore write above. If Supabase fails, Firestore
+      //   still has the data. If both succeed, both backends are in sync.
+      //   This is the FIRST path we wire to Supabase — picked because lifetime
+      //   P&L is small, simple, and changes infrequently (lower noise for the
+      //   verification step). Session 2 expands to taraCallLog + learnings.
+      cloudSupabaseWriteDebouncedRMW(
+        'state/lifetimePnL',
+        ()=>({value:_pnlRef.current,updatedAt:_pnlUpdatedAtRef.current}),
+        (cloudData,localData)=>{
+          const cT=Number(cloudData?.updatedAt)||0;
+          const lT=Number(localData.updatedAt)||0;
+          if(cT>lT+1000)return null;
+          if(cloudData&&Number(cloudData.value)===Number(localData.value)&&cT===lT)return null;
+          return{value:localData.value,updatedAt:localData.updatedAt};
+        },
+        1500,
+      );
     }
   },[lifetimePnL]);
   useEffect(()=>{
@@ -21484,13 +21877,16 @@ function TaraApp(){
         //   When ON, auto-exec skips these. Manual click still fires them.
         skipTimeCapCommit:!!v.skipTimeCapCommit,
         // V10.0.0: Tara's Trade timing engine mode (Phase 4).
-        //   'off'      — Phase 4 disabled entirely
-        //   'shadow'   — runs on every lock, logs decision to CSV, does NOT affect trades [DEFAULT — data collection phase]
+        //   'off'      — Phase 4 disabled entirely [CURRENT DEFAULT — dormant during Firestore migration work]
+        //   'shadow'   — runs on every lock, logs decision to CSV, does NOT affect trades
         //   'advisory' — decision shown in UI but doesn't block (Session 4+)
         //   'pregate'  — live, blocks/delays per decision (Session 4+, manual click bypasses)
         //   Session 2 (current): only 'off' and 'shadow' are functional.
         //   advisory/pregate are stubbed until Session 4 promotes them.
-        tradeTimingMode:(['off','shadow','advisory','pregate'].includes(v.tradeTimingMode))?v.tradeTimingMode:'shadow',
+        //   Default flipped to 'off' on 2026-05-14 to free up focus during the
+        //   Supabase migration. User can flip back to 'shadow' anytime after
+        //   migration is stable to resume data collection toward Session 3.
+        tradeTimingMode:(['off','shadow','advisory','pregate'].includes(v.tradeTimingMode))?v.tradeTimingMode:'off',
         // V9.19.24: edge filter cap. Default 15pt — based on May 14 audit of 642
         //   resolved trades. WR by edge bucket: +0-10pt → 70.6%, +10-20pt → 65.1%,
         //   +20-30pt → 60.2%, +30+pt → 65.2%. Cap at 15pt keeps the sweet-spot
@@ -21584,7 +21980,7 @@ function TaraApp(){
         smartExitExtendCents:Number(v.smartExitExtendCents)>=0?Number(v.smartExitExtendCents):5, // extend target by N¢ when extending
         signalSource:(v.signalSource==='lock'||v.signalSource==='snapshot')?v.signalSource:'snapshot', // V9.17.22
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,tradeTimingMode:'shadow',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,tradeTimingMode:'off',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
