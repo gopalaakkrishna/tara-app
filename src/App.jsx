@@ -2015,6 +2015,73 @@ const kalshiPlaceOrder=async({apiKeyId,privateKeyPem,ticker,dir,limitCents,betDo
   return{ok:true,dryRun:false,order:res.data?.order||res.data,raw:res};
 };
 
+// V9.18.10: KALSHI RESPONSE NORMALIZATION
+// Kalshi's order objects have evolved through several API versions. The legacy
+// fields our code expected (status==='filled', fill_price as integer cents) do
+// NOT match current Kalshi:
+//   - Current status values: 'resting' | 'canceled' | 'executed'  (NOT 'filled')
+//   - Current price fields: 'yes_price_dollars' / 'no_price_dollars' (string like "0.5600")
+//   - Fill average:  'taker_fill_cost_dollars' / 'maker_fill_cost_dollars' (string $)
+//   - Counts:        'fill_count_fp' / 'remaining_count_fp' (string fixed-point)
+//
+// This was an end-to-end bug since the exit code was written: status never
+// matched 'filled' on a real order, so stop-loss / take-profit / smart-exit
+// never fired on real money. Dry-run worked because dry-run hardcoded 'filled'.
+//
+// This helper accepts the raw Kalshi order object and returns:
+//   { status: 'filled' | 'resting' | 'partially_filled' | 'canceled' | <raw>,
+//     fillPriceCents: int 1-99 | null,
+//     filledCount: int }
+//
+// status is normalized to 'filled' for both 'executed' (legacy fully-filled)
+// and 'filled' (dry-run synthetic) so all downstream code keeps working.
+const KALSHI_FILLED_STATUSES=['executed','filled'];
+const _kalshiParseDollarString=(s)=>{
+  // Kalshi returns prices as strings like "0.5600" representing dollars.
+  // Returns integer cents (rounded), or null if unparseable / out of [1, 99].
+  if(s==null)return null;
+  const n=Number(s);
+  if(!Number.isFinite(n)||n<=0||n>=1)return null;
+  const cents=Math.round(n*100);
+  return cents>=1&&cents<=99?cents:null;
+};
+const kalshiNormalizeOrder=(_ord)=>{
+  if(!_ord||typeof _ord!=='object')return{status:null,fillPriceCents:null,filledCount:0};
+  const _rawStatus=_ord.status||null;
+  // Normalize 'executed' → 'filled' for downstream consumers
+  const _status=KALSHI_FILLED_STATUSES.includes(_rawStatus)?'filled':_rawStatus;
+  // Filled contract count: prefer fixed-point string, fallback to legacy integer
+  let _filledCount=0;
+  if(_ord.fill_count_fp!=null){
+    const n=Number(_ord.fill_count_fp);
+    if(Number.isFinite(n))_filledCount=Math.floor(n);
+  }else if(_ord.fill_count!=null){
+    const n=Number(_ord.fill_count);
+    if(Number.isFinite(n))_filledCount=Math.floor(n);
+  }
+  // Fill price (in cents on the user-side axis they queried). Try several
+  // fields in priority order:
+  //   1. average_fill_price (V2 endpoint) — string $ on the side that filled
+  //   2. taker_fill_cost_dollars — string $ average for taker fills
+  //   3. maker_fill_cost_dollars — string $ average for maker fills
+  //   4. fill_price (legacy integer cents) — last resort
+  //   5. yes_price_dollars (limit price, NOT fill — only if filled and no other data)
+  let _fillCents=null;
+  _fillCents=_kalshiParseDollarString(_ord.average_fill_price);
+  if(_fillCents==null)_fillCents=_kalshiParseDollarString(_ord.taker_fill_cost_dollars);
+  if(_fillCents==null)_fillCents=_kalshiParseDollarString(_ord.maker_fill_cost_dollars);
+  if(_fillCents==null&&_ord.fill_price!=null){
+    const n=Number(_ord.fill_price);
+    if(Number.isFinite(n)&&n>=1&&n<=99)_fillCents=Math.round(n);
+  }
+  // Only use yes_price_dollars (limit) as last-resort estimate if order is filled.
+  // Conservative — limit might equal fill price for marketable limits.
+  if(_fillCents==null&&_status==='filled'){
+    _fillCents=_kalshiParseDollarString(_ord.yes_price_dollars);
+  }
+  return{status:_status,fillPriceCents:_fillCents,filledCount:_filledCount,_raw:_ord};
+};
+
 const kalshiGetOrder=async({apiKeyId,privateKeyPem,orderId,dryRun})=>{
   if(dryRun||(orderId&&String(orderId).startsWith('DRY_'))){
     // Dry-run orders auto-fill after ~3s of simulated lookups
@@ -2065,10 +2132,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.13-v9.18.9-block-urgency-deemphasize-posterior';
+const BASELINE_VERSION='2026.05.13-v9.18.10-kalshi-response-normalizer-CRITICAL';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.18.9';
+const TARA_VERSION_DISPLAY='Tara 9.18.10';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -27275,13 +27342,22 @@ function TaraApp(){
         }
         const _ord=res.order||{};
         const _orderId=_ord.order_id||_ord.id||null;
-        const _status=_ord.status||(res.dryRun?'resting':'submitted');
-        const _count=Number(_ord.count)||0;
+        // V9.18.10: normalize placement response. If Kalshi instant-fills the
+        //   marketable limit (common when our price is at offer+slippage),
+        //   status comes back as 'executed' and we extract fillPriceCents
+        //   directly so exit logic can fire immediately without waiting for
+        //   the poll loop to discover it.
+        const _norm=kalshiNormalizeOrder(_ord);
+        const _status=_norm.status||(res.dryRun?'resting':'submitted');
+        const _count=_norm.filledCount||Number(_ord.count)||0;
+        const _placementFill=_norm.fillPriceCents;
+        try{console.info('[V9.18.10] placement parsed',{status:_status,fillPriceCents:_placementFill,count:_count,rawStatus:_ord.status});}catch(_){}
         setAutoOrderState(prev=>prev?{
           ...prev,
           orderId:_orderId,
           count:_count||prev.count,
           status:_status,
+          fillPrice:_placementFill!=null?_placementFill:prev.fillPrice,
           dryRun:!!res.dryRun,
         }:null);
         // V9.3.0: route through handleManualSync so the existing trade-log machinery
@@ -27342,19 +27418,21 @@ function TaraApp(){
         }
         _consecutiveErrors=0;
         const _ord=r.order||{};
-        const _newStatus=_ord.status||autoOrderState.status;
-        // V9.17.11: fillPrice semantics safety check. Dry-run stores our-side
-        //   cents. Kalshi's real fill_price field semantics need verification with
-        //   a real fill before relying on it for math (smart exits, P&L). For now,
-        //   if value is suspiciously >100 or <0, ignore and keep our limitCents
-        //   as the conservative best-known fill estimate.
-        const _rawFill=_ord.fill_price!=null?Number(_ord.fill_price):null;
-        const _safeFill=Number.isFinite(_rawFill)&&_rawFill>0&&_rawFill<100?_rawFill:null;
+        // V9.18.10: route through normalizer so status='executed' is mapped to
+        //   our internal 'filled' AND fillPrice is extracted from whichever
+        //   field Kalshi actually populated (taker_fill_cost_dollars,
+        //   average_fill_price, etc — see kalshiNormalizeOrder for full priority).
+        //   This is the fix that lets exit logic finally run on real orders.
+        const _norm=kalshiNormalizeOrder(_ord);
+        const _newStatus=_norm.status||autoOrderState.status;
+        const _safeFill=_norm.fillPriceCents;
         if(_newStatus!==autoOrderState.status||_safeFill!=null){
+          try{console.info('[V9.18.10] poll update',{prevStatus:autoOrderState.status,newStatus:_newStatus,fillPriceCents:_safeFill,filledCount:_norm.filledCount,rawStatus:_ord.status});}catch(_){}
           setAutoOrderState(prev=>prev?{
             ...prev,
             status:_newStatus,
             fillPrice:_safeFill!=null?_safeFill:prev.fillPrice,
+            count:_norm.filledCount>0?_norm.filledCount:prev.count,
           }:null);
         }
       }catch(_){}
@@ -27697,11 +27775,13 @@ function TaraApp(){
             return;
           }
           const _ord=r.order||{};
-          // V9.17.16: extract actual exit fill price. Same safety bound as entry fill.
-          //   For dry-run, fall back to exitTriggerCents (the price that triggered exit).
-          //   For real fills, use Kalshi's fill_price when valid.
-          const _rawExitFill=_ord.fill_price!=null?Number(_ord.fill_price):null;
-          const _safeExitFill=Number.isFinite(_rawExitFill)&&_rawExitFill>0&&_rawExitFill<100?_rawExitFill:null;
+          // V9.18.10: use normalizer to extract exit fill price from whichever
+          //   field Kalshi populated. Legacy code looked at fill_price which
+          //   Kalshi doesn't return. Result: exitFillPrice was always null on
+          //   real exits → realized P&L showed wrong, fills logged wrong.
+          const _norm=kalshiNormalizeOrder(_ord);
+          const _safeExitFill=_norm.fillPriceCents;
+          try{console.info('[V9.18.10] exit parsed',{status:_norm.status,exitFillCents:_safeExitFill,rawStatus:_ord.status});}catch(_){}
           setAutoOrderState(prev=>prev?{
             ...prev,
             exitOrderId:_ord.order_id||_ord.id||`pending_${Date.now()}`,
@@ -30679,7 +30759,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.18.9
+              9.18.10
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
