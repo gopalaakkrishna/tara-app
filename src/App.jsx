@@ -703,6 +703,114 @@ const cloudDelete=async(path)=>{
   catch(e){console.warn('[Firestore delete failed]',path,e?.message);_setCloudStatus({state:'error',lastError:{path,message:e?.message,at:Date.now()}});return false;}
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.1.0 — ONE-SHOT FIRESTORE → SUPABASE MIGRATION (Session 2)
+// ═══════════════════════════════════════════════════════════════════════════
+// Reads every Firestore document path the app uses and upserts it into
+//   Supabase tara_state. Run from DevTools console:
+//
+//     window.__taraMigrate('dryrun')  → reads Firestore, logs sizes, NO writes
+//     window.__taraMigrate('real')    → reads Firestore + upserts to Supabase
+//
+// Idempotent: Supabase upsert is keyed on doc_path PK. Multiple runs just
+//   overwrite each path with the latest Firestore value.
+//
+// IMPORTANT: This migrates whatever is currently in Firestore. If local data
+//   is ahead of cloud (Sync tab shows drift), click "Save as Baseline" FIRST
+//   to push local → Firestore, then run this migration to copy Firestore →
+//   Supabase. Otherwise local-only entries will be lost in transit.
+//
+// Remove this hook in Session 4 once Firestore is fully retired.
+const _MIGRATION_PATHS=[
+  'state/currentLock',
+  'state/lifetimePnL',
+  'memory/taraCallLog',
+  'history/pastWindows',
+  'baseline/canonical',
+  'learnings/tara',
+  'learnings/taraWeights',
+  'learnings/regimeMemory',
+];
+
+const _taraMigrate=async(mode='dryrun')=>{
+  if(mode!=='dryrun'&&mode!=='real'){
+    console.error('[Migration] mode must be "dryrun" or "real". Got:',mode);
+    return;
+  }
+  if(!_fbDb){console.error('[Migration] Firestore not initialized — cannot read.');return;}
+  if(!_sbClient){console.error('[Migration] Supabase not initialized — cannot write.');return;}
+
+  console.group(`[Migration] ${mode.toUpperCase()} — Firestore → Supabase`);
+  console.info('Paths to migrate:',_MIGRATION_PATHS.length);
+  const _results=[];
+
+  for(const path of _MIGRATION_PATHS){
+    const _t0=Date.now();
+    try{
+      const _data=await cloudRead(path);
+      const _readMs=Date.now()-_t0;
+
+      if(_data===null){
+        console.warn(`  ⊘ ${path} — empty (no doc in Firestore, skipping)`);
+        _results.push({path,status:'empty',readMs:_readMs});
+        continue;
+      }
+
+      // Strip Firestore-only metadata fields before writing to Supabase.
+      //   _updatedAt is a Firestore serverTimestamp (not portable). The Supabase
+      //   write helper sets its own updated_at column.
+      const _cleaned={..._data};
+      delete _cleaned._updatedAt;
+
+      let _sizeBytes=0;
+      try{_sizeBytes=new Blob([JSON.stringify(_cleaned)]).size;}catch(_){_sizeBytes=-1;}
+      const _entryCount=Array.isArray(_cleaned.entries)
+        ?_cleaned.entries.length
+        :(_cleaned.value!==undefined?1:Object.keys(_cleaned).length);
+      const _shape=Array.isArray(_cleaned.entries)?'entries':'keys';
+
+      console.info(`  ✓ ${path} — ${(_sizeBytes/1024).toFixed(1)} KB, ${_entryCount} ${_shape}, read in ${_readMs}ms`);
+
+      if(mode==='real'){
+        const _w0=Date.now();
+        const _ok=await cloudSupabaseWrite(path,_cleaned);
+        const _writeMs=Date.now()-_w0;
+        if(_ok){
+          // Verify by reading back from Supabase.
+          const _back=await cloudSupabaseRead(path);
+          const _verified=_back!==null;
+          console.info(`    ↳ wrote to Supabase in ${_writeMs}ms, verified=${_verified}`);
+          _results.push({path,status:_verified?'ok':'wrote-but-readback-empty',sizeBytes:_sizeBytes,entryCount:_entryCount,writeMs:_writeMs});
+        }else{
+          console.error(`    ↳ Supabase write FAILED for ${path}`);
+          _results.push({path,status:'write-failed',sizeBytes:_sizeBytes});
+        }
+      }else{
+        _results.push({path,status:'dryrun-ok',sizeBytes:_sizeBytes,entryCount:_entryCount});
+      }
+    }catch(e){
+      console.error(`  ✗ ${path} — error:`,e?.message);
+      _results.push({path,status:'error',error:e?.message});
+    }
+  }
+
+  console.groupEnd();
+  console.info('[Migration] Summary:');
+  try{console.table(_results);}catch(_){console.info(_results);}
+
+  if(mode==='dryrun'){
+    console.info('[Migration] Dry run complete. To execute for real:  window.__taraMigrate("real")');
+  }else{
+    const _okCount=_results.filter(r=>r.status==='ok').length;
+    const _failCount=_results.filter(r=>['write-failed','error','wrote-but-readback-empty'].includes(r.status)).length;
+    console.info(`[Migration] Real run complete: ${_okCount} ok, ${_failCount} failed/issues out of ${_results.length}.`);
+  }
+  return _results;
+};
+
+try{if(typeof window!=='undefined'){window.__taraMigrate=_taraMigrate;console.info('[Migration] hook ready — run window.__taraMigrate("dryrun") in console');}}catch(_){}
+
+
 // ── V9.10.7: AUDIT LOG for silent log-write failures ────────────────────────
 // Why: V9.10.6 surfaced an incident where Tara emitted a Discord embed for a
 //   DOWN no-go-data lock at 1:45 AM but no matching entry appeared in taraCallLog.
