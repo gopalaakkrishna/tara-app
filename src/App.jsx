@@ -2132,10 +2132,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.13-v9.18.10-kalshi-response-normalizer-CRITICAL';
+const BASELINE_VERSION='2026.05.14-v9.19.0-phase1-predictor-header-ui-only';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.18.10';
+const TARA_VERSION_DISPLAY='Tara 9.19.0';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -8914,6 +8914,9 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           <div className={`flex items-baseline gap-2 flex-wrap ${callColor}`}>
             <span className="text-2xl">{arrow}</span>
             <span className="text-3xl font-serif font-bold tracking-tight leading-none">{callLabel}</span>
+            {/* V9.19.0 Phase 1 stub: Tara WR pill. Renders placeholder; real
+                 computation from taraCallLog ships in V9.19.2. */}
+            {isLockedSnap&&<span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded self-baseline tabular-nums" style={{color:'rgba(110,231,183,0.65)',background:'rgba(110,231,183,0.06)',border:'1px solid rgba(110,231,183,0.18)'}} title="Tara's directional accuracy on last N windows. Computes in V9.19.2.">WR · -- <span className="opacity-60 normal-case">(last 30)</span></span>}
             {isLockedSnap&&<span className="text-[11px] tabular-nums opacity-50 self-baseline" title="Raw posterior — not WR-calibrated. Tier (chip) is the calibrated signal.">{dispConfidence}% <span className="opacity-60">raw</span></span>}
             {/* V9.9.5: tier chip on the locked card. Reads from snap.tier (V9.9.5 added
                  it to taraCallSnapshotRef). Color-coded by tier quality so user can see
@@ -19516,6 +19519,110 @@ function ScalperAdvisorPanel({
       className:'p-4 rounded-lg',
       style:{background:'var(--tara-bg-card,#15151a)',border:'1px solid '+_taraDirColor.replace('rgb(','rgba(').replace(')',',0.25)').replace('0.92','0.25')},
     },
+      // ─────────────────────────────────────────────────────────────────────
+      // V9.19.0 — PREDICTOR HEADER STRIP (Phase 1: render only, NO behavior)
+      //   Two toggles + two mode presets. Reads autoExecSettings to show what
+      //   is currently selected. Buttons are visually styled connected/idle
+      //   but clicking does NOT yet mutate state (that ships in Phase 2 /
+      //   V9.19.1). This phase verifies the UI sits right on the card before
+      //   wiring any handlers — avoids a UI+behavior change in one ship.
+      // ─────────────────────────────────────────────────────────────────────
+      React.createElement('div',{key:'predictor-header',className:'mb-3 pb-3 border-b border-[#E8E9E4]/8'},
+        // Title row: "Predictor" + small "phase 1 preview" badge
+        React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
+          React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.18em]',style:{color:'#E5C870'}},'predictor'),
+          React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded',style:{color:'rgba(232,233,228,0.45)',background:'rgba(232,233,228,0.06)'}},'v9.19.0 ui only'),
+        ),
+        // Row 1: AUTO / MANUAL toggle (pair of buttons, joined)
+        React.createElement('div',{className:'flex gap-0 mb-2 rounded overflow-hidden',style:{border:'1px solid rgba(232,233,228,0.10)'}},
+          (()=>{
+            const _isAuto=!!autoExecSettings?.enabled;
+            const _btnBase='flex-1 px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider text-center transition-colors';
+            return [
+              React.createElement('button',{
+                key:'auto',
+                className:_btnBase,
+                style:_isAuto
+                  ?{background:'rgba(110,231,183,0.16)',color:'rgb(110,231,183)',borderRight:'1px solid rgba(110,231,183,0.30)'}
+                  :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)',borderRight:'1px solid rgba(232,233,228,0.06)'},
+                disabled:true, // Phase 1: render only
+                title:'auto-exec on (wires in V9.19.1)',
+              },'auto'),
+              React.createElement('button',{
+                key:'manual',
+                className:_btnBase,
+                style:!_isAuto
+                  ?{background:'rgba(229,200,112,0.16)',color:'#E5C870'}
+                  :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)'},
+                disabled:true,
+                title:'manual only (wires in V9.19.1)',
+              },'manual'),
+            ];
+          })(),
+        ),
+        // Row 2: Tara's Call / Tara's Trade toggle
+        React.createElement('div',{className:'flex gap-0 mb-2 rounded overflow-hidden',style:{border:'1px solid rgba(232,233,228,0.10)'}},
+          (()=>{
+            const _src=autoExecSettings?.signalSource||'snapshot';
+            const _isCall=_src==='snapshot';
+            const _btnBase='flex-1 px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider text-center transition-colors';
+            return [
+              React.createElement('button',{
+                key:'call',
+                className:_btnBase,
+                style:_isCall
+                  ?{background:'rgba(229,200,112,0.16)',color:'#E5C870',borderRight:'1px solid rgba(229,200,112,0.30)'}
+                  :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)',borderRight:'1px solid rgba(232,233,228,0.06)'},
+                disabled:true,
+                title:"use Tara's settled call (snapshot) — wires in V9.19.1",
+              },"tara's call"),
+              React.createElement('button',{
+                key:'trade',
+                className:_btnBase,
+                style:!_isCall
+                  ?{background:'rgba(110,231,183,0.16)',color:'rgb(110,231,183)'}
+                  :{background:'rgba(232,233,228,0.03)',color:'rgba(232,233,228,0.45)'},
+                disabled:true,
+                title:"use Tara's engine lock — wires in V9.19.1. real 'Tara's Trade' model is phase 4 work.",
+              },[
+                "tara's trade",
+                React.createElement('span',{key:'lbl',className:'ml-1 normal-case opacity-50',style:{fontSize:'8px'}},'(engine lock)'),
+              ]),
+            ];
+          })(),
+        ),
+        // Row 3: Mode preset buttons (Patient A / Fast B)
+        React.createElement('div',{className:'flex items-center gap-1.5'},
+          React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'rgba(232,233,228,0.40)'}},'mode'),
+          React.createElement('div',{className:'flex gap-1 flex-1'},
+            React.createElement('button',{
+              key:'patient',
+              className:'flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors',
+              style:{background:'rgba(232,233,228,0.04)',color:'rgba(232,233,228,0.55)',border:'1px solid rgba(232,233,228,0.10)'},
+              disabled:true,
+              title:'patient: cheap entries (max 40¢), wait up to 120s, SL 15¢, TP 90¢. wires in V9.19.1.',
+            },[
+              React.createElement('span',{key:'a',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'A'),
+              'patient',
+            ]),
+            React.createElement('button',{
+              key:'fast',
+              className:'flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors',
+              style:{background:'rgba(232,233,228,0.04)',color:'rgba(232,233,228,0.55)',border:'1px solid rgba(232,233,228,0.10)'},
+              disabled:true,
+              title:'fast: fire on conviction, +2¢ slip, SL 25¢, TP 80¢, structural+ only. wires in V9.19.1.',
+            },[
+              React.createElement('span',{key:'b',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'B'),
+              'fast',
+            ]),
+          ),
+        ),
+        // Phase 3 (V9.19.2) will add a live P&L strip here. Placeholder for now.
+        React.createElement('div',{className:'mt-2 pt-2 border-t border-[#E8E9E4]/5 text-[10px] tabular-nums',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace',color:'rgba(232,233,228,0.35)'}},
+          'today · P&L: -- · trades: -- · WR: --',
+          React.createElement('span',{className:'ml-1 opacity-60',style:{fontSize:'8px'}},'(wires v9.19.2)'),
+        ),
+      ),
       // Header: "this round" + window label + LOCKED badge
       React.createElement('div',{className:'flex items-baseline justify-between mb-3 pb-2 border-b border-[#E8E9E4]/8'},
         React.createElement('div',{className:'flex flex-col'},
@@ -30759,7 +30866,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.18.10
+              9.19.0
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
