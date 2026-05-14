@@ -2381,10 +2381,10 @@ const computeAutoExecSize=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v9.19.24-edge-filter';
+const BASELINE_VERSION='2026.05.14-v9.19.25-settings-clarity';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.19.24';
+const TARA_VERSION_DISPLAY='Tara 9.19.25';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -10323,6 +10323,35 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
   if(!open)return null;
   const _update=(k,v)=>setSettings(prev=>({...prev,[k]:v}));
   const _num=(s,fallback)=>{const n=Number(s);return Number.isFinite(n)?n:fallback;};
+  // V9.19.25: tap-to-reveal tooltip state. Each setting has a stable id; clicking
+  //   the (?) icon opens its tooltip inline. Click again or click another to dismiss.
+  const[_settingsTip,_setSettingsTip]=React.useState(null);
+  // V9.19.25: helper to render a label with hover-tooltip (desktop, via title)
+  //   + tap-tooltip (mobile, via inline expansion). Used by settings rows that
+  //   need more explanation than a 1-liner hint can give.
+  //   Usage: _labelTip('id','Label text','Detailed explanation')
+  //   Returns a React element ready to drop in as a label.
+  const _labelTip=(id,label,tip,extraStyle)=>{
+    const _isOpen=_settingsTip===id;
+    return React.createElement('div',{className:'flex items-baseline gap-1',style:extraStyle||{}},
+      React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/65'},label),
+      React.createElement('button',{
+        type:'button',
+        onClick:(e)=>{e.preventDefault();_setSettingsTip(_isOpen?null:id);},
+        title:tip,
+        className:'text-[9px] opacity-60 hover:opacity-100 cursor-pointer',
+        style:{background:'none',border:'none',padding:0,color:'#E5C870'},
+      },'(?)'),
+    );
+  };
+  // V9.19.25: render the expanded tip inline below the input (for tap users)
+  const _tipBox=(id,tip)=>{
+    if(_settingsTip!==id)return null;
+    return React.createElement('div',{
+      className:'mt-1 px-2 py-1.5 rounded text-[10px] leading-relaxed',
+      style:{background:'rgba(229,200,112,0.06)',border:'1px solid rgba(229,200,112,0.20)',color:'rgba(232,233,228,0.85)'},
+    },tip);
+  };
   return React.createElement('div',{
     className:'fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-4 bg-black/70 backdrop-blur-sm overflow-y-auto',
     onClick:onClose,
@@ -10522,9 +10551,12 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       ),
       // ── V9.3.0: KALSHI AUTO-EXECUTION ─────────────────────────────────
       React.createElement('div',{className:'mb-4 p-3 rounded-lg border',style:{background:'rgba(229,200,112,0.04)',borderColor:'rgba(229,200,112,0.20)'}},
-        React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
+        React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
           React.createElement('div',null,
-            React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-[0.18em]',style:{color:T2_GOLD}},'Kalshi Auto-Execution'),
+            React.createElement('div',{className:'flex items-baseline gap-2'},
+              React.createElement('div',{className:'text-[12px] font-bold tracking-[0.02em]',style:{color:T2_GOLD,textTransform:'none'}},'Kalshi Auto-Execution'),
+              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded',style:{color:T2_GOLD,border:`1px solid ${T2_GOLD}55`,background:`${T2_GOLD}14`}},'places real orders'),
+            ),
             React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/45 mt-0.5'},'localStorage only · never synced'),
           ),
           // Live status pill
@@ -10536,6 +10568,12 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             const _color=_killed?'#F87171':_on?(_dry?'#FBBF24':'#6EE7B7'):'rgba(232,233,228,0.45)';
             return React.createElement('span',{className:'text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded',style:{color:_color,border:`1px solid ${_color}`,background:`${_color}15`}},_label);
           })(),
+        ),
+        // V9.19.25: clear "what this is" section, so the user never confuses
+        //   this with Tara's Advisor (scalper) below.
+        React.createElement('p',{className:'text-[11px] text-[#E8E9E4]/70 leading-relaxed mb-3'},
+          React.createElement('strong',{style:{color:T2_GOLD}},'Places real Kalshi orders. '),
+          'When Tara locks UP or DOWN, this engine fires a limit order on your behalf. All money risk lives here. Verify in dry-run mode first.',
         ),
         // ── V9.6.0: HOW-TO GUIDE ──────────────────────────────────────────
         // Collapsible step-by-step walkthrough. Closed by default to keep modal
@@ -10669,71 +10707,73 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-2'},'Risk guardrails'),
           React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-2'},
             React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Max bet / trade ($)'),
+              _labelTip('max-bet','Max bet / trade ($)','HARD WALL. Auto-exec will SIT OUT (not downsize) if the intended bet exceeds this. The single most important safety knob — it caps your worst-case loss on any one trade. Bypass: only super-confluence tier OR manual click can override (and even then it clamps to this cap). Lower = safer, smaller positions. Higher = more capital at risk per trade.'),
               React.createElement('input',{
                 type:'number',min:1,max:500,step:1,value:autoExecSettings?.maxBetPerTrade||0,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxBetPerTrade:Math.max(1,Math.min(500,_num(e.target.value,25)))})),
-                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
               }),
               // V9.17.20: unit hint
               React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
                 `= reject any single auto-trade larger than $${Number(autoExecSettings?.maxBetPerTrade||25).toFixed(0)} dollars`,
               ),
+              _tipBox('max-bet','HARD WALL. Auto-exec will SIT OUT (not downsize) if the intended bet exceeds this. The single most important safety knob — it caps your worst-case loss on any one trade. Bypass: only super-confluence tier OR manual click can override (and even then it clamps to this cap). Lower = safer, smaller positions. Higher = more capital at risk per trade.'),
             ),
-            // V9.17.3: Daily loss cap REMOVED — local P&L tracking gone.
-            //   Loss-streak cooldown is the remaining auto-exec discipline guard.
             React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Cooldown after N losses'),
+              _labelTip('cooldown-n','Cooldown after N losses','After N consecutive LOSSES, auto-exec pauses for the cooldown duration. Prevents tilt-trading after a losing streak. Default 3 — typical for tape-led strategies. Setting to 2 is aggressive (pauses quickly), 5+ is loose (lets a bad streak run).'),
               React.createElement('input',{
                 type:'number',min:2,max:10,step:1,value:autoExecSettings?.cooldownLossStreak||3,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownLossStreak:Math.max(2,Math.min(10,_num(e.target.value,3)))})),
-                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
               }),
               // V9.17.20: unit hint
               React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
                 `= ${autoExecSettings?.cooldownLossStreak||3} consecutive losses triggers a cooldown`,
               ),
+              _tipBox('cooldown-n','After N consecutive LOSSES, auto-exec pauses for the cooldown duration. Prevents tilt-trading after a losing streak. Default 3 — typical for tape-led strategies. Setting to 2 is aggressive (pauses quickly), 5+ is loose (lets a bad streak run).'),
             ),
           ),
           React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-2'},
             React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Cooldown duration (min)'),
+              _labelTip('cooldown-dur','Cooldown duration (min)','Once cooldown triggers, auto-exec stays paused this many minutes. Default 20. Use shorter (5-10) if you want to resume quickly after a streak; longer (30-60) if you want a real reset before re-engaging.'),
               React.createElement('input',{
                 type:'number',min:1,max:240,step:1,value:autoExecSettings?.cooldownMinutes||20,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownMinutes:Math.max(1,Math.min(240,_num(e.target.value,20)))})),
-                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
               }),
-              // V9.17.20: unit hint
               React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
                 `= ${autoExecSettings?.cooldownMinutes||20} minutes of no new auto-trades after streak`,
               ),
+              _tipBox('cooldown-dur','Once cooldown triggers, auto-exec stays paused this many minutes. Default 20. Use shorter (5-10) if you want to resume quickly after a streak; longer (30-60) if you want a real reset before re-engaging.'),
             ),
+            // empty cell to keep grid balanced
+            React.createElement('div',null),
           ),
           React.createElement('div',{className:'grid grid-cols-2 gap-2'},
             React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Slippage (¢ over offer)'),
+              _labelTip('slippage','Slippage (¢ over offer)','How much above the current Kalshi offer to bid for immediate fill. 0 = wait for fair price (patient — may miss fast moves). 2 = standard (almost always fills). 5+ = aggressive (pays up for certainty). Each cent costs you that much per contract on entry.'),
               React.createElement('input',{
                 type:'number',min:0,max:10,step:1,value:autoExecSettings?.slippageCents||0,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,slippageCents:Math.max(0,Math.min(10,_num(e.target.value,2)))})),
-                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
               }),
-              // V9.17.20: unit hint
               React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
                 `= bid +${autoExecSettings?.slippageCents||0}¢ above market to improve fill (each ¢ = 1% of $1 contract)`,
               ),
+              _tipBox('slippage','How much above the current Kalshi offer to bid for immediate fill. 0 = wait for fair price (patient — may miss fast moves). 2 = standard (almost always fills). 5+ = aggressive (pays up for certainty). Each cent costs you that much per contract on entry.'),
             ),
             React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Take-profit at offer ¢'),
+              _labelTip('take-profit','Take-profit at offer ¢','Auto-sell when the Kalshi offer on your side reaches this. 78-80¢ = book early, smaller wins. 85-88¢ = patient, bigger wins but more misses. 90¢+ = aggressive target, often expires worthless near close. A contract pays $1 at settle if right, so target ¢ ≈ % of max payout locked in.'),
               React.createElement('input',{
                 type:'number',min:60,max:99,step:1,value:autoExecSettings?.autoExitOffer||85,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,autoExitOffer:Math.max(60,Math.min(99,_num(e.target.value,85)))})),
-                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
               }),
-              // V9.17.20: unit hint
               React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},(()=>{
                 const _c=autoExecSettings?.autoExitOffer||85;
                 return `= sell when our-side offer ≥ ${_c}¢ on a 100¢ contract (locks in ${_c}% of max payout)`;
               })()),
+              _tipBox('take-profit','Auto-sell when the Kalshi offer on your side reaches this. 78-80¢ = book early, smaller wins. 85-88¢ = patient, bigger wins but more misses. 90¢+ = aggressive target, often expires worthless near close. A contract pays $1 at settle if right, so target ¢ ≈ % of max payout locked in.'),
             ),
           ),
           // V9.19.24: Edge filter — single full-width row at the bottom of risk guardrails.
@@ -10741,7 +10781,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           React.createElement('div',{className:'mt-2 pt-2',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
             React.createElement('label',{className:'block'},
               React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
-                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65'},'Edge cap — max Tara-vs-Kalshi gap (pt)'),
+                _labelTip('edge-cap','Edge cap — max Tara-vs-Kalshi gap (pt)','Blocks auto-trades where Tara is too far ahead of Kalshi on the same side. May 14 audit of 642 trades: edge >25pt won only 65%, edge 0-10pt won 70.6%, edge negative (Kalshi ahead) won 80%+. The pattern: HIGH positive edge = "market already priced this" = bad trade. Default 15. Manual click bypasses. Set to 0 to disable filter entirely (not recommended).'),
                 React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#E5C870'}},'V9.19.24'),
               ),
               React.createElement('input',{
@@ -10756,6 +10796,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 if(_eff===0)return '= filter DISABLED (was the May 14 audit\'s root cause — recommend 15)';
                 return `= sit out if Tara is more than ${_eff}pt above Kalshi on her direction. Audit: edge >${_eff}pt trades won at 65% (would have lifted last week to ~70%). Manual click bypasses.`;
               })()),
+              _tipBox('edge-cap','Blocks auto-trades where Tara is too far ahead of Kalshi on the same side. May 14 audit of 642 trades: edge >25pt won only 65%, edge 0-10pt won 70.6%, edge negative (Kalshi ahead) won 80%+. The pattern: HIGH positive edge = "market already priced this" = bad trade. Default 15. Manual click bypasses. Set to 0 to disable filter entirely (not recommended).'),
             ),
           ),
         ),
@@ -11148,7 +11189,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             })(),
             React.createElement('div',null,
               React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
-                React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#E8E9E4]/60'},'Sizing strategy'),
+                _labelTip('sizing-mode','Sizing strategy','How Tara computes the dollar amount per trade. THREE OPTIONS: (1) Fixed — always uses the manual bet-size from Trading Settings. Predictable, no surprises. Best for paper trading. (2) Scale with conviction — bigger bets on stronger calls, smaller on weaker ones. ⚠ Currently relies on the broken posterior calibration — Tier C item, pending recalibration. (3) Kelly fraction — math-optimal sizing based on edge. Mixed with fixed bet via the Kelly blend slider below. IMPORTANT: this strategy is OVERRIDDEN when Entry mode (below) is set to "contracts" or "%". Dollar mode uses this strategy as-written.',{textTransform:'uppercase',letterSpacing:'0.05em',fontWeight:'bold',color:'rgba(232,233,228,0.60)'}),
                 (autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')&&React.createElement('div',{
                   className:'text-[9px] italic',style:{color:'rgba(229,200,112,0.75)'},
                 },'(overridden by entry mode below)'),
@@ -11174,32 +11215,33 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 autoExecSettings?.sizingMode==='kelly'?'Kelly = (b·p − q) ÷ b, where p=posterior, b=net odds. Mixed with fixed bet via blend slider below. Edge-only.':
                 'Always uses your manual bet-size from Trading Settings, capped at max-bet-per-trade.',
               ),
+              _tipBox('sizing-mode','How Tara computes the dollar amount per trade. THREE OPTIONS: (1) Fixed — always uses the manual bet-size from Trading Settings. Predictable, no surprises. Best for paper trading. (2) Scale with conviction — bigger bets on stronger calls, smaller on weaker ones. ⚠ Currently relies on the broken posterior calibration — Tier C item, pending recalibration. (3) Kelly fraction — math-optimal sizing based on edge. Mixed with fixed bet via the Kelly blend slider below. IMPORTANT: this strategy is OVERRIDDEN when Entry mode (below) is set to "contracts" or "%". Dollar mode uses this strategy as-written.'),
             ),
             (autoExecSettings?.sizingMode==='confidence'||autoExecSettings?.sizingMode==='kelly')&&
               React.createElement('div',{className:'grid grid-cols-2 gap-2'},
                 React.createElement('label',{className:'block'},
-                  React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Low bet ($)'),
+                  _labelTip('low-bet','Low bet ($)','The smallest dollar stake used when Tara\'s conviction is weak (conviction ~5pt above 50% threshold). In Kelly mode this is the bet floor. Set this conservatively — it determines how much you lose on the weakest qualifying signals.'),
                   React.createElement('input',{
                     type:'number',min:1,max:500,step:1,value:autoExecSettings?.confidenceLowBet||5,
                     onChange:(e)=>setAutoExecSettings(prev=>({...prev,confidenceLowBet:Math.max(1,Math.min(500,_num(e.target.value,5)))})),
-                    className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                    className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
                   }),
-                  // V9.17.20: unit hint
                   React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
                     `= $${Number(autoExecSettings?.confidenceLowBet||5).toFixed(0)} dollars stake on weakest qualifying calls`,
                   ),
+                  _tipBox('low-bet','The smallest dollar stake used when Tara\'s conviction is weak (conviction ~5pt above 50% threshold). In Kelly mode this is the bet floor. Set this conservatively — it determines how much you lose on the weakest qualifying signals.'),
                 ),
                 React.createElement('label',{className:'block'},
-                  React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'High bet ($)'),
+                  _labelTip('high-bet','High bet ($)','The maximum dollar stake used when Tara\'s conviction is strong (conviction ≥35pt). Always still capped by Max bet/trade — that ceiling wins. Set this generously if you want to scale up on strong signals; conservatively for tighter risk control.'),
                   React.createElement('input',{
                     type:'number',min:1,max:500,step:1,value:autoExecSettings?.confidenceHighBet||25,
                     onChange:(e)=>setAutoExecSettings(prev=>({...prev,confidenceHighBet:Math.max(1,Math.min(500,_num(e.target.value,25)))})),
-                    className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                    className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
                   }),
-                  // V9.17.20: unit hint
                   React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
                     `= $${Number(autoExecSettings?.confidenceHighBet||25).toFixed(0)} dollars stake on strongest calls (capped by Max bet/trade)`,
                   ),
+                  _tipBox('high-bet','The maximum dollar stake used when Tara\'s conviction is strong (conviction ≥35pt). Always still capped by Max bet/trade — that ceiling wins. Set this generously if you want to scale up on strong signals; conservatively for tighter risk control.'),
                 ),
               ),
             // V9.18.4: KELLY BLEND DIAL. Only shown when sizingMode='kelly'.
@@ -11207,7 +11249,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             //   Always floored at fixed bet — you never bet less than your declared stake.
             autoExecSettings?.sizingMode==='kelly'&&React.createElement('label',{className:'block pt-2 mt-2 border-t border-[#E8E9E4]/8'},
               React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
-                React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/65'},'Kelly blend %'),
+                _labelTip('kelly-blend','Kelly blend %','Slider controls how much Kelly math vs. fixed-bet drives the actual stake. 0% = always use your fixed bet, ignore Kelly entirely (safest, predictable). 100% = pure Kelly math, bet size varies wildly with edge (math-optimal but volatile). 50% = halfway between. CRITICAL: bet is always floored at your fixed bet — Kelly can scale UP but never below your declared stake. Start low (25-50%) until you trust Kelly\'s math.'),
                 React.createElement('span',{className:'text-[11px] tabular-nums font-bold',style:{color:'#E5C870',fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
                   `${Number(autoExecSettings?.kellyBlend||50)}%`,
                 ),
@@ -11220,41 +11262,45 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1 leading-relaxed'},
                 '0% = always bet your fixed stake (Kelly ignored) · 100% = pure Kelly math (variable bet) · 50% = halfway. Bet is always floored at your fixed Bet size from Trading Settings.',
               ),
+              _tipBox('kelly-blend','Slider controls how much Kelly math vs. fixed-bet drives the actual stake. 0% = always use your fixed bet, ignore Kelly entirely (safest, predictable). 100% = pure Kelly math, bet size varies wildly with edge (math-optimal but volatile). 50% = halfway between. CRITICAL: bet is always floored at your fixed bet — Kelly can scale UP but never below your declared stake. Start low (25-50%) until you trust Kelly\'s math.'),
             ),
             // V9.18.4: ENTRY MODE SELECTOR. How to express the stake.
             React.createElement('div',{className:'pt-2 mt-2 border-t border-[#E8E9E4]/8'},
-              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1.5 font-bold uppercase tracking-wider'},'Entry mode'),
+              _labelTip('entry-mode','Entry mode','How the bet amount is EXPRESSED. THREE OPTIONS: (1) Dollar cost — uses the Sizing strategy above (fixed/conviction/Kelly). Most flexible. (2) Fixed contract count — always buy exactly N contracts regardless of price, regardless of sizing strategy. SIMPLE but the dollar cost varies with Kalshi offer price. (3) % of Kalshi balance — sizes as % of current Kalshi account balance. Scales with wins/losses naturally. CRITICAL: "contracts" and "%" modes OVERRIDE the Sizing strategy above — you\'ll see a gray-out indicator. Max bet/trade still caps everything.',{textTransform:'uppercase',letterSpacing:'0.05em',fontWeight:'bold',color:'rgba(232,233,228,0.60)'}),
               React.createElement('select',{
                 value:autoExecSettings?.entryMode||'dollars',
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryMode:e.target.value})),
-                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1.5 text-white text-sm focus:border-[#E5C870] focus:outline-none mb-2',
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1.5 text-white text-sm focus:border-[#E5C870] focus:outline-none mb-2 mt-1',
                 style:{background:'#15151a',color:'#E8E9E4'},
               },
                 React.createElement('option',{value:'dollars',style:{background:'#15151a',color:'#E8E9E4'}},'Dollar cost (use sizing strategy above)'),
                 React.createElement('option',{value:'contracts',style:{background:'#15151a',color:'#E8E9E4'}},'Fixed contract count'),
                 React.createElement('option',{value:'percent',style:{background:'#15151a',color:'#E8E9E4'}},'% of Kalshi balance'),
               ),
+              _tipBox('entry-mode','How the bet amount is EXPRESSED. THREE OPTIONS: (1) Dollar cost — uses the Sizing strategy above (fixed/conviction/Kelly). Most flexible. (2) Fixed contract count — always buy exactly N contracts regardless of price, regardless of sizing strategy. SIMPLE but the dollar cost varies with Kalshi offer price. (3) % of Kalshi balance — sizes as % of current Kalshi account balance. Scales with wins/losses naturally. CRITICAL: "contracts" and "%" modes OVERRIDE the Sizing strategy above — you\'ll see a gray-out indicator. Max bet/trade still caps everything.'),
               autoExecSettings?.entryMode==='contracts'&&React.createElement('label',{className:'block mb-1'},
-                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Contracts per trade'),
+                _labelTip('entry-contracts','Contracts per trade','Number of Kalshi contracts to buy each trade. Each contract pays $1 at settlement if right, $0 if wrong. Cost varies with current offer price — e.g., 5 contracts at 60¢ offer = $3.00 total cost. CAUTION: this multiplies the slippage cost too. Max bet/trade still caps the total — if 5 contracts × current price exceeds your cap, auto-exec sits out.'),
                 React.createElement('input',{
                   type:'number',min:1,max:500,step:1,value:Number(autoExecSettings?.entryContracts)||5,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryContracts:Math.max(1,Math.min(500,_num(e.target.value,5)))})),
-                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
                 }),
                 React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
                   `= ${Number(autoExecSettings?.entryContracts)||5} contracts × current cost-per-contract ¢ = total $`,
                 ),
+                _tipBox('entry-contracts','Number of Kalshi contracts to buy each trade. Each contract pays $1 at settlement if right, $0 if wrong. Cost varies with current offer price — e.g., 5 contracts at 60¢ offer = $3.00 total cost. CAUTION: this multiplies the slippage cost too. Max bet/trade still caps the total — if 5 contracts × current price exceeds your cap, auto-exec sits out.'),
               ),
               autoExecSettings?.entryMode==='percent'&&React.createElement('label',{className:'block mb-1'},
-                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'% of Kalshi balance per trade'),
+                _labelTip('entry-percent','% of Kalshi balance per trade','Risk this % of your live Kalshi balance per trade. 5% = conservative (you\'d need 20 losing trades in a row to wipe out). 10% = aggressive. 20%+ = high-risk. Naturally scales: as you win, bet sizes grow; as you lose, they shrink. Still capped by Max bet/trade.'),
                 React.createElement('input',{
                   type:'number',min:1,max:100,step:1,value:Number(autoExecSettings?.entryPercentBalance)||10,
                   onChange:(e)=>setAutoExecSettings(prev=>({...prev,entryPercentBalance:Math.max(1,Math.min(100,_num(e.target.value,10)))})),
-                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
                 }),
                 React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
                   `= ${Number(autoExecSettings?.entryPercentBalance)||10}% of your live Kalshi balance per trade`,
                 ),
+                _tipBox('entry-percent','Risk this % of your live Kalshi balance per trade. 5% = conservative (you\'d need 20 losing trades in a row to wipe out). 10% = aggressive. 20%+ = high-risk. Naturally scales: as you win, bet sizes grow; as you lose, they shrink. Still capped by Max bet/trade.'),
               ),
               React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1 leading-relaxed'},
                 'Dollar mode uses the sizing strategy above. Contracts and % modes OVERRIDE the sizing strategy — they directly set the bet from contract count or balance %. Max bet / trade still caps everything.',
@@ -11293,16 +11339,25 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       scalperSettings&&typeof setScalperSettings==='function'&&React.createElement('section',{
         className:'pt-4 mt-4 border-t border-[#E8E9E4]/10',
       },
-        // Header — gold title + advisory badge
-        React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
-          React.createElement('h3',{className:'text-[12px] font-bold',style:{color:T2_GOLD,letterSpacing:'0.02em',textTransform:'none'}},'Tara\'s Advisor'),
-          React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45',style:{letterSpacing:'0.02em'}},'advisory · scalper'),
-        ),
-        React.createElement('p',{className:'text-[11px] text-[#E8E9E4]/55 leading-relaxed mb-3'},
-          'Short-horizon kalshi cents advisor. Reads tape + flow + book pressure for 30-90s entries. Suggests, you execute — no auto-orders.',
+        // V9.19.25: section header redesigned to make this VISUALLY DISTINCT from
+        //   Kalshi Auto-Execution. Both used gold before, which made them feel like
+        //   the same system. They are not — auto-exec places real orders, this is
+        //   advisory only. Now violet/purple identity + clear "advisory only" label.
+        React.createElement('div',{className:'p-3 rounded-lg mb-3',style:{background:'rgba(196,181,253,0.05)',border:'1px solid rgba(196,181,253,0.22)'}},
+          React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
+            React.createElement('h3',{className:'text-[12px] font-bold',style:{color:'#C4B5FD',letterSpacing:'0.02em',textTransform:'none'}},'Tara\'s Advisor (scalper)'),
+            React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded',style:{color:'#C4B5FD',border:'1px solid rgba(196,181,253,0.40)',background:'rgba(196,181,253,0.08)'}},'advisory only'),
+          ),
+          React.createElement('p',{className:'text-[11px] text-[#E8E9E4]/70 leading-relaxed mt-1'},
+            React.createElement('strong',{style:{color:'#C4B5FD'}},'Never places orders. '),
+            'Short-horizon kalshi cents advisor that reads tape + flow + book pressure for 30-90s entries. When conditions align, suggestions appear in the left column. You execute manually on Kalshi.',
+          ),
+          React.createElement('p',{className:'text-[10px] text-[#E8E9E4]/45 leading-relaxed mt-2 italic'},
+            'Distinct from ',React.createElement('span',{style:{color:T2_GOLD}},'Kalshi Auto-Execution'),' above — that places real orders when Tara locks. Scalper is a separate engine with its own settings.',
+          ),
         ),
         // MASTER ENABLE — prominent toggle
-        React.createElement('div',{className:'mb-3 p-3 rounded-lg',style:{background:'rgba(229,200,112,0.05)',border:'1px solid rgba(229,200,112,0.18)'}},
+        React.createElement('div',{className:'mb-3 p-3 rounded-lg',style:{background:'rgba(196,181,253,0.05)',border:'1px solid rgba(196,181,253,0.18)'}},
           React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
             React.createElement('div',{className:'flex flex-col'},
               React.createElement('span',{className:'text-[12px] font-bold text-[#E8E9E4]',style:{letterSpacing:'0.02em',textTransform:'none'}},'Enable scalper advisor'),
@@ -31554,7 +31609,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.19.24
+              9.19.25
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
