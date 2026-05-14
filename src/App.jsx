@@ -2188,13 +2188,198 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
   return{ok:true,balance:res.data?.balance,raw:res.data};
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// V9.19.16: computeAutoExecSize — CENTRAL SIZING FUNCTION
+//
+// SINGLE SOURCE OF TRUTH for "how many contracts and dollars will the next
+// auto-exec trade place?" Called from BOTH:
+//   • The auto-exec entry effect (the actual fire path)
+//   • The trade ticket UI (the preview shown to the user)
+// Result: ticket preview MATCHES what places. No two-source divergence.
+//
+// Design contract:
+//   • Inputs: settings + market state (no React state, pure function)
+//   • Returns: {decision, intendedDollars, intendedContracts, ...components}
+//   • decision is one of:
+//       'fire'         — place this many contracts for this many dollars
+//       'sit-out-cap'  — intended exceeds maxBetPerTrade; sit out (V9.19.16 rule)
+//       'sit-out-tiny' — intended < $1; sit out (sizing said no)
+//       'sit-out-bad'  — bad inputs (no cost, no direction, etc); sit out
+//   • Components show the full provenance so the UI can explain decisions.
+//
+// V9.19.16 cap-exceeded behavior:
+//   • Default: SIT OUT entirely if intended > maxBetPerTrade.
+//   • BYPASS allowed for tier='super' OR manualBypass=true (manual button
+//     click). Bypass falls through and lets cap clamp (downsize) instead.
+//   • Logged with 'fire-bypass-cap' decision for forensics.
+//
+// Mode interaction table (entry mode OVERRIDES sizing mode when set):
+//   sizingMode=fixed      + entryMode=dollars   → use tradingSettings.betSize
+//   sizingMode=confidence + entryMode=dollars   → confLow..confHigh by conv
+//   sizingMode=kelly      + entryMode=dollars   → kellyBlend mix
+//   sizingMode=mission    + entryMode=dollars   → mission cluster sizing
+//   any sizingMode        + entryMode=contracts → ignore sizing, use N×cost
+//   any sizingMode        + entryMode=percent   → ignore sizing, balance×pct
+// ═══════════════════════════════════════════════════════════════════════════
+const computeAutoExecSize=(inputs)=>{
+  const {
+    sizingMode='fixed',           // 'fixed'|'confidence'|'kelly'|'mission'
+    entryMode='dollars',          // 'dollars'|'contracts'|'percent'
+    tradingBetSize=10,            // tradingSettings.betSize
+    confidenceLowBet=5,
+    confidenceHighBet=25,
+    kellyBlend=0,                 // 0-100
+    entryContracts=5,
+    entryPercentBalance=10,       // 0-100
+    maxBetPerTrade=25,            // cap in $
+    // Market context
+    costPerContractCents=0,       // current cost per contract on our side (1-99)
+    rawProbAbove=50,              // analysis posterior 0-100 (for Kelly)
+    dir=null,                     // 'UP'|'DOWN'
+    conviction=0,                 // 0-50 (for confidence mode)
+    kalshiBalance=0,              // for percent mode
+    // Mission mode (only used if sizingMode='mission')
+    missionResult=null,           // {ok, betDollars, kellyFrac, ...} from upstream
+    // Bypass flags
+    tier='single',                // 'super'|'confluence'|'tape'|'structural'|'single'
+    manualBypass=false,           // true when manual button clicked
+  }=inputs||{};
+
+  // Sentinel: bad inputs
+  if(!dir||(dir!=='UP'&&dir!=='DOWN'))return{
+    decision:'sit-out-bad',reason:'no direction',
+    intendedDollars:0,intendedContracts:0,capExceeded:false,
+    components:{sizingModeUsed:sizingMode,entryModeUsed:entryMode,sizingModeOverridden:false,rawSizingDollars:0,afterEntryModeDollars:0,capDollars:maxBetPerTrade,actualDollarsPostCap:0,bypassUsed:false},
+  };
+  if(!Number.isFinite(costPerContractCents)||costPerContractCents<=0||costPerContractCents>=100)return{
+    decision:'sit-out-bad',reason:`bad cost-per-contract ${costPerContractCents}¢`,
+    intendedDollars:0,intendedContracts:0,capExceeded:false,
+    components:{sizingModeUsed:sizingMode,entryModeUsed:entryMode,sizingModeOverridden:false,rawSizingDollars:0,afterEntryModeDollars:0,capDollars:maxBetPerTrade,actualDollarsPostCap:0,bypassUsed:false},
+  };
+
+  // ── Step 1: SIZING — figure out base $ amount from sizing mode ──
+  let rawSizingDollars=Math.max(0,Number(tradingBetSize)||0);
+  if(sizingMode==='fixed'){
+    rawSizingDollars=Math.max(0,Number(tradingBetSize)||0);
+  }else if(sizingMode==='confidence'){
+    // Linear interp: conviction 5 → low, conviction 35+ → high
+    const _convClamped=Math.max(5,Math.min(35,Number(conviction)||0));
+    const _frac=(_convClamped-5)/30;
+    rawSizingDollars=Number(confidenceLowBet)+(Number(confidenceHighBet)-Number(confidenceLowBet))*_frac;
+    // Floor at fixed bet so confidence mode never goes below user's declared stake
+    rawSizingDollars=Math.max(Number(tradingBetSize)||0,rawSizingDollars);
+  }else if(sizingMode==='kelly'){
+    // Kelly fraction f* = (bp - q) / b for binary outcomes
+    const _p=(dir==='UP'?(Number(rawProbAbove)||50):100-(Number(rawProbAbove)||50))/100;
+    const _q=1-_p;
+    const _b=(100-costPerContractCents)/Math.max(1,costPerContractCents);
+    const _kelly=(_b*_p-_q)/Math.max(0.0001,_b);
+    const _kellyFrac=Math.max(0,Math.min(1,_kelly));
+    const _kellyBet=Number(confidenceHighBet)*_kellyFrac;
+    // Blend with fixed bet via slider 0-100
+    const _blend=Math.max(0,Math.min(100,Number(kellyBlend)||0))/100;
+    const _fixedBet=Number(tradingBetSize)||0;
+    const _mixed=_fixedBet*(1-_blend)+_kellyBet*_blend;
+    rawSizingDollars=Math.max(_fixedBet,_mixed);
+  }else if(sizingMode==='mission'){
+    // Mission mode result is computed upstream (needs trade-log/cluster lookup
+    // that this pure function can't do). Caller passes missionResult; if it
+    // says don't fire, we propagate that. Otherwise we use its betDollars.
+    if(missionResult&&missionResult.ok===false){
+      return{
+        decision:'sit-out-bad',reason:missionResult.reason||'mission veto',
+        intendedDollars:0,intendedContracts:0,capExceeded:false,
+        components:{sizingModeUsed:'mission',entryModeUsed:entryMode,sizingModeOverridden:false,rawSizingDollars:0,afterEntryModeDollars:0,capDollars:maxBetPerTrade,actualDollarsPostCap:0,bypassUsed:false,missionInfo:missionResult},
+      };
+    }
+    rawSizingDollars=Number(missionResult?.betDollars)||Number(tradingBetSize)||0;
+  }
+
+  // ── Step 2: ENTRY MODE override (if set) ──
+  let afterEntryModeDollars=rawSizingDollars;
+  let sizingModeOverridden=false;
+  if(entryMode==='contracts'){
+    const _wantContracts=Math.max(1,Math.min(500,Number(entryContracts)||5));
+    afterEntryModeDollars=(_wantContracts*costPerContractCents)/100;
+    sizingModeOverridden=true;
+  }else if(entryMode==='percent'){
+    const _pct=Math.max(0,Math.min(100,Number(entryPercentBalance)||10))/100;
+    afterEntryModeDollars=(Number(kalshiBalance)||0)*_pct;
+    sizingModeOverridden=true;
+  }
+
+  // ── Step 3: cap check (V9.19.16 wall behavior, with super/manual bypass) ──
+  const cap=Math.max(0,Number(maxBetPerTrade)||0);
+  const capExceeded=afterEntryModeDollars>cap;
+  const bypassAllowed=tier==='super'||manualBypass===true;
+
+  // Default: sit out if over cap
+  if(capExceeded&&!bypassAllowed){
+    return{
+      decision:'sit-out-cap',
+      reason:`intended $${afterEntryModeDollars.toFixed(2)} exceeds cap $${cap.toFixed(2)}`,
+      intendedDollars:afterEntryModeDollars,
+      intendedContracts:Math.max(1,Math.floor((afterEntryModeDollars*100)/costPerContractCents)),
+      capExceeded:true,
+      components:{
+        sizingModeUsed:sizingMode,entryModeUsed:entryMode,sizingModeOverridden,
+        rawSizingDollars,afterEntryModeDollars,capDollars:cap,
+        actualDollarsPostCap:0,bypassUsed:false,
+        costPerContractCents,tier,
+      },
+    };
+  }
+
+  // Bypass path: super-confluence or manual — clamp instead of refuse
+  let finalDollars=afterEntryModeDollars;
+  let bypassUsed=false;
+  if(capExceeded&&bypassAllowed){
+    finalDollars=cap;
+    bypassUsed=true;
+  }
+
+  // Floor at $1; below that, sit out
+  if(finalDollars<1){
+    return{
+      decision:'sit-out-tiny',
+      reason:`final $${finalDollars.toFixed(2)} below $1 floor`,
+      intendedDollars:finalDollars,intendedContracts:0,capExceeded:false,
+      components:{
+        sizingModeUsed:sizingMode,entryModeUsed:entryMode,sizingModeOverridden,
+        rawSizingDollars,afterEntryModeDollars,capDollars:cap,
+        actualDollarsPostCap:0,bypassUsed,
+        costPerContractCents,tier,
+      },
+    };
+  }
+
+  // Compute final contract count (floor — matches kalshiBuildOrder math)
+  const intendedContracts=Math.max(1,Math.min(250,Math.floor((finalDollars*100)/costPerContractCents)));
+
+  return{
+    decision:bypassUsed?'fire-bypass-cap':'fire',
+    reason:bypassUsed
+      ?`bypass: ${tier==='super'?'super-confluence tier':'manual click'} — clamped to cap`
+      :'within cap',
+    intendedDollars:finalDollars,
+    intendedContracts,
+    capExceeded,
+    components:{
+      sizingModeUsed:sizingMode,entryModeUsed:entryMode,sizingModeOverridden,
+      rawSizingDollars,afterEntryModeDollars,capDollars:cap,
+      actualDollarsPostCap:finalDollars,bypassUsed,
+      costPerContractCents,tier,
+    },
+  };
+};
+
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v9.19.15-simplified-trade-ticket';
+const BASELINE_VERSION='2026.05.14-v9.19.21-sizing-rebuild-complete';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.19.15';
+const TARA_VERSION_DISPLAY='Tara 9.19.21';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -10906,21 +11091,60 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45'},'how much to bet'),
           ),
           React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3'},
+            // V9.19.20: ACTIVE-RULE summary — shows exactly which mode will
+            //   compute the bet, so the user never has to guess again. The two-
+            //   source-of-truth confusion that lost user money on V9.19.15 lived
+            //   in this gap between sizing-mode and entry-mode. Now it's surfaced.
+            (()=>{
+              const _em=autoExecSettings?.entryMode||'dollars';
+              const _sm=autoExecSettings?.sizingMode||'fixed';
+              const _overridden=_em==='contracts'||_em==='percent';
+              const _activeRule=
+                _em==='contracts'?`${Number(autoExecSettings?.entryContracts)||5} contracts × current cost-per-contract`:
+                _em==='percent'?`${Number(autoExecSettings?.entryPercentBalance)||10}% of Kalshi balance`:
+                _sm==='fixed'?'fixed bet ($) from Trading Settings':
+                _sm==='confidence'?'scaled by conviction (low ↔ high bet)':
+                _sm==='kelly'?'Kelly fraction blended with fixed bet':'(unknown)';
+              return React.createElement('div',{
+                className:'px-2 py-2 rounded',
+                style:{background:'rgba(229,200,112,0.06)',border:'1px solid rgba(229,200,112,0.25)'},
+              },
+                React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-wider mb-0.5',style:{color:'#E5C870'}},'active rule'),
+                React.createElement('div',{className:'text-[11px]',style:{color:'rgba(232,233,228,0.95)'}},_activeRule),
+                _overridden&&React.createElement('div',{className:'text-[9px] mt-1 italic',style:{color:'rgba(232,233,228,0.55)'}},
+                  `Sizing strategy is overridden by entry mode = ${_em}.`,
+                ),
+                React.createElement('div',{className:'text-[9px] mt-1',style:{color:'rgba(232,233,228,0.55)'}},
+                  `cap: $${Number(autoExecSettings?.maxBetPerTrade)||25}/trade · if intended > cap → sit out (super-confluence/manual click can bypass)`,
+                ),
+              );
+            })(),
             React.createElement('div',null,
-              React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#E8E9E4]/60 mb-1'},'Sizing strategy'),
+              React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
+                React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#E8E9E4]/60'},'Sizing strategy'),
+                (autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')&&React.createElement('div',{
+                  className:'text-[9px] italic',style:{color:'rgba(229,200,112,0.75)'},
+                },'(overridden by entry mode below)'),
+              ),
               React.createElement('select',{
                 value:autoExecSettings?.sizingMode||'fixed',
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,sizingMode:e.target.value})),
+                disabled:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent'),
                 className:'w-full bg-[#0E100F] border border-[#E8E9E4]/15 rounded px-2 py-1.5 text-white text-sm focus:border-[#E5C870] focus:outline-none',
-                style:{background:'#15151a',color:'#E8E9E4'},
+                style:{
+                  background:'#15151a',
+                  color:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')?'rgba(232,233,228,0.40)':'#E8E9E4',
+                  cursor:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')?'not-allowed':'pointer',
+                  opacity:(autoExecSettings?.entryMode==='contracts'||autoExecSettings?.entryMode==='percent')?0.55:1,
+                },
               },
                 React.createElement('option',{value:'fixed',style:{background:'#15151a',color:'#E8E9E4'}},'Fixed (uses your bet-size, capped at max-bet)'),
-                React.createElement('option',{value:'confidence',style:{background:'#15151a',color:'#E8E9E4'}},'Scale with conviction (low/high range)'),
-                React.createElement('option',{value:'kelly',style:{background:'#15151a',color:'#E8E9E4'}},'Kelly fraction (most aggressive — math-driven)'),
+                React.createElement('option',{value:'confidence',style:{background:'#15151a',color:'#E8E9E4'}},'Scale with conviction (low/high range) — pending recalibration'),
+                React.createElement('option',{value:'kelly',style:{background:'#15151a',color:'#E8E9E4'}},'Kelly fraction blended with fixed bet'),
               ),
               React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 mt-1 leading-relaxed'},
-                autoExecSettings?.sizingMode==='confidence'?'Linear ramp: conviction 5pt → low bet, 35pt+ → high bet.':
-                autoExecSettings?.sizingMode==='kelly'?'Kelly = (b·p − q) ÷ b, where p=posterior, b=net odds. Scales high-bet × Kelly fraction. Edge-only — sits out when math says no edge.':
+                autoExecSettings?.sizingMode==='confidence'?'Linear ramp: conviction 5pt → low bet, 35pt+ → high bet. ⚠ Inherits the broken posterior signal — pending Tier C recalibration (after 50+ post-V9.18.10 audited trades).':
+                autoExecSettings?.sizingMode==='kelly'?'Kelly = (b·p − q) ÷ b, where p=posterior, b=net odds. Mixed with fixed bet via blend slider below. Edge-only.':
                 'Always uses your manual bet-size from Trading Settings, capped at max-bet-per-trade.',
               ),
             ),
@@ -18874,6 +19098,10 @@ function ScalperAdvisorPanel({
   // V9.19.2 Phase 3: taraCallLog for predictor P&L computation. Filters to
   //   today's autoExec trades and sums realizedPnLDollars + computes WR.
   taraCallLog,
+  // V9.19.18: kalshiBalance for ticket-preview sizing (percent mode needs it,
+  //   other modes ignore it). Pass-through to computeAutoExecSize so the
+  //   ticket renders the SAME numbers the entry effect will fire on.
+  kalshiBalance,
   // V9.17.18: Tara's committed snapshot (from taraCallSnapshotRef). When engine
   //   lock is null but the snapshot has committed via time-cap-commit / timer-
   //   commit / no-go paths, we still want to show the trade ticket and the
@@ -19263,12 +19491,40 @@ function ScalperAdvisorPanel({
   const _yes=Number(kalshiYesPrice);
   const _isYesLive=Number.isFinite(_yes);
   const _entryCents=_isYesLive&&_taraDir?(_taraDir==='UP'?Math.round(_yes):Math.round(100-_yes)):null;
-  const _betSize=Number(tradingSettings?.betSize)||10;
-  // V9.19.14: was Math.round — diverged from kalshiBuildOrder's Math.floor and
-  //   caused UI to show N+1 contracts pre-fill while order placed N. Now matches.
-  //   Example: $1 at 35¢: round=3 (wrong), floor=2 (what places). The order
-  //   builder uses floor because partial contracts can't be bought.
-  const _contracts=_entryCents?Math.max(1,Math.floor(_betSize/(_entryCents*0.01))):1;
+  // V9.19.18: ticket preview uses the SAME central sizing function as the fire path.
+  //   Inputs mirror what the entry effect at L27750ish passes in. The preview's
+  //   sole job is to show: "this is exactly what will fire when Tara locks."
+  //   If decision is 'sit-out-cap' / 'sit-out-tiny' / 'sit-out-bad', the ticket
+  //   surfaces that as a warning instead of pretending the trade will fire.
+  //   Mission mode preview is best-effort: mission's bet depends on cluster-WR
+  //   lookup that the panel doesn't have; we omit missionResult here and the
+  //   function falls back to tradingSettings.betSize for mission.
+  const _previewConviction=Math.abs((Number(analysis?.rawProbAbove)||50)-50);
+  const _previewSize=_entryCents&&_taraDir?computeAutoExecSize({
+    sizingMode:autoExecSettings?.sizingMode||'fixed',
+    entryMode:autoExecSettings?.entryMode||'dollars',
+    tradingBetSize:Number(tradingSettings?.betSize)||0,
+    confidenceLowBet:Number(autoExecSettings?.confidenceLowBet)||5,
+    confidenceHighBet:Number(autoExecSettings?.confidenceHighBet)||25,
+    kellyBlend:Number(autoExecSettings?.kellyBlend)||0,
+    entryContracts:Number(autoExecSettings?.entryContracts)||5,
+    entryPercentBalance:Number(autoExecSettings?.entryPercentBalance)||10,
+    maxBetPerTrade:Number(autoExecSettings?.maxBetPerTrade)||25,
+    costPerContractCents:_entryCents,
+    rawProbAbove:Number(analysis?.rawProbAbove)||50,
+    dir:_taraDir,
+    conviction:_previewConviction,
+    kalshiBalance:Number(kalshiBalance?.balance)||0,
+    missionResult:null, // preview doesn't have mission cluster context
+    tier:'single', // preview shows the default-tier outcome
+    manualBypass:false,
+  }):null;
+  const _betSize=_previewSize?_previewSize.intendedDollars:(Number(tradingSettings?.betSize)||10);
+  const _contracts=_previewSize?_previewSize.intendedContracts:(_entryCents?Math.max(1,Math.floor(_betSize/(_entryCents*0.01))):1);
+  // V9.19.18: surfaces sit-out reasons so the ticket can warn the user before they
+  //   trust the displayed numbers. e.g. "would sit out: $3.55 > cap $1.00"
+  const _previewWillFire=_previewSize?(_previewSize.decision==='fire'||_previewSize.decision==='fire-bypass-cap'):true;
+  const _previewSitOutReason=(_previewSize&&!_previewWillFire)?_previewSize.reason:null;
   const _maxPayout=_contracts*1.0; // dollars (each contract pays $1 at settle if right)
   const _maxProfit=_maxPayout-_betSize;
   const _cashOutCents=Number(autoExecSettings?.autoExitOffer)||85;
@@ -19937,17 +20193,37 @@ ${_d.responseBody||'(empty)'}`;
               `Tara called ${_taraDir==='UP'?'long up — she thinks price will be ABOVE the strike at window close':_taraDir==='DOWN'?'long down — she thinks price will be BELOW the strike at window close':'no direction yet'}. ${autoExecSettings?.signalSource==='lock'?'(engine-lock signal)':'(snapshot signal — public 67% WR call)'}`,
               _taraDirColor,
             ));
+            // V9.19.18: sit-out warning row — shown BEFORE the position row
+            //   when preview says cap would block. Loud + clear so user knows
+            //   the next auto-fire will refuse. Hidden once in a live trade
+            //   (no preview when actively filled/exiting).
+            if(!_liveValid&&_previewSitOutReason){
+              _rows.push(React.createElement('div',{
+                key:'preview-sit-out',
+                className:'py-2 px-2 mt-1 mb-1 rounded',
+                style:{
+                  background:'rgba(244,114,182,0.08)',
+                  border:'1px solid rgba(244,114,182,0.30)',
+                },
+              },
+                React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'rgba(244,114,182,0.95)'}},'⚠ auto-exec will sit out'),
+                React.createElement('div',{className:'text-[11px] leading-relaxed',style:{color:'rgba(232,233,228,0.85)'}},_previewSitOutReason),
+                React.createElement('div',{className:'text-[10px] mt-1',style:{color:'rgba(232,233,228,0.55)'}},'fix: raise max-bet, lower contracts/percent, or change sizing mode in settings'),
+              ));
+            }
             // position: contracts × price OR placed/filled detail
             if((_liveValid?_liveEntryCents:_entryCents)!=null){
               const _n=_liveValid?_liveContractsActual:_contracts;
               const _px=_liveValid?_liveEntryCents:_entryCents;
               _rows.push(_renderTip(
                 'position',
-                _liveValid?'position':'will buy',
+                _liveValid?'position':(_previewWillFire?'will buy':'would buy (blocked)'),
                 `${_n} contract${_n===1?'':'s'} @ ${_px}¢`,
                 _liveValid
                   ?`You hold ${_n} ${_taraDir==='UP'?'YES':'NO'} contract${_n===1?'':'s'}, each bought at ${_px}¢. Each contract pays $1.00 if Tara is right, $0 if wrong. Max possible profit: $${((100-_px)*_n*0.01).toFixed(2)}. Max possible loss: $${(_px*_n*0.01).toFixed(2)}.`
-                  :`Tara plans to buy ${_n} ${_taraDir==='UP'?'YES':'NO'} contract${_n===1?'':'s'} at ${_px}¢ each. Each contract pays $1.00 if right. Counts are floored — partial contracts can't be bought, so the actual fill may be ≤ this.`,
+                  :_previewWillFire
+                    ?`Tara plans to buy ${_n} ${_taraDir==='UP'?'YES':'NO'} contract${_n===1?'':'s'} at ${_px}¢ each. Each contract pays $1.00 if right. Counts are floored — partial contracts can't be bought, so the actual fill may be ≤ this.`
+                    :`The cap-exceeded warning above will block this trade. The numbers shown reflect what would have placed if the cap allowed it.`,
               ));
             }
             // stake
@@ -27249,6 +27525,19 @@ function TaraApp(){
     const _snap=taraCallSnapshotRef.current;
     const _snapDir=_snap?.call==='UP'||_snap?.call==='DOWN'?_snap.call
                   :_snap?.direction==='UP'||_snap?.direction==='DOWN'?_snap.direction:null;
+    // V9.19.19: detect EXPLICIT sit-out from the snapshot. The snapshot can be
+    //   in three states:
+    //     1. has a direction (UP/DOWN) → fire (subject to other gates)
+    //     2. SIT_OUT (explicit decision) → respect it, DO NOT fall through
+    //     3. null/missing (bootstrap before first snapshot) → fallback path OK
+    //   Before V9.19.19 cases 2 and 3 were treated identically — both fell
+    //   through to lockedCallRef and then to taraCall.direction (live engine).
+    //   That caused trades to fire when the snapshot was explicitly telling us
+    //   NOT to trade. Now SIT_OUT is honored as a real signal.
+    const _snapExplicitSitOut=!!(_snap&&(
+      _snap.call==='SIT_OUT'||_snap.call==='SIT-OUT'||
+      _snap.direction==='SIT_OUT'||_snap.direction==='SIT-OUT'
+    ));
     if(_useSnapshotFirst&&_snapDir){
       // Prefer the public snapshot. Use snapshot's commit time as the dedup
       // anchor — same snapshot fires at most once per window.
@@ -27273,6 +27562,22 @@ function TaraApp(){
         _manualTrigger:!!(lockedCallRef.current?._manualTrigger),
       };
     }else{
+      // V9.19.19: if snapshot is EXPLICITLY SIT_OUT, respect that decision.
+      //   Do not fall through to the engine lock or live taraCall. The user
+      //   selected snapshot mode ("Tara's Call") which means they want to
+      //   trade what Tara publicly calls — and "don't trade" is a public call.
+      //   Manual button can still override via _bypassAutoExecFilters path.
+      if(_useSnapshotFirst&&_snapExplicitSitOut){
+        // Burn dedup key so we don't keep evaluating this same SIT_OUT snapshot
+        const _ssWid=computeWindowId(windowType);
+        const _snapCommitTs=_snap?.committedAt||_snap?.lockedAt||_snap?.snapAt||_snap?.time||0;
+        const _ssKey=`${currentAsset}|${_ssWid}|SIT_OUT|${_snapCommitTs||0}`;
+        if(_autoExecLastFiredKeyRef.current!==_ssKey){
+          _autoExecLastFiredKeyRef.current=_ssKey;
+          try{console.info('[V9.19.19] Snapshot SIT_OUT respected — auto-exec sits out');}catch(_){}
+        }
+        return;
+      }
       // Fallback path: either signalSource='lock' is set, or no usable snapshot
       // direction yet (bootstrap case before first snapshot is committed).
       const _lock=lockedCallRef.current;
@@ -27533,16 +27838,18 @@ function TaraApp(){
     }
     // Convert back to the YES-axis for the order builder (it expects YES price 1-99 always)
     const _yesLimitForBuilder=_dir==='UP'?_limit:(100-_limit);
-    // V9.6.0: POSITION SIZING — choose bet based on sizingMode
-    let _bet=Number(tradingSettings?.betSize)||0;
-    let _missionInfo=null; // for telemetry
-    // V9.7.0: MISSION MODE OVERRIDE. When active, replaces all other sizing.
-    //   Uses cluster-specific WR + fractional Kelly + drawdown brake + distance-to-target tilt.
+    // ── V9.19.17: SIZING via central computeAutoExecSize ──────────────────
+    // Replaces the V9.6.0 sizing ladder + V9.18.4 entry-mode overrides + the
+    // cap line. All sizing decisions flow through ONE function so the trade
+    // ticket preview matches what fires. Mission mode still runs its cluster
+    // sizing upstream (this code), then passes the result into computeAutoExecSize.
+    let _missionInfo=null;
+    let _missionResult=null;
     if(mission.active&&mission.status==='active'){
       const _tier=_tierRank===5?'super':_tierRank===4?'confluence':_tierRank===3?'structural':_tierRank===2?'tape':'single';
       const _cwr=_missionGetClusterWR({regime:analysis?.regime,dir:_dir,tier:_tier,regimeDirCal:regimeDirCalibration});
       const _daysRemaining=mission.endDate?Math.max(0,(new Date(mission.endDate).getTime()-Date.now())/86400000):0;
-      const _result=_missionComputeBet({
+      _missionResult=_missionComputeBet({
         bankroll:mission.currentBankroll,
         target:mission.target,
         daysRemaining:_daysRemaining,
@@ -27553,73 +27860,64 @@ function TaraApp(){
         maxBetFraction:mission.maxBetFraction,
         maxBetCap:autoExecSettings.maxBetPerTrade,
       });
-      if(!_result.betDollars||_result.blockedReason){
-        // Mission says don't fire. Burn the dedup key so we don't keep evaluating.
+      if(_missionResult.blockedReason){
+        // Mission veto. Burn the dedup key so we don't keep evaluating.
         _autoExecLastFiredKeyRef.current=_key;
         return;
       }
-      _bet=_result.betDollars;
       _missionInfo={
         clusterWR:_cwr.wr,clusterN:_cwr.n,tier:_tier,
-        kellyFrac:_result.kellyFrac,fractionOfBankroll:_result.fractionOfBankroll,
+        kellyFrac:_missionResult.kellyFrac,fractionOfBankroll:_missionResult.fractionOfBankroll,
         bankrollAtEntry:mission.currentBankroll,
-        sizingReason:_result.reason,
+        sizingReason:_missionResult.reason,
       };
-    }else if(autoExecSettings.sizingMode==='confidence'){
-      // Linear interpolation: conviction 5 → low, conviction 35+ → high
-      const _convClamped=Math.max(5,Math.min(35,_conviction));
-      const _frac=(_convClamped-5)/30;
-      _bet=autoExecSettings.confidenceLowBet+(autoExecSettings.confidenceHighBet-autoExecSettings.confidenceLowBet)*_frac;
-    }else if(autoExecSettings.sizingMode==='kelly'){
-      // Kelly fraction: f* = (bp - q) / b, where p=win prob, q=1-p, b=net odds.
-      // For Kalshi: cost ¢ to win (100-cost)¢. b = (100-cost)/cost.
-      // p ≈ posterior/100 (in our directional axis).
-      const _p=(_dir==='UP'?(analysis?.rawProbAbove||50):100-(analysis?.rawProbAbove||50))/100;
-      const _q=1-_p;
-      const _b=(100-_dirCents)/Math.max(1,_dirCents);
-      const _kelly=(_b*_p-_q)/_b;
-      const _kellyFrac=Math.max(0,Math.min(1,_kelly));
-      const _kellyBet=autoExecSettings.confidenceHighBet*_kellyFrac;
-      // V9.18.4: Kelly BLEND. `kellyBlend` is 0-100 (percent).
-      //   0   = pure fixed bet from tradingSettings.betSize (Kelly ignored)
-      //   100 = pure Kelly (the math-only behavior)
-      //   50  = halfway between
-      //   We mix and then ALSO floor at fixedBet, so the user never bets
-      //   less than their declared stake.
-      const _fixedBet=Number(tradingSettings?.betSize)||0;
-      const _blend=Math.max(0,Math.min(100,Number(autoExecSettings?.kellyBlend)||0))/100;
-      const _mixed=_fixedBet*(1-_blend)+_kellyBet*_blend;
-      _bet=Math.max(_fixedBet,_mixed);
     }
-    // V9.18.4: For non-Kelly modes too, enforce fixed-bet floor if it's set.
-    //   Confidence mode previously could output below tradingSettings.betSize
-    //   on low-conviction trades. Now: confidence sets the dial, fixed sets the floor.
-    if(autoExecSettings.sizingMode==='confidence'){
-      const _fixedBet=Number(tradingSettings?.betSize)||0;
-      _bet=Math.max(_fixedBet,_bet);
+    const _bypassFromTier=(_tierRank===5); // super-confluence
+    const _sizeRes=computeAutoExecSize({
+      sizingMode:_missionInfo?'mission':autoExecSettings.sizingMode,
+      entryMode:autoExecSettings.entryMode||'dollars',
+      tradingBetSize:Number(tradingSettings?.betSize)||0,
+      confidenceLowBet:Number(autoExecSettings.confidenceLowBet)||5,
+      confidenceHighBet:Number(autoExecSettings.confidenceHighBet)||25,
+      kellyBlend:Number(autoExecSettings.kellyBlend)||0,
+      entryContracts:Number(autoExecSettings.entryContracts)||5,
+      entryPercentBalance:Number(autoExecSettings.entryPercentBalance)||10,
+      maxBetPerTrade:Number(autoExecSettings.maxBetPerTrade)||25,
+      costPerContractCents:_dirCents,
+      rawProbAbove:Number(analysis?.rawProbAbove)||50,
+      dir:_dir,
+      conviction:_conviction,
+      kalshiBalance:Number(kalshiBalance?.balance)||0,
+      missionResult:_missionResult?{ok:!_missionResult.blockedReason,betDollars:_missionResult.betDollars}:null,
+      tier:_tierRank===5?'super':_tierRank===4?'confluence':_tierRank===3?'structural':_tierRank===2?'tape':'single',
+      manualBypass:_isManual,
+    });
+    // V9.19.17: full sizing decision logged for forensics. Every fire OR sit-out
+    //   from sizing leaves a record showing exactly what the central function
+    //   computed and why. If anything weird fires later, scrollback gives us
+    //   the exact provenance.
+    try{console.info('[V9.19.17] SIZING DECISION',{
+      decision:_sizeRes.decision,
+      reason:_sizeRes.reason,
+      intendedDollars:_sizeRes.intendedDollars,
+      intendedContracts:_sizeRes.intendedContracts,
+      capExceeded:_sizeRes.capExceeded,
+      components:_sizeRes.components,
+    });}catch(_){}
+    if(_sizeRes.decision==='sit-out-cap'||_sizeRes.decision==='sit-out-tiny'||_sizeRes.decision==='sit-out-bad'){
+      // Burn dedup key so we don't re-evaluate the same lock; emit a visible UI state
+      _autoExecLastFiredKeyRef.current=_key;
+      setAutoOrderState({
+        status:_sizeRes.decision==='sit-out-cap'?'sit-out-cap':'sit-out',
+        reason:_sizeRes.reason,
+        dir:_dir,
+        placedAt:Date.now(),
+        asset:currentAsset,
+        _sizingComponents:_sizeRes.components,
+      });
+      return;
     }
-    // V9.18.4: ENTRY MODE OVERRIDE. The sizing-mode math above produced a $
-    //   amount. If entryMode is contracts or percent, override here. This way
-    //   the user can express their bet in whatever unit makes sense to them.
-    //   - 'dollars': use $ from sizing math (current behavior)
-    //   - 'contracts': fixed count of contracts × current cost-per-contract = $
-    //   - 'percent':   N% of Kalshi balance = $
-    //   Kalshi only takes contracts × cents, so we always end up with $ → contracts
-    //   in kalshiBuildOrder anyway. This just changes the user-facing semantic.
-    if(autoExecSettings.entryMode==='contracts'){
-      const _wantContracts=Math.max(1,Math.min(500,Number(autoExecSettings.entryContracts)||5));
-      const _costPerContractCents=_dirCents; // our-side cents = cost in cents
-      _bet=(_wantContracts*_costPerContractCents)/100;
-      try{console.info('[V9.18.4] entry mode: contracts',{wantContracts:_wantContracts,costPerContractCents:_costPerContractCents,derivedBet:_bet});}catch(_){}
-    }else if(autoExecSettings.entryMode==='percent'){
-      const _bal=Number(kalshiBalance?.balance)||0;
-      const _pct=Math.max(0,Math.min(100,Number(autoExecSettings.entryPercentBalance)||10))/100;
-      _bet=_bal*_pct;
-      try{console.info('[V9.18.4] entry mode: percent',{balance:_bal,percent:_pct*100,derivedBet:_bet});}catch(_){}
-    }
-    // Always cap at maxBetPerTrade and floor at $1
-    _bet=Math.max(0,Math.min(autoExecSettings.maxBetPerTrade,_bet));
-    if(_bet<1){_autoExecLastFiredKeyRef.current=_key;return;} // sizing said don't fire
+    const _bet=_sizeRes.intendedDollars;
     _autoExecLastFiredKeyRef.current=_key;
     // V9.18.3: mark this window as ATTEMPTED. Hard cap — even if the order
     //   errors / cancels / never fills, the entry effect will NOT re-fire on
@@ -27654,6 +27952,34 @@ function TaraApp(){
     });
     (async()=>{
       try{
+        // V9.19.21: PRE-FIRE LOG — captured immediately before the Kalshi POST
+        //   so any future "why did it fire X" or "what did the cap allow"
+        //   question can be answered from scrollback. The kalshiBuildOrder
+        //   function will floor stake → contracts; we precompute the same
+        //   value here so the log shows what's about to land at Kalshi.
+        try{
+          const _ourSideCost=_dir==='UP'?_yesLimitForBuilder:(100-_yesLimitForBuilder);
+          const _predictedCount=_ourSideCost>0?Math.max(1,Math.floor((_bet*100)/_ourSideCost)):0;
+          console.info('[V9.19.21] PRE-FIRE',{
+            ticker:kalshiActiveMarket.ticker,
+            dir:_dir,
+            asset:currentAsset,
+            ourSideCostCents:_ourSideCost,
+            limitCentsYesAxis:_yesLimitForBuilder,
+            betDollars:_bet,
+            predictedCount:_predictedCount,
+            predictedCostDollars:(_predictedCount*_ourSideCost)/100,
+            dryRun:!!autoExecSettings.dryRun,
+            capDollars:Number(autoExecSettings?.maxBetPerTrade)||null,
+            sizingDecision:_sizeRes.decision,
+            sizingReason:_sizeRes.reason,
+            sizingComponents:_sizeRes.components,
+            signalSource:_signal._source,
+            tierRank:_tierRank,
+            isManual:_isManual,
+            timestamp:new Date().toISOString(),
+          });
+        }catch(_){}
         const res=await kalshiPlaceOrder({
           apiKeyId:kalshiCreds.apiKeyId,
           privateKeyPem:kalshiCreds.privateKeyPem,
@@ -31093,7 +31419,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.19.15
+              9.19.21
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
@@ -32314,6 +32640,7 @@ function TaraApp(){
                 onClearKillSwitch={()=>setKillSwitchEngaged(false)}
                 onClearAutoOrder={()=>setAutoOrderState(null)}
                 taraCallLog={taraCallLog}
+                kalshiBalance={kalshiBalance}
                 taraSnapshotForTicket={taraCallSnapshotRef.current?{
                   call:taraCallSnapshotRef.current.call,
                   direction:taraCallSnapshotRef.current.direction,
