@@ -682,6 +682,15 @@ const cloudRead=async(path)=>{
   }
 };
 const cloudWrite=async(path,data)=>{
+  // V10.1.0 Session 2 — PARALLEL SUPABASE WRITE.
+  //   Mirrors the RMW helper's pattern. Every one-shot Firestore write also
+  //   dispatches a parallel Supabase upsert. Call sites untouched.
+  //
+  //   Use cases covered: Save as Baseline, Apply Baseline, Force Push (Sync tab),
+  //   and any direct cloudWrite() invocations. After this change, the Sync tab's
+  //   Save-as-Baseline action writes to BOTH backends — so even if Firestore
+  //   silently fails (quota), Supabase still receives the data.
+  try{cloudSupabaseWrite(path,data);}catch(_){}
   const ref=_fbDoc(path);if(!ref)return false;
   _incActiveWrites(); // V8.8.7
   let _ok=false;
@@ -943,6 +952,18 @@ const cloudFlushAll=()=>{
 const _writeQueueRMW=new Map();
 const _writePendingRMW=new Map();
 const cloudWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
+  // V10.1.0 Session 2 — PARALLEL SUPABASE WRITE.
+  //   Every Firestore RMW write also dispatches a Supabase RMW write with the
+  //   SAME args (path, getLocalData, mergeFn, delayMs). Each backend independently
+  //   transacts against its own current state. Convergence happens naturally:
+  //   identical local data → identical merged result on both sides.
+  //
+  //   Failures isolated: Firestore failing doesn't block Supabase, and vice versa.
+  //   Debouncing per-path per-backend means rapid re-invocations collapse correctly.
+  //
+  //   No call site changes needed. Replaces the explicit per-site parallel-write
+  //   pattern (which was only wired at state/lifetimePnL during Session 1).
+  try{cloudSupabaseWriteDebouncedRMW(path,getLocalData,mergeFn,delayMs);}catch(_){}
   if(_writeQueueRMW.has(path))clearTimeout(_writeQueueRMW.get(path));
   _writePendingRMW.set(path,{getLocalData,mergeFn});
   const tid=setTimeout(async()=>{
@@ -21770,25 +21791,11 @@ function TaraApp(){
         },
         1500,
       );
-      // V10.1.0 — PARALLEL SUPABASE WRITE (proof-of-life for migration Session 1).
-      //   Same arguments, same merge logic, written to Supabase tara_state in
-      //   parallel with the Firestore write above. If Supabase fails, Firestore
-      //   still has the data. If both succeed, both backends are in sync.
-      //   This is the FIRST path we wire to Supabase — picked because lifetime
-      //   P&L is small, simple, and changes infrequently (lower noise for the
-      //   verification step). Session 2 expands to taraCallLog + learnings.
-      cloudSupabaseWriteDebouncedRMW(
-        'state/lifetimePnL',
-        ()=>({value:_pnlRef.current,updatedAt:_pnlUpdatedAtRef.current}),
-        (cloudData,localData)=>{
-          const cT=Number(cloudData?.updatedAt)||0;
-          const lT=Number(localData.updatedAt)||0;
-          if(cT>lT+1000)return null;
-          if(cloudData&&Number(cloudData.value)===Number(localData.value)&&cT===lT)return null;
-          return{value:localData.value,updatedAt:localData.updatedAt};
-        },
-        1500,
-      );
+      // V10.1.0 Session 2 — parallel Supabase write is now handled internally by
+      //   cloudWriteDebouncedRMW (see helper definition). The explicit
+      //   cloudSupabaseWriteDebouncedRMW call previously here was the Session 1
+      //   proof-of-life pattern; removed now that the helper-level approach covers
+      //   every path uniformly.
     }
   },[lifetimePnL]);
   useEffect(()=>{
