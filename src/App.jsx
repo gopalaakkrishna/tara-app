@@ -2378,13 +2378,416 @@ const computeAutoExecSize=(inputs)=>{
   };
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.0.0 — TARA'S TRADE (Phase 4) — TIMING ENGINE SPEC
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// SPEC STATUS: locked 2026-05-14. This block is the contract. Sessions 2+
+//   implement against this spec. Changes require a Session-1-style discussion.
+//
+// WHAT IT IS
+//   A timing engine that evaluates each Tara's Call lock at the moment of
+//   decision and outputs fire-now / wait / abort with reasoning. It sits
+//   between Tara's Call (existing — decides direction) and the Kalshi POST
+//   (existing — places the order). It does NOT decide direction; it decides
+//   whether THIS exact instant is the right entry for an already-decided
+//   direction call.
+//
+// PROBLEM IT SOLVES
+//   Audit of 642 resolved trades (May 14 2026) showed:
+//     • Normal commits (real conviction):     N=107  WR=78.5%
+//     • Early locks (signal fired fast):      N=213  WR=65.7%
+//     • Time-cap-commits (deadline forced):   N=322  WR=62.4%  ← problem
+//   The "what" decision (Tara's Call) is okay. The "when" decision (always
+//   fire immediately after lock) is wrong. Phase 4 separates "when" out.
+//
+// GOAL
+//   Lift auto-fire WR from current ~66% lifetime to 75-80%. Volume drop is
+//   the accepted cost.
+//
+// INPUTS (single inputs object — function is pure, no React state):
+//   call: {
+//     direction: 'UP' | 'DOWN',
+//     tier: 'super' | 'confluence' | 'structural' | 'tape' | 'single' |
+//           'time-cap-commit' | 'timer-commit' | 'forced',
+//     posterior: 0-100,
+//     qScore: 0-100,
+//     qScoreV2: 0-100 | null,        // shadow score (V9.19.10+)
+//     lockType: 'early' | 'normal' | 'time-cap',
+//     secondsIntoWindow: 0-900,      // when lock fired
+//   }
+//   market: {
+//     kalshiYes: 1-99,               // current our-side price (cents)
+//     kalshiYes30sAgo: 1-99 | null,  // 30s-ago price (velocity)
+//     kalshiSpread: 0-50,            // bid-ask cents
+//     spotPrice: number,             // current asset price
+//     spotDrift1m: number,           // bps drift last 1m
+//     spotDrift10s: number,          // bps drift last 10s
+//     tapeBuySell30s: 0-1,           // buy ratio last 30s
+//     whaleNetUSD30s: number,        // signed whale flow last 30s
+//     orderBookImbalance: -1 to 1,   // asks heavy → negative
+//     liqLongUSD: number,            // shorts liquidation level
+//     liqShortUSD: number,           // longs liquidation level
+//     obDepthLive: -1 to 1 | null,   // V134 live 2.5s depth flash if fresh
+//     futuresBasisPct: number,       // basis (futures - spot) / spot
+//     binanceLeadBps: number,        // V114 Binance vs Coinbase lead
+//   }
+//   window: {
+//     secondsRemaining: 0-900,
+//     strikePrice: number,
+//     distanceBps: number,           // bps from spot to strike
+//     distanceFavorable: boolean,    // does current price favor the call dir?
+//     amplitudeBps: number,          // bps range covered so far in window
+//   }
+//   history: {
+//     similarWindowsN: integer,      // count of analogous past windows
+//     similarWindowsWR: 0-1,         // their WR
+//     recentRegimeWR: 0-1,           // last N trades in this regime
+//     sessionWR: 0-1,                // this session-of-day WR
+//     coldStreak: boolean,           // recent loss cluster in this regime?
+//   }
+//   fgt: {
+//     alignment: -4.0 to +4.0,       // signed MTF alignment score
+//     detail: { '1m','5m','15m' },   // signed direction per timeframe
+//     htfDominantDir: 'UP'|'DOWN'|'MIXED',
+//     htfConfluence: 0-1,            // confluence strength
+//   }
+//   exec: {
+//     edgePt: number,                // Tara conv - Kalshi conv on her side
+//     sizingDecision: 'fire'|'sit-out-cap'|'sit-out-tiny'|'sit-out-bad',
+//     intendedDollars: number,
+//   }
+//
+// OUTPUT
+//   {
+//     decision: 'fire-now' | 'wait' | 'abort',
+//     score: 0-100,                  // confidence in the decision
+//     reasons: [
+//       { factor: string, impact: signed-number, note: string },
+//       ...
+//     ],
+//     // 'wait' only:
+//     waitForCondition: string | null,  // e.g. 'kalshiBelow55', 'tapeConfirm'
+//     waitMaxSec: 30,                   // HARD CAP — re-eval every 5s, force
+//                                       // fire-or-abort decision after this
+//     waitStartedAt: timestamp | null,
+//   }
+//
+// WAIT STATE MACHINE
+//   Phase 4 returns 'wait' → caller stores waitContext = {condition, maxSec,
+//   startedAt}. Re-evaluates every 5s:
+//     • Condition met early       → fire-now (proceed to sizing + POST)
+//     • Lock flipped/invalidated  → abort
+//     • Window expires            → abort
+//     • 30s elapsed (max)         → force re-decide as fire-or-abort ONLY,
+//                                   no second wait, no wait→wait loops
+//
+// INTEGRATION POINT
+//   Inside auto-exec entry effect, AFTER all V9.19.x soft filters pass
+//   (tier, quality, conviction, marginal caution, urgency, edge, timecap),
+//   BEFORE the V9.19.16 sizing decision.
+//
+//   Existing gates → V10.0.0 evaluateTradeTiming() → sizing → Kalshi POST
+//
+// SETTINGS
+//   autoExecSettings.tradeTimingMode = 'off' | 'shadow' | 'advisory' | 'pregate'
+//     off       — Phase 4 disabled, V9.19.x behavior unchanged
+//     shadow    — runs on every lock, logs to CSV, does NOT affect trades.
+//                 DEFAULT initial mode for data collection.
+//     advisory  — Phase 4 decision displayed in UI but doesn't block.
+//     pregate   — Phase 4 is live, blocks/delays per its decision.
+//                 Manual click bypasses (same _bypassSoftFilters pattern).
+//
+// FAILURE MODES
+//   shadow / advisory  → fail-OPEN. Log error, allow auto-exec to fire normally.
+//   pregate            → fail-CLOSED. Abort the trade, emit
+//                        autoOrderState 'sit-out-phase4-error'.
+//
+// CSV LOGGING (added to taraCallLog entries):
+//   tradeTimingDecision  — 'fire-now' | 'wait' | 'abort' | 'error'
+//   tradeTimingScore     — 0-100
+//   tradeTimingReason    — concatenated reason summary (first 3 factors)
+//   tradeTimingWaitMs    — how long we waited (0 for fire-now/abort)
+//
+// BUILD PLAN
+//   Session 1 (DONE) — this spec.
+//   Session 2 — implement evaluateTradeTimingV1 + wire shadow mode + CSV log.
+//   Session 3 — analyze shadow data after 30+ trades, tune thresholds.
+//   Session 4 — promote to advisory + pregate behind toggle.
+//   Session 5+ — A/B test live vs off, iterate.
+//
+// CONSTRAINTS / NON-NEGOTIABLES
+//   • Pure function — no React state inside evaluateTradeTimingV1
+//   • Manual click ALWAYS bypasses (consistent with V9.19.x soft-filter pattern)
+//   • Cap-exceeded sit-outs (V9.19.16) still apply AFTER Phase 4
+//   • Edge filter (V9.19.24) still applies BEFORE Phase 4
+//   • Time-cap filter (V9.19.26) still applies BEFORE Phase 4
+//   • Manual button bypasses Phase 4 in pregate mode (via _bypassSoftFilters)
+//   • The four gates form a layered defense, not redundancy
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── V10.0.0 evaluateTradeTimingV1 — SHADOW IMPLEMENTATION ─────────────────
+// Pure function. No React state. Given the inputs spec above, returns a
+// {decision, score, reasons, waitForCondition, waitMaxSec, waitStartedAt}
+// object. Session 2 builds the scoring; Session 3 tunes thresholds against
+// shadow data; Session 4 promotes to live.
+//
+// Scoring model: additive from neutral 50, clamped 0-100. Every factor
+// contributes a signed impact with a human-readable note. This is intentional
+// — interpretability is required so Session 3 can audit factor contributions
+// against outcomes and rebalance weights.
+//
+// Decision thresholds (V1 starting values — WILL be tuned):
+//   score >= 70  → 'fire-now'
+//   40 <= score < 70 → 'wait'  (something specific should improve)
+//   score < 40   → 'abort'
+//
+// Defensive defaults — function never throws. Missing/garbage inputs
+// degrade to neutral contributions; never crash the auto-exec path.
+const evaluateTradeTimingV1=(inputs)=>{
+  // Defensive: bail to a neutral 'wait' if inputs are totally broken
+  if(!inputs||typeof inputs!=='object'){
+    return{decision:'wait',score:50,reasons:[{factor:'inputs',impact:0,note:'missing or invalid inputs object'}],waitForCondition:null,waitMaxSec:30,waitStartedAt:null};
+  }
+  const call=inputs.call||{};
+  const market=inputs.market||{};
+  const window=inputs.window||{};
+  const history=inputs.history||{};
+  const fgt=inputs.fgt||{};
+  const exec=inputs.exec||{};
+
+  // Helpers
+  const _num=(x,fb=0)=>{const n=Number(x);return Number.isFinite(n)?n:fb;};
+  const _dir=call.direction==='UP'?1:call.direction==='DOWN'?-1:0;
+  // If we don't even know direction, abort — nothing to time
+  if(_dir===0){
+    return{decision:'abort',score:0,reasons:[{factor:'direction',impact:-50,note:'no direction call'}],waitForCondition:null,waitMaxSec:0,waitStartedAt:null};
+  }
+
+  const reasons=[];
+  let score=50;
+  const _bump=(factor,impact,note)=>{
+    if(!Number.isFinite(impact))return;
+    score+=impact;
+    reasons.push({factor,impact:Math.round(impact*10)/10,note});
+  };
+
+  // ── FACTOR 1: CALL QUALITY (tier + lockType) — max ±20 ──────────────────
+  // Audit-backed: time-cap-commit WR=62.4%, normal=78.5%, early=65.7%.
+  // The lock type is the strongest single predictor.
+  const _tier=String(call.tier||'').toLowerCase();
+  if(_tier==='super')_bump('tier',+12,'super-confluence tier (lifetime WR 75%)');
+  else if(_tier==='confluence')_bump('tier',+10,'confluence tier (lifetime WR 80%)');
+  else if(_tier==='structural')_bump('tier',+4,'structural-led tier (lifetime WR 60%)');
+  else if(_tier==='tape')_bump('tier',+6,'tape-led tier (lifetime WR 68%)');
+  else if(_tier==='single')_bump('tier',-2,'single-signal tier — marginal');
+  else if(_tier==='time-cap-commit')_bump('tier',-12,'time-cap-commit — deadline-forced lock (lifetime WR 62%)');
+  else if(_tier==='timer-commit')_bump('tier',-8,'timer-commit — ETA expired (lifetime WR ~64%)');
+  else if(_tier==='forced')_bump('tier',-1,'user-forced lock (lifetime WR 67%)');
+  else _bump('tier',0,`unknown tier '${_tier||'(empty)'}'`);
+
+  // Late-window locks degrade further — confirms even non-time-cap late locks
+  const _secInto=_num(call.secondsIntoWindow);
+  if(_secInto>=180&&_tier!=='time-cap-commit'&&_tier!=='timer-commit'){
+    _bump('lateness',-3,`locked late at ${Math.round(_secInto)}s into window`);
+  } else if(_secInto>0&&_secInto<60){
+    _bump('lateness',+2,`early lock at ${Math.round(_secInto)}s — high conviction signal`);
+  }
+
+  // ── FACTOR 2: EDGE — max ±15 ────────────────────────────────────────────
+  // The May 14 audit's central finding. V9.19.24 already filters >+15pt, so
+  // most surviving trades are in the +0 to +15 range. Reward small-to-mid
+  // positive edge and contrarian negative edge.
+  const _edge=_num(exec.edgePt,null);
+  if(_edge!==null&&Number.isFinite(_edge)){
+    if(_edge<-10)_bump('edge',+12,`contrarian gem: Kalshi ${Math.abs(Math.round(_edge))}pt ahead of Tara (audit WR 85%)`);
+    else if(_edge<0)_bump('edge',+8,`mild contrarian: Kalshi ${Math.abs(Math.round(_edge))}pt ahead (audit WR 75%)`);
+    else if(_edge<=10)_bump('edge',+5,`sweet spot edge +${Math.round(_edge)}pt (audit WR 70%)`);
+    else if(_edge<=15)_bump('edge',+1,`acceptable edge +${Math.round(_edge)}pt`);
+    else if(_edge<=25)_bump('edge',-5,`high edge +${Math.round(_edge)}pt — market may have priced this`);
+    else _bump('edge',-12,`extreme edge +${Math.round(_edge)}pt — likely overconfident vs market`);
+  } else {
+    _bump('edge',0,'edge not computable');
+  }
+
+  // ── FACTOR 3: TAPE ALIGNMENT — max ±10 ──────────────────────────────────
+  const _tapeBS=_num(market.tapeBuySell30s,0.5);
+  // Tape favors UP when buy ratio > 0.5; favors DOWN when < 0.5
+  const _tapeFavor=_dir===1?(_tapeBS-0.5)*2:(0.5-_tapeBS)*2; // -1 to +1
+  if(_tapeFavor>0.3)_bump('tape',+8,`tape ${Math.round(_tapeBS*100)}% ${_dir===1?'buy':'sell'} — confirms ${call.direction}`);
+  else if(_tapeFavor>0.1)_bump('tape',+4,`tape mildly supports ${call.direction}`);
+  else if(_tapeFavor<-0.3)_bump('tape',-8,`tape ${Math.round((1-_tapeBS)*100)}% ${_dir===1?'sell':'buy'} — fights ${call.direction}`);
+  else if(_tapeFavor<-0.1)_bump('tape',-4,`tape mildly against ${call.direction}`);
+  else _bump('tape',0,'tape neutral');
+
+  // Whale net flow last 30s — same direction logic
+  const _whale=_num(market.whaleNetUSD30s,0);
+  const _whaleFavor=_dir===1?_whale:-_whale; // signed in trade direction
+  if(_whaleFavor>500000)_bump('whales',+5,`whales aligned (+$${Math.round(_whaleFavor/1000)}K in dir)`);
+  else if(_whaleFavor<-500000)_bump('whales',-5,`whales against (${Math.round(_whaleFavor/1000)}K dir)`);
+  // small whale flows ignored
+
+  // ── FACTOR 4: FGT ALIGNMENT — max ±10 ───────────────────────────────────
+  const _fgtAlign=_num(fgt.alignment,0);
+  const _fgtFavor=_dir===1?_fgtAlign:-_fgtAlign;
+  if(_fgtFavor>=2)_bump('fgt',+8,`FGT strongly confirms ${call.direction} (align ${_fgtAlign.toFixed(1)})`);
+  else if(_fgtFavor>=1)_bump('fgt',+4,`FGT supports ${call.direction}`);
+  else if(_fgtFavor<=-2)_bump('fgt',-8,`FGT strongly fights ${call.direction}`);
+  else if(_fgtFavor<=-1)_bump('fgt',-4,`FGT mildly against ${call.direction}`);
+  // Per-timeframe disagreement penalty — when 1m and 15m point opposite ways
+  const _detail=fgt.detail||{};
+  const _tf1=_num(_detail['1m']),_tf15=_num(_detail['15m']);
+  if(_tf1>0&&_tf15<0||_tf1<0&&_tf15>0)_bump('mtf',-3,'1m and 15m disagree — chop risk');
+
+  // ── FACTOR 5: ORDER-BOOK / LIQUIDATIONS — max ±10 ────────────────────────
+  const _obImbal=_num(market.orderBookImbalance,0);
+  // Positive = bids heavy (UP pressure); negative = asks heavy (DOWN pressure)
+  const _obFavor=_dir===1?_obImbal:-_obImbal;
+  if(_obFavor>0.4)_bump('orderbook',+6,'depth imbalance heavily favors direction');
+  else if(_obFavor>0.2)_bump('orderbook',+3,'depth supports direction');
+  else if(_obFavor<-0.4)_bump('orderbook',-6,'depth imbalance fights direction');
+  else if(_obFavor<-0.2)_bump('orderbook',-3,'depth mildly against direction');
+
+  // V134 live depth flash — when fresh, doubles confidence if it agrees
+  const _obLive=market.obDepthLive;
+  if(_obLive!=null&&Number.isFinite(_obLive)){
+    const _liveFavor=_dir===1?_obLive:-_obLive;
+    if(Math.sign(_liveFavor)===Math.sign(_obFavor)&&Math.abs(_liveFavor)>0.2){
+      _bump('depth-live',+3,'live depth flash agrees with snapshot');
+    } else if(Math.sign(_liveFavor)!==Math.sign(_obFavor)&&Math.abs(_liveFavor)>0.2){
+      _bump('depth-live',-4,'live depth flash diverges — fast-moving book');
+    }
+  }
+
+  // Liquidation magnets — large stop clusters above/below pull price
+  const _liqLong=_num(market.liqLongUSD,0); // shorts above (UP magnet)
+  const _liqShort=_num(market.liqShortUSD,0); // longs below (DOWN magnet)
+  if(_dir===1&&_liqLong>2*_liqShort&&_liqLong>500000){
+    _bump('liq-magnet',+3,'large short-liq cluster above — UP magnet');
+  } else if(_dir===-1&&_liqShort>2*_liqLong&&_liqShort>500000){
+    _bump('liq-magnet',+3,'large long-liq cluster below — DOWN magnet');
+  }
+
+  // ── FACTOR 6: KALSHI VELOCITY — max ±8 ───────────────────────────────────
+  const _yesNow=_num(market.kalshiYes,null);
+  const _yes30=_num(market.kalshiYes30sAgo,null);
+  if(_yesNow!=null&&_yes30!=null){
+    const _yesDelta=_yesNow-_yes30;
+    const _yesFavor=_dir===1?_yesDelta:-_yesDelta;
+    if(_yesFavor>=8)_bump('k-velocity',+6,`Kalshi YES moved ${_yesDelta>0?'+':''}${Math.round(_yesDelta)}¢ in 30s — favors direction`);
+    else if(_yesFavor>=3)_bump('k-velocity',+3,`Kalshi YES drifting toward direction`);
+    else if(_yesFavor<=-8)_bump('k-velocity',-6,`Kalshi YES moved ${Math.round(_yesDelta)}¢ in 30s — against direction`);
+    else if(_yesFavor<=-3)_bump('k-velocity',-3,`Kalshi YES drifting against direction`);
+  }
+
+  // ── FACTOR 7: SPOT MOMENTUM — max ±8 ────────────────────────────────────
+  const _drift10s=_num(market.spotDrift10s,0);
+  const _drift1m=_num(market.spotDrift1m,0);
+  const _drift10sFavor=_dir===1?_drift10s:-_drift10s;
+  const _drift1mFavor=_dir===1?_drift1m:-_drift1m;
+  if(_drift10sFavor>=3&&_drift1mFavor>=2)_bump('momentum',+6,'spot momentum (10s + 1m) confirms direction');
+  else if(_drift10sFavor>=2)_bump('momentum',+3,'spot moving toward direction (last 10s)');
+  else if(_drift10sFavor<=-3&&_drift1mFavor<=-2)_bump('momentum',-6,'spot momentum fights direction');
+  else if(_drift10sFavor<=-2)_bump('momentum',-3,'spot drifting against direction (last 10s)');
+
+  // V114: Binance lead — when futures diverge significantly, coinbase will follow
+  const _bnLead=_num(market.binanceLeadBps,0);
+  const _bnFavor=_dir===1?_bnLead:-_bnLead;
+  if(_bnFavor>=3)_bump('futures-lead',+2,'Binance futures lead favors direction');
+  else if(_bnFavor<=-3)_bump('futures-lead',-2,'Binance futures lead against direction');
+
+  // Futures basis — extreme basis is mean-reversion signal
+  const _basis=_num(market.futuresBasisPct,0);
+  if(Math.abs(_basis)>0.0015){
+    // Positive basis (contango) over 0.15% is mild bearish bias; negative is bullish
+    const _basisFavor=_dir===1?-_basis:_basis;
+    if(_basisFavor>0.001)_bump('basis',+1,'futures basis hints mean-reversion in direction');
+    else _bump('basis',-1,'futures basis hints against direction');
+  }
+
+  // ── FACTOR 8: WINDOW STATE — max ±7 ──────────────────────────────────────
+  const _secsLeft=_num(window.secondsRemaining,300);
+  const _distBps=_num(window.distanceBps,null);
+  const _distFav=!!window.distanceFavorable;
+  // Less time remaining = lower chance of move materializing
+  if(_secsLeft<90)_bump('time-left',-4,`only ${Math.round(_secsLeft)}s left — limited move time`);
+  else if(_secsLeft<180)_bump('time-left',-1,`${Math.round(_secsLeft)}s left — tight`);
+  else if(_secsLeft>=600)_bump('time-left',+2,'plenty of time for move to develop');
+  // Distance from strike — favorable side is easier to settle right
+  if(_distBps!=null){
+    if(_distFav&&Math.abs(_distBps)<30)_bump('strike-dist',+4,`already ${Math.round(Math.abs(_distBps))}bps favorable from strike`);
+    else if(!_distFav&&Math.abs(_distBps)>50)_bump('strike-dist',-3,`${Math.round(Math.abs(_distBps))}bps adverse to strike — needs big move`);
+    else if(_distFav)_bump('strike-dist',+2,'on favorable side of strike');
+  }
+
+  // ── FACTOR 9: HISTORY — max ±6 ───────────────────────────────────────────
+  const _sessionWR=_num(history.sessionWR,0.6);
+  const _regimeWR=_num(history.recentRegimeWR,0.6);
+  const _analogWR=_num(history.similarWindowsWR,0.6);
+  const _analogN=_num(history.similarWindowsN,0);
+
+  if(_sessionWR>=0.72)_bump('session',+2,`session WR ${Math.round(_sessionWR*100)}% — favorable`);
+  else if(_sessionWR<=0.50)_bump('session',-2,`session WR ${Math.round(_sessionWR*100)}% — hostile session`);
+
+  if(_regimeWR>=0.70)_bump('regime',+2,`recent regime WR ${Math.round(_regimeWR*100)}%`);
+  else if(_regimeWR<=0.45)_bump('regime',-3,`recent regime WR ${Math.round(_regimeWR*100)}% — current regime hostile`);
+
+  // Analogs only count when sample is meaningful (n>=8)
+  if(_analogN>=8){
+    if(_analogWR>=0.75)_bump('analogs',+2,`${_analogN} similar windows won ${Math.round(_analogWR*100)}%`);
+    else if(_analogWR<=0.45)_bump('analogs',-2,`${_analogN} similar windows lost more (${Math.round(_analogWR*100)}%)`);
+  }
+
+  // ── FACTOR 10: COLD STREAK — penalty only ────────────────────────────────
+  if(history.coldStreak){
+    _bump('cold-streak',-8,'recent losses in this regime — cold');
+  }
+
+  // ── DECISION ─────────────────────────────────────────────────────────────
+  // Clamp + threshold
+  const _finalScore=Math.max(0,Math.min(100,Math.round(score*10)/10));
+  let decision,waitForCondition=null,waitMaxSec=0;
+  if(_finalScore>=70)decision='fire-now';
+  else if(_finalScore>=40){
+    decision='wait';
+    // What specifically should we wait for? Pick the most negative factor
+    // and infer the condition.
+    const _negs=reasons.filter(r=>r.impact<0).sort((a,b)=>a.impact-b.impact);
+    const _worst=_negs[0];
+    if(_worst){
+      if(_worst.factor==='tape'||_worst.factor==='whales')waitForCondition='tape-confirms-direction';
+      else if(_worst.factor==='k-velocity')waitForCondition='kalshi-stops-drifting-against';
+      else if(_worst.factor==='momentum')waitForCondition='spot-momentum-confirms';
+      else if(_worst.factor==='edge')waitForCondition='edge-normalizes';
+      else if(_worst.factor==='time-left')waitForCondition=null; // can't wait, just decide
+      else waitForCondition=`improvement-in-${_worst.factor}`;
+    }
+    waitMaxSec=waitForCondition?30:0;
+    if(!waitForCondition){
+      // Nothing actionable to wait for — fall through to abort
+      decision='abort';
+    }
+  } else {
+    decision='abort';
+  }
+
+  return{
+    decision,
+    score:_finalScore,
+    reasons,
+    waitForCondition,
+    waitMaxSec,
+    waitStartedAt:null, // set by caller when actually entering wait state
+  };
+};
+
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v9.19.26-timecap-filter';
+const BASELINE_VERSION='2026.05.14-v10.0.0-session2-shadow';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.19.26';
+const TARA_VERSION_DISPLAY='Tara 10.0.0';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -10823,6 +11226,35 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               }),
             ),
           ),
+          // V10.0.0: Tara's Trade timing engine (Phase 4) mode selector.
+          //   Session 2 ships with 'off' and 'shadow' fully functional.
+          //   'advisory' and 'pregate' are reserved for Session 4 (not yet
+          //   implemented — they behave like 'shadow' until then).
+          React.createElement('div',{className:'mt-2 pt-2',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
+            React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
+              _labelTip('timing-mode','Tara\'s Trade engine (Phase 4)','New V10.0.0 timing engine. Evaluates every Tara\'s Call lock and outputs fire-now / wait / abort with reasons. Currently in SHADOW mode for Session 2 data collection — runs silently, logs to CSV, does NOT affect trades. Future sessions: tune thresholds (Session 3) → advisory/pregate live blocking (Session 4). Set to "off" if you don\'t want the engine logging anything at all.'),
+              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.0.0'),
+            ),
+            React.createElement('select',{
+              value:autoExecSettings?.tradeTimingMode||'shadow',
+              onChange:(e)=>setAutoExecSettings(prev=>({...prev,tradeTimingMode:e.target.value})),
+              className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm focus:border-[#A78BFA] focus:outline-none',
+              style:{background:'#15151a',color:'#E8E9E4'},
+            },
+              React.createElement('option',{value:'off',style:{background:'#15151a',color:'#E8E9E4'}},'Off — Phase 4 disabled'),
+              React.createElement('option',{value:'shadow',style:{background:'#15151a',color:'#E8E9E4'}},'Shadow — logs decisions, no blocking (RECOMMENDED)'),
+              React.createElement('option',{value:'advisory',style:{background:'#15151a',color:'#E8E9E4'}},'Advisory — shows in UI (Session 4 stub)'),
+              React.createElement('option',{value:'pregate',style:{background:'#15151a',color:'#E8E9E4'}},'Pre-gate — blocks trades (Session 4 stub)'),
+            ),
+            React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1 leading-relaxed'},(()=>{
+              const _m=autoExecSettings?.tradeTimingMode||'shadow';
+              if(_m==='off')return '= no Phase 4 evaluation, V9.19.x behavior preserved';
+              if(_m==='shadow')return '= scoring runs every lock, decision logged to CSV (tradeTimingDecision column). Auto-exec NOT affected. Run 30+ trades, then we analyze.';
+              if(_m==='advisory')return '= [Session 4 stub] currently behaves like shadow';
+              if(_m==='pregate')return '= [Session 4 stub] currently behaves like shadow';
+            })()),
+            _tipBox('timing-mode','New V10.0.0 timing engine. Evaluates every Tara\'s Call lock and outputs fire-now / wait / abort with reasons. Currently in SHADOW mode for Session 2 data collection — runs silently, logs to CSV, does NOT affect trades. Future sessions: tune thresholds (Session 3) → advisory/pregate live blocking (Session 4). Set to "off" if you don\'t want the engine logging anything at all.'),
+          ),
         ),
         // ── V9.6.0: ADVANCED ENTRY FILTERS ────────────────────────────────
         React.createElement('details',{className:'mb-3 rounded',style:{background:'rgba(196,181,253,0.04)',border:'1px solid rgba(196,181,253,0.16)'}},
@@ -14437,7 +14869,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -14545,6 +14977,14 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     // V9.11.0: session + device for learning-bucket attribution
                     e.session||'',
                     e.device||'',
+                    // V10.0.0 Phase 4: timing engine telemetry. Decision is one of
+                    //   'fire-now' | 'wait' | 'abort' | 'error' | null (legacy entries
+                    //   pre-Session 2 will be null). Score is 0-100. Reason is the
+                    //   compact factor summary. Mode is which mode produced it.
+                    e.tradeTimingDecision||'',
+                    e.tradeTimingScore!=null?e.tradeTimingScore:'',
+                    e.tradeTimingReason||'',
+                    e.tradeTimingMode||'',
                   ].map(v=>typeof v==='string'&&v.includes(',')?`"${v}"`:String(v));
                   _rows.push(_row.join(','));
                 });
@@ -21043,6 +21483,14 @@ function TaraApp(){
         //   normal commits). The 90-119s sub-band was 54.6% (coin flip).
         //   When ON, auto-exec skips these. Manual click still fires them.
         skipTimeCapCommit:!!v.skipTimeCapCommit,
+        // V10.0.0: Tara's Trade timing engine mode (Phase 4).
+        //   'off'      — Phase 4 disabled entirely
+        //   'shadow'   — runs on every lock, logs decision to CSV, does NOT affect trades [DEFAULT — data collection phase]
+        //   'advisory' — decision shown in UI but doesn't block (Session 4+)
+        //   'pregate'  — live, blocks/delays per decision (Session 4+, manual click bypasses)
+        //   Session 2 (current): only 'off' and 'shadow' are functional.
+        //   advisory/pregate are stubbed until Session 4 promotes them.
+        tradeTimingMode:(['off','shadow','advisory','pregate'].includes(v.tradeTimingMode))?v.tradeTimingMode:'shadow',
         // V9.19.24: edge filter cap. Default 15pt — based on May 14 audit of 642
         //   resolved trades. WR by edge bucket: +0-10pt → 70.6%, +10-20pt → 65.1%,
         //   +20-30pt → 60.2%, +30+pt → 65.2%. Cap at 15pt keeps the sweet-spot
@@ -21136,7 +21584,7 @@ function TaraApp(){
         smartExitExtendCents:Number(v.smartExitExtendCents)>=0?Number(v.smartExitExtendCents):5, // extend target by N¢ when extending
         signalSource:(v.signalSource==='lock'||v.signalSource==='snapshot')?v.signalSource:'snapshot', // V9.17.22
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,tradeTimingMode:'shadow',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
@@ -21200,6 +21648,11 @@ function TaraApp(){
   // V9.17.27: track last logged key for the manual-eval log so we don't spam
   //   the console every analysis pulse when autoOrderState is stuck in 'error'.
   const _autoExecLastLoggedKeyRef=useRef('');
+  // V10.0.0 Phase 4: holds the Tara's Trade timing engine decision from the
+  //   most recent lock evaluation. Read by the call-log writer downstream to
+  //   attach tradeTimingDecision/Score/Reason CSV columns. Shape:
+  //     { decision, score, reason, waitForCondition, waitMaxSec, mode, ts }
+  const _phase4DecisionRef=useRef(null);
   // Connection status from a manual ping
   const[kalshiPingState,setKalshiPingState]=useState({state:'idle',msg:'',balance:null,at:0});
   // V8.2: Anti-tilt cooldown state — set when streak reaches threshold, blocks new entries
@@ -28029,6 +28482,151 @@ function TaraApp(){
         }
       }
     }
+    // ── V10.0.0: TARA'S TRADE TIMING ENGINE (Phase 4) — SHADOW MODE ───────
+    // Per spec block at ~L2382: shadow evaluates every lock, logs decision,
+    // does NOT block trades. Data accumulates for Session 3 analysis.
+    // Manual click bypass: we still SHADOW manual clicks so we collect data
+    // on what Phase 4 would have said. We just don't act on the decision.
+    //
+    // Phase 4 result is stored in a ref so the call-log entry writer can
+    // attach it to the trade record (CSV columns added below).
+    const _timingMode=autoExecSettings?.tradeTimingMode||'shadow';
+    let _phase4Decision=null;
+    if(_timingMode!=='off'){
+      try{
+        // Build inputs object per the V10.0.0 spec
+        // Many fields come from existing refs/analysis; missing ones degrade
+        // gracefully inside evaluateTradeTimingV1.
+        const _kYesNow=Number(kalshiYesPrice);
+        const _kYes30=_kalshiYes30sAgoRef?.current||null; // may not exist yet
+        const _bloom=bloombergData||{};
+        const _depthFlash=depthFlashRef?.current||null;
+        const _gf=globalFlow||{};
+        const _wp=whalePulse||{}; // whale info
+        const _tapeMetrics=tapeMetricsRef?.current||{};
+        const _ctx=taraCall?._ctx||{};
+        const _signalForTiming=_signal||{};
+        const _stateGate=stateGate||{};
+        const _phase4Inputs={
+          call:{
+            direction:_dir,
+            tier:_signalForTiming.tier||taraCall?.tier||'',
+            posterior:Number(analysis?.rawProbAbove),
+            qScore:Number(_ctx?.q||taraCall?.qScore),
+            qScoreV2:Number(_ctx?._qScoreV2Shadow||null),
+            lockType:(_signalForTiming.tier==='time-cap-commit'||_signalForTiming.tier==='timer-commit')?'time-cap':(taraCall?.earlyLock?'early':'normal'),
+            secondsIntoWindow:(()=>{
+              const _totalSec=windowType==='15m'?900:300;
+              const _remSec=(timeState?.minsRemaining||0)*60+(timeState?.secsRemaining||0);
+              return Math.max(0,_totalSec-_remSec);
+            })(),
+          },
+          market:{
+            kalshiYes:_kYesNow,
+            kalshiYes30sAgo:_kYes30,
+            kalshiSpread:Number(_bloom?.kalshiSpread||0),
+            spotPrice:Number(analysis?.currentPrice||0),
+            spotDrift1m:Number(analysis?.drift1m||0),
+            spotDrift10s:Number(analysis?.drift10s||0),
+            tapeBuySell30s:Number(_tapeMetrics?.buyRatio30s||0.5),
+            whaleNetUSD30s:Number(_wp?.netUSD30s||0),
+            orderBookImbalance:(()=>{
+              const _ll=Number(_bloom?.liqLongUSD||0);
+              const _ls=Number(_bloom?.liqShortUSD||0);
+              if(_ll+_ls<=0)return 0;
+              return (_ls-_ll)/(_ll+_ls); // positive = bids heavy (ASKS heavier per V114 inverted)
+            })(),
+            liqLongUSD:Number(_bloom?.liqLongUSD||0),
+            liqShortUSD:Number(_bloom?.liqShortUSD||0),
+            obDepthLive:_depthFlash?.obImbalanceLive||null,
+            futuresBasisPct:Number(_gf?.basisPct||0),
+            binanceLeadBps:(()=>{
+              const _bn=Number(_gf?.binancePrice||0);
+              const _sp=Number(analysis?.currentPrice||0);
+              if(_bn<=0||_sp<=0)return 0;
+              return ((_bn-_sp)/_sp)*10000;
+            })(),
+          },
+          window:{
+            secondsRemaining:(timeState?.minsRemaining||0)*60+(timeState?.secsRemaining||0),
+            strikePrice:Number(analysis?.strikePrice||0),
+            distanceBps:(()=>{
+              const _sp=Number(analysis?.currentPrice||0);
+              const _str=Number(analysis?.strikePrice||0);
+              if(_sp<=0||_str<=0)return null;
+              return ((_str-_sp)/_sp)*10000;
+            })(),
+            distanceFavorable:(()=>{
+              const _sp=Number(analysis?.currentPrice||0);
+              const _str=Number(analysis?.strikePrice||0);
+              if(_sp<=0||_str<=0)return false;
+              // For UP: favorable when price is at or above strike
+              // For DOWN: favorable when price is at or below strike
+              return _dir==='UP'?(_sp>=_str):(_sp<=_str);
+            })(),
+            amplitudeBps:Number(analysis?.windowAmplitude?.bps||0),
+          },
+          history:{
+            similarWindowsN:Number(taraScorecards?.similarWindows?.n||0),
+            similarWindowsWR:Number(taraScorecards?.similarWindows?.wr||0.6),
+            recentRegimeWR:Number(taraScorecards?.recentRegimeWR||0.6),
+            sessionWR:Number(_todaySessionWR?.wr||0.6),
+            coldStreak:!!currentStreak&&currentStreak.type==='L'&&currentStreak.count>=3,
+          },
+          fgt:{
+            alignment:Number(analysis?.mtfAlignment||0),
+            detail:analysis?.mtfDetail||{},
+            htfDominantDir:analysis?.htfDominantDir||'MIXED',
+            htfConfluence:Number(analysis?.htfConfluence||0),
+          },
+          exec:{
+            edgePt:(()=>{
+              if(!Number.isFinite(_post)||!Number.isFinite(_yes))return null;
+              const _tc=_dir==='UP'?_post:(100-_post);
+              const _kc=_dir==='UP'?_yes:(100-_yes);
+              return _tc-_kc;
+            })(),
+            sizingDecision:'fire', // sizing hasn't run yet at this point — we're before it
+            intendedDollars:Number(autoExecSettings?.maxBetPerTrade||25),
+          },
+        };
+        _phase4Decision=evaluateTradeTimingV1(_phase4Inputs);
+        // Store on ref so the call-log entry writer downstream can attach
+        _phase4DecisionRef.current={
+          decision:_phase4Decision.decision,
+          score:_phase4Decision.score,
+          // Compact reason summary — first 3 factors
+          reason:(_phase4Decision.reasons||[]).slice(0,3).map(r=>`${r.factor}${r.impact>=0?'+':''}${r.impact}`).join('|'),
+          waitForCondition:_phase4Decision.waitForCondition,
+          waitMaxSec:_phase4Decision.waitMaxSec,
+          mode:_timingMode,
+          ts:Date.now(),
+        };
+        // Log every shadow decision so we can see what's happening at runtime
+        try{console.info(`[V10.0.0-${_timingMode}] DECISION`,{
+          decision:_phase4Decision.decision,
+          score:_phase4Decision.score,
+          dir:_dir,
+          tier:_phase4Inputs.call.tier,
+          topReasons:(_phase4Decision.reasons||[]).slice(0,5).map(r=>`${r.factor}(${r.impact>=0?'+':''}${r.impact})`).join(' '),
+          waitFor:_phase4Decision.waitForCondition,
+        });}catch(_){}
+        // SHADOW: do NOT block trades. Advisory/pregate behavior comes in Session 4.
+        // (intentional no-op here)
+      }catch(_phase4Err){
+        // Fail-open in shadow mode — log error, allow auto-exec to proceed
+        try{console.warn('[V10.0.0-shadow] DECISION ERROR (failing open):',_phase4Err&&_phase4Err.message);}catch(_){}
+        _phase4DecisionRef.current={
+          decision:'error',
+          score:null,
+          reason:String(_phase4Err&&_phase4Err.message||'unknown').slice(0,80),
+          waitForCondition:null,
+          waitMaxSec:0,
+          mode:_timingMode,
+          ts:Date.now(),
+        };
+      }
+    }
     const _dirCents=_dir==='UP'?_yes:(100-_yes);
     // ── V9.17.5: PATIENT ENTRY ────────────────────────────────────────────
     // If enabled, wait for offer to enter value zone before placing order.
@@ -29397,6 +29995,14 @@ function TaraApp(){
           // result:null populates at rollover scoring. NO_TRADE entries skip resolution
           //   (no win/loss to compute) but the entry exists so memory shows the no-go event.
           result:snapshot.isNoGo?'NO_TRADE':null,
+          // V10.0.0 Phase 4: shadow timing decision. Populated from
+          //   _phase4DecisionRef when auto-exec entry effect ran. May be null
+          //   for snapshots logged outside the auto-exec entry path
+          //   (e.g., pure user-force snapshots that don't trigger auto-exec).
+          tradeTimingDecision:_phase4DecisionRef.current?_phase4DecisionRef.current.decision:null,
+          tradeTimingScore:_phase4DecisionRef.current?_phase4DecisionRef.current.score:null,
+          tradeTimingReason:_phase4DecisionRef.current?_phase4DecisionRef.current.reason:null,
+          tradeTimingMode:_phase4DecisionRef.current?_phase4DecisionRef.current.mode:null,
           // V9.2.1: Bet amount + max payout for P&L tracking. Captured at snapshot
           //   time so each trade carries its actual dollar amounts. P&L computed at
           //   resolution: WIN = maxPay - betAmt, LOSS = -betAmt.
@@ -31677,7 +32283,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.19.26
+              10.0.0
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
