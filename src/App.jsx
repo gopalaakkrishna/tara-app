@@ -2065,10 +2065,10 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.13-v9.18.8-exit-tick-visible-fillprice-fallback';
+const BASELINE_VERSION='2026.05.13-v9.18.9-block-urgency-deemphasize-posterior';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.18.8';
+const TARA_VERSION_DISPLAY='Tara 9.18.9';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -8847,7 +8847,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           <div className={`flex items-baseline gap-2 flex-wrap ${callColor}`}>
             <span className="text-2xl">{arrow}</span>
             <span className="text-3xl font-serif font-bold tracking-tight leading-none">{callLabel}</span>
-            {isLockedSnap&&<span className="text-lg tabular-nums opacity-75 self-baseline">{dispConfidence}%</span>}
+            {isLockedSnap&&<span className="text-[11px] tabular-nums opacity-50 self-baseline" title="Raw posterior — not WR-calibrated. Tier (chip) is the calibrated signal.">{dispConfidence}% <span className="opacity-60">raw</span></span>}
             {/* V9.9.5: tier chip on the locked card. Reads from snap.tier (V9.9.5 added
                  it to taraCallSnapshotRef). Color-coded by tier quality so user can see
                  at a glance whether this is a Tier-1 lock (super-confluence, confluence,
@@ -10681,6 +10681,14 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Block when V9.4.0 attaches a marginal-zone caution chip (low ATR, low quality, single tier). Coin-flip zone — historically 59% WR.'),
               ),
               React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.skipMarginalCaution,onChange:(e)=>setAutoExecSettings(prev=>({...prev,skipMarginalCaution:e.target.checked})),className:'ml-2'}),
+            ),
+            // V9.18.9: BLOCK URGENCY-APPLIED CALLS
+            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded mt-1',style:{background:'rgba(244,114,182,0.04)',border:'1px solid rgba(244,114,182,0.14)'}},
+              React.createElement('div',null,
+                React.createElement('div',{className:'text-[11px] font-bold text-white'},'Block urgency-applied calls'),
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Block when V9.7.6 urgency floor-drop kicks in (late-window forced commits). From your reconcile: 2W/3L = 40% WR (n=5, low confidence). Default OFF — enable if you want to be conservative.'),
+              ),
+              React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.blockUrgencyApplied,onChange:(e)=>setAutoExecSettings(prev=>({...prev,blockUrgencyApplied:e.target.checked})),className:'ml-2'}),
             ),
           ),
         ),
@@ -20296,6 +20304,7 @@ function TaraApp(){
         minConviction:Number(v.minConviction)>=0?Number(v.minConviction):0,
         // Skip when V9.4.0 marginal-zone caution is attached. Conservative default OFF.
         skipMarginalCaution:!!v.skipMarginalCaution,
+        blockUrgencyApplied:!!v.blockUrgencyApplied, // V9.18.9
         // Lock-stability requirement: wait N seconds after lock fires before placing
         // the order. Filters out instant-flip locks. 0 = fire immediately on lock.
         lockStabilitySec:Number(v.lockStabilitySec)>=0?Number(v.lockStabilitySec):0,
@@ -20358,7 +20367,7 @@ function TaraApp(){
         smartExitExtendCents:Number(v.smartExitExtendCents)>=0?Number(v.smartExitExtendCents):5, // extend target by N¢ when extending
         signalSource:(v.signalSource==='lock'||v.signalSource==='snapshot')?v.signalSource:'snapshot', // V9.17.22
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
@@ -27009,6 +27018,15 @@ function TaraApp(){
     if(!_bypassSoftFilters&&autoExecSettings.minConviction>0&&_conviction<autoExecSettings.minConviction){_autoExecLastFiredKeyRef.current=_key;return;}
     // V9.6.0: SKIP MARGINAL CAUTION (V9.4.0 marginal-zone caution is attached to taraCall.caution)
     if(!_bypassSoftFilters&&autoExecSettings.skipMarginalCaution&&taraCall?.caution){_autoExecLastFiredKeyRef.current=_key;return;}
+    // V9.18.9: BLOCK URGENCY-APPLIED CALLS (opt-in).
+    //   From the BTC reconcile: urgency-applied calls were 2W/3L = 40% WR vs
+    //   66.4% baseline (n=5 — small sample, low confidence). Surface as a
+    //   user-controlled toggle rather than enforcing a default block.
+    //   Urgency is tagged in _v97DiagRef.current.urgencyApplied at lock time.
+    if(!_bypassSoftFilters&&autoExecSettings.blockUrgencyApplied&&_v97DiagRef?.current?.urgencyApplied){
+      if(_shouldLogManual)try{console.info('[V9.18.9] auto-exec blocked: urgency-applied call (blockUrgencyApplied=ON)');}catch(_){}
+      _autoExecLastFiredKeyRef.current=_key;return;
+    }
     const _g=_autoExecGuardrailCheck();
     if(!_g.ok){
       if(_isManual){
@@ -30661,7 +30679,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.18.8
+              9.18.9
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
