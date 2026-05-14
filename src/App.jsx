@@ -2296,9 +2296,14 @@ const computeAutoExecSize=(inputs)=>{
   }
 
   // ── Step 2: ENTRY MODE override (if set) ──
+  // V9.19.22: mission mode is sovereign. When mission is active, its cluster-WR
+  //   sizing math has bankroll-aware logic that contract-count or percent
+  //   overrides would silently throw away. Skip entry-mode override for mission.
   let afterEntryModeDollars=rawSizingDollars;
   let sizingModeOverridden=false;
-  if(entryMode==='contracts'){
+  if(sizingMode==='mission'){
+    // Mission's bet is final — no entry-mode override.
+  }else if(entryMode==='contracts'){
     const _wantContracts=Math.max(1,Math.min(500,Number(entryContracts)||5));
     afterEntryModeDollars=(_wantContracts*costPerContractCents)/100;
     sizingModeOverridden=true;
@@ -2376,10 +2381,10 @@ const computeAutoExecSize=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v9.19.21-sizing-rebuild-complete';
+const BASELINE_VERSION='2026.05.14-v9.19.23-refined-presets';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.19.21';
+const TARA_VERSION_DISPLAY='Tara 9.19.23';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -19647,35 +19652,69 @@ function ScalperAdvisorPanel({
     React.createElement('div',{className:'flex items-center gap-1.5'},
       React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'rgba(232,233,228,0.40)'}},'mode'),
       (()=>{
+        // V9.19.23: PRESETS REFINED based on real-market exit fill behavior.
+        //
+        // Patient (A) — "let winners run, kill losers tight"
+        //   • Patient entry waits for cheaper fills (≤45¢, up to 90s)
+        //   • Stop 15¢: cut losses quick; patient is about waiting for the
+        //     RIGHT entry, not riding bad trades.
+        //   • Target 88¢: a hair below 90¢ — most 90¢ targets miss as the
+        //     offer pulls back 1-2¢ near the high. 88¢ has a much higher
+        //     real-fill rate while still capturing nearly all the win.
+        //   • Time exit 45s: leave settlement chaos to the impulsive.
+        //   • Lock stability 5s: wait a moment to filter whipsaws (these
+        //     bottom-of-quality locks are the ones that lose).
+        //   • Min tier 'any': we entered patiently; no need for extra filter.
+        //
+        // Fast (B) — "scalp, book early, cut faster"
+        //   • Patient entry OFF, +2¢ slippage to ensure immediate fill.
+        //   • Stop 20¢: tighter than old 25¢. Fast = high WR small wins;
+        //     don't ride losses far.
+        //   • Target 78¢: book profits before they fade. Fast windows can
+        //     reverse hard in the final third.
+        //   • Time exit 60s: exit even earlier — fast mode's edge is small
+        //     wins; time decay near close erodes them.
+        //   • Lock stability 0s: speed is the point of fast.
+        //   • Min tier 'structural': stricter — fast mode without quality
+        //     filter is gambling.
+        //
+        // Both modes: smart-exits ON, min-profit 5¢ — be willing to take
+        //   small wins when Tara's read flips instead of watching them
+        //   evaporate.
         const _PATIENT={
           patientEntryEnabled:true,
-          patientEntryMaxCents:40,
-          patientEntryMaxWaitSec:120,
+          patientEntryMaxCents:45,
+          patientEntryMaxWaitSec:90,
           entryLadderEnabled:false,
           slippageCents:0,
           stopLossDeltaCents:15,
-          autoExitOffer:90,
+          autoExitOffer:88,
+          timeExitSecLeft:45,
           smartExitsEnabled:true,
           smartExitMinProfitCents:5,
+          lockStabilitySec:5,
+          minTier:'any',
         };
         const _FAST={
           patientEntryEnabled:false,
           entryLadderEnabled:false,
           slippageCents:2,
-          stopLossDeltaCents:25,
-          autoExitOffer:80,
+          stopLossDeltaCents:20,
+          autoExitOffer:78,
+          timeExitSecLeft:60,
           smartExitsEnabled:true,
-          smartExitMinProfitCents:8,
+          smartExitMinProfitCents:5,
+          lockStabilitySec:0,
           minTier:'structural',
         };
         const _isPatientActive=
           autoExecSettings?.patientEntryEnabled===true
-          &&autoExecSettings?.autoExitOffer===90
+          &&autoExecSettings?.autoExitOffer===88
           &&autoExecSettings?.stopLossDeltaCents===15;
         const _isFastActive=
           autoExecSettings?.patientEntryEnabled===false
-          &&autoExecSettings?.autoExitOffer===80
-          &&autoExecSettings?.stopLossDeltaCents===25
+          &&autoExecSettings?.autoExitOffer===78
+          &&autoExecSettings?.stopLossDeltaCents===20
           &&autoExecSettings?.minTier==='structural';
         const _applyMode=(preset)=>{
           if(typeof setAutoExecSettings!=='function')return;
@@ -19689,7 +19728,7 @@ function ScalperAdvisorPanel({
             className:'flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer',
             style:_isPatientActive?_btnStyleActive:_btnStyleIdle,
             onClick:()=>_applyMode(_PATIENT),
-            title:'patient: wait for cheap entries (max 40¢, up to 120s wait), tight stops (SL 15¢), let winners run (TP 90¢), smart-exit on small profits. accept lower WR for bigger winners.',
+            title:'patient (A): waits for cheaper entries (≤45¢, up to 90s), tight stop (15¢), realistic target (88¢ — leaves 2¢ buffer for fill misses), time-exit 45s before window close, smart-exit on 5¢+ profit when Tara flips. accepts lower fire rate for better R:R.',
           },[
             React.createElement('span',{key:'a',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'A'),
             'patient',
@@ -19699,7 +19738,7 @@ function ScalperAdvisorPanel({
             className:'flex-1 px-2 py-1 text-[10px] font-medium rounded transition-colors cursor-pointer',
             style:_isFastActive?_btnStyleActive:_btnStyleIdle,
             onClick:()=>_applyMode(_FAST),
-            title:'fast: fire at offer +2¢ slip, structural+ tier only, SL 25¢, TP 80¢, smart-exit on bigger profits. higher WR with smaller winners.',
+            title:'fast (B): fires immediately at offer+2¢, tighter stop (20¢), early target (78¢ — book before fade), time-exit 60s before close, structural+ tier only. higher fire rate with smaller-faster winners.',
           },[
             React.createElement('span',{key:'b',className:'opacity-50 mr-1',style:{fontSize:'8px'}},'B'),
             'fast',
@@ -27566,8 +27605,14 @@ function TaraApp(){
       //   Do not fall through to the engine lock or live taraCall. The user
       //   selected snapshot mode ("Tara's Call") which means they want to
       //   trade what Tara publicly calls — and "don't trade" is a public call.
-      //   Manual button can still override via _bypassAutoExecFilters path.
-      if(_useSnapshotFirst&&_snapExplicitSitOut){
+      // V9.19.22: manual button (lockedCallRef._manualTrigger or
+      //   _bypassAutoExecFilters) ALWAYS bypasses this block. The user has
+      //   explicitly asked to override Tara's sit-out decision. We synthesize
+      //   a signal from lockedCallRef.dir (which the manual button sets) so
+      //   the rest of the entry effect can process it.
+      const _lockForManual=lockedCallRef.current;
+      const _manualForcing=!!(_lockForManual?._manualTrigger||_lockForManual?._bypassAutoExecFilters);
+      if(_useSnapshotFirst&&_snapExplicitSitOut&&!_manualForcing){
         // Burn dedup key so we don't keep evaluating this same SIT_OUT snapshot
         const _ssWid=computeWindowId(windowType);
         const _snapCommitTs=_snap?.committedAt||_snap?.lockedAt||_snap?.snapAt||_snap?.time||0;
@@ -27575,11 +27620,21 @@ function TaraApp(){
         if(_autoExecLastFiredKeyRef.current!==_ssKey){
           _autoExecLastFiredKeyRef.current=_ssKey;
           try{console.info('[V9.19.19] Snapshot SIT_OUT respected — auto-exec sits out');}catch(_){}
+          // V9.19.22: surface SIT_OUT to UI so user sees "Tara said no" instead
+          //   of silent inaction. Reuses 'sit-out' status convention.
+          setAutoOrderState({
+            status:'sit-out',
+            reason:'Tara called SIT_OUT — auto-exec respecting',
+            dir:null,
+            placedAt:Date.now(),
+            asset:currentAsset,
+          });
         }
         return;
       }
       // Fallback path: either signalSource='lock' is set, or no usable snapshot
-      // direction yet (bootstrap case before first snapshot is committed).
+      // direction yet (bootstrap case before first snapshot is committed), or
+      // manual button is forcing through SIT_OUT.
       const _lock=lockedCallRef.current;
       if(_lock&&_lock.dir){_signal={..._lock,_source:_useSnapshotFirst?'lock-fallback':'lock-explicit'};}
       // V9.17.22: when in snapshot mode but snapshot dir is null and we did
@@ -27673,7 +27728,7 @@ function TaraApp(){
       }
       _autoExecLastFiredKeyRef.current=_key;return;
     }
-    if(autoOrderState&&autoOrderState.status!=='canceled'&&autoOrderState.status!=='exited'&&autoOrderState.status!=='patient-waiting'){
+    if(autoOrderState&&autoOrderState.status!=='canceled'&&autoOrderState.status!=='exited'&&autoOrderState.status!=='patient-waiting'&&autoOrderState.status!=='sit-out'&&autoOrderState.status!=='sit-out-cap'){
       // V9.17.23: REMOVED 'error' from the re-fire allow-list. Previous behavior
       //   re-fired on error status, which caused a tight loop when Kalshi returned
       //   401/403 (auth failures aren't transient — they fail every retry, banging
@@ -27872,7 +27927,6 @@ function TaraApp(){
         sizingReason:_missionResult.reason,
       };
     }
-    const _bypassFromTier=(_tierRank===5); // super-confluence
     const _sizeRes=computeAutoExecSize({
       sizingMode:_missionInfo?'mission':autoExecSettings.sizingMode,
       entryMode:autoExecSettings.entryMode||'dollars',
@@ -31419,7 +31473,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.19.21
+              9.19.23
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
