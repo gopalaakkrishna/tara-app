@@ -2381,10 +2381,10 @@ const computeAutoExecSize=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v9.19.23-refined-presets';
+const BASELINE_VERSION='2026.05.14-v9.19.24-edge-filter';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 9.19.23';
+const TARA_VERSION_DISPLAY='Tara 9.19.24';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -10733,6 +10733,28 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},(()=>{
                 const _c=autoExecSettings?.autoExitOffer||85;
                 return `= sell when our-side offer ≥ ${_c}¢ on a 100¢ contract (locks in ${_c}% of max payout)`;
+              })()),
+            ),
+          ),
+          // V9.19.24: Edge filter — single full-width row at the bottom of risk guardrails.
+          //   Critical for V9.19.24+ — blocks "market already priced this" trades.
+          React.createElement('div',{className:'mt-2 pt-2',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65'},'Edge cap — max Tara-vs-Kalshi gap (pt)'),
+                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#E5C870'}},'V9.19.24'),
+              ),
+              React.createElement('input',{
+                type:'number',min:0,max:100,step:1,
+                value:Number.isFinite(Number(autoExecSettings?.maxEdgePt))?Number(autoExecSettings.maxEdgePt):15,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxEdgePt:Math.max(0,Math.min(100,_num(e.target.value,15)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+              }),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1 leading-relaxed'},(()=>{
+                const _e=Number(autoExecSettings?.maxEdgePt);
+                const _eff=Number.isFinite(_e)&&_e>=0?_e:15;
+                if(_eff===0)return '= filter DISABLED (was the May 14 audit\'s root cause — recommend 15)';
+                return `= sit out if Tara is more than ${_eff}pt above Kalshi on her direction. Audit: edge >${_eff}pt trades won at 65% (would have lifted last week to ~70%). Manual click bypasses.`;
               })()),
             ),
           ),
@@ -20936,6 +20958,12 @@ function TaraApp(){
         slippageCents:Number(v.slippageCents)>=0?Number(v.slippageCents):2,
         autoExitOffer:Number(v.autoExitOffer)>0?Number(v.autoExitOffer):85, // exit at 85¢ offer
         autoExitSecLeft:Number(v.autoExitSecLeft)>0?Number(v.autoExitSecLeft):20,
+        // V9.19.24: edge filter cap. Default 15pt — based on May 14 audit of 642
+        //   resolved trades. WR by edge bucket: +0-10pt → 70.6%, +10-20pt → 65.1%,
+        //   +20-30pt → 60.2%, +30+pt → 65.2%. Cap at 15pt keeps the sweet-spot
+        //   trades (small positive edge) and contrarian gems (negative edge),
+        //   blocks the "market already priced" zone. Set to 0 to disable filter.
+        maxEdgePt:Number(v.maxEdgePt)>=0?Number(v.maxEdgePt):15,
         // ── V9.6.0: ADVANCED ENTRY FILTERS ──────────────────────────────
         // Per-asset enable. Default both ON. When OFF, auto-exec skips that asset
         // even if the master toggle is on. Useful for "auto-trade BTC only".
@@ -21023,7 +21051,7 @@ function TaraApp(){
         smartExitExtendCents:Number(v.smartExitExtendCents)>=0?Number(v.smartExitExtendCents):5, // extend target by N¢ when extending
         signalSource:(v.signalSource==='lock'||v.signalSource==='snapshot')?v.signalSource:'snapshot', // V9.17.22
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,maxEdgePt:15,enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
@@ -27728,7 +27756,7 @@ function TaraApp(){
       }
       _autoExecLastFiredKeyRef.current=_key;return;
     }
-    if(autoOrderState&&autoOrderState.status!=='canceled'&&autoOrderState.status!=='exited'&&autoOrderState.status!=='patient-waiting'&&autoOrderState.status!=='sit-out'&&autoOrderState.status!=='sit-out-cap'){
+    if(autoOrderState&&autoOrderState.status!=='canceled'&&autoOrderState.status!=='exited'&&autoOrderState.status!=='patient-waiting'&&autoOrderState.status!=='sit-out'&&autoOrderState.status!=='sit-out-cap'&&autoOrderState.status!=='sit-out-edge'){
       // V9.17.23: REMOVED 'error' from the re-fire allow-list. Previous behavior
       //   re-fired on error status, which caused a tight loop when Kalshi returned
       //   401/403 (auth failures aren't transient — they fail every retry, banging
@@ -27825,6 +27853,59 @@ function TaraApp(){
       _setManualOrderFeedback({at:Date.now(),msg:'all gates passed · placing order',color:'emerald'});
     }
     const _dir=_signal.dir;
+    // ── V9.19.24: EDGE FILTER ─────────────────────────────────────────────
+    // Block trades where Tara's conviction substantially exceeds Kalshi's on
+    // the same side. Audit of 642 resolved trades (May 3-14) showed:
+    //   • Edge > +25pt: WR 65.2%  ← market already pricing this
+    //   • Edge +10-20pt: WR 65.1%  ← marginal
+    //   • Edge +0-10pt: WR 70.6%  ← sweet spot
+    //   • Edge negative (Kalshi more confident than Tara): WR 75-85%  ← contrarian gem
+    // Pattern: HIGH positive edge = "obvious" trade, market already moved.
+    // Filtering edge > +15pt would have lifted this week's WR from 61.5% → 69%.
+    //
+    // Threshold: autoExecSettings.maxEdgePt (default 15). Manual click bypasses
+    // via _bypassSoftFilters. Super-confluence does NOT bypass (per user spec).
+    //
+    // Compute Tara conviction on her direction's side:
+    //   • UP call  → tara_conv = posterior (e.g. 75% UP = 75)
+    //   • DOWN call → tara_conv = 100 - posterior (e.g. 25% UP = 75% DOWN)
+    // Kalshi conviction on Tara's side:
+    //   • UP call  → kalshi_conv = kalshiYes (75¢ YES = 75% market thinks UP)
+    //   • DOWN call → kalshi_conv = 100 - kalshiYes
+    // Edge = tara_conv - kalshi_conv. Positive = Tara more bullish on her dir.
+    if(!_bypassSoftFilters){
+      const _maxEdge=Number(autoExecSettings?.maxEdgePt);
+      // Default to 15pt if unset (filter ON by default after the May 14 audit)
+      const _edgeCap=Number.isFinite(_maxEdge)&&_maxEdge>0?_maxEdge:15;
+      const _post=Number(analysis?.rawProbAbove);
+      if(Number.isFinite(_post)&&Number.isFinite(_yes)){
+        const _taraConv=_dir==='UP'?_post:(100-_post);
+        const _kalshiConv=_dir==='UP'?_yes:(100-_yes);
+        const _edge=_taraConv-_kalshiConv;
+        try{console.info('[V9.19.24] EDGE CHECK',{
+          dir:_dir,taraConv:_taraConv,kalshiConv:_kalshiConv,
+          edgePt:Math.round(_edge*10)/10,cap:_edgeCap,
+          willBlock:_edge>_edgeCap,
+        });}catch(_){}
+        if(_edge>_edgeCap){
+          // Block. Burn dedup key so we don't keep evaluating the same lock,
+          // and emit a visible UI state so the user sees "sit out: market priced".
+          _autoExecLastFiredKeyRef.current=_key;
+          const _reason=`edge +${Math.round(_edge)}pt > cap +${_edgeCap}pt — market already priced (Tara ${Math.round(_taraConv)}% vs Kalshi ${Math.round(_kalshiConv)}%)`;
+          try{console.info('[V9.19.24] AUTO-EXEC BLOCKED (edge filter):',_reason);}catch(_){}
+          setAutoOrderState({
+            status:'sit-out-edge',
+            reason:_reason,
+            dir:_dir,
+            placedAt:Date.now(),
+            asset:currentAsset,
+            _edgePt:Math.round(_edge*10)/10,
+            _edgeCap:_edgeCap,
+          });
+          return;
+        }
+      }
+    }
     const _dirCents=_dir==='UP'?_yes:(100-_yes);
     // ── V9.17.5: PATIENT ENTRY ────────────────────────────────────────────
     // If enabled, wait for offer to enter value zone before placing order.
@@ -31473,7 +31554,7 @@ function TaraApp(){
               boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
             }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
-              9.19.23
+              9.19.24
             </span>
             {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
