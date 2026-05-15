@@ -3473,10 +3473,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.0-firestore-retired-supabase-primary';
+const BASELINE_VERSION='2026.05.14-v10.2.1-calibration-refresh-755trades';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.0';
+const TARA_VERSION_DISPLAY='Tara 10.2.1';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -23626,13 +23626,21 @@ function TaraApp(){
   //   seeds — never saved on update, never synced. Now: localStorage cached, cloud-synced
   //   via learnings/regimeMemory, max-per-cell merge for cross-device convergence.
   const[regimeMemory,setRegimeMemory]=useState(()=>{
+    // V10.2.1: seeds refreshed from 755-trade audit. Old seeds were V144-era and badly
+    //   overfit (TRENDING DOWN seeded 87.5% from n=16; reality at n=352 is 65.3%).
+    //   RANGE-CHOP seeded as the WEAKEST regime; reality is the STRONGEST at 78.2%.
+    //   Note: stored localStorage values OVERWRITE these seeds on hydrate, so this
+    //   only affects fresh installs / unknown regimes — but those biases were leaking
+    //   into cold-start calibration and ML weights.
+    //   HIGH VOL CHOP kept at original (n=12 audit sample too small to trust).
+    //   LONG SQUEEZE still 0/0 — never observed in 755 trades.
     const _seeds={
-      'TRENDING UP':   {wins:0,losses:0},
-      'TRENDING DOWN': {wins:14,losses:2},   // 87.5% WR (n=16) — extremely reliable
-      'HIGH VOL CHOP': {wins:24,losses:21},  // 53% WR (n=45) — UP/DOWN both weak, require CONVICTION
-      'SHORT SQUEEZE': {wins:66,losses:31},  // 68% WR (n=97) — primary regime, trust calls
-      'LONG SQUEEZE':  {wins:0,losses:0},
-      'RANGE-CHOP':    {wins:59,losses:51},  // 53.6% WR (n=110) — near coin flip, BE SELECTIVE
+      'TRENDING UP':   {wins:61,losses:37},   // 62.2% WR (n=98)    — was 0/0 (no seed)
+      'TRENDING DOWN': {wins:230,losses:122}, // 65.3% WR (n=352)   — was 87.5% (n=16, overfit)
+      'HIGH VOL CHOP': {wins:24,losses:21},   // 53% WR (n=45 V144) — n=12 in audit too small
+      'SHORT SQUEEZE': {wins:130,losses:75},  // 63.4% WR (n=205)   — was 68% (n=97)
+      'LONG SQUEEZE':  {wins:0,losses:0},     // never observed in audit
+      'RANGE-CHOP':    {wins:68,losses:19},   // 78.2% WR (n=87)    — was 53.6% (mislabeled as weak!)
     };
     try{
       const stored=localStorage.getItem('taraRegimeMemory_v1');
@@ -28202,7 +28210,11 @@ function TaraApp(){
       //   to the inverted quality-vs-WR correlation (q 70+ wins 58%, q 20-29 wins 82%).
       //   New defaults match user-observed performance. Long-term: read from learned
       //   session memory once V9.11.0 session weights have data.
-      const sWR={'EU':64,'ASIA':73,'US':62,'OFF-HOURS':70}[getMarketSessions().dominant]||62;
+      // V10.2.1: re-audited at 755 trades — ASIA dropped 73→68, US rose 62→65, EU
+      //   dropped 64→62, OFF dropped 70→66. The qScore inversion is STILL present
+      //   (qScore 0-19: 73.9%, qScore 60-79: 60.6%) so stale session weights alone
+      //   weren't the root cause. Refreshed values below; qScore needs deeper review.
+      const sWR={'EU':62,'ASIA':68,'US':65,'OFF-HOURS':66}[getMarketSessions().dominant]||65;
       const pt=ana.rawProbAbove||50;
       const ps=Math.min(40,Math.max(0,(Math.abs(pt-50)-15)*1.6));
       const cp=ana.isVeryLateLock?-20:ana.isLateLockZone?-8:0;
