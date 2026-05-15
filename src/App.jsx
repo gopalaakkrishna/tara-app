@@ -3830,10 +3830,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.18-phase4-stamps-all-commit-paths';
+const BASELINE_VERSION='2026.05.14-v10.2.19-timeseries-capture-from-snapshot-too';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.18';
+const TARA_VERSION_DISPLAY='Tara 10.2.19';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -27946,7 +27946,16 @@ function TaraApp(){
             //   push at L21609 (V9.8.14 capture) running correctly. Closure-capturing here
             //   means the data is preserved through the timing race regardless of when
             //   _logResult actually fires.
-            const _capturedTimeSeries=(typeof lockedCallRef!=='undefined'&&Array.isArray(lockedCallRef.current?.timeSeries))?[...lockedCallRef.current.timeSeries]:null;
+            // V10.2.19: also capture from taraCallSnapshotRef as fallback. Snapshot
+            //   commits (ng-snap, cap-snap, mix-snap, kalshi-snap) populate the
+            //   snapshot ref's timeSeries instead of lockedCallRef. Without this
+            //   line, 81% of resolved trades captured null.
+            const _capturedTimeSeries=
+              (typeof lockedCallRef!=='undefined'&&Array.isArray(lockedCallRef.current?.timeSeries)&&lockedCallRef.current.timeSeries.length>0)
+                ?[...lockedCallRef.current.timeSeries]
+                :(typeof taraCallSnapshotRef!=='undefined'&&Array.isArray(taraCallSnapshotRef.current?.timeSeries)&&taraCallSnapshotRef.current.timeSeries.length>0)
+                  ?[...taraCallSnapshotRef.current.timeSeries]
+                  :null;
             const _capturedReleaseHistory=(typeof lockedCallRef!=='undefined'&&Array.isArray(lockedCallRef.current?.releaseSignalsHistory))?[...lockedCallRef.current.releaseSignalsHistory]:null;
             const _logResult=(resultStr)=>{
               // V8.8.6: capture the asset this resolution is FOR. Without filtering by
@@ -27991,7 +28000,16 @@ function TaraApp(){
                   //   in the typical case (rollover effect already cleared refs before this
                   //   setTimeout-based merge fires). The captured const path is the reliable
                   //   one. Defensive fallback chain in case capture returned null.
-                  timeSeries:_capturedTimeSeries||(typeof lockedCallRef!=='undefined'&&lockedCallRef.current?.timeSeries)||idx.e.timeSeries||[],
+                  // V10.2.19: also fall back to taraCallSnapshotRef.timeSeries — snapshot
+                  //   commits (ng-snap / cap-snap / mix-snap / kalshi-snap) populate the
+                  //   snapshot ref instead of lockedCallRef, so this is the only place the
+                  //   data lives for those trades. Without this fallback, 81% of resolved
+                  //   trades had timeSeriesLen=0.
+                  timeSeries:_capturedTimeSeries
+                    ||(typeof lockedCallRef!=='undefined'&&lockedCallRef.current?.timeSeries)
+                    ||(typeof taraCallSnapshotRef!=='undefined'&&taraCallSnapshotRef.current?.timeSeries)
+                    ||idx.e.timeSeries
+                    ||[],
                   releaseSignalsHistory:_capturedReleaseHistory||(typeof lockedCallRef!=='undefined'&&lockedCallRef.current?.releaseSignalsHistory)||idx.e.releaseSignalsHistory||[],
                 };
                 // ── V9.10.8: DERIVE MID-TRADE EXCURSION METRICS FROM timeSeries ──
@@ -29071,15 +29089,36 @@ function TaraApp(){
       //   (~17 minutes of 5s sampling, well over a 15m window) to bound memory.
       //   Resolution merge (line ~18860) copies this onto the call-log entry at
       //   window expiry so it lands in the CSV/JSON exports.
-      if(lockedCallRef.current){
+      //
+      // V10.2.19 — CAPTURE FROM SNAPSHOT TOO. The original V9.8.14 capture only
+      //   fired when lockedCallRef.current was set (engine lock). But ~81% of
+      //   resolved trades commit via the SNAPSHOT path (ng-snap / cap-snap /
+      //   mix-snap / kalshi-snap) which sets taraCallSnapshotRef.current but
+      //   NOT lockedCallRef.current. Capture never started for those trades —
+      //   timeSeriesLen=0 on 588 of 724 trades in May 3-15 audit, breaking
+      //   maxFavorable/AdverseExcursionBps + smart-exit validation downstream.
+      //
+      //   Fix: capture whenever EITHER ref is set. Store onto whichever ref is
+      //   available (preferring lockedCallRef when present for backward compat;
+      //   falling back to snapshotRef otherwise). Resolution merge reads from
+      //   both refs and uses whichever has data.
+      const _captureTarget=lockedCallRef.current||taraCallSnapshotRef.current;
+      if(_captureTarget){
         const _now=Date.now();
         if(_now-_lastTimeSeriesAtRef.current>=5000){
           _lastTimeSeriesAtRef.current=_now;
-          if(!lockedCallRef.current.timeSeries)lockedCallRef.current.timeSeries=[];
-          if(lockedCallRef.current.timeSeries.length<200){
+          // lockedAt fallback: engine lock has .lockedAt, snapshot has _committedAt
+          //   or atSecondsLeft-derived. Use whatever's available, default to now
+          //   (means first sample is at t=0).
+          const _lockedAt=_captureTarget.lockedAt
+            ||_captureTarget._committedAt
+            ||_captureTarget.commitTime
+            ||_now;
+          if(!_captureTarget.timeSeries)_captureTarget.timeSeries=[];
+          if(_captureTarget.timeSeries.length<200){
             const _kPctTs=kalshiYesPrice!=null&&Number.isFinite(kalshiYesPrice)?Number(kalshiYesPrice):null;
-            lockedCallRef.current.timeSeries.push({
-              t:Math.round((_now-(lockedCallRef.current.lockedAt||_now))/1000), // seconds since lock
+            _captureTarget.timeSeries.push({
+              t:Math.round((_now-_lockedAt)/1000), // seconds since lock/commit
               p:Math.round(posterior),
               g:Math.round(realGapBps||0),
               k:_kPctTs!=null?Math.round(_kPctTs):null,
@@ -29093,13 +29132,18 @@ function TaraApp(){
             //   resolution. localStorage write is cheap (~16KB max for full 200-sample
             //   array, well under quota). Restored on app load via the lock-restore
             //   effect so accumulated samples survive across refreshes.
+            // V10.2.19: persist whichever ref we just pushed to. Cloud-restore reads
+            //   into lockedCallRef on adoption, but for snapshot-only commits we still
+            //   persist locally so capture survives refresh.
             try{
-              localStorage.setItem('taraLockedTimeSeries_v1',JSON.stringify({
-                lockedAt:lockedCallRef.current.lockedAt||_now,
-                dir:lockedCallRef.current.dir||null,
-                windowId:lockedCallRef.current.windowId||null,
-                ts:lockedCallRef.current.timeSeries,
-              }));
+              const _persistShape={
+                lockedAt:_lockedAt,
+                dir:_captureTarget.dir||_captureTarget.call||null,
+                windowId:_captureTarget.windowId||computeWindowId(windowType),
+                ts:_captureTarget.timeSeries,
+                source:lockedCallRef.current===_captureTarget?'engineLock':'snapshot',
+              };
+              localStorage.setItem('taraLockedTimeSeries_v1',JSON.stringify(_persistShape));
             }catch(_){/* quota exceeded or storage unavailable — silent fail OK */}
           }
         }
