@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.29-hunter-websocket-default-on';
+const BASELINE_VERSION='2026.05.14-v10.2.30-websocket-default-off-needs-proxy';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.29';
+const TARA_VERSION_DISPLAY='Tara 10.2.30';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -23508,15 +23508,25 @@ function TaraApp(){
   //   Toggle via __taraWebSocket('on') / __taraWebSocket('off') console hook
   //   or the settings UI checkbox.
   const[kalshiWsEnabled,setKalshiWsEnabled]=useState(()=>{
-    // V10.2.29 — DEFAULT ON. Was opt-in (off by default) in V10.2.28.
-    //   Real-time pricing is strictly better for stop/target accuracy as long as
-    //   the WS connects. Falls back to 30s polling automatically if WS fails,
-    //   so worst case is no worse than the old behavior.
-    //   Only OFF if user has explicitly disabled (localStorage = '0').
+    // V10.2.30 — DEFAULT OFF (was ON in V10.2.29). Reason: client-side WS to
+    //   Kalshi's API doesn't work — they require authentication headers on the
+    //   WebSocket handshake, and browser WebSocket constructors don't allow
+    //   custom headers. To make WS function, a server-side proxy (Vercel API
+    //   route) needs to open the WS to Kalshi with auth headers and relay
+    //   messages to the browser via a separate WS or SSE channel.
+    //
+    //   Until that backend work is done, this stays OFF. The 30s REST poll
+    //   continues to deliver prices. Manual override: __taraWebSocket('on')
+    //   if you want to test, but expect reconnect spam.
+    //
+    //   Also force-clears any 'on' state from V10.2.29 default-on rollout —
+    //   users who hadn't explicitly chosen still got it turned on and saw
+    //   reconnect spam. Now they don't.
     try{
       const v=localStorage.getItem('taraKalshiWsEnabled');
-      return v==='0'?false:true;
-    }catch(_){return true;}
+      // Only ON if explicitly set to '1' AND user opted in after V10.2.30
+      return v==='1';
+    }catch(_){return false;}
   });
   useEffect(()=>{try{localStorage.setItem('taraKalshiWsEnabled',kalshiWsEnabled?'1':'0');}catch(_){}},[kalshiWsEnabled]);
   // Track WS connection state for UI surfacing
@@ -28098,13 +28108,27 @@ function TaraApp(){
         };
         _ws.onclose=(e)=>{
           if(_stopped)return;
-          try{console.info(`[V10.2.28] Kalshi WS closed (code=${e?.code}) — reconnecting in ${_reconnectDelay/1000}s`);}catch(_){}
-          setKalshiWsState(prev=>({...prev,status:'reconnecting',reconnectAttempts:(prev.reconnectAttempts||0)+1}));
+          // V10.2.30 — give up after 5 attempts. Kalshi WS requires auth that
+          //   we can't provide from a browser. Endless reconnects spam console
+          //   and waste battery. After 5 failures, stop trying — user can
+          //   re-enable explicitly if conditions change.
+          const _attempts=(_reconnectTimer?(_reconnectTimer._attempts||0):0)+1;
+          if(_attempts>=5){
+            try{console.warn(`[V10.2.30] Kalshi WS gave up after ${_attempts} attempts. Likely needs server-side proxy for auth. Disabling.`);}catch(_){}
+            setKalshiWsState(prev=>({...prev,status:'gave-up',reconnectAttempts:_attempts}));
+            try{localStorage.setItem('taraKalshiWsEnabled','0');}catch(_){}
+            // Don't schedule another retry — the state update will trigger
+            // the effect to clean up.
+            return;
+          }
+          try{console.info(`[V10.2.28] Kalshi WS closed (code=${e?.code}) — reconnecting in ${_reconnectDelay/1000}s (attempt ${_attempts}/5)`);}catch(_){}
+          setKalshiWsState(prev=>({...prev,status:'reconnecting',reconnectAttempts:_attempts}));
           // Exponential backoff with 60s ceiling
           _reconnectTimer=setTimeout(()=>{
             _reconnectDelay=Math.min(60000,_reconnectDelay*2);
             _connect();
           },_reconnectDelay);
+          _reconnectTimer._attempts=_attempts;
         };
       }catch(e){
         try{console.warn('[V10.2.28] Kalshi WS init failed:',e?.message);}catch(_){}
