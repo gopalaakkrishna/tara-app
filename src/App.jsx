@@ -3646,10 +3646,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.11-kalshi-30s-ring-phase4-live';
+const BASELINE_VERSION='2026.05.14-v10.2.12-bake-audit-optimal-defaults';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.11';
+const TARA_VERSION_DISPLAY='Tara 10.2.12';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -23042,8 +23042,35 @@ function TaraApp(){
           }catch(_){}
           return _v;
         })(),
-        cooldownLossStreak:Number(v.cooldownLossStreak)>=2?Number(v.cooldownLossStreak):3,
-        cooldownMinutes:Number(v.cooldownMinutes)>0?Number(v.cooldownMinutes):20,
+        // V10.2.12 — audit-optimal: 3→2. Earlier cooldown trigger prevents tilt
+        //   on a 2-loss streak rather than waiting for a third. Matches BALANCED
+        //   + SURGEON preset values. Only fires if user is on the prior default (3).
+        cooldownLossStreak:(()=>{
+          let _v=Number(v.cooldownLossStreak)>=2?Number(v.cooldownLossStreak):3;
+          try{
+            if(!localStorage.getItem('tara_v10_2_12_audit_phase2_applied')){
+              if(Number(v.cooldownLossStreak)===3||v.cooldownLossStreak==null){
+                _v=2;
+                try{console.info('[V10.2.12] audit-optimal: cooldownLossStreak 3→2');}catch(_){}
+              }
+            }
+          }catch(_){}
+          return _v;
+        })(),
+        // V10.2.12 — audit-optimal: 20→30 min. Longer cooldown after streak gives
+        //   real reset before re-engagement. Matches BALANCED + SURGEON presets.
+        cooldownMinutes:(()=>{
+          let _v=Number(v.cooldownMinutes)>0?Number(v.cooldownMinutes):20;
+          try{
+            if(!localStorage.getItem('tara_v10_2_12_audit_phase2_applied')){
+              if(Number(v.cooldownMinutes)===20||v.cooldownMinutes==null){
+                _v=30;
+                try{console.info('[V10.2.12] audit-optimal: cooldownMinutes 20→30');}catch(_){}
+              }
+            }
+          }catch(_){}
+          return _v;
+        })(),
         // V10.2.x — runaway protection: hard cap on number of auto-exec trades per
         //   UTC day. When reached, autoExecCooldownUntil is set to UTC midnight so
         //   the existing cooldown UI surfaces the block. Default 10 — conservative
@@ -23136,16 +23163,38 @@ function TaraApp(){
         //   on first load after this deploy. Sentinel key 'tara_phase4_v10_2_upgraded'
         //   ensures this happens only once — after upgrade, explicit user choices
         //   (including reverting to 'off') are fully respected.
+        // V10.2.12 — audit-optimal: shadow→advisory. Shadow and advisory both
+        //   evaluate Phase 4 and log to CSV; the only difference is advisory
+        //   surfaces the decision badge prominently in the predictor header.
+        //   Defaulting to advisory gives the user immediate visibility into
+        //   what Phase 4 thinks, without blocking any trades (pregate would
+        //   block; that's a deliberate per-user opt-in).
+        //   This migration is THE LAST one in the V10.2.12 audit-optimal trio,
+        //   so it sets the shared sentinel `tara_v10_2_12_audit_phase2_applied`
+        //   after all three (cooldownLossStreak, cooldownMinutes, tradeTimingMode)
+        //   have had a chance to run.
         tradeTimingMode:(()=>{
           let _m=v.tradeTimingMode;
           try{
+            // Original V10.2.0 upgrade — flip from off/unset to shadow
             if(!localStorage.getItem('tara_phase4_v10_2_upgraded')){
               _m='shadow';
               localStorage.setItem('tara_phase4_v10_2_upgraded','1');
               try{console.info('[Phase4] V10.2.0 upgrade — tradeTimingMode set to shadow (was '+(v.tradeTimingMode||'unset')+')');}catch(_){}
             }
+            // V10.2.12 — bump shadow→advisory (no behavior change — both log
+            //   the decision; advisory just makes the badge a "real" UI signal
+            //   the user pays attention to)
+            if(!localStorage.getItem('tara_v10_2_12_audit_phase2_applied')){
+              if(_m==='shadow'||v.tradeTimingMode==='shadow'){
+                _m='advisory';
+                try{console.info('[V10.2.12] audit-optimal: tradeTimingMode shadow→advisory');}catch(_){}
+              }
+              // Set the shared sentinel here — last of the three V10.2.12 migrations
+              localStorage.setItem('tara_v10_2_12_audit_phase2_applied','1');
+            }
           }catch(_){}
-          return(['off','shadow','advisory','pregate'].includes(_m))?_m:'shadow';
+          return(['off','shadow','advisory','pregate'].includes(_m))?_m:'advisory';
         })(),
         // V9.19.24: edge filter cap. Default 15pt — based on May 14 audit of 642
         //   resolved trades. WR by edge bucket: +0-10pt → 70.6%, +10-20pt → 65.1%,
@@ -23268,7 +23317,7 @@ function TaraApp(){
         smartExitExtendCents:Number(v.smartExitExtendCents)>=0?Number(v.smartExitExtendCents):5, // extend target by N¢ when extending
         signalSource:(v.signalSource==='lock'||v.signalSource==='snapshot')?v.signalSource:'snapshot', // V9.17.22
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:2,maxDailyLoss:5,maxAutoTradesPerDay:5,maxAutoTradesPerWindow:1,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:88,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,tradeTimingMode:'shadow',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:15,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:2,maxDailyLoss:5,maxAutoTradesPerDay:5,maxAutoTradesPerWindow:1,cooldownLossStreak:2,cooldownMinutes:30,slippageCents:2,autoExitOffer:82,autoExitSecLeft:20,maxEdgePt:10,skipTimeCapCommit:true,tradeTimingMode:'advisory',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:15,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
