@@ -3620,10 +3620,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.8-qscore-fix-proxy-fallback-presets';
+const BASELINE_VERSION='2026.05.14-v10.2.9-manual-position-recorder-and-pnl-pill-fix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.8';
+const TARA_VERSION_DISPLAY='Tara 10.2.9';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -9249,6 +9249,7 @@ function PredictionContent(props){
     strikeConfirmed,strikeMode,targetMargin,
     isLoading,analysis,currentPrice,
     qualityGate,userPosition,timeState,streakData,
+    manualKalshiEntry,setManualKalshiEntry, // V10.2.9: manual fill recorder
     handleManualSync,getMarketSessions,executeAction,
     broadcastSignalManual,discordWebhook,regimeDirWR,
     kalshiYesPrice,
@@ -9917,8 +9918,142 @@ function PredictionContent(props){
         <SyncButtons userPosition={userPosition} handleManualSync={handleManualSync}/>
       </div>
 
+      {/* V10.2.9 — manual Kalshi entry recorder. Only renders when user is in
+          a manual position. Lets them log actual fill price + contract count
+          so the trade ticket can compute real P&L instead of preview math. */}
+      {userPosition&&(
+        <ManualKalshiEntryInput
+          userPosition={userPosition}
+          manualKalshiEntry={manualKalshiEntry}
+          setManualKalshiEntry={setManualKalshiEntry}
+          kalshiYesPrice={kalshiYesPrice}
+        />
+      )}
+
       {/* ── V111: TARA ADVISOR PANEL ── */}
       <TaraAdvisorPanel advisor={analysis?.advisor} executeAction={executeAction}/>
+    </div>
+  );
+}
+
+// V10.2.9 — Manual Kalshi entry input. Renders below ENTERED UP/DOWN buttons
+//   when user has clicked one (userPosition !== null). Two inputs (fill ¢,
+//   contracts) + Save/Clear buttons. On save, stores {entryCents, contracts,
+//   side, time} so the trade ticket can show real values instead of preview.
+//   Pre-populates the fill price field with the current Kalshi offer for the
+//   user's side as a starting suggestion.
+function ManualKalshiEntryInput({userPosition,manualKalshiEntry,setManualKalshiEntry,kalshiYesPrice}){
+  // Current Kalshi offer on the user's side (for default suggestion)
+  const _yes=Number(kalshiYesPrice);
+  const _isYesLive=Number.isFinite(_yes)&&_yes>0&&_yes<100;
+  const _curOurCents=_isYesLive
+    ?(userPosition==='UP'?Math.round(_yes):Math.round(100-_yes))
+    :null;
+  // Edit state — defaults to current values if entry exists, otherwise current
+  //   Kalshi offer for fill ¢ and 1 for contracts
+  const[entryCentsInput,setEntryCentsInput]=React.useState(
+    manualKalshiEntry?String(manualKalshiEntry.entryCents):(_curOurCents?String(_curOurCents):'')
+  );
+  const[contractsInput,setContractsInput]=React.useState(
+    manualKalshiEntry?String(manualKalshiEntry.contracts):'1'
+  );
+  // Sync edit state when manualKalshiEntry changes externally (e.g., cleared)
+  React.useEffect(()=>{
+    setEntryCentsInput(manualKalshiEntry?String(manualKalshiEntry.entryCents):(_curOurCents?String(_curOurCents):''));
+    setContractsInput(manualKalshiEntry?String(manualKalshiEntry.contracts):'1');
+  },[manualKalshiEntry?.entryCents,manualKalshiEntry?.contracts]);
+  const _entryCentsNum=parseInt(entryCentsInput,10);
+  const _contractsNum=parseInt(contractsInput,10);
+  const _valid=_entryCentsNum>=1&&_entryCentsNum<=99&&_contractsNum>=1&&_contractsNum<=250;
+  const _isSaved=!!manualKalshiEntry;
+  const _save=()=>{
+    if(!_valid)return;
+    setManualKalshiEntry({
+      entryCents:_entryCentsNum,
+      contracts:_contractsNum,
+      side:userPosition,
+      time:Date.now(),
+    });
+  };
+  const _clear=()=>setManualKalshiEntry(null);
+  // Color matches direction
+  const _dirColor=userPosition==='UP'?'rgb(110,231,183)':'rgba(244,114,182,0.92)';
+  return (
+    <div className="mt-2 p-2 rounded border" style={{borderColor:'rgba(232,233,228,0.10)',background:'rgba(14,16,15,0.40)'}}>
+      <div className="flex items-baseline justify-between mb-1.5">
+        <span className="text-[9px] uppercase tracking-wide font-bold" style={{color:'rgba(232,233,228,0.55)'}}>
+          Real Kalshi fill <span style={{color:_dirColor}}>({userPosition})</span>
+        </span>
+        {_isSaved&&<span className="text-[8px] uppercase tracking-wider" style={{color:'rgb(110,231,183)'}}>● logged</span>}
+      </div>
+      <div className="text-[9px] mb-2 leading-relaxed" style={{color:'rgba(232,233,228,0.45)'}}>
+        {_isSaved
+          ?`Tara is using ${manualKalshiEntry.contracts} × ${manualKalshiEntry.entryCents}¢ = $${(manualKalshiEntry.contracts*manualKalshiEntry.entryCents/100).toFixed(2)} as your real position. Ticket P&L and stop-loss now track against this.`
+          :`Enter your actual fill price + contract count from Kalshi so Tara stops showing preview numbers and tracks your real P&L.`}
+      </div>
+      <div className="flex flex-wrap gap-1.5 items-end">
+        <label className="flex-1 min-w-[80px]">
+          <div className="text-[9px] mb-0.5" style={{color:'rgba(232,233,228,0.45)'}}>fill ¢</div>
+          <input
+            type="number"
+            min="1" max="99" step="1"
+            inputMode="numeric"
+            value={entryCentsInput}
+            onChange={(e)=>setEntryCentsInput(e.target.value)}
+            placeholder={_curOurCents?String(_curOurCents):'1-99'}
+            className="w-full bg-transparent border rounded px-2 py-1 text-white text-sm tabular-nums focus:outline-none"
+            style={{borderColor:'rgba(232,233,228,0.15)'}}
+            onFocus={(e)=>{e.target.style.borderColor='#E5C870';}}
+            onBlur={(e)=>{e.target.style.borderColor='rgba(232,233,228,0.15)';}}
+          />
+        </label>
+        <label className="flex-1 min-w-[80px]">
+          <div className="text-[9px] mb-0.5" style={{color:'rgba(232,233,228,0.45)'}}>contracts</div>
+          <input
+            type="number"
+            min="1" max="250" step="1"
+            inputMode="numeric"
+            value={contractsInput}
+            onChange={(e)=>setContractsInput(e.target.value)}
+            placeholder="1-250"
+            className="w-full bg-transparent border rounded px-2 py-1 text-white text-sm tabular-nums focus:outline-none"
+            style={{borderColor:'rgba(232,233,228,0.15)'}}
+            onFocus={(e)=>{e.target.style.borderColor='#E5C870';}}
+            onBlur={(e)=>{e.target.style.borderColor='rgba(232,233,228,0.15)';}}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={_save}
+          disabled={!_valid}
+          className="px-3 py-1 rounded text-[10px] uppercase tracking-wide font-bold transition-colors"
+          style={{
+            background:_valid?'rgba(110,231,183,0.15)':'rgba(232,233,228,0.05)',
+            color:_valid?'rgb(110,231,183)':'rgba(232,233,228,0.30)',
+            border:`1px solid ${_valid?'rgba(110,231,183,0.30)':'rgba(232,233,228,0.10)'}`,
+            cursor:_valid?'pointer':'not-allowed',
+          }}
+        >{_isSaved?'update':'save'}</button>
+        {_isSaved&&(
+          <button
+            type="button"
+            onClick={_clear}
+            className="px-2 py-1 rounded text-[10px] uppercase tracking-wide transition-colors"
+            style={{
+              background:'rgba(232,233,228,0.05)',
+              color:'rgba(232,233,228,0.55)',
+              border:'1px solid rgba(232,233,228,0.10)',
+              cursor:'pointer',
+            }}
+            title="forget the logged fill; ticket will revert to preview"
+          >clear</button>
+        )}
+      </div>
+      {_valid&&!_isSaved&&_contractsNum*_entryCentsNum>0&&(
+        <div className="text-[9px] mt-1.5" style={{color:'rgba(232,233,228,0.45)'}}>
+          → cost ${(_contractsNum*_entryCentsNum/100).toFixed(2)} · max payout ${(_contractsNum).toFixed(2)} · max profit ${(_contractsNum-_contractsNum*_entryCentsNum/100).toFixed(2)}
+        </div>
+      )}
     </div>
   );
 }
@@ -20749,6 +20884,8 @@ function ScalperAdvisorPanel({
   ticketEntryOverrideRef,
   // V9.17.6: Tara's lock context for showing trade ticket when locked
   taraCall,analysis,tradingSettings,autoOrderState,userPosition,
+  // V10.2.9: user-logged actual Kalshi fill for manual positions
+  manualKalshiEntry,
   windowType,timeState,useLocalTime,timeFormat,
   // V9.17.18: manual place-order callback. Fires auto-exec on Tara's snapshot
   //   direction even when the engine-lock path didn't (e.g., time-cap-commit).
@@ -21218,6 +21355,21 @@ function ScalperAdvisorPanel({
   // Only pull live values when the order's direction matches Tara's locked direction
   //  (defensive — if directions diverge we don't want to mix generic + live values).
   const _liveValid=(_isInTrade||_isExited)&&_liveDir&&_taraDir&&_liveDir===_taraDir;
+  // V10.2.9 — MANUAL FILL FALLBACK. When auto-exec didn't place this trade
+  //   (or it's a fully manual position), the user may have logged their real
+  //   Kalshi fill via the ManualKalshiEntryInput. Treat that as just as
+  //   authoritative as autoOrderState for ticket value reads. _liveValid wins
+  //   if both are present (auto-exec is more trustworthy — it has the actual
+  //   Kalshi response).
+  const _manualValid=!_liveValid
+    &&!!manualKalshiEntry
+    &&!!userPosition
+    &&manualKalshiEntry.side===userPosition
+    &&manualKalshiEntry.side===_taraDir
+    &&manualKalshiEntry.entryCents>0
+    &&manualKalshiEntry.contracts>0;
+  // Unified "we have a real position" flag for ticket value reads
+  const _positionKnown=_liveValid||_manualValid;
   let _liveEntryCents=null,_liveContractsActual=null,_liveStakeDollars=null,_liveCurOurCents=null;
   let _liveUnrealCents=null,_liveUnrealDollars=null,_liveMaxPayout=null,_liveMaxNet=null;
   let _liveExitCents=null,_liveRealCents=null,_liveRealDollars=null,_liveIsWin=null;
@@ -21238,6 +21390,21 @@ function ScalperAdvisorPanel({
       _liveRealCents=_liveExitCents-_liveEntryCents;
       _liveRealDollars=(_liveRealCents*_liveContractsActual)/100;
       _liveIsWin=_liveRealCents>0;
+    }
+  }else if(_manualValid){
+    // V10.2.9 — read from user-logged fill. Same shape as _liveValid path
+    //   so the rest of the ticket can use these without knowing the source.
+    //   Exit data is NOT available (no Kalshi exit response yet — user closes
+    //   manually). _isExited stays false; "result" row won't render.
+    _liveEntryCents=manualKalshiEntry.entryCents;
+    _liveContractsActual=manualKalshiEntry.contracts;
+    _liveStakeDollars=(manualKalshiEntry.entryCents*manualKalshiEntry.contracts)/100;
+    _liveMaxPayout=_liveContractsActual*1.0;
+    _liveMaxNet=_liveMaxPayout-_liveStakeDollars;
+    if(_isYesLive&&_yes>0&&_yes<100){
+      _liveCurOurCents=manualKalshiEntry.side==='UP'?Math.round(_yes):Math.round(100-_yes);
+      _liveUnrealCents=_liveCurOurCents-_liveEntryCents;
+      _liveUnrealDollars=(_liveUnrealCents*_liveContractsActual)/100;
     }
   }
 
@@ -21414,21 +21581,26 @@ function ScalperAdvisorPanel({
       })(),
     ),
     // P&L strip
+    // V10.2.9 — was filtered to autoExec=true only, which left the pill blank
+    //   forever for users who hadn't run auto-exec yet (the 814 historical
+    //   manual trades didn't show). Now shows ALL today's resolved trades
+    //   with a small breakdown when both auto and manual trades exist.
     (()=>{
       const _log=Array.isArray(taraCallLog)?taraCallLog:[];
       const _today=_dayKey(new Date(),timeFormat); // V10.2.x: honors header TZ
-      const _todayAuto=_log.filter(e=>e
-        &&e.autoExec===true
+      const _todayAll=_log.filter(e=>e
         &&(e.result==='WIN'||e.result==='LOSS')
         &&_dayKey(e.resolvedTimestampISO||e.timestampISO||0,timeFormat)===_today);
-      const _n=_todayAuto.length;
-      const _wins=_todayAuto.filter(e=>e.result==='WIN').length;
+      const _todayAuto=_todayAll.filter(e=>e.autoExec===true);
+      const _todayManual=_todayAll.filter(e=>e.autoExec!==true);
+      const _n=_todayAll.length;
+      const _wins=_todayAll.filter(e=>e.result==='WIN').length;
       const _wr=_n>0?Math.round((_wins/_n)*100):null;
       let _pnl=null;
       if(_n>0){
         _pnl=0;
         let _haveAny=false;
-        for(const e of _todayAuto){
+        for(const e of _todayAll){
           if(Number.isFinite(e.realizedPnLDollars)){
             _pnl+=e.realizedPnLDollars;
             _haveAny=true;
@@ -21438,7 +21610,17 @@ function ScalperAdvisorPanel({
       }
       const _pnlSign=_pnl==null?'':_pnl>=0?'+':'';
       const _pnlColor=_pnl==null?'rgba(232,233,228,0.55)':_pnl>0?'rgb(110,231,183)':_pnl<0?'rgba(244,114,182,0.92)':'rgba(232,233,228,0.65)';
-      return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#E8E9E4]/5 text-[10px] tabular-nums flex items-baseline gap-2',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
+      // V10.2.9: show breakdown only when BOTH types exist today; otherwise the
+      //   single-source line is unambiguous already.
+      const _showBreakdown=_todayAuto.length>0&&_todayManual.length>0;
+      const _breakdownText=_showBreakdown
+        ?`(auto ${_todayAuto.length} · manual ${_todayManual.length})`
+        :_todayAuto.length>0&&_todayManual.length===0
+          ?'(all auto)'
+          :_todayManual.length>0&&_todayAuto.length===0
+            ?'(all manual)'
+            :'';
+      return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#E8E9E4]/5 text-[10px] tabular-nums flex flex-wrap items-baseline gap-2',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
         React.createElement('span',{style:{color:'rgba(232,233,228,0.40)'}},'today'),
         React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'·'),
         React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'P&L'),
@@ -21449,6 +21631,7 @@ function ScalperAdvisorPanel({
         React.createElement('span',{style:{color:'rgba(232,233,228,0.40)'}},'·'),
         React.createElement('span',{style:{color:'rgba(232,233,228,0.55)'}},'WR'),
         React.createElement('span',{style:{color:'rgba(232,233,228,0.85)'}},_wr==null?'--':`${_wr}%`),
+        _breakdownText?React.createElement('span',{style:{color:'rgba(232,233,228,0.40)',fontSize:'9px',marginLeft:'2px'}},_breakdownText):null,
       );
     })(),
   );
@@ -21906,7 +22089,10 @@ ${_d.responseBody||'(empty)'}`;
             //   when Kalshi shows different numbers.
             //   Banner directs them to the edit button (which can override
             //   the displayed entry price → make stops/targets accurate).
-            const _hasManualPos=!!userPosition&&!_liveValid;
+            //   V10.2.9: ALSO hide the banner when user has logged their real
+            //   fill via ManualKalshiEntryInput — the ticket math is now
+            //   correct, no banner needed.
+            const _hasManualPos=!!userPosition&&!_liveValid&&!_manualValid;
             if(_hasManualPos){
               _rows.push(React.createElement('div',{
                 key:'manual-position-banner',
@@ -21921,9 +22107,9 @@ ${_d.responseBody||'(empty)'}`;
                   `Tara sees you marked ENTERED ${userPosition} but doesn't know your real fill price or contract count from Kalshi. The numbers below show what Tara WOULD buy at the current market — not what you actually own.`,
                 ),
                 React.createElement('div',{className:'text-[10px] mt-1.5 leading-relaxed',style:{color:'rgba(232,233,228,0.65)'}},
-                  '→ Tap ',
-                  React.createElement('span',{style:{color:'#E5C870',fontWeight:600}},'✎ edit values for this window'),
-                  ' below and enter your actual fill price. Stop-loss + take-profit will then track against your real entry instead of the live market.',
+                  '→ Scroll down and use the ',
+                  React.createElement('span',{style:{color:'#E5C870',fontWeight:600}},'Real Kalshi fill'),
+                  ' input below the ENTERED button to log your actual fill price + contract count. Stop-loss / take-profit will then track against your real entry.',
                 ),
               ));
             }
@@ -21954,15 +22140,18 @@ ${_d.responseBody||'(empty)'}`;
               ));
             }
             // position: contracts × price OR placed/filled detail
-            if((_liveValid?_liveEntryCents:_entryCents)!=null){
-              const _n=_liveValid?_liveContractsActual:_contracts;
-              const _px=_liveValid?_liveEntryCents:_entryCents;
+            // V10.2.9 — uses _positionKnown (= _liveValid || _manualValid) so
+            //   the row shows REAL fill numbers when user logged them, not preview.
+            if((_positionKnown?_liveEntryCents:_entryCents)!=null){
+              const _n=_positionKnown?_liveContractsActual:_contracts;
+              const _px=_positionKnown?_liveEntryCents:_entryCents;
+              const _posLabel=_liveValid?'position':_manualValid?'position (logged)':(_previewWillFire?'will buy':'would buy (blocked)');
               _rows.push(_renderTip(
                 'position',
-                _liveValid?'position':(_previewWillFire?'will buy':'would buy (blocked)'),
+                _posLabel,
                 `${_n} contract${_n===1?'':'s'} @ ${_px}¢`,
-                _liveValid
-                  ?`You hold ${_n} ${_taraDir==='UP'?'YES':'NO'} contract${_n===1?'':'s'}, each bought at ${_px}¢. Each contract pays $1.00 if Tara is right, $0 if wrong. Max possible profit: $${((100-_px)*_n*0.01).toFixed(2)}. Max possible loss: $${(_px*_n*0.01).toFixed(2)}.`
+                _positionKnown
+                  ?`You hold ${_n} ${_taraDir==='UP'?'YES':'NO'} contract${_n===1?'':'s'}, each bought at ${_px}¢${_manualValid?' (logged by you)':''}. Each contract pays $1.00 if Tara is right, $0 if wrong. Max possible profit: $${((100-_px)*_n*0.01).toFixed(2)}. Max possible loss: $${(_px*_n*0.01).toFixed(2)}.`
                   :_previewWillFire
                     ?`Tara plans to buy ${_n} ${_taraDir==='UP'?'YES':'NO'} contract${_n===1?'':'s'} at ${_px}¢ each. Each contract pays $1.00 if right. Counts are floored — partial contracts can't be bought, so the actual fill may be ≤ this.`
                     :`The cap-exceeded warning above will block this trade. The numbers shown reflect what would have placed if the cap allowed it.`,
@@ -21985,12 +22174,15 @@ ${_d.responseBody||'(empty)'}`;
             //                  actually charge after the floor)
             //       Label changes to "budget · cost" so the two numbers are
             //       clearly different quantities.
-            if(_liveValid){
+            //   V10.2.9 — _positionKnown extends "live" to include user-logged
+            //   manual fills (manualKalshiEntry), so logged manual positions
+            //   show real stake instead of budget/cost preview.
+            if(_positionKnown){
               _rows.push(_renderTip(
                 'stake',
                 'stake',
                 `$${_liveStakeDollars.toFixed(2)}`,
-                `What you actually paid on Kalshi: ${_liveContractsActual} contract${_liveContractsActual===1?'':'s'} × ${_liveEntryCents}¢ = $${_liveStakeDollars.toFixed(2)}. This is your maximum possible loss (price settles against you).`,
+                `${_manualValid?'You logged':'What you actually paid on Kalshi'}: ${_liveContractsActual} contract${_liveContractsActual===1?'':'s'} × ${_liveEntryCents}¢ = $${_liveStakeDollars.toFixed(2)}. This is your maximum possible loss (price settles against you).`,
               ));
             }else{
               const _predictedCost=_contracts&&_entryCents?(_contracts*_entryCents/100):0;
@@ -22002,8 +22194,8 @@ ${_d.responseBody||'(empty)'}`;
                 `Tara's sizing wants to spend $${_betSize.toFixed(2)} (your budget from Trading Settings → bet size, capped at max-bet). But Kalshi only sells whole contracts, so the actual cost is ${_contracts} × ${_entryCents}¢ = $${_predictedCost.toFixed(2)}. The $${_leftover.toFixed(2)} difference can't buy a partial contract — it stays in your balance. Raise your bet size to buy more contracts (each one needs ${_entryCents}¢ to add).`,
               ));
             }
-            // current offer + unrealized P&L (only when in-trade)
-            if(_liveValid&&_liveCurOurCents!=null){
+            // current offer + unrealized P&L (any known position — live or manual)
+            if(_positionKnown&&_liveCurOurCents!=null){
               const _color=_liveUnrealCents==null||_liveUnrealCents===0
                 ?'#E8E9E4'
                 :_liveUnrealCents>0?'rgb(110,231,183)':'rgba(244,114,182,0.92)';
@@ -22019,9 +22211,9 @@ ${_d.responseBody||'(empty)'}`;
             }
             // target (take profit)
             const _tpCents=Number(autoExecSettings?.autoExitOffer)||85;
-            if(_tpCents>0&&(_liveValid?_liveEntryCents:_entryCents)!=null){
-              const _n=_liveValid?_liveContractsActual:_contracts;
-              const _entry=_liveValid?_liveEntryCents:_entryCents;
+            if(_tpCents>0&&(_positionKnown?_liveEntryCents:_entryCents)!=null){
+              const _n=_positionKnown?_liveContractsActual:_contracts;
+              const _entry=_positionKnown?_liveEntryCents:_entryCents;
               const _winDollars=((_tpCents-_entry)*_n*0.01);
               _rows.push(_renderTip(
                 'target',
@@ -22033,9 +22225,9 @@ ${_d.responseBody||'(empty)'}`;
             }
             // stop (cut loss)
             const _slDelta=Number(autoExecSettings?.stopLossDeltaCents)||0;
-            if(_slDelta>0&&(_liveValid?_liveEntryCents:_entryCents)!=null){
-              const _entry=_liveValid?_liveEntryCents:_entryCents;
-              const _n=_liveValid?_liveContractsActual:_contracts;
+            if(_slDelta>0&&(_positionKnown?_liveEntryCents:_entryCents)!=null){
+              const _entry=_positionKnown?_liveEntryCents:_entryCents;
+              const _n=_positionKnown?_liveContractsActual:_contracts;
               const _stopAt=Math.max(0,_entry-_slDelta);
               const _lossDollars=((_stopAt-_entry)*_n*0.01);
               _rows.push(_renderTip(
@@ -22045,7 +22237,7 @@ ${_d.responseBody||'(empty)'}`;
                 `Auto-stop-loss. If the price drops ${_slDelta}¢ below your fill (to ${_stopAt}¢), Tara automatically sells to cut the loss. Tighter stop = smaller losses but more whipsaws. Adjust in the Predictor card (Fast = 25¢, Patient = 15¢) or in auto-exec settings.`,
                 'rgba(244,114,182,0.92)',
               ));
-            }else if(_liveValid===false&&_slDelta===0){
+            }else if(_positionKnown===false&&_slDelta===0){
               // No-stop-loss warning in pre-fill state
               _rows.push(React.createElement('div',{key:'nostop',className:'pt-2 mt-1 border-t border-[#E8E9E4]/5'},
                 React.createElement('div',{className:'text-[10px] italic',style:{color:'rgba(232,233,228,0.40)'}},'no stop loss · position rides to settlement or target'),
@@ -24953,6 +25145,55 @@ function TaraApp(){
   const[chatInput,setChatInput]=useState('');
   const lastWindowRef=useRef('');
   const[userPosition,setUserPosition]=useState(null);
+  // V10.2.9 — MANUAL KALSHI ENTRY RECORDER
+  //   Solves the V10.2.7 disconnect: when user clicks ENTERED UP/DOWN, that
+  //   only sets a flag — Tara has no idea what they actually paid on Kalshi
+  //   or how many contracts they hold. Result: the trade ticket shows a
+  //   forward-looking preview ("will buy 1 @ 64¢") that has nothing to do
+  //   with the real position. Unrealized P&L is wrong. Stop/target distance
+  //   is wrong.
+  //
+  //   Now: when userPosition is set, a small input row appears under the
+  //   ENTERED buttons. User enters their actual fill ¢ + contract count.
+  //   The ticket then computes against THAT real entry instead of preview.
+  //
+  //   Storage: localStorage key 'tara_manual_kalshi_entry_v1'. Shape:
+  //   {entryCents, contracts, side:'UP'|'DOWN', time}. Restored on refresh
+  //   if it's < 30min old (any older = stale, user probably forgot to clear).
+  //   Auto-cleared when userPosition is toggled off (handleManualSync close).
+  const[manualKalshiEntry,setManualKalshiEntry]=useState(()=>{
+    try{
+      const raw=localStorage.getItem('tara_manual_kalshi_entry_v1');
+      if(!raw)return null;
+      const p=JSON.parse(raw);
+      if(!p||typeof p!=='object')return null;
+      if(!(p.entryCents>0&&p.entryCents<100))return null;
+      if(!(p.contracts>0))return null;
+      if(p.side!=='UP'&&p.side!=='DOWN')return null;
+      // Stale guard: anything older than 30 min is dropped (user probably
+      //   closed the position and forgot to clear it from Tara).
+      if(Date.now()-(p.time||0)>30*60*1000)return null;
+      return p;
+    }catch(_){return null;}
+  });
+  // Persist manualKalshiEntry across renders
+  useEffect(()=>{
+    try{
+      if(manualKalshiEntry){
+        localStorage.setItem('tara_manual_kalshi_entry_v1',JSON.stringify(manualKalshiEntry));
+      }else{
+        localStorage.removeItem('tara_manual_kalshi_entry_v1');
+      }
+    }catch(_){}
+  },[manualKalshiEntry]);
+  // Auto-clear manualKalshiEntry when userPosition is cleared (toggle off,
+  //   asset switch, window roll — all of which already null userPosition).
+  useEffect(()=>{
+    if(!userPosition&&manualKalshiEntry){
+      try{console.info('[V10.2.9] auto-clearing manualKalshiEntry (userPosition cleared)');}catch(_){}
+      setManualKalshiEntry(null);
+    }
+  },[userPosition,manualKalshiEntry]);
   // V9.10.5: showHelp state removed — opened the "What's New" modal which was stale at
   //   v8.8 and removed in V9.10.3 (button) + V9.10.5 (modal body). Orphan state cleaned.
   const[soundEnabled,setSoundEnabled]=useState(()=>{
@@ -35031,7 +35272,7 @@ function TaraApp(){
 
             {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
 
-            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} scalperPanelEl={
+            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} manualKalshiEntry={manualKalshiEntry} setManualKalshiEntry={setManualKalshiEntry} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} scalperPanelEl={
               <ScalperAdvisorPanel
                 scalperRead={scalperRead}
                 scalperSettings={scalperSettings}
@@ -35055,6 +35296,7 @@ function TaraApp(){
                 tradingSettings={tradingSettings}
                 autoOrderState={autoOrderState}
                 userPosition={userPosition}
+                manualKalshiEntry={manualKalshiEntry}
                 windowType={windowType}
                 timeState={timeState}
                 useLocalTime={useLocalTime}
