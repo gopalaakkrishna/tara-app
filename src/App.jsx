@@ -3473,10 +3473,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.1-calibration-refresh-755trades';
+const BASELINE_VERSION='2026.05.14-v10.2.3-manual-flag-persistence-fix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.1';
+const TARA_VERSION_DISPLAY='Tara 10.2.3';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -12125,9 +12125,13 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
                 }),
                 // V9.17.20: unit hint
+                // V10.2.2: WARNING about qScore inversion. 755-trade audit showed qScore
+                //   is anti-correlated with WR (q 0-19: 73.9% / q 60-79: 60.6%). v2 shadow
+                //   addresses this but has <50 entries — not yet graduated. Keep at 0.
                 React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},(()=>{
                   const _v=autoExecSettings?.minQualityScore||0;
-                  return _v===0?'= no quality filter (any score allowed)':`= reject locks with quality score below ${_v}/100`;
+                  if(_v===0)return '= no quality filter (RECOMMENDED — qScore is currently anti-correlated with WR per May 14 audit; v1 fix shipping after qScoreV2 graduates)';
+                  return `⚠ ${_v}/100 — qScore is currently INVERTED: high scores have LOWER WR (audit: q60-79 won 60.6%, q0-19 won 73.9%). Raising this filters OUT better trades. Set to 0 until qScoreV2 graduates.`;
                 })()),
               ),
               React.createElement('label',{className:'block'},
@@ -12138,9 +12142,14 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
                 }),
                 // V9.17.20: unit hint
+                // V10.2.2: same inversion warning as minQualityScore. Conviction =
+                //   |posterior-50|, which is the dominant input to qScore's `ps` term.
+                //   Audit's edge-bucket data: edge 0-10pt (low conv) won 71.2%; edge
+                //   30+pt (high conv) won 61.6%. High conviction has LOWER WR.
                 React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},(()=>{
                   const _v=autoExecSettings?.minConviction||0;
-                  return _v===0?'= no conviction filter':`= require posterior at least ${_v}pts away from 50 (so ≥${50+_v}% or ≤${50-_v}%)`;
+                  if(_v===0)return '= no conviction filter (RECOMMENDED — high conviction has LOWER WR in audit)';
+                  return `⚠ require posterior ≥${_v}pts from 50. Note: high conviction was anti-correlated with WR in 755-trade audit (edge 30+pt: 61.6% / edge 0-10pt: 71.2%). Same root cause as qScore inversion.`;
                 })()),
               ),
             ),
@@ -29133,6 +29142,19 @@ function TaraApp(){
       //   to explicitly override the hard cap. Clear the entry so this attempt
       //   proceeds. (The dedup-key check below will still de-dupe identical
       //   re-clicks within the same render.)
+      // V10.2.3 GUARD: but FIRST — refuse the clear if the previous attempt in
+      //   this window actually succeeded (filled/exiting/exited). The user
+      //   already got a trade; "retry" is wrong, this is the churn-loop entry.
+      //   This is defense-in-depth: the primary fix is clearing _manualTrigger
+      //   after consumption (~L29730), but if anything else leaks the flag
+      //   back through, this still blocks the cycle.
+      const _prevFilled=autoOrderState&&autoOrderState.windowId===_wid&&autoOrderState.asset===currentAsset
+        &&(autoOrderState.status==='filled'||autoOrderState.status==='exiting'||autoOrderState.status==='exited');
+      if(_prevFilled){
+        try{console.warn('[V10.2.3] manual retry BLOCKED — window already had a successful fill (status='+autoOrderState.status+'). Preventing churn loop.');}catch(_){}
+        _setManualOrderFeedback({at:Date.now(),msg:`blocked: window already had a fill (status: ${autoOrderState.status}). Wait for next window.`,color:'rose'});
+        return;
+      }
       _attemptedWindowsRef.current.delete(_attemptKey);
       _persistAttemptedWindows(); // V9.19.4
       if(_shouldLogManual)try{console.info('[V9.18.3] Manual override — clearing window attempt mark for',_attemptKey);}catch(_){}
@@ -29715,6 +29737,29 @@ function TaraApp(){
     //   this window for this asset. Manual override clears it (handled above).
     _attemptedWindowsRef.current.add(_attemptKey);
     _persistAttemptedWindows(); // V9.19.4
+    // V10.2.3 CRITICAL FIX: consume the manual-override flags after placement.
+    //   ROOT CAUSE BUG: lockedCallRef.current._manualTrigger was set by manual
+    //   button clicks but never reset. After one manual click in a window, the
+    //   flag stayed true forever. Every subsequent auto-exec evaluation saw
+    //   _isManual=true, which BYPASSED the hard cap at L28640 (delete from
+    //   _attemptedWindowsRef). After smart-exit fired and autoOrderState went
+    //   to 'exited' (an allow-listed status), the entry effect re-evaluated,
+    //   cleared the hard cap, and fired ANOTHER order. Loop ran at ~1Hz until
+    //   the window rolled.
+    //
+    //   Observed real-world impact: Kalshi position with 36 trades in one 15m
+    //   window, $93.19 paid vs $92.53 paid out = -$0.66 churn loss on what
+    //   was actually a WIN (outcome above target).
+    //
+    //   Fix: bypass flags are one-shot tickets per manual click. Clear them
+    //   here, AFTER they're consumed for this placement, so subsequent
+    //   evaluations require fresh user intent to bypass guards.
+    if(lockedCallRef.current&&(lockedCallRef.current._manualTrigger||lockedCallRef.current._bypassAutoExecFilters||lockedCallRef.current._bypassUserPosition)){
+      try{console.info('[V10.2.3] consumed manual override flags (one-shot semantics)');}catch(_){}
+      lockedCallRef.current._manualTrigger=false;
+      lockedCallRef.current._bypassAutoExecFilters=false;
+      lockedCallRef.current._bypassUserPosition=false;
+    }
     try{console.info('[V9.18.3] window attempt marked:',_attemptKey,'· stake=$',_bet.toFixed(2),'dir=',_dir);}catch(_){}
     // V9.18.3: log full stake provenance so any "why did it bet $X" question
     //   can be answered from console. Compares each potential source.
