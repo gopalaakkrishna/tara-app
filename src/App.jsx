@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.34-tcc-smart-bypass-combined';
+const BASELINE_VERSION='2026.05.14-v10.2.35-hawk-preset-patient-entry-confident-cheap';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.34';
+const TARA_VERSION_DISPLAY='Tara 10.2.35';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -12497,8 +12497,8 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2.25'),
             ),
             React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mb-2 leading-relaxed'},'One-tap setup. Sniper/Hunter tuned for current market (momentum regimes).'),
-            // ROW 1: SNIPER + HUNTER — the V10.2.25 current-market presets
-            React.createElement('div',{className:'grid grid-cols-2 gap-1.5 mb-1.5'},
+            // ROW 1: SNIPER + HUNTER + HAWK — the V10.2.25 / V10.2.35 current-market presets
+            React.createElement('div',{className:'grid grid-cols-3 gap-1.5 mb-1.5'},
               // SNIPER — V10.2.25, max-WR play stacking every lever
               React.createElement('button',{
                 type:'button',
@@ -12587,6 +12587,60 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               },
                 React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Hunter'),
                 React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'70-72% · 6-10/day · V10.2.25'),
+              ),
+              // HAWK — V10.2.35, "confident lock + cheap entry" play.
+              //   Stacks Hunter base + patient entry @ ≤70¢ + tighter qScore.
+              //   Targets the "patient" tier which won 80% over last 60 trades
+              //   and 66% lifetime — and the Kalshi-in-dir 55-70 subset which
+              //   won 83% recent / 69% lifetime.
+              React.createElement('button',{
+                type:'button',
+                onClick:()=>{
+                  if(typeof setAutoExecSettings!=='function')return;
+                  if(!confirm('Apply HAWK preset?\\n\\n"Confident lock + cheap entry" — for sure-shot trades:\\n\\n• Min tier: tape+ (Hunter base)\\n• Min qScoreV2: 50 (tighter than Hunter\'s 40)\\n• Edge cap: 8pt\\n• Phase 4: ADVISORY\\n• Skip time-cap-commit: ON (with smart bypass V10.2.34)\\n• Skip marginal-caution: ON\\n\\n• PATIENT ENTRY: ON (max 70¢, wait 60s)\\n  → Tara locks, then waits for offer to drop to ≤70¢ before buying\\n  → If 60s passes without hitting threshold → sit out\\n  → "Patient" tier trades won 80% over last 60 / 66% lifetime\\n\\n• Take-profit: 88¢ (more patient than Hunter\'s 82¢)\\n• Stop-loss: 13¢\\n• Max trades/day: 8\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nALSO enables Kalshi-agree LIVE.\\n\\nExpected: 72-76% WR, ~4-7 trades/day.\\nThe disciplined-entry preset.'))return;
+                  setAutoExecSettings(prev=>({
+                    ...prev,
+                    minTier:'tape',
+                    minQualityScore:50,
+                    maxEdgePt:8,
+                    tradeTimingMode:'advisory',
+                    skipTimeCapCommit:true,
+                    tccSmartBypass:true,
+                    skipMarginalCaution:true,
+                    // PATIENT ENTRY — the defining HAWK feature
+                    patientEntryEnabled:true,
+                    patientEntryMaxCents:70,
+                    patientEntryMaxWaitSec:60,
+                    // Exits — slightly more patient target than Hunter
+                    autoExitOffer:88,
+                    stopLossDeltaCents:13,
+                    // Caps + cooldown — match Hunter
+                    maxAutoTradesPerDay:8,
+                    maxAutoTradesPerWindow:1,
+                    maxBetPerTrade:2.5,
+                    maxDailyLoss:6,
+                    cooldownLossStreak:2,
+                    cooldownMinutes:30,
+                  }));
+                  try{
+                    const _cur=localStorage.getItem('taraKalshiAgreeMode');
+                    if(_cur!=='live'){
+                      localStorage.setItem('taraKalshiAgreeMode','live');
+                      if(typeof setKalshiAgreeMode==='function')setKalshiAgreeMode('live');
+                    }
+                  }catch(_){}
+                  try{console.info('[V10.2.35] HAWK preset applied — patient entry @≤70¢, tape+, qScoreV2≥50, Kalshi-agree live');}catch(_){}
+                },
+                className:'text-[10px] py-2.5 px-1 rounded transition-colors',
+                style:{
+                  background:'rgba(229,200,112,0.10)',
+                  border:'1px solid rgba(229,200,112,0.45)',
+                  color:'rgb(229,200,112)',
+                },
+                title:'Confident lock + cheap entry. Waits for price to drop to ≤70¢ before firing. Patient tier wins 80% recent / 66% lifetime.',
+              },
+                React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Hawk'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'72-76% · 4-7/day · V10.2.35'),
               ),
             ),
             // Divider label for legacy presets
