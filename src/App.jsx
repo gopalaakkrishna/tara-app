@@ -3830,10 +3830,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.16-session-tier-actually-applies-plus-stale-warnings';
+const BASELINE_VERSION='2026.05.14-v10.2.18-phase4-stamps-all-commit-paths';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.16';
+const TARA_VERSION_DISPLAY='Tara 10.2.18';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -30188,23 +30188,27 @@ function TaraApp(){
     //   When off: no effect.
     //   Multipliers default to 1.0 (identity) unless user has populated localStorage
     //   via __taraSessionTier('derive') or manual setting.
+    // V10.2.17 — multiplier is NO LONGER applied to display confidence. The
+    //   V10.2.16 application to _confidence was directionally wrong (higher
+    //   conviction made edge bigger which made auto-exec MORE conservative,
+    //   opposite of "trust this combo more"). The multiplier now ONLY affects
+    //   the auto-exec edge cap (line ~30760), where mult>1 loosens the cap
+    //   for strong tier×session combos. The cosmetic confidence display in
+    //   the UI now matches what the model actually computed (raw posterior),
+    //   so the headline number is honest. CSV columns still log mult/mode/
+    //   applied for forensics.
     let _sessionTierMult=1.0;
     let _sessionTierApplied=false;
-    let _confidenceAdjusted=_confidence;
     try{
       const _curSession=(typeof getMarketSessions==='function'?getMarketSessions().dominant:null)||'';
       const _curTier=isSuperConfluent?'confluence':isConfluent?'confluence':isStructuralLed?'structural':isTapeLed?'tape':_isSingleTier?'single':null;
       _sessionTierMult=_resolveSessionTierMultiplier(_curSession,_curTier);
-      if(sessionTierMode==='live'&&_sessionTierMult!==1.0){
-        _confidenceAdjusted=Math.max(0,Math.min(100,_confidence*_sessionTierMult));
-        _sessionTierApplied=true;
-      }else if(sessionTierMode==='shadow'){
-        // Don't change _confidence, but flag for logging
-        _sessionTierApplied=false; // not "applied" but logged
-      }
+      // 'applied' now means "would have affected edge cap" — the live decision point.
+      //   Set true when in live mode AND multiplier deviates from identity.
+      _sessionTierApplied=sessionTierMode==='live'&&_sessionTierMult!==1.0;
     }catch(_){}
     return{
-      call:dir,reason:_reasonParts.join(' · '),confidence:_confidenceAdjusted,direction:dir,conviction,phase:'FORMING',
+      call:dir,reason:_reasonParts.join(' · '),confidence:_confidence,direction:dir,conviction,phase:'FORMING',
       caution:_marginalCaution, // V9.4.0: surfaces in TaraCallCard caution chip
       // Pass through to lifecycle so it can compute needSamples consistently.
       // V10.2.13: include session-tier diag so the CSV writer can attach columns.
@@ -30212,7 +30216,7 @@ function TaraApp(){
         _sessionTierMode:sessionTierMode,
         _sessionTierMult:Math.round(_sessionTierMult*1000)/1000,
         _sessionTierApplied:_sessionTierApplied,
-        _confidencePreAdjust:_confidence,
+        _confidencePreAdjust:_confidence, // V10.2.17: alias for backward compat — same as confidence now
       },
     };
   })();
@@ -30757,22 +30761,23 @@ function TaraApp(){
     if(!_bypassSoftFilters){
       const _maxEdge=Number(autoExecSettings?.maxEdgePt);
       // Default to 15pt if unset (filter ON by default after the May 14 audit)
-      const _edgeCap=Number.isFinite(_maxEdge)&&_maxEdge>0?_maxEdge:15;
+      const _edgeCapRaw=Number.isFinite(_maxEdge)&&_maxEdge>0?_maxEdge:15;
       const _post=Number(analysis?.rawProbAbove);
       if(Number.isFinite(_post)&&Number.isFinite(_yes)){
-        const _taraConvRaw=_dir==='UP'?_post:(100-_post);
-        // V10.2.16 — session × tier multiplier APPLIES here. Previously the
-        //   multiplier only affected taraCall.confidence (display) but auto-exec
-        //   edge gate read raw posterior, so the optimizer was cosmetic. Now the
-        //   gate sees the adjusted conviction → optimizer actually nudges fire
-        //   decisions. Multiplier defaults to 1.0 (no-op) when sessionTierMode
-        //   isn't 'live', so behavior unchanged for users on off/shadow.
-        let _taraConv=_taraConvRaw;
+        const _taraConv=_dir==='UP'?_post:(100-_post);
+        // V10.2.17 — SESSION × TIER MULTIPLIER applied to EDGE CAP (not conviction).
+        //   V10.2.16 applied it to conviction, which was directionally backwards:
+        //     mult > 1 (strong tier × session) → conviction UP → edge UP → BLOCKED more
+        //     mult < 1 (weak tier × session)   → conviction DOWN → edge DOWN → FIRED more
+        //   That's the opposite of what the audit data implies.
+        //   Correct semantic:
+        //     mult > 1 (strong combo) → LOOSEN cap (cap = base × mult) → fire MORE
+        //     mult < 1 (weak combo)   → TIGHTEN cap (cap = base × mult) → fire LESS
+        //   When sessionTierMode !== 'live', mult resolves to 1.0 → no-op for off/shadow.
+        let _edgeCap=_edgeCapRaw;
         let _sessTierMultEdge=1.0;
         try{
           if(sessionTierMode==='live'){
-            // Re-derive tier classification from the current taraCall snapshot.
-            //   Cleanest signal source: taraCall._ctx flags set by the IIFE above.
             const _ctx=taraCall?._ctx||{};
             const _curTier=_ctx.isSuperConfluent?'confluence'
               :_ctx.isConfluent?'confluence'
@@ -30782,24 +30787,24 @@ function TaraApp(){
             const _curSession=(typeof getMarketSessions==='function'?getMarketSessions().dominant:null)||'';
             _sessTierMultEdge=_resolveSessionTierMultiplier(_curSession,_curTier);
             if(_sessTierMultEdge!==1.0){
-              _taraConv=Math.max(0,Math.min(100,_taraConvRaw*_sessTierMultEdge));
-              try{console.info('[V10.2.16] session-tier mult applied to edge:',{session:_curSession,tier:_curTier,mult:_sessTierMultEdge,convRaw:Math.round(_taraConvRaw),convAdj:Math.round(_taraConv)});}catch(_){}
+              _edgeCap=Math.max(1,Math.round(_edgeCapRaw*_sessTierMultEdge*10)/10);
+              try{console.info('[V10.2.17] session-tier mult applied to edge CAP:',{session:_curSession,tier:_curTier,mult:_sessTierMultEdge,capRaw:_edgeCapRaw,capAdj:_edgeCap,direction:_sessTierMultEdge>1?'loosened (strong combo)':'tightened (weak combo)'});}catch(_){}
             }
           }
         }catch(_){}
         const _kalshiConv=_dir==='UP'?_yes:(100-_yes);
         const _edge=_taraConv-_kalshiConv;
         try{console.info('[V9.19.24] EDGE CHECK',{
-          dir:_dir,taraConv:_taraConv,taraConvRaw:_taraConvRaw,sessTierMult:_sessTierMultEdge,kalshiConv:_kalshiConv,
-          edgePt:Math.round(_edge*10)/10,cap:_edgeCap,
+          dir:_dir,taraConv:_taraConv,kalshiConv:_kalshiConv,
+          edgePt:Math.round(_edge*10)/10,cap:_edgeCap,capRaw:_edgeCapRaw,sessTierMult:_sessTierMultEdge,
           willBlock:_edge>_edgeCap,
         });}catch(_){}
         if(_edge>_edgeCap){
           // Block. Burn dedup key so we don't keep evaluating the same lock,
           // and emit a visible UI state so the user sees "sit out: market priced".
           _autoExecLastFiredKeyRef.current=_key;
-          const _multTag=_sessTierMultEdge!==1.0?` [×${_sessTierMultEdge}]`:'';
-          const _reason=`edge +${Math.round(_edge)}pt > cap +${_edgeCap}pt — market already priced (Tara ${Math.round(_taraConv)}%${_multTag} vs Kalshi ${Math.round(_kalshiConv)}%)`;
+          const _multTag=_sessTierMultEdge!==1.0?` [cap×${_sessTierMultEdge}]`:'';
+          const _reason=`edge +${Math.round(_edge)}pt > cap +${_edgeCap}pt${_multTag} — market already priced (Tara ${Math.round(_taraConv)}% vs Kalshi ${Math.round(_kalshiConv)}%)`;
           try{console.info('[V9.19.24] AUTO-EXEC BLOCKED (edge filter):',_reason);}catch(_){}
           setAutoOrderState({
             status:'sit-out-edge',
@@ -30809,10 +30814,11 @@ function TaraApp(){
             asset:currentAsset,
             _edgePt:Math.round(_edge*10)/10,
             _edgeCap:_edgeCap,
+            _edgeCapRaw:_edgeCapRaw,
             _sessTierMult:_sessTierMultEdge,
           });
           // V10.2.4: log edge-cap block
-          try{_autoExecLogPushBlockOnce({type:'blocked',guard:'edge-cap',asset:currentAsset,windowId:_wid,dir:_dir,blockReason:_reason,edgePt:Math.round(_edge*10)/10,edgeCap:_edgeCap,taraConv:Math.round(_taraConv),kalshiConv:Math.round(_kalshiConv),sessTierMult:_sessTierMultEdge});}catch(_){}
+          try{_autoExecLogPushBlockOnce({type:'blocked',guard:'edge-cap',asset:currentAsset,windowId:_wid,dir:_dir,blockReason:_reason,edgePt:Math.round(_edge*10)/10,edgeCap:_edgeCap,edgeCapRaw:_edgeCapRaw,taraConv:Math.round(_taraConv),kalshiConv:Math.round(_kalshiConv),sessTierMult:_sessTierMultEdge});}catch(_){}
           return;
         }
       }
@@ -32329,6 +32335,18 @@ function TaraApp(){
         isUserForced:true,reason:taraCallSnapshotRef.current.reason,
         // V7.0.7: tag asset for user-forced entries (was missing — defaulted to BTC on display).
         asset:currentAssetRef.current||currentAsset||'BTC',
+        // V10.2.18 — Phase 4 + sessionTier stamps on user-force commit. Even
+        //   user-force trades benefit from the audit data — they happen in a
+        //   real session × tier context, and Phase 4 may have evaluated. Stamps
+        //   are null-safe; if Phase 4 hadn't run yet for this window, decision
+        //   is null which the audit hooks handle correctly.
+        tradeTimingDecision:_phase4DecisionRef.current?_phase4DecisionRef.current.decision:null,
+        tradeTimingScore:_phase4DecisionRef.current?_phase4DecisionRef.current.score:null,
+        tradeTimingReason:_phase4DecisionRef.current?_phase4DecisionRef.current.reason:null,
+        tradeTimingMode:_phase4DecisionRef.current?_phase4DecisionRef.current.mode:null,
+        sessionTierMode:taraCall?._ctx?._sessionTierMode||null,
+        sessionTierMult:taraCall?._ctx?._sessionTierMult!=null?taraCall._ctx._sessionTierMult:null,
+        sessionTierApplied:taraCall?._ctx?._sessionTierApplied===true,
         // V9.10.9: stamp device label so personal scorecard filters to this device only.
         // V9.10.10: stamp pattern detection state at lock time.
         patternsAtLock:analysis?.patternsV9_10_10||null,
@@ -32430,6 +32448,17 @@ function TaraApp(){
           reason:tc.reason,
           // V7.0.7: tag asset for SIT_OUT entries (was missing — defaulted to BTC on display).
           asset:currentAssetRef.current||currentAsset||'BTC',
+          // V10.2.18 — Phase 4 + sessionTier stamps on SIT_OUT commit. SIT_OUT
+          //   entries are valuable for shadow validation — they tell us which
+          //   Phase 4 decisions correctly chose NOT to fire. Without these, we
+          //   can't compute "abort decisions led to actual losses avoided" stats.
+          tradeTimingDecision:_phase4DecisionRef.current?_phase4DecisionRef.current.decision:null,
+          tradeTimingScore:_phase4DecisionRef.current?_phase4DecisionRef.current.score:null,
+          tradeTimingReason:_phase4DecisionRef.current?_phase4DecisionRef.current.reason:null,
+          tradeTimingMode:_phase4DecisionRef.current?_phase4DecisionRef.current.mode:null,
+          sessionTierMode:taraCall?._ctx?._sessionTierMode||null,
+          sessionTierMult:taraCall?._ctx?._sessionTierMult!=null?taraCall._ctx._sessionTierMult:null,
+          sessionTierApplied:taraCall?._ctx?._sessionTierApplied===true,
           // V9.10.9: stamp device label so personal scorecard filters to this device only.
           // V9.10.10: stamp pattern detection state at lock time.
           patternsAtLock:analysis?.patternsV9_10_10||null,
@@ -33336,6 +33365,18 @@ function TaraApp(){
         isTapeLed:tc?._ctx?.isTapeLed||false,
         // V6.2.0: structural-led is a separate learning bucket
         isStructuralLed:tc?._ctx?.isStructuralLed||false,
+        // V10.2.18 — Phase 4 + sessionTier stamps on MAIN directional commit.
+        //   Previously only _logSnapshotEntry (the late/edge-case helper) had these.
+        //   The main UP/DOWN commit path here was missing them, so most resolved
+        //   trades had null tradeTiming + null sessionTier fields in the CSV.
+        //   Without these, shadow validation of Phase 4 / sessionTier is impossible.
+        tradeTimingDecision:_phase4DecisionRef.current?_phase4DecisionRef.current.decision:null,
+        tradeTimingScore:_phase4DecisionRef.current?_phase4DecisionRef.current.score:null,
+        tradeTimingReason:_phase4DecisionRef.current?_phase4DecisionRef.current.reason:null,
+        tradeTimingMode:_phase4DecisionRef.current?_phase4DecisionRef.current.mode:null,
+        sessionTierMode:tc?._ctx?._sessionTierMode||null,
+        sessionTierMult:tc?._ctx?._sessionTierMult!=null?tc._ctx._sessionTierMult:null,
+        sessionTierApplied:tc?._ctx?._sessionTierApplied===true,
         // V6.3.3: log structural alignment + raw vs calibrated posterior for diagnostics
         structAtLock:analysis?.structAlignment?{
           dir:analysis.structAlignment.dir,
