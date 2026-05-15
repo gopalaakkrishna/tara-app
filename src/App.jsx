@@ -3830,10 +3830,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.25-sniper-hunter-presets-current-market-tuned';
+const BASELINE_VERSION='2026.05.14-v10.2.27-tpsl-display-payout-plus-delta';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.25';
+const TARA_VERSION_DISPLAY='Tara 10.2.27';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -21771,7 +21771,18 @@ function ScalperAdvisorPanel({
   if(_liveValid){
     _liveEntryCents=autoOrderState.fillPrice!=null?autoOrderState.fillPrice:autoOrderState.limitCents;
     _liveContractsActual=Number(autoOrderState.count)||0;
-    _liveStakeDollars=Number(autoOrderState.betDollars)||(_liveEntryCents*_liveContractsActual/100);
+    // V10.2.26 — STAKE DISPLAY FIX. Old behavior preferred autoOrderState.betDollars
+    //   (the BUDGET passed to Kalshi at order time) over the real cost
+    //   (entry × contracts / 100). Kalshi only sells whole contracts, so the
+    //   actual cost is always ≤ budget. Showing budget as "stake" misled users
+    //   into thinking they spent more than they did (e.g. $1.00 stake when
+    //   actual was 58¢ for 1 contract).
+    //   Fix: ALWAYS compute from entry × contracts. Only fall back to betDollars
+    //   if entry or contracts are missing (defensive — shouldn't happen in
+    //   live state).
+    _liveStakeDollars=(_liveEntryCents&&_liveContractsActual)
+      ?(_liveEntryCents*_liveContractsActual/100)
+      :(Number(autoOrderState.betDollars)||0);
     _liveMaxPayout=_liveContractsActual*1.0;
     _liveMaxNet=_liveMaxPayout-_liveStakeDollars;
     // Live current offer on our side (from kalshiYesPrice, translated by direction)
@@ -22605,31 +22616,48 @@ ${_d.responseBody||'(empty)'}`;
               ));
             }
             // target (take profit)
+            // V10.2.27 — enhanced display:
+            //   was: "85¢  (+$0.09 if hits)"
+            //   now: "85¢  →  $1.70 payout  (+$0.85 net)"
+            //   payout = contracts × target × 0.01 (what you'd collect from Kalshi)
+            //   net    = payout - stake (your actual profit after the contract cost)
+            //   This matches how Kalshi displays it ("Payout if Yes: $1.95") so the
+            //   numbers reconcile directly with what you see on Kalshi.
             const _tpCents=Number(autoExecSettings?.autoExitOffer)||85;
             if(_tpCents>0&&(_positionKnown?_liveEntryCents:_entryCents)!=null){
               const _n=_positionKnown?_liveContractsActual:_contracts;
               const _entry=_positionKnown?_liveEntryCents:_entryCents;
-              const _winDollars=((_tpCents-_entry)*_n*0.01);
+              const _stake=_positionKnown?_liveStakeDollars:(_n*_entry*0.01);
+              const _payout=_tpCents*_n*0.01;
+              const _net=_payout-_stake;
               _rows.push(_renderTip(
                 'target',
                 'target',
-                `${_tpCents}¢  (${_winDollars>=0?'+':'-'}$${Math.abs(_winDollars).toFixed(2)} if hits)`,
-                `Auto-cash-out target. If the price reaches ${_tpCents}¢, Tara automatically sells everything to lock in profit. Higher target = bigger winners but more trades that never reach it. Adjust in the Predictor card (Fast = 80¢, Patient = 90¢) or in auto-exec settings.`,
+                `${_tpCents}¢  →  $${_payout.toFixed(2)} payout  (${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)} net)`,
+                `Auto-cash-out target. If our side reaches ${_tpCents}¢, Tara sells all ${_n} contract${_n===1?'':'s'} for $${_payout.toFixed(2)} total payout (= ${_n} × ${_tpCents}¢). Net profit after your $${_stake.toFixed(2)} stake: ${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)}. Higher target = bigger winners but more trades that never reach it. Adjust in Predictor card (Fast/Patient) or auto-exec settings.`,
                 'rgb(110,231,183)',
               ));
             }
             // stop (cut loss)
+            // V10.2.27 — enhanced display:
+            //   was: "45¢  (-$0.13 if hits)"
+            //   now: "45¢  →  $0.45 payout  (-$0.13 net loss · max risk)"
+            //   Same reconciliation logic as target above — payout = exit value,
+            //   net = realized P&L after subtracting stake. For stop, payout is
+            //   what you'd salvage; net is the realized loss.
             const _slDelta=Number(autoExecSettings?.stopLossDeltaCents)||0;
             if(_slDelta>0&&(_positionKnown?_liveEntryCents:_entryCents)!=null){
               const _entry=_positionKnown?_liveEntryCents:_entryCents;
               const _n=_positionKnown?_liveContractsActual:_contracts;
               const _stopAt=Math.max(0,_entry-_slDelta);
-              const _lossDollars=((_stopAt-_entry)*_n*0.01);
+              const _stake=_positionKnown?_liveStakeDollars:(_n*_entry*0.01);
+              const _payout=_stopAt*_n*0.01;
+              const _net=_payout-_stake;
               _rows.push(_renderTip(
                 'stop',
                 'stop',
-                `${_stopAt}¢  (${_lossDollars>=0?'+':'-'}$${Math.abs(_lossDollars).toFixed(2)} if hits)`,
-                `Auto-stop-loss. If the price drops ${_slDelta}¢ below your fill (to ${_stopAt}¢), Tara automatically sells to cut the loss. Tighter stop = smaller losses but more whipsaws. Adjust in the Predictor card (Fast = 25¢, Patient = 15¢) or in auto-exec settings.`,
+                `${_stopAt}¢  →  $${_payout.toFixed(2)} payout  (${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)} net · max risk)`,
+                `Auto-stop-loss. If our side drops ${_slDelta}¢ below entry (to ${_stopAt}¢), Tara sells all ${_n} contract${_n===1?'':'s'} for $${_payout.toFixed(2)} salvage value. Net realized loss: ${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)}. This is the most you can lose if the stop fires before settlement. Tighter stop = smaller losses but more whipsaws. Adjust in Predictor card or auto-exec settings.`,
                 'rgba(244,114,182,0.92)',
               ));
             }else if(_positionKnown===false&&_slDelta===0){
