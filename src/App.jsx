@@ -3830,10 +3830,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.13-tier-session-audit-and-shadow-optimizer';
+const BASELINE_VERSION='2026.05.14-v10.2.14-session-tier-apply-helper';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.13';
+const TARA_VERSION_DISPLAY='Tara 10.2.14';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -23258,7 +23258,32 @@ function TaraApp(){
   // Console hook: inspect or set current session-tier state
   useEffect(()=>{
     if(typeof window==='undefined')return;
-    window.__taraSessionTier=(action)=>{
+    window.__taraSessionTier=(action,opts)=>{
+      // V10.2.14 — 'apply' action: derives + auto-applies in one call. Avoids
+      //   the copy/paste trap where Chrome's console abbreviates {...} and
+      //   users paste the literal '{...}' which is invalid JSON.
+      //   Optional mode: __taraSessionTier('apply', {mode:'shadow'|'live'}).
+      //   Defaults to NOT changing mode — user explicitly chooses shadow vs live.
+      if(action==='apply'){
+        const m=window.__taraSessionTier('derive');
+        if(!m){console.error('[apply] derive failed — nothing applied');return null;}
+        try{
+          localStorage.setItem('taraSessionTierMultipliers',JSON.stringify(m));
+          console.info('%c✓ Multipliers saved to localStorage','color:rgb(110,231,183);font-weight:bold;font-size:13px');
+          const _wantMode=opts&&['off','shadow','live'].includes(opts.mode)?opts.mode:null;
+          if(_wantMode){
+            localStorage.setItem('taraSessionTierMode',_wantMode);
+            console.info(`%c✓ Mode set to '${_wantMode}'`,'color:rgb(110,231,183);font-weight:bold;font-size:13px');
+            console.info('%cRefresh the page (Cmd+R) for changes to take effect.','color:#E5C870;font-weight:bold');
+          }else{
+            const _curMode=localStorage.getItem('taraSessionTierMode')||'off';
+            console.info(`%cMode is currently '${_curMode}'.`,'color:rgba(232,233,228,0.65)');
+            console.info('To enable shadow logging (safer first step):  __taraSessionTier(\'apply\', {mode:\'shadow\'})');
+            console.info('To enable live optimization:                  __taraSessionTier(\'apply\', {mode:\'live\'})');
+          }
+          return m;
+        }catch(e){console.error('[apply] save failed:',e);return null;}
+      }
       if(action==='derive'){
         // Auto-derive multipliers from historical taraCallLog
         try{
@@ -23295,8 +23320,9 @@ function TaraApp(){
           console.info('Source: '+entries.length+' resolved trades');
           console.info('Multipliers (clamped to [0.7, 1.3], cells with n<10 → 1.0):');
           console.table(multipliers);
-          console.info('To apply: localStorage.setItem(\'taraSessionTierMultipliers\', JSON.stringify('+JSON.stringify(multipliers)+'))');
-          console.info('Then set mode: localStorage.setItem(\'taraSessionTierMode\', \'live\') and refresh');
+          console.info('%cTo apply these (no copy-paste needed):','color:rgb(110,231,183);font-weight:bold');
+          console.info('  __taraSessionTier(\'apply\', {mode:\'shadow\'})  // safer first step');
+          console.info('  __taraSessionTier(\'apply\', {mode:\'live\'})    // activate adjustments');
           console.groupEnd();
           return multipliers;
         }catch(e){console.error('derive failed:',e);return null;}
@@ -23307,8 +23333,11 @@ function TaraApp(){
       console.info('mode:',sessionTierMode);
       console.info('multipliers:',cur);
       console.info('Commands:');
-      console.info('  __taraSessionTier()         show this');
-      console.info('  __taraSessionTier(\'derive\') compute multipliers from history');
+      console.info('  __taraSessionTier()                              show this');
+      console.info('  __taraSessionTier(\'derive\')                      compute multipliers from history');
+      console.info('  __taraSessionTier(\'apply\')                       derive + save (no mode change)');
+      console.info('  __taraSessionTier(\'apply\', {mode:\'shadow\'})      derive + save + set shadow mode');
+      console.info('  __taraSessionTier(\'apply\', {mode:\'live\'})        derive + save + set live mode');
       console.groupEnd();
       return{mode:sessionTierMode,multipliers:cur};
     };
