@@ -3573,10 +3573,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.4-event-log-and-per-window-cap';
+const BASELINE_VERSION='2026.05.14-v10.2.5-risk-guardrails-reorg-stoploss-promoted';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.4';
+const TARA_VERSION_DISPLAY='Tara 10.2.5';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -11956,10 +11956,23 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             React.createElement('input',{type:'checkbox',checked:!!autoExecSettings?.dryRun,onChange:(e)=>setAutoExecSettings(prev=>({...prev,dryRun:e.target.checked})),className:'ml-2'}),
           ),
         ),
-        // Risk guardrails
+        // V10.2.5 — RISK GUARDRAILS REORGANIZED into 6 logical subsections
+        //   1. Position size & fills    — Max bet, Slippage
+        //   2. Daily caps                — Max trades/day, Max daily loss
+        //   3. Per-window cap            — Max trades/window
+        //   4. Exit thresholds           — Take-profit, Stop-loss (PROMOTED from Advanced)
+        //   5. Cooldown after losses     — N losses, Duration
+        //   6. Entry filters             — Edge cap, Skip time-cap-commit
+        //   7. Decision routing          — Phase 4 mode
+        //   Each field's wiring is unchanged; only the wrapping divs reorder them.
         React.createElement('div',{className:'mb-3 p-2 rounded bg-[#0E100F]/60'},
-          React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-2'},'Risk guardrails'),
-          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-2'},
+          React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-1'},'Risk guardrails'),
+          React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mb-3 leading-relaxed'},'Hard discipline guards. Block or exit trades automatically — no opinions, just rules.'),
+          //
+          // ── 1. Position size & fills ─────────────────────────────────────────
+          //
+          React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#E8E9E4]/45 mb-1.5'},'Position size & fills'),
+          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
             React.createElement('label',{className:'block'},
               _labelTip('max-bet','Max bet / trade ($)','HARD WALL. Auto-exec will SIT OUT (not downsize) if the intended bet exceeds this. The single most important safety knob — it caps your worst-case loss on any one trade. Bypass: only super-confluence tier OR manual click can override (and even then it clamps to this cap). Lower = safer, smaller positions. Higher = more capital at risk per trade.'),
               React.createElement('input',{
@@ -11967,45 +11980,33 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxBetPerTrade:Math.max(1,Math.min(500,_num(e.target.value,25)))})),
                 className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
               }),
-              // V9.17.20: unit hint
               React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
                 `= reject any single auto-trade larger than $${Number(autoExecSettings?.maxBetPerTrade||25).toFixed(0)} dollars`,
               ),
               _tipBox('max-bet','HARD WALL. Auto-exec will SIT OUT (not downsize) if the intended bet exceeds this. The single most important safety knob — it caps your worst-case loss on any one trade. Bypass: only super-confluence tier OR manual click can override (and even then it clamps to this cap). Lower = safer, smaller positions. Higher = more capital at risk per trade.'),
             ),
             React.createElement('label',{className:'block'},
-              _labelTip('cooldown-n','Cooldown after N losses','After N consecutive LOSSES, auto-exec pauses for the cooldown duration. Prevents tilt-trading after a losing streak. Default 3 — typical for tape-led strategies. Setting to 2 is aggressive (pauses quickly), 5+ is loose (lets a bad streak run).'),
+              _labelTip('slippage','Slippage (¢ over offer)','How much above the current Kalshi offer to bid for immediate fill. 0 = wait for fair price (patient — may miss fast moves). 2 = standard (almost always fills). 5+ = aggressive (pays up for certainty). Each cent costs you that much per contract on entry.'),
               React.createElement('input',{
-                type:'number',min:2,max:10,step:1,value:autoExecSettings?.cooldownLossStreak||3,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownLossStreak:Math.max(2,Math.min(10,_num(e.target.value,3)))})),
+                type:'number',min:0,max:10,step:1,value:autoExecSettings?.slippageCents||0,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,slippageCents:Math.max(0,Math.min(10,_num(e.target.value,2)))})),
                 className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
               }),
-              // V9.17.20: unit hint
               React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
-                `= ${autoExecSettings?.cooldownLossStreak||3} consecutive losses triggers a cooldown`,
+                `= bid +${autoExecSettings?.slippageCents||0}¢ above market to improve fill (each ¢ = 1% of $1 contract)`,
               ),
-              _tipBox('cooldown-n','After N consecutive LOSSES, auto-exec pauses for the cooldown duration. Prevents tilt-trading after a losing streak. Default 3 — typical for tape-led strategies. Setting to 2 is aggressive (pauses quickly), 5+ is loose (lets a bad streak run).'),
+              _tipBox('slippage','How much above the current Kalshi offer to bid for immediate fill. 0 = wait for fair price (patient — may miss fast moves). 2 = standard (almost always fills). 5+ = aggressive (pays up for certainty). Each cent costs you that much per contract on entry.'),
             ),
           ),
-          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-2'},
+          //
+          // ── 2. Daily caps ────────────────────────────────────────────────────
+          //
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid rgba(232,233,228,0.06)'}},
+            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#E8E9E4]/45'},'Daily caps'),
+          ),
+          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
             React.createElement('label',{className:'block'},
-              _labelTip('cooldown-dur','Cooldown duration (min)','Once cooldown triggers, auto-exec stays paused this many minutes. Default 20. Use shorter (5-10) if you want to resume quickly after a streak; longer (30-60) if you want a real reset before re-engaging.'),
-              React.createElement('input',{
-                type:'number',min:1,max:240,step:1,value:autoExecSettings?.cooldownMinutes||20,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownMinutes:Math.max(1,Math.min(240,_num(e.target.value,20)))})),
-                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
-              }),
-              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
-                `= ${autoExecSettings?.cooldownMinutes||20} minutes of no new auto-trades after streak`,
-              ),
-              _tipBox('cooldown-dur','Once cooldown triggers, auto-exec stays paused this many minutes. Default 20. Use shorter (5-10) if you want to resume quickly after a streak; longer (30-60) if you want a real reset before re-engaging.'),
-            ),
-            // V10.2.x — Daily trade-count cap. Hard cap on number of auto-exec
-            //   trades placed per UTC day. Pure runaway protection. When reached,
-            //   sets autoExecCooldownUntil to UTC midnight so the existing cooldown
-            //   UI shows the block.
-            React.createElement('label',{className:'block'},
-              _labelTip('max-trades-day','Max trades / day','HARD CAP. Maximum number of auto-exec trades allowed per UTC day. Pure runaway protection — if a bug or unexpected market condition causes Tara to fire repeatedly, this is the brick wall. When hit, auto-exec is blocked until UTC midnight rolls. Default 10 — conservative for low-balance accounts. Raise once you trust the system. 0 disables.'),
+              _labelTip('max-trades-day','Max trades / day','HARD CAP. Maximum number of auto-exec trades allowed per UTC day. Pure runaway protection — if a bug or unexpected market condition causes Tara to fire repeatedly, this is the brick wall. When hit, auto-exec is blocked until UTC midnight rolls. Default 5 — conservative for low-balance accounts. Raise once you trust the system. 0 disables.'),
               React.createElement('input',{
                 type:'number',min:0,max:200,step:1,value:autoExecSettings?.maxAutoTradesPerDay??10,
                 onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxAutoTradesPerDay:Math.max(0,Math.min(200,_num(e.target.value,10)))})),
@@ -12016,38 +12017,8 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 if(_n===0)return '= DISABLED (no daily count cap — not recommended)';
                 return `= block auto-exec for the rest of the day after ${_n} trade${_n===1?'':'s'} placed`;
               })()),
-              _tipBox('max-trades-day','HARD CAP. Maximum number of auto-exec trades allowed per UTC day. Pure runaway protection — if a bug or unexpected market condition causes Tara to fire repeatedly, this is the brick wall. When hit, auto-exec is blocked until UTC midnight rolls. Default 10 — conservative for low-balance accounts. Raise once you trust the system. 0 disables.'),
+              _tipBox('max-trades-day','HARD CAP. Maximum number of auto-exec trades allowed per UTC day. Pure runaway protection — if a bug or unexpected market condition causes Tara to fire repeatedly, this is the brick wall. When hit, auto-exec is blocked until UTC midnight rolls. Default 5 — conservative for low-balance accounts. Raise once you trust the system. 0 disables.'),
             ),
-          ),
-          // V10.2.4 — Max trades per window. The V9.18.3 hard cap was always "1 per
-          //   window per asset" — now exposed as a user setting. Default 1 matches
-          //   prior behavior. Raise to 2-5 only if you specifically want to scalp
-          //   in/out within the same window. WARNING: raising this re-enables some
-          //   of the failure modes the V9.18.3 cap was designed to prevent.
-          React.createElement('div',{className:'mt-2 pt-2',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
-            React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
-                _labelTip('max-trades-window','Max trades / window','HARD CAP. Maximum number of auto-exec entries on the same window (per asset). Default 1 = one shot per window. Was always "1" in V9.18.3 but the loop bug in V10.2.2 churned 36 trades on one window because the cap was bypassable. V10.2.3 fixed the bypass + V10.2.4 makes the cap a user-tunable setting. Raise to 2-5 only if you want to average-in or scalp in/out within one window. The 36-trade incident is what this guard prevents.'),
-                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2.4'),
-              ),
-              React.createElement('input',{
-                type:'number',min:1,max:5,step:1,value:autoExecSettings?.maxAutoTradesPerWindow??1,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxAutoTradesPerWindow:Math.max(1,Math.min(5,_num(e.target.value,1)))})),
-                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
-              }),
-              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},(()=>{
-                const _n=Number(autoExecSettings?.maxAutoTradesPerWindow)||1;
-                if(_n===1)return '= one auto-exec entry per window per asset (RECOMMENDED — matches original V9.18.3 hard cap)';
-                return `⚠ allow up to ${_n} auto-exec entries on the same window per asset — re-entry mode (re-enables failure modes V9.18.3 prevented; only for explicit scalping/averaging strategies)`;
-              })()),
-              _tipBox('max-trades-window','HARD CAP. Maximum number of auto-exec entries on the same window (per asset). Default 1 = one shot per window. Was always "1" in V9.18.3 but the loop bug in V10.2.2 churned 36 trades on one window because the cap was bypassable. V10.2.3 fixed the bypass + V10.2.4 makes the cap a user-tunable setting. Raise to 2-5 only if you want to average-in or scalp in/out within one window. The 36-trade incident is what this guard prevents.'),
-            ),
-          ),
-          // V10.2.x — Daily dollar loss cap. Re-added after V9.17.3 removal now that
-          //   per-trade P&L is captured on call log entries (betAmt + maxPay + result).
-          //   When net auto-exec P&L for today drops below -maxDailyLoss, cooldown
-          //   engages until UTC midnight.
-          React.createElement('div',{className:'mt-2 pt-2',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
             React.createElement('label',{className:'block'},
               React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
                 _labelTip('max-daily-loss','Max daily loss ($)','HARD CAP. When auto-exec net P&L for today drops to -$X or worse, auto-exec is blocked until UTC midnight. Honest discipline guard. Counts auto-exec trades only (manual trades ignored). Re-added in V10.2.x after the V9.17.3 removal, now that per-trade P&L is captured on the call log. 0 disables.'),
@@ -12066,19 +12037,41 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               _tipBox('max-daily-loss','HARD CAP. When auto-exec net P&L for today drops to -$X or worse, auto-exec is blocked until UTC midnight. Honest discipline guard. Counts auto-exec trades only (manual trades ignored). Re-added in V10.2.x after the V9.17.3 removal, now that per-trade P&L is captured on the call log. 0 disables.'),
             ),
           ),
-          React.createElement('div',{className:'grid grid-cols-2 gap-2'},
+          //
+          // ── 3. Per-window cap ────────────────────────────────────────────────
+          //
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid rgba(232,233,228,0.06)'}},
+            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#E8E9E4]/45'},'Per-window cap'),
+          ),
+          React.createElement('div',{className:'mb-3'},
             React.createElement('label',{className:'block'},
-              _labelTip('slippage','Slippage (¢ over offer)','How much above the current Kalshi offer to bid for immediate fill. 0 = wait for fair price (patient — may miss fast moves). 2 = standard (almost always fills). 5+ = aggressive (pays up for certainty). Each cent costs you that much per contract on entry.'),
+              React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
+                _labelTip('max-trades-window','Max trades / window','HARD CAP. Maximum number of auto-exec entries on the same window (per asset). Default 1 = one shot per window. Was always "1" in V9.18.3 but the loop bug in V10.2.2 churned 36 trades on one window because the cap was bypassable. V10.2.3 fixed the bypass + V10.2.4 makes the cap a user-tunable setting. Raise to 2-5 only if you want to average-in or scalp in/out within one window. The 36-trade incident is what this guard prevents.'),
+                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2.4'),
+              ),
               React.createElement('input',{
-                type:'number',min:0,max:10,step:1,value:autoExecSettings?.slippageCents||0,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,slippageCents:Math.max(0,Math.min(10,_num(e.target.value,2)))})),
+                type:'number',min:1,max:5,step:1,value:autoExecSettings?.maxAutoTradesPerWindow??1,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxAutoTradesPerWindow:Math.max(1,Math.min(5,_num(e.target.value,1)))})),
                 className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
               }),
-              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
-                `= bid +${autoExecSettings?.slippageCents||0}¢ above market to improve fill (each ¢ = 1% of $1 contract)`,
-              ),
-              _tipBox('slippage','How much above the current Kalshi offer to bid for immediate fill. 0 = wait for fair price (patient — may miss fast moves). 2 = standard (almost always fills). 5+ = aggressive (pays up for certainty). Each cent costs you that much per contract on entry.'),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},(()=>{
+                const _n=Number(autoExecSettings?.maxAutoTradesPerWindow)||1;
+                if(_n===1)return '= one auto-exec entry per window per asset (RECOMMENDED — matches original V9.18.3 hard cap)';
+                return `⚠ allow up to ${_n} auto-exec entries on the same window per asset — re-entry mode (re-enables failure modes V9.18.3 prevented; only for explicit scalping/averaging strategies)`;
+              })()),
+              _tipBox('max-trades-window','HARD CAP. Maximum number of auto-exec entries on the same window (per asset). Default 1 = one shot per window. Was always "1" in V9.18.3 but the loop bug in V10.2.2 churned 36 trades on one window because the cap was bypassable. V10.2.3 fixed the bypass + V10.2.4 makes the cap a user-tunable setting. Raise to 2-5 only if you want to average-in or scalp in/out within one window. The 36-trade incident is what this guard prevents.'),
             ),
+          ),
+          //
+          // ── 4. Exit thresholds (Take-profit + Stop-loss) ─────────────────────
+          //
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid rgba(232,233,228,0.06)'}},
+            React.createElement('div',{className:'flex items-baseline justify-between'},
+              React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#E8E9E4]/45'},'Exit thresholds'),
+              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2.5'),
+            ),
+          ),
+          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
             React.createElement('label',{className:'block'},
               _labelTip('take-profit','Take-profit at offer ¢','Auto-sell when the Kalshi offer on your side reaches this. 78-80¢ = book early, smaller wins. 85-88¢ = patient, bigger wins but more misses. 90¢+ = aggressive target, often expires worthless near close. A contract pays $1 at settle if right, so target ¢ ≈ % of max payout locked in.'),
               React.createElement('input',{
@@ -12092,10 +12085,60 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               })()),
               _tipBox('take-profit','Auto-sell when the Kalshi offer on your side reaches this. 78-80¢ = book early, smaller wins. 85-88¢ = patient, bigger wins but more misses. 90¢+ = aggressive target, often expires worthless near close. A contract pays $1 at settle if right, so target ¢ ≈ % of max payout locked in.'),
             ),
+            React.createElement('label',{className:'block'},
+              _labelTip('stop-loss','Stop-loss drawdown (¢)','Auto-sell when our-side offer drops by this many cents below your fill price. Default 15¢. PROMOTED to Risk guardrails in V10.2.5 — was previously buried in Advanced Exit Logic and OFF by default, which was backwards given how often emotional holding causes losses to compound. Tighter (8-12¢) = cuts losers faster, locks in some recoverable dips as losses. Looser (20-30¢) = holds longer for recovery, full bet at risk if it never recovers. 0 = disabled (position holds to settle or take-profit).'),
+              React.createElement('input',{
+                type:'number',min:0,max:90,step:1,value:autoExecSettings?.stopLossDeltaCents??15,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(90,_num(e.target.value,15)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
+              }),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1 leading-relaxed'},(()=>{
+                const _c=Number(autoExecSettings?.stopLossDeltaCents)||0;
+                if(_c===0)return '⚠ DISABLED — position holds to settle (full bet at risk if Tara is wrong). Not recommended unless you have a specific reason.';
+                return `= exit if our-side offer drops ${_c}¢ below fill (e.g. filled at 87¢, exit at ${87-_c}¢)`;
+              })()),
+              _tipBox('stop-loss','Auto-sell when our-side offer drops by this many cents below your fill price. Default 15¢. PROMOTED to Risk guardrails in V10.2.5 — was previously buried in Advanced Exit Logic and OFF by default, which was backwards given how often emotional holding causes losses to compound. Tighter (8-12¢) = cuts losers faster, locks in some recoverable dips as losses. Looser (20-30¢) = holds longer for recovery, full bet at risk if it never recovers. 0 = disabled (position holds to settle or take-profit).'),
+            ),
           ),
-          // V9.19.24: Edge filter — single full-width row at the bottom of risk guardrails.
-          //   Critical for V9.19.24+ — blocks "market already priced this" trades.
-          React.createElement('div',{className:'mt-2 pt-2',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
+          //
+          // ── 5. Cooldown after losses ─────────────────────────────────────────
+          //
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid rgba(232,233,228,0.06)'}},
+            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#E8E9E4]/45'},'Cooldown after losses'),
+          ),
+          React.createElement('div',{className:'grid grid-cols-2 gap-2 mb-3'},
+            React.createElement('label',{className:'block'},
+              _labelTip('cooldown-n','Cooldown after N losses','After N consecutive LOSSES, auto-exec pauses for the cooldown duration. Prevents tilt-trading after a losing streak. Default 3 — typical for tape-led strategies. Setting to 2 is aggressive (pauses quickly), 5+ is loose (lets a bad streak run).'),
+              React.createElement('input',{
+                type:'number',min:2,max:10,step:1,value:autoExecSettings?.cooldownLossStreak||3,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownLossStreak:Math.max(2,Math.min(10,_num(e.target.value,3)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
+              }),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
+                `= ${autoExecSettings?.cooldownLossStreak||3} consecutive losses triggers a cooldown`,
+              ),
+              _tipBox('cooldown-n','After N consecutive LOSSES, auto-exec pauses for the cooldown duration. Prevents tilt-trading after a losing streak. Default 3 — typical for tape-led strategies. Setting to 2 is aggressive (pauses quickly), 5+ is loose (lets a bad streak run).'),
+            ),
+            React.createElement('label',{className:'block'},
+              _labelTip('cooldown-dur','Cooldown duration (min)','Once cooldown triggers, auto-exec stays paused this many minutes. Default 20. Use shorter (5-10) if you want to resume quickly after a streak; longer (30-60) if you want a real reset before re-engaging.'),
+              React.createElement('input',{
+                type:'number',min:1,max:240,step:1,value:autoExecSettings?.cooldownMinutes||20,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,cooldownMinutes:Math.max(1,Math.min(240,_num(e.target.value,20)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
+              }),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
+                `= ${autoExecSettings?.cooldownMinutes||20} minutes of no new auto-trades after streak`,
+              ),
+              _tipBox('cooldown-dur','Once cooldown triggers, auto-exec stays paused this many minutes. Default 20. Use shorter (5-10) if you want to resume quickly after a streak; longer (30-60) if you want a real reset before re-engaging.'),
+            ),
+          ),
+          //
+          // ── 6. Entry filters ─────────────────────────────────────────────────
+          //
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid rgba(232,233,228,0.06)'}},
+            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#E8E9E4]/45'},'Entry filters'),
+          ),
+          React.createElement('div',{className:'mb-2'},
             React.createElement('label',{className:'block'},
               React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
                 _labelTip('edge-cap','Edge cap — max Tara-vs-Kalshi gap (pt)','Blocks auto-trades where Tara is too far ahead of Kalshi on the same side. May 14 audit of 642 trades: edge >25pt won only 65%, edge 0-10pt won 70.6%, edge negative (Kalshi ahead) won 80%+. The pattern: HIGH positive edge = "market already priced this" = bad trade. Default 15. Manual click bypasses. Set to 0 to disable filter entirely (not recommended).'),
@@ -12116,9 +12159,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               _tipBox('edge-cap','Blocks auto-trades where Tara is too far ahead of Kalshi on the same side. May 14 audit of 642 trades: edge >25pt won only 65%, edge 0-10pt won 70.6%, edge negative (Kalshi ahead) won 80%+. The pattern: HIGH positive edge = "market already priced this" = bad trade. Default 15. Manual click bypasses. Set to 0 to disable filter entirely (not recommended).'),
             ),
           ),
-          // V9.19.26: Skip time-cap-commit toggle. Sits inside Risk Guardrails
-          //   right below Edge cap — both are data-backed gates from May 14 audit.
-          React.createElement('div',{className:'mt-2 pt-2',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
+          React.createElement('div',{className:'mb-2 mt-2'},
             React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
               React.createElement('div',{className:'flex-1 pr-2'},
                 React.createElement('div',{className:'flex items-baseline gap-2 mb-0.5'},
@@ -12140,11 +12181,13 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               }),
             ),
           ),
-          // V10.0.0: Tara's Trade timing engine (Phase 4) mode selector.
-          //   Session 2 ships with 'off' and 'shadow' fully functional.
-          //   'advisory' and 'pregate' are reserved for Session 4 (not yet
-          //   implemented — they behave like 'shadow' until then).
-          React.createElement('div',{className:'mt-2 pt-2',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
+          //
+          // ── 7. Decision routing (Phase 4) ────────────────────────────────────
+          //
+          React.createElement('div',{className:'pt-3 mb-1.5',style:{borderTop:'1px solid rgba(232,233,228,0.06)'}},
+            React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#E8E9E4]/45'},'Decision routing'),
+          ),
+          React.createElement('div',{className:'mb-1'},
             React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
               _labelTip('timing-mode','Tara\'s Trade engine (Phase 4)','New V10.0.0 timing engine. Evaluates every Tara\'s Call lock and outputs fire-now / wait / abort with reasons. Currently in SHADOW mode for Session 2 data collection — runs silently, logs to CSV, does NOT affect trades. Future sessions: tune thresholds (Session 3) → advisory/pregate live blocking (Session 4). Set to "off" if you don\'t want the engine logging anything at all.'),
               React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.0.0'),
@@ -12427,23 +12470,9 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           ),
           React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-3'},
             React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55 leading-relaxed'},
-              'Three exit paths run in parallel. Whichever fires first wins. If none fires, position settles naturally on Kalshi. Take-profit lives in the basic guardrails section above.',
+              'Optional exit paths beyond the basic take-profit and stop-loss in Risk guardrails. Time exit closes before Kalshi settles. Smart exits (separate panel below) react to tape reversal.',
             ),
-            // Stop loss
-            React.createElement('label',{className:'block'},
-              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Stop-loss: exit if our side drops by N¢ from fill (0=disabled)'),
-              React.createElement('input',{
-                type:'number',min:0,max:90,step:1,value:autoExecSettings?.stopLossDeltaCents||0,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(90,_num(e.target.value,0)))})),
-                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
-              }),
-              // V9.17.20: unit hint
-              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},(()=>{
-                const _c=autoExecSettings?.stopLossDeltaCents||0;
-                return _c===0?'= no stop-loss (position holds to settle or take-profit)':`= exit if our-side offer drops ${_c}¢ below fill price`;
-              })()),
-              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 mt-1 leading-relaxed'},'E.g. 20: filled at 60¢, exit if our side drops to 40¢. Cuts losers early at the cost of some marginal recoveries. Try 25-35 to start.'),
-            ),
+            // V10.2.5: Stop-loss moved to Risk guardrails > Exit thresholds. Was here.
             // Time exit
             React.createElement('label',{className:'block'},
               React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Time exit: close when fewer than N seconds left (0=disabled)'),
@@ -22526,7 +22555,23 @@ function TaraApp(){
         lockStabilitySec:Number(v.lockStabilitySec)>=0?Number(v.lockStabilitySec):0,
         // ── V9.6.0: ADVANCED EXIT LOGIC ──────────────────────────────────
         // Stop-loss: exit if our side drops by N¢ from the fill price. 0 = disabled.
-        stopLossDeltaCents:Number(v.stopLossDeltaCents)>=0?Number(v.stopLossDeltaCents):0,
+        // V10.2.5: PROMOTED FROM ADVANCED TO RISK GUARDRAILS — it's a discipline
+        //   guard, not an opinion. One-shot migration: if user has 0 (default),
+        //   bump to 15. Honors customizations (any non-zero value left alone).
+        //   Sentinel 'tara_v10_2_5_stoploss_default_applied' ensures single-run.
+        stopLossDeltaCents:(()=>{
+          let _v=Number(v.stopLossDeltaCents)>=0?Number(v.stopLossDeltaCents):0;
+          try{
+            if(!localStorage.getItem('tara_v10_2_5_stoploss_default_applied')){
+              if(_v===0){
+                _v=15;
+                try{console.info('[V10.2.5] stop-loss default applied: 0→15¢ (promoted to Risk guardrails)');}catch(_){}
+              }
+              localStorage.setItem('tara_v10_2_5_stoploss_default_applied','1');
+            }
+          }catch(_){}
+          return _v;
+        })(),
         // Time-based exit: exit when fewer than N seconds remain in the window.
         // 0 = disabled (let it settle naturally on Kalshi).
         timeExitSecLeft:Number(v.timeExitSecLeft)>=0?Number(v.timeExitSecLeft):0,
@@ -22583,7 +22628,7 @@ function TaraApp(){
         smartExitExtendCents:Number(v.smartExitExtendCents)>=0?Number(v.smartExitExtendCents):5, // extend target by N¢ when extending
         signalSource:(v.signalSource==='lock'||v.signalSource==='snapshot')?v.signalSource:'snapshot', // V9.17.22
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:2,maxDailyLoss:5,maxAutoTradesPerDay:5,maxAutoTradesPerWindow:1,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:88,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,tradeTimingMode:'shadow',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:2,maxDailyLoss:5,maxAutoTradesPerDay:5,maxAutoTradesPerWindow:1,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:88,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,tradeTimingMode:'shadow',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:15,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
