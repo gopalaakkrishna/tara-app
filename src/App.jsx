@@ -3830,10 +3830,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.14-session-tier-apply-helper';
+const BASELINE_VERSION='2026.05.14-v10.2.15-rollover-grace-blocks-lifecycle-commits';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.14';
+const TARA_VERSION_DISPLAY='Tara 10.2.15';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -32242,8 +32242,7 @@ function TaraApp(){
     //   regardless of tc.call state. Direction picked from posterior — whichever side has
     //   the most confidence right now. Bypasses ALL safeguards. This is the explicit
     //   "I see something Tara doesn't" override.
-    const _hardForceOnEntry=hardForceRef.current>0&&(Date.now()-hardForceRef.current)<5000;
-    if(_hardForceOnEntry){
+    const _hardForceOnEntry=hardForceRef.current>0&&(Date.now()-hardForceRef.current)<5000;    if(_hardForceOnEntry){
       const _post=analysis?.rawProbAbove??50;
       const _forceDir=_post>=50?'UP':'DOWN';
       const _forceSession=(typeof getMarketSessions==='function'?getMarketSessions():{})?.dominant||'UNKNOWN';
@@ -32349,6 +32348,21 @@ function TaraApp(){
         return [...prev,_entry].slice(-TARA_CALL_LOG_CAP);
       });
       return;
+    }
+    // V10.2.15 — ROLLOVER GRACE BLOCKS LIFECYCLE COMMITS.
+    //   The engine IIFE (line 29722) correctly returns SIT_OUT for the first 5s
+    //   after a new window starts ("observing fresh data"). BUT the lifecycle
+    //   commit paths below read _commitDir from analysis.rawProbAbove DIRECTLY,
+    //   not from tc.call. So they could fire snapshot commits during the grace
+    //   period, producing the "LOCKED UP + observing fresh data (5s)" sticky
+    //   state the user reported in V10.2.14.
+    //
+    //   Fix: respect the grace at the lifecycle level too. Hard-force above is
+    //   intentionally exempted (user is explicitly overriding everything).
+    //   All other auto-commit paths defer until grace expires.
+    const _msSinceRolloverLC=Date.now()-(_rolloverGraceRef.current||0);
+    if(_rolloverGraceRef.current>0&&_msSinceRolloverLC<5000){
+      return; // grace active — let the engine's SIT_OUT render, no auto-commits
     }
     // Track sample stability — if direction flips, reset count
     const ref=taraCallSampleRef.current;
