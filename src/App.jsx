@@ -1260,6 +1260,27 @@ const _autoExecLogPush=(event)=>{
     localStorage.setItem(AUTO_EXEC_LOG_KEY,JSON.stringify(_arr));
   }catch(_){}
 };
+// V10.2.6 — DEDUPE BLOCKED EVENTS to stop log spam. The auto-exec entry effect
+//   re-evaluates ~1Hz (on every snapshot tick) and was pushing a 'blocked' event
+//   per tick when a guard fired — flooding the 500-event FIFO buffer with
+//   duplicates and EVICTING the actually-interesting events (placed/filled/exited).
+//   May 14 user log: 500/500 entries were 'window-cap' blocks on a single window;
+//   the two manual 'placed' events from that window had been pushed out.
+//
+//   Fix: per-window+guard+asset dedupe. First block of a given (guard, wid, asset)
+//   logs; subsequent identical blocks are silently dropped. Module-level Set —
+//   survives renders but resets on full page refresh (acceptable; refreshing is
+//   itself a fresh diagnostic context). Self-prunes at 2000 entries.
+const _AUTO_EXEC_BLOCK_DEDUP=new Set();
+const _autoExecLogPushBlockOnce=(payload)=>{
+  try{
+    const _key=`${payload&&payload.guard||'?'}|${payload&&payload.windowId||'?'}|${payload&&payload.asset||'?'}|${payload&&payload.dir||'?'}`;
+    if(_AUTO_EXEC_BLOCK_DEDUP.has(_key))return;
+    _AUTO_EXEC_BLOCK_DEDUP.add(_key);
+    if(_AUTO_EXEC_BLOCK_DEDUP.size>2000)_AUTO_EXEC_BLOCK_DEDUP.clear();
+    _autoExecLogPush(payload);
+  }catch(_){}
+};
 const _autoExecLogGet=()=>{
   try{
     const _raw=localStorage.getItem(AUTO_EXEC_LOG_KEY);
@@ -3573,10 +3594,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.5-risk-guardrails-reorg-stoploss-promoted';
+const BASELINE_VERSION='2026.05.14-v10.2.7-ticket-honesty-manual-position-banner';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.5';
+const TARA_VERSION_DISPLAY='Tara 10.2.7';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -21721,6 +21742,42 @@ ${_d.responseBody||'(empty)'}`;
               );
             };
             const _rows=[];
+            // V10.2.7 — MANUAL-POSITION MISMATCH BANNER
+            //   Detect a common failure mode the user hit: they have a real
+            //   position on Kalshi (clicked ENTERED UP/DOWN button), but
+            //   autoOrderState is empty or doesn't have a fill price. This
+            //   happens when:
+            //     (a) user entered manually on Kalshi outside of Tara
+            //     (b) autoOrderState was cleared between place and now
+            //     (c) auto-exec is disabled and they fired via Kalshi directly
+            //   In any of these cases the rows below are FORWARD-LOOKING
+            //   PREVIEW — what Tara would buy at the current market — NOT the
+            //   user's actual position. Without this banner the user reads
+            //   "1 contract @ 64¢" as their actual entry and gets confused
+            //   when Kalshi shows different numbers.
+            //   Banner directs them to the edit button (which can override
+            //   the displayed entry price → make stops/targets accurate).
+            const _hasManualPos=!!userPosition&&!_liveValid;
+            if(_hasManualPos){
+              _rows.push(React.createElement('div',{
+                key:'manual-position-banner',
+                className:'py-2 px-2 mt-1 mb-1 rounded',
+                style:{
+                  background:'rgba(229,200,112,0.10)',
+                  border:'1px solid rgba(229,200,112,0.35)',
+                },
+              },
+                React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider mb-1',style:{color:'#E5C870'}},'⚠ manual position — preview shown'),
+                React.createElement('div',{className:'text-[11px] leading-relaxed',style:{color:'rgba(232,233,228,0.85)'}},
+                  `Tara sees you marked ENTERED ${userPosition} but doesn't know your real fill price or contract count from Kalshi. The numbers below show what Tara WOULD buy at the current market — not what you actually own.`,
+                ),
+                React.createElement('div',{className:'text-[10px] mt-1.5 leading-relaxed',style:{color:'rgba(232,233,228,0.65)'}},
+                  '→ Tap ',
+                  React.createElement('span',{style:{color:'#E5C870',fontWeight:600}},'✎ edit values for this window'),
+                  ' below and enter your actual fill price. Stop-loss + take-profit will then track against your real entry instead of the live market.',
+                ),
+              ));
+            }
             // direction
             _rows.push(_renderTip(
               'direction',
@@ -21762,13 +21819,40 @@ ${_d.responseBody||'(empty)'}`;
                     :`The cap-exceeded warning above will block this trade. The numbers shown reflect what would have placed if the cap allowed it.`,
               ));
             }
-            // stake
-            _rows.push(_renderTip(
-              'stake',
-              'stake',
-              `$${(_liveValid?_liveStakeDollars:_betSize).toFixed(2)}`,
-              `Total dollars you're risking on this trade. This is the maximum loss if everything goes wrong (price settles against you). Set in Trading Settings → bet size.`,
-            ));
+            // stake/cost — V10.2.7 HONESTY FIX
+            //   Old behavior was misleading: when previewing (not yet in a trade),
+            //   this row showed `_betSize` which is the BUDGET passed to Kalshi
+            //   (intendedDollars from sizing). But Kalshi only buys integer
+            //   contracts via floor(budget / cost_per_contract). For $1 budget
+            //   at 65¢ → 1 contract for 65¢ actual cost, $0.35 budget leftover.
+            //   User reading "stake: $1.00" thought they'd spent $1.00 on Kalshi.
+            //
+            //   New behavior:
+            //     - Live (in a real trade): show actual stake (contracts × fill).
+            //       Label stays "stake" because the number IS the realized cost.
+            //     - Preview: show "budget $X → cost $Y" where:
+            //         budget = _betSize (what the sizing math wants to spend)
+            //         cost   = _contracts × _entryCents / 100 (what Kalshi will
+            //                  actually charge after the floor)
+            //       Label changes to "budget · cost" so the two numbers are
+            //       clearly different quantities.
+            if(_liveValid){
+              _rows.push(_renderTip(
+                'stake',
+                'stake',
+                `$${_liveStakeDollars.toFixed(2)}`,
+                `What you actually paid on Kalshi: ${_liveContractsActual} contract${_liveContractsActual===1?'':'s'} × ${_liveEntryCents}¢ = $${_liveStakeDollars.toFixed(2)}. This is your maximum possible loss (price settles against you).`,
+              ));
+            }else{
+              const _predictedCost=_contracts&&_entryCents?(_contracts*_entryCents/100):0;
+              const _leftover=_betSize-_predictedCost;
+              _rows.push(_renderTip(
+                'stake',
+                'budget · cost',
+                `$${_betSize.toFixed(2)} → $${_predictedCost.toFixed(2)}`,
+                `Tara's sizing wants to spend $${_betSize.toFixed(2)} (your budget from Trading Settings → bet size, capped at max-bet). But Kalshi only sells whole contracts, so the actual cost is ${_contracts} × ${_entryCents}¢ = $${_predictedCost.toFixed(2)}. The $${_leftover.toFixed(2)} difference can't buy a partial contract — it stays in your balance. Raise your bet size to buy more contracts (each one needs ${_entryCents}¢ to add).`,
+              ));
+            }
             // current offer + unrealized P&L (only when in-trade)
             if(_liveValid&&_liveCurOurCents!=null){
               const _color=_liveUnrealCents==null||_liveUnrealCents===0
@@ -29362,7 +29446,7 @@ function TaraApp(){
     const _effectiveCount=(_winCount===0&&_attemptedWindowsRef.current.has(_attemptKey))?1:_winCount;
     if(_effectiveCount>=_maxPerWindow&&!_isManual){
       // V10.2.4: emit a block event so the user can see the cap fired
-      try{_autoExecLogPush({type:'blocked',guard:'window-cap',asset:currentAsset,windowId:_wid,dir:_signal?.dir||null,blockReason:`max trades per window reached (${_effectiveCount}/${_maxPerWindow})`});}catch(_){}
+      try{_autoExecLogPushBlockOnce({type:'blocked',guard:'window-cap',asset:currentAsset,windowId:_wid,dir:_signal?.dir||null,blockReason:`max trades per window reached (${_effectiveCount}/${_maxPerWindow})`});}catch(_){}
       return;
     }
     if(_attemptedWindowsRef.current.has(_attemptKey)&&_isManual){
@@ -29543,7 +29627,7 @@ function TaraApp(){
       }
       _autoExecLastFiredKeyRef.current=_key; // mark seen so we don't keep evaluating
       // V10.2.4: log guardrail block
-      try{_autoExecLogPush({type:'blocked',guard:'guardrail',asset:currentAsset,windowId:computeWindowId(windowType),dir:_signal?.dir||null,blockReason:_g.reason});}catch(_){}
+      try{_autoExecLogPushBlockOnce({type:'blocked',guard:'guardrail',asset:currentAsset,windowId:computeWindowId(windowType),dir:_signal?.dir||null,blockReason:_g.reason});}catch(_){}
       return;
     }
     // Need an active Kalshi market to place an order against
@@ -29618,7 +29702,7 @@ function TaraApp(){
             _edgeCap:_edgeCap,
           });
           // V10.2.4: log edge-cap block
-          try{_autoExecLogPush({type:'blocked',guard:'edge-cap',asset:currentAsset,windowId:_wid,dir:_dir,blockReason:_reason,edgePt:Math.round(_edge*10)/10,edgeCap:_edgeCap,taraConv:Math.round(_taraConv),kalshiConv:Math.round(_kalshiConv)});}catch(_){}
+          try{_autoExecLogPushBlockOnce({type:'blocked',guard:'edge-cap',asset:currentAsset,windowId:_wid,dir:_dir,blockReason:_reason,edgePt:Math.round(_edge*10)/10,edgeCap:_edgeCap,taraConv:Math.round(_taraConv),kalshiConv:Math.round(_kalshiConv)});}catch(_){}
           return;
         }
       }
