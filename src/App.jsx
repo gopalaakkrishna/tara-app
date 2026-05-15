@@ -3830,10 +3830,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.19-timeseries-capture-from-snapshot-too';
+const BASELINE_VERSION='2026.05.14-v10.2.20-qscorev2-retune-from-724trade-audit';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.19';
+const TARA_VERSION_DISPLAY='Tara 10.2.20';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -29608,8 +29608,33 @@ function TaraApp(){
       const regimeCalPts=ana?.diagnosticsV97?.regimeCal?.applied?25:0;
       const regimeWRPts=Math.min(20,Math.max(0,(rWR-50)*0.4));
       const pt=ana.rawProbAbove||50;
-      const postPts=Math.min(10,Math.max(0,(Math.abs(pt-50)-15)*0.4));
-      const latePenalty=ana.isVeryLateLock?-20:ana.isLateLockZone?-8:0;
+      // V10.2.20 — POSTERIOR component retuned from 724-trade audit.
+      //   May 15 audit findings:
+      //     • Overall post×WR: posterior magnitude is NON-MONOTONIC for single-tier
+      //       (which is 78% of trades). Specifically:
+      //         <10pt:  80.0% WR  (n=18)
+      //         10-20:  76.3% WR  (n=84)
+      //         20-30:  65.0% WR  (n=377)
+      //         30+:    64.7% WR  (n=88)
+      //       Higher conviction = LOWER WR for single-tier.
+      //     • Inside TRENDING UP × 30+pt posterior:  54.5% WR
+      //     • Inside SHORT SQUEEZE × 30+pt posterior: 54.8% WR
+      //       Both momentum regimes show high posterior = overconfidence.
+      //   Fix: zero out postPts in momentum regimes (TRENDING UP / SHORT SQUEEZE);
+      //   keep it modest elsewhere. Net effect: qScoreV2 stops giving false signal
+      //   to "extreme posterior" trades that statistically don't deliver.
+      const _momentumRegime=rg==='TRENDING UP'||rg==='SHORT SQUEEZE';
+      const postPts=_momentumRegime?0:Math.min(10,Math.max(0,(Math.abs(pt-50)-15)*0.4));
+      // V10.2.20 — LATE-LOCK PENALTY dropped (was -20 very-late / -8 late zone).
+      //   May 15 audit (qScoreV2 components, n=28 V2 trades):
+      //     wins: late component avg -0.91
+      //     losses: late component avg 0.00
+      //   Wins had the late penalty applied MORE OFTEN than losses, meaning late
+      //   locks were WINNING. Penalty was directionally wrong. Setting to 0 until
+      //   we have more V2 data — if a later audit shows late locks DO underperform
+      //   on tighter filters, we can reinstate or invert.
+      //   V1 forensic legacy preserved at _computeQualityV1Legacy for comparison.
+      const latePenalty=0;
       const base=5;
       const raw=regimeCalPts+sessionPts+regimeWRPts+postPts+latePenalty+base;
       const score=Math.max(0,Math.min(100,Math.round(raw)));
@@ -29617,7 +29642,11 @@ function TaraApp(){
         score,
         label:score>=75?'HIGH':score>=55?'MODERATE':'LOW',
         color:score>=75?'emerald':score>=55?'amber':'rose',
-        components:{regimeCalPts,sessionPts,regimeWRPts,postPts,latePenalty,base},
+        components:{regimeCalPts,sessionPts,regimeWRPts,postPts,latePenalty,base,
+          // V10.2.20 — diagnostic flags for audit hooks
+          _v10_2_20_postZeroed:_momentumRegime,
+          _v10_2_20_lateDropped:true,
+        },
       };
     }catch(e){return{score:0,label:'LOW',color:'rose',components:null};}
   };
@@ -29667,8 +29696,12 @@ function TaraApp(){
       const regimeCalPts=ana?.diagnosticsV97?.regimeCal?.applied?25:0;
       const regimeWRPts=Math.min(20,Math.max(0,(rWR-50)*0.4));
       const pt=ana.rawProbAbove||50;
-      const postPts=Math.min(10,Math.max(0,(Math.abs(pt-50)-15)*0.4));
-      const latePenalty=ana.isVeryLateLock?-20:ana.isLateLockZone?-8:0;
+      // V10.2.20 — same retune as _computeQuality (zero out post in momentum
+      //   regimes, drop late penalty). Keeping V2 in sync with V1-live so the
+      //   qScoreV2 CSV column remains a 1:1 match to the live qScore.
+      const _momentumRegime=rg==='TRENDING UP'||rg==='SHORT SQUEEZE';
+      const postPts=_momentumRegime?0:Math.min(10,Math.max(0,(Math.abs(pt-50)-15)*0.4));
+      const latePenalty=0;
       const base=5;
       const raw=regimeCalPts+sessionPts+regimeWRPts+postPts+latePenalty+base;
       const score=Math.max(0,Math.min(100,Math.round(raw)));
