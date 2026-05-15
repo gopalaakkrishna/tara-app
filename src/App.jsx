@@ -1227,6 +1227,106 @@ if(typeof window!=='undefined'){
   try{console.info('[AuditStats] hook ready — run window.__taraAuditStats() in console');}catch(_){}
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.2.4 — AUTO-EXEC EVENT LOG
+// ═══════════════════════════════════════════════════════════════════════════
+// Persistent log of every auto-exec decision: placed, filled, exited, blocked,
+//   error. Surfaces what's ACTUALLY happening with auto-exec — including all
+//   the times it sat out and why. Without this, you only see settled trades
+//   in the call log, not the (much larger) population of attempts and skips.
+//
+// Stored in localStorage at 'taraAutoExecLog_v1'. Cap 500 events (auto-prunes
+//   oldest on overflow). Each event has timestamp, type, asset, windowId, and
+//   type-specific fields (limit, fill price, exit reason, block guard, etc.).
+//
+// Console hooks:
+//   window.__taraAutoExecLog()                  → print today's events
+//   window.__taraAutoExecLog({n:50})            → last N events
+//   window.__taraAutoExecLog({type:'blocked'})  → only block events
+//   window.__taraAutoExecLog({type:'placed'})   → only placement events
+//   window.__taraAutoExecLog({asset:'BTC'})     → filter to one asset
+//   window.__taraAutoExecLog({raw:true})        → return full array, no print
+//   window.__taraAutoExecLogClear()             → wipe (asks for confirmation)
+const AUTO_EXEC_LOG_CAP=500;
+const AUTO_EXEC_LOG_KEY='taraAutoExecLog_v1';
+const _autoExecLogPush=(event)=>{
+  try{
+    const _raw=localStorage.getItem(AUTO_EXEC_LOG_KEY);
+    const _arr=_raw?JSON.parse(_raw):[];
+    if(!Array.isArray(_arr))return;
+    const _e={id:Date.now()+Math.random(),ts:Date.now(),...event};
+    _arr.push(_e);
+    if(_arr.length>AUTO_EXEC_LOG_CAP)_arr.splice(0,_arr.length-AUTO_EXEC_LOG_CAP);
+    localStorage.setItem(AUTO_EXEC_LOG_KEY,JSON.stringify(_arr));
+  }catch(_){}
+};
+const _autoExecLogGet=()=>{
+  try{
+    const _raw=localStorage.getItem(AUTO_EXEC_LOG_KEY);
+    return _raw?JSON.parse(_raw):[];
+  }catch(_){return[];}
+};
+if(typeof window!=='undefined'){
+  window.__taraAutoExecLog=(opts={})=>{
+    try{
+      const _log=_autoExecLogGet();
+      let _filtered=_log;
+      if(opts.type)_filtered=_filtered.filter(e=>e.type===opts.type);
+      if(opts.asset)_filtered=_filtered.filter(e=>e.asset===opts.asset);
+      if(opts.todayOnly){
+        const _todayStart=new Date();_todayStart.setHours(0,0,0,0);
+        _filtered=_filtered.filter(e=>e.ts>=_todayStart.getTime());
+      }
+      const _n=Math.max(1,Number(opts.n)||_filtered.length);
+      _filtered=_filtered.slice(-_n);
+      if(opts.raw)return _filtered;
+      console.group(`%c━━━ Tara Auto-Exec Event Log ━━━`,'color:#E5C870;font-weight:bold;font-size:13px');
+      console.info(`Showing: ${_filtered.length} events (filter: ${opts.type||'all types'}, ${opts.asset||'all assets'})`);
+      // Summary by type
+      const _byType={};
+      _filtered.forEach(e=>{if(!_byType[e.type])_byType[e.type]=[];_byType[e.type].push(e);});
+      const _summary=Object.entries(_byType).map(([type,events])=>({
+        type,count:events.length,
+        firstAt:events.length?new Date(events[0].ts).toLocaleString():'',
+        lastAt:events.length?new Date(events[events.length-1].ts).toLocaleString():'',
+      }));
+      console.group('Summary by type');
+      try{console.table(_summary);}catch(_){}
+      console.groupEnd();
+      // Block reasons breakdown (most informative for "why didn't it fire")
+      const _blocks=_filtered.filter(e=>e.type==='blocked');
+      if(_blocks.length>0){
+        const _byGuard={};
+        _blocks.forEach(e=>{const g=e.guard||'unknown';_byGuard[g]=(_byGuard[g]||0)+1;});
+        console.group(`Block reasons (n=${_blocks.length})`);
+        try{console.table(Object.entries(_byGuard).map(([guard,count])=>({guard,count})).sort((a,b)=>b.count-a.count));}catch(_){}
+        console.groupEnd();
+      }
+      // Full timeline (most recent first)
+      console.group(`Timeline (${_filtered.length} events, most recent first)`);
+      try{console.table(_filtered.slice().reverse().map(e=>({
+        time:new Date(e.ts).toLocaleTimeString(),
+        type:e.type,
+        asset:e.asset||'',
+        dir:e.dir||'',
+        wid:(e.windowId||'').split('-').pop()?.slice(-12)||'',
+        details:e.exitReason||e.blockReason||e.errorMsg||(e.limitCents?`${e.limitCents}¢`:'')||(e.fillPriceCents?`fill ${e.fillPriceCents}¢`:'')||'',
+      })));}catch(_){}
+      console.groupEnd();
+      console.groupEnd();
+      return{count:_filtered.length,byType:_byType};
+    }catch(e){console.error('[AutoExecLog] failed:',e&&e.message);return null;}
+  };
+  window.__taraAutoExecLogClear=()=>{
+    try{
+      if(!confirm('Wipe all auto-exec event log entries? This cannot be undone.'))return;
+      localStorage.removeItem(AUTO_EXEC_LOG_KEY);
+      console.info('[AutoExecLog] cleared');
+    }catch(_){}
+  };
+  try{console.info('[AutoExecLog] hook ready — run window.__taraAutoExecLog() in console');}catch(_){}
+}
+
 // Deterministic ID for the current trading window (UTC ISO of window-open boundary).
 // Refresh during the same window → same ID → restore the same lock.
 const computeWindowId=(windowType)=>{
@@ -3473,10 +3573,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.3-manual-flag-persistence-fix';
+const BASELINE_VERSION='2026.05.14-v10.2.4-event-log-and-per-window-cap';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.3';
+const TARA_VERSION_DISPLAY='Tara 10.2.4';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -11917,6 +12017,30 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 return `= block auto-exec for the rest of the day after ${_n} trade${_n===1?'':'s'} placed`;
               })()),
               _tipBox('max-trades-day','HARD CAP. Maximum number of auto-exec trades allowed per UTC day. Pure runaway protection — if a bug or unexpected market condition causes Tara to fire repeatedly, this is the brick wall. When hit, auto-exec is blocked until UTC midnight rolls. Default 10 — conservative for low-balance accounts. Raise once you trust the system. 0 disables.'),
+            ),
+          ),
+          // V10.2.4 — Max trades per window. The V9.18.3 hard cap was always "1 per
+          //   window per asset" — now exposed as a user setting. Default 1 matches
+          //   prior behavior. Raise to 2-5 only if you specifically want to scalp
+          //   in/out within the same window. WARNING: raising this re-enables some
+          //   of the failure modes the V9.18.3 cap was designed to prevent.
+          React.createElement('div',{className:'mt-2 pt-2',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
+                _labelTip('max-trades-window','Max trades / window','HARD CAP. Maximum number of auto-exec entries on the same window (per asset). Default 1 = one shot per window. Was always "1" in V9.18.3 but the loop bug in V10.2.2 churned 36 trades on one window because the cap was bypassable. V10.2.3 fixed the bypass + V10.2.4 makes the cap a user-tunable setting. Raise to 2-5 only if you want to average-in or scalp in/out within one window. The 36-trade incident is what this guard prevents.'),
+                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2.4'),
+              ),
+              React.createElement('input',{
+                type:'number',min:1,max:5,step:1,value:autoExecSettings?.maxAutoTradesPerWindow??1,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxAutoTradesPerWindow:Math.max(1,Math.min(5,_num(e.target.value,1)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
+              }),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},(()=>{
+                const _n=Number(autoExecSettings?.maxAutoTradesPerWindow)||1;
+                if(_n===1)return '= one auto-exec entry per window per asset (RECOMMENDED — matches original V9.18.3 hard cap)';
+                return `⚠ allow up to ${_n} auto-exec entries on the same window per asset — re-entry mode (re-enables failure modes V9.18.3 prevented; only for explicit scalping/averaging strategies)`;
+              })()),
+              _tipBox('max-trades-window','HARD CAP. Maximum number of auto-exec entries on the same window (per asset). Default 1 = one shot per window. Was always "1" in V9.18.3 but the loop bug in V10.2.2 churned 36 trades on one window because the cap was bypassable. V10.2.3 fixed the bypass + V10.2.4 makes the cap a user-tunable setting. Raise to 2-5 only if you want to average-in or scalp in/out within one window. The 36-trade incident is what this guard prevents.'),
             ),
           ),
           // V10.2.x — Daily dollar loss cap. Re-added after V9.17.3 removal now that
@@ -22278,8 +22402,27 @@ function TaraApp(){
       return{
         enabled:!!v.enabled,                         // master toggle
         dryRun:v.dryRun!==false,                     // default ON — flip after sandbox verification
-        maxBetPerTrade:Number(v.maxBetPerTrade)>0?Number(v.maxBetPerTrade):25,
-        maxDailyLoss:Number(v.maxDailyLoss)>0?Number(v.maxDailyLoss):50,
+        // V10.2.4: same safe-defaults migration as maxAutoTradesPerDay below.
+        maxBetPerTrade:(()=>{
+          let _v=Number(v.maxBetPerTrade)>0?Number(v.maxBetPerTrade):25;
+          try{
+            if(!localStorage.getItem('tara_v10_2_4_safe_defaults_applied')){
+              const _atOldDefaults=(Number(v.maxBetPerTrade)===25&&Number(v.maxDailyLoss)===50&&Number(v.maxAutoTradesPerDay)===10);
+              if(_atOldDefaults){_v=2;try{console.info('[V10.2.4] safe-defaults migration: maxBetPerTrade 25→2');}catch(_){}}
+            }
+          }catch(_){}
+          return _v;
+        })(),
+        maxDailyLoss:(()=>{
+          let _v=Number(v.maxDailyLoss)>0?Number(v.maxDailyLoss):50;
+          try{
+            if(!localStorage.getItem('tara_v10_2_4_safe_defaults_applied')){
+              const _atOldDefaults=(Number(v.maxBetPerTrade)===25&&Number(v.maxDailyLoss)===50&&Number(v.maxAutoTradesPerDay)===10);
+              if(_atOldDefaults){_v=5;try{console.info('[V10.2.4] safe-defaults migration: maxDailyLoss 50→5');}catch(_){}}
+            }
+          }catch(_){}
+          return _v;
+        })(),
         cooldownLossStreak:Number(v.cooldownLossStreak)>=2?Number(v.cooldownLossStreak):3,
         cooldownMinutes:Number(v.cooldownMinutes)>0?Number(v.cooldownMinutes):20,
         // V10.2.x — runaway protection: hard cap on number of auto-exec trades per
@@ -22287,7 +22430,32 @@ function TaraApp(){
         //   the existing cooldown UI surfaces the block. Default 10 — conservative
         //   for low-balance accounts; user should raise once they trust the system.
         //   Set to 0 to disable (not recommended).
-        maxAutoTradesPerDay:Number.isFinite(Number(v.maxAutoTradesPerDay))&&Number(v.maxAutoTradesPerDay)>=0?Number(v.maxAutoTradesPerDay):10,
+        // V10.2.4: SAFE-DEFAULTS MIGRATION. Detect users on the V10.2.x defaults
+        //   (maxBet=25, maxDailyLoss=50, maxAutoTradesPerDay=10) and bump them to
+        //   safer recommended values (2 / 5 / 5) since user feedback shows these
+        //   were never customized but the high values cost real money in the loop
+        //   bug. Sentinel 'tara_v10_2_4_safe_defaults_applied' prevents double-run.
+        //   If user has customized ANY of the three, leave all three alone.
+        maxAutoTradesPerDay:(()=>{
+          let _v=Number.isFinite(Number(v.maxAutoTradesPerDay))&&Number(v.maxAutoTradesPerDay)>=0?Number(v.maxAutoTradesPerDay):10;
+          try{
+            if(!localStorage.getItem('tara_v10_2_4_safe_defaults_applied')){
+              const _atOldDefaults=(Number(v.maxBetPerTrade)===25&&Number(v.maxDailyLoss)===50&&Number(v.maxAutoTradesPerDay)===10);
+              if(_atOldDefaults){
+                _v=5;
+                try{console.info('[V10.2.4] safe-defaults migration: maxAutoTradesPerDay 10→5');}catch(_){}
+              }
+              localStorage.setItem('tara_v10_2_4_safe_defaults_applied','1');
+            }
+          }catch(_){}
+          return _v;
+        })(),
+        // V10.2.4: per-window hard cap on auto-exec attempts. Default 1 — matches
+        //   V9.18.3 hard-cap behavior. Raising to N allows up to N entries on the
+        //   same window (e.g. averaging in, scalp pyramiding). WARNING: raising
+        //   this re-enables some failure modes the V9.18.3 cap was designed to
+        //   prevent. Keep at 1 unless you have a specific reason.
+        maxAutoTradesPerWindow:Number.isFinite(Number(v.maxAutoTradesPerWindow))&&Number(v.maxAutoTradesPerWindow)>=1?Math.min(5,Number(v.maxAutoTradesPerWindow)):1,
         slippageCents:Number(v.slippageCents)>=0?Number(v.slippageCents):2,
         autoExitOffer:Number(v.autoExitOffer)>0?Number(v.autoExitOffer):85, // exit at 85¢ offer
         autoExitSecLeft:Number(v.autoExitSecLeft)>0?Number(v.autoExitSecLeft):20,
@@ -22415,7 +22583,7 @@ function TaraApp(){
         smartExitExtendCents:Number(v.smartExitExtendCents)>=0?Number(v.smartExitExtendCents):5, // extend target by N¢ when extending
         signalSource:(v.signalSource==='lock'||v.signalSource==='snapshot')?v.signalSource:'snapshot', // V9.17.22
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,maxAutoTradesPerDay:10,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,tradeTimingMode:'off',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:2,maxDailyLoss:5,maxAutoTradesPerDay:5,maxAutoTradesPerWindow:1,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:88,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,tradeTimingMode:'shadow',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
@@ -22791,6 +22959,12 @@ function TaraApp(){
       return _alive;
     }catch(_){return new Set();}
   })());
+  // V10.2.4: per-window attempt COUNT (Map<key,count>). Backs the new
+  //   maxAutoTradesPerWindow setting. In-memory only (resets on page refresh
+  //   — that's OK because the Set above persists, and a fresh count of 0 with
+  //   the Set entry still present is treated as 1 via the post-refresh
+  //   fallback in the hard cap check below). Incremented on each placement.
+  const _windowAttemptCountRef=useRef(new Map());
   // V9.19.4: persist write helper. Preserves each key's original timestamp.
   //   New keys (in set but not in ts map) get stamped now; existing keys keep
   //   their original stamp so TTL counts from first attempt, not last persist.
@@ -29133,8 +29307,17 @@ function TaraApp(){
     //   window. Cleared on window roll (new windowId = new set entry).
     //   Manual override bypasses by clearing the specific entry below.
     const _attemptKey=`${_wid}|${currentAsset}`;
-    if(_attemptedWindowsRef.current.has(_attemptKey)&&!_isManual){
-      // Auto-mode re-fire blocked. Don't spam logs.
+    // V10.2.4: count-based hard cap. Default maxAutoTradesPerWindow=1 matches
+    //   V9.18.3 behavior. Higher values allow re-entry on the same window
+    //   (averaging in, scalp pyramiding). Post-refresh fallback: if Set has
+    //   the key but in-memory count is 0, treat as count=1 (conservative —
+    //   honor the persisted attempt mark even though we don't have the count).
+    const _maxPerWindow=Math.max(1,Math.min(5,Number(autoExecSettings?.maxAutoTradesPerWindow)||1));
+    const _winCount=_windowAttemptCountRef.current.get(_attemptKey)||0;
+    const _effectiveCount=(_winCount===0&&_attemptedWindowsRef.current.has(_attemptKey))?1:_winCount;
+    if(_effectiveCount>=_maxPerWindow&&!_isManual){
+      // V10.2.4: emit a block event so the user can see the cap fired
+      try{_autoExecLogPush({type:'blocked',guard:'window-cap',asset:currentAsset,windowId:_wid,dir:_signal?.dir||null,blockReason:`max trades per window reached (${_effectiveCount}/${_maxPerWindow})`});}catch(_){}
       return;
     }
     if(_attemptedWindowsRef.current.has(_attemptKey)&&_isManual){
@@ -29314,6 +29497,8 @@ function TaraApp(){
         _setManualOrderFeedback({at:Date.now(),msg:`blocked: ${_g.reason}`,color:'rose'});
       }
       _autoExecLastFiredKeyRef.current=_key; // mark seen so we don't keep evaluating
+      // V10.2.4: log guardrail block
+      try{_autoExecLogPush({type:'blocked',guard:'guardrail',asset:currentAsset,windowId:computeWindowId(windowType),dir:_signal?.dir||null,blockReason:_g.reason});}catch(_){}
       return;
     }
     // Need an active Kalshi market to place an order against
@@ -29387,6 +29572,8 @@ function TaraApp(){
             _edgePt:Math.round(_edge*10)/10,
             _edgeCap:_edgeCap,
           });
+          // V10.2.4: log edge-cap block
+          try{_autoExecLogPush({type:'blocked',guard:'edge-cap',asset:currentAsset,windowId:_wid,dir:_dir,blockReason:_reason,edgePt:Math.round(_edge*10)/10,edgeCap:_edgeCap,taraConv:Math.round(_taraConv),kalshiConv:Math.round(_kalshiConv)});}catch(_){}
           return;
         }
       }
@@ -29737,6 +29924,9 @@ function TaraApp(){
     //   this window for this asset. Manual override clears it (handled above).
     _attemptedWindowsRef.current.add(_attemptKey);
     _persistAttemptedWindows(); // V9.19.4
+    // V10.2.4: increment per-window count for the new maxAutoTradesPerWindow
+    //   cap. Map is in-memory only; the Set above carries the persistent flag.
+    _windowAttemptCountRef.current.set(_attemptKey,(_windowAttemptCountRef.current.get(_attemptKey)||0)+1);
     // V10.2.3 CRITICAL FIX: consume the manual-override flags after placement.
     //   ROOT CAUSE BUG: lockedCallRef.current._manualTrigger was set by manual
     //   button clicks but never reset. After one manual click in a window, the
@@ -29786,6 +29976,17 @@ function TaraApp(){
       ladderStartedAt:_isLadderInitial?Date.now():null,
       ladderTargetCents:_dirCents, // remember the offer at lock time for ladder math
     });
+    // V10.2.4: stamp PLACED event for the auto-exec event log.
+    try{_autoExecLogPush({
+      type:'placed',asset:currentAsset,windowId:_wid,dir:_dir,
+      limitCents:_limit,betDollars:_bet,
+      tier:_tierRank===5?'super-confluence':_tierRank===4?'confluence':_tierRank===3?'structural':_tierRank===2?'tape-led':'single',
+      conviction:_conviction,
+      dryRun:!!autoExecSettings.dryRun,
+      manual:_isManual,
+      sizingMode:_missionInfo?'mission':autoExecSettings.sizingMode,
+      ladder:!!autoExecSettings.entryLadderEnabled,
+    });}catch(_){}
     (async()=>{
       try{
         // V9.19.21: PRE-FIRE LOG — captured immediately before the Kalshi POST
@@ -29902,6 +30103,8 @@ function TaraApp(){
         const _ageMs=Date.now()-autoOrderState.placedAt;
         if(_ageMs>=3000){
           setAutoOrderState(prev=>prev?{...prev,status:'filled',fillPrice:prev.limitCents}:null);
+          // V10.2.4: log filled event (dry-run)
+          try{_autoExecLogPush({type:'filled',asset:autoOrderState.asset,windowId:autoOrderState.windowId,dir:autoOrderState.dir,fillPriceCents:autoOrderState.limitCents,dryRun:true});}catch(_){}
         }
         return;
       }
@@ -29916,6 +30119,8 @@ function TaraApp(){
           _consecutiveErrors++;
           if(_consecutiveErrors>=3){
             setAutoOrderState(prev=>prev?{...prev,status:'error',error:r.reason||'poll failed'}:null);
+            // V10.2.4: log error event
+            try{_autoExecLogPush({type:'error',asset:autoOrderState.asset,windowId:autoOrderState.windowId,dir:autoOrderState.dir,errorMsg:'poll failed: '+(r.reason||'unknown')});}catch(_){}
           }
           return;
         }
@@ -29931,6 +30136,10 @@ function TaraApp(){
         const _safeFill=_norm.fillPriceCents;
         if(_newStatus!==autoOrderState.status||_safeFill!=null){
           try{console.info('[V9.18.10] poll update',{prevStatus:autoOrderState.status,newStatus:_newStatus,fillPriceCents:_safeFill,filledCount:_norm.filledCount,rawStatus:_ord.status});}catch(_){}
+          // V10.2.4: log filled event when state crosses into 'filled' (live)
+          if(_newStatus==='filled'&&autoOrderState.status!=='filled'){
+            try{_autoExecLogPush({type:'filled',asset:autoOrderState.asset,windowId:autoOrderState.windowId,dir:autoOrderState.dir,fillPriceCents:_safeFill,filledCount:_norm.filledCount,dryRun:false});}catch(_){}
+          }
           setAutoOrderState(prev=>prev?{
             ...prev,
             status:_newStatus,
@@ -30262,6 +30471,16 @@ function TaraApp(){
       //   UI can show realized P&L. exitFillPrice is set after the order returns; for
       //   dry-run we fall back to exitTriggerCents.
       setAutoOrderState(prev=>prev?{...prev,status:'exiting',exitReason:_exitReason,exitTriggerCents:_ourSideCents}:null);
+      // V10.2.4: log exit event with reason so we can attribute outcomes by exit path
+      //   (take-profit vs smart-exit-reverse vs stop-loss vs time-exit).
+      try{_autoExecLogPush({
+        type:'exited',asset:_aos.asset,windowId:_aos.windowId,dir:_aos.dir,
+        exitReason:_exitReason,
+        exitPriceCents:_ourSideCents,
+        fillPriceCents:_aos.fillPrice,
+        profitCents:_aos.fillPrice!=null?(_ourSideCents-_aos.fillPrice):null,
+        dryRun:!!_aos.dryRun,
+      });}catch(_){}
       (async()=>{
         try{
           const r=await kalshiExitPosition({
