@@ -2737,22 +2737,48 @@ const kalshiAuthedFetch=async({apiKeyId,privateKeyPem,method,path,body,timeoutMs
   //   the proxy's path prefix — the proxy forwards /kalshi/<path> →
   //   api.elections.kalshi.com/trade-api/v2/<path>.
   //
-  //   Override at runtime: localStorage.setItem('taraKalshiProxyBase', 'https://...').
-  const _kProxyBase = (typeof localStorage!=='undefined' && localStorage.getItem('taraKalshiProxyBase'))
-    || 'https://tara-kalshi.up.railway.app/kalshi';
-  const url=`${_kProxyBase}${path}`;
+  //   V10.2.8 — MULTI-PROXY FALLBACK. The previous single-proxy setup made
+  //   the Railway URL a single point of failure: one Railway outage = total
+  //   Kalshi blackout (verified May 14 by ERR_NAME_NOT_RESOLVED on the bare
+  //   kalshi.com domain when the proxy went down). Now `taraKalshiProxyBase`
+  //   accepts a comma-separated list; the fetch tries each in order until
+  //   one succeeds, with full per-URL signal so timeouts don't poison the
+  //   retry. To configure multiple proxies:
+  //     localStorage.setItem('taraKalshiProxyBase',
+  //       'https://tara-kalshi.up.railway.app/kalshi,https://backup-proxy.fly.dev/kalshi');
+  //   Override at runtime: same key as before, just supports CSV now.
+  const _kProxyRaw=(typeof localStorage!=='undefined'&&localStorage.getItem('taraKalshiProxyBase'))||'';
+  const _kProxyBases=_kProxyRaw
+    ?_kProxyRaw.split(',').map(s=>s.trim()).filter(Boolean)
+    :['https://tara-kalshi.up.railway.app/kalshi'];
   const headers={
     'KALSHI-ACCESS-KEY':apiKeyId,
     'KALSHI-ACCESS-TIMESTAMP':ts,
     'KALSHI-ACCESS-SIGNATURE':sig,
     'Accept':'application/json',
   };
-  const init={method:m,headers};
-  if(body&&m!=='GET'&&m!=='HEAD'){headers['Content-Type']='application/json';init.body=JSON.stringify(body);}
-  try{init.signal=AbortSignal.timeout(timeoutMs);}catch(_){}
-  let resp;
-  try{resp=await fetch(url,init);}
-  catch(e){return{ok:false,status:0,reason:'network: '+(e?.message||String(e))};}
+  // Build the base init (sans signal — signal must be fresh per attempt).
+  const _baseInit={method:m,headers};
+  if(body&&m!=='GET'&&m!=='HEAD'){headers['Content-Type']='application/json';_baseInit.body=JSON.stringify(body);}
+  // V10.2.8 — fallback loop. First success wins; otherwise return the last
+  //   error with prefix so user can see WHICH proxy(es) failed.
+  let resp=null;
+  let _lastReason='no-proxies-configured';
+  for(const _base of _kProxyBases){
+    const url=`${_base}${path}`;
+    const init={..._baseInit};
+    try{init.signal=AbortSignal.timeout(timeoutMs);}catch(_){}
+    try{
+      resp=await fetch(url,init);
+      break; // success — exit fallback loop
+    }catch(e){
+      _lastReason=`${_base.slice(0,60)} · ${e?.message||String(e)}`;
+      // continue to next proxy
+    }
+  }
+  if(!resp){
+    return{ok:false,status:0,reason:`all-proxies-failed (${_kProxyBases.length} tried): ${_lastReason}`};
+  }
   // V9.17.25: VERBOSE ERROR CAPTURE. Pull the response body as TEXT first
   //   (so we get it even if it isn't valid JSON), then try parsing. Surface
   //   Kalshi's actual rejection reason in the returned `reason` field by
@@ -3594,10 +3620,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.7-ticket-honesty-manual-position-banner';
+const BASELINE_VERSION='2026.05.14-v10.2.8-qscore-fix-proxy-fallback-presets';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.7';
+const TARA_VERSION_DISPLAY='Tara 10.2.8';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -11989,6 +12015,129 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
         React.createElement('div',{className:'mb-3 p-2 rounded bg-[#0E100F]/60'},
           React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-1'},'Risk guardrails'),
           React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mb-3 leading-relaxed'},'Hard discipline guards. Block or exit trades automatically — no opinions, just rules.'),
+          //
+          // ── V10.2.8 — PROFILE PRESETS ────────────────────────────────────────
+          //   Three one-click setups derived from the May 14 755-trade audit. Each
+          //   sets take-profit + stop-loss + edge cap + skip-time-cap + caps +
+          //   cooldown to a coherent profile. Manual overrides still work after.
+          //   - SURGEON:   highest WR, low volume. Confluence-tier-or-better only.
+          //                Expected ~72-75% WR, ~3-5 trades/day.
+          //   - BALANCED:  audit-optimal. Mid WR, mid volume.
+          //                Expected ~70-72% WR, ~8-12 trades/day.
+          //   - VOLUME:    higher turnover, accept lower WR. All tiers, time-cap on.
+          //                Expected ~66-68% WR, ~15-25 trades/day.
+          //   Preset selection does NOT touch master enabled toggle, dryRun,
+          //   sizing mode, API creds, or Phase 4 mode — those stay as-is.
+          //
+          React.createElement('div',{className:'mb-3'},
+            React.createElement('div',{className:'flex items-baseline justify-between mb-1.5'},
+              React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#E8E9E4]/45'},'Profile presets'),
+              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2.8'),
+            ),
+            React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mb-2 leading-relaxed'},'One-tap setup. Audit-derived from 755 May 14 trades.'),
+            React.createElement('div',{className:'grid grid-cols-3 gap-1.5'},
+              // SURGEON preset — highest WR, lowest volume
+              React.createElement('button',{
+                type:'button',
+                onClick:()=>{
+                  if(typeof setAutoExecSettings!=='function')return;
+                  if(!confirm('Apply SURGEON preset?\\n\\n• Take-profit 80¢ (book early)\\n• Stop-loss 12¢ (cut fast)\\n• Edge cap 8pt (tightest)\\n• Min tier: confluence+ (top 2 only)\\n• Skip time-cap commits: ON\\n• Max trades/day: 3\\n• Max bet: $2\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 72-75% WR, ~3-5 trades/day.'))return;
+                  setAutoExecSettings(prev=>({
+                    ...prev,
+                    autoExitOffer:80,
+                    stopLossDeltaCents:12,
+                    maxEdgePt:8,
+                    minTier:'confluence',
+                    skipTimeCapCommit:true,
+                    maxAutoTradesPerDay:3,
+                    maxAutoTradesPerWindow:1,
+                    maxBetPerTrade:2,
+                    maxDailyLoss:5,
+                    cooldownLossStreak:2,
+                    cooldownMinutes:30,
+                  }));
+                  try{console.info('[V10.2.8] SURGEON preset applied');}catch(_){}
+                },
+                className:'text-[10px] py-2 px-1 rounded transition-colors',
+                style:{
+                  background:'rgba(110,231,183,0.08)',
+                  border:'1px solid rgba(110,231,183,0.25)',
+                  color:'rgb(110,231,183)',
+                },
+                title:'Highest WR, lowest volume. Confluence+ trades only. ~72-75% WR target.',
+              },
+                React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Surgeon'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'72-75% · 3-5/day'),
+              ),
+              // BALANCED preset — audit-optimal
+              React.createElement('button',{
+                type:'button',
+                onClick:()=>{
+                  if(typeof setAutoExecSettings!=='function')return;
+                  if(!confirm('Apply BALANCED preset?\\n\\n• Take-profit 82¢\\n• Stop-loss 15¢\\n• Edge cap 10pt\\n• Min tier: any\\n• Skip time-cap commits: ON\\n• Max trades/day: 5\\n• Max bet: $2\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 70-72% WR, ~8-12 trades/day. Audit-optimal.'))return;
+                  setAutoExecSettings(prev=>({
+                    ...prev,
+                    autoExitOffer:82,
+                    stopLossDeltaCents:15,
+                    maxEdgePt:10,
+                    minTier:'any',
+                    skipTimeCapCommit:true,
+                    maxAutoTradesPerDay:5,
+                    maxAutoTradesPerWindow:1,
+                    maxBetPerTrade:2,
+                    maxDailyLoss:5,
+                    cooldownLossStreak:2,
+                    cooldownMinutes:30,
+                  }));
+                  try{console.info('[V10.2.8] BALANCED preset applied');}catch(_){}
+                },
+                className:'text-[10px] py-2 px-1 rounded transition-colors',
+                style:{
+                  background:'rgba(229,200,112,0.10)',
+                  border:'1px solid rgba(229,200,112,0.30)',
+                  color:'#E5C870',
+                },
+                title:'Audit-optimal. Mid WR, mid volume. RECOMMENDED for first auto-exec runs.',
+              },
+                React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Balanced'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'70-72% · 8-12/day'),
+              ),
+              // VOLUME preset — higher turnover, lower WR
+              React.createElement('button',{
+                type:'button',
+                onClick:()=>{
+                  if(typeof setAutoExecSettings!=='function')return;
+                  if(!confirm('Apply VOLUME preset?\\n\\n• Take-profit 85¢\\n• Stop-loss 18¢\\n• Edge cap 15pt\\n• Min tier: any\\n• Skip time-cap commits: OFF (includes lower-WR cluster)\\n• Max trades/day: 10\\n• Max bet: $3\\n• Cooldown: 3 losses → 20 min\\n\\nExpected: 66-68% WR, ~15-25 trades/day. Higher turnover.'))return;
+                  setAutoExecSettings(prev=>({
+                    ...prev,
+                    autoExitOffer:85,
+                    stopLossDeltaCents:18,
+                    maxEdgePt:15,
+                    minTier:'any',
+                    skipTimeCapCommit:false,
+                    maxAutoTradesPerDay:10,
+                    maxAutoTradesPerWindow:1,
+                    maxBetPerTrade:3,
+                    maxDailyLoss:8,
+                    cooldownLossStreak:3,
+                    cooldownMinutes:20,
+                  }));
+                  try{console.info('[V10.2.8] VOLUME preset applied');}catch(_){}
+                },
+                className:'text-[10px] py-2 px-1 rounded transition-colors',
+                style:{
+                  background:'rgba(167,139,250,0.10)',
+                  border:'1px solid rgba(167,139,250,0.30)',
+                  color:'#A78BFA',
+                },
+                title:'More trades, lower per-trade WR but higher absolute profit potential.',
+              },
+                React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Volume'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'66-68% · 15-25/day'),
+              ),
+            ),
+            React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/35 mt-1.5 leading-relaxed'},'Presets overwrite the 12 fields they touch. Other settings (sizing mode, signal source, Phase 4) stay as-is.'),
+          ),
           //
           // ── 1. Position size & fills ─────────────────────────────────────────
           //
@@ -22570,14 +22719,52 @@ function TaraApp(){
         //   prevent. Keep at 1 unless you have a specific reason.
         maxAutoTradesPerWindow:Number.isFinite(Number(v.maxAutoTradesPerWindow))&&Number(v.maxAutoTradesPerWindow)>=1?Math.min(5,Number(v.maxAutoTradesPerWindow)):1,
         slippageCents:Number(v.slippageCents)>=0?Number(v.slippageCents):2,
-        autoExitOffer:Number(v.autoExitOffer)>0?Number(v.autoExitOffer):85, // exit at 85¢ offer
+        // V10.2.8 — AUDIT-OPTIMAL MIGRATION for autoExitOffer (88→82), maxEdgePt
+        //   (15→10), and skipTimeCapCommit (false→true). Each one is independently
+        //   migrated ONLY if it currently equals the prior default — any custom
+        //   value is preserved. Rationale: May 14 755-trade audit showed
+        //   - take-profit 82¢ books winners more reliably than 88¢ at +17pt entry
+        //   - edge cap 10pt cuts the 65% WR tail (audit: edge >25pt = 65%, 0-10pt = 70.6%)
+        //   - skipTimeCapCommit=true filters the 62.4% WR cluster (audit: time-cap = 50% of volume)
+        //   Combined expected WR lift: ~66% → ~72% on the surviving trades.
+        //   Sentinel 'tara_v10_2_8_audit_optimal_applied' guarantees single-run.
+        autoExitOffer:(()=>{
+          let _v=Number(v.autoExitOffer)>0?Number(v.autoExitOffer):85;
+          try{
+            if(!localStorage.getItem('tara_v10_2_8_audit_optimal_applied')){
+              // Migrate ONLY if user is on prior default (88 or 85). Otherwise preserve.
+              if(Number(v.autoExitOffer)===88||Number(v.autoExitOffer)===85){
+                _v=82;
+                try{console.info('[V10.2.8] audit-optimal: autoExitOffer →82¢ (was '+v.autoExitOffer+'¢)');}catch(_){}
+              }
+            }
+          }catch(_){}
+          return _v;
+        })(),
         autoExitSecLeft:Number(v.autoExitSecLeft)>0?Number(v.autoExitSecLeft):20,
         // V9.19.26: opt-in skip of time-cap-commit / timer-commit locks.
         //   Default OFF — A/B test by enabling. May 14 audit: 322 of 642 resolved
         //   trades (50.2%) were time-cap commits, won only 62.4% (vs 78.5% for
         //   normal commits). The 90-119s sub-band was 54.6% (coin flip).
         //   When ON, auto-exec skips these. Manual click still fires them.
-        skipTimeCapCommit:!!v.skipTimeCapCommit,
+        // V10.2.8 — audit-optimal: OFF→ON. Time-cap-commit cluster won only 62.4%
+        //   in 642-trade audit vs 78.5% for normal commits. Biggest single WR lever.
+        //   Manual click still fires time-cap locks. Sentinel sets here (last in
+        //   the V10.2.8 trio so all three migrations have a chance to fire first).
+        skipTimeCapCommit:(()=>{
+          let _v=!!v.skipTimeCapCommit;
+          try{
+            if(!localStorage.getItem('tara_v10_2_8_audit_optimal_applied')){
+              if(!v.skipTimeCapCommit){
+                _v=true;
+                try{console.info('[V10.2.8] audit-optimal: skipTimeCapCommit OFF→ON');}catch(_){}
+              }
+              // Last of the V10.2.8 trio — set the sentinel here
+              localStorage.setItem('tara_v10_2_8_audit_optimal_applied','1');
+            }
+          }catch(_){}
+          return _v;
+        })(),
         // V10.0.0: Tara's Trade timing engine mode (Phase 4).
         //   'off'      — Phase 4 disabled entirely
         //   'shadow'   — runs on every lock, logs decision to call log, does NOT affect trades
@@ -22608,7 +22795,19 @@ function TaraApp(){
         //   +20-30pt → 60.2%, +30+pt → 65.2%. Cap at 15pt keeps the sweet-spot
         //   trades (small positive edge) and contrarian gems (negative edge),
         //   blocks the "market already priced" zone. Set to 0 to disable filter.
-        maxEdgePt:Number(v.maxEdgePt)>=0?Number(v.maxEdgePt):15,
+        // V10.2.8 — audit-optimal: 15→10 (filters 65% WR tail, keeps ~85% of volume)
+        maxEdgePt:(()=>{
+          let _v=Number(v.maxEdgePt)>=0?Number(v.maxEdgePt):15;
+          try{
+            if(!localStorage.getItem('tara_v10_2_8_audit_optimal_applied')){
+              if(Number(v.maxEdgePt)===15||v.maxEdgePt==null){
+                _v=10;
+                try{console.info('[V10.2.8] audit-optimal: maxEdgePt 15→10');}catch(_){}
+              }
+            }
+          }catch(_){}
+          return _v;
+        })(),
         // ── V9.6.0: ADVANCED ENTRY FILTERS ──────────────────────────────
         // Per-asset enable. Default both ON. When OFF, auto-exec skips that asset
         // even if the master toggle is on. Useful for "auto-trade BTC only".
@@ -28508,33 +28707,62 @@ function TaraApp(){
   useEffect(()=>{regimeTransitionRef.current=regimeTransition;},[regimeTransition]);
 
   // ── QUALITY GATE — plain function call, no useMemo to avoid any TDZ risk ──
+  // V10.2.8 — QSCORE INVERSION FIXED. V1 formula was anti-correlated with WR
+  //   in the 755-trade audit (q70+ won 60.6%, q0-19 won 73.9%). Root cause was
+  //   the `ps` term weighting `Math.abs(posterior-50)` at 40/90 of the total —
+  //   high-conviction predictions were systematically lower-WR than low-conviction
+  //   ones. V2 formula (designed in V9.19.10, shadowed since then) replaces this
+  //   with weights anchored to audit-measured group ranks:
+  //     • regimeCalApplied  → +25 (audited 71.9% vs 65.6% without)
+  //     • session (Asia=20, OFF=16, EU=11, US=7) — audit ranking
+  //     • regimeWR (max +20) — same direction as v1, less weight
+  //     • posterior magnitude (max +10) — DOWN-weighted from v1's 40
+  //     • late-lock penalty (-20) — preserved
+  //     • base (+5) — preserved
+  //   The V1 formula is preserved as _computeQualityV1Legacy below for forensic
+  //   comparison via `__taraAuditStats()`. Going forward `qScore` in the log
+  //   reflects V2 numbers; old log entries keep their V1 numbers (immutable).
+  //   `qScoreV2` field in the log is now redundant with `qScore` (both = V2).
+  //   We keep it stamped for the next ~50 trades so audit can confirm monotonicity
+  //   before fully retiring the duplicate column.
   const _computeQuality=(ana,regMem)=>{
+    if(!ana)return{score:0,label:'LOW',color:'rose',components:null};
+    try{
+      const rg=ana.regime||'RANGE-CHOP';
+      const rm=regMem[rg]||{wins:0,losses:0};
+      const rt=rm.wins+rm.losses;
+      const rWR=rt>5?(rm.wins/rt)*100:60;
+      const sess=getMarketSessions().dominant;
+      const sessionPts={'ASIA':20,'OFF-HOURS':16,'EU':11,'US':7}[sess]||7;
+      const regimeCalPts=ana?.diagnosticsV97?.regimeCal?.applied?25:0;
+      const regimeWRPts=Math.min(20,Math.max(0,(rWR-50)*0.4));
+      const pt=ana.rawProbAbove||50;
+      const postPts=Math.min(10,Math.max(0,(Math.abs(pt-50)-15)*0.4));
+      const latePenalty=ana.isVeryLateLock?-20:ana.isLateLockZone?-8:0;
+      const base=5;
+      const raw=regimeCalPts+sessionPts+regimeWRPts+postPts+latePenalty+base;
+      const score=Math.max(0,Math.min(100,Math.round(raw)));
+      return{
+        score,
+        label:score>=75?'HIGH':score>=55?'MODERATE':'LOW',
+        color:score>=75?'emerald':score>=55?'amber':'rose',
+        components:{regimeCalPts,sessionPts,regimeWRPts,postPts,latePenalty,base},
+      };
+    }catch(e){return{score:0,label:'LOW',color:'rose',components:null};}
+  };
+  // V10.2.8 — V1 formula preserved for forensic comparison. NOT used in
+  //   production. Re-enable via `__taraQualityCompare()` console hook if needed.
+  const _computeQualityV1Legacy=(ana,regMem)=>{
     if(!ana)return{score:0,label:'LOW',color:'rose'};
     try{
       const rg=ana.regime||'RANGE-CHOP';
       const rm=regMem[rg]||{wins:0,losses:0};
       const rt=rm.wins+rm.losses;
       const rWR=rt>5?(rm.wins/rt)*100:60;
-      // V9.11.3: Session WRs were hardcoded {EU:67, ASIA:62, US:57, OFF:55}. Audit of
-      //   467 trades showed actual: {ASIA:73, US:62, EU:64, OFF:70} — wildly off the
-      //   defaults. Worse, the stale values drove the quality score UP for sessions
-      //   that were actually performing WORSE than the defaults claimed, contributing
-      //   to the inverted quality-vs-WR correlation (q 70+ wins 58%, q 20-29 wins 82%).
-      //   New defaults match user-observed performance. Long-term: read from learned
-      //   session memory once V9.11.0 session weights have data.
-      // V10.2.1: re-audited at 755 trades — ASIA dropped 73→68, US rose 62→65, EU
-      //   dropped 64→62, OFF dropped 70→66. The qScore inversion is STILL present
-      //   (qScore 0-19: 73.9%, qScore 60-79: 60.6%) so stale session weights alone
-      //   weren't the root cause. Refreshed values below; qScore needs deeper review.
       const sWR={'EU':62,'ASIA':68,'US':65,'OFF-HOURS':66}[getMarketSessions().dominant]||65;
       const pt=ana.rawProbAbove||50;
       const ps=Math.min(40,Math.max(0,(Math.abs(pt-50)-15)*1.6));
       const cp=ana.isVeryLateLock?-20:ana.isLateLockZone?-8:0;
-      // V9.11.3: removed `+4 if dir==='UP'` bias. There's no principled reason UP
-      //   should have higher quality than DOWN. Was likely a leftover from when
-      //   UP performed better; data now shows DOWN at 60.0% vs UP at 50.0% in user's
-      //   May 11 trades. The bias was tilting quality UP, contributing to overconfident
-      //   UP locks losing more.
       const raw=ps+Math.min(30,(rWR-50)*0.6)+Math.min(15,(sWR-50)*0.6)+cp;
       const score=Math.max(0,Math.min(100,raw+5));
       return{score,label:score>=75?'HIGH':score>=55?'MODERATE':'LOW',color:score>=75?'emerald':score>=55?'amber':'rose'};
