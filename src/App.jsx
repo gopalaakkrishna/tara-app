@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.33-stoploss-warning-tdz-crash-fix';
+const BASELINE_VERSION='2026.05.14-v10.2.34-tcc-smart-bypass-combined';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.33';
+const TARA_VERSION_DISPLAY='Tara 10.2.34';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -12512,6 +12512,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     maxEdgePt:6,
                     tradeTimingMode:'pregate',
                     skipTimeCapCommit:true,
+                    tccSmartBypass:true,
                     skipMarginalCaution:true,
                     autoExitOffer:80,
                     stopLossDeltaCents:10,
@@ -12556,6 +12557,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     maxEdgePt:8,
                     tradeTimingMode:'advisory',
                     skipTimeCapCommit:true,
+                    tccSmartBypass:true,
                     skipMarginalCaution:true,
                     autoExitOffer:82,
                     stopLossDeltaCents:13,
@@ -12604,6 +12606,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     maxEdgePt:8,
                     minTier:'confluence',
                     skipTimeCapCommit:true,
+                    tccSmartBypass:true,
                     maxAutoTradesPerDay:3,
                     maxAutoTradesPerWindow:1,
                     maxBetPerTrade:2,
@@ -12637,6 +12640,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     maxEdgePt:10,
                     minTier:'any',
                     skipTimeCapCommit:true,
+                    tccSmartBypass:true,
                     maxAutoTradesPerDay:5,
                     maxAutoTradesPerWindow:1,
                     maxBetPerTrade:2,
@@ -23884,6 +23888,11 @@ function TaraApp(){
           }catch(_){}
           return _v;
         })(),
+        // V10.2.34 — TCC SMART BYPASS. When true (default), the skipTimeCapCommit
+        //   gate above is softened: TCC trades that match ANY of {ASIA session,
+        //   Kalshi≥55% + qScore≥50, RANGE-CHOP regime} are allowed through.
+        //   Empty/null persisted value → true. Explicit false → strict block-all.
+        tccSmartBypass:(v.tccSmartBypass===false)?false:true,
         // V10.0.0: Tara's Trade timing engine mode (Phase 4).
         //   'off'      — Phase 4 disabled entirely
         //   'shadow'   — runs on every lock, logs decision to call log, does NOT affect trades
@@ -24074,7 +24083,8 @@ function TaraApp(){
         // Hunter filters
         minTier:'tape',minQualityScore:40,minConviction:0,
         maxEdgePt:8,
-        skipTimeCapCommit:true,skipMarginalCaution:true,
+        skipTimeCapCommit:true,
+        tccSmartBypass:true,skipMarginalCaution:true,
         blockUrgencyApplied:false,lockStabilitySec:0,
         // Hunter exits
         autoExitOffer:82,autoExitSecLeft:20,
@@ -28250,6 +28260,7 @@ function TaraApp(){
       maxEdgePt:8,
       tradeTimingMode:'advisory',
       skipTimeCapCommit:true,
+      tccSmartBypass:true,
       skipMarginalCaution:true,
       autoExitOffer:82,
       stopLossDeltaCents:13,
@@ -31492,27 +31503,74 @@ function TaraApp(){
     // Default OFF — user can A/B test by enabling. Manual click bypasses via
     // _bypassSoftFilters. When ON, blocks the bottom-WR cluster entirely;
     // backtest projects 66% → 70%+ WR on remaining trades.
+    //
+    // V10.2.34 — TCC SMART BYPASS (combined A+B+C from audit analysis).
+    //   When skipTimeCapCommit=true AND tccSmartBypass=true (default true), we
+    //   check 3 conditions BEFORE blocking. If ANY pass, let the trade through:
+    //
+    //     1. SESSION: ASIA hours → take it (audit: ASIA TCC = 68.1% WR, n=191)
+    //     2. KALSHI + qScore: Kalshi-in-dir ≥ 55% AND qScoreV2 ≥ 50
+    //        → take it (audit: this combo = 78.4% WR, n=37)
+    //     3. REGIME: RANGE-CHOP → take it (audit: 71.4% WR, n=21)
+    //
+    //   Anything outside these passes still gets blocked. Per audit, this
+    //   recovers ~220 trades of the 369 TCCs at ~70% WR (vs 62% take-all).
+    //   The trade-through is stamped with `_tccBypassReason` for CSV audit.
     if(!_bypassSoftFilters&&autoExecSettings.skipTimeCapCommit){
       const _isTimeCap=_sigTier==='time-cap-commit'||_sigTier==='timer-commit';
       if(_isTimeCap){
-        if(_shouldLogManual)try{console.info('[V9.19.26] auto-exec blocked: time-cap-commit (skipTimeCapCommit=ON, tier=',_sigTier,')');}catch(_){}
-        try{console.info('[V9.19.26] TIME-CAP BLOCKED',{
-          tier:_sigTier,
-          dir:_signal.dir,
-          posterior:analysis?.rawProbAbove,
-          reason:'deadline-forced lock — historical WR 62%',
-        });}catch(_){}
-        _autoExecLastFiredKeyRef.current=_key;
-        // Emit visible UI state so user sees "sit-out: time-cap"
-        setAutoOrderState({
-          status:'sit-out-timecap',
-          reason:`time-cap-commit blocked — deadline-forced lock has historical WR 62% (this filter is opt-in via settings)`,
-          dir:_signal.dir,
-          placedAt:Date.now(),
-          asset:currentAsset,
-          _tier:_sigTier,
-        });
-        return;
+        // V10.2.34 — Smart bypass check. Compute the three conditions.
+        let _tccBypassReason=null;
+        if(autoExecSettings.tccSmartBypass!==false){ // default true (opt-out)
+          // Condition 1: ASIA session
+          let _sess='';
+          try{_sess=String((typeof getMarketSessions==='function'?getMarketSessions().dominant:'')||'').toUpperCase();}catch(_){}
+          if(_sess==='ASIA')_tccBypassReason='asia-session';
+          // Condition 2: Kalshi-in-dir ≥ 55% AND qScoreV2 ≥ 50
+          if(!_tccBypassReason){
+            const _yes=Number(kalshiYesPrice);
+            const _kalshiInDir=(_yes>0&&_yes<100)?(_signal.dir==='UP'?_yes:(100-_yes)):null;
+            const _qScore=Number(qualityGate?.score)||0;
+            if(_kalshiInDir!=null&&_kalshiInDir>=55&&_qScore>=50){
+              _tccBypassReason=`high-signal (kalshi=${Math.round(_kalshiInDir)}, qScore=${Math.round(_qScore)})`;
+            }
+          }
+          // Condition 3: RANGE-CHOP regime
+          if(!_tccBypassReason){
+            const _reg=String(analysis?.regime||'').toUpperCase();
+            if(_reg==='RANGE-CHOP'||_reg==='RANGE CHOP'||_reg==='RANGE-BEARISH')_tccBypassReason='range-chop-regime';
+          }
+        }
+        if(_tccBypassReason){
+          // Let the trade through, stamp on signal so call-log captures it.
+          try{
+            if(_signal&&typeof _signal==='object')_signal._tccBypassReason=_tccBypassReason;
+            if(taraCallSnapshotRef.current)taraCallSnapshotRef.current._tccBypassReason=_tccBypassReason;
+            if(lockedCallRef.current)lockedCallRef.current._tccBypassReason=_tccBypassReason;
+          }catch(_){}
+          try{console.info('[V10.2.34] TCC SMART BYPASS allowed:',{tier:_sigTier,reason:_tccBypassReason,dir:_signal.dir});}catch(_){}
+          try{_autoExecLogPush({type:'tcc-bypass',asset:currentAsset,dir:_signal.dir,reason:_tccBypassReason,tier:_sigTier});}catch(_){}
+          // Continue evaluation — skip the block below
+        }else{
+          if(_shouldLogManual)try{console.info('[V9.19.26] auto-exec blocked: time-cap-commit (skipTimeCapCommit=ON, tier=',_sigTier,', no smart-bypass match)');}catch(_){}
+          try{console.info('[V9.19.26] TIME-CAP BLOCKED',{
+            tier:_sigTier,
+            dir:_signal.dir,
+            posterior:analysis?.rawProbAbove,
+            reason:'deadline-forced lock — no smart-bypass condition matched',
+          });}catch(_){}
+          _autoExecLastFiredKeyRef.current=_key;
+          // Emit visible UI state so user sees "sit-out: time-cap"
+          setAutoOrderState({
+            status:'sit-out-timecap',
+            reason:`time-cap-commit blocked — deadline-forced lock has historical WR 62% (this filter is opt-in via settings)`,
+            dir:_signal.dir,
+            placedAt:Date.now(),
+            asset:currentAsset,
+            _tier:_sigTier,
+          });
+          return;
+        }
       }
     }
     const _g=_autoExecGuardrailCheck();
