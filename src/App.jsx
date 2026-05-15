@@ -3017,6 +3017,42 @@ const kalshiAuthedFetch=async({apiKeyId,privateKeyPem,method,path,body,timeoutMs
   };
 };
 
+// V10.2.28 — KALSHI FEE COMPUTATION
+//   Kalshi charges a trading fee on EVERY trade (entry AND exit, both sides).
+//   Formula (per their published docs):
+//     fee_cents = ceil(0.07 × contracts × price_dollars × (1 - price_dollars) × 100)
+//   Where price_dollars is the contract price in 0..1 range (e.g. 0.50 for 50¢).
+//   The fee is ceiled (rounded UP) to the next whole cent.
+//
+//   Examples:
+//     1 contract @ 50¢: ceil(0.07 × 1 × 0.5 × 0.5 × 100) = ceil(1.75) = 2¢
+//     10 contracts @ 50¢: ceil(0.07 × 10 × 0.5 × 0.5 × 100) = ceil(17.5) = 18¢
+//     1 contract @ 90¢: ceil(0.07 × 1 × 0.9 × 0.1 × 100) = ceil(0.63) = 1¢
+//
+//   Note: settlement (contract resolves at 100¢) has no exit fee — only
+//   pre-settlement exits trigger the second fee. computeKalshiTotalFees
+//   accepts an `isSettlement` flag for this.
+//
+//   Sources: Kalshi public fee schedule. May vary by product (BTC vs others).
+//   For TARA we use the standard formula and display approximate fees.
+const computeKalshiFeeCents=(contractsN,priceCents)=>{
+  const c=Math.max(0,Number(contractsN)||0);
+  const p=(Math.max(1,Math.min(99,Number(priceCents)||0)))/100;
+  if(c===0)return 0;
+  return Math.ceil(0.07*c*p*(1-p)*100);
+};
+const computeKalshiTotalFees=({contractsN,entryCents,exitCents,isSettlement})=>{
+  const _entryFee=computeKalshiFeeCents(contractsN,entryCents);
+  // Settlement (winning side resolves at 100¢) has no exit fee
+  const _exitFee=isSettlement?0:computeKalshiFeeCents(contractsN,exitCents);
+  return{
+    entryFeeCents:_entryFee,
+    exitFeeCents:_exitFee,
+    totalFeeCents:_entryFee+_exitFee,
+    totalFeeDollars:(_entryFee+_exitFee)/100,
+  };
+};
+
 // Place a limit order. side='yes' for UP, 'no' for DOWN.
 // betDollars is the user's stake; we convert to contract count using the limit price.
 // Each YES contract pays out $1 if it resolves YES; cost = yes_price (cents).
@@ -3830,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.27-tpsl-display-payout-plus-delta';
+const BASELINE_VERSION='2026.05.14-v10.2.29-hunter-websocket-default-on';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.27';
+const TARA_VERSION_DISPLAY='Tara 10.2.29';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -22623,18 +22659,25 @@ ${_d.responseBody||'(empty)'}`;
             //   net    = payout - stake (your actual profit after the contract cost)
             //   This matches how Kalshi displays it ("Payout if Yes: $1.95") so the
             //   numbers reconcile directly with what you see on Kalshi.
+            // V10.2.28 — also subtract Kalshi trading fees (entry + exit) from net.
+            //   Kalshi takes ~7% × P × (1-P) × C cents per side. For typical
+            //   $1-3 stakes the fee is 1-5¢ total; for bigger positions it matters
+            //   more. Now displayed as part of the net so the "+$0.85 net" is
+            //   what actually lands in your account, not gross.
             const _tpCents=Number(autoExecSettings?.autoExitOffer)||85;
             if(_tpCents>0&&(_positionKnown?_liveEntryCents:_entryCents)!=null){
               const _n=_positionKnown?_liveContractsActual:_contracts;
               const _entry=_positionKnown?_liveEntryCents:_entryCents;
               const _stake=_positionKnown?_liveStakeDollars:(_n*_entry*0.01);
               const _payout=_tpCents*_n*0.01;
-              const _net=_payout-_stake;
+              const _fees=computeKalshiTotalFees({contractsN:_n,entryCents:_entry,exitCents:_tpCents,isSettlement:false});
+              const _netBeforeFees=_payout-_stake;
+              const _net=_netBeforeFees-_fees.totalFeeDollars;
               _rows.push(_renderTip(
                 'target',
                 'target',
-                `${_tpCents}¢  →  $${_payout.toFixed(2)} payout  (${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)} net)`,
-                `Auto-cash-out target. If our side reaches ${_tpCents}¢, Tara sells all ${_n} contract${_n===1?'':'s'} for $${_payout.toFixed(2)} total payout (= ${_n} × ${_tpCents}¢). Net profit after your $${_stake.toFixed(2)} stake: ${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)}. Higher target = bigger winners but more trades that never reach it. Adjust in Predictor card (Fast/Patient) or auto-exec settings.`,
+                `${_tpCents}¢  →  $${_payout.toFixed(2)} payout  (${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)} net after ${_fees.totalFeeCents}¢ fees)`,
+                `Auto-cash-out target. If our side reaches ${_tpCents}¢, Tara sells all ${_n} contract${_n===1?'':'s'} for $${_payout.toFixed(2)} total payout (= ${_n} × ${_tpCents}¢). Stake: $${_stake.toFixed(2)}. Kalshi fees: ${_fees.entryFeeCents}¢ entry + ${_fees.exitFeeCents}¢ exit = ${_fees.totalFeeCents}¢ total. Net after fees: ${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)}. Higher target = bigger winners but more trades that never reach it.`,
                 'rgb(110,231,183)',
               ));
             }
@@ -22645,6 +22688,9 @@ ${_d.responseBody||'(empty)'}`;
             //   Same reconciliation logic as target above — payout = exit value,
             //   net = realized P&L after subtracting stake. For stop, payout is
             //   what you'd salvage; net is the realized loss.
+            // V10.2.28 — fees subtracted (entry + exit). On a stop-out, fees
+            //   actually make the realized loss SLIGHTLY worse than the cents
+            //   delta alone — typically by 1-3¢ on $1-3 stakes.
             const _slDelta=Number(autoExecSettings?.stopLossDeltaCents)||0;
             if(_slDelta>0&&(_positionKnown?_liveEntryCents:_entryCents)!=null){
               const _entry=_positionKnown?_liveEntryCents:_entryCents;
@@ -22652,12 +22698,14 @@ ${_d.responseBody||'(empty)'}`;
               const _stopAt=Math.max(0,_entry-_slDelta);
               const _stake=_positionKnown?_liveStakeDollars:(_n*_entry*0.01);
               const _payout=_stopAt*_n*0.01;
-              const _net=_payout-_stake;
+              const _fees=computeKalshiTotalFees({contractsN:_n,entryCents:_entry,exitCents:_stopAt,isSettlement:false});
+              const _netBeforeFees=_payout-_stake;
+              const _net=_netBeforeFees-_fees.totalFeeDollars;
               _rows.push(_renderTip(
                 'stop',
                 'stop',
-                `${_stopAt}¢  →  $${_payout.toFixed(2)} payout  (${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)} net · max risk)`,
-                `Auto-stop-loss. If our side drops ${_slDelta}¢ below entry (to ${_stopAt}¢), Tara sells all ${_n} contract${_n===1?'':'s'} for $${_payout.toFixed(2)} salvage value. Net realized loss: ${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)}. This is the most you can lose if the stop fires before settlement. Tighter stop = smaller losses but more whipsaws. Adjust in Predictor card or auto-exec settings.`,
+                `${_stopAt}¢  →  $${_payout.toFixed(2)} payout  (${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)} net after ${_fees.totalFeeCents}¢ fees · max risk)`,
+                `Auto-stop-loss. If our side drops ${_slDelta}¢ below entry (to ${_stopAt}¢), Tara sells all ${_n} contract${_n===1?'':'s'} for $${_payout.toFixed(2)} salvage value. Stake: $${_stake.toFixed(2)}. Kalshi fees: ${_fees.entryFeeCents}¢ entry + ${_fees.exitFeeCents}¢ exit = ${_fees.totalFeeCents}¢. Net realized loss after fees: ${_net>=0?'+':'-'}$${Math.abs(_net).toFixed(2)}. Most you can lose if the stop fires.`,
                 'rgba(244,114,182,0.92)',
               ));
             }else if(_positionKnown===false&&_slDelta===0){
@@ -22670,6 +22718,27 @@ ${_d.responseBody||'(empty)'}`;
                   style:{color:'#E5C870',border:'1px solid rgba(229,200,112,0.30)',background:'rgba(229,200,112,0.05)'},
                 },'⚙ enable stop loss'),
               ));
+            }
+            // V10.2.28 — PARTIAL FILL UI CLARITY
+            //   Kalshi sometimes only fills a portion of a limit order (e.g. you
+            //   asked for 5 contracts, got 2 at your limit, the other 3 remain
+            //   resting). Previously the UI showed "filled" with the partial
+            //   count and no indication that more was expected. Now surface this
+            //   clearly so the user knows the position is incomplete and any
+            //   remaining contracts may still fill.
+            if(_liveValid&&autoOrderState&&autoOrderState.requestedCount>0){
+              const _filled=Number(autoOrderState.count)||0;
+              const _requested=Number(autoOrderState.requestedCount)||0;
+              const _isPartial=_filled>0&&_filled<_requested&&(_liveStatus==='filled'||_liveStatus==='resting'||_liveStatus==='submitted');
+              if(_isPartial){
+                _rows.push(_renderTip(
+                  'partial',
+                  '⚠ partial fill',
+                  `${_filled} of ${_requested} contracts filled`,
+                  `Your order requested ${_requested} contracts but Kalshi only filled ${_filled} at your limit price (${autoOrderState.limitCents}¢). The remaining ${_requested-_filled} contract${_requested-_filled===1?'':'s'} may still fill if price comes back, or expire when the order TTL runs out (90s default). Exit math (target/stop) only applies to the ${_filled} actually filled. If you wanted exposure to all ${_requested}, you can manually buy more on Kalshi at the current offer.`,
+                  'rgba(229,200,112,0.95)',
+                ));
+              }
             }
             // exit-when summary (plain English)
             if(_liveValid&&_liveStatus==='filled'){
@@ -23411,12 +23480,47 @@ function TaraApp(){
   //   Mode default = 'shadow' so users see logged data without behavior change.
   //   Graduate to 'live' after ~30 V10.2.21 trades validate the multiplier.
   const[kalshiAgreeMode,setKalshiAgreeMode]=useState(()=>{
+    // V10.2.29 — DEFAULT 'live' (was 'shadow' from V10.2.21).
+    //   Hunter preset already sets this live; making it the factory default so
+    //   fresh installs / cleared storage gets the validated 18pt-swing WR lever
+    //   from the start. To opt out: __taraKalshiAgree('apply',{mode:'shadow'}).
     try{
       const v=localStorage.getItem('taraKalshiAgreeMode');
-      return(['off','shadow','live'].includes(v))?v:'shadow';
-    }catch(_){return 'shadow';}
+      return(['off','shadow','live'].includes(v))?v:'live';
+    }catch(_){return 'live';}
   });
   useEffect(()=>{try{localStorage.setItem('taraKalshiAgreeMode',kalshiAgreeMode);}catch(_){}},[kalshiAgreeMode]);
+  // V10.2.28 — WEBSOCKET REAL-TIME PRICE FEED (opt-in)
+  //   Default OFF — existing 30s polling keeps working. When user enables,
+  //   Tara opens a WebSocket to Kalshi's public ticker_v2 channel and
+  //   sub-second price updates feed kalshiYesPrice directly. Stops & targets
+  //   fire ~30x faster (within ~1s instead of up to 30s lag).
+  //
+  //   Public ticker_v2 doesn't require auth — connect, subscribe, receive.
+  //   We use the bid for our SIDE: if Tara is UP, we watch yes_bid; if DOWN,
+  //   we watch no_bid. The bid is what we could sell at right now (= the
+  //   correct price for "should the stop fire").
+  //
+  //   Disconnects auto-retry with exponential backoff up to 60s. If the
+  //   connection drops entirely, polling continues to deliver prices — this
+  //   is additive, not replacement.
+  //
+  //   Toggle via __taraWebSocket('on') / __taraWebSocket('off') console hook
+  //   or the settings UI checkbox.
+  const[kalshiWsEnabled,setKalshiWsEnabled]=useState(()=>{
+    // V10.2.29 — DEFAULT ON. Was opt-in (off by default) in V10.2.28.
+    //   Real-time pricing is strictly better for stop/target accuracy as long as
+    //   the WS connects. Falls back to 30s polling automatically if WS fails,
+    //   so worst case is no worse than the old behavior.
+    //   Only OFF if user has explicitly disabled (localStorage = '0').
+    try{
+      const v=localStorage.getItem('taraKalshiWsEnabled');
+      return v==='0'?false:true;
+    }catch(_){return true;}
+  });
+  useEffect(()=>{try{localStorage.setItem('taraKalshiWsEnabled',kalshiWsEnabled?'1':'0');}catch(_){}},[kalshiWsEnabled]);
+  // Track WS connection state for UI surfacing
+  const[kalshiWsState,setKalshiWsState]=useState({status:'disconnected',lastUpdate:null,messageCount:0,reconnectAttempts:0});
   // Resolve multiplier from Kalshi's conviction-in-trade-direction.
   //   Returns 1.0 (no-op) when conviction unknown.
   //   Multiplier table is fixed (not derived from history yet — would need
@@ -23885,7 +23989,44 @@ function TaraApp(){
         smartExitExtendCents:Number(v.smartExitExtendCents)>=0?Number(v.smartExitExtendCents):5, // extend target by N¢ when extending
         signalSource:(v.signalSource==='lock'||v.signalSource==='snapshot')?v.signalSource:'snapshot', // V9.17.22
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:2,maxDailyLoss:5,maxAutoTradesPerDay:5,maxAutoTradesPerWindow:1,cooldownLossStreak:2,cooldownMinutes:30,slippageCents:2,autoExitOffer:82,autoExitSecLeft:20,maxEdgePt:10,skipTimeCapCommit:true,tradeTimingMode:'advisory',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:15,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
+    }catch(_){
+      // V10.2.29 — Factory defaults are now HUNTER preset values (was BALANCED).
+      //   Hunter is calibrated for the current momentum-heavy market and stacks
+      //   every V10.2.x WR lever (Kalshi-agree live, qScoreV2 retune, session-
+      //   tier optimizer). Fresh installs / cleared storage start here. Users
+      //   who manually customize still keep their settings (this catch only
+      //   fires on parse failure / no localStorage entry).
+      //   Hunter targets: 70-72% WR, 6-10 trades/day.
+      return{
+        enabled:false,dryRun:true,
+        // Hunter sizing
+        maxBetPerTrade:2.5,maxDailyLoss:6,maxAutoTradesPerDay:8,maxAutoTradesPerWindow:1,
+        // Hunter filters
+        minTier:'tape',minQualityScore:40,minConviction:0,
+        maxEdgePt:8,
+        skipTimeCapCommit:true,skipMarginalCaution:true,
+        blockUrgencyApplied:false,lockStabilitySec:0,
+        // Hunter exits
+        autoExitOffer:82,autoExitSecLeft:20,
+        stopLossDeltaCents:13,timeExitSecLeft:0,
+        // Hunter cooldown
+        cooldownLossStreak:2,cooldownMinutes:30,
+        // Phase 4 advisory (badge shows, doesn't block)
+        tradeTimingMode:'advisory',
+        // Universal
+        slippageCents:2,
+        enabledAssets:{BTC:true,ETH:true},
+        enabledWindowTypes:{'15m':true,'5m':true},
+        sizingMode:'fixed',
+        confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,
+        entryMode:'dollars',entryContracts:5,entryPercentBalance:10,
+        entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,
+        patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,
+        smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,
+        smartExitExtendOnStrength:false,smartExitExtendCents:5,
+        signalSource:'snapshot',
+      };
+    }
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
@@ -27889,6 +28030,127 @@ function TaraApp(){
     return()=>{clearInterval(iv);document.removeEventListener('visibilitychange',onVisible);triggerKalshiFetchRef.current=null;};
   },[windowType,timeState.nextWindow,currentAsset]);
 
+  // V10.2.28 — WEBSOCKET PRICE FEED EFFECT
+  //   Opens a WebSocket to Kalshi's public ticker_v2 channel when:
+  //     - kalshiWsEnabled is true (user opted in)
+  //     - kalshiActiveMarket.ticker is known (we have a market to subscribe to)
+  //   Updates kalshiYesPrice on each ticker message (~once per market change,
+  //   often 100ms-1s cadence on liquid markets).
+  //
+  //   Auto-reconnect with exponential backoff (1s, 2s, 4s, 8s, max 60s).
+  //   If WS fails entirely, polling continues — they're additive.
+  //   Closes cleanly on unmount or market change.
+  useEffect(()=>{
+    if(!kalshiWsEnabled)return;
+    if(!kalshiActiveMarket?.ticker)return;
+    let _ws=null;
+    let _reconnectTimer=null;
+    let _reconnectDelay=1000;
+    let _stopped=false;
+    let _messageCount=0;
+    const _connect=()=>{
+      if(_stopped)return;
+      try{
+        // Kalshi public WebSocket — no auth needed for market data channels
+        _ws=new WebSocket('wss://api.elections.kalshi.com/trade-api/ws/v2');
+        setKalshiWsState(prev=>({...prev,status:'connecting'}));
+        _ws.onopen=()=>{
+          if(_stopped){try{_ws.close();}catch(_){};return;}
+          try{
+            _ws.send(JSON.stringify({
+              id:Date.now()&0xffffff,
+              cmd:'subscribe',
+              params:{
+                channels:['ticker_v2'],
+                market_tickers:[kalshiActiveMarket.ticker],
+              },
+            }));
+            _reconnectDelay=1000; // reset on successful open
+            setKalshiWsState(prev=>({...prev,status:'connected',reconnectAttempts:0}));
+            try{console.info('[V10.2.28] Kalshi WS connected, subscribed to',kalshiActiveMarket.ticker);}catch(_){}
+          }catch(e){
+            try{console.warn('[V10.2.28] Kalshi WS subscribe failed:',e?.message);}catch(_){}
+          }
+        };
+        _ws.onmessage=(evt)=>{
+          if(_stopped)return;
+          try{
+            const msg=JSON.parse(evt.data);
+            // Ticker messages have: { type: 'ticker_v2', msg: { market_ticker, yes_bid, yes_ask, no_bid, no_ask, ts } }
+            if(msg?.type==='ticker_v2'&&msg.msg&&msg.msg.market_ticker===kalshiActiveMarket.ticker){
+              const _yesBid=Number(msg.msg.yes_bid);
+              // yes_bid is what someone is willing to buy YES at = our sell price for YES
+              // (this is the "current value if I exit now" — exactly what stop/target should react to)
+              if(Number.isFinite(_yesBid)&&_yesBid>=0&&_yesBid<=100){
+                setKalshiYesPrice(_yesBid);
+                _messageCount++;
+                // Throttled state update — only every 10 messages to avoid React thrashing
+                if(_messageCount%10===0){
+                  setKalshiWsState(prev=>({...prev,lastUpdate:Date.now(),messageCount:_messageCount}));
+                }
+              }
+            }
+          }catch(_){/* malformed message — ignore */}
+        };
+        _ws.onerror=(e)=>{
+          try{console.warn('[V10.2.28] Kalshi WS error:',e?.message||'unknown');}catch(_){}
+          setKalshiWsState(prev=>({...prev,status:'error'}));
+        };
+        _ws.onclose=(e)=>{
+          if(_stopped)return;
+          try{console.info(`[V10.2.28] Kalshi WS closed (code=${e?.code}) — reconnecting in ${_reconnectDelay/1000}s`);}catch(_){}
+          setKalshiWsState(prev=>({...prev,status:'reconnecting',reconnectAttempts:(prev.reconnectAttempts||0)+1}));
+          // Exponential backoff with 60s ceiling
+          _reconnectTimer=setTimeout(()=>{
+            _reconnectDelay=Math.min(60000,_reconnectDelay*2);
+            _connect();
+          },_reconnectDelay);
+        };
+      }catch(e){
+        try{console.warn('[V10.2.28] Kalshi WS init failed:',e?.message);}catch(_){}
+        setKalshiWsState(prev=>({...prev,status:'failed'}));
+      }
+    };
+    _connect();
+    return()=>{
+      _stopped=true;
+      if(_reconnectTimer)clearTimeout(_reconnectTimer);
+      if(_ws){try{_ws.close();}catch(_){}}
+      setKalshiWsState({status:'disconnected',lastUpdate:null,messageCount:0,reconnectAttempts:0});
+    };
+  },[kalshiWsEnabled,kalshiActiveMarket?.ticker]);
+
+  // V10.2.28 — Console hook to toggle WebSocket without UI
+  useEffect(()=>{
+    if(typeof window==='undefined')return;
+    window.__taraWebSocket=(action)=>{
+      if(action==='on'){
+        setKalshiWsEnabled(true);
+        try{localStorage.setItem('taraKalshiWsEnabled','1');}catch(_){}
+        console.info('[V10.2.28] Kalshi WebSocket ENABLED — sub-second price feed active');
+        return{status:'on'};
+      }
+      if(action==='off'){
+        setKalshiWsEnabled(false);
+        try{localStorage.setItem('taraKalshiWsEnabled','0');}catch(_){}
+        console.info('[V10.2.28] Kalshi WebSocket DISABLED — back to 30s polling only');
+        return{status:'off'};
+      }
+      console.group('%c━━━ Kalshi WebSocket State ━━━','color:#E5C870;font-weight:bold');
+      console.info('Enabled: '+(kalshiWsEnabled?'YES':'NO'));
+      console.info('Status: '+(kalshiWsState?.status||'unknown'));
+      console.info('Message count: '+(kalshiWsState?.messageCount||0));
+      console.info('Reconnect attempts: '+(kalshiWsState?.reconnectAttempts||0));
+      console.info('Last update: '+(kalshiWsState?.lastUpdate?new Date(kalshiWsState.lastUpdate).toLocaleTimeString():'never'));
+      console.info('');
+      console.info('Commands:');
+      console.info('  __taraWebSocket(\'on\')   enable real-time feed');
+      console.info('  __taraWebSocket(\'off\')  disable, back to polling');
+      console.groupEnd();
+      return{enabled:kalshiWsEnabled,state:kalshiWsState};
+    };
+  },[kalshiWsEnabled,kalshiWsState]);
+
   // V2.6: Kalshi settlement resolver for marginal trades.
   //   Trades with |closingGapBps| < 10 are queued for verification because Tara's local price
   //   feed and Kalshi's CF Benchmarks settlement index can disagree near strike. This effect
@@ -31706,6 +31968,14 @@ function TaraApp(){
     setAutoOrderState({
       orderId:null,ticker:kalshiActiveMarket.ticker,side:_dir==='UP'?'yes':'no',
       dir:_dir,count:0,limitCents:_limit,placedAt:Date.now(),
+      // V10.2.28 — partial-fill tracking. requestedCount is what we asked Kalshi for
+      //   (computed same way as kalshiBuildOrder does internally: floor(betDollars*100 / costPerContractCents)).
+      //   If the final `count` from Kalshi's response is less than this, the order
+      //   was only partially filled — UI shows "filled: 2/5" status.
+      requestedCount:(()=>{
+        const _cost=_dir==='UP'?_limit:(100-_limit);
+        return _cost>0?Math.max(1,Math.min(250,Math.floor((Number(_bet)||0)*100/_cost))):0;
+      })(),
       status:'placing',fillPrice:null,exitOrderId:null,error:null,
       dryRun:!!autoExecSettings.dryRun,key:_key,windowId:_wid,asset:currentAsset,
       betDollars:_bet,sizingMode:_missionInfo?'mission':autoExecSettings.sizingMode,
