@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.32-partial-fill-display-bug-fix';
+const BASELINE_VERSION='2026.05.14-v10.2.33-stoploss-warning-tdz-crash-fix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.32';
+const TARA_VERSION_DISPLAY='Tara 10.2.33';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -22690,6 +22690,15 @@ ${_d.responseBody||'(empty)'}`;
                 'rgb(110,231,183)',
               ));
             }
+            // V10.2.33 — _slDelta moved up here to fix TDZ crash.
+            //   V10.2.31's safety warning (below) references _slDelta, but the
+            //   declaration was DOWN in the stop row at line ~22734. JS const
+            //   in same block scope = temporal dead zone error on first access.
+            //   Crash text: "ReferenceError: Cannot access '_slDelta' before
+            //   initialization". Declaring it up here lets BOTH the warning
+            //   AND the stop row use it. The stop row's own `const _slDelta`
+            //   was removed since it's now in scope.
+            const _slDelta=Number(autoExecSettings?.stopLossDeltaCents)||0;
             // V10.2.31 — STOP-LOSS SAFETY WARNING
             //   stopLossDeltaCents > 30 is a "stop in name only" — at typical
             //   entry prices (50-85¢), a 30+¢ stop means exit at 20-55¢, by
@@ -22731,7 +22740,8 @@ ${_d.responseBody||'(empty)'}`;
             // V10.2.28 — fees subtracted (entry + exit). On a stop-out, fees
             //   actually make the realized loss SLIGHTLY worse than the cents
             //   delta alone — typically by 1-3¢ on $1-3 stakes.
-            const _slDelta=Number(autoExecSettings?.stopLossDeltaCents)||0;
+            // V10.2.33 — _slDelta no longer redeclared here; lifted above
+            //   to satisfy TDZ. Uses the outer scope const.
             if(_slDelta>0&&(_positionKnown?_liveEntryCents:_entryCents)!=null){
               const _entry=_positionKnown?_liveEntryCents:_entryCents;
               const _n=_positionKnown?_liveContractsActual:_contracts;
