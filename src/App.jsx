@@ -3830,10 +3830,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.21-kalshi-agreement-tier-promoter';
+const BASELINE_VERSION='2026.05.14-v10.2.22-kalshiagree-hotfix-plus-range-bearish-label';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.21';
+const TARA_VERSION_DISPLAY='Tara 10.2.22';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -15145,11 +15145,17 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
 
 // V9.1.2: Plain-language helper for regime labels. Used in user-facing UI to
 //   replace jargon like "TRENDING DOWN" with "going down (dump)" etc.
+// V10.2.22 — RANGE-CHOP display rename. 724-trade audit (May 15 2026):
+//   regime labeled RANGE-CHOP actually closes DOWN 40.3% / FLAT 39.0% / UP 20.8%
+//   It's not choppy — it's slightly bearish ranging. Internal regime identifier
+//   stays "RANGE-CHOP" for backward compat with stored data (regimeMemory,
+//   regimeWeightKeys, regimeDirCalibration, etc.) but display labels change
+//   so the user sees what the regime actually is.
 const regimeToPlainLabel=(regime)=>{
   const map={
     'TRENDING UP':'going up — pump trajectory',
     'TRENDING DOWN':'going down — dump trajectory',
-    'RANGE-CHOP':'sideways chop',
+    'RANGE-CHOP':'range-bearish — sideways with downside lean',
     'SHORT SQUEEZE':'short squeeze — pump',
     'HIGH VOL CHOP':'wild swings — both directions',
   };
@@ -15159,7 +15165,7 @@ const regimeToShortPlain=(regime)=>{
   const map={
     'TRENDING UP':'pumping ▲',
     'TRENDING DOWN':'dumping ▼',
-    'RANGE-CHOP':'sideways',
+    'RANGE-CHOP':'range-bearish ▽',
     'SHORT SQUEEZE':'squeeze ▲',
     'HIGH VOL CHOP':'wild',
   };
@@ -23300,11 +23306,34 @@ function TaraApp(){
   // Console hook to inspect Kalshi-agreement state + sanity-check on history
   useEffect(()=>{
     if(typeof window==='undefined')return;
-    window.__taraKalshiAgree=()=>{
+    window.__taraKalshiAgree=(action,opts)=>{
+      // V10.2.22 — 'apply' action mirrors __taraSessionTier('apply'). One-shot
+      //   enable that bypasses the React-state-staleness trap (setting
+      //   localStorage manually doesn't trigger re-render, so mode stays stuck
+      //   at mount value until refresh). 'apply' sets both localStorage AND
+      //   React state, so live mode takes effect immediately.
+      //   Usage: __taraKalshiAgree('apply', {mode:'live'})
+      if(action==='apply'){
+        const _mode=opts&&['off','shadow','live'].includes(opts.mode)?opts.mode:'live';
+        try{
+          localStorage.setItem('taraKalshiAgreeMode',_mode);
+          setKalshiAgreeMode(_mode);
+          console.info('[V10.2.22] kalshi-agree mode applied:',_mode,'— effective immediately');
+        }catch(e){console.error('[apply] failed:',e?.message);}
+        return{mode:_mode};
+      }
+      // Default action: analyze
       const log=JSON.parse(localStorage.getItem('taraCallLog_v1')||'[]');
-      const resolved=log.filter(e=>(e?.result==='WIN'||e?.result==='LOSS')&&e?.kalshiAtLock!=null&&e?.direction);
+      // V10.2.22 — field name FIX. V10.2.21 used e?.direction which is the CSV
+      //   export name, but in-memory entries use e.dir (and outcomeDir). The
+      //   filter matched 0 trades. Now reads dir.
+      const resolved=log.filter(e=>(e?.result==='WIN'||e?.result==='LOSS')&&e?.kalshiAtLock!=null&&(e?.dir==='UP'||e?.dir==='DOWN'));
+      // V10.2.22 — read mode from localStorage rather than React state. Closure
+      //   captured stale value at useEffect mount; localStorage is always fresh.
+      const _persistedMode=(()=>{try{return localStorage.getItem('taraKalshiAgreeMode')||'shadow';}catch(_){return 'shadow';}})();
       console.group('%c━━━ Kalshi Agreement Analyzer ━━━','color:#E5C870;font-weight:bold');
-      console.info('Mode: '+kalshiAgreeMode);
+      console.info('Persisted mode: '+_persistedMode);
+      console.info('In-app React mode: '+kalshiAgreeMode+(_persistedMode!==kalshiAgreeMode?' (mismatch — refresh required, or run __taraKalshiAgree("apply",{mode:"'+_persistedMode+'"}))':''));
       console.info('Resolved trades with Kalshi data: '+resolved.length);
       if(resolved.length<10){console.info('Need ≥10 resolved trades for analysis.');console.groupEnd();return;}
       // Bucket by Kalshi's conviction in trade direction
@@ -23312,7 +23341,7 @@ function TaraApp(){
       resolved.forEach(e=>{
         const _k=Number(e.kalshiAtLock);
         if(!Number.isFinite(_k))return;
-        const _kInDir=e.direction==='UP'?_k:(100-_k);
+        const _kInDir=e.dir==='UP'?_k:(100-_k);
         const _b=_kInDir<40?'<40':_kInDir<55?'40-55':_kInDir<70?'55-70':_kInDir<85?'70-85':'85+';
         buckets[_b].push(e.result==='WIN'?1:0);
       });
@@ -23325,11 +23354,15 @@ function TaraApp(){
         _table[b]={n,wins:w,wr,multiplier:_mult};
       });
       console.table(_table);
-      console.info('To enable live: localStorage.setItem(\'taraKalshiAgreeMode\',\'live\') and refresh');
+      console.info('Commands:');
+      console.info('  __taraKalshiAgree()                      show this');
+      console.info('  __taraKalshiAgree(\'apply\',{mode:\'live\'})  enable live (no refresh needed)');
+      console.info('  __taraKalshiAgree(\'apply\',{mode:\'shadow\'}) back to shadow');
+      console.info('  __taraKalshiAgree(\'apply\',{mode:\'off\'})    disable entirely');
       console.groupEnd();
       return _table;
     };
-  },[kalshiAgreeMode,_resolveKalshiAgreementMultiplier]);
+  },[kalshiAgreeMode,_resolveKalshiAgreementMultiplier,setKalshiAgreeMode]);
   // Console hook: inspect or set current session-tier state
   useEffect(()=>{
     if(typeof window==='undefined')return;
