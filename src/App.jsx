@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.30-websocket-default-off-needs-proxy';
+const BASELINE_VERSION='2026.05.14-v10.2.32-partial-fill-display-bug-fix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.30';
+const TARA_VERSION_DISPLAY='Tara 10.2.32';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -12810,18 +12810,27 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               _tipBox('take-profit','Auto-sell when the Kalshi offer on your side reaches this. 78-80¢ = book early, smaller wins. 85-88¢ = patient, bigger wins but more misses. 90¢+ = aggressive target, often expires worthless near close. A contract pays $1 at settle if right, so target ¢ ≈ % of max payout locked in.'),
             ),
             React.createElement('label',{className:'block'},
-              _labelTip('stop-loss','Stop-loss drawdown (¢)','Auto-sell when our-side offer drops by this many cents below your fill price. Default 15¢. PROMOTED to Risk guardrails in V10.2.5 — was previously buried in Advanced Exit Logic and OFF by default, which was backwards given how often emotional holding causes losses to compound. Tighter (8-12¢) = cuts losers faster, locks in some recoverable dips as losses. Looser (20-30¢) = holds longer for recovery, full bet at risk if it never recovers. 0 = disabled (position holds to settle or take-profit).'),
+              _labelTip('stop-loss','Stop-loss drawdown (¢)','Auto-sell when our-side offer drops by this many cents below your fill price. Default 15¢. V10.2.31 capped at 50¢ — values above 30¢ are dangerous (position can lose most of its value before exit fires). Hunter sets 13¢, Sniper 10¢. Tighter (8-12¢) = cuts losers faster. Looser (20-30¢) = holds longer for recovery. 0 = disabled.'),
               React.createElement('input',{
-                type:'number',min:0,max:90,step:1,value:autoExecSettings?.stopLossDeltaCents??15,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(90,_num(e.target.value,15)))})),
+                // V10.2.31 — max lowered 90 → 50. 75¢ stop on a typical 50-85¢ entry
+                //   means exit at -25¢ to 10¢, i.e. effectively at zero. Useful
+                //   range is 8-30¢; everything above is "no stop" with extra steps.
+                type:'number',min:0,max:50,step:1,value:autoExecSettings?.stopLossDeltaCents??15,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:Math.max(0,Math.min(50,_num(e.target.value,15)))})),
                 className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
               }),
-              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1 leading-relaxed'},(()=>{
+              React.createElement('div',{className:'text-[9px] mt-1 leading-relaxed',style:{color:(()=>{
                 const _c=Number(autoExecSettings?.stopLossDeltaCents)||0;
-                if(_c===0)return '⚠ DISABLED — position holds to settle (full bet at risk if Tara is wrong). Not recommended unless you have a specific reason.';
+                if(_c===0)return 'rgba(244,114,182,0.95)';
+                if(_c>=30)return 'rgba(244,114,182,0.95)';
+                return 'rgba(232,233,228,0.40)';
+              })()}},(()=>{
+                const _c=Number(autoExecSettings?.stopLossDeltaCents)||0;
+                if(_c===0)return '⚠ DISABLED — position holds to settle (full bet at risk if Tara is wrong). Not recommended.';
+                if(_c>=30)return `⚠ WIDE STOP — ${_c}¢ delta means exit only after losing ${_c}¢/contract. On a typical 50-85¢ fill, this is too late. Hunter recommends 13¢.`;
                 return `= exit if our-side offer drops ${_c}¢ below fill (e.g. filled at 87¢, exit at ${87-_c}¢)`;
               })()),
-              _tipBox('stop-loss','Auto-sell when our-side offer drops by this many cents below your fill price. Default 15¢. PROMOTED to Risk guardrails in V10.2.5 — was previously buried in Advanced Exit Logic and OFF by default, which was backwards given how often emotional holding causes losses to compound. Tighter (8-12¢) = cuts losers faster, locks in some recoverable dips as losses. Looser (20-30¢) = holds longer for recovery, full bet at risk if it never recovers. 0 = disabled (position holds to settle or take-profit).'),
+              _tipBox('stop-loss','Auto-sell when our-side offer drops by this many cents below your fill price. Default 15¢. V10.2.31 capped at 50¢ — values above 30¢ are dangerous.'),
             ),
           ),
           //
@@ -22681,6 +22690,37 @@ ${_d.responseBody||'(empty)'}`;
                 'rgb(110,231,183)',
               ));
             }
+            // V10.2.31 — STOP-LOSS SAFETY WARNING
+            //   stopLossDeltaCents > 30 is a "stop in name only" — at typical
+            //   entry prices (50-85¢), a 30+¢ stop means exit at 20-55¢, by
+            //   which point the position has lost 35-65% of value. Hunter sets
+            //   13¢, Sniper 10¢; anything above ~25¢ is dangerous.
+            //   Audit context: in 724 historical trades, median loser closed
+            //   ~15¢ below entry. A 75¢ stop never actually triggers in
+            //   normal market action — the contract would have to be nearly
+            //   worthless before exiting.
+            if(_slDelta>=30){
+              _rows.push(React.createElement('div',{
+                key:'sl-warning',
+                className:'pt-2 mt-1 border-t border-rose-500/30 text-[10px]',
+                style:{color:'rgba(244,114,182,0.95)',fontWeight:600},
+              },
+                `⚠ stop-loss delta ${_slDelta}¢ is very wide — `,
+                `position can lose ${Math.min(99,Math.round(_slDelta))}¢/contract `,
+                `(${_positionKnown?'~$'+(_slDelta*_liveContractsActual/100).toFixed(2)+' total':'most of stake'}) `,
+                `before exit fires. Hunter recommends 13¢, Sniper 10¢. `,
+                React.createElement('button',{
+                  onClick:()=>{
+                    if(typeof setAutoExecSettings==='function'){
+                      setAutoExecSettings(prev=>({...prev,stopLossDeltaCents:13}));
+                      try{console.info('[V10.2.31] Stop-loss reset to Hunter default 13¢');}catch(_){}
+                    }
+                  },
+                  className:'underline ml-1 cursor-pointer',
+                  style:{color:'rgba(244,114,182,0.95)',background:'none',border:'none',padding:0,fontSize:'inherit'},
+                },'reset to 13¢'),
+              ));
+            }
             // stop (cut loss)
             // V10.2.27 — enhanced display:
             //   was: "45¢  (-$0.13 if hits)"
@@ -22741,19 +22781,22 @@ ${_d.responseBody||'(empty)'}`;
               }
             }
             // exit-when summary (plain English)
+            // V10.2.31 — show ALL exit conditions, no truncation. Previously
+            //   truncated to 3 with "· ⋯" which hid the others. Multi-line
+            //   layout when needed.
             if(_liveValid&&_liveStatus==='filled'){
               const _bits=[];
               if(_tpCents>0)_bits.push(`hits ${_tpCents}¢ (target)`);
               if(_slDelta>0)_bits.push(`drops ${_slDelta}¢ (stop)`);
               const _te=Number(autoExecSettings?.timeExitSecLeft)||0;
               if(_te>0)_bits.push(`${_te}s before window close`);
-              _bits.push('window closes');
-              if(autoExecSettings?.smartExitsEnabled)_bits.push("Tara's read flips");
+              _bits.push('window closes (settlement)');
+              if(autoExecSettings?.smartExitsEnabled)_bits.push("Tara's read flips (smart-exit)");
               if(_bits.length>0){
                 _rows.push(_renderTip(
                   'exits',
                   'exits when',
-                  _bits.length<=3?_bits.join(' · '):_bits.slice(0,3).join(' · ')+' · ⋯',
+                  _bits.join(' · '),
                   `Tara will automatically close this position as soon as ANY of these conditions hit (whichever comes first):\n\n• ${_bits.join('\n• ')}\n\nIf none of them trigger before window close, the position settles at the strike: YES pays $1 if BTC ended above strike, $0 if below.`,
                   'rgba(229,200,112,0.85)',
                 ));
@@ -23939,6 +23982,13 @@ function TaraApp(){
                 try{console.info('[V10.2.5] stop-loss default applied: 0→15¢ (promoted to Risk guardrails)');}catch(_){}
               }
               localStorage.setItem('tara_v10_2_5_stoploss_default_applied','1');
+            }
+            // V10.2.31 — clamp persisted SL to max 50¢. If a user had set a wide
+            //   stop pre-V10.2.31 (max was 90¢), bring it back into the safe range
+            //   on next load. Logs the clamp so it's visible — not silent.
+            if(_v>50){
+              try{console.warn(`[V10.2.31] Clamping persisted stopLossDeltaCents ${_v}¢ → 50¢ (max). Wide stops are dangerous; recommend 13¢ (Hunter) or 10¢ (Sniper).`);}catch(_){}
+              _v=50;
             }
           }catch(_){}
           return _v;
@@ -28175,6 +28225,72 @@ function TaraApp(){
     };
   },[kalshiWsEnabled,kalshiWsState]);
 
+  // V10.2.31 — HUNTER DRIFT CHECK + RE-APPLY console hooks.
+  //   Purpose: catch silent drift from preset values. After applying Hunter,
+  //   users sometimes manually tweak a setting and forget — most dangerous
+  //   when stopLossDeltaCents gets widened (turns "stop" into "ride to zero").
+  //   __taraHunterCheck() compares current autoExec values vs the Hunter spec.
+  //   __taraHunterReapply() resets all 14 Hunter-touched fields to spec values.
+  useEffect(()=>{
+    if(typeof window==='undefined')return;
+    // Hunter spec from V10.2.25 preset
+    const HUNTER_SPEC={
+      minTier:'tape',
+      minQualityScore:40,
+      maxEdgePt:8,
+      tradeTimingMode:'advisory',
+      skipTimeCapCommit:true,
+      skipMarginalCaution:true,
+      autoExitOffer:82,
+      stopLossDeltaCents:13,
+      maxAutoTradesPerDay:8,
+      maxAutoTradesPerWindow:1,
+      maxBetPerTrade:2.5,
+      maxDailyLoss:6,
+      cooldownLossStreak:2,
+      cooldownMinutes:30,
+    };
+    window.__taraHunterCheck=()=>{
+      const ae=autoExecSettings||{};
+      const _rows={};
+      let _drifted=0;
+      Object.entries(HUNTER_SPEC).forEach(([k,expected])=>{
+        const actual=ae[k];
+        // Compare numbers loosely, strings strictly
+        const _match=(typeof expected==='number')
+          ?Math.abs(Number(actual)-expected)<0.01
+          :actual===expected;
+        _rows[k]={expected,current:actual,status:_match?'✓':'✗ DRIFT'};
+        if(!_match)_drifted++;
+      });
+      // Also check Kalshi-agree live
+      const _kam=(typeof localStorage!=='undefined')?localStorage.getItem('taraKalshiAgreeMode'):null;
+      _rows.kalshiAgreeMode={expected:'live',current:_kam,status:_kam==='live'?'✓':'✗ DRIFT'};
+      if(_kam!=='live')_drifted++;
+      console.group('%c━━━ Hunter Drift Check ━━━','color:'+(_drifted===0?'rgb(110,231,183)':'rgba(244,114,182,0.95)')+';font-weight:bold');
+      console.info(_drifted===0?'✓ All Hunter values match spec':`✗ ${_drifted} field${_drifted===1?'':'s'} drifted from Hunter spec`);
+      console.table(_rows);
+      if(_drifted>0){
+        console.info('To reset: __taraHunterReapply()');
+      }
+      console.groupEnd();
+      return{drifted:_drifted,rows:_rows};
+    };
+    window.__taraHunterReapply=()=>{
+      if(typeof setAutoExecSettings!=='function'){
+        console.error('setAutoExecSettings unavailable');
+        return null;
+      }
+      setAutoExecSettings(prev=>({...prev,...HUNTER_SPEC}));
+      try{
+        localStorage.setItem('taraKalshiAgreeMode','live');
+        if(typeof setKalshiAgreeMode==='function')setKalshiAgreeMode('live');
+      }catch(_){}
+      console.info('[V10.2.31] Hunter spec re-applied across 14 fields + Kalshi-agree live');
+      return{applied:true,fields:Object.keys(HUNTER_SPEC).length+1};
+    };
+  },[autoExecSettings,setKalshiAgreeMode]);
+
   // V2.6: Kalshi settlement resolver for marginal trades.
   //   Trades with |closingGapBps| < 10 are queued for verification because Tara's local price
   //   feed and Kalshi's CF Benchmarks settlement index can disagree near strike. This effect
@@ -31992,12 +32108,29 @@ function TaraApp(){
     setAutoOrderState({
       orderId:null,ticker:kalshiActiveMarket.ticker,side:_dir==='UP'?'yes':'no',
       dir:_dir,count:0,limitCents:_limit,placedAt:Date.now(),
-      // V10.2.28 — partial-fill tracking. requestedCount is what we asked Kalshi for
-      //   (computed same way as kalshiBuildOrder does internally: floor(betDollars*100 / costPerContractCents)).
-      //   If the final `count` from Kalshi's response is less than this, the order
-      //   was only partially filled — UI shows "filled: 2/5" status.
+      // V10.2.32 — PARTIAL-FILL DISPLAY BUG FIX
+      //   V10.2.28 introduced this calc and got the convention wrong for DOWN:
+      //     const _cost = _dir==='UP' ? _limit : (100 - _limit);
+      //   The `_limit` variable in this scope is OUR-SIDE cents (see line ~31961
+      //   comment: "Override is in 'our side' cents. UP→limit on yes-side,
+      //   DOWN→limit on no-side, same axis as _limit/_dirCents"). It's ALREADY
+      //   the cost per contract on the side we're buying — no conversion needed.
+      //
+      //   The buggy flip caused DOWN trades to compute cost as (100-_limit) which
+      //   inflated contract count by ~5x. Example from V10.2.28 in the wild:
+      //     bet=$2, DOWN, _limit=83 (NO cost 83¢)
+      //     Buggy: floor($2*100 / (100-83)) = floor(200/17) = 11
+      //     Real:  floor($2*100 /  83     ) = floor(200/83) = 2  ✓
+      //   So users saw "2 of 11 filled" partial-fill warnings on DOWN trades
+      //   that were actually fully filled (2 of 2).
+      //
+      //   For UP, _limit was already correct (yes-side = our-side). Bug only
+      //   affected DOWN display, not actual order sizing — the order builder
+      //   uses a SEPARATE _yesLimitForBuilder variable that flips correctly for
+      //   the Kalshi API call. So dollar caps and contract counts at Kalshi
+      //   were always correct; only the partial-fill display number was wrong.
       requestedCount:(()=>{
-        const _cost=_dir==='UP'?_limit:(100-_limit);
+        const _cost=Number(_limit)||0;
         return _cost>0?Math.max(1,Math.min(250,Math.floor((Number(_bet)||0)*100/_cost))):0;
       })(),
       status:'placing',fillPrice:null,exitOrderId:null,error:null,
