@@ -3830,10 +3830,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.20-qscorev2-retune-from-724trade-audit';
+const BASELINE_VERSION='2026.05.14-v10.2.21-kalshi-agreement-tier-promoter';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.20';
+const TARA_VERSION_DISPLAY='Tara 10.2.21';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -23255,6 +23255,81 @@ function TaraApp(){
     if(!Number.isFinite(raw)||raw<=0)return 1.0;
     return Math.max(0.7,Math.min(1.3,raw));
   },[_getSessionTierMultipliers]);
+  // V10.2.21 — KALSHI-AGREEMENT MULTIPLIER (Priority 2 from 724-trade audit)
+  //   Biggest WR lever found in the audit: 18pt swing inside a single regime
+  //   based on Kalshi's level of agreement with Tara's call.
+  //
+  //   Audit findings (TRENDING DOWN, n=337 sliced by Kalshi conviction in Tara's dir):
+  //     Kalshi <40% (DISAGREES strongly):  58.3% WR  (n=24)
+  //     Kalshi 40-55% (neutral):           62.5% WR  (n=104)
+  //     Kalshi 55-70% (mild agree):        66.9% WR  (n=145)
+  //     Kalshi 70%+ (STRONGLY agrees):     75.9% WR  (n=54)
+  //
+  //   Action: scale the auto-exec edge cap by Kalshi-agreement strength.
+  //     - Strong agree → LOOSEN edge cap (allow trades with bigger Tara-vs-Kalshi gap)
+  //     - Disagree → TIGHTEN edge cap (require tighter math; effectively block more)
+  //
+  //   Mode default = 'shadow' so users see logged data without behavior change.
+  //   Graduate to 'live' after ~30 V10.2.21 trades validate the multiplier.
+  const[kalshiAgreeMode,setKalshiAgreeMode]=useState(()=>{
+    try{
+      const v=localStorage.getItem('taraKalshiAgreeMode');
+      return(['off','shadow','live'].includes(v))?v:'shadow';
+    }catch(_){return 'shadow';}
+  });
+  useEffect(()=>{try{localStorage.setItem('taraKalshiAgreeMode',kalshiAgreeMode);}catch(_){}},[kalshiAgreeMode]);
+  // Resolve multiplier from Kalshi's conviction-in-trade-direction.
+  //   Returns 1.0 (no-op) when conviction unknown.
+  //   Multiplier table is fixed (not derived from history yet — would need
+  //   per-(regime × kalshi-bucket) reweighting which is overkill for now).
+  //   Future: derive from rolling 200-trade history.
+  const _resolveKalshiAgreementMultiplier=React.useCallback((kalshiConvInDir)=>{
+    if(!Number.isFinite(kalshiConvInDir))return 1.0;
+    // Calibrated from 724-trade audit (May 15 2026):
+    //   <40 → 0.70 (audit: 58.3% WR, well below baseline) → tighten cap
+    //   40-55 → 0.95 (audit: 62.5% WR, slightly below baseline) → very mild tighten
+    //   55-70 → 1.10 (audit: 66.9% WR, slightly above baseline) → mild loosen
+    //   70-85 → 1.25 (audit: 75.9% WR, well above baseline) → loosen
+    //   85+ → 1.30 (cap; small sample but consistent direction)
+    if(kalshiConvInDir<40)return 0.70;
+    if(kalshiConvInDir<55)return 0.95;
+    if(kalshiConvInDir<70)return 1.10;
+    if(kalshiConvInDir<85)return 1.25;
+    return 1.30;
+  },[]);
+  // Console hook to inspect Kalshi-agreement state + sanity-check on history
+  useEffect(()=>{
+    if(typeof window==='undefined')return;
+    window.__taraKalshiAgree=()=>{
+      const log=JSON.parse(localStorage.getItem('taraCallLog_v1')||'[]');
+      const resolved=log.filter(e=>(e?.result==='WIN'||e?.result==='LOSS')&&e?.kalshiAtLock!=null&&e?.direction);
+      console.group('%c━━━ Kalshi Agreement Analyzer ━━━','color:#E5C870;font-weight:bold');
+      console.info('Mode: '+kalshiAgreeMode);
+      console.info('Resolved trades with Kalshi data: '+resolved.length);
+      if(resolved.length<10){console.info('Need ≥10 resolved trades for analysis.');console.groupEnd();return;}
+      // Bucket by Kalshi's conviction in trade direction
+      const buckets={'<40':[],'40-55':[],'55-70':[],'70-85':[],'85+':[]};
+      resolved.forEach(e=>{
+        const _k=Number(e.kalshiAtLock);
+        if(!Number.isFinite(_k))return;
+        const _kInDir=e.direction==='UP'?_k:(100-_k);
+        const _b=_kInDir<40?'<40':_kInDir<55?'40-55':_kInDir<70?'55-70':_kInDir<85?'70-85':'85+';
+        buckets[_b].push(e.result==='WIN'?1:0);
+      });
+      const _table={};
+      ['<40','40-55','55-70','70-85','85+'].forEach(b=>{
+        const arr=buckets[b];
+        const n=arr.length,w=arr.reduce((a,c)=>a+c,0);
+        const wr=n>0?(w/n*100).toFixed(1)+'%':'—';
+        const _mult=_resolveKalshiAgreementMultiplier(b==='<40'?30:b==='40-55'?47:b==='55-70'?62:b==='70-85'?77:90);
+        _table[b]={n,wins:w,wr,multiplier:_mult};
+      });
+      console.table(_table);
+      console.info('To enable live: localStorage.setItem(\'taraKalshiAgreeMode\',\'live\') and refresh');
+      console.groupEnd();
+      return _table;
+    };
+  },[kalshiAgreeMode,_resolveKalshiAgreementMultiplier]);
   // Console hook: inspect or set current session-tier state
   useEffect(()=>{
     if(typeof window==='undefined')return;
@@ -29709,7 +29784,12 @@ function TaraApp(){
         score,
         label:score>=75?'HIGH':score>=55?'MODERATE':'LOW',
         color:score>=75?'emerald':score>=55?'amber':'rose',
-        components:{regimeCalPts,sessionPts,regimeWRPts,postPts,latePenalty,base},
+        // V10.2.21 — added diagnostic flags to V2 components (forgotten in V10.2.20).
+        //   These flags let users verify V10.2.20 retune is active on their trades.
+        components:{regimeCalPts,sessionPts,regimeWRPts,postPts,latePenalty,base,
+          _v10_2_20_postZeroed:_momentumRegime,
+          _v10_2_20_lateDropped:true,
+        },
       };
     }catch(e){return{score:0,label:'LOW',color:'rose',components:null};}
   };
@@ -30853,6 +30933,7 @@ function TaraApp(){
         //   When sessionTierMode !== 'live', mult resolves to 1.0 → no-op for off/shadow.
         let _edgeCap=_edgeCapRaw;
         let _sessTierMultEdge=1.0;
+        let _kalshiAgreeMult=1.0;
         try{
           if(sessionTierMode==='live'){
             const _ctx=taraCall?._ctx||{};
@@ -30866,6 +30947,21 @@ function TaraApp(){
             if(_sessTierMultEdge!==1.0){
               _edgeCap=Math.max(1,Math.round(_edgeCapRaw*_sessTierMultEdge*10)/10);
               try{console.info('[V10.2.17] session-tier mult applied to edge CAP:',{session:_curSession,tier:_curTier,mult:_sessTierMultEdge,capRaw:_edgeCapRaw,capAdj:_edgeCap,direction:_sessTierMultEdge>1?'loosened (strong combo)':'tightened (weak combo)'});}catch(_){}
+            }
+          }
+          // V10.2.21 — KALSHI-AGREEMENT MULTIPLIER stacks with session-tier.
+          //   18pt WR lever from May 15 audit. Loosens cap when Kalshi
+          //   strongly agrees, tightens when Kalshi disagrees. Stacks
+          //   multiplicatively with session-tier — both can apply at once.
+          //   Default mode='shadow' so users see logged data without behavior
+          //   change. Graduate to 'live' after ~30 trades validate.
+          if(kalshiAgreeMode==='live'){
+            const _kalshiInDir=_dir==='UP'?_yes:(100-_yes);
+            _kalshiAgreeMult=_resolveKalshiAgreementMultiplier(_kalshiInDir);
+            if(_kalshiAgreeMult!==1.0){
+              const _capPreKalshi=_edgeCap;
+              _edgeCap=Math.max(1,Math.round(_edgeCap*_kalshiAgreeMult*10)/10);
+              try{console.info('[V10.2.21] kalshi-agreement mult applied to edge CAP:',{kalshiInDir:Math.round(_kalshiInDir),mult:_kalshiAgreeMult,capBefore:_capPreKalshi,capAfter:_edgeCap,direction:_kalshiAgreeMult>1?'loosened (Kalshi agrees)':'tightened (Kalshi disagrees)'});}catch(_){}
             }
           }
         }catch(_){}
@@ -30893,9 +30989,10 @@ function TaraApp(){
             _edgeCap:_edgeCap,
             _edgeCapRaw:_edgeCapRaw,
             _sessTierMult:_sessTierMultEdge,
+            _kalshiAgreeMult:_kalshiAgreeMult,
           });
           // V10.2.4: log edge-cap block
-          try{_autoExecLogPushBlockOnce({type:'blocked',guard:'edge-cap',asset:currentAsset,windowId:_wid,dir:_dir,blockReason:_reason,edgePt:Math.round(_edge*10)/10,edgeCap:_edgeCap,edgeCapRaw:_edgeCapRaw,taraConv:Math.round(_taraConv),kalshiConv:Math.round(_kalshiConv),sessTierMult:_sessTierMultEdge});}catch(_){}
+          try{_autoExecLogPushBlockOnce({type:'blocked',guard:'edge-cap',asset:currentAsset,windowId:_wid,dir:_dir,blockReason:_reason,edgePt:Math.round(_edge*10)/10,edgeCap:_edgeCap,edgeCapRaw:_edgeCapRaw,taraConv:Math.round(_taraConv),kalshiConv:Math.round(_kalshiConv),sessTierMult:_sessTierMultEdge,kalshiAgreeMult:_kalshiAgreeMult});}catch(_){}
           return;
         }
       }
