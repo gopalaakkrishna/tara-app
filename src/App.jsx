@@ -3830,10 +3830,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.22-kalshiagree-hotfix-plus-range-bearish-label';
+const BASELINE_VERSION='2026.05.14-v10.2.25-sniper-hunter-presets-current-market-tuned';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.22';
+const TARA_VERSION_DISPLAY='Tara 10.2.25';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -12033,7 +12033,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
 // ── V8.2: TRADING SETTINGS MODAL ────────────────────────────────────────────
 // Configure bet size, win payout, anti-tilt cooldown, Discord alert filter,
 // take-profit/cut-loss rules. All localStorage-only, per-device prefs.
-function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,saveKalshiCreds,autoExecSettings,setAutoExecSettings,killSwitchEngaged,setKillSwitchEngaged,kalshiPingState,setKalshiPingState,autoExecCooldownUntil,setAutoExecCooldownUntil,mission,setMission,regimeDirCalibration,scalperSettings,setScalperSettings}){
+function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,saveKalshiCreds,autoExecSettings,setAutoExecSettings,killSwitchEngaged,setKillSwitchEngaged,kalshiPingState,setKalshiPingState,autoExecCooldownUntil,setAutoExecCooldownUntil,mission,setMission,regimeDirCalibration,scalperSettings,setScalperSettings,kalshiAgreeMode,setKalshiAgreeMode}){
   if(!open)return null;
   const _update=(k,v)=>setSettings(prev=>({...prev,[k]:v}));
   const _num=(s,fallback)=>{const n=Number(s);return Number.isFinite(n)?n:fallback;};
@@ -12429,25 +12429,131 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-1'},'Risk guardrails'),
           React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mb-3 leading-relaxed'},'Hard discipline guards. Block or exit trades automatically — no opinions, just rules.'),
           //
-          // ── V10.2.8 — PROFILE PRESETS ────────────────────────────────────────
-          //   Three one-click setups derived from the May 14 755-trade audit. Each
-          //   sets take-profit + stop-loss + edge cap + skip-time-cap + caps +
-          //   cooldown to a coherent profile. Manual overrides still work after.
-          //   - SURGEON:   highest WR, low volume. Confluence-tier-or-better only.
-          //                Expected ~72-75% WR, ~3-5 trades/day.
-          //   - BALANCED:  audit-optimal. Mid WR, mid volume.
-          //                Expected ~70-72% WR, ~8-12 trades/day.
-          //   - VOLUME:    higher turnover, accept lower WR. All tiers, time-cap on.
-          //                Expected ~66-68% WR, ~15-25 trades/day.
-          //   Preset selection does NOT touch master enabled toggle, dryRun,
-          //   sizing mode, API creds, or Phase 4 mode — those stay as-is.
+          // ── V10.2.8 / V10.2.25 — PROFILE PRESETS ──────────────────────────────
+          //   Five one-click setups. Sniper + Hunter are V10.2.25 additions, tuned
+          //   for the current market (heavy TRENDING DOWN + SHORT SQUEEZE momentum
+          //   regimes) which exposed the weaknesses the May 14 audit hadn't fully
+          //   addressed. Surgeon/Balanced/Volume preserved from V10.2.8 but no
+          //   longer recommended for current market — kept for users who want
+          //   the original audit-derived behavior.
+          //
+          //   - SNIPER:    NEW V10.2.25. Pure WR play. Uses every V10.2.x lever:
+          //                Phase 4 pregate + Kalshi-agree live + qScoreV2 ≥55 +
+          //                Min tier confluence + tight edge cap. Targets 78%+ WR.
+          //                Expected ~2-4 trades/day.
+          //   - SURGEON:   V10.2.8 legacy. Confluence-tier-only.
+          //                ~72-75% WR target (BUT — pre-momentum-market calibration).
+          //   - HUNTER:    NEW V10.2.25. "Win ideally + take volume" balance.
+          //                Phase 4 advisory + Kalshi-agree live + qScoreV2 ≥40 +
+          //                Min tier tape + skip time-cap. Targets 70-72% WR
+          //                with ~6-10 trades/day.
+          //   - BALANCED:  V10.2.8 legacy audit-optimal. Mid both.
+          //                ~70-72% WR · ~8-12/day (May 14 baseline).
+          //   - VOLUME:    V10.2.8 legacy higher turnover. Accept lower WR.
+          //                ~66-68% WR · ~15-25/day.
+          //
+          //   All presets set maxAutoTradesPerWindow:1 (hard floor since V10.2.24).
+          //   Manual overrides still work after.
           //
           React.createElement('div',{className:'mb-3'},
             React.createElement('div',{className:'flex items-baseline justify-between mb-1.5'},
               React.createElement('div',{className:'text-[9px] uppercase tracking-[0.10em] font-semibold text-[#E8E9E4]/45'},'Profile presets'),
-              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2.8'),
+              React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2.25'),
             ),
-            React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mb-2 leading-relaxed'},'One-tap setup. Audit-derived from 755 May 14 trades.'),
+            React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mb-2 leading-relaxed'},'One-tap setup. Sniper/Hunter tuned for current market (momentum regimes).'),
+            // ROW 1: SNIPER + HUNTER — the V10.2.25 current-market presets
+            React.createElement('div',{className:'grid grid-cols-2 gap-1.5 mb-1.5'},
+              // SNIPER — V10.2.25, max-WR play stacking every lever
+              React.createElement('button',{
+                type:'button',
+                onClick:()=>{
+                  if(typeof setAutoExecSettings!=='function')return;
+                  if(!confirm('Apply SNIPER preset?\\n\\nMax-WR play. Stacks ALL V10.2.x filters:\\n• Min tier: confluence+ (top WR tier)\\n• Min qScoreV2: 55 (V2 60+ shows 90%+ WR)\\n• Edge cap: 6pt (tightest)\\n• Phase 4: PREGATE (blocks wait/abort)\\n• Skip time-cap commits: ON\\n• Skip marginal-caution: ON\\n• Take-profit: 80¢ (book early)\\n• Stop-loss: 10¢ (cut fast)\\n• Max trades/day: 4\\n• Max bet: $2\\n• Cooldown: 2 losses → 45 min\\n\\nALSO enables Kalshi-agree LIVE if shadow.\\n\\nExpected: 78%+ WR, ~2-4 trades/day.\\nFew trades, mostly wins.'))return;
+                  setAutoExecSettings(prev=>({
+                    ...prev,
+                    minTier:'confluence',
+                    minQualityScore:55,
+                    maxEdgePt:6,
+                    tradeTimingMode:'pregate',
+                    skipTimeCapCommit:true,
+                    skipMarginalCaution:true,
+                    autoExitOffer:80,
+                    stopLossDeltaCents:10,
+                    maxAutoTradesPerDay:4,
+                    maxAutoTradesPerWindow:1,
+                    maxBetPerTrade:2,
+                    maxDailyLoss:4,
+                    cooldownLossStreak:2,
+                    cooldownMinutes:45,
+                  }));
+                  // Also enable Kalshi-agree live since this is the max-WR preset
+                  try{
+                    const _cur=localStorage.getItem('taraKalshiAgreeMode');
+                    if(_cur!=='live'){
+                      localStorage.setItem('taraKalshiAgreeMode','live');
+                      if(typeof setKalshiAgreeMode==='function')setKalshiAgreeMode('live');
+                    }
+                  }catch(_){}
+                  try{console.info('[V10.2.25] SNIPER preset applied — Phase 4 pregate, Kalshi-agree live, qScoreV2≥55, confluence-only');}catch(_){}
+                },
+                className:'text-[10px] py-2.5 px-1 rounded transition-colors',
+                style:{
+                  background:'rgba(244,114,182,0.10)',
+                  border:'1px solid rgba(244,114,182,0.35)',
+                  color:'rgb(244,114,182)',
+                },
+                title:'Max WR play. Every V10.2.x filter stacked aggressive. Few trades, mostly wins.',
+              },
+                React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Sniper'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'78%+ · 2-4/day · V10.2.25'),
+              ),
+              // HUNTER — V10.2.25, win-ideally + take-volume sweet spot
+              React.createElement('button',{
+                type:'button',
+                onClick:()=>{
+                  if(typeof setAutoExecSettings!=='function')return;
+                  if(!confirm('Apply HUNTER preset?\\n\\nWin-ideally + take volume balance:\\n• Min tier: tape+ (skips raw single-tier)\\n• Min qScoreV2: 40\\n• Edge cap: 8pt\\n• Phase 4: ADVISORY (badge only, no block)\\n• Skip time-cap commits: ON\\n• Skip marginal-caution: ON\\n• Take-profit: 82¢\\n• Stop-loss: 13¢\\n• Max trades/day: 8\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nALSO enables Kalshi-agree LIVE if shadow.\\n\\nExpected: 70-72% WR, ~6-10 trades/day.\\nThe "win and earn" sweet spot.'))return;
+                  setAutoExecSettings(prev=>({
+                    ...prev,
+                    minTier:'tape',
+                    minQualityScore:40,
+                    maxEdgePt:8,
+                    tradeTimingMode:'advisory',
+                    skipTimeCapCommit:true,
+                    skipMarginalCaution:true,
+                    autoExitOffer:82,
+                    stopLossDeltaCents:13,
+                    maxAutoTradesPerDay:8,
+                    maxAutoTradesPerWindow:1,
+                    maxBetPerTrade:2.5,
+                    maxDailyLoss:6,
+                    cooldownLossStreak:2,
+                    cooldownMinutes:30,
+                  }));
+                  try{
+                    const _cur=localStorage.getItem('taraKalshiAgreeMode');
+                    if(_cur!=='live'){
+                      localStorage.setItem('taraKalshiAgreeMode','live');
+                      if(typeof setKalshiAgreeMode==='function')setKalshiAgreeMode('live');
+                    }
+                  }catch(_){}
+                  try{console.info('[V10.2.25] HUNTER preset applied — tape+, qScoreV2≥40, Kalshi-agree live, advisory Phase 4');}catch(_){}
+                },
+                className:'text-[10px] py-2.5 px-1 rounded transition-colors',
+                style:{
+                  background:'rgba(96,165,250,0.10)',
+                  border:'1px solid rgba(96,165,250,0.35)',
+                  color:'rgb(96,165,250)',
+                },
+                title:'Win-ideally AND take meaningful volume. The recommended preset for daily auto-exec.',
+              },
+                React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Hunter'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'70-72% · 6-10/day · V10.2.25'),
+              ),
+            ),
+            // Divider label for legacy presets
+            React.createElement('div',{className:'text-[8px] uppercase tracking-[0.10em] text-[#E8E9E4]/30 my-1.5'},'Legacy presets (May 14 baseline)'),
+            // ROW 2: Surgeon + Balanced + Volume — V10.2.8 legacy
             React.createElement('div',{className:'grid grid-cols-3 gap-1.5'},
               // SURGEON preset — highest WR, lowest volume
               React.createElement('button',{
@@ -12473,11 +12579,11 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 },
                 className:'text-[10px] py-2 px-1 rounded transition-colors',
                 style:{
-                  background:'rgba(110,231,183,0.08)',
-                  border:'1px solid rgba(110,231,183,0.25)',
-                  color:'rgb(110,231,183)',
+                  background:'rgba(110,231,183,0.06)',
+                  border:'1px solid rgba(110,231,183,0.20)',
+                  color:'rgba(110,231,183,0.85)',
                 },
-                title:'Highest WR, lowest volume. Confluence+ trades only. ~72-75% WR target.',
+                title:'Highest WR, lowest volume. Confluence+ trades only. ~72-75% WR target. PRE-V10.2.x calibration.',
               },
                 React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Surgeon'),
                 React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'72-75% · 3-5/day'),
@@ -12506,11 +12612,11 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 },
                 className:'text-[10px] py-2 px-1 rounded transition-colors',
                 style:{
-                  background:'rgba(229,200,112,0.10)',
-                  border:'1px solid rgba(229,200,112,0.30)',
-                  color:'#E5C870',
+                  background:'rgba(229,200,112,0.06)',
+                  border:'1px solid rgba(229,200,112,0.20)',
+                  color:'rgba(229,200,112,0.80)',
                 },
-                title:'Audit-optimal. Mid WR, mid volume. RECOMMENDED for first auto-exec runs.',
+                title:'Audit-optimal. Mid WR, mid volume. PRE-V10.2.x calibration.',
               },
                 React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Balanced'),
                 React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'70-72% · 8-12/day'),
@@ -12539,17 +12645,17 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 },
                 className:'text-[10px] py-2 px-1 rounded transition-colors',
                 style:{
-                  background:'rgba(167,139,250,0.10)',
-                  border:'1px solid rgba(167,139,250,0.30)',
-                  color:'#A78BFA',
+                  background:'rgba(167,139,250,0.06)',
+                  border:'1px solid rgba(167,139,250,0.20)',
+                  color:'rgba(167,139,250,0.80)',
                 },
-                title:'More trades, lower per-trade WR but higher absolute profit potential.',
+                title:'More trades, lower per-trade WR. PRE-V10.2.x calibration.',
               },
                 React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-wider'},'Volume'),
                 React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'66-68% · 15-25/day'),
               ),
             ),
-            React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/35 mt-1.5 leading-relaxed'},'Presets overwrite the 12 fields they touch. Other settings (sizing mode, signal source, Phase 4) stay as-is.'),
+            React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/35 mt-1.5 leading-relaxed'},'Sniper & Hunter also enable Kalshi-agree LIVE. Presets overwrite ~12 fields (sizing mode, signal source, dryRun, API stay as-is).'),
           ),
           //
           // ── 1. Position size & fills ─────────────────────────────────────────
@@ -12629,20 +12735,19 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           React.createElement('div',{className:'mb-3'},
             React.createElement('label',{className:'block'},
               React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
-                _labelTip('max-trades-window','Max trades / window','HARD CAP. Maximum number of auto-exec entries on the same window (per asset). Default 1 = one shot per window. Was always "1" in V9.18.3 but the loop bug in V10.2.2 churned 36 trades on one window because the cap was bypassable. V10.2.3 fixed the bypass + V10.2.4 makes the cap a user-tunable setting. Raise to 2-5 only if you want to average-in or scalp in/out within one window. The 36-trade incident is what this guard prevents.'),
-                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2.4'),
+                _labelTip('max-trades-window','Max trades / window','HARD FLOOR at 1 since V10.2.24. Maximum auto-exec entries on the same window across ALL subsystems (Tara auto-exec + scalper auto-exec share this slot). Setting capped at 1 — was 1-5 in V10.2.4 but V10.2.24 enforces the floor because cross-system collisions could place 2+ trades per window when both subsystems were active.'),
+                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2.24'),
               ),
               React.createElement('input',{
-                type:'number',min:1,max:5,step:1,value:autoExecSettings?.maxAutoTradesPerWindow??1,
-                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxAutoTradesPerWindow:Math.max(1,Math.min(5,_num(e.target.value,1)))})),
-                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
+                // V10.2.24: max raised to 1 (was 5). Hard floor; cannot exceed.
+                type:'number',min:1,max:1,step:1,value:1,disabled:true,
+                onChange:()=>{}, // no-op — value is hardcoded
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white/50 text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1 cursor-not-allowed',
               }),
-              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},(()=>{
-                const _n=Number(autoExecSettings?.maxAutoTradesPerWindow)||1;
-                if(_n===1)return '= one auto-exec entry per window per asset (RECOMMENDED — matches original V9.18.3 hard cap)';
-                return `⚠ allow up to ${_n} auto-exec entries on the same window per asset — re-entry mode (re-enables failure modes V9.18.3 prevented; only for explicit scalping/averaging strategies)`;
-              })()),
-              _tipBox('max-trades-window','HARD CAP. Maximum number of auto-exec entries on the same window (per asset). Default 1 = one shot per window. Was always "1" in V9.18.3 but the loop bug in V10.2.2 churned 36 trades on one window because the cap was bypassable. V10.2.3 fixed the bypass + V10.2.4 makes the cap a user-tunable setting. Raise to 2-5 only if you want to average-in or scalp in/out within one window. The 36-trade incident is what this guard prevents.'),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
+                '= 1 auto-exec entry per window across ALL subsystems (hard floor since V10.2.24; Tara + scalper share this slot, manual click bypasses)'
+              ),
+              _tipBox('max-trades-window','HARD FLOOR at 1 since V10.2.24. Maximum auto-exec entries on the same window across ALL subsystems (Tara auto-exec + scalper auto-exec share this slot). Setting capped at 1 — was 1-5 in V10.2.4 but V10.2.24 enforces the floor because cross-system collisions could place 2+ trades per window when both subsystems were active.'),
             ),
           ),
           //
@@ -23536,7 +23641,7 @@ function TaraApp(){
         //   same window (e.g. averaging in, scalp pyramiding). WARNING: raising
         //   this re-enables some failure modes the V9.18.3 cap was designed to
         //   prevent. Keep at 1 unless you have a specific reason.
-        maxAutoTradesPerWindow:Number.isFinite(Number(v.maxAutoTradesPerWindow))&&Number(v.maxAutoTradesPerWindow)>=1?Math.min(5,Number(v.maxAutoTradesPerWindow)):1,
+        maxAutoTradesPerWindow:1, // V10.2.24: hard floor — value forced to 1 regardless of input
         slippageCents:Number(v.slippageCents)>=0?Number(v.slippageCents):2,
         // V10.2.8 — AUDIT-OPTIMAL MIGRATION for autoExitOffer (88→82), maxEdgePt
         //   (15→10), and skipTimeCapCommit (false→true). Each one is independently
@@ -24175,6 +24280,81 @@ function TaraApp(){
   //   the Set entry still present is treated as 1 via the post-refresh
   //   fallback in the hard cap check below). Incremented on each placement.
   const _windowAttemptCountRef=useRef(new Map());
+  // V10.2.24 — SHARED CROSS-SYSTEM 1-TRADE-PER-WINDOW HARD FLOOR.
+  //   Problem this solves: auto-exec subsystems (main Tara auto-exec,
+  //   scalper auto-exec, future Phase-4-pregate, future weak-cluster filter,
+  //   etc.) all maintain their own counters. They mutually-exclude at the
+  //   SETTINGS level (UI keeps them from both being 'enabled' at once), but
+  //   if a user has main auto-exec off and scalper on, scalper has no
+  //   per-window cap of its own — it just respects a 'don't fire while Tara
+  //   is locked' guard. Multiple scalper trades CAN occur per Kalshi window.
+  //
+  //   This ref is the SHARED truth: any auto-exec subsystem that fires must
+  //   call _claimWindowSlot(key, system). It returns true only if no slot
+  //   has been claimed for that window yet. False blocks the trade.
+  //
+  //   Hard floor — NOT user-configurable. The maxAutoTradesPerWindow setting
+  //   is now bounded to 1 in this ref (any value above 1 is ignored). Per-
+  //   subsystem behavior (Tara's own counter, scalper's dedup, etc.) still
+  //   runs as additional safeguards, but THIS ref is the final word.
+  //
+  //   Map shape: <windowKey, {system, ts, dir}>
+  //   windowKey = `${asset}_${windowType}_${windowId}` (matches existing
+  //   _attemptKey shape used in V10.2.4 path).
+  //
+  //   Cleared on rollover via the existing _windowAttemptCountRef.clear()
+  //   site — same lifecycle, same key shape, so no separate GC needed.
+  const _sharedWindowSlotRef=useRef(new Map());
+  const _claimWindowSlot=React.useCallback((key,system,extra)=>{
+    if(!key||!system)return{ok:false,reason:'missing key or system'};
+    const _existing=_sharedWindowSlotRef.current.get(key);
+    if(_existing){
+      // Same system re-checking is OK — return true so it can proceed with its
+      // own logic; this is just a defensive same-tick re-entry case.
+      if(_existing.system===system)return{ok:true,owner:_existing,reentry:true};
+      // Different system trying to fire after another already did. Block.
+      try{console.info(`[V10.2.24] shared 1-trade floor: ${system} blocked, ${_existing.system} already fired in window ${key}`);}catch(_){}
+      return{ok:false,reason:`window already used by ${_existing.system}`,owner:_existing};
+    }
+    _sharedWindowSlotRef.current.set(key,{system,ts:Date.now(),...(extra||{})});
+    try{console.info(`[V10.2.24] shared 1-trade floor: ${system} claimed window ${key}`);}catch(_){}
+    return{ok:true,claimed:true};
+  },[]);
+  // Console hook to inspect slot state — useful for debugging "why didn't scalper fire?"
+  useEffect(()=>{
+    if(typeof window==='undefined')return;
+    window.__taraWindowSlots=()=>{
+      // Light GC on read: drop entries older than 24h to bound map growth
+      const _now=Date.now();
+      const _TTL=24*60*60*1000;
+      for(const[k,v]of _sharedWindowSlotRef.current.entries()){
+        if(v?.ts&&(_now-v.ts)>_TTL)_sharedWindowSlotRef.current.delete(k);
+      }
+      const _entries=Array.from(_sharedWindowSlotRef.current.entries()).map(([k,v])=>({
+        window:k,
+        system:v.system,
+        firedAt:new Date(v.ts).toLocaleTimeString(),
+        dir:v.dir||'—',
+      }));
+      console.group('%c━━━ Shared 1-Trade-Per-Window Slots ━━━','color:#E5C870;font-weight:bold');
+      if(_entries.length===0)console.info('No windows claimed in this session.');
+      else console.table(_entries);
+      console.groupEnd();
+      return _entries;
+    };
+  },[]);
+  // V10.2.24: GC on a 1-hour cadence so map doesn't grow unbounded
+  useEffect(()=>{
+    const _gc=()=>{
+      const _now=Date.now();
+      const _TTL=24*60*60*1000;
+      for(const[k,v]of _sharedWindowSlotRef.current.entries()){
+        if(v?.ts&&(_now-v.ts)>_TTL)_sharedWindowSlotRef.current.delete(k);
+      }
+    };
+    const _h=setInterval(_gc,60*60*1000);
+    return()=>clearInterval(_h);
+  },[]);
   // V9.19.4: persist write helper. Preserves each key's original timestamp.
   //   New keys (in set but not in ts map) get stamped now; existing keys keep
   //   their original stamp so TTL counts from first attempt, not last persist.
@@ -31187,12 +31367,38 @@ function TaraApp(){
           },
         };
         _phase4Decision=evaluateTradeTimingV1(_phase4Inputs);
+        // V10.2.23 — PER-FACTOR IMPACT EXTRACTION for downstream calibration.
+        //   The reasons array from evaluateTradeTimingV1 is [{factor, impact, note}].
+        //   Previously we only stamped a string summary (top 3 factors). For data-driven
+        //   weight tuning we need each factor's signed impact as its own field, so the
+        //   CSV/JSON exports can correlate impact-per-factor with eventual WR.
+        //
+        //   Known factor names from Phase 4 v1: tier, lateness, edge, kalshi, tape,
+        //   urgency, regime, mtf, momentum, pattern, time-of-day, manual-override.
+        //   We sum impacts when the same factor appears multiple times (rare but
+        //   possible — e.g. 'tape' fires for both accel and consensus).
+        const _phase4Factors={};
+        try{
+          (_phase4Decision.reasons||[]).forEach(r=>{
+            if(!r||!r.factor||!Number.isFinite(r.impact))return;
+            const _k=String(r.factor).toLowerCase().replace(/[^a-z0-9]/g,'_');
+            _phase4Factors[_k]=(_phase4Factors[_k]||0)+r.impact;
+          });
+          // Round each accumulated impact to 1dp for compact stamping.
+          Object.keys(_phase4Factors).forEach(k=>{
+            _phase4Factors[k]=Math.round(_phase4Factors[k]*10)/10;
+          });
+        }catch(_){}
         // Store on ref so the call-log entry writer downstream can attach
         _phase4DecisionRef.current={
           decision:_phase4Decision.decision,
           score:_phase4Decision.score,
           // Compact reason summary — first 3 factors
           reason:(_phase4Decision.reasons||[]).slice(0,3).map(r=>`${r.factor}${r.impact>=0?'+':''}${r.impact}`).join('|'),
+          // V10.2.23 — full per-factor breakdown (object: factorName→signedImpact)
+          factors:_phase4Factors,
+          // V10.2.23 — count of factors that fired (cheap sanity field)
+          factorCount:Object.keys(_phase4Factors).length,
           waitForCondition:_phase4Decision.waitForCondition,
           waitMaxSec:_phase4Decision.waitMaxSec,
           mode:_timingMode,
@@ -31420,6 +31626,20 @@ function TaraApp(){
     // V10.2.4: increment per-window count for the new maxAutoTradesPerWindow
     //   cap. Map is in-memory only; the Set above carries the persistent flag.
     _windowAttemptCountRef.current.set(_attemptKey,(_windowAttemptCountRef.current.get(_attemptKey)||0)+1);
+    // V10.2.24 — SHARED CROSS-SYSTEM SLOT CLAIM. Hard floor of 1 trade
+    //   per window across ALL auto-exec subsystems. If scalper already
+    //   fired for this window key, we block. (Conversely, if Tara fires
+    //   first, scalper's gate at its placement site will block.) Manual
+    //   trades bypass — they're user-initiated, not auto-exec.
+    //   _isManual is the user-click flag set earlier in this effect.
+    if(!_isManual){
+      const _claim=_claimWindowSlot(_attemptKey,'tara-auto-exec',{dir:_dir});
+      if(!_claim.ok){
+        try{console.warn(`[V10.2.24] tara-auto-exec BLOCKED by shared floor: ${_claim.reason}`);}catch(_){}
+        try{_autoExecLogPushBlockOnce({type:'blocked',guard:'shared-window-floor',asset:currentAsset,windowId:_wid,dir:_dir,blockReason:`shared 1/window floor: ${_claim.reason}`});}catch(_){}
+        return;
+      }
+    }
     // V10.2.3 CRITICAL FIX: consume the manual-override flags after placement.
     //   ROOT CAUSE BUG: lockedCallRef.current._manualTrigger was set by manual
     //   button clicks but never reset. After one manual click in a window, the
@@ -31990,6 +32210,20 @@ function TaraApp(){
     const _sigKey=`${scalperRead.dir}_${Math.round(_conv/5)*5}_${Math.round(_k)}`;
     if(scalperOrderStateRef.current.inFlight)return;
     if(scalperOrderStateRef.current.lastFiredSignature===_sigKey&&Date.now()-scalperOrderStateRef.current.lastFiredAt<60000)return;
+    // V10.2.24 — SHARED CROSS-SYSTEM SLOT CLAIM for scalper. Same hard floor
+    //   as Tara auto-exec. Key shape must match Tara's _attemptKey
+    //   (`${asset}_${windowType}_${windowId}`) so both systems compete for
+    //   the same slot. Scalper operates on a Kalshi ticker not a Tara window
+    //   directly — derive the equivalent key from currentAsset + windowType
+    //   + computed windowId.
+    try{
+      const _scalperKey=`${currentAsset}_${windowType}_${computeWindowId(windowType)}`;
+      const _claim=_claimWindowSlot(_scalperKey,'scalper-auto-exec',{dir:_dir,k:_k});
+      if(!_claim.ok){
+        try{console.warn(`[V10.2.24] scalper-auto-exec BLOCKED by shared floor: ${_claim.reason}`);}catch(_){}
+        return;
+      }
+    }catch(_){/* claim failed unexpectedly — fail open, scalper's own dedup still applies */}
     // Fire order
     scalperOrderStateRef.current.inFlight=true;
     scalperOrderStateRef.current.lastFiredSignature=_sigKey;
@@ -32551,6 +32785,9 @@ function TaraApp(){
         tradeTimingScore:_phase4DecisionRef.current?_phase4DecisionRef.current.score:null,
         tradeTimingReason:_phase4DecisionRef.current?_phase4DecisionRef.current.reason:null,
         tradeTimingMode:_phase4DecisionRef.current?_phase4DecisionRef.current.mode:null,
+        // V10.2.23 — per-factor impact breakdown for offline calibration
+        tradeTimingFactors:_phase4DecisionRef.current?_phase4DecisionRef.current.factors||null:null,
+        tradeTimingFactorCount:_phase4DecisionRef.current?_phase4DecisionRef.current.factorCount||0:0,
         sessionTierMode:taraCall?._ctx?._sessionTierMode||null,
         sessionTierMult:taraCall?._ctx?._sessionTierMult!=null?taraCall._ctx._sessionTierMult:null,
         sessionTierApplied:taraCall?._ctx?._sessionTierApplied===true,
@@ -32663,6 +32900,9 @@ function TaraApp(){
           tradeTimingScore:_phase4DecisionRef.current?_phase4DecisionRef.current.score:null,
           tradeTimingReason:_phase4DecisionRef.current?_phase4DecisionRef.current.reason:null,
           tradeTimingMode:_phase4DecisionRef.current?_phase4DecisionRef.current.mode:null,
+          // V10.2.23 — per-factor impact breakdown for offline calibration
+          tradeTimingFactors:_phase4DecisionRef.current?_phase4DecisionRef.current.factors||null:null,
+          tradeTimingFactorCount:_phase4DecisionRef.current?_phase4DecisionRef.current.factorCount||0:0,
           sessionTierMode:taraCall?._ctx?._sessionTierMode||null,
           sessionTierMult:taraCall?._ctx?._sessionTierMult!=null?taraCall._ctx._sessionTierMult:null,
           sessionTierApplied:taraCall?._ctx?._sessionTierApplied===true,
@@ -32919,6 +33159,9 @@ function TaraApp(){
           tradeTimingScore:_phase4DecisionRef.current?_phase4DecisionRef.current.score:null,
           tradeTimingReason:_phase4DecisionRef.current?_phase4DecisionRef.current.reason:null,
           tradeTimingMode:_phase4DecisionRef.current?_phase4DecisionRef.current.mode:null,
+          // V10.2.23 — per-factor impact breakdown for offline calibration
+          tradeTimingFactors:_phase4DecisionRef.current?_phase4DecisionRef.current.factors||null:null,
+          tradeTimingFactorCount:_phase4DecisionRef.current?_phase4DecisionRef.current.factorCount||0:0,
           // V10.2.13: session × tier optimizer telemetry. _ctx comes from taraCall
           //   IIFE return; fields are stamped whenever taraCall ran for this lock.
           //   Mode='off' produces 1.0 mult / false applied (no-op baseline). Shadow
@@ -33439,7 +33682,11 @@ function TaraApp(){
         // V9.9.5: tier label persisted on snapshot so Discord broadcast can render it,
         //   and so the call card has an authoritative source after lock formation. Mirrors
         //   the value written to the call log entry at L23673.
-        tier:tierLabel,
+        // V10.2.23 — DUPLICATE-KEY WARNING FIX. This site originally set tier:tierLabel,
+        //   and ~57 lines below it ALSO set tier:_hardForceActive?'user-forced':tierLabel.
+        //   Both keys winning sequentially in JS — the second always overrode the first,
+        //   so user-force properly resolved. Warning was benign but masked code smell.
+        //   Removed the duplicate; kept the conditional version below.
         atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
         atPosterior:analysis?.rawProbAbove,
         // V6.5.7: lock-time price + strike + quality + FGT + regime persisted in snapshot.
@@ -33581,6 +33828,9 @@ function TaraApp(){
         tradeTimingScore:_phase4DecisionRef.current?_phase4DecisionRef.current.score:null,
         tradeTimingReason:_phase4DecisionRef.current?_phase4DecisionRef.current.reason:null,
         tradeTimingMode:_phase4DecisionRef.current?_phase4DecisionRef.current.mode:null,
+        // V10.2.23 — per-factor impact breakdown for offline calibration
+        tradeTimingFactors:_phase4DecisionRef.current?_phase4DecisionRef.current.factors||null:null,
+        tradeTimingFactorCount:_phase4DecisionRef.current?_phase4DecisionRef.current.factorCount||0:0,
         sessionTierMode:tc?._ctx?._sessionTierMode||null,
         sessionTierMult:tc?._ctx?._sessionTierMult!=null?tc._ctx._sessionTierMult:null,
         sessionTierApplied:tc?._ctx?._sessionTierApplied===true,
@@ -36177,6 +36427,8 @@ function TaraApp(){
           regimeDirCalibration={regimeDirCalibration}
           scalperSettings={scalperSettings}
           setScalperSettings={setScalperSettings}
+          kalshiAgreeMode={kalshiAgreeMode}
+          setKalshiAgreeMode={setKalshiAgreeMode}
         />
 
         {/* V8.5: Best Practices modal — comprehensive trader's guide */}
