@@ -3830,10 +3830,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.15-rollover-grace-blocks-lifecycle-commits';
+const BASELINE_VERSION='2026.05.14-v10.2.16-session-tier-actually-applies-plus-stale-warnings';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.15';
+const TARA_VERSION_DISPLAY='Tara 10.2.16';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -12880,8 +12880,8 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 //   addresses this but has <50 entries — not yet graduated. Keep at 0.
                 React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},(()=>{
                   const _v=autoExecSettings?.minQualityScore||0;
-                  if(_v===0)return '= no quality filter (RECOMMENDED — qScore is currently anti-correlated with WR per May 14 audit; v1 fix shipping after qScoreV2 graduates)';
-                  return `⚠ ${_v}/100 — qScore is currently INVERTED: high scores have LOWER WR (audit: q60-79 won 60.6%, q0-19 won 73.9%). Raising this filters OUT better trades. Set to 0 until qScoreV2 graduates.`;
+                  if(_v===0)return '= no quality filter (recommended default — qScore V2 is now live and monotonic with WR but most live trades happen at qScore >= 30 anyway, so a hard filter is rarely useful)';
+                  return `${_v}/100 — V2 formula live since V10.2.8 (was inverted in V1; fixed). Raising this only filters when q-score is below ${_v}; verify ${_v}+ trades actually have meaningfully higher WR before relying on it.`;
                 })()),
               ),
               React.createElement('label',{className:'block'},
@@ -30760,11 +30760,37 @@ function TaraApp(){
       const _edgeCap=Number.isFinite(_maxEdge)&&_maxEdge>0?_maxEdge:15;
       const _post=Number(analysis?.rawProbAbove);
       if(Number.isFinite(_post)&&Number.isFinite(_yes)){
-        const _taraConv=_dir==='UP'?_post:(100-_post);
+        const _taraConvRaw=_dir==='UP'?_post:(100-_post);
+        // V10.2.16 — session × tier multiplier APPLIES here. Previously the
+        //   multiplier only affected taraCall.confidence (display) but auto-exec
+        //   edge gate read raw posterior, so the optimizer was cosmetic. Now the
+        //   gate sees the adjusted conviction → optimizer actually nudges fire
+        //   decisions. Multiplier defaults to 1.0 (no-op) when sessionTierMode
+        //   isn't 'live', so behavior unchanged for users on off/shadow.
+        let _taraConv=_taraConvRaw;
+        let _sessTierMultEdge=1.0;
+        try{
+          if(sessionTierMode==='live'){
+            // Re-derive tier classification from the current taraCall snapshot.
+            //   Cleanest signal source: taraCall._ctx flags set by the IIFE above.
+            const _ctx=taraCall?._ctx||{};
+            const _curTier=_ctx.isSuperConfluent?'confluence'
+              :_ctx.isConfluent?'confluence'
+              :_ctx.isStructuralLed?'structural'
+              :_ctx.isTapeLed?'tape'
+              :null;
+            const _curSession=(typeof getMarketSessions==='function'?getMarketSessions().dominant:null)||'';
+            _sessTierMultEdge=_resolveSessionTierMultiplier(_curSession,_curTier);
+            if(_sessTierMultEdge!==1.0){
+              _taraConv=Math.max(0,Math.min(100,_taraConvRaw*_sessTierMultEdge));
+              try{console.info('[V10.2.16] session-tier mult applied to edge:',{session:_curSession,tier:_curTier,mult:_sessTierMultEdge,convRaw:Math.round(_taraConvRaw),convAdj:Math.round(_taraConv)});}catch(_){}
+            }
+          }
+        }catch(_){}
         const _kalshiConv=_dir==='UP'?_yes:(100-_yes);
         const _edge=_taraConv-_kalshiConv;
         try{console.info('[V9.19.24] EDGE CHECK',{
-          dir:_dir,taraConv:_taraConv,kalshiConv:_kalshiConv,
+          dir:_dir,taraConv:_taraConv,taraConvRaw:_taraConvRaw,sessTierMult:_sessTierMultEdge,kalshiConv:_kalshiConv,
           edgePt:Math.round(_edge*10)/10,cap:_edgeCap,
           willBlock:_edge>_edgeCap,
         });}catch(_){}
@@ -30772,7 +30798,8 @@ function TaraApp(){
           // Block. Burn dedup key so we don't keep evaluating the same lock,
           // and emit a visible UI state so the user sees "sit out: market priced".
           _autoExecLastFiredKeyRef.current=_key;
-          const _reason=`edge +${Math.round(_edge)}pt > cap +${_edgeCap}pt — market already priced (Tara ${Math.round(_taraConv)}% vs Kalshi ${Math.round(_kalshiConv)}%)`;
+          const _multTag=_sessTierMultEdge!==1.0?` [×${_sessTierMultEdge}]`:'';
+          const _reason=`edge +${Math.round(_edge)}pt > cap +${_edgeCap}pt — market already priced (Tara ${Math.round(_taraConv)}%${_multTag} vs Kalshi ${Math.round(_kalshiConv)}%)`;
           try{console.info('[V9.19.24] AUTO-EXEC BLOCKED (edge filter):',_reason);}catch(_){}
           setAutoOrderState({
             status:'sit-out-edge',
@@ -30782,9 +30809,10 @@ function TaraApp(){
             asset:currentAsset,
             _edgePt:Math.round(_edge*10)/10,
             _edgeCap:_edgeCap,
+            _sessTierMult:_sessTierMultEdge,
           });
           // V10.2.4: log edge-cap block
-          try{_autoExecLogPushBlockOnce({type:'blocked',guard:'edge-cap',asset:currentAsset,windowId:_wid,dir:_dir,blockReason:_reason,edgePt:Math.round(_edge*10)/10,edgeCap:_edgeCap,taraConv:Math.round(_taraConv),kalshiConv:Math.round(_kalshiConv)});}catch(_){}
+          try{_autoExecLogPushBlockOnce({type:'blocked',guard:'edge-cap',asset:currentAsset,windowId:_wid,dir:_dir,blockReason:_reason,edgePt:Math.round(_edge*10)/10,edgeCap:_edgeCap,taraConv:Math.round(_taraConv),kalshiConv:Math.round(_kalshiConv),sessTierMult:_sessTierMultEdge});}catch(_){}
           return;
         }
       }
