@@ -3024,6 +3024,32 @@ const kalshiPing=async({apiKeyId,privateKeyPem})=>{
   return{ok:true,balance:res.data?.balance,raw:res.data};
 };
 
+// V10.2.10 — fetch current open positions from Kalshi. Returns:
+//   {ok, positions:[{ticker, count, side, ...}], raw}
+// Kalshi's response shape: data.market_positions = [{ticker, position, ...}] where
+// `position` is signed (positive = long YES, negative = long NO, 0 = closed).
+// We normalize to {ticker, count, side, raw} for easier consumption.
+const kalshiFetchPositions=async({apiKeyId,privateKeyPem})=>{
+  if(!apiKeyId||!privateKeyPem)return{ok:false,reason:'no-credentials',positions:[]};
+  const res=await kalshiAuthedFetch({apiKeyId,privateKeyPem,method:'GET',path:'/portfolio/positions?status=open&limit=100',timeoutMs:8000});
+  if(!res.ok)return{ok:false,reason:res.reason||`http ${res.status}`,positions:[]};
+  const _mp=Array.isArray(res.data?.market_positions)?res.data.market_positions:[];
+  const _normalized=_mp
+    .map(p=>{
+      const _pos=Number(p?.position)||0;
+      if(_pos===0)return null; // closed positions = ignore
+      return{
+        ticker:p?.ticker||'',
+        count:Math.abs(_pos),
+        side:_pos>0?'yes':'no', // Kalshi convention
+        signedPosition:_pos,
+        raw:p,
+      };
+    })
+    .filter(Boolean);
+  return{ok:true,positions:_normalized,raw:res.data};
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // V9.19.16: computeAutoExecSize — CENTRAL SIZING FUNCTION
 //
@@ -3620,10 +3646,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.9-manual-position-recorder-and-pnl-pill-fix';
+const BASELINE_VERSION='2026.05.14-v10.2.11-kalshi-30s-ring-phase4-live';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.9';
+const TARA_VERSION_DISPLAY='Tara 10.2.11';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -9228,6 +9254,66 @@ function QualityGateCard({qualityGate,regime,session}){
   );
 }
 
+// V10.2.10 — Position reconciliation drift banner. Shows ONLY when the poll
+//   detected drift between Tara's tracked state and Kalshi's actual book.
+//   Three drift kinds (see TaraApp's positionReconciliation comment):
+//     - phantom-auto / phantom-manual: Tara has it, Kalshi doesn't
+//     - count-mismatch: counts disagree
+//     - unknown-to-tara: Kalshi has a position Tara doesn't know about
+//   Each line shows a concise action hint. Dismissable for the rest of this
+//   poll cycle (next poll will re-render if drift persists).
+function PositionReconciliationBanner({positionReconciliation}){
+  const[dismissedAt,setDismissedAt]=React.useState(0);
+  const _rec=positionReconciliation;
+  if(!_rec||_rec.status!=='drift'||!Array.isArray(_rec.driftDetails)||_rec.driftDetails.length===0)return null;
+  // If user dismissed this poll's banner, suppress until next poll arrives
+  if(dismissedAt>0&&dismissedAt>=(_rec.lastCheckAt||0))return null;
+  const _kindColor=(k)=>k==='unknown-to-tara'?'#A78BFA':k==='count-mismatch-auto'||k==='count-mismatch-manual'?'#E5C870':'rgba(244,114,182,0.95)';
+  const _kindLabel=(k)=>{
+    if(k==='phantom-auto')return 'phantom (auto)';
+    if(k==='phantom-manual')return 'phantom (manual)';
+    if(k==='count-mismatch-auto')return 'count mismatch (auto)';
+    if(k==='count-mismatch-manual')return 'count mismatch (manual)';
+    if(k==='unknown-to-tara')return 'kalshi-only';
+    return k;
+  };
+  return (
+    <div className="mb-2 p-2.5 rounded-lg" style={{background:'rgba(244,114,182,0.08)',border:'1px solid rgba(244,114,182,0.35)'}}>
+      <div className="flex items-baseline justify-between mb-1.5">
+        <span className="text-[10px] uppercase font-bold tracking-wider" style={{color:'rgba(244,114,182,0.95)'}}>
+          ⚠ Position drift detected
+        </span>
+        <button
+          type="button"
+          onClick={()=>setDismissedAt(Date.now())}
+          className="text-[10px] hover:opacity-100 transition-opacity"
+          style={{color:'rgba(232,233,228,0.55)',opacity:0.7,background:'none',border:'none',cursor:'pointer',padding:0}}
+          title="dismiss until next poll"
+        >dismiss</button>
+      </div>
+      <div className="text-[10px] mb-1.5 leading-relaxed" style={{color:'rgba(232,233,228,0.65)'}}>
+        Tara's tracked position{_rec.driftDetails.length===1?'':'s'} {_rec.driftDetails.length===1?'doesn\'t':'don\'t'} match what Kalshi shows. Last checked {Math.max(0,Math.floor((Date.now()-_rec.lastCheckAt)/1000))}s ago.
+      </div>
+      <div className="space-y-1.5">
+        {_rec.driftDetails.map((d,i)=>(
+          <div key={i} className="text-[11px] py-1 pl-2" style={{borderLeft:`2px solid ${_kindColor(d.kind)}`}}>
+            <div className="flex items-baseline gap-2 mb-0.5">
+              <span className="text-[9px] uppercase font-bold tracking-wider" style={{color:_kindColor(d.kind)}}>{_kindLabel(d.kind)}</span>
+              <span className="text-[10px] tabular-nums" style={{color:'rgba(232,233,228,0.55)'}}>Tara:{d.taraCount} · Kalshi:{d.kalshiCount}</span>
+            </div>
+            <div className="text-[11px] leading-relaxed" style={{color:'rgba(232,233,228,0.85)'}}>
+              {d.note}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="text-[9px] mt-1.5" style={{color:'rgba(232,233,228,0.45)'}}>
+        Full diff in console: <code style={{color:'rgba(232,233,228,0.65)'}}>{'window.__taraPositionReconciliation()'}</code>
+      </div>
+    </div>
+  );
+}
+
 // SyncButtons — extracted to avoid esbuild IIFE+shadow class slash bug
 function SyncButtons({userPosition,handleManualSync}){
   const upActive=userPosition==='UP';
@@ -9250,6 +9336,7 @@ function PredictionContent(props){
     isLoading,analysis,currentPrice,
     qualityGate,userPosition,timeState,streakData,
     manualKalshiEntry,setManualKalshiEntry, // V10.2.9: manual fill recorder
+    positionReconciliation, // V10.2.10: portfolio reconciliation banner data
     handleManualSync,getMarketSessions,executeAction,
     broadcastSignalManual,discordWebhook,regimeDirWR,
     kalshiYesPrice,
@@ -9889,6 +9976,13 @@ function PredictionContent(props){
         {lockPriceStatus}
       </div>
       )}
+
+      {/* V10.2.10 — POSITION RECONCILIATION DRIFT BANNER
+          Shows ONLY when the 30s poll detected drift between Tara's tracked
+          state and the actual Kalshi book. Each drift item rendered as its own
+          line with a clear action hint. Banner is dismissable but reappears
+          on the next poll if drift persists. */}
+      <PositionReconciliationBanner positionReconciliation={positionReconciliation}/>
 
       {analysis.lockInfo&&(
         <QualityGateCard qualityGate={qualityGate} regime={analysis.regime} session={getMarketSessions().dominant}/>
@@ -12505,15 +12599,15 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             },
               React.createElement('option',{value:'off',style:{background:'#15151a',color:'#E8E9E4'}},'Off — Phase 4 disabled'),
               React.createElement('option',{value:'shadow',style:{background:'#15151a',color:'#E8E9E4'}},'Shadow — logs decisions, no blocking (RECOMMENDED)'),
-              React.createElement('option',{value:'advisory',style:{background:'#15151a',color:'#E8E9E4'}},'Advisory — shows in UI (Session 4 stub)'),
-              React.createElement('option',{value:'pregate',style:{background:'#15151a',color:'#E8E9E4'}},'Pre-gate — blocks trades (Session 4 stub)'),
+              React.createElement('option',{value:'advisory',style:{background:'#15151a',color:'#E8E9E4'}},'Advisory — shows decision badge, no blocking'),
+              React.createElement('option',{value:'pregate',style:{background:'#15151a',color:'#E8E9E4'}},'Pre-gate — BLOCKS abort/wait decisions'),
             ),
             React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1 leading-relaxed'},(()=>{
               const _m=autoExecSettings?.tradeTimingMode||'shadow';
               if(_m==='off')return '= no Phase 4 evaluation, V9.19.x behavior preserved';
               if(_m==='shadow')return '= scoring runs every lock, decision logged to CSV (tradeTimingDecision column). Auto-exec NOT affected. Run 30+ trades, then we analyze.';
-              if(_m==='advisory')return '= [Session 4 stub] currently behaves like shadow';
-              if(_m==='pregate')return '= [Session 4 stub] currently behaves like shadow';
+              if(_m==='advisory')return '= V10.2.11 LIVE — decision badge renders in predictor header (color-coded fire-now/wait/abort), auto-exec still proceeds. Manual gut-check mode.';
+              if(_m==='pregate')return '= V10.2.11 LIVE — auto-exec is BLOCKED when Phase 4 returns abort or wait. Manual click bypasses. Most conservative live mode.';
             })()),
             _tipBox('timing-mode','New V10.0.0 timing engine. Evaluates every Tara\'s Call lock and outputs fire-now / wait / abort with reasons. Currently in SHADOW mode for Session 2 data collection — runs silently, logs to CSV, does NOT affect trades. Future sessions: tune thresholds (Session 3) → advisory/pregate live blocking (Session 4). Set to "off" if you don\'t want the engine logging anything at all.'),
           ),
@@ -22698,6 +22792,77 @@ function TaraApp(){
   const mtfLocksRef=useRef({'5m':null,'15m':null}); // {dir,lockedAt,posterior};
 
   const[kalshiYesPrice,setKalshiYesPrice]=useState(null); // live YES price from active Kalshi market
+  // V10.2.11 — KALSHI 30s HISTORY RING
+  //   Phase 4's timing engine needs a 30s-ago Kalshi YES price to compute
+  //   "kalshi velocity" — is the market moving toward Tara's call or away?
+  //   This was a TODO at L30370 since V10.0.0; without it Phase 4 always saw
+  //   kalshiYes30sAgo=null and the velocity factor was always 0/neutral.
+  //
+  //   Ring shape: array of {ts: ms, yes: 0-99}, capped at 25 entries (one
+  //   every ~5s for ~2 minutes of history). Captures on every kalshiYesPrice
+  //   change OR every 5s minimum via heartbeat. Pruned to keep last 90s only.
+  //
+  //   Lookup: _kalshiYesAtAgo(secsAgo) returns the closest entry to N seconds
+  //   ago, or null if no entry within ±5s of target.
+  const _kalshiYesRingRef=useRef([]);
+  // Capture on every kalshiYesPrice change. Lightweight — just one push + prune.
+  useEffect(()=>{
+    const _y=Number(kalshiYesPrice);
+    if(!Number.isFinite(_y)||_y<=0||_y>=100)return;
+    const _ring=_kalshiYesRingRef.current;
+    const _now=Date.now();
+    // De-dup: don't push if the last entry is < 1s old AND the same price (avoid spam)
+    const _last=_ring[_ring.length-1];
+    if(_last&&_now-_last.ts<1000&&_last.yes===_y)return;
+    _ring.push({ts:_now,yes:_y});
+    // Prune to keep last 90s only (Phase 4 reads 30s, give buffer)
+    const _cutoff=_now-90000;
+    while(_ring.length>0&&_ring[0].ts<_cutoff)_ring.shift();
+    // Hard cap of 60 entries (defensive against price-change spam)
+    if(_ring.length>60)_ring.splice(0,_ring.length-60);
+  },[kalshiYesPrice]);
+  // Lookup helper — returns Kalshi YES price ~N seconds ago, or null if no
+  //   data within ±5s of target. Uses linear search; ring is small (<60).
+  const _kalshiYesAtAgo=React.useCallback((secsAgo)=>{
+    const _ring=_kalshiYesRingRef.current;
+    if(!_ring||_ring.length===0)return null;
+    const _target=Date.now()-(secsAgo*1000);
+    const _tolMs=5000;
+    let _best=null;
+    let _bestDist=Infinity;
+    for(const e of _ring){
+      const d=Math.abs(e.ts-_target);
+      if(d<_bestDist&&d<=_tolMs){
+        _best=e;_bestDist=d;
+      }
+    }
+    return _best?_best.yes:null;
+  },[]);
+  // V10.2.11 — console hook to inspect the 30s history ring. Useful for
+  //   verifying Phase 4 has data, debugging stale-ring issues, or just
+  //   sanity-checking the velocity input.
+  useEffect(()=>{
+    if(typeof window==='undefined')return;
+    window.__taraKalshiRing=()=>{
+      const _ring=_kalshiYesRingRef.current||[];
+      const _now=Date.now();
+      const _summary=_ring.map(e=>({
+        ts:new Date(e.ts).toLocaleTimeString(),
+        ageSec:Math.floor((_now-e.ts)/1000),
+        yes:e.yes,
+      }));
+      console.group('%c━━━ Kalshi 30s history ring ━━━','color:#E5C870;font-weight:bold;font-size:13px');
+      console.info(`Entries: ${_ring.length} (capped at 60, pruned >90s)`);
+      if(_ring.length>0){
+        const _span=Math.floor((_ring[_ring.length-1].ts-_ring[0].ts)/1000);
+        console.info(`Span: ${_span}s from oldest to newest`);
+      }
+      console.info(`Current Phase 4 input: kalshiYes30sAgo = ${_kalshiYesAtAgo(30)} (${_kalshiYesAtAgo(30)===null?'NO DATA — ring too cold':'OK'})`);
+      console.table(_summary);
+      console.groupEnd();
+      return{ring:_ring,kalshiYes30sAgo:_kalshiYesAtAgo(30),kalshiYes60sAgo:_kalshiYesAtAgo(60)};
+    };
+  },[_kalshiYesAtAgo]);
   // V8.9.0: Kalshi YES price history for smart-money divergence detector. Captures
   //   each non-null Kalshi update with timestamp, kept to last 60s. Used to detect
   //   when Kalshi moves >5¢ in 30s while spot stays flat (positioning play / squeeze).
@@ -23162,6 +23327,47 @@ function TaraApp(){
   const[autoOrderState,setAutoOrderState]=useState(null);
   const autoOrderStateRef=useRef(autoOrderState);
   useEffect(()=>{autoOrderStateRef.current=autoOrderState;},[autoOrderState]);
+  // V10.2.10 — POSITION RECONCILIATION (Phase 2). Polls /portfolio/positions
+  //   every 30s when there's reason to believe Tara should be tracking
+  //   something on Kalshi. Detects three categories of drift between Tara's
+  //   internal state and the actual Kalshi book:
+  //
+  //   1. PHANTOM (Tara has it, Kalshi doesn't):
+  //      - autoOrderState says filled, but Kalshi shows 0 contracts on that
+  //        ticker. Means user manually closed on Kalshi or order errored
+  //        after partial fill. Auto-exec exit would fail.
+  //      - manualKalshiEntry says N contracts at X¢, but Kalshi shows 0.
+  //        Means user forgot to clear the entry after closing.
+  //
+  //   2. UNDERCOUNT (Tara has more than Kalshi):
+  //      - autoOrderState says filled 4 contracts, Kalshi shows 2. Partial
+  //        close on Kalshi side.
+  //
+  //   3. UNKNOWN (Kalshi has it, Tara doesn't):
+  //      - Tara state empty but Kalshi shows positions on the active ticker.
+  //        Means user manually entered without telling Tara. Tara's analysis
+  //        is operating on the wrong position basis.
+  //
+  //   The poll does NOT auto-correct (too risky — could submit wrong orders).
+  //   It surfaces a banner so the user can resolve manually:
+  //   - Tap the banner → console gets full diff
+  //   - Or run window.__taraPositionReconciliation() any time
+  //
+  //   Shape: {
+  //     status: 'in-sync' | 'drift' | 'error' | 'idle',
+  //     driftCount: number,
+  //     driftDetails: [{kind, ticker, taraCount, kalshiCount, side}],
+  //     kalshiPositions: [{ticker, count, side}],
+  //     lastCheckAt: ms,
+  //     lastErrorMsg: string | null,
+  //   }
+  const[positionReconciliation,setPositionReconciliation]=useState({
+    status:'idle',driftCount:0,driftDetails:[],kalshiPositions:[],lastCheckAt:0,lastErrorMsg:null,
+  });
+  // Refs so the poll function reads current values without re-running on every state change
+  const _manualKalshiEntryRef=useRef(null);
+  const _userPositionRef=useRef(null);
+  const _kalshiActiveMarketRef=useRef(null);
   // Per-window dedup so we never double-fire on the same lock (e.g., on a forceRender pulse).
   const _autoExecLastFiredKeyRef=useRef('');
   // V9.17.27: track last logged key for the manual-eval log so we don't spam
@@ -25194,6 +25400,10 @@ function TaraApp(){
       setManualKalshiEntry(null);
     }
   },[userPosition,manualKalshiEntry]);
+  // V10.2.10 — sync refs for reconciliation poll (poll function reads from these
+  //   so it doesn't need to re-mount on every state change)
+  _manualKalshiEntryRef.current=manualKalshiEntry;
+  _userPositionRef.current=userPosition;
   // V9.10.5: showHelp state removed — opened the "What's New" modal which was stale at
   //   v8.8 and removed in V9.10.3 (button) + V9.10.5 (modal body). Orphan state cleaned.
   const[soundEnabled,setSoundEnabled]=useState(()=>{
@@ -30228,7 +30438,11 @@ function TaraApp(){
           },
           market:{
             kalshiYes:_kYesNow,
-            kalshiYes30sAgo:null, // V10.0.0 TODO: add 30s history ring for Kalshi prices (Session 3+)
+            // V10.2.11 — kalshiYes30sAgo now wired from 30s history ring (was
+            //   a V10.0.0 TODO null since launch). Tolerance: ±5s; returns
+            //   null if ring is cold (< 30s of data captured) or no nearby
+            //   entry. Phase 4 handles null gracefully (velocity factor → 0).
+            kalshiYes30sAgo:_kalshiYesAtAgo(30),
             kalshiSpread:Number(_bloom?.kalshiSpread||0),
             spotPrice:Number(analysis?.currentPrice||0),
             spotDrift1m:Number(analysis?.drift1m||0),
@@ -30351,8 +30565,45 @@ function TaraApp(){
           topReasons:(_phase4Decision.reasons||[]).slice(0,5).map(r=>`${r.factor}(${r.impact>=0?'+':''}${r.impact})`).join(' '),
           waitFor:_phase4Decision.waitForCondition,
         });}catch(_){}
-        // SHADOW: do NOT block trades. Advisory/pregate behavior comes in Session 4.
-        // (intentional no-op here)
+        // V10.2.11 — PHASE 4 LIVE GATING (was SHADOW-ONLY until now).
+        //
+        //   Behavior by mode:
+        //     - off:      Phase 4 disabled, no evaluation
+        //     - shadow:   evaluate + log only, never blocks (default)
+        //     - advisory: evaluate + log + render badge prominently (Phase4Badge
+        //                 already does this in the header); auto-exec still
+        //                 proceeds. User sees the decision but Tara doesn't act.
+        //     - pregate:  evaluate + log + BLOCK auto-exec if decision is
+        //                 'abort' or 'wait'. Manual click bypasses.
+        //
+        //   Why 'wait' also blocks: pregate is the most conservative live mode.
+        //   'wait' decisions carry waitForCondition/waitMaxSec hints that we'd
+        //   need a separate re-evaluation pump to honor properly. Until that
+        //   exists, treating 'wait' as 'abort' for one window is the safer
+        //   default — Tara will re-evaluate on the next lock anyway.
+        //
+        //   Manual click ALWAYS bypasses Phase 4 (consistent with all other
+        //   soft filters — manual button is the global override).
+        if(_timingMode==='pregate'&&!_isManual&&_phase4Decision){
+          if(_phase4Decision.decision==='abort'||_phase4Decision.decision==='wait'){
+            try{console.warn(`[V10.2.11] Phase 4 (pregate) BLOCKED auto-exec — decision=${_phase4Decision.decision}, score=${_phase4Decision.score}, top reasons=${(_phase4Decision.reasons||[]).slice(0,3).map(r=>`${r.factor}(${r.impact>=0?'+':''}${r.impact})`).join(' ')}`);}catch(_){}
+            try{_autoExecLogPushBlockOnce({type:'blocked',guard:'phase4',asset:currentAsset,windowId:_wid,dir:_signal?.dir||null,blockReason:`Phase 4 ${_phase4Decision.decision} (score ${_phase4Decision.score})`});}catch(_){}
+            // Surface to UI so user sees the block instead of silent inaction
+            setAutoOrderState({
+              status:'sit-out',
+              reason:`Phase 4 ${_phase4Decision.decision}: ${(_phase4Decision.reasons||[]).slice(0,2).map(r=>r.factor).join(', ')}`,
+              dir:_dir,
+              placedAt:Date.now(),
+              asset:currentAsset,
+              _phase4Decision:_phase4Decision.decision,
+              _phase4Score:_phase4Decision.score,
+            });
+            _autoExecLastFiredKeyRef.current=_key;
+            return;
+          }
+        }
+        // SHADOW + ADVISORY: log only, don't block. (advisory's UI surface is
+        //   the Phase4Badge in the predictor header — already implemented.)
       }catch(_phase4Err){
         // Fail-open in shadow mode — log error, allow auto-exec to proceed
         try{console.warn('[V10.0.0-shadow] DECISION ERROR (failing open):',_phase4Err&&_phase4Err.message);}catch(_){}
@@ -30682,6 +30933,189 @@ function TaraApp(){
   //   propagating reliably to this effect).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[analysis,currentAsset,windowType,kalshiActiveMarket,kalshiYesPrice,userPosition,autoExecSettings,killSwitchEngaged,taraCall,_manualAutoExecNonce]);
+
+  // ── V10.2.10 — POSITION RECONCILIATION POLL ────────────────────────────────
+  // Polls /portfolio/positions every 30s and detects three drift categories
+  // between Tara's internal state and Kalshi's actual book. See state comment
+  // at the positionReconciliation declaration for the categories. Polling only
+  // runs when there's reason to expect a position (autoOrderState set OR
+  // manualKalshiEntry set OR userPosition set OR auto-exec enabled). Outside
+  // those cases it's idle.
+  //
+  // The drift detector lives outside React state so it can be invoked
+  // independently from the console hook. It reads through refs to current
+  // Tara state — the poll's interval doesn't need to re-mount on every render.
+  useEffect(()=>{
+    _kalshiActiveMarketRef.current=kalshiActiveMarket;
+  },[kalshiActiveMarket]);
+  useEffect(()=>{
+    const _hasCreds=!!(kalshiCreds.apiKeyId&&kalshiCreds.privateKeyPem);
+    if(!_hasCreds)return;
+    // Only poll when there's a reason — saves Kalshi rate quota and avoids
+    //   alarming on inactive users.
+    const _shouldPoll=()=>{
+      if(autoExecSettings?.enabled)return true;
+      if(autoOrderStateRef.current)return true;
+      if(_manualKalshiEntryRef.current)return true;
+      if(_userPositionRef.current)return true;
+      return false;
+    };
+    let _stopped=false;
+    let _inflight=false;
+    const _computeDrift=(positions)=>{
+      const _details=[];
+      const _aos=autoOrderStateRef.current;
+      const _mke=_manualKalshiEntryRef.current;
+      const _up=_userPositionRef.current;
+      const _km=_kalshiActiveMarketRef.current;
+      const _activeTicker=_km?.ticker||null;
+      // PHANTOM: Tara thinks she has a live position
+      if(_aos&&(_aos.status==='filled'||_aos.status==='exiting')&&_aos.ticker){
+        const _match=positions.find(p=>p.ticker===_aos.ticker);
+        if(!_match){
+          _details.push({
+            kind:'phantom-auto',
+            ticker:_aos.ticker,
+            taraCount:Number(_aos.count)||0,
+            kalshiCount:0,
+            side:_aos.side||(_aos.dir==='UP'?'yes':'no'),
+            note:`Tara's auto-exec thinks you hold ${Number(_aos.count)||0} contract(s) but Kalshi shows none — likely closed manually or order errored`,
+          });
+        }else if(_match.count!==Number(_aos.count)){
+          _details.push({
+            kind:'count-mismatch-auto',
+            ticker:_aos.ticker,
+            taraCount:Number(_aos.count)||0,
+            kalshiCount:_match.count,
+            side:_match.side,
+            note:`Auto-exec thinks ${Number(_aos.count)||0} contracts, Kalshi shows ${_match.count}`,
+          });
+        }
+      }
+      // PHANTOM: manualKalshiEntry stale (user closed but didn't tell Tara)
+      if(_mke&&_activeTicker&&_up){
+        const _match=positions.find(p=>p.ticker===_activeTicker);
+        const _expectedSide=_mke.side==='UP'?'yes':'no';
+        if(!_match){
+          _details.push({
+            kind:'phantom-manual',
+            ticker:_activeTicker,
+            taraCount:Number(_mke.contracts)||0,
+            kalshiCount:0,
+            side:_expectedSide,
+            note:`Logged manual fill says ${_mke.contracts} × ${_mke.entryCents}¢ but Kalshi shows no position — clear the logged fill if you've closed`,
+          });
+        }else if(_match.count!==Number(_mke.contracts)||_match.side!==_expectedSide){
+          _details.push({
+            kind:'count-mismatch-manual',
+            ticker:_activeTicker,
+            taraCount:Number(_mke.contracts)||0,
+            kalshiCount:_match.count,
+            side:_match.side,
+            note:`Logged ${_mke.contracts} contracts on ${_expectedSide}; Kalshi shows ${_match.count} on ${_match.side}`,
+          });
+        }
+      }
+      // UNKNOWN: Kalshi has a position on the active ticker that Tara doesn't know about
+      if(_activeTicker&&!_aos&&!_mke){
+        const _match=positions.find(p=>p.ticker===_activeTicker);
+        if(_match){
+          _details.push({
+            kind:'unknown-to-tara',
+            ticker:_activeTicker,
+            taraCount:0,
+            kalshiCount:_match.count,
+            side:_match.side,
+            note:`Kalshi shows ${_match.count} ${_match.side.toUpperCase()} on the active window — Tara doesn't know about this. Either log it via ENTERED ${_match.side==='yes'?'UP':'DOWN'} + Real Kalshi fill, or close on Kalshi to clear`,
+          });
+        }
+      }
+      return _details;
+    };
+    const _tick=async()=>{
+      if(_stopped)return;
+      if(_inflight)return;
+      if(!_shouldPoll()){
+        // Nothing to reconcile — keep state as 'idle' but don't burn API calls
+        return;
+      }
+      _inflight=true;
+      try{
+        const _res=await kalshiFetchPositions({apiKeyId:kalshiCreds.apiKeyId,privateKeyPem:kalshiCreds.privateKeyPem});
+        if(_stopped)return;
+        if(!_res.ok){
+          setPositionReconciliation(prev=>({
+            ...prev,
+            status:'error',
+            lastErrorMsg:_res.reason||'unknown',
+            lastCheckAt:Date.now(),
+          }));
+          return;
+        }
+        const _details=_computeDrift(_res.positions);
+        setPositionReconciliation({
+          status:_details.length>0?'drift':'in-sync',
+          driftCount:_details.length,
+          driftDetails:_details,
+          kalshiPositions:_res.positions,
+          lastCheckAt:Date.now(),
+          lastErrorMsg:null,
+        });
+      }catch(e){
+        // Silent on network errors — don't flag drift if we can't even reach Kalshi
+        if(!_stopped){
+          setPositionReconciliation(prev=>({
+            ...prev,
+            status:'error',
+            lastErrorMsg:String(e?.message||e),
+            lastCheckAt:Date.now(),
+          }));
+        }
+      }finally{
+        _inflight=false;
+      }
+    };
+    // First check after 5s (give the app time to settle), then every 30s
+    const _firstHandle=setTimeout(_tick,5000);
+    const _intervalHandle=setInterval(_tick,30000);
+    return ()=>{
+      _stopped=true;
+      clearTimeout(_firstHandle);
+      clearInterval(_intervalHandle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[kalshiCreds.apiKeyId,kalshiCreds.privateKeyPem,autoExecSettings?.enabled]);
+
+  // V10.2.10 — console hook for on-demand reconciliation diagnostics
+  useEffect(()=>{
+    if(typeof window==='undefined')return;
+    window.__taraPositionReconciliation=async()=>{
+      try{
+        if(!kalshiCreds.apiKeyId||!kalshiCreds.privateKeyPem){
+          console.warn('No Kalshi credentials configured');
+          return null;
+        }
+        const _res=await kalshiFetchPositions({apiKeyId:kalshiCreds.apiKeyId,privateKeyPem:kalshiCreds.privateKeyPem});
+        console.group('%c━━━ Position reconciliation ━━━','color:#E5C870;font-weight:bold;font-size:13px');
+        if(!_res.ok){
+          console.error('Kalshi fetch failed:',_res.reason);
+          console.groupEnd();
+          return{ok:false,reason:_res.reason};
+        }
+        console.info('Kalshi positions:',_res.positions);
+        console.info('Tara autoOrderState:',autoOrderStateRef.current);
+        console.info('Tara manualKalshiEntry:',_manualKalshiEntryRef.current);
+        console.info('Tara userPosition:',_userPositionRef.current);
+        console.info('Active market ticker:',_kalshiActiveMarketRef.current?.ticker||'(none)');
+        console.info('Last poll result:',positionReconciliation);
+        console.groupEnd();
+        return{ok:true,kalshi:_res.positions,tara:{autoOrderState:autoOrderStateRef.current,manualKalshiEntry:_manualKalshiEntryRef.current,userPosition:_userPositionRef.current},lastReconciliation:positionReconciliation};
+      }catch(e){
+        console.error('Reconciliation error:',e);
+        return{ok:false,error:String(e?.message||e)};
+      }
+    };
+  },[kalshiCreds.apiKeyId,kalshiCreds.privateKeyPem,positionReconciliation]);
 
   // ── POLL EFFECT ───────────────────────────────────────────────────────────
   // While an order is in 'placing'/'submitted'/'resting'/'partially_filled' state,
@@ -35272,7 +35706,7 @@ function TaraApp(){
 
             {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
 
-            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} manualKalshiEntry={manualKalshiEntry} setManualKalshiEntry={setManualKalshiEntry} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} scalperPanelEl={
+            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} manualKalshiEntry={manualKalshiEntry} setManualKalshiEntry={setManualKalshiEntry} positionReconciliation={positionReconciliation} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} scalperPanelEl={
               <ScalperAdvisorPanel
                 scalperRead={scalperRead}
                 scalperSettings={scalperSettings}
