@@ -1034,6 +1034,199 @@ if(typeof window!=='undefined'){
   try{console.info('[Phase4Stats] hook ready — run window.__taraPhase4Stats() in console');}catch(_){}
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.2.x — TARA AUDIT STATS (DevTools console hook)
+// ═══════════════════════════════════════════════════════════════════════════
+// Re-runs the May 14 audit on demand. Reads taraCallLog from localStorage,
+//   computes WR breakdowns across multiple dimensions, and compares each to
+//   the May 14 baselines (642-trade audit) so drift is visible.
+//
+// Run from DevTools console:
+//
+//   window.__taraAuditStats()                       → everything, all trades
+//   window.__taraAuditStats({autoExecOnly:true})    → auto-exec subset only
+//   window.__taraAuditStats({asset:'BTC'})          → BTC only
+//   window.__taraAuditStats({asset:'ETH',autoExecOnly:true,minN:5})
+//
+// Output: console.table blocks per dimension — tier, regime, edge bucket,
+//   session, window type, asset, direction, auto/manual split, time-cap-commit
+//   sub-bands (the V9.19.26 90-119s finding), and v1 vs v2 score-bucket
+//   monotonicity comparison (does qScoreV2 predict better than qScore?).
+//
+// Each row shows n, wins, losses, WR — plus baseline + delta where a May 14
+//   number exists. Use to decide which knobs need re-tuning and which clusters
+//   are bleeding vs holding their baseline.
+if(typeof window!=='undefined'){
+  // May 14 audit baselines (642 trades). Empty entries = no baseline captured.
+  const _AUDIT_BASELINES={
+    tier:{
+      'time-cap-commit':62.4,
+      'timer-commit':62.4,
+      'normal':78.5,
+      'early':65.7,
+    },
+    edge:{
+      'edge ≤ -10pt':80.0,
+      'edge 0-10pt':70.6,
+      'edge 10-20pt':65.1,
+      'edge 20-30pt':60.2,
+      'edge 30+pt':65.2,
+    },
+    tcBand:{
+      '90-119s':54.6,
+    },
+  };
+  window.__taraAuditStats=(opts={})=>{
+    try{
+      const raw=localStorage.getItem('taraCallLog_v1');
+      if(!raw){console.warn('[AuditStats] no call log in localStorage');return null;}
+      const log=JSON.parse(raw);
+      if(!Array.isArray(log)){console.warn('[AuditStats] call log malformed');return null;}
+      // Filters
+      const _asset=opts.asset||opts.assetFilter||'all';
+      const _autoOnly=opts.autoExecOnly===true;
+      const _minN=Number.isFinite(opts.minN)?opts.minN:3;
+      let filtered=log;
+      if(_asset!=='all')filtered=filtered.filter(e=>(e?.asset||'BTC')===_asset);
+      if(_autoOnly)filtered=filtered.filter(e=>e?.autoExec===true);
+      const resolved=filtered.filter(e=>e?.result==='WIN'||e?.result==='LOSS');
+      const _wrPct=(w,n)=>n>0?(w/n*100).toFixed(1)+'%':'n/a';
+      const _wrNum=(w,n)=>n>0?(w/n*100):null;
+      const _delta=(curWR,baseWR)=>{
+        if(curWR==null||baseWR==null)return '—';
+        const d=curWR-baseWR;
+        return (d>=0?'+':'')+d.toFixed(1)+'pt';
+      };
+      // Generic grouping helper.
+      const _groupBy=(entries,keyFn,baselineMap)=>{
+        const groups={};
+        entries.forEach(e=>{
+          const k=keyFn(e);
+          if(k==null||k===undefined||k==='')return;
+          if(!groups[k])groups[k]={n:0,w:0,l:0};
+          groups[k].n++;
+          if(e.result==='WIN')groups[k].w++;
+          else if(e.result==='LOSS')groups[k].l++;
+        });
+        return Object.entries(groups)
+          .filter(([,v])=>v.n>=_minN)
+          .map(([k,v])=>{
+            const wr=_wrNum(v.w,v.n);
+            const baseWR=baselineMap?.[k]??null;
+            return{
+              bucket:k,
+              n:v.n,
+              wins:v.w,
+              losses:v.l,
+              WR:_wrPct(v.w,v.n),
+              baselineMay14:baseWR!=null?baseWR.toFixed(1)+'%':'—',
+              delta:_delta(wr,baseWR),
+            };
+          })
+          .sort((a,b)=>b.n-a.n);
+      };
+      const _overallW=resolved.filter(e=>e.result==='WIN').length;
+      console.group(`%c━━━ Tara Audit Stats ━━━`,'color:#E5C870;font-weight:bold;font-size:13px');
+      console.info(`Filter: asset=${_asset}, autoExecOnly=${_autoOnly}, minN=${_minN}`);
+      console.info(`Entries: ${filtered.length} total · ${resolved.length} resolved · ${filtered.length-resolved.length} pending/sit-out`);
+      console.info(`Overall WR: ${_wrPct(_overallW,resolved.length)} (${_overallW}W / ${resolved.length-_overallW}L)`);
+      // ── BY TIER ────────────────────────────────────────────────────────
+      console.group('By tier');
+      try{console.table(_groupBy(resolved,e=>e.tier||'untiered',_AUDIT_BASELINES.tier));}catch(_){}
+      console.groupEnd();
+      // ── BY REGIME ──────────────────────────────────────────────────────
+      console.group('By regime');
+      try{console.table(_groupBy(resolved,e=>e.regime||'unknown'));}catch(_){}
+      console.groupEnd();
+      // ── BY EDGE BUCKET (Tara conf - Kalshi conf, on Tara's direction) ─
+      console.group('By edge bucket — Tara conv minus Kalshi conv, on her dir');
+      try{console.table(_groupBy(resolved,e=>{
+        const _post=Number(e.posterior),_k=Number(e.kalshiAtLock);
+        if(!Number.isFinite(_post)||!Number.isFinite(_k)||!e.dir)return null;
+        const _taraConf=e.dir==='UP'?_post:(100-_post);
+        const _kalConf=e.dir==='UP'?_k:(100-_k);
+        const _edge=_taraConf-_kalConf;
+        if(_edge<=-10)return 'edge ≤ -10pt';
+        if(_edge<0)return 'edge -10 to 0';
+        if(_edge<10)return 'edge 0-10pt';
+        if(_edge<20)return 'edge 10-20pt';
+        if(_edge<30)return 'edge 20-30pt';
+        return 'edge 30+pt';
+      },_AUDIT_BASELINES.edge));}catch(_){}
+      console.groupEnd();
+      // ── BY SESSION ─────────────────────────────────────────────────────
+      console.group('By session (London/Asia/NY/OFF)');
+      try{console.table(_groupBy(resolved,e=>e.session||'unknown'));}catch(_){}
+      console.groupEnd();
+      // ── BY WINDOW TYPE ─────────────────────────────────────────────────
+      console.group('By window type');
+      try{console.table(_groupBy(resolved,e=>e.windowType||'unknown'));}catch(_){}
+      console.groupEnd();
+      // ── BY ASSET (only meaningful if not pre-filtered to one) ──────────
+      if(_asset==='all'){
+        console.group('By asset');
+        try{console.table(_groupBy(resolved,e=>e.asset||'BTC'));}catch(_){}
+        console.groupEnd();
+      }
+      // ── BY DIRECTION ───────────────────────────────────────────────────
+      console.group('By direction');
+      try{console.table(_groupBy(resolved,e=>e.dir||'unknown'));}catch(_){}
+      console.groupEnd();
+      // ── AUTO vs MANUAL (only if not pre-filtered to auto-only) ─────────
+      if(!_autoOnly){
+        console.group('Auto-exec vs manual');
+        try{console.table(_groupBy(resolved,e=>e.autoExec===true?'auto-exec':'manual'));}catch(_){}
+        console.groupEnd();
+      }
+      // ── TIME-CAP-COMMIT SUB-BANDS (V9.19.26 finding) ───────────────────
+      const _tcResolved=resolved.filter(e=>e.tier==='time-cap-commit'||e.tier==='timer-commit');
+      if(_tcResolved.length>=_minN){
+        console.group(`Time-cap-commit sub-bands · n=${_tcResolved.length} (May 14: 90-119s was worst at 54.6%)`);
+        try{console.table(_groupBy(_tcResolved,e=>{
+          const _sec=Number(e.secondsIntoWindow);
+          if(!Number.isFinite(_sec))return null;
+          if(_sec<60)return '0-59s';
+          if(_sec<90)return '60-89s';
+          if(_sec<120)return '90-119s';
+          if(_sec<180)return '120-179s';
+          return '180s+';
+        },_AUDIT_BASELINES.tcBand));}catch(_){}
+        console.groupEnd();
+      }
+      // ── qScore v1 vs v2 MONOTONICITY ─────────────────────────────────
+      // If higher score → higher WR consistently in BOTH columns, both
+      //   models are calibrated. If v2 shows tighter monotonicity than v1,
+      //   v2 is more predictive — graduate it from shadow to primary.
+      const _scoreBucket=(s)=>{
+        const _n=Number(s);
+        if(!Number.isFinite(_n))return null;
+        if(_n<20)return '0-19';
+        if(_n<40)return '20-39';
+        if(_n<60)return '40-59';
+        if(_n<80)return '60-79';
+        return '80-100';
+      };
+      const _v1Rows=_groupBy(resolved,e=>_scoreBucket(e.qScore));
+      const _v2Rows=_groupBy(resolved,e=>_scoreBucket(e.qScoreV2));
+      const _hasV2=_v2Rows.length>0;
+      if(_v1Rows.length>0){
+        console.group(`Score-bucket monotonicity${_hasV2?' (v1 vs v2)':''}`);
+        try{console.info('qScore v1 (current production):');console.table(_v1Rows);}catch(_){}
+        if(_hasV2){try{console.info('qScoreV2 (shadow, V9.19.10+):');console.table(_v2Rows);}catch(_){}}
+        else{console.info('qScoreV2: no data in log (older entries pre-V9.19.10 don\'t have it)');}
+        console.groupEnd();
+      }
+      console.groupEnd(); // close the outer audit group
+      // Return the structured data so it can be assigned to a var for further analysis
+      return{
+        filter:{asset:_asset,autoExecOnly:_autoOnly,minN:_minN},
+        totals:{entries:filtered.length,resolved:resolved.length,wins:_overallW,losses:resolved.length-_overallW,WR:_wrPct(_overallW,resolved.length)},
+      };
+    }catch(e){console.error('[AuditStats] failed:',e&&e.message);return null;}
+  };
+  try{console.info('[AuditStats] hook ready — run window.__taraAuditStats() in console');}catch(_){}
+}
+
 // Deterministic ID for the current trading window (UTC ISO of window-open boundary).
 // Refresh during the same window → same ID → restore the same lock.
 const computeWindowId=(windowType)=>{
@@ -2067,7 +2260,7 @@ const useScalperEngine=({tapeWindows,globalFlow,velocityRef,spotPerpDiv,depthFla
 //   - status: 'idle' | 'connected' | 'error' | 'no-creds'
 //
 // "Today's delta" = balance - baseline. If baselineDay !== today, reset baseline.
-const useKalshiBalance=({kalshiCreds})=>{
+const useKalshiBalance=({kalshiCreds,timeFormat})=>{
   const[state,setState]=React.useState(()=>{
     try{
       const saved=JSON.parse(localStorage.getItem('tara_kalshi_balance_v1')||'{}');
@@ -2111,9 +2304,9 @@ const useKalshiBalance=({kalshiCreds})=>{
           return;
         }
         const _balanceDollars=_rawBalance/100;
-        const _today=new Date().toISOString().slice(0,10);
+        const _today=_dayKey(new Date(),timeFormat); // V10.2.x: honors header TZ (was UTC-only)
         setState(prev=>{
-          // Reset baseline on new UTC day OR if no baseline exists yet.
+          // Reset baseline on new day (in user's TZ) OR if no baseline exists yet.
           // V9.17.9: was `!_baseline` which is true for 0, causing baseline to
           //   reset every poll when actual balance was zero. Use typeof check.
           let _baseline=prev.baseline;
@@ -2139,7 +2332,7 @@ const useKalshiBalance=({kalshiCreds})=>{
     _poll();
     const iv=setInterval(_poll,30000);
     return()=>{_cancelled=true;clearInterval(iv);};
-  },[kalshiCreds?.apiKeyId,kalshiCreds?.privateKeyPem]);
+  },[kalshiCreds?.apiKeyId,kalshiCreds?.privateKeyPem,timeFormat]); // V10.2.x: timeFormat in deps so day-roll re-evaluates
   return state;
 };
 
@@ -4247,6 +4440,68 @@ const _fmtDateTz=(d,timeFormat,opts={year:'numeric',month:'2-digit',day:'2-digit
   if(!Number.isFinite(_d.getTime()))return'';
   try{return _d.toLocaleDateString('en-US',{..._tzOptFor(timeFormat),...opts});}
   catch(_){return _d.toLocaleDateString('en-US',opts);}
+};
+
+// V10.2.x — DAY-BOUNDARY HELPERS (single source of truth for "what's today?")
+// ═══════════════════════════════════════════════════════════════════════════
+// Centralizes day-boundary calculations across Tara so all daily aggregations
+// (daily caps, "today's P&L" strips, balance baseline reset, loss-streak
+// cooldown, Phase 4 day groupings) use the SAME definition of "today." Without
+// this, "Today's P&L" can disagree with the daily cap because one uses local TZ
+// and the other uses UTC — leading to the cap triggering on a different day
+// than the strip claims.
+//
+// Both helpers honor the user's header timeFormat ('local' | 'utc' | 'est').
+// 'est' = America/New_York (DST-aware, switches between EST and EDT).
+//
+// _dayKey returns 'YYYY-MM-DD' (sortable, ISO-style) for the date in the
+// chosen TZ. _nextMidnightMs returns the epoch-ms moment the next midnight
+// occurs in the chosen TZ — used as the cooldown-until value for daily caps
+// so they auto-release at day roll.
+
+const _dayKey=(d,timeFormat)=>{
+  const _d=d instanceof Date?d:new Date(d);
+  if(!Number.isFinite(_d.getTime()))return'';
+  try{
+    // en-CA locale produces YYYY-MM-DD format. Sortable, ISO-style.
+    if(timeFormat==='utc')return _d.toLocaleDateString('en-CA',{timeZone:'UTC'});
+    if(timeFormat==='est')return _d.toLocaleDateString('en-CA',{timeZone:'America/New_York'});
+    return _d.toLocaleDateString('en-CA'); // local
+  }catch(_){return _d.toISOString().slice(0,10);} // last-resort: UTC
+};
+
+const _nextMidnightMs=(timeFormat)=>{
+  if(!timeFormat||timeFormat==='local'){
+    const d=new Date();d.setHours(24,0,0,0);return d.getTime();
+  }
+  if(timeFormat==='utc'){
+    const d=new Date();d.setUTCHours(24,0,0,0);return d.getTime();
+  }
+  // 'est' — America/New_York. Search forward for the moment when the day key
+  //   changes in that TZ. Coarse 30-min steps (≤48 iters to span ~24h) then
+  //   refine in 1-min steps. Handles DST transitions correctly because the
+  //   day-key check itself is TZ-aware.
+  const tz='America/New_York';
+  const now=Date.now();
+  let curKey;try{curKey=new Date(now).toLocaleDateString('en-CA',{timeZone:tz});}catch(_){curKey='';}
+  if(!curKey){const d=new Date();d.setUTCHours(24,0,0,0);return d.getTime();}
+  let t=now;
+  for(let i=0;i<49;i++){
+    t+=30*60*1000;
+    let k;try{k=new Date(t).toLocaleDateString('en-CA',{timeZone:tz});}catch(_){continue;}
+    if(k!==curKey){
+      // Refine to 1-minute precision
+      let back=t;
+      for(let j=0;j<30;j++){
+        back-=60*1000;
+        let bk;try{bk=new Date(back).toLocaleDateString('en-CA',{timeZone:tz});}catch(_){continue;}
+        if(bk===curKey)return back+60*1000;
+      }
+      return t;
+    }
+  }
+  // Fallback (shouldn't reach in practice)
+  const d=new Date();d.setUTCHours(24,0,0,0);return d.getTime();
 };
 
 const buildRegimeDirCalibration=(tradeLog)=>{
@@ -11645,8 +11900,47 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               ),
               _tipBox('cooldown-dur','Once cooldown triggers, auto-exec stays paused this many minutes. Default 20. Use shorter (5-10) if you want to resume quickly after a streak; longer (30-60) if you want a real reset before re-engaging.'),
             ),
-            // empty cell to keep grid balanced
-            React.createElement('div',null),
+            // V10.2.x — Daily trade-count cap. Hard cap on number of auto-exec
+            //   trades placed per UTC day. Pure runaway protection. When reached,
+            //   sets autoExecCooldownUntil to UTC midnight so the existing cooldown
+            //   UI shows the block.
+            React.createElement('label',{className:'block'},
+              _labelTip('max-trades-day','Max trades / day','HARD CAP. Maximum number of auto-exec trades allowed per UTC day. Pure runaway protection — if a bug or unexpected market condition causes Tara to fire repeatedly, this is the brick wall. When hit, auto-exec is blocked until UTC midnight rolls. Default 10 — conservative for low-balance accounts. Raise once you trust the system. 0 disables.'),
+              React.createElement('input',{
+                type:'number',min:0,max:200,step:1,value:autoExecSettings?.maxAutoTradesPerDay??10,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxAutoTradesPerDay:Math.max(0,Math.min(200,_num(e.target.value,10)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none mt-1',
+              }),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},(()=>{
+                const _n=Number(autoExecSettings?.maxAutoTradesPerDay);
+                if(_n===0)return '= DISABLED (no daily count cap — not recommended)';
+                return `= block auto-exec for the rest of the day after ${_n} trade${_n===1?'':'s'} placed`;
+              })()),
+              _tipBox('max-trades-day','HARD CAP. Maximum number of auto-exec trades allowed per UTC day. Pure runaway protection — if a bug or unexpected market condition causes Tara to fire repeatedly, this is the brick wall. When hit, auto-exec is blocked until UTC midnight rolls. Default 10 — conservative for low-balance accounts. Raise once you trust the system. 0 disables.'),
+            ),
+          ),
+          // V10.2.x — Daily dollar loss cap. Re-added after V9.17.3 removal now that
+          //   per-trade P&L is captured on call log entries (betAmt + maxPay + result).
+          //   When net auto-exec P&L for today drops below -maxDailyLoss, cooldown
+          //   engages until UTC midnight.
+          React.createElement('div',{className:'mt-2 pt-2',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
+            React.createElement('label',{className:'block'},
+              React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
+                _labelTip('max-daily-loss','Max daily loss ($)','HARD CAP. When auto-exec net P&L for today drops to -$X or worse, auto-exec is blocked until UTC midnight. Honest discipline guard. Counts auto-exec trades only (manual trades ignored). Re-added in V10.2.x after the V9.17.3 removal, now that per-trade P&L is captured on the call log. 0 disables.'),
+                React.createElement('span',{className:'text-[9px] uppercase font-bold tracking-wider',style:{color:'#A78BFA'}},'V10.2'),
+              ),
+              React.createElement('input',{
+                type:'number',min:0,max:10000,step:1,value:autoExecSettings?.maxDailyLoss??50,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,maxDailyLoss:Math.max(0,Math.min(10000,_num(e.target.value,50)))})),
+                className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+              }),
+              React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1 leading-relaxed'},(()=>{
+                const _n=Number(autoExecSettings?.maxDailyLoss);
+                if(_n===0)return '= DISABLED (no daily $ loss cap — not recommended)';
+                return `= block auto-exec for the rest of the day when net auto-exec P&L ≤ -$${_n}`;
+              })()),
+              _tipBox('max-daily-loss','HARD CAP. When auto-exec net P&L for today drops to -$X or worse, auto-exec is blocked until UTC midnight. Honest discipline guard. Counts auto-exec trades only (manual trades ignored). Re-added in V10.2.x after the V9.17.3 removal, now that per-trade P&L is captured on the call log. 0 disables.'),
+            ),
           ),
           React.createElement('div',{className:'grid grid-cols-2 gap-2'},
             React.createElement('label',{className:'block'},
@@ -14127,7 +14421,7 @@ const regimeToShortPlain=(regime)=>{
   return map[regime]||regime;
 };
 
-function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset,analysis,currentStreak,speedDial,setSpeedDial,speedAutoMode,setSpeedAutoMode}){
+function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,currentAsset,analysis,currentStreak,speedDial,setSpeedDial,speedAutoMode,setSpeedAutoMode}){
   const[ctx,setCtx]=React.useState(()=>getMarketContext(new Date()));
   const[expanded,setExpanded]=React.useState(false);
   React.useEffect(()=>{
@@ -14155,13 +14449,14 @@ function MarketContextStrip({useLocalTime,taraLearnings,taraCallLog,currentAsset
   const _todaySessionWR=React.useMemo(()=>{
     if(!Array.isArray(taraCallLog))return null;
     const _curSession=getMarketSessions().dominant;
-    const _today=new Date().toDateString();
+    // V10.2.x: today follows the header tz pill via _dayKey
+    const _tz=timeFormat||'local';
+    const _todayKey=_dayKey(new Date(),_tz);
     const _matches=taraCallLog.filter(e=>{
       if(!e||(e.result!=='WIN'&&e.result!=='LOSS'))return false;
       if((e.asset||'BTC')!==currentAsset)return false;
       if(e.session!==_curSession)return false;
-      const _d=new Date(e.id||e.time);
-      return _d.toDateString()===_today;
+      return _dayKey(e.id||e.time||0,_tz)===_todayKey;
     });
     if(_matches.length<3)return null;
     const _w=_matches.filter(e=>e.result==='WIN').length;
@@ -20789,11 +21084,11 @@ function ScalperAdvisorPanel({
     // P&L strip
     (()=>{
       const _log=Array.isArray(taraCallLog)?taraCallLog:[];
-      const _today=new Date().toISOString().slice(0,10);
+      const _today=_dayKey(new Date(),timeFormat); // V10.2.x: honors header TZ
       const _todayAuto=_log.filter(e=>e
         &&e.autoExec===true
         &&(e.result==='WIN'||e.result==='LOSS')
-        &&String(e.resolvedTimestampISO||e.timestampISO||'').slice(0,10)===_today);
+        &&_dayKey(e.resolvedTimestampISO||e.timestampISO||0,timeFormat)===_today);
       const _n=_todayAuto.length;
       const _wins=_todayAuto.filter(e=>e.result==='WIN').length;
       const _wr=_n>0?Math.round((_wins/_n)*100):null;
@@ -21978,6 +22273,12 @@ function TaraApp(){
         maxDailyLoss:Number(v.maxDailyLoss)>0?Number(v.maxDailyLoss):50,
         cooldownLossStreak:Number(v.cooldownLossStreak)>=2?Number(v.cooldownLossStreak):3,
         cooldownMinutes:Number(v.cooldownMinutes)>0?Number(v.cooldownMinutes):20,
+        // V10.2.x — runaway protection: hard cap on number of auto-exec trades per
+        //   UTC day. When reached, autoExecCooldownUntil is set to UTC midnight so
+        //   the existing cooldown UI surfaces the block. Default 10 — conservative
+        //   for low-balance accounts; user should raise once they trust the system.
+        //   Set to 0 to disable (not recommended).
+        maxAutoTradesPerDay:Number.isFinite(Number(v.maxAutoTradesPerDay))&&Number(v.maxAutoTradesPerDay)>=0?Number(v.maxAutoTradesPerDay):10,
         slippageCents:Number(v.slippageCents)>=0?Number(v.slippageCents):2,
         autoExitOffer:Number(v.autoExitOffer)>0?Number(v.autoExitOffer):85, // exit at 85¢ offer
         autoExitSecLeft:Number(v.autoExitSecLeft)>0?Number(v.autoExitSecLeft):20,
@@ -22105,7 +22406,7 @@ function TaraApp(){
         smartExitExtendCents:Number(v.smartExitExtendCents)>=0?Number(v.smartExitExtendCents):5, // extend target by N¢ when extending
         signalSource:(v.signalSource==='lock'||v.signalSource==='snapshot')?v.signalSource:'snapshot', // V9.17.22
       };
-    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,tradeTimingMode:'off',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
+    }catch(_){return{enabled:false,dryRun:true,maxBetPerTrade:25,maxDailyLoss:50,maxAutoTradesPerDay:10,cooldownLossStreak:3,cooldownMinutes:20,slippageCents:2,autoExitOffer:85,autoExitSecLeft:20,maxEdgePt:15,skipTimeCapCommit:false,tradeTimingMode:'off',enabledAssets:{BTC:true,ETH:true},enabledWindowTypes:{'15m':true,'5m':true},minTier:'any',minQualityScore:0,minConviction:0,skipMarginalCaution:false,blockUrgencyApplied:false,lockStabilitySec:0,stopLossDeltaCents:0,timeExitSecLeft:0,sizingMode:'fixed',confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,entryMode:'dollars',entryContracts:5,entryPercentBalance:10,entryLadderEnabled:false,entryLadderUndercutCents:2,entryLadderStepSec:8,entryLadderMaxSteps:2,patientEntryEnabled:false,patientEntryMaxCents:55,patientEntryMaxWaitSec:90,smartExitsEnabled:false,smartExitReverseConviction:70,smartExitMinProfitCents:5,smartExitExtendOnStrength:false,smartExitExtendCents:5,signalSource:'snapshot'};}
   });
   useEffect(()=>{try{localStorage.setItem('tara_autoexec_v1',JSON.stringify(autoExecSettings));}catch(_){}},[autoExecSettings]);
   // ── V9.7.0: MISSION MODE ─────────────────────────────────────────────────
@@ -24395,7 +24696,7 @@ function TaraApp(){
   // V9.17.4: KALSHI BALANCE TRACKING. Polls /portfolio/balance every 30s when
   //   credentials are present. Replaces removed local P&L tracker with real
   //   Kalshi-source data. UTC day baseline for "today's delta" display.
-  const kalshiBalance=useKalshiBalance({kalshiCreds});
+  const kalshiBalance=useKalshiBalance({kalshiCreds,timeFormat}); // V10.2.x: timeFormat for day-roll
   const marketSessions=useMemo(()=>getMarketSessions(),[timeState.currentHour]);
   const[klines,setKlines]=useState([]);
   // V8.1: Movement risk pulse — combines vol acceleration, volume spikes, tape imbalance,
@@ -28530,11 +28831,64 @@ function TaraApp(){
     const _bet=Number(tradingSettings?.betSize)||0;
     if(_bet<=0)return{ok:false,reason:'bet size is 0'};
     if(_bet>autoExecSettings.maxBetPerTrade)return{ok:false,reason:`bet $${_bet} > cap $${autoExecSettings.maxBetPerTrade}`};
-    // V9.17.3: daily loss cap (dollar P&L) removed. Loss-streak cooldown is
-    //   the remaining discipline guard. Real money tracking via kalshi portfolio
-    //   API can be added in a future ship if needed.
+    // V10.2.x — DAILY RUNAWAY PROTECTION (re-added after V9.17.3 stripped it)
+    //   Two complementary caps:
+    //   (a) maxAutoTradesPerDay  — hard cap on count of placed trades (TZ day)
+    //   (b) maxDailyLoss         — hard cap on net P&L from auto-exec trades today
+    //
+    //   Both source from taraCallLogRef (the live ref to the call log). When either
+    //   trips, set autoExecCooldownUntil to next midnight in the user's chosen tz
+    //   so the existing cooldown UI surfaces the block and it auto-releases at
+    //   day roll. Setting either to 0 disables that cap (not recommended).
+    //
+    //   V10.2.x: "today" follows the header timezone pill (local/est/utc) via the
+    //   shared _dayKey helper (single source of truth across Tara). Was UTC-only.
+    {
+      const _tz=timeFormat||'local';
+      const _todayKey=_dayKey(new Date(),_tz);
+      const _log=taraCallLogRef.current||[];
+      const _entryDay=(e)=>_dayKey(e?.resolvedTimestampISO||e?.timestampISO||e?.id||0,_tz);
+      // (a) Trade-count cap
+      const _maxN=Number(autoExecSettings.maxAutoTradesPerDay);
+      if(Number.isFinite(_maxN)&&_maxN>0){
+        let _count=0;
+        for(const e of _log){
+          if(!e||e.autoExec!==true)continue;
+          if(_entryDay(e)===_todayKey)_count++;
+        }
+        if(_count>=_maxN){
+          // Engage cooldown to next midnight in user's tz so the UI shows the block.
+          const _midnight=_nextMidnightMs(_tz);
+          if(autoExecCooldownUntil<_midnight){
+            try{setAutoExecCooldownUntil(_midnight);}catch(_){}
+          }
+          return{ok:false,reason:`daily trade cap reached (${_count}/${_maxN}) — resets at ${_tz.toUpperCase()} midnight`};
+        }
+      }
+      // (b) Daily $ loss cap — counts RESOLVED auto-exec trades only (WIN/LOSS).
+      //   Unresolved trades don't have P&L yet so can't count. This is intentional:
+      //   the cap is on realized losses, not unrealized exposure. The count cap
+      //   above is the forward-looking limit.
+      const _maxLoss=Number(autoExecSettings.maxDailyLoss);
+      if(Number.isFinite(_maxLoss)&&_maxLoss>0){
+        let _pnl=0;
+        for(const e of _log){
+          if(!e||e.autoExec!==true)continue;
+          if(_entryDay(e)!==_todayKey)continue;
+          if(e.result==='WIN')_pnl+=(Number(e.maxPay)||0)-(Number(e.betAmt)||0);
+          else if(e.result==='LOSS')_pnl-=(Number(e.betAmt)||0);
+        }
+        if(_pnl<=-_maxLoss){
+          const _midnight=_nextMidnightMs(_tz);
+          if(autoExecCooldownUntil<_midnight){
+            try{setAutoExecCooldownUntil(_midnight);}catch(_){}
+          }
+          return{ok:false,reason:`daily loss cap reached ($${(-_pnl).toFixed(2)} ≥ $${_maxLoss.toFixed(0)}) — resets at ${_tz.toUpperCase()} midnight`};
+        }
+      }
+    }
     return{ok:true};
-  },[killSwitchEngaged,autoExecSettings,kalshiCreds,autoExecCooldownUntil,tiltLockUntil,tradingSettings]);
+  },[killSwitchEngaged,autoExecSettings,kalshiCreds,autoExecCooldownUntil,tiltLockUntil,tradingSettings,taraCallLog,timeFormat]);
 
   // V9.17.18: MANUAL PLACE-ORDER on Tara's call.
   //   Tara's snapshot (taraCallSnapshotRef) is set on time-cap-commit, timer-commit,
@@ -29117,13 +29471,14 @@ function TaraApp(){
             sessionWR:(()=>{
               try{
                 if(!Array.isArray(taraCallLog))return 0.6;
-                const _today=new Date().toDateString();
+                // V10.2.x: today follows the header tz pill via _dayKey
+                const _tz=timeFormat||'local';
+                const _todayKey=_dayKey(new Date(),_tz);
                 let _w=0,_n=0;
                 for(const e of taraCallLog){
                   if(!e||(e.result!=='WIN'&&e.result!=='LOSS'))continue;
                   if((e.asset||'BTC')!==currentAsset)continue;
-                  const _d=new Date(e.id||e.time||0);
-                  if(_d.toDateString()!==_today)continue;
+                  if(_dayKey(e.id||e.time||0,_tz)!==_todayKey)continue;
                   _n++;
                   if(e.result==='WIN')_w++;
                 }
@@ -29916,14 +30271,18 @@ function TaraApp(){
   const _lastSeenAutoExecTradeIdRef=useRef(0);
   useEffect(()=>{
     if(!Array.isArray(taraCallLog))return;
-    const todayKey=new Date().toISOString().slice(0,10);
+    // V10.2.x: "today" follows the header timezone pill (local/est/utc) via the
+    //   shared _dayKey helper. Was UTC-only — now consistent with the daily caps
+    //   and the P&L strip so they all agree on day boundaries.
+    const _tz=timeFormat||'local';
+    const todayKey=_dayKey(new Date(),_tz);
     const _newAutoTrades=taraCallLog.filter(e=>e&&e.autoExec===true&&e.id>_lastSeenAutoExecTradeIdRef.current&&(e.result==='WIN'||e.result==='LOSS'));
     if(_newAutoTrades.length===0)return;
     let _maxId=_lastSeenAutoExecTradeIdRef.current;
     let _newTradesCount=0;
     for(const t of _newAutoTrades){
       if(t.id>_maxId)_maxId=t.id;
-      const _isToday=t.resolvedTimestampISO?String(t.resolvedTimestampISO).slice(0,10)===todayKey:true;
+      const _isToday=t.resolvedTimestampISO?_dayKey(t.resolvedTimestampISO,_tz)===todayKey:true;
       if(!_isToday)continue;
       _newTradesCount++;
     }
@@ -29942,7 +30301,7 @@ function TaraApp(){
       setAutoExecCooldownUntil(_until);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[taraCallLog,autoExecSettings.cooldownLossStreak,autoExecSettings.cooldownMinutes,tradingSettings]);
+  },[taraCallLog,autoExecSettings.cooldownLossStreak,autoExecSettings.cooldownMinutes,tradingSettings,timeFormat]);
 
   // ── V9.7.0: MISSION BANKROLL ROLLUP FROM TRADE LOG ───────────────────────
   // When a new auto-exec trade with a missionInfo stamp settles, update the
@@ -33666,6 +34025,7 @@ function TaraApp(){
         {/* V8.7.2: Now also reads call log + currentAsset for session-WR advisory */}
         <MarketContextStrip
           useLocalTime={useLocalTime}
+          timeFormat={timeFormat}
           taraLearnings={taraLearnings}
           taraCallLog={taraCallLog}
           currentAsset={currentAsset}
