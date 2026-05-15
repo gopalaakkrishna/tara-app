@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.35-hawk-preset-patient-entry-confident-cheap';
+const BASELINE_VERSION='2026.05.14-v10.2.36-range-detection-force-chop-override';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.35';
+const TARA_VERSION_DISPLAY='Tara 10.2.36';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -8157,6 +8157,41 @@ const computeV99Posterior=(params)=>{
   //         by sample size (n=1). The asymmetry was too aggressive (UP at 68 / DN at 20).
   //         New: UP 72, DN 26. Both directions tightened, but UP more, so DOWN can fire when
   //         signals genuinely warrant it.
+  // V10.2.36 — RANGE DETECTION OVERRIDE
+  //   Audit finding from 22:59 export: last 30 trades showed only 7.3 bps avg abs
+  //   window movement (very small — choppy market), but regime classifier was
+  //   labeling 26/30 windows as TRENDING (DOWN or UP) or SHORT SQUEEZE. This
+  //   mismatch is the root cause of the 53% WR slump: Tara reads TRENDING and
+  //   calibrates strong directional posterior, but market actually chops near
+  //   the strike. Override: if recent windows have been quiet (avg abs < 10 bps
+  //   over last 10 windows), FORCE regime to RANGE-CHOP regardless of drift1m
+  //   signals. This is more aligned with what the market is actually doing.
+  //
+  //   Detection: params.recentWindowMovesBps is an array of |close-strike|/strike
+  //   in bps from the N most recent resolved windows (caller computes this).
+  //   When ≥ 5 entries available AND mean abs < 10 bps, override fires.
+  //
+  //   When override fires, regime='RANGE-CHOP' and we use RANGE-CHOP thresholds.
+  //   No other downstream changes — the rest of the signal scoring runs normally,
+  //   but the regime calibration (which is the biggest driver) flips to chop mode.
+  let _rangeOverrideFired=false;
+  let _rangeOverrideAvgBps=null;
+  const _recentMoves=Array.isArray(params.recentWindowMovesBps)?params.recentWindowMovesBps:null;
+  if(_recentMoves&&_recentMoves.length>=5){
+    const _absMoves=_recentMoves.filter(b=>Number.isFinite(b)).map(b=>Math.abs(b));
+    if(_absMoves.length>=5){
+      _rangeOverrideAvgBps=_absMoves.reduce((s,v)=>s+v,0)/_absMoves.length;
+      if(_rangeOverrideAvgBps<10){
+        _rangeOverrideFired=true;
+        regime='RANGE-CHOP';
+        upThreshold=68;downThreshold=32; // RANGE-CHOP thresholds
+        reasoning.push(`[V10.2.36 RANGE-OVERRIDE] last ${_absMoves.length} windows avg ${_rangeOverrideAvgBps.toFixed(1)}bps → forced RANGE-CHOP regime`);
+      }
+    }
+  }
+  // Only run the normal regime ladder if override didn't fire — otherwise we'd
+  // immediately overwrite our RANGE-CHOP assignment.
+  if(!_rangeOverrideFired){
   if(retailShorting&&whalesBuying&&drift1m>-3){regime='SHORT SQUEEZE';upThreshold=72;downThreshold=26;}
   else if(retailLonging&&whalesSelling&&drift1m<3){regime='LONG SQUEEZE';upThreshold=80;downThreshold=36;}
   else if(retailShorting&&whalesBuying&&drift1m<=-3){
@@ -8179,6 +8214,7 @@ const computeV99Posterior=(params)=>{
   //   Note: these regime-set values are dead variables in V140 — the LOCK_THRESHOLD_DN_EFFECTIVE
   //   ladder downstream ignores them. We're fixing both layers in V141.
   else if(isHighVol){regime='HIGH VOL CHOP';upThreshold=75;downThreshold=25;reasoning.push(`[REGIME] High vol — strict thresholds`);}
+  } // end if(!_rangeOverrideFired)
   // V113: Velocity-adaptive threshold adjustment
   // Slow markets: tighten thresholds (require more conviction — chop is dangerous)
   // Fast markets: loosen thresholds (real moves don't wait for indecision)
@@ -9003,6 +9039,10 @@ const computeV99Posterior=(params)=>{
   }
 
   return{posterior:finalPosterior,rawPosterior:posterior,displayPosterior,regime,upThreshold,downThreshold,reasoning,atrBps,rsi,bb,vwap,realGapBps,drift1m,drift5m,drift15m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isMoonshot,isPostDecay,consecutive,volRatio,channel,momentumAlign,rawSignalScores,totalSignalWeight,velocityRegime,velocityScalars:_velAdj,projectedPrice:_projectedPrice,projectedGapBps:_projectedGapBps,trajectoryAdj,windowDriftBps,mtfAlignment,mtfBonus,fgtResults,windowExhaustionPenalty,
+  // V10.2.36 — Range-chop override flag + computed avg bps. Stamped on engine
+  //   result for call-log capture and UI surfacing.
+  _v10_2_36_rangeOverrideFired:_rangeOverrideFired,
+  _v10_2_36_rangeOverrideAvgBps:_rangeOverrideAvgBps,
   // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
   //   for post-hoc audit. Tells us which gates fired on which trades, so we can
   //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
@@ -29184,7 +29224,25 @@ function TaraApp(){
         tickHist:tickHistoryRef.current||[],
         nowMs:Date.now(),
       });
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv});
+      // V10.2.36 — compute recent window moves (bps) for RANGE-CHOP override.
+      //   Pull last ~15 resolved entries from taraCallLog for this asset,
+      //   compute (closingPrice - strike) / strike in bps. Caller passes this
+      //   into the analyzer; if avg abs < 10 bps, regime gets forced to
+      //   RANGE-CHOP regardless of drift1m. Empty/short array → no override.
+      const _recentWindowMovesBps=(()=>{
+        try{
+          const _log=taraCallLogRef.current||[];
+          const _asset=currentAsset||'BTC';
+          const _resolved=_log.filter(e=>
+            e&&e.asset===_asset&&
+            (e.result==='WIN'||e.result==='LOSS')&&
+            Number.isFinite(e.strike)&&Number.isFinite(e.closingPrice)&&
+            e.strike>0
+          ).slice(-15);
+          return _resolved.map(e=>((e.closingPrice-e.strike)/e.strike)*10000);
+        }catch(_){return[];}
+      })();
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,recentWindowMovesBps:_recentWindowMovesBps});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
