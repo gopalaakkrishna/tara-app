@@ -1225,6 +1225,190 @@ if(typeof window!=='undefined'){
     }catch(e){console.error('[AuditStats] failed:',e&&e.message);return null;}
   };
   try{console.info('[AuditStats] hook ready — run window.__taraAuditStats() in console');}catch(_){}
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // V10.2.13 — TIER × SESSION/HOUR/WINDOW CROSS-TAB AUDITS
+  // ═════════════════════════════════════════════════════════════════════════
+  // Three new console hooks for testing the hypothesis: does tier performance
+  // vary by session-of-day or hour-of-day? If yes, we know which tier to
+  // boost when. If no, the optimizer infrastructure stays off — no harm done.
+  //
+  //   window.__taraTierBySession()  → 4×N table: ASIA/EU/US/OFF × tier
+  //   window.__taraTierByHour()     → 24×N table: hour-of-day × tier
+  //   window.__taraTierByWindow()   → 2×N table: 5m vs 15m × tier
+  //
+  // Each cell shows: WR% (n) — and is dimmed if n < minN (default 10).
+  // After the table, prints which tier wins each row and by how many points.
+  //
+  // Options: {minN: 10, autoExecOnly: false, asset: null, windowType: null}
+  // ═════════════════════════════════════════════════════════════════════════
+  const _readCallLog=()=>{
+    try{
+      const raw=localStorage.getItem('taraCallLog_v1');
+      if(!raw)return null;
+      const log=JSON.parse(raw);
+      return Array.isArray(log)?log:null;
+    }catch(_){return null;}
+  };
+  const _filterLog=(log,opts)=>{
+    const _autoOnly=opts?.autoExecOnly===true;
+    const _asset=opts?.asset||null;
+    const _windowType=opts?.windowType||null;
+    return log.filter(e=>{
+      if(!e)return false;
+      if(_autoOnly&&!e.autoExec)return false;
+      if(_asset&&e.asset!==_asset)return false;
+      if(_windowType&&e.windowType!==_windowType)return false;
+      return e.result==='WIN'||e.result==='LOSS';
+    });
+  };
+  const _wrCell=(wins,n,minN)=>{
+    if(n===0)return{label:'·',raw:null,n:0,dim:true};
+    const pct=Math.round((wins/n)*1000)/10;
+    return{label:`${pct}% (${n})`,raw:pct,n,dim:n<minN};
+  };
+  const _printCrossTab=(title,table,rowLabels,colLabels,minN)=>{
+    console.group(`%c━━━ ${title} ━━━`,'color:#E5C870;font-weight:bold;font-size:13px');
+    // Convert to console.table-friendly shape
+    const _rows={};
+    rowLabels.forEach(r=>{
+      _rows[r]={};
+      colLabels.forEach(c=>{
+        const cell=table[r]?.[c];
+        _rows[r][c]=cell?cell.label:'·';
+      });
+    });
+    console.table(_rows);
+    // Best-tier-per-row analysis
+    console.info('%cBest tier per row (n ≥ '+minN+'):','color:#A78BFA;font-weight:bold');
+    rowLabels.forEach(r=>{
+      const cells=colLabels.map(c=>({col:c,...table[r]?.[c]}));
+      const valid=cells.filter(c=>c&&c.raw!=null&&c.n>=minN);
+      if(valid.length===0){
+        console.info(`  ${r}: (no cells with n≥${minN})`);
+        return;
+      }
+      const best=valid.reduce((a,b)=>b.raw>a.raw?b:a);
+      const worst=valid.reduce((a,b)=>b.raw<a.raw?b:a);
+      const gap=best.raw-worst.raw;
+      const gapStr=gap>=10?`%c+${gap.toFixed(1)}pt gap`:`+${gap.toFixed(1)}pt gap`;
+      const style=gap>=10?'color:rgb(110,231,183);font-weight:bold':'color:rgba(232,233,228,0.55)';
+      if(gap>=10){
+        console.info(`  ${r}: ${best.col} wins (${best.label}) vs ${worst.col} (${worst.label}) — ${gapStr}`,style);
+      }else{
+        console.info(`  ${r}: ${best.col} (${best.label}) — gap only +${gap.toFixed(1)}pt vs ${worst.col} (${worst.label})`);
+      }
+    });
+    console.groupEnd();
+  };
+  const _buildCrossTab=(entries,rowFn,colFn)=>{
+    const _table={};
+    const _rowsSet=new Set();
+    const _colsSet=new Set();
+    entries.forEach(e=>{
+      const r=rowFn(e);
+      const c=colFn(e);
+      if(r==null||c==null||r===''||c==='')return;
+      _rowsSet.add(r);_colsSet.add(c);
+      if(!_table[r])_table[r]={};
+      if(!_table[r][c])_table[r][c]={wins:0,n:0};
+      _table[r][c].n++;
+      if(e.result==='WIN')_table[r][c].wins++;
+    });
+    return{table:_table,rows:Array.from(_rowsSet),cols:Array.from(_colsSet)};
+  };
+  const _normalizeTier=(t)=>{
+    if(!t)return 'untiered';
+    const s=String(t).toLowerCase();
+    // Collapse variants: tape-led, tape → 'tape'; structural-led, structural → 'structural'; etc.
+    if(s.includes('super')||s.includes('confluence'))return 'confluence';
+    if(s.includes('structural'))return 'structural';
+    if(s.includes('tape'))return 'tape';
+    if(s.includes('time-cap')||s.includes('timer'))return 'time-cap';
+    if(s.includes('single'))return 'single';
+    return s;
+  };
+
+  window.__taraTierBySession=(opts={})=>{
+    const minN=Number(opts.minN)||10;
+    const log=_readCallLog();
+    if(!log){console.warn('[TierBySession] no call log');return null;}
+    const entries=_filterLog(log,opts);
+    const{table,rows,cols}=_buildCrossTab(entries,e=>e.session||'unknown',e=>_normalizeTier(e.tier));
+    // Build display table with WR cells
+    const _displayTable={};
+    rows.forEach(r=>{
+      _displayTable[r]={};
+      cols.forEach(c=>{
+        const cell=table[r]?.[c];
+        _displayTable[r][c]=cell?_wrCell(cell.wins,cell.n,minN):{label:'·',n:0,dim:true};
+      });
+    });
+    // Sort: standard session order, then tiers by overall sample size desc
+    const _sessionOrder=['ASIA','EU','US','OFF-HOURS','unknown'];
+    const _orderedRows=[..._sessionOrder.filter(s=>rows.includes(s)),...rows.filter(r=>!_sessionOrder.includes(r))];
+    const _tierTotals={};
+    cols.forEach(c=>{_tierTotals[c]=rows.reduce((sum,r)=>sum+(table[r]?.[c]?.n||0),0);});
+    const _orderedCols=cols.slice().sort((a,b)=>_tierTotals[b]-_tierTotals[a]);
+    _printCrossTab(`Tier × Session (n=${entries.length} resolved trades, minN=${minN})`,_displayTable,_orderedRows,_orderedCols,minN);
+    return{table:_displayTable,rows:_orderedRows,cols:_orderedCols};
+  };
+
+  window.__taraTierByHour=(opts={})=>{
+    const minN=Number(opts.minN)||10;
+    const log=_readCallLog();
+    if(!log){console.warn('[TierByHour] no call log');return null;}
+    const entries=_filterLog(log,opts);
+    const{table,rows,cols}=_buildCrossTab(entries,
+      e=>{
+        const t=e.timestampISO||e.timestamp||null;
+        if(!t)return null;
+        const d=new Date(t);
+        if(!d.getTime())return null;
+        const h=d.getUTCHours();
+        return`${String(h).padStart(2,'0')}:00 UTC`;
+      },
+      e=>_normalizeTier(e.tier)
+    );
+    const _displayTable={};
+    rows.forEach(r=>{
+      _displayTable[r]={};
+      cols.forEach(c=>{
+        const cell=table[r]?.[c];
+        _displayTable[r][c]=cell?_wrCell(cell.wins,cell.n,minN):{label:'·',n:0,dim:true};
+      });
+    });
+    const _orderedRows=rows.slice().sort();
+    const _tierTotals={};
+    cols.forEach(c=>{_tierTotals[c]=rows.reduce((sum,r)=>sum+(table[r]?.[c]?.n||0),0);});
+    const _orderedCols=cols.slice().sort((a,b)=>_tierTotals[b]-_tierTotals[a]);
+    _printCrossTab(`Tier × Hour-of-day UTC (n=${entries.length} resolved trades, minN=${minN})`,_displayTable,_orderedRows,_orderedCols,minN);
+    return{table:_displayTable,rows:_orderedRows,cols:_orderedCols};
+  };
+
+  window.__taraTierByWindow=(opts={})=>{
+    const minN=Number(opts.minN)||10;
+    const log=_readCallLog();
+    if(!log){console.warn('[TierByWindow] no call log');return null;}
+    const entries=_filterLog(log,opts);
+    const{table,rows,cols}=_buildCrossTab(entries,e=>e.windowType||'unknown',e=>_normalizeTier(e.tier));
+    const _displayTable={};
+    rows.forEach(r=>{
+      _displayTable[r]={};
+      cols.forEach(c=>{
+        const cell=table[r]?.[c];
+        _displayTable[r][c]=cell?_wrCell(cell.wins,cell.n,minN):{label:'·',n:0,dim:true};
+      });
+    });
+    const _orderedRows=['15m','5m'].filter(r=>rows.includes(r)).concat(rows.filter(r=>r!=='15m'&&r!=='5m'));
+    const _tierTotals={};
+    cols.forEach(c=>{_tierTotals[c]=rows.reduce((sum,r)=>sum+(table[r]?.[c]?.n||0),0);});
+    const _orderedCols=cols.slice().sort((a,b)=>_tierTotals[b]-_tierTotals[a]);
+    _printCrossTab(`Tier × Window-type (n=${entries.length} resolved trades, minN=${minN})`,_displayTable,_orderedRows,_orderedCols,minN);
+    return{table:_displayTable,rows:_orderedRows,cols:_orderedCols};
+  };
+
+  try{console.info('[V10.2.13] tier cross-tab hooks ready — __taraTierBySession() / __taraTierByHour() / __taraTierByWindow()');}catch(_){}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3646,10 +3830,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.12-bake-audit-optimal-defaults';
+const BASELINE_VERSION='2026.05.14-v10.2.13-tier-session-audit-and-shadow-optimizer';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.12';
+const TARA_VERSION_DISPLAY='Tara 10.2.13';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -16221,7 +16405,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -16337,6 +16521,12 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     e.tradeTimingScore!=null?e.tradeTimingScore:'',
                     e.tradeTimingReason||'',
                     e.tradeTimingMode||'',
+                    // V10.2.13: session × tier optimizer telemetry. Mode is 'off'|'shadow'|'live'.
+                    //   Mult is the (clamped) multiplier that resolved for this (session, tier).
+                    //   Applied indicates whether it actually modified confidence (only true in 'live' mode).
+                    e.sessionTierMode||'',
+                    e.sessionTierMult!=null?e.sessionTierMult:'',
+                    e.sessionTierApplied===true?'true':e.sessionTierApplied===false?'false':'',
                   ].map(v=>typeof v==='string'&&v.includes(',')?`"${v}"`:String(v));
                   _rows.push(_row.join(','));
                 });
@@ -23015,6 +23205,114 @@ function TaraApp(){
       else localStorage.removeItem('tara_kalshi_private_key');
     }catch(_){}
   };
+  // V10.2.13 — SESSION × TIER OPTIMIZER (infrastructure phase)
+  //   User hypothesis: tape-led wins in US-day (directional flow), structural-led
+  //   wins in ASIA/EU (thinner flow, levels respected). Audit hooks
+  //   __taraTierBySession() etc. validate this. If confirmed, this layer
+  //   applies a per-(session,tier) multiplier to Tara's Call confidence.
+  //
+  //   Three modes (defaulting to 'off' until user audits + confirms):
+  //     - 'off':    no multiplier applied; multiplier=1.0 always.
+  //     - 'shadow': multiplier computed + logged to CSV; confidence not modified.
+  //     - 'live':   multiplier applied to confidence in real-time.
+  //
+  //   Multipliers are USER-CONFIGURABLE via localStorage:
+  //     localStorage.setItem('taraSessionTierMultipliers', JSON.stringify({
+  //       ASIA: {structural:1.10, tape:0.95, confluence:1.05},
+  //       US:   {structural:0.95, tape:1.10, confluence:1.00},
+  //       ...
+  //     }))
+  //   Default = identity (all 1.0) so enabling 'live' is a no-op until tuned.
+  //   Multipliers clamped to [0.7, 1.3] to prevent runaway adjustments.
+  const[sessionTierMode,setSessionTierMode]=useState(()=>{
+    try{
+      const v=localStorage.getItem('taraSessionTierMode');
+      return(['off','shadow','live'].includes(v))?v:'off';
+    }catch(_){return 'off';}
+  });
+  useEffect(()=>{try{localStorage.setItem('taraSessionTierMode',sessionTierMode);}catch(_){}},[sessionTierMode]);
+  const _sessionTierMultipliersRef=useRef(null);
+  const _getSessionTierMultipliers=React.useCallback(()=>{
+    try{
+      const raw=localStorage.getItem('taraSessionTierMultipliers');
+      if(!raw)return{};
+      const parsed=JSON.parse(raw);
+      if(!parsed||typeof parsed!=='object')return{};
+      return parsed;
+    }catch(_){return{};}
+  },[]);
+  const _resolveSessionTierMultiplier=React.useCallback((session,tier)=>{
+    if(!session||!tier)return 1.0;
+    const mults=_getSessionTierMultipliers();
+    const _s=String(session).toUpperCase();
+    const _t=String(tier).toLowerCase().includes('tape')?'tape'
+      :String(tier).toLowerCase().includes('structural')?'structural'
+      :String(tier).toLowerCase().includes('confluence')||String(tier).toLowerCase().includes('super')?'confluence'
+      :String(tier).toLowerCase().includes('single')?'single'
+      :null;
+    if(!_t)return 1.0;
+    const raw=Number(mults?.[_s]?.[_t]);
+    if(!Number.isFinite(raw)||raw<=0)return 1.0;
+    return Math.max(0.7,Math.min(1.3,raw));
+  },[_getSessionTierMultipliers]);
+  // Console hook: inspect or set current session-tier state
+  useEffect(()=>{
+    if(typeof window==='undefined')return;
+    window.__taraSessionTier=(action)=>{
+      if(action==='derive'){
+        // Auto-derive multipliers from historical taraCallLog
+        try{
+          const raw=localStorage.getItem('taraCallLog_v1');
+          if(!raw){console.warn('no call log');return null;}
+          const log=JSON.parse(raw);
+          if(!Array.isArray(log)){console.warn('call log malformed');return null;}
+          const entries=log.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS'));
+          const wrTable={};
+          entries.forEach(e=>{
+            const s=String(e.session||'').toUpperCase();
+            const t=String(e.tier||'').toLowerCase();
+            const tNorm=t.includes('tape')?'tape':t.includes('structural')?'structural':t.includes('confluence')||t.includes('super')?'confluence':t.includes('single')?'single':null;
+            if(!s||!tNorm)return;
+            if(!wrTable[s])wrTable[s]={};
+            if(!wrTable[s][tNorm])wrTable[s][tNorm]={wins:0,n:0};
+            wrTable[s][tNorm].n++;
+            if(e.result==='WIN')wrTable[s][tNorm].wins++;
+          });
+          const multipliers={};
+          Object.keys(wrTable).forEach(s=>{
+            multipliers[s]={};
+            const sessTotal=Object.values(wrTable[s]).reduce((a,c)=>({w:a.w+c.wins,n:a.n+c.n}),{w:0,n:0});
+            const sessWR=sessTotal.n>0?sessTotal.w/sessTotal.n:0.6;
+            Object.keys(wrTable[s]).forEach(t=>{
+              const c=wrTable[s][t];
+              if(c.n<10){multipliers[s][t]=1.0;return;}
+              const tierWR=c.wins/c.n;
+              const rawMult=tierWR/sessWR;
+              multipliers[s][t]=Math.round(Math.max(0.7,Math.min(1.3,rawMult))*100)/100;
+            });
+          });
+          console.group('%c━━━ Derived session-tier multipliers ━━━','color:#E5C870;font-weight:bold');
+          console.info('Source: '+entries.length+' resolved trades');
+          console.info('Multipliers (clamped to [0.7, 1.3], cells with n<10 → 1.0):');
+          console.table(multipliers);
+          console.info('To apply: localStorage.setItem(\'taraSessionTierMultipliers\', JSON.stringify('+JSON.stringify(multipliers)+'))');
+          console.info('Then set mode: localStorage.setItem(\'taraSessionTierMode\', \'live\') and refresh');
+          console.groupEnd();
+          return multipliers;
+        }catch(e){console.error('derive failed:',e);return null;}
+      }
+      // Default: show current state
+      const cur=_getSessionTierMultipliers();
+      console.group('%c━━━ Session-tier optimizer state ━━━','color:#E5C870;font-weight:bold');
+      console.info('mode:',sessionTierMode);
+      console.info('multipliers:',cur);
+      console.info('Commands:');
+      console.info('  __taraSessionTier()         show this');
+      console.info('  __taraSessionTier(\'derive\') compute multipliers from history');
+      console.groupEnd();
+      return{mode:sessionTierMode,multipliers:cur};
+    };
+  },[sessionTierMode,_getSessionTierMultipliers]);
   const[autoExecSettings,setAutoExecSettings]=useState(()=>{
     try{
       const v=JSON.parse(localStorage.getItem('tara_autoexec_v1')||'{}');
@@ -29855,11 +30153,38 @@ function TaraApp(){
       // Catch the new weak cluster: TRENDING UP × structural at 37.5% (n=8 — small but bleeding)
       // Single-tier in TRENDING UP is fine (70% WR), so this only fires if it somehow gets here
     }
+    // V10.2.13 — session × tier multiplier (data-driven, opt-in via sessionTierMode)
+    //   When live: applies a multiplier to confidence per (current session, current tier).
+    //   When shadow: computes the would-be multiplier and logs it for CSV but doesn't change _confidence.
+    //   When off: no effect.
+    //   Multipliers default to 1.0 (identity) unless user has populated localStorage
+    //   via __taraSessionTier('derive') or manual setting.
+    let _sessionTierMult=1.0;
+    let _sessionTierApplied=false;
+    let _confidenceAdjusted=_confidence;
+    try{
+      const _curSession=(typeof getMarketSessions==='function'?getMarketSessions().dominant:null)||'';
+      const _curTier=isSuperConfluent?'confluence':isConfluent?'confluence':isStructuralLed?'structural':isTapeLed?'tape':_isSingleTier?'single':null;
+      _sessionTierMult=_resolveSessionTierMultiplier(_curSession,_curTier);
+      if(sessionTierMode==='live'&&_sessionTierMult!==1.0){
+        _confidenceAdjusted=Math.max(0,Math.min(100,_confidence*_sessionTierMult));
+        _sessionTierApplied=true;
+      }else if(sessionTierMode==='shadow'){
+        // Don't change _confidence, but flag for logging
+        _sessionTierApplied=false; // not "applied" but logged
+      }
+    }catch(_){}
     return{
-      call:dir,reason:_reasonParts.join(' · '),confidence:_confidence,direction:dir,conviction,phase:'FORMING',
+      call:dir,reason:_reasonParts.join(' · '),confidence:_confidenceAdjusted,direction:dir,conviction,phase:'FORMING',
       caution:_marginalCaution, // V9.4.0: surfaces in TaraCallCard caution chip
-      // Pass through to lifecycle so it can compute needSamples consistently
-      _ctx:{q,conviction,fgtAbs,regime:analysis.regime,winType,tapeStronglyAgrees,tapeSuperStrong,kalshiAgrees,kalshiStronglyAgrees,_remaining,_elapsed,isConfluent,isSuperConfluent,isRisingConfluence,isTapeLed,isStructuralLed,strikeFavorable,marginalCaution:_marginalCaution},
+      // Pass through to lifecycle so it can compute needSamples consistently.
+      // V10.2.13: include session-tier diag so the CSV writer can attach columns.
+      _ctx:{q,conviction,fgtAbs,regime:analysis.regime,winType,tapeStronglyAgrees,tapeSuperStrong,kalshiAgrees,kalshiStronglyAgrees,_remaining,_elapsed,isConfluent,isSuperConfluent,isRisingConfluence,isTapeLed,isStructuralLed,strikeFavorable,marginalCaution:_marginalCaution,
+        _sessionTierMode:sessionTierMode,
+        _sessionTierMult:Math.round(_sessionTierMult*1000)/1000,
+        _sessionTierApplied:_sessionTierApplied,
+        _confidencePreAdjust:_confidence,
+      },
     };
   })();
   // ═══════════════════════════════════════════════════════════════════════════
@@ -32287,6 +32612,14 @@ function TaraApp(){
           tradeTimingScore:_phase4DecisionRef.current?_phase4DecisionRef.current.score:null,
           tradeTimingReason:_phase4DecisionRef.current?_phase4DecisionRef.current.reason:null,
           tradeTimingMode:_phase4DecisionRef.current?_phase4DecisionRef.current.mode:null,
+          // V10.2.13: session × tier optimizer telemetry. _ctx comes from taraCall
+          //   IIFE return; fields are stamped whenever taraCall ran for this lock.
+          //   Mode='off' produces 1.0 mult / false applied (no-op baseline). Shadow
+          //   computes the mult but doesn't change confidence; applied is false but
+          //   mult tells us what live would have done. Live: applied=true if mult≠1.0.
+          sessionTierMode:taraCall?._ctx?._sessionTierMode||null,
+          sessionTierMult:taraCall?._ctx?._sessionTierMult!=null?taraCall._ctx._sessionTierMult:null,
+          sessionTierApplied:taraCall?._ctx?._sessionTierApplied===true,
           // V9.2.1: Bet amount + max payout for P&L tracking. Captured at snapshot
           //   time so each trade carries its actual dollar amounts. P&L computed at
           //   resolution: WIN = maxPay - betAmt, LOSS = -betAmt.
