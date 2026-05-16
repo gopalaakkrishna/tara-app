@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.40-probabilistic-regime-conservative';
+const BASELINE_VERSION='2026.05.14-v10.2.40.1-persist-regime-stamps-to-call-log';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.40';
+const TARA_VERSION_DISPLAY='Tara 10.2.40.1';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -30597,6 +30597,34 @@ function TaraApp(){
         // V9.7.9: diagnostic state from V9.7.x gates — stamped on trade log entries
         //   for post-hoc audit ("did the cap fire?" / "did the damper change the lock?").
         diagnosticsV97:eng.diagnosticsV97||null,
+        // V10.2.36-40 — Regime detection improvement stamps. Pulled through from
+        //   the engine return so the call log entry committer can persist them.
+        //   These enable the post-hoc audit snippets in the dashboard:
+        //   "did the range overrides fire in this trade? did it win?"
+        _v10_2_36_rangeOverrideFired:eng._v10_2_36_rangeOverrideFired===true,
+        _v10_2_36_rangeOverrideAvgBps:eng._v10_2_36_rangeOverrideAvgBps??null,
+        _v10_2_37_quietOverrideFired:eng._v10_2_37_quietOverrideFired===true,
+        _v10_2_37_quietOverrideRatio:eng._v10_2_37_quietOverrideRatio??null,
+        _v10_2_37_quietRealizedBps:eng._v10_2_37_quietRealizedBps??null,
+        _v10_2_37_quietExpectedBps:eng._v10_2_37_quietExpectedBps??null,
+        _v10_2_37_mtfUpAligned:eng._v10_2_37_mtfUpAligned===true,
+        _v10_2_37_mtfDnAligned:eng._v10_2_37_mtfDnAligned===true,
+        _v10_2_38_srRangeDetected:eng._v10_2_38_srRangeDetected===true,
+        _v10_2_38_srRangeBps:eng._v10_2_38_srRangeBps??null,
+        _v10_2_38_srTouchesHigh:eng._v10_2_38_srTouchesHigh??0,
+        _v10_2_38_srTouchesLow:eng._v10_2_38_srTouchesLow??0,
+        _v10_2_38_srRangeHigh:eng._v10_2_38_srRangeHigh??null,
+        _v10_2_38_srRangeLow:eng._v10_2_38_srRangeLow??null,
+        _v10_2_39_htfFlatOverride:eng._v10_2_39_htfFlatOverride===true,
+        _v10_2_39_htfVetoFired:eng._v10_2_39_htfVetoFired===true,
+        _v10_2_39_htf1hDriftBps:eng._v10_2_39_htf1hDriftBps??null,
+        _v10_2_39_htf4hDriftBps:eng._v10_2_39_htf4hDriftBps??null,
+        _v10_2_39_htf1hLabel:eng._v10_2_39_htf1hLabel||null,
+        _v10_2_39_htf4hLabel:eng._v10_2_39_htf4hLabel||null,
+        _v10_2_40_regimeProbs:eng._v10_2_40_regimeProbs||null,
+        _v10_2_40_regimeConfidence:eng._v10_2_40_regimeConfidence??null,
+        _v10_2_40_primaryRegime:eng._v10_2_40_primaryRegime||null,
+        _v10_2_40_dampened:eng._v10_2_40_dampened===true,
         // V9.10.10 → V9.11.0: pass through pattern + futures telemetry blocks so the
         //   entry-stamping code at L23722/23792/23991/24733 can read them.
         //   BUG FIX V9.11.1: these were being computed by the engine but stripped from
@@ -33778,6 +33806,29 @@ function TaraApp(){
             };
           })(),
         futuresAtLock:analysis?.futuresV9_11_0||null,
+          // V10.2.36-40 — Regime detection improvement stamps persisted to call log.
+          _v10_2_36_rangeOverrideFired:analysis?._v10_2_36_rangeOverrideFired===true,
+          _v10_2_36_rangeOverrideAvgBps:analysis?._v10_2_36_rangeOverrideAvgBps??null,
+          _v10_2_37_quietOverrideFired:analysis?._v10_2_37_quietOverrideFired===true,
+          _v10_2_37_quietOverrideRatio:analysis?._v10_2_37_quietOverrideRatio??null,
+          _v10_2_37_quietRealizedBps:analysis?._v10_2_37_quietRealizedBps??null,
+          _v10_2_37_quietExpectedBps:analysis?._v10_2_37_quietExpectedBps??null,
+          _v10_2_37_mtfUpAligned:analysis?._v10_2_37_mtfUpAligned===true,
+          _v10_2_37_mtfDnAligned:analysis?._v10_2_37_mtfDnAligned===true,
+          _v10_2_38_srRangeDetected:analysis?._v10_2_38_srRangeDetected===true,
+          _v10_2_38_srRangeBps:analysis?._v10_2_38_srRangeBps??null,
+          _v10_2_38_srTouchesHigh:analysis?._v10_2_38_srTouchesHigh??0,
+          _v10_2_38_srTouchesLow:analysis?._v10_2_38_srTouchesLow??0,
+          _v10_2_39_htfFlatOverride:analysis?._v10_2_39_htfFlatOverride===true,
+          _v10_2_39_htfVetoFired:analysis?._v10_2_39_htfVetoFired===true,
+          _v10_2_39_htf1hDriftBps:analysis?._v10_2_39_htf1hDriftBps??null,
+          _v10_2_39_htf4hDriftBps:analysis?._v10_2_39_htf4hDriftBps??null,
+          _v10_2_39_htf1hLabel:analysis?._v10_2_39_htf1hLabel||null,
+          _v10_2_39_htf4hLabel:analysis?._v10_2_39_htf4hLabel||null,
+          _v10_2_40_regimeProbs:analysis?._v10_2_40_regimeProbs||null,
+          _v10_2_40_regimeConfidence:analysis?._v10_2_40_regimeConfidence??null,
+          _v10_2_40_primaryRegime:analysis?._v10_2_40_primaryRegime||null,
+          _v10_2_40_dampened:analysis?._v10_2_40_dampened===true,
         result:null,
       };
       setTaraCallLog(prev=>{
@@ -33893,6 +33944,29 @@ function TaraApp(){
             };
           })(),
         futuresAtLock:analysis?.futuresV9_11_0||null,
+          // V10.2.36-40 — Regime detection improvement stamps persisted to call log.
+          _v10_2_36_rangeOverrideFired:analysis?._v10_2_36_rangeOverrideFired===true,
+          _v10_2_36_rangeOverrideAvgBps:analysis?._v10_2_36_rangeOverrideAvgBps??null,
+          _v10_2_37_quietOverrideFired:analysis?._v10_2_37_quietOverrideFired===true,
+          _v10_2_37_quietOverrideRatio:analysis?._v10_2_37_quietOverrideRatio??null,
+          _v10_2_37_quietRealizedBps:analysis?._v10_2_37_quietRealizedBps??null,
+          _v10_2_37_quietExpectedBps:analysis?._v10_2_37_quietExpectedBps??null,
+          _v10_2_37_mtfUpAligned:analysis?._v10_2_37_mtfUpAligned===true,
+          _v10_2_37_mtfDnAligned:analysis?._v10_2_37_mtfDnAligned===true,
+          _v10_2_38_srRangeDetected:analysis?._v10_2_38_srRangeDetected===true,
+          _v10_2_38_srRangeBps:analysis?._v10_2_38_srRangeBps??null,
+          _v10_2_38_srTouchesHigh:analysis?._v10_2_38_srTouchesHigh??0,
+          _v10_2_38_srTouchesLow:analysis?._v10_2_38_srTouchesLow??0,
+          _v10_2_39_htfFlatOverride:analysis?._v10_2_39_htfFlatOverride===true,
+          _v10_2_39_htfVetoFired:analysis?._v10_2_39_htfVetoFired===true,
+          _v10_2_39_htf1hDriftBps:analysis?._v10_2_39_htf1hDriftBps??null,
+          _v10_2_39_htf4hDriftBps:analysis?._v10_2_39_htf4hDriftBps??null,
+          _v10_2_39_htf1hLabel:analysis?._v10_2_39_htf1hLabel||null,
+          _v10_2_39_htf4hLabel:analysis?._v10_2_39_htf4hLabel||null,
+          _v10_2_40_regimeProbs:analysis?._v10_2_40_regimeProbs||null,
+          _v10_2_40_regimeConfidence:analysis?._v10_2_40_regimeConfidence??null,
+          _v10_2_40_primaryRegime:analysis?._v10_2_40_primaryRegime||null,
+          _v10_2_40_dampened:analysis?._v10_2_40_dampened===true,
           result:null, // populated at rollover
         };
         setTaraCallLog(prev=>{
@@ -34108,6 +34182,29 @@ function TaraApp(){
             };
           })(),
         futuresAtLock:analysis?.futuresV9_11_0||null,
+          // V10.2.36-40 — Regime detection improvement stamps persisted to call log.
+          _v10_2_36_rangeOverrideFired:analysis?._v10_2_36_rangeOverrideFired===true,
+          _v10_2_36_rangeOverrideAvgBps:analysis?._v10_2_36_rangeOverrideAvgBps??null,
+          _v10_2_37_quietOverrideFired:analysis?._v10_2_37_quietOverrideFired===true,
+          _v10_2_37_quietOverrideRatio:analysis?._v10_2_37_quietOverrideRatio??null,
+          _v10_2_37_quietRealizedBps:analysis?._v10_2_37_quietRealizedBps??null,
+          _v10_2_37_quietExpectedBps:analysis?._v10_2_37_quietExpectedBps??null,
+          _v10_2_37_mtfUpAligned:analysis?._v10_2_37_mtfUpAligned===true,
+          _v10_2_37_mtfDnAligned:analysis?._v10_2_37_mtfDnAligned===true,
+          _v10_2_38_srRangeDetected:analysis?._v10_2_38_srRangeDetected===true,
+          _v10_2_38_srRangeBps:analysis?._v10_2_38_srRangeBps??null,
+          _v10_2_38_srTouchesHigh:analysis?._v10_2_38_srTouchesHigh??0,
+          _v10_2_38_srTouchesLow:analysis?._v10_2_38_srTouchesLow??0,
+          _v10_2_39_htfFlatOverride:analysis?._v10_2_39_htfFlatOverride===true,
+          _v10_2_39_htfVetoFired:analysis?._v10_2_39_htfVetoFired===true,
+          _v10_2_39_htf1hDriftBps:analysis?._v10_2_39_htf1hDriftBps??null,
+          _v10_2_39_htf4hDriftBps:analysis?._v10_2_39_htf4hDriftBps??null,
+          _v10_2_39_htf1hLabel:analysis?._v10_2_39_htf1hLabel||null,
+          _v10_2_39_htf4hLabel:analysis?._v10_2_39_htf4hLabel||null,
+          _v10_2_40_regimeProbs:analysis?._v10_2_40_regimeProbs||null,
+          _v10_2_40_regimeConfidence:analysis?._v10_2_40_regimeConfidence??null,
+          _v10_2_40_primaryRegime:analysis?._v10_2_40_primaryRegime||null,
+          _v10_2_40_dampened:analysis?._v10_2_40_dampened===true,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
           // result:null populates at rollover scoring. NO_TRADE entries skip resolution
@@ -34912,6 +35009,29 @@ function TaraApp(){
             };
           })(),
         futuresAtLock:analysis?.futuresV9_11_0||null,
+          // V10.2.36-40 — Regime detection improvement stamps persisted to call log.
+          _v10_2_36_rangeOverrideFired:analysis?._v10_2_36_rangeOverrideFired===true,
+          _v10_2_36_rangeOverrideAvgBps:analysis?._v10_2_36_rangeOverrideAvgBps??null,
+          _v10_2_37_quietOverrideFired:analysis?._v10_2_37_quietOverrideFired===true,
+          _v10_2_37_quietOverrideRatio:analysis?._v10_2_37_quietOverrideRatio??null,
+          _v10_2_37_quietRealizedBps:analysis?._v10_2_37_quietRealizedBps??null,
+          _v10_2_37_quietExpectedBps:analysis?._v10_2_37_quietExpectedBps??null,
+          _v10_2_37_mtfUpAligned:analysis?._v10_2_37_mtfUpAligned===true,
+          _v10_2_37_mtfDnAligned:analysis?._v10_2_37_mtfDnAligned===true,
+          _v10_2_38_srRangeDetected:analysis?._v10_2_38_srRangeDetected===true,
+          _v10_2_38_srRangeBps:analysis?._v10_2_38_srRangeBps??null,
+          _v10_2_38_srTouchesHigh:analysis?._v10_2_38_srTouchesHigh??0,
+          _v10_2_38_srTouchesLow:analysis?._v10_2_38_srTouchesLow??0,
+          _v10_2_39_htfFlatOverride:analysis?._v10_2_39_htfFlatOverride===true,
+          _v10_2_39_htfVetoFired:analysis?._v10_2_39_htfVetoFired===true,
+          _v10_2_39_htf1hDriftBps:analysis?._v10_2_39_htf1hDriftBps??null,
+          _v10_2_39_htf4hDriftBps:analysis?._v10_2_39_htf4hDriftBps??null,
+          _v10_2_39_htf1hLabel:analysis?._v10_2_39_htf1hLabel||null,
+          _v10_2_39_htf4hLabel:analysis?._v10_2_39_htf4hLabel||null,
+          _v10_2_40_regimeProbs:analysis?._v10_2_40_regimeProbs||null,
+          _v10_2_40_regimeConfidence:analysis?._v10_2_40_regimeConfidence??null,
+          _v10_2_40_primaryRegime:analysis?._v10_2_40_primaryRegime||null,
+          _v10_2_40_dampened:analysis?._v10_2_40_dampened===true,
         result:null, // populated at rollover scoring
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
