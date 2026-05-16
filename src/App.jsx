@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.45-mobile-trade-log-overflow-fix';
+const BASELINE_VERSION='2026.05.15-v10.2.50-chop-amplification';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.45';
+const TARA_VERSION_DISPLAY='Tara 10.2.50';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -8566,6 +8566,68 @@ const computeV99Posterior=(params)=>{
       reasoning.push(`[V10.2.43 REGIME-CORRECT] ${regime} × ${_regimeMult.toFixed(2)} → struct ${_structOrig>=0?'+':''}${_structOrig}→${_structNew>=0?'+':''}${_structNew} tech ${_techOrig>=0?'+':''}${_techOrig}→${_techNew>=0?'+':''}${_techNew} (Δ ${_structDelta+_techDelta>=0?'+':''}${_structDelta+_techDelta})`);
     }
   }
+  // ─── V10.2.50 — CHOP AMPLIFICATION ────────────────────────────────────────
+  // Problem: in RANGE-CHOP regime, primary signals (gap/momentum/flow) push
+  // trend-direction and cancel each other out, leaving posterior near 50%.
+  // Time-cap then forces marginal commits that lose. The CHOP-NATIVE signals
+  // (meanReversion, rangePosition, reversal) fire infrequently and at modest
+  // magnitude — they need more weight in their native regime.
+  //
+  // Approach: when regime is RANGE-CHOP, amplify these signals by 1.5×
+  // retroactively. Only in chop. Other regimes unchanged.
+  //
+  // Why retroactive: keeps signal computation regime-agnostic; the amplification
+  // is a regime-specific application layer, mirroring the V10.2.43 pattern.
+  //
+  // Risk: if chop is misclassified (false chop label on a real trend), these
+  // contrarian signals will push WRONG direction. The 1.5× is modest enough
+  // that one misfire isn't catastrophic; multiple chop indicators (V10.2.36-39)
+  // would all have to be wrong simultaneously.
+  let _v10_2_50_chopAmpDelta=0;
+  if(regime==='RANGE-CHOP'){
+    const _chopAmp=1.5;
+    const _mrOrig=rawSignalScores.meanReversion||0;
+    const _rpOrig=rawSignalScores.rangePosition||0;
+    const _revOrig=rawSignalScores.reversal||0;
+    // Only amplify if these signals actually fired
+    if(_mrOrig!==0||_rpOrig!==0||_revOrig!==0){
+      const _mrNew=Math.round(_mrOrig*_chopAmp);
+      const _rpNew=Math.round(_rpOrig*_chopAmp);
+      const _revNew=Math.round(_revOrig*_chopAmp);
+      const _delta=(_mrNew-_mrOrig)+(_rpNew-_rpOrig)+(_revNew-_revOrig);
+      totalScore+=_delta;
+      rawSignalScores.meanReversion=_mrNew;
+      rawSignalScores.rangePosition=_rpNew;
+      rawSignalScores.reversal=_revNew;
+      _v10_2_50_chopAmpDelta=_delta;
+      reasoning.push(`[V10.2.50 CHOP-AMP] RANGE-CHOP × 1.5 → meanRev ${_mrOrig}→${_mrNew} rangePos ${_rpOrig}→${_rpNew} reversal ${_revOrig}→${_revNew} (Δ ${_delta>=0?'+':''}${_delta})`);
+    }
+  }
+  // ─── V10.2.50 — HTF-PATTERNS CHOP UNCAP for double-top/double-bottom ──────
+  // The V10.2.41 cap of ±20 was set to limit noise across all regimes. But
+  // doubleTop and doubleBottom patterns are SPECIFICALLY chop-predictive
+  // (they mark the range edges). In chop regime, allow them to express more
+  // strongly — cap raised to ±35 when the dominant pattern detected is a
+  // double-top or double-bottom. Other patterns stay capped at ±20.
+  let _v10_2_50_htfChopBoost=null;
+  if(regime==='RANGE-CHOP'&&_htfPatterns?.detail){
+    const _hasDoubleTop=/doubleTop/i.test(_htfPatterns.detail);
+    const _hasDoubleBottom=/doubleBottom/i.test(_htfPatterns.detail);
+    if(_hasDoubleTop||_hasDoubleBottom){
+      // Recompute with higher cap for this specific case
+      const _patternRaw=Math.round((_htfPatterns.totalAdj||0)*(W.htfPatterns||1.0));
+      const _capChop=35;
+      const _newCapped=Math.max(-_capChop,Math.min(_capChop,_patternRaw));
+      // Find what we previously applied (the V10.2.41 capped value)
+      const _prevApplied=Math.max(-20,Math.min(20,_patternRaw));
+      const _boost=_newCapped-_prevApplied;
+      if(_boost!==0){
+        totalScore+=_boost;
+        _v10_2_50_htfChopBoost={prevCap:_prevApplied,newCap:_newCapped,boost:_boost};
+        reasoning.push(`[V10.2.50 HTF-CHOP-UNCAP] doubleTop/Bottom in RANGE-CHOP → cap raised 20→35 (${_prevApplied}→${_newCapped}, Δ ${_boost>=0?'+':''}${_boost})`);
+      }
+    }
+  }
   // V113: Velocity-adaptive threshold adjustment
   // Slow markets: tighten thresholds (require more conviction — chop is dangerous)
   // Fast markets: loosen thresholds (real moves don't wait for indecision)
@@ -9522,6 +9584,9 @@ const computeV99Posterior=(params)=>{
   // V10.2.44 — calibration haircut stamps
   _v10_2_44_haircutApplied:_haircutApplied,
   _v10_2_44_postBeforeHaircut:dirCalibrated,
+  // V10.2.50 — Chop amplification telemetry
+  _v10_2_50_chopAmpDelta:_v10_2_50_chopAmpDelta,
+  _v10_2_50_htfChopBoost:_v10_2_50_htfChopBoost,
   // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
   //   for post-hoc audit. Tells us which gates fired on which trades, so we can
   //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
@@ -30815,6 +30880,8 @@ function TaraApp(){
         _v10_2_43_techOrig:eng._v10_2_43_techOrig??0,
         _v10_2_44_haircutApplied:eng._v10_2_44_haircutApplied||null,
         _v10_2_44_postBeforeHaircut:eng._v10_2_44_postBeforeHaircut??null,
+        _v10_2_50_chopAmpDelta:eng._v10_2_50_chopAmpDelta??0,
+        _v10_2_50_htfChopBoost:eng._v10_2_50_htfChopBoost||null,
         // V9.10.10 → V9.11.0: pass through pattern + futures telemetry blocks so the
         //   entry-stamping code at L23722/23792/23991/24733 can read them.
         //   BUG FIX V9.11.1: these were being computed by the engine but stripped from
@@ -34024,6 +34091,8 @@ function TaraApp(){
           _v10_2_43_techOrig:analysis?._v10_2_43_techOrig??0,
           _v10_2_44_haircutApplied:analysis?._v10_2_44_haircutApplied||null,
           _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
+          _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
+          _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
         result:null,
       };
       setTaraCallLog(prev=>{
@@ -34167,6 +34236,8 @@ function TaraApp(){
           _v10_2_43_techOrig:analysis?._v10_2_43_techOrig??0,
           _v10_2_44_haircutApplied:analysis?._v10_2_44_haircutApplied||null,
           _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
+          _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
+          _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
           result:null, // populated at rollover
         };
         setTaraCallLog(prev=>{
@@ -34410,6 +34481,8 @@ function TaraApp(){
           _v10_2_43_techOrig:analysis?._v10_2_43_techOrig??0,
           _v10_2_44_haircutApplied:analysis?._v10_2_44_haircutApplied||null,
           _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
+          _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
+          _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
           // result:null populates at rollover scoring. NO_TRADE entries skip resolution
@@ -34573,6 +34646,37 @@ function TaraApp(){
       //   already committed. _cloudRestoreCompletedRef flips true only after cloudRead
       //   resolves — distinct from _hasRestoredLockRef which gates the effect re-running.
       if(_hardCapElapsed&&_cloudRestoreCompletedRef.current&&taraCallSnapshotRef.current===null){
+        // V10.2.50 — CHOP TIME-CAP GUARD: if regime is RANGE-CHOP and conviction
+        //   is sub-baseline (<68%), the historical WR of time-cap-commit in chop
+        //   is well below 50%. Audit of trade log showed both LOSSes in the user's
+        //   May 15 batch were time-cap-commit at 65% conf in RANGE-CHOP. Better to
+        //   sit out than force a marginal commit. Converts these to SITOUT tier
+        //   with caution note explaining the override.
+        const _v10250ChopGuard=(analysis?.regime==='RANGE-CHOP'&&_commitConf<68);
+        if(_v10250ChopGuard){
+          const _sitSnap={
+            call:'SIT_OUT',direction:'SIT_OUT',
+            confidence:_commitConf,
+            caution:`Chop guard — ${_commitConf}% in RANGE-CHOP at time-cap, sub-baseline conviction → sit out (V10.2.50)`,
+            reason:`V10.2.50 chop time-cap guard: RANGE-CHOP regime + ${_commitConf}% conv at ${Math.round(elapsedSec)}s — historically loses, sit out`,
+            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+            atPosterior:_post,
+            kalshiAtLock:_kPctNow,
+            locked:true,earlyLock:false,
+            isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+            samples:0,needSamples:0,
+            tier:'chop-time-cap-sitout', // new tier name so we can audit
+            session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+            regime:analysis?.regime||'',
+            qScore:Math.round(_qFast),
+            fgt:analysis?.mtfAlignment,
+            _committedAt:Date.now(),
+          };
+          taraCallSnapshotRef.current=_sitSnap;
+          _logSnapshotEntry(_sitSnap);
+          _persistLock();
+          return;
+        }
         const _cautionLevel=_commitConf>=70?'firm':_commitConf>=60?'leaning':_commitConf>=55?'tentative':'low-confidence';
         const _cautionNote=_commitConf>=70?null:`${_cautionLevel} call — confidence ${_commitConf}% (commit by time cap)`;
         const _capSnap={
@@ -35242,6 +35346,8 @@ function TaraApp(){
           _v10_2_43_techOrig:analysis?._v10_2_43_techOrig??0,
           _v10_2_44_haircutApplied:analysis?._v10_2_44_haircutApplied||null,
           _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
+          _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
+          _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
         result:null, // populated at rollover scoring
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
