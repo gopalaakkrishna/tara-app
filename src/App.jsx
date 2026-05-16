@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.44-calibration-fix-phase4';
+const BASELINE_VERSION='2026.05.14-v10.2.45-mobile-trade-log-overflow-fix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.44';
+const TARA_VERSION_DISPLAY='Tara 10.2.45';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -16721,7 +16721,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
     className:'fixed inset-0 z-50 bg-[#0E100F]/95 backdrop-blur-md overflow-y-auto',
     onClick:(e)=>{if(e.target===e.currentTarget)onClose();},
   },
-    React.createElement('div',{className:'max-w-[900px] mx-auto px-4 py-6 sm:py-8'},
+    React.createElement('div',{className:'max-w-[900px] mx-auto px-2 sm:px-4 py-6 sm:py-8'},
       React.createElement('div',{className:'flex items-center justify-between mb-5'},
         React.createElement('div',null,
           React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-[0.18em]',style:{color:T2_GOLD}},'TARA · MEMORY'),
@@ -17724,9 +17724,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                       const _per=_periodFromWindowId(e.windowId,e.windowType);
                       const _strikeFmt=_fmtPrice(e.strike);
                       const _closeFmt=_fmtPrice(e.closingPrice);
-                      return React.createElement('div',{key:e.id,className:'flex items-baseline gap-2 sm:gap-3 text-[10px] tabular-nums'},
+                      return React.createElement('div',{key:e.id,className:'flex items-baseline gap-2 sm:gap-3 text-[10px] tabular-nums flex-wrap'},
                         React.createElement('span',{className:'text-[#E8E9E4]/40 shrink-0',style:{minWidth:48}},_t),
-                        React.createElement('span',{className:'text-[#E8E9E4]/60 shrink-0',style:{minWidth:90}},_per||e.windowType),
+                        React.createElement('span',{className:'text-[#E8E9E4]/60 shrink-0 truncate',style:{minWidth:80,maxWidth:120}},_per||e.windowType),
                         React.createElement('span',{className:'font-bold shrink-0',style:_dirStyle(e.dir)},e.dir==='UP'?'▲ UP':e.dir==='DOWN'?'▼ DOWN':'· SIT'),
                         e.confidence>0&&React.createElement('span',{className:'text-[#E8E9E4]/40 shrink-0'},e.confidence,'%'),
                         _strikeFmt&&_closeFmt&&React.createElement('span',{className:'text-[#E8E9E4]/45 shrink-0 hidden sm:inline'},_strikeFmt,' → ',_closeFmt),
@@ -17802,7 +17802,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                         const _phaseKey=e.phase||(typeof inferPhaseFromTimestamp==='function'?inferPhaseFromTimestamp(e.time):null);
                         const _phaseProfile=_phaseKey&&typeof PHASE_PROFILES!=='undefined'?PHASE_PROFILES[_phaseKey]:null;
                         return(
-                        React.createElement('div',{key:e.id,className:'px-3 sm:px-4 py-3 hover:bg-[#E8E9E4]/3 transition-colors'},
+                        React.createElement('div',{key:e.id,className:'px-3 sm:px-4 py-3 hover:bg-[#E8E9E4]/3 transition-colors overflow-hidden'},
                           // Header row: time · windowType · period · session · result badge
                           React.createElement('div',{className:'flex items-center justify-between gap-3 mb-2'},
                             React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
@@ -17876,7 +17876,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                                 ),
                           ),
                           // Mid row: direction + confidence + posterior
-                          React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 mb-1.5'},
+                          React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 mb-1.5 flex-wrap'},
                             React.createElement('span',{className:'font-bold text-sm tabular-nums shrink-0',style:_dirStyle(e.dir)},_dirLabel),
                             e.confidence>0&&React.createElement('span',{className:'text-[11px] text-[#E8E9E4]/55 tabular-nums shrink-0'},Math.min(99,Math.round(e.confidence)),'% conf'),
                             e.posterior!=null&&e.dir!=='SIT_OUT'&&e.dir!=='NO_TRADE'&&React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/40 tabular-nums shrink-0'},'· post ',Math.round(e.posterior),'%'),
@@ -17896,7 +17896,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                               ),
                               e.gapBps!=null&&e.result!=='SITOUT'&&e.result!=='NO_TRADE'&&React.createElement('span',{className:'text-[10px] tabular-nums shrink-0',style:{color:e.gapBps>=0?'rgba(110,231,183,0.85)':'rgba(244,114,182,0.85)'}},formatSignedInt(e.gapBps)+' bps'),
                             ),
-                            React.createElement('div',{className:'flex items-baseline gap-2 text-[#E8E9E4]/35 shrink-0',style:{fontSize:9}},
+                            React.createElement('div',{className:'flex items-baseline gap-2 text-[#E8E9E4]/35 flex-wrap',style:{fontSize:9}},
                               e.regime&&React.createElement('span',null,e.regime),
                               e.qScore!=null&&React.createElement('span',null,'q',e.qScore),
                               e.tier&&React.createElement('span',null,e.tier),
