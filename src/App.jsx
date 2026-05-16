@@ -8603,31 +8603,11 @@ const computeV99Posterior=(params)=>{
       reasoning.push(`[V10.2.50 CHOP-AMP] RANGE-CHOP × 1.5 → meanRev ${_mrOrig}→${_mrNew} rangePos ${_rpOrig}→${_rpNew} reversal ${_revOrig}→${_revNew} (Δ ${_delta>=0?'+':''}${_delta})`);
     }
   }
-  // ─── V10.2.50 — HTF-PATTERNS CHOP UNCAP for double-top/double-bottom ──────
-  // The V10.2.41 cap of ±20 was set to limit noise across all regimes. But
-  // doubleTop and doubleBottom patterns are SPECIFICALLY chop-predictive
-  // (they mark the range edges). In chop regime, allow them to express more
-  // strongly — cap raised to ±35 when the dominant pattern detected is a
-  // double-top or double-bottom. Other patterns stay capped at ±20.
+  // V10.2.50 HTF-CHOP-UNCAP is applied inline at the htfPatterns cap site below
+  // (around line 8735) — moved there because _htfPatterns isn't declared yet at
+  // this point in the engine flow. The _v10_2_50_htfChopBoost telemetry is set
+  // at that location.
   let _v10_2_50_htfChopBoost=null;
-  if(regime==='RANGE-CHOP'&&_htfPatterns?.detail){
-    const _hasDoubleTop=/doubleTop/i.test(_htfPatterns.detail);
-    const _hasDoubleBottom=/doubleBottom/i.test(_htfPatterns.detail);
-    if(_hasDoubleTop||_hasDoubleBottom){
-      // Recompute with higher cap for this specific case
-      const _patternRaw=Math.round((_htfPatterns.totalAdj||0)*(W.htfPatterns||1.0));
-      const _capChop=35;
-      const _newCapped=Math.max(-_capChop,Math.min(_capChop,_patternRaw));
-      // Find what we previously applied (the V10.2.41 capped value)
-      const _prevApplied=Math.max(-20,Math.min(20,_patternRaw));
-      const _boost=_newCapped-_prevApplied;
-      if(_boost!==0){
-        totalScore+=_boost;
-        _v10_2_50_htfChopBoost={prevCap:_prevApplied,newCap:_newCapped,boost:_boost};
-        reasoning.push(`[V10.2.50 HTF-CHOP-UNCAP] doubleTop/Bottom in RANGE-CHOP → cap raised 20→35 (${_prevApplied}→${_newCapped}, Δ ${_boost>=0?'+':''}${_boost})`);
-      }
-    }
-  }
   // V113: Velocity-adaptive threshold adjustment
   // Slow markets: tighten thresholds (require more conviction — chop is dangerous)
   // Fast markets: loosen thresholds (real moves don't wait for indecision)
@@ -8731,10 +8711,20 @@ const computeV99Posterior=(params)=>{
   //   after `flow`. Reducing cap 55→20 keeps the signal as ONE voice among many
   //   instead of dominating. If patterns are genuinely predictive long-term, the
   //   learning loop will push them back up. If they're noise, the cap limits damage.
+  // V10.2.50 — CHOP UNCAP for doubleTop/doubleBottom: these patterns are
+  //   specifically chop-predictive (mark range edges). In RANGE-CHOP regime,
+  //   raise cap to ±35 when dominant pattern is a double-top or double-bottom.
+  //   Other patterns and other regimes stay at ±20.
   const _patternAdjUncapped=Math.round((_htfPatterns.totalAdj||0)*(W.htfPatterns||1.0));
-  const patternAdj=Math.max(-20,Math.min(20,_patternAdjUncapped)); // V10.2.41: 55→20
+  const _isChopDoublePattern=regime==='RANGE-CHOP'&&_htfPatterns?.detail&&(/doubleTop/i.test(_htfPatterns.detail)||/doubleBottom/i.test(_htfPatterns.detail));
+  const _cap=_isChopDoublePattern?35:20;
+  const patternAdj=Math.max(-_cap,Math.min(_cap,_patternAdjUncapped));
+  if(_isChopDoublePattern){
+    _v10_2_50_htfChopBoost={cap:35,baselineCap:20,patternAdj:patternAdj,detail:_htfPatterns.detail};
+  }
   if(patternAdj!==0){
-    const _capNote=Math.abs(_patternAdjUncapped)>20?` (capped from ${_patternAdjUncapped}, V10.2.41 ±20)`:'';
+    const _capLabel=_isChopDoublePattern?`V10.2.50 chop±35`:`V10.2.41 ±20`;
+    const _capNote=Math.abs(_patternAdjUncapped)>_cap?` (capped from ${_patternAdjUncapped}, ${_capLabel})`:'';
     reasoning.push(`[HTF-PATTERNS] ${_htfPatterns.detail} → ${patternAdj>0?'+':''}${patternAdj} (W:${(W.htfPatterns||1.0).toFixed(2)})${_capNote}`);
   }
   totalScore+=patternAdj;
