@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.16-v10.2.51-chop-confluence-threshold-drop';
+const BASELINE_VERSION='2026.05.16-v10.3.0-range-fade-module';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.51';
+const TARA_VERSION_DISPLAY='Tara 10.3.0';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -8658,6 +8658,130 @@ const computeV99Posterior=(params)=>{
       reasoning.push(`[V10.2.51 CHOP-CONFLUENCE] ${_dnSignals.length} chop signals → DOWN (${_v10_2_51_chopConfluence.signals}) → downThreshold ${_origDn}→${downThreshold}`);
     }
   }
+  // ─── V10.3.0 — RANGE-FADE MODULE ──────────────────────────────────────────
+  // Goal: actually win chop, not just sit it out. Built on the empirical truth
+  // that chop is range-bound — price oscillates between identifiable high/low
+  // boundaries. The edge in chop is fading rejections at boundaries.
+  //
+  // Architecture:
+  //   1. Range identification: rangeHigh / rangeLow from last 30×1m candles
+  //      (95th/5th percentile to filter spike wicks, not raw max/min).
+  //   2. Position-in-range (PIR): 0=at low, 100=at high.
+  //   3. Range health: % of candles whose CLOSE was inside [rangeLow, rangeHigh].
+  //      <70% = range is breaking, don't apply chop-fade logic.
+  //   4. Rejection detection: last 5 candles, looking for wick ≥ 1.5× body that
+  //      pierced a boundary and closed back inside.
+  //   5. Fade signal: PIR ≥80 + top rejection + healthy range → push DOWN.
+  //                   PIR ≤20 + bottom rejection + healthy range → push UP.
+  //   6. Mid-range flag (PIR 30-70): used downstream to force sit-out in chop.
+  //
+  // Only active in RANGE-CHOP regime. Other regimes unchanged.
+  let _v10_3_0_rangeData=null;
+  let _v10_3_0_rangeFadeFired=null;
+  let _v10_3_0_midRangeSitout=false;
+  let _v10_3_0_rangeBroken=false;
+  if(regime==='RANGE-CHOP'){
+    const _c1m=tfCandles?.c1m||[];
+    const _LOOKBACK=30; // 30 minutes
+    if(_c1m.length>=20){
+      const _recent=_c1m.slice(-_LOOKBACK);
+      // 95th/5th percentile to filter outlier spike wicks
+      const _highsSorted=_recent.map(c=>c.h).sort((a,b)=>a-b);
+      const _lowsSorted=_recent.map(c=>c.l).sort((a,b)=>a-b);
+      const _p95idx=Math.floor(_highsSorted.length*0.95);
+      const _p05idx=Math.floor(_lowsSorted.length*0.05);
+      const _rangeHigh=_highsSorted[_p95idx];
+      const _rangeLow=_lowsSorted[_p05idx];
+      const _rangeSize=_rangeHigh-_rangeLow;
+      if(_rangeSize>0&&currentPrice>0){
+        const _pir=Math.max(0,Math.min(100,((currentPrice-_rangeLow)/_rangeSize)*100));
+        // Range health: % of candles closed inside [rangeLow, rangeHigh]
+        const _closedInside=_recent.filter(c=>c.c>=_rangeLow&&c.c<=_rangeHigh).length;
+        const _rangeHealth=(_closedInside/_recent.length)*100;
+        // Rejection candle detection on last 5 candles
+        const _last5=_recent.slice(-5);
+        let _topRejection=0;
+        let _bottomRejection=0;
+        let _topRejStrength=0;
+        let _botRejStrength=0;
+        _last5.forEach(c=>{
+          const _body=Math.abs(c.c-c.o);
+          if(_body<0.01)return; // skip doji
+          const _upperWick=c.h-Math.max(c.c,c.o);
+          const _lowerWick=Math.min(c.c,c.o)-c.l;
+          // Top rejection: candle high touched/exceeded rangeHigh AND closed back inside AND upper wick is dominant
+          const _highTouched=c.h>=_rangeHigh*0.9995;
+          const _closedBack=c.c<_rangeHigh;
+          const _wickDom=_upperWick>=1.5*_body;
+          if(_highTouched&&_closedBack&&_wickDom){
+            _topRejection++;
+            _topRejStrength+=_upperWick/_body;
+          }
+          // Bottom rejection: mirror
+          const _lowTouched=c.l<=_rangeLow*1.0005;
+          const _closedAbove=c.c>_rangeLow;
+          const _lowWickDom=_lowerWick>=1.5*_body;
+          if(_lowTouched&&_closedAbove&&_lowWickDom){
+            _bottomRejection++;
+            _botRejStrength+=_lowerWick/_body;
+          }
+        });
+        _v10_3_0_rangeData={
+          rangeHigh:Math.round(_rangeHigh),
+          rangeLow:Math.round(_rangeLow),
+          rangeSize:Math.round(_rangeSize),
+          rangeBps:Math.round((_rangeSize/currentPrice)*10000),
+          pir:Math.round(_pir),
+          rangeHealth:Math.round(_rangeHealth),
+          topRejection:_topRejection,
+          bottomRejection:_bottomRejection,
+          topRejStrength:_topRejStrength.toFixed(1),
+          botRejStrength:_botRejStrength.toFixed(1),
+          lookbackBars:_recent.length,
+        };
+        // Range health check — if breaking down, don't apply fade logic
+        if(_rangeHealth<70){
+          _v10_3_0_rangeBroken=true;
+          reasoning.push(`[V10.3.0 RANGE-BROKEN] health ${Math.round(_rangeHealth)}% < 70% — range integrity weak, skip fade logic`);
+        }else{
+          // Range is healthy — apply fade logic
+          // V10.3.0 FADE: only at PIR extremes with rejection
+          if(_pir>=80&&_topRejection>=1){
+            // Strong DOWN fade signal — push posterior DOWN
+            // Magnitude scales with PIR extremity AND rejection strength
+            const _pirBoost=Math.min(15,(_pir-80)*0.75); // 0 at PIR=80, 15 at PIR=100
+            const _rejBoost=Math.min(15,_topRejStrength*4); // capped at 15
+            const _fadeAdj=-Math.round(15+_pirBoost+_rejBoost); // -15 to -45
+            totalScore+=_fadeAdj;
+            rawSignalScores.rangeFade=_fadeAdj;
+            _v10_3_0_rangeFadeFired={dir:'DOWN',magnitude:_fadeAdj,pir:Math.round(_pir),rejections:_topRejection,rejStrength:_topRejStrength.toFixed(1),health:Math.round(_rangeHealth)};
+            // Drop downThreshold to make DOWN lock fire on this signal
+            const _origDn=downThreshold;
+            downThreshold=Math.min(50,downThreshold+20);
+            reasoning.push(`[V10.3.0 RANGE-FADE-DOWN] PIR ${Math.round(_pir)}% + ${_topRejection} top rejections (strength ${_topRejStrength.toFixed(1)}) + health ${Math.round(_rangeHealth)}% → ${_fadeAdj}, downThreshold ${_origDn}→${downThreshold}`);
+          }else if(_pir<=20&&_bottomRejection>=1){
+            // Strong UP fade signal
+            const _pirBoost=Math.min(15,(20-_pir)*0.75);
+            const _rejBoost=Math.min(15,_botRejStrength*4);
+            const _fadeAdj=Math.round(15+_pirBoost+_rejBoost);
+            totalScore+=_fadeAdj;
+            rawSignalScores.rangeFade=_fadeAdj;
+            _v10_3_0_rangeFadeFired={dir:'UP',magnitude:_fadeAdj,pir:Math.round(_pir),rejections:_bottomRejection,rejStrength:_botRejStrength.toFixed(1),health:Math.round(_rangeHealth)};
+            const _origUp=upThreshold;
+            upThreshold=Math.max(50,upThreshold-20);
+            reasoning.push(`[V10.3.0 RANGE-FADE-UP] PIR ${Math.round(_pir)}% + ${_bottomRejection} bottom rejections (strength ${_botRejStrength.toFixed(1)}) + health ${Math.round(_rangeHealth)}% → +${_fadeAdj}, upThreshold ${_origUp}→${upThreshold}`);
+          }else if(_pir>=30&&_pir<=70){
+            // Mid-range — no edge in chop. Flag for downstream sit-out enforcement.
+            _v10_3_0_midRangeSitout=true;
+            reasoning.push(`[V10.3.0 MID-RANGE] PIR ${Math.round(_pir)}% (30-70 band) in healthy chop — sit-out candidate`);
+          }else{
+            // PIR at edge (75-80 or 20-25) but no rejection — wait for rejection
+            reasoning.push(`[V10.3.0 RANGE-EDGE-NOREJ] PIR ${Math.round(_pir)}% at edge but no rejection candle — wait`);
+          }
+        }
+      }
+    }
+  }
   // V113: Velocity-adaptive threshold adjustment
   // Slow markets: tighten thresholds (require more conviction — chop is dangerous)
   // Fast markets: loosen thresholds (real moves don't wait for indecision)
@@ -9628,6 +9752,11 @@ const computeV99Posterior=(params)=>{
   _v10_2_50_chopAmpDelta:_v10_2_50_chopAmpDelta,
   _v10_2_50_htfChopBoost:_v10_2_50_htfChopBoost,
   _v10_2_51_chopConfluence:_v10_2_51_chopConfluence,
+  // V10.3.0 — Range-fade module telemetry
+  _v10_3_0_rangeData:_v10_3_0_rangeData,
+  _v10_3_0_rangeFadeFired:_v10_3_0_rangeFadeFired,
+  _v10_3_0_midRangeSitout:_v10_3_0_midRangeSitout,
+  _v10_3_0_rangeBroken:_v10_3_0_rangeBroken,
   // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
   //   for post-hoc audit. Tells us which gates fired on which trades, so we can
   //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
@@ -30924,6 +31053,10 @@ function TaraApp(){
         _v10_2_50_chopAmpDelta:eng._v10_2_50_chopAmpDelta??0,
         _v10_2_50_htfChopBoost:eng._v10_2_50_htfChopBoost||null,
         _v10_2_51_chopConfluence:eng._v10_2_51_chopConfluence||null,
+        _v10_3_0_rangeData:eng._v10_3_0_rangeData||null,
+        _v10_3_0_rangeFadeFired:eng._v10_3_0_rangeFadeFired||null,
+        _v10_3_0_midRangeSitout:eng._v10_3_0_midRangeSitout===true,
+        _v10_3_0_rangeBroken:eng._v10_3_0_rangeBroken===true,
         // V9.10.10 → V9.11.0: pass through pattern + futures telemetry blocks so the
         //   entry-stamping code at L23722/23792/23991/24733 can read them.
         //   BUG FIX V9.11.1: these were being computed by the engine but stripped from
@@ -34136,6 +34269,10 @@ function TaraApp(){
           _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
           _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
           _v10_2_51_chopConfluence:analysis?._v10_2_51_chopConfluence||null,
+          _v10_3_0_rangeData:analysis?._v10_3_0_rangeData||null,
+          _v10_3_0_rangeFadeFired:analysis?._v10_3_0_rangeFadeFired||null,
+          _v10_3_0_midRangeSitout:analysis?._v10_3_0_midRangeSitout===true,
+          _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
         result:null,
       };
       setTaraCallLog(prev=>{
@@ -34282,6 +34419,10 @@ function TaraApp(){
           _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
           _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
           _v10_2_51_chopConfluence:analysis?._v10_2_51_chopConfluence||null,
+          _v10_3_0_rangeData:analysis?._v10_3_0_rangeData||null,
+          _v10_3_0_rangeFadeFired:analysis?._v10_3_0_rangeFadeFired||null,
+          _v10_3_0_midRangeSitout:analysis?._v10_3_0_midRangeSitout===true,
+          _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
           result:null, // populated at rollover
         };
         setTaraCallLog(prev=>{
@@ -34528,6 +34669,10 @@ function TaraApp(){
           _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
           _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
           _v10_2_51_chopConfluence:analysis?._v10_2_51_chopConfluence||null,
+          _v10_3_0_rangeData:analysis?._v10_3_0_rangeData||null,
+          _v10_3_0_rangeFadeFired:analysis?._v10_3_0_rangeFadeFired||null,
+          _v10_3_0_midRangeSitout:analysis?._v10_3_0_midRangeSitout===true,
+          _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
           // result:null populates at rollover scoring. NO_TRADE entries skip resolution
@@ -34607,6 +34752,38 @@ function TaraApp(){
     let _noGoTier=null;
     // V7.10.3: gated on _cloudRestoreCompletedRef.current to prevent commit-before-cloud-restore.
     if(taraCallSnapshotRef.current===null&&_postKnown&&_commitDir&&_cloudRestoreCompletedRef.current){
+      // V10.3.0 — MID-RANGE SIT-OUT: in healthy RANGE-CHOP, if price is mid-range
+      //   (PIR 30-70) and no fade signal fired, there's no edge. Force sit-out.
+      //   The engine flagged this via _v10_3_0_midRangeSitout. Only fires when
+      //   range is healthy (not breaking) — broken-range chop falls through to
+      //   normal logic in case the chop is transitioning to trend.
+      if(analysis?._v10_3_0_midRangeSitout===true&&!analysis?._v10_3_0_rangeFadeFired){
+        const _rd=analysis?._v10_3_0_rangeData||{};
+        const _sitSnap={
+          call:'SIT_OUT',direction:'SIT_OUT',
+          confidence:_commitConf||0,
+          caution:`Mid-range chop — PIR ${_rd.pir||'?'}% (range $${_rd.rangeLow||'?'}-$${_rd.rangeHigh||'?'}), no edge in middle of range → sit out`,
+          reason:`V10.3.0 mid-range sit-out: PIR ${_rd.pir}% in healthy chop range, no fade signal`,
+          wasOverriddenNoTrade:true,
+          noGoCategory:'mid-range-chop-sitout',
+          atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+          atPosterior:_post,
+          kalshiAtLock:_kPctNow,
+          locked:true,earlyLock:false,
+          isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+          samples:0,needSamples:0,
+          tier:'mid-range-chop-sitout',
+          session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+          regime:analysis?.regime||'',
+          qScore:Math.round(_qFast),
+          fgt:analysis?.mtfAlignment,
+          _committedAt:Date.now(),
+        };
+        taraCallSnapshotRef.current=_sitSnap;
+        _logSnapshotEntry(_sitSnap);
+        _persistLock();
+        return;
+      }
       // (a) NEGATIVE EDGE — only check if both Tara and Kalshi numbers are valid
       if(_kPctNow!=null&&_commitConf!=null){
         const _kalshiForCommit=_commitDir==='UP'?_kPctNow:(100-_kPctNow);
@@ -34656,6 +34833,39 @@ function TaraApp(){
           //   uncertain; can decide to skip externally or wait for hard-cap.
           return;
         }
+        // V10.3.0 — NO-GO-EDGE IN CHOP → SIT_OUT, not warned-lock.
+        //   Empirical data from May 16 batch: 10 no-go-edge trades in RANGE-CHOP
+        //   resulted in 7W/3L = 70% WR, BUT -$0.128 per trade in real money because
+        //   the asymmetric Kalshi payout (win $0.16, lose $0.80) requires 83%+ WR
+        //   to break even. Locking these is mathematically negative EV.
+        //   Fix: in RANGE-CHOP, no-go-edge converts to SIT_OUT. Outside chop, keep
+        //   warned-lock behavior (trends can still be tradeable with thin edge).
+        if(_noGoTier==='no-go-edge'&&analysis?.regime==='RANGE-CHOP'){
+          const _sitSnap={
+            call:'SIT_OUT',direction:'SIT_OUT',
+            confidence:_commitConf,
+            caution:`${_noGoReason} — sitting out (V10.3.0: no-go-edge in chop = -EV)`,
+            reason:`V10.3.0 no-go-edge chop guard: ${_noGoReason}`,
+            wasOverriddenNoTrade:true,
+            noGoCategory:'no-go-edge-chop-sitout',
+            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+            atPosterior:_post,
+            kalshiAtLock:_kPctNow,
+            locked:true,earlyLock:false,
+            isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+            samples:0,needSamples:0,
+            tier:'no-go-edge-chop-sitout',
+            session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+            regime:analysis?.regime||'',
+            qScore:Math.round(_qFast),
+            fgt:analysis?.mtfAlignment,
+            _committedAt:Date.now(),
+          };
+          taraCallSnapshotRef.current=_sitSnap;
+          _logSnapshotEntry(_sitSnap);
+          _persistLock();
+          return;
+        }
         // V8.9.2: REMOVED no-trade gating for cases (a)+(b). User mandate: every round
         //   Tara picks a direction; the original no-go reason becomes a CAUTION badge
         //   so the user knows to be skeptical, but they get the call.
@@ -34692,12 +34902,14 @@ function TaraApp(){
       //   resolves — distinct from _hasRestoredLockRef which gates the effect re-running.
       if(_hardCapElapsed&&_cloudRestoreCompletedRef.current&&taraCallSnapshotRef.current===null){
         // V10.2.50 — CHOP TIME-CAP GUARD: if regime is RANGE-CHOP and conviction
-        //   is sub-baseline (<68%), the historical WR of time-cap-commit in chop
-        //   is well below 50%. Audit of trade log showed both LOSSes in the user's
-        //   May 15 batch were time-cap-commit at 65% conf in RANGE-CHOP. Better to
-        //   sit out than force a marginal commit. Converts these to SITOUT tier
-        //   with caution note explaining the override.
-        const _v10250ChopGuard=(analysis?.regime==='RANGE-CHOP'&&_commitConf<68);
+        //   is sub-baseline, the historical WR of time-cap-commit in chop is
+        //   well below 50%. Converts marginal time-cap commits to sit-outs.
+        // V10.3.0 — RAISED THRESHOLD 68→78. May 16 audit showed all 5 chop
+        //   time-cap commits were at 71-76% conf, with 2W/3L (40% WR) — below the
+        //   58% break-even on time-cap pricing. The old 68% threshold was too low.
+        //   At 78%, only genuinely high-conviction commits go through; everything
+        //   else (the 70-77% band that's been losing) becomes a sit-out.
+        const _v10250ChopGuard=(analysis?.regime==='RANGE-CHOP'&&_commitConf<78);
         if(_v10250ChopGuard){
           const _sitSnap={
             call:'SIT_OUT',direction:'SIT_OUT',
@@ -35394,6 +35606,10 @@ function TaraApp(){
           _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
           _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
           _v10_2_51_chopConfluence:analysis?._v10_2_51_chopConfluence||null,
+          _v10_3_0_rangeData:analysis?._v10_3_0_rangeData||null,
+          _v10_3_0_rangeFadeFired:analysis?._v10_3_0_rangeFadeFired||null,
+          _v10_3_0_midRangeSitout:analysis?._v10_3_0_midRangeSitout===true,
+          _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
         result:null, // populated at rollover scoring
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
