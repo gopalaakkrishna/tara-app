@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.15-v10.2.50-chop-amplification';
+const BASELINE_VERSION='2026.05.16-v10.2.51-chop-confluence-threshold-drop';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.50';
+const TARA_VERSION_DISPLAY='Tara 10.2.51';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -8608,6 +8608,56 @@ const computeV99Posterior=(params)=>{
   // this point in the engine flow. The _v10_2_50_htfChopBoost telemetry is set
   // at that location.
   let _v10_2_50_htfChopBoost=null;
+  // ─── V10.2.51 — CHOP CONFLUENCE THRESHOLD DROP ────────────────────────────
+  // Problem: in RANGE-CHOP, foundation signals (gap/momentum/flow) push trend
+  // direction and cancel. Chop-native signals (meanReversion/rangePosition/
+  // reversal) fire but their amplified magnitude (~9-12) isn't enough to push
+  // past the lock threshold (~75/26). Result: posterior lands ~50%, no lock
+  // until time-cap forces a marginal commit.
+  //
+  // Fix: when ≥2 chop-native signals fire in the SAME direction with magnitude
+  // ≥5 each, treat that as a confluent chop-fade signal and lower the lock
+  // threshold for that direction by 15 pts. The chop-native signals are
+  // accurate predictors in chop per the audit — they just need a path to fire
+  // locks without competing against canceling trend signals.
+  //
+  // Direction encoding:
+  //   - positive score → UP-pushing signal
+  //   - negative score → DOWN-pushing signal
+  //   - doubleTop pattern → DOWN bias (price tested top, rejected)
+  //   - doubleBottom pattern → UP bias (price tested bottom, rejected)
+  //
+  // For UP lock easier: lower upThreshold (need less to fire)
+  // For DOWN lock easier: raise downThreshold (allow higher posterior to fire DOWN)
+  let _v10_2_51_chopConfluence=null;
+  if(regime==='RANGE-CHOP'){
+    const _mr=rawSignalScores.meanReversion||0;
+    const _rp=rawSignalScores.rangePosition||0;
+    const _rev=rawSignalScores.reversal||0;
+    // Note: _htfPatterns isn't available yet here, so we check the detail
+    // string via a deferred check. For V10.2.51, only use mr/rp/rev — doubleTop/
+    // doubleBottom contribution flows through patternAdj which adds to totalScore
+    // and already moves posterior in the right direction. The threshold drop here
+    // is independent — based purely on the 3 chop-native signal counts.
+    const _chopSignals=[
+      {name:'meanReversion',score:_mr},
+      {name:'rangePosition',score:_rp},
+      {name:'reversal',score:_rev},
+    ];
+    const _upSignals=_chopSignals.filter(s=>s.score>=5);
+    const _dnSignals=_chopSignals.filter(s=>s.score<=-5);
+    if(_upSignals.length>=2&&_dnSignals.length===0){
+      const _origUp=upThreshold;
+      upThreshold=Math.max(50,upThreshold-15);
+      _v10_2_51_chopConfluence={dir:'UP',count:_upSignals.length,origThr:_origUp,newThr:upThreshold,signals:_upSignals.map(s=>`${s.name}+${s.score}`).join(', ')};
+      reasoning.push(`[V10.2.51 CHOP-CONFLUENCE] ${_upSignals.length} chop signals → UP (${_v10_2_51_chopConfluence.signals}) → upThreshold ${_origUp}→${upThreshold}`);
+    }else if(_dnSignals.length>=2&&_upSignals.length===0){
+      const _origDn=downThreshold;
+      downThreshold=Math.min(50,downThreshold+15);
+      _v10_2_51_chopConfluence={dir:'DOWN',count:_dnSignals.length,origThr:_origDn,newThr:downThreshold,signals:_dnSignals.map(s=>`${s.name}${s.score}`).join(', ')};
+      reasoning.push(`[V10.2.51 CHOP-CONFLUENCE] ${_dnSignals.length} chop signals → DOWN (${_v10_2_51_chopConfluence.signals}) → downThreshold ${_origDn}→${downThreshold}`);
+    }
+  }
   // V113: Velocity-adaptive threshold adjustment
   // Slow markets: tighten thresholds (require more conviction — chop is dangerous)
   // Fast markets: loosen thresholds (real moves don't wait for indecision)
@@ -9577,6 +9627,7 @@ const computeV99Posterior=(params)=>{
   // V10.2.50 — Chop amplification telemetry
   _v10_2_50_chopAmpDelta:_v10_2_50_chopAmpDelta,
   _v10_2_50_htfChopBoost:_v10_2_50_htfChopBoost,
+  _v10_2_51_chopConfluence:_v10_2_51_chopConfluence,
   // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
   //   for post-hoc audit. Tells us which gates fired on which trades, so we can
   //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
@@ -30872,6 +30923,7 @@ function TaraApp(){
         _v10_2_44_postBeforeHaircut:eng._v10_2_44_postBeforeHaircut??null,
         _v10_2_50_chopAmpDelta:eng._v10_2_50_chopAmpDelta??0,
         _v10_2_50_htfChopBoost:eng._v10_2_50_htfChopBoost||null,
+        _v10_2_51_chopConfluence:eng._v10_2_51_chopConfluence||null,
         // V9.10.10 → V9.11.0: pass through pattern + futures telemetry blocks so the
         //   entry-stamping code at L23722/23792/23991/24733 can read them.
         //   BUG FIX V9.11.1: these were being computed by the engine but stripped from
@@ -34083,6 +34135,7 @@ function TaraApp(){
           _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
           _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
           _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
+          _v10_2_51_chopConfluence:analysis?._v10_2_51_chopConfluence||null,
         result:null,
       };
       setTaraCallLog(prev=>{
@@ -34228,6 +34281,7 @@ function TaraApp(){
           _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
           _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
           _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
+          _v10_2_51_chopConfluence:analysis?._v10_2_51_chopConfluence||null,
           result:null, // populated at rollover
         };
         setTaraCallLog(prev=>{
@@ -34473,6 +34527,7 @@ function TaraApp(){
           _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
           _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
           _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
+          _v10_2_51_chopConfluence:analysis?._v10_2_51_chopConfluence||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
           // result:null populates at rollover scoring. NO_TRADE entries skip resolution
@@ -35338,6 +35393,7 @@ function TaraApp(){
           _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
           _v10_2_50_chopAmpDelta:analysis?._v10_2_50_chopAmpDelta??0,
           _v10_2_50_htfChopBoost:analysis?._v10_2_50_htfChopBoost||null,
+          _v10_2_51_chopConfluence:analysis?._v10_2_51_chopConfluence||null,
         result:null, // populated at rollover scoring
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
