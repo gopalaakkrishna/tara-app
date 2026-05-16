@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.36-range-detection-force-chop-override';
+const BASELINE_VERSION='2026.05.14-v10.2.40-probabilistic-regime-conservative';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.36';
+const TARA_VERSION_DISPLAY='Tara 10.2.40';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -8061,8 +8061,30 @@ const computeV99Posterior=(params)=>{
   // V135: Loosened TRENDING UP/DOWN thresholds — was drift>5/<-5 + whalesBuying/Selling + atrBps<30.
   //       The ATR<30 gate excluded fast moves entirely (they got dumped into HIGH VOL CHOP),
   //       and the $500K whale threshold made TRENDING DOWN trigger only 6% of trades vs SHORT SQUEEZE 38%.
-  const isCleanUp=drift1m>3&&whalesBuyingMild;
-  const isCleanDn=drift1m<-3&&whalesSellingMild;
+  // V10.2.37 — MULTI-TIMEFRAME ALIGNMENT (Option 1 of regime detection improvements).
+  //   Was: isCleanUp = drift1m > 3 && whalesBuyingMild
+  //   Problem: drift1m is a 1-minute snapshot. A 4 bps drift1m spike during chop
+  //   would mislabel the whole window as TRENDING. The 22:59 audit showed this
+  //   exact failure — micro-flat market (7.3 bps avg) labeled TRENDING DOWN 12
+  //   times in last 30 windows.
+  //
+  //   New: also require drift5m AND drift15m to confirm direction. Specifically:
+  //     TRENDING UP   = drift1m > 3 AND drift5m > 5 AND drift15m > 8
+  //     TRENDING DOWN = drift1m < -3 AND drift5m < -5 AND drift15m < -8
+  //   This forces directional persistence across THREE timeframes before
+  //   committing to a trending regime label. Single-TF drift spikes default
+  //   to RANGE-CHOP, removing the directional bias trap.
+  //
+  //   Expected impact: ~60% reduction in false TRENDING labels per audit.
+  const _mtfUpAligned=drift1m>3&&drift5m>5&&drift15m>8;
+  const _mtfDnAligned=drift1m<-3&&drift5m<-5&&drift15m<-8;
+  const isCleanUp=_mtfUpAligned&&whalesBuyingMild;
+  const isCleanDn=_mtfDnAligned&&whalesSellingMild;
+  // Log multi-TF state for visibility — when single-TF fired but multi-TF didn't,
+  // it tells the user the new filter caught a would-be false TRENDING.
+  if((drift1m>3||drift1m<-3)&&!isCleanUp&&!isCleanDn){
+    reasoning.push(`[V10.2.37 MTF-VETO] drift1m=${drift1m.toFixed(1)} but 5m/15m didn't confirm (5m=${drift5m.toFixed(1)}, 15m=${drift15m.toFixed(1)}) → not trending`);
+  }
   // V114: Cross-Exchange Lead-Lag — Binance often leads Coinbase by 1-3s on big moves
   // If futures price diverges from spot by significant amount, signal direction
   const _binancePrice=globalFlow?.binancePrice||0;
@@ -8189,9 +8211,161 @@ const computeV99Posterior=(params)=>{
       }
     }
   }
-  // Only run the normal regime ladder if override didn't fire — otherwise we'd
+  // V10.2.37 — REALIZED-VS-EXPECTED MOVE DETECTION (Option 2).
+  //   Within the CURRENT window, compute how much price has moved so far
+  //   vs how much we'd expect given ATR and elapsed time. If realized move
+  //   is significantly LESS than expected, force RANGE-CHOP — the window
+  //   is quiet despite whatever drift1m says.
+  //
+  //   Math:
+  //     elapsed_fraction = clockSeconds / 900 (fraction of 15min elapsed)
+  //     expected_move_bps = atrBps × elapsed_fraction
+  //     realized_move_bps = |currentPrice - windowOpenPrice| / windowOpenPrice × 10000
+  //     ratio = realized / expected
+  //
+  //   Thresholds:
+  //     ratio < 0.4 + at least 3 min into window → FORCE RANGE-CHOP (quiet)
+  //   Why 0.4: if we're at 60% of expected, that's normal variance. 40% means
+  //     the window is genuinely under-moving. Threshold tuned conservatively.
+  //   Why 3 min: very early windows haven't had time to move; ratio noise is high.
+  //
+  //   This stacks with V10.2.36 — both can fire independently. V10.2.36 reads
+  //   PRIOR windows; V10.2.37 reads CURRENT window. Either way → force chop.
+  let _quietOverrideFired=false;
+  let _quietOverrideRatio=null;
+  let _quietRealizedBps=null;
+  let _quietExpectedBps=null;
+  if(!_rangeOverrideFired){ // skip if V10.2.36 already forced chop
+    if(windowOpenPrice>0&&atrBps>0&&clockSeconds>=180){
+      const _elapsedFrac=Math.min(1,clockSeconds/900);
+      _quietExpectedBps=atrBps*_elapsedFrac;
+      _quietRealizedBps=Math.abs((currentPrice-windowOpenPrice)/windowOpenPrice)*10000;
+      if(_quietExpectedBps>0){
+        _quietOverrideRatio=_quietRealizedBps/_quietExpectedBps;
+        if(_quietOverrideRatio<0.4){
+          _quietOverrideFired=true;
+          regime='RANGE-CHOP';
+          upThreshold=68;downThreshold=32;
+          reasoning.push(`[V10.2.37 QUIET-OVERRIDE] realized ${_quietRealizedBps.toFixed(1)}bps vs expected ${_quietExpectedBps.toFixed(1)}bps (ratio ${_quietOverrideRatio.toFixed(2)}) → forced RANGE-CHOP within-window`);
+        }
+      }
+    }
+  }
+  // V10.2.38 — S/R TOUCH RANGE DETECTION (Option 3 of regime improvements).
+  //   Looks at the last 20 minutes of 1m candles. Identifies the range (high/low).
+  //   Counts how many candles "touched" each extreme (within ±3 bps).
+  //   When BOTH extremes have ≥ 2 touches AND total range is contained (< 35 bps),
+  //   we have a confirmed S/R range — price respects these levels.
+  //
+  //   This is more reliable than statistical range detection (V10.2.36, V10.2.37)
+  //   because it confirms LEVELS that price has tested and bounced from. Useful
+  //   for the auto-exec patient entry to find genuine mean-reversion opportunities.
+  //
+  //   Touch tolerance ±3 bps means candle high within 3 bps of range high counts as
+  //   a touch. At BTC ~$80K, 3 bps = $24, so this catches near-touches not just
+  //   exact prints. Requires ≥ 2 touches each side to filter out single-spike wicks.
+  //
+  //   Range size cap 35 bps: anything wider isn't really a range anymore (one-sided
+  //   trend with a single counter-spike). At $80K, 35 bps = $280 — that's the upper
+  //   bound for what we'd call a 20-min range.
+  let _srRangeDetected=false;
+  let _srRangeBps=null;
+  let _srTouchesHigh=0;
+  let _srTouchesLow=0;
+  let _srRangeHigh=null;
+  let _srRangeLow=null;
+  if(!_rangeOverrideFired&&!_quietOverrideFired){
+    const _oneMinCandles=tfCandles?.c1m||[];
+    if(_oneMinCandles.length>=20&&currentPrice>0){
+      // c1m[0] is most recent; take first 20 = last 20 minutes
+      const _recent=_oneMinCandles.slice(0,20);
+      const _highs=_recent.map(c=>Number(c?.h)).filter(v=>Number.isFinite(v)&&v>0);
+      const _lows=_recent.map(c=>Number(c?.l)).filter(v=>Number.isFinite(v)&&v>0);
+      if(_highs.length>=15&&_lows.length>=15){ // require sufficient data
+        _srRangeHigh=Math.max(..._highs);
+        _srRangeLow=Math.min(..._lows);
+        if(_srRangeHigh>_srRangeLow){
+          _srRangeBps=((_srRangeHigh-_srRangeLow)/currentPrice)*10000;
+          // Count touches within ±3 bps of each extreme
+          const _touchTolPrice=currentPrice*(3/10000);
+          _srTouchesHigh=_highs.filter(h=>Math.abs(h-_srRangeHigh)<=_touchTolPrice).length;
+          _srTouchesLow=_lows.filter(l=>Math.abs(l-_srRangeLow)<=_touchTolPrice).length;
+          // Range detection: both ends touched ≥ 2 times AND total range < 35 bps
+          if(_srTouchesHigh>=2&&_srTouchesLow>=2&&_srRangeBps<35){
+            _srRangeDetected=true;
+            regime='RANGE-CHOP';
+            upThreshold=68;downThreshold=32;
+            reasoning.push(`[V10.2.38 S/R-RANGE] ${_srTouchesHigh}× high touches @${_srRangeHigh.toFixed(1)}, ${_srTouchesLow}× low touches @${_srRangeLow.toFixed(1)}, range ${_srRangeBps.toFixed(1)}bps → confirmed range`);
+          }
+        }
+      }
+    }
+  }
+  // V10.2.39 — HTF TREND FILTER (Option 4 of regime improvements).
+  //   Computes 1h and 4h drift from the c15m candle stack and uses them to
+  //   confirm OR veto the 15m regime decision.
+  //
+  //   Sources:
+  //     1h drift = (currentPrice - close of c15m[3]) / close × 10000 bps
+  //                (4 candles × 15min = 60min lookback)
+  //     4h drift = (currentPrice - close of c15m[15]) / close × 10000 bps
+  //                (16 candles × 15min = 240min lookback)
+  //
+  //   Classification thresholds (calibrated for BTC at ~$80K, normal volatility):
+  //     |1h drift| < 15 bps → 1h FLAT
+  //     |4h drift| < 40 bps → 4h FLAT
+  //     above threshold → UP/DOWN
+  //
+  //   Two HTF effects fire in different places:
+  //     (a) PRE-CLASSIFIER OVERRIDE: if BOTH 1h and 4h are FLAT, force RANGE-CHOP
+  //         and skip the classifier ladder entirely. Strong signal for chop.
+  //     (b) POST-CLASSIFIER VETO: if the classifier picks TRENDING UP/DOWN but
+  //         the HTF context disagrees (4h is opposite direction or flat), veto
+  //         the trending label back to RANGE-CHOP. Prevents 15m fake-trends in
+  //         a HTF range structure.
+  //
+  //   Why this matters: most 15m windows are noise within a HTF context.
+  //   A 15m TRENDING DOWN inside a 4h flat range is usually a counter-trend
+  //   bounce that mean-reverts. Better to skip those trades.
+  let _htfFlatOverride=false;
+  let _htfVetoFired=false;
+  let _htf1hDriftBps=null;
+  let _htf4hDriftBps=null;
+  let _htf1hLabel=null;
+  let _htf4hLabel=null;
+  try{
+    const _c15m=tfCandles?.c15m||[];
+    if(_c15m.length>=4&&currentPrice>0){
+      const _p1hAgo=Number(_c15m[3]?.c)||0;
+      if(_p1hAgo>0){
+        _htf1hDriftBps=((currentPrice-_p1hAgo)/_p1hAgo)*10000;
+        _htf1hLabel=Math.abs(_htf1hDriftBps)<15?'FLAT':(_htf1hDriftBps>0?'UP':'DOWN');
+      }
+      if(_c15m.length>=16){
+        const _p4hAgo=Number(_c15m[15]?.c)||0;
+        if(_p4hAgo>0){
+          _htf4hDriftBps=((currentPrice-_p4hAgo)/_p4hAgo)*10000;
+          _htf4hLabel=Math.abs(_htf4hDriftBps)<40?'FLAT':(_htf4hDriftBps>0?'UP':'DOWN');
+        }
+      }
+    }
+  }catch(_){}
+  // (a) PRE-CLASSIFIER OVERRIDE: both HTFs flat → force RANGE-CHOP
+  if(!_rangeOverrideFired&&!_quietOverrideFired&&!_srRangeDetected&&
+     _htf1hLabel==='FLAT'&&_htf4hLabel==='FLAT'){
+    _htfFlatOverride=true;
+    regime='RANGE-CHOP';
+    upThreshold=68;downThreshold=32;
+    reasoning.push(`[V10.2.39 HTF-FLAT] 1h ${_htf1hDriftBps.toFixed(1)}bps + 4h ${_htf4hDriftBps.toFixed(1)}bps both FLAT → forced RANGE-CHOP`);
+  }
+  // Only run the normal regime ladder if NO override fired — otherwise we'd
   // immediately overwrite our RANGE-CHOP assignment.
-  if(!_rangeOverrideFired){
+  // V10.2.39 — extended gate to include all four overrides:
+  //   _rangeOverrideFired (V10.2.36 — historical 15-window quiet)
+  //   _quietOverrideFired (V10.2.37 — current-window realized<<expected)
+  //   _srRangeDetected    (V10.2.38 — S/R level touches confirm range)
+  //   _htfFlatOverride    (V10.2.39 — both 1h+4h HTFs flat)
+  if(!_rangeOverrideFired&&!_quietOverrideFired&&!_srRangeDetected&&!_htfFlatOverride){
   if(retailShorting&&whalesBuying&&drift1m>-3){regime='SHORT SQUEEZE';upThreshold=72;downThreshold=26;}
   else if(retailLonging&&whalesSelling&&drift1m<3){regime='LONG SQUEEZE';upThreshold=80;downThreshold=36;}
   else if(retailShorting&&whalesBuying&&drift1m<=-3){
@@ -8214,7 +8388,116 @@ const computeV99Posterior=(params)=>{
   //   Note: these regime-set values are dead variables in V140 — the LOCK_THRESHOLD_DN_EFFECTIVE
   //   ladder downstream ignores them. We're fixing both layers in V141.
   else if(isHighVol){regime='HIGH VOL CHOP';upThreshold=75;downThreshold=25;reasoning.push(`[REGIME] High vol — strict thresholds`);}
-  } // end if(!_rangeOverrideFired)
+  } // end if(!_rangeOverrideFired && !_quietOverrideFired && !_srRangeDetected && !_htfFlatOverride)
+  // (b) V10.2.39 POST-CLASSIFIER HTF VETO: if classifier landed on TRENDING UP/DOWN
+  //   but the 4h context disagrees, veto back to RANGE-CHOP. Specifically:
+  //     TRENDING UP   but 4h is DOWN or FLAT → veto
+  //     TRENDING DOWN but 4h is UP or FLAT → veto
+  //   We require 4h disagreement (not 1h) because 1h is too noisy to veto reliably.
+  //   This catches the case where 15m signals look strong but the HTF range is intact.
+  if(_htf4hLabel!=null&&_htf4hLabel!=='UP'&&regime==='TRENDING UP'){
+    _htfVetoFired=true;
+    reasoning.push(`[V10.2.39 HTF-VETO] classifier said TRENDING UP but 4h is ${_htf4hLabel} (${_htf4hDriftBps?.toFixed(1)}bps) → veto to RANGE-CHOP`);
+    regime='RANGE-CHOP';
+    upThreshold=68;downThreshold=32;
+  }
+  else if(_htf4hLabel!=null&&_htf4hLabel!=='DOWN'&&regime==='TRENDING DOWN'){
+    _htfVetoFired=true;
+    reasoning.push(`[V10.2.39 HTF-VETO] classifier said TRENDING DOWN but 4h is ${_htf4hLabel} (${_htf4hDriftBps?.toFixed(1)}bps) → veto to RANGE-CHOP`);
+    regime='RANGE-CHOP';
+    upThreshold=68;downThreshold=32;
+  }
+  // V10.2.40 — PROBABILISTIC REGIME (Option 5 of regime improvements — conservative).
+  //   Compute soft probability scores over all 6 regimes from raw signals.
+  //   Use the resulting distribution for TWO things:
+  //
+  //     (a) AUDIT: store on engine return so we can analyze regime confidence
+  //         post-hoc. "When confidence was high, did Tara win more?"
+  //
+  //     (b) LOW-CONFIDENCE DAMPENING: if no regime scored > 45% probability,
+  //         the classifier picked a weak winner. Dampen thresholds toward
+  //         neutral (68/32) to reduce false-directional locks.
+  //
+  //   This is a CONSERVATIVE implementation. It does NOT replace the existing
+  //   classifier (the primary `regime` string remains the hard classifier output).
+  //   It does NOT touch regimeWeights, regimeDirCalibration, or qScoreV2 — those
+  //   continue to use the primary regime as before. A full probabilistic system
+  //   (blending all downstream lookups by probability) is queued for V10.3.0.
+  //
+  //   Scoring rationale per regime:
+  //     RANGE-CHOP gets BASE points and accumulates more from each override that
+  //       fired (V10.2.36/37/38/39), plus small drift/ATR for "objectively quiet"
+  //     TRENDING UP/DOWN accumulate from drift alignment across 1m/5m/15m + HTF
+  //     SHORT/LONG SQUEEZE accumulate from funding+whale combinations
+  //     HIGH VOL CHOP from ATR magnitude alone
+  //
+  //   Final probabilities = scores / sum(scores). Always well-formed (sums to 1).
+  const _regimeScores={
+    'RANGE-CHOP':1.0,           // base: chop is the default
+    'TRENDING UP':0,
+    'TRENDING DOWN':0,
+    'SHORT SQUEEZE':0,
+    'LONG SQUEEZE':0,
+    'HIGH VOL CHOP':0,
+  };
+  // RANGE-CHOP accumulators
+  if(_rangeOverrideFired)_regimeScores['RANGE-CHOP']+=2.5;
+  if(_quietOverrideFired)_regimeScores['RANGE-CHOP']+=2.0;
+  if(_srRangeDetected)_regimeScores['RANGE-CHOP']+=2.0;
+  if(_htfFlatOverride)_regimeScores['RANGE-CHOP']+=2.0;
+  if(_htfVetoFired)_regimeScores['RANGE-CHOP']+=1.5;
+  if(Math.abs(drift1m)<3)_regimeScores['RANGE-CHOP']+=0.5;
+  if(atrBps<15)_regimeScores['RANGE-CHOP']+=0.5;
+  if(_htf1hLabel==='FLAT')_regimeScores['RANGE-CHOP']+=0.5;
+  if(_htf4hLabel==='FLAT')_regimeScores['RANGE-CHOP']+=1.0;
+  // TRENDING UP accumulators
+  if(drift1m>3)_regimeScores['TRENDING UP']+=1.0;
+  if(drift5m>5)_regimeScores['TRENDING UP']+=1.0;
+  if(drift15m>8)_regimeScores['TRENDING UP']+=1.0;
+  if(whalesBuyingMild)_regimeScores['TRENDING UP']+=0.5;
+  if(_htf1hLabel==='UP')_regimeScores['TRENDING UP']+=1.0;
+  if(_htf4hLabel==='UP')_regimeScores['TRENDING UP']+=1.5;
+  // TRENDING DOWN accumulators (mirror)
+  if(drift1m<-3)_regimeScores['TRENDING DOWN']+=1.0;
+  if(drift5m<-5)_regimeScores['TRENDING DOWN']+=1.0;
+  if(drift15m<-8)_regimeScores['TRENDING DOWN']+=1.0;
+  if(whalesSellingMild)_regimeScores['TRENDING DOWN']+=0.5;
+  if(_htf1hLabel==='DOWN')_regimeScores['TRENDING DOWN']+=1.0;
+  if(_htf4hLabel==='DOWN')_regimeScores['TRENDING DOWN']+=1.5;
+  // SHORT SQUEEZE accumulators
+  if(retailShorting&&whalesBuying)_regimeScores['SHORT SQUEEZE']+=2.0;
+  if(retailShorting&&whalesBuying&&drift1m>-3)_regimeScores['SHORT SQUEEZE']+=0.5;
+  // LONG SQUEEZE accumulators
+  if(retailLonging&&whalesSelling)_regimeScores['LONG SQUEEZE']+=2.0;
+  if(retailLonging&&whalesSelling&&drift1m<3)_regimeScores['LONG SQUEEZE']+=0.5;
+  // HIGH VOL CHOP accumulators
+  if(isHighVol)_regimeScores['HIGH VOL CHOP']+=3.0;
+  // Normalize to probabilities
+  let _regimeProbs={};
+  const _scoreSum=Object.values(_regimeScores).reduce((s,v)=>s+v,0);
+  if(_scoreSum>0){
+    Object.entries(_regimeScores).forEach(([k,v])=>{_regimeProbs[k]=v/_scoreSum;});
+  }else{
+    _regimeProbs={'RANGE-CHOP':1,'TRENDING UP':0,'TRENDING DOWN':0,'SHORT SQUEEZE':0,'LONG SQUEEZE':0,'HIGH VOL CHOP':0};
+  }
+  // Determine primary regime + confidence
+  let _primaryRegime='RANGE-CHOP';
+  let _regimeConfidence=0;
+  Object.entries(_regimeProbs).forEach(([k,v])=>{
+    if(v>_regimeConfidence){_primaryRegime=k;_regimeConfidence=v;}
+  });
+  // (b) LOW-CONFIDENCE DAMPENING — if no regime won clearly AND the current
+  //   classifier picked a directional regime (not chop), dampen thresholds
+  //   toward neutral. This is a defense against weak-evidence directional bias.
+  let _v10_2_40_dampened=false;
+  if(_regimeConfidence<0.45&&regime!=='RANGE-CHOP'&&regime!=='HIGH VOL CHOP'){
+    const _neutralUp=68,_neutralDn=32;
+    const _origUp=upThreshold,_origDn=downThreshold;
+    upThreshold=Math.round(upThreshold*0.5+_neutralUp*0.5);
+    downThreshold=Math.round(downThreshold*0.5+_neutralDn*0.5);
+    _v10_2_40_dampened=true;
+    reasoning.push(`[V10.2.40 LOW-CONF] regime confidence ${(_regimeConfidence*100).toFixed(0)}% < 45% → thresholds dampened ${_origUp}/${_origDn} → ${upThreshold}/${downThreshold}`);
+  }
   // V113: Velocity-adaptive threshold adjustment
   // Slow markets: tighten thresholds (require more conviction — chop is dangerous)
   // Fast markets: loosen thresholds (real moves don't wait for indecision)
@@ -9043,6 +9326,50 @@ const computeV99Posterior=(params)=>{
   //   result for call-log capture and UI surfacing.
   _v10_2_36_rangeOverrideFired:_rangeOverrideFired,
   _v10_2_36_rangeOverrideAvgBps:_rangeOverrideAvgBps,
+  // V10.2.37 — Within-window quiet-override + multi-TF alignment flags.
+  //   _quietOverrideFired: realized<<expected → forced RANGE-CHOP this window
+  //   _quietOverrideRatio: realized/expected (lower = quieter)
+  //   _mtfUpAligned / _mtfDnAligned: whether 1m+5m+15m all confirmed trend
+  _v10_2_37_quietOverrideFired:_quietOverrideFired,
+  _v10_2_37_quietOverrideRatio:_quietOverrideRatio,
+  _v10_2_37_quietRealizedBps:_quietRealizedBps,
+  _v10_2_37_quietExpectedBps:_quietExpectedBps,
+  _v10_2_37_mtfUpAligned:_mtfUpAligned,
+  _v10_2_37_mtfDnAligned:_mtfDnAligned,
+  // V10.2.38 — S/R touch range detection stamps.
+  //   srRangeDetected: did 20-min range with ≥2 touches each side confirm?
+  //   srRangeBps: total range size in bps
+  //   srTouchesHigh / srTouchesLow: touch counts at each extreme
+  //   srRangeHigh / srRangeLow: the level prices (for downstream UI use)
+  _v10_2_38_srRangeDetected:_srRangeDetected,
+  _v10_2_38_srRangeBps:_srRangeBps,
+  _v10_2_38_srTouchesHigh:_srTouchesHigh,
+  _v10_2_38_srTouchesLow:_srTouchesLow,
+  _v10_2_38_srRangeHigh:_srRangeHigh,
+  _v10_2_38_srRangeLow:_srRangeLow,
+  // V10.2.39 — HTF trend filter stamps.
+  //   htfFlatOverride: pre-classifier override (both HTFs flat)
+  //   htfVetoFired: post-classifier veto (4h disagreed with TRENDING label)
+  //   htf1hDriftBps / htf4hDriftBps: actual drift values for audit
+  //   htf1hLabel / htf4hLabel: FLAT / UP / DOWN classification
+  _v10_2_39_htfFlatOverride:_htfFlatOverride,
+  _v10_2_39_htfVetoFired:_htfVetoFired,
+  _v10_2_39_htf1hDriftBps:_htf1hDriftBps,
+  _v10_2_39_htf4hDriftBps:_htf4hDriftBps,
+  _v10_2_39_htf1hLabel:_htf1hLabel,
+  _v10_2_39_htf4hLabel:_htf4hLabel,
+  // V10.2.40 — Probabilistic regime stamps.
+  //   regimeProbs: full probability distribution over all 6 regimes
+  //   regimeConfidence: probability of the primary (highest) regime
+  //   primaryRegime: the regime with highest probability (may differ from
+  //     `regime` field, which is the hard-classifier output. They usually
+  //     agree but won't always — that disagreement IS the signal that the
+  //     classifier is uncertain.)
+  //   dampened: whether low-confidence threshold dampening fired
+  _v10_2_40_regimeProbs:_regimeProbs,
+  _v10_2_40_regimeConfidence:_regimeConfidence,
+  _v10_2_40_primaryRegime:_primaryRegime,
+  _v10_2_40_dampened:_v10_2_40_dampened,
   // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
   //   for post-hoc audit. Tells us which gates fired on which trades, so we can
   //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
