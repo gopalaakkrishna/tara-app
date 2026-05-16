@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.14-v10.2.40.1-persist-regime-stamps-to-call-log';
+const BASELINE_VERSION='2026.05.14-v10.2.44-calibration-fix-phase4';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.2.40.1';
+const TARA_VERSION_DISPLAY='Tara 10.2.44';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -7644,14 +7644,26 @@ const computeV99Posterior=(params)=>{
           // Magnitude check — reversal must be meaningful, not tiny dojis
           const _avgPx=(_r0.c+_r1.c)/2;
           const _moveBps=_avgPx>0?(Math.abs(_d0)+Math.abs(_d1))/_avgPx*10000:0;
-          if(_moveBps>=4){ // 4bps+ across 2 candles = real move
-            if(_structDir==='DOWN'&&_bothUp){
-              _reversalDampMult=0.5;
-              _reversalReason=`recent 2x 1m closed UP (${_moveBps.toFixed(0)}bps) vs STRUCT DOWN`;
-            }else if(_structDir==='UP'&&_bothDn){
-              _reversalDampMult=0.5;
-              _reversalReason=`recent 2x 1m closed DOWN (${_moveBps.toFixed(0)}bps) vs STRUCT UP`;
-            }
+          // V10.2.42 PHASE 2 — RELAXED damper trigger.
+          //   Was: requires BOTH candles same direction AND combined ≥4bps.
+          //   Problem: damper fires 0.8% across 751 trades — far too rare for what
+          //   should be a common "fresh reversal" protection. The "both candles"
+          //   requirement misses single-strong-reversal patterns (one big counter
+          //   candle is often more meaningful than two small ones).
+          //   Now: fire when (a) BOTH same-dir at ≥3bps combined, OR (b) the most
+          //   recent candle is strongly opposite to struct at ≥4bps single-candle.
+          //   The latter catches "fresh reversal candle just printed" patterns.
+          const _r0OppUp=_structDir==='DOWN'&&_d0>0;
+          const _r0OppDn=_structDir==='UP'&&_d0<0;
+          const _r0MoveBps=_avgPx>0?Math.abs(_d0)/_avgPx*10000:0;
+          const _r0StrongOpp=(_r0OppUp||_r0OppDn)&&_r0MoveBps>=4;
+          if(_moveBps>=3&&((_structDir==='DOWN'&&_bothUp)||(_structDir==='UP'&&_bothDn))){
+            _reversalDampMult=0.5;
+            _reversalReason=`recent 2x 1m closed ${_bothUp?'UP':'DOWN'} (${_moveBps.toFixed(0)}bps) vs STRUCT ${_structDir}`;
+          }else if(_r0StrongOpp){
+            // Single-candle strong reversal print
+            _reversalDampMult=0.6; // slightly less aggressive damp for single-candle signal
+            _reversalReason=`latest 1m candle ${_d0>0?'UP':'DOWN'} ${_r0MoveBps.toFixed(0)}bps vs STRUCT ${_structDir} (V10.2.42)`;
           }
         }
       }
@@ -7725,7 +7737,16 @@ const computeV99Posterior=(params)=>{
   const _realGapBpsLocal=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
   const _realizedAgreesChase=Math.abs(_realGapBpsLocal)>=5&&Math.sign(_realGapBpsLocal)===_chaseDirSign;
   const _projAgreesChase=Math.abs(_projectedGapBps)>=5&&Math.sign(_projectedGapBps)===_chaseDirSign;
-  const _fgtAgreesChase=(_chaseDirSign>0&&mtfAlignment>=1.5)||(_chaseDirSign<0&&mtfAlignment<=-1.5);
+  // V10.2.42 PHASE 2 — RELAXED FGT GATE for reversal detection.
+  //   Was: mtfAlignment >= 1.5 (mild agreement) blocks reversal.
+  //   Problem: 0 reversal signal fires across 751 trades. Mild FGT agreement
+  //   (1.5) blocks reversal in too many cases — including legitimate exhaustion
+  //   patterns where the multi-TF trend is still mildly bullish but the immediate
+  //   move is exhausting and about to reverse.
+  //   Now: require STRONG FGT agreement (≥3.0) to block. This lets reversal fire
+  //   when FGT is mildly aligned with chase but the immediate move is exhausted.
+  //   Strong FGT (3.0+) still blocks — genuine trend continuation is safe.
+  const _fgtAgreesChase=(_chaseDirSign>0&&mtfAlignment>=3.0)||(_chaseDirSign<0&&mtfAlignment<=-3.0);
   const _continuationConfirmed=_realizedAgreesChase||_projAgreesChase||_fgtAgreesChase;
   if(_allHighMag&&_allSameDir&&timeFraction<=0.6&&!_structConfirmsChase&&!_continuationConfirmed){
     // Exhaustion strength = sum of magnitudes above the 10pt floor, capped
@@ -8498,6 +8519,53 @@ const computeV99Posterior=(params)=>{
     _v10_2_40_dampened=true;
     reasoning.push(`[V10.2.40 LOW-CONF] regime confidence ${(_regimeConfidence*100).toFixed(0)}% < 45% → thresholds dampened ${_origUp}/${_origDn} → ${upThreshold}/${downThreshold}`);
   }
+  // ─── V10.2.43 PHASE 3 — REGIME-AWARE STRUCTURE/TECHNICAL CORRECTION ───────
+  // Both `structure` (45.0% accuracy in 271 fires) and `technical` (46.9% in
+  // 337 fires) were SLIGHTLY INVERSE predictors in the 751-trade audit. Root
+  // cause: their logic assumes trend-continuation everywhere.
+  //   - structure: 3+ green candles → bullish (continuation). But in CHOP,
+  //     3+ green candles often mean price hit the range top and is about to
+  //     reverse DOWN, not continue UP.
+  //   - technical: RSI 70+ → fade (continuation-mean-rev split based on
+  //     realGapBps). In CHOP this is roughly right, but in TRENDING regimes
+  //     RSI 70 = continuation, current logic fades and is wrong.
+  //
+  // The fix: AFTER regime is finalized, retroactively apply a regime-aware
+  // multiplier to these two signals.
+  //
+  // Multipliers:
+  //   TRENDING UP/DOWN     → ×1.0  (keep current — continuation-correct)
+  //   RANGE-CHOP           → ×-0.7 (INVERT — chop = mean-revert from extremes)
+  //   SHORT/LONG SQUEEZE   → ×0.5  (half-weight — mixed dynamics)
+  //   HIGH VOL CHOP        → ×0.5  (half-weight — noise dominant)
+  //
+  // Why -0.7 (partial invert) for chop: full inversion (-1.0) is risky if the
+  // regime is misclassified. -0.7 still flips the sign but with reduced
+  // magnitude. If chop misclassification still happens, damage is bounded.
+  //
+  // This runs AFTER all regime overrides (V10.2.36-40) so the `regime` variable
+  // is the final, definitive classification. Retroactive math: subtract old
+  // contribution from totalScore, add the multiplier-adjusted version. Net delta
+  // applied to totalScore. rawSignalScores updated for telemetry.
+  const _structOrig=rawSignalScores.structure||0;
+  const _techOrig=rawSignalScores.technical||0;
+  let _regimeMult=1.0;
+  if(regime==='RANGE-CHOP')_regimeMult=-0.7;
+  else if(regime==='SHORT SQUEEZE'||regime==='LONG SQUEEZE')_regimeMult=0.5;
+  else if(regime==='HIGH VOL CHOP')_regimeMult=0.5;
+  // TRENDING UP and TRENDING DOWN keep ×1.0 (current behavior preserved)
+  if(_regimeMult!==1.0){
+    const _structNew=Math.round(_structOrig*_regimeMult);
+    const _techNew=Math.round(_techOrig*_regimeMult);
+    const _structDelta=_structNew-_structOrig;
+    const _techDelta=_techNew-_techOrig;
+    totalScore+=_structDelta+_techDelta;
+    rawSignalScores.structure=_structNew;
+    rawSignalScores.technical=_techNew;
+    if(_structOrig!==0||_techOrig!==0){
+      reasoning.push(`[V10.2.43 REGIME-CORRECT] ${regime} × ${_regimeMult.toFixed(2)} → struct ${_structOrig>=0?'+':''}${_structOrig}→${_structNew>=0?'+':''}${_structNew} tech ${_techOrig>=0?'+':''}${_techOrig}→${_techNew>=0?'+':''}${_techNew} (Δ ${_structDelta+_techDelta>=0?'+':''}${_structDelta+_techDelta})`);
+    }
+  }
   // V113: Velocity-adaptive threshold adjustment
   // Slow markets: tighten thresholds (require more conviction — chop is dangerous)
   // Fast markets: loosen thresholds (real moves don't wait for indecision)
@@ -8552,14 +8620,20 @@ const computeV99Posterior=(params)=>{
     //   15m window) excluded almost all locks since they happen between 30-240s
     //   elapsed (timeFraction 0.05-0.27). Now fires past 2.25min of a 15m window
     //   or 45s of a 5m window, which covers the typical lock window.
-    if((timeFraction||0)>=0.15&&Math.abs(rangeBps)>=1.0){
+    // V10.2.42 PHASE 2 — LOWERED σ THRESHOLD from 1.0 to 0.7.
+    //   Problem: rangePosition fired 1/751 trades. Most locks happen 30-90s into
+    //   the window where price hasn't deviated a full ATR yet. 0.7σ catches the
+    //   "modest extreme" cases where price has stretched 70% of expected envelope.
+    //   Sign inversion still applies — at 0.7σ UP from open late in window,
+    //   contrarian push DOWN. Modest 0.6× dampener kept so signal doesn't dominate.
+    if((timeFraction||0)>=0.15&&Math.abs(rangeBps)>=0.7){
       // tanh produces a smooth ±1 saturation past |rangeBps|=2
-      const excess=Math.abs(rangeBps)-1.0;
+      const excess=Math.abs(rangeBps)-0.7;
       const saturation=Math.tanh(excess*0.7);
       // SIGN INVERSION: if price went UP (positive rangeBps), this signal pushes DOWN (negative)
       const rangeDir=rangeBps>0?-1:1;
       rangeBonus=W.rangePosition*saturation*rangeDir*0.6; // 0.6 dampener — modest by default
-      reasoning.push(`[RANGE-EXH] price ${rangeBps.toFixed(1)}σ from open at ${((timeFraction||0)*100).toFixed(0)}% through window — contrarian ${rangeBonus.toFixed(0)}`);
+      reasoning.push(`[RANGE-EXH] price ${rangeBps.toFixed(1)}σ from open at ${((timeFraction||0)*100).toFixed(0)}% through window — contrarian ${rangeBonus.toFixed(0)} (V10.2.42: ≥0.7σ)`);
     }
   }
   const rangeClamped=Math.max(-W.rangePosition,Math.min(W.rangePosition,rangeBonus));
@@ -8589,10 +8663,16 @@ const computeV99Posterior=(params)=>{
   //   multiplier (0-2.5×) could amplify further. Clamping at ±55 keeps HTF as one strong
   //   signal among many rather than the dominant one. The full per-TF + confluence detail
   //   is still preserved in patternsV9_11_0 telemetry for analysis.
+  // V10.2.41 PHASE 1 — REDUCED CAP: htfPatterns showed 54.2% accuracy across 273
+  //   fires with average magnitude 41 (huge) in 751-trade audit. That's barely
+  //   better than random, but the signal was the SECOND-LARGEST magnitude driver
+  //   after `flow`. Reducing cap 55→20 keeps the signal as ONE voice among many
+  //   instead of dominating. If patterns are genuinely predictive long-term, the
+  //   learning loop will push them back up. If they're noise, the cap limits damage.
   const _patternAdjUncapped=Math.round((_htfPatterns.totalAdj||0)*(W.htfPatterns||1.0));
-  const patternAdj=Math.max(-55,Math.min(55,_patternAdjUncapped));
+  const patternAdj=Math.max(-20,Math.min(20,_patternAdjUncapped)); // V10.2.41: 55→20
   if(patternAdj!==0){
-    const _capNote=Math.abs(_patternAdjUncapped)>55?` (capped from ${_patternAdjUncapped})`:'';
+    const _capNote=Math.abs(_patternAdjUncapped)>20?` (capped from ${_patternAdjUncapped}, V10.2.41 ±20)`:'';
     reasoning.push(`[HTF-PATTERNS] ${_htfPatterns.detail} → ${patternAdj>0?'+':''}${patternAdj} (W:${(W.htfPatterns||1.0).toFixed(2)})${_capNote}`);
   }
   totalScore+=patternAdj;
@@ -8674,8 +8754,16 @@ const computeV99Posterior=(params)=>{
   const _w15Buy=tapeWindows?.w15?.buyPct;
   const _w30Buy=tapeWindows?.w30?.buyPct;
   const _w60Buy=tapeWindows?.w60?.buyPct;
-  const _tapeConsensusUp=_w15Buy!=null&&_w30Buy!=null&&_w60Buy!=null&&_w15Buy>=70&&_w30Buy>=65&&_w60Buy>=60;
-  const _tapeConsensusDown=_w15Buy!=null&&_w30Buy!=null&&_w60Buy!=null&&_w15Buy<=30&&_w30Buy<=35&&_w60Buy<=40;
+  // V10.2.42 PHASE 2 — LOWERED THRESHOLDS for mean-reversion detection.
+  //   Was: w15≥70, w30≥65, w60≥60 (strong consensus required).
+  //   Problem: 5 fires across 751 trades. By the time tape consensus is THAT
+  //   one-sided, the move is usually already played out — too late to call the
+  //   reversal. The "earlyEnough" gate then often expires before consensus arrives.
+  //   Now: w15≥60, w30≥58, w60≥55 — fires on developing one-sided tape, while
+  //   the move is still building but exhaustion is detectable.
+  //   Mirror thresholds for DOWN side.
+  const _tapeConsensusUp=_w15Buy!=null&&_w30Buy!=null&&_w60Buy!=null&&_w15Buy>=60&&_w30Buy>=58&&_w60Buy>=55;
+  const _tapeConsensusDown=_w15Buy!=null&&_w30Buy!=null&&_w60Buy!=null&&_w15Buy<=40&&_w30Buy<=42&&_w60Buy<=45;
   if((_allChaseUp&&_tapeConsensusUp)&&!_isClearTrend&&_earlyEnough){
     // All three signals + tape pumping UP — call the reversal
     const _sumMag=_gapS+_momS+_flowS;
@@ -8837,13 +8925,18 @@ const computeV99Posterior=(params)=>{
       const _diff=_w5Pct-_w30Pct; // positive = recent more bullish than 30s avg
       // Only meaningful divergence: ≥15pp shift in 5s vs 30s
       if(Math.abs(_diff)>=15){
+        // V10.2.41 PHASE 1 — HALF WEIGHT: tapeAccel showed 51.8% accuracy across 85
+        //   fires in 751-trade audit. Coin flip. 30s tape windows are too short for
+        //   reliable directional prediction in 15min trading. Reducing magnitude by
+        //   50% — keeps the signal alive (in case it predicts in specific regimes)
+        //   but stops it pushing 7-pt swings on random outcomes.
         // tanh saturation for stability
-        const _tapeAccelMag=Math.tanh(Math.abs(_diff)/30)*10;
+        const _tapeAccelMag=Math.tanh(Math.abs(_diff)/30)*10*0.5; // V10.2.41: ×0.5
         const _tapeAccelDir=_diff>0?1:-1;
         const _tapeAccelAdj=_tapeAccelMag*_tapeAccelDir;
         totalScore+=_tapeAccelAdj;
         rawSignalScores.tapeAccel=_tapeAccelAdj;
-        reasoning.push(`[TAPE-ACCEL] 5s buy% ${_w5Pct.toFixed(0)} vs 30s ${_w30Pct.toFixed(0)} (Δ${_diff>0?'+':''}${_diff.toFixed(0)}pp) → ${_tapeAccelAdj>0?'+':''}${_tapeAccelAdj.toFixed(1)}`);
+        reasoning.push(`[TAPE-ACCEL] 5s buy% ${_w5Pct.toFixed(0)} vs 30s ${_w30Pct.toFixed(0)} (Δ${_diff>0?'+':''}${_diff.toFixed(0)}pp) → ${_tapeAccelAdj>0?'+':''}${_tapeAccelAdj.toFixed(1)} (V10.2.41: ×0.5)`);
       }
     }
   }
@@ -8900,28 +8993,46 @@ const computeV99Posterior=(params)=>{
       const _mlConfidenceBoost=Math.round((_mlProb-0.5)*20); // -10 to +10
       const _currentLeanSign=totalScore>5?1:totalScore<-5?-1:0; // 0 = no clear lean
       const _mlScore=_currentLeanSign*_mlConfidenceBoost;
-      if(Math.abs(_mlScore)>=2&&_currentLeanSign!==0){
+      // V10.2.41 PHASE 1 — DISABLED: ML signal showed 49.3% accuracy across 507
+      //   fires in 751-trade audit. That's random output — model hasn't learned.
+      //   Still compute _mlScore for telemetry, but don't apply to totalScore.
+      //   When the ML model is properly retrained, re-enable by removing this guard.
+      const _ML_DISABLED=true; // V10.2.41 — disable until model is retrained
+      if(!_ML_DISABLED&&Math.abs(_mlScore)>=2&&_currentLeanSign!==0){
         totalScore+=_mlScore;
         rawSignalScores.ml=_mlScore;
         const _leanLabel=_currentLeanSign>0?'UP':'DOWN';
         reasoning.push(`[ML] Model ${(_mlProb*100).toFixed(0)}% WIN chance × ${_leanLabel}-lean → ${_mlScore>0?'+':''}${_mlScore} (trained on ${_mlModel.nTrades} trades, ${(_mlModel.accuracy*100).toFixed(0)}% accuracy)`);
-      } else if(_currentLeanSign===0){
-        // Track ML output even when not applied, for telemetry
-        rawSignalScores.ml=0;
+      } else {
+        // V10.2.41: still track ML output as telemetry (so we can audit if it gets better)
+        // but don't apply to totalScore. Once it improves, flip _ML_DISABLED.
+        rawSignalScores.ml=_mlScore; // shadow tracking only
+        if(_ML_DISABLED&&Math.abs(_mlScore)>=5)reasoning.push(`[ML-DISABLED] Would have applied ${_mlScore>0?'+':''}${_mlScore} (V10.2.41 — model is 49% accurate, suppressed)`);
       }
     }
   }
   // V9.2.3: TIME-OF-DAY BOOST — data-driven hourly WR feeds back into posterior.
   //   Computed from historical call log (per-asset). Hours with ≥8 trades and WR ≥60%
   //   get a boost; hours with WR <45% get a penalty. Up to ±6 pts.
+  // V10.2.41 PHASE 1 — DISABLED: timeOfDay showed 47.7% accuracy across 451 fires.
+  //   That's SLIGHTLY INVERSE — actively harmful, pushing posterior the wrong way ~52%
+  //   of the time. Per-bucket samples are 10-30 trades which is too noisy to trust.
+  //   Still track for telemetry. Re-enable when buckets reach ≥50 trades each AND
+  //   directional accuracy exceeds 55%.
   const _todBoost=params.timeOfDayBoost;
   if(_todBoost){
     const _h=new Date().getUTCHours();
     const _boost=_todBoost[_h]||0;
     if(_boost!==0){
-      totalScore+=_boost;
-      rawSignalScores.timeOfDay=_boost;
-      reasoning.push(`[TIME-OF-DAY] Hour ${_h} UTC → ${_boost>0?'+':''}${_boost} (from historical WR at this hour)`);
+      const _TOD_DISABLED=true; // V10.2.41 — disable until accuracy improves
+      if(!_TOD_DISABLED){
+        totalScore+=_boost;
+        rawSignalScores.timeOfDay=_boost;
+        reasoning.push(`[TIME-OF-DAY] Hour ${_h} UTC → ${_boost>0?'+':''}${_boost} (from historical WR at this hour)`);
+      } else {
+        rawSignalScores.timeOfDay=_boost; // shadow tracking only
+        if(Math.abs(_boost)>=3)reasoning.push(`[TIME-OF-DAY-DISABLED] Hour ${_h} UTC would have applied ${_boost>0?'+':''}${_boost} (V10.2.41 — 48% accuracy, suppressed)`);
+      }
     }
   }
   // V9.5.0: KALSHI-SPOT DIVERGENCE (opponent modeling).
@@ -8947,12 +9058,17 @@ const computeV99Posterior=(params)=>{
   //       starts pulling the posterior toward truth before gap is catastrophic.
   //       Added intermediate -25/+25 tier so the cap reaches into lock-firing range earlier.
   //       Outer threshold tightened -40→-35 / +40→+35.
-  if(realGapBps<-35){posterior=Math.min(posterior,18);reasoning.push(`[CAP] Deep underwater — UP capped at 18%`);}
-  else if(realGapBps<-25){posterior=Math.min(posterior,30);reasoning.push(`[CAP] Adverse gap — UP capped at 30%`);}
-  else if(realGapBps<-12){posterior=Math.min(posterior,40);}
-  else if(realGapBps>35){posterior=Math.max(posterior,82);reasoning.push(`[CAP] Deep ITM — UP floored at 82%`);}
-  else if(realGapBps>25){posterior=Math.max(posterior,70);reasoning.push(`[CAP] Strong favorable — UP floored at 70%`);}
-  else if(realGapBps>12){posterior=Math.max(posterior,60);}
+  // V10.2.44 PHASE 4 — LOOSENED CAPS: audit showed 80-90% claimed posteriors won
+  //   only 66.3% (n=98), and 90%+ won 70.5% (n=44). The 82% floor / 18% ceiling
+  //   weren't earning their certainty — the caps were FORCING posteriors into
+  //   ranges they didn't deserve. Loosened to 75/25 outer, 28/72 mid. Caps still
+  //   function (preventing absurd misalignment) but stop manufacturing fake confidence.
+  if(realGapBps<-35){posterior=Math.min(posterior,25);reasoning.push(`[CAP] Deep underwater — UP capped at 25% (V10.2.44: was 18)`);}
+  else if(realGapBps<-25){posterior=Math.min(posterior,32);reasoning.push(`[CAP] Adverse gap — UP capped at 32% (V10.2.44: was 30)`);}
+  else if(realGapBps<-12){posterior=Math.min(posterior,42);}
+  else if(realGapBps>35){posterior=Math.max(posterior,75);reasoning.push(`[CAP] Deep ITM — UP floored at 75% (V10.2.44: was 82)`);}
+  else if(realGapBps>25){posterior=Math.max(posterior,68);reasoning.push(`[CAP] Strong favorable — UP floored at 68% (V10.2.44: was 70)`);}
+  else if(realGapBps>12){posterior=Math.max(posterior,58);}
 
   // Apply calibration if available (makes % accurate to actual historical win rate)
   const calibratedPosterior=calibration?calibratePosterior(posterior,calibration):posterior;
@@ -9090,7 +9206,36 @@ const computeV99Posterior=(params)=>{
   //       drives both display and lock decisions. No more "honest display, biased decision."
   //       Removed the _calibratedDisplay backtest compression — it was adding a second
   //       layer of cosmetic correction on top of calibration.
-  const finalPosterior=Math.max(1,Math.min(99,dirCalibrated));
+  // V10.2.44 PHASE 4 — HIGH-CONFIDENCE HAIRCUT.
+  //   Audit: 80-90% claimed → 66.3% actual (n=98), 90%+ → 70.5% actual (n=44).
+  //   Systemic overconfidence at the top end. Apply a graded haircut:
+  //     80-89% → pull 30% of distance toward 78
+  //     90%+  → pull 50% of distance toward 78
+  //   Symmetric for DOWN side (≤20% gets pulled toward 22).
+  //   This is a CALIBRATION CORRECTION — it doesn't change whether locks fire
+  //   (lock thresholds use _baseUpThr from regime), it makes the displayed and
+  //   stored posterior reflect actual historical WR at that confidence level.
+  let _haircutFinal=dirCalibrated;
+  let _haircutApplied=null;
+  if(dirCalibrated>=90){
+    const _target=78,_pull=0.5;
+    _haircutFinal=dirCalibrated-(dirCalibrated-_target)*_pull;
+    _haircutApplied=`90+ haircut: ${dirCalibrated.toFixed(0)}→${_haircutFinal.toFixed(0)} (pulled 50% toward 78)`;
+  }else if(dirCalibrated>=80){
+    const _target=78,_pull=0.3;
+    _haircutFinal=dirCalibrated-(dirCalibrated-_target)*_pull;
+    _haircutApplied=`80-89 haircut: ${dirCalibrated.toFixed(0)}→${_haircutFinal.toFixed(0)} (pulled 30% toward 78)`;
+  }else if(dirCalibrated<=10){
+    const _target=22,_pull=0.5;
+    _haircutFinal=dirCalibrated+(_target-dirCalibrated)*_pull;
+    _haircutApplied=`≤10 haircut: ${dirCalibrated.toFixed(0)}→${_haircutFinal.toFixed(0)} (pulled 50% toward 22)`;
+  }else if(dirCalibrated<=20){
+    const _target=22,_pull=0.3;
+    _haircutFinal=dirCalibrated+(_target-dirCalibrated)*_pull;
+    _haircutApplied=`11-20 haircut: ${dirCalibrated.toFixed(0)}→${_haircutFinal.toFixed(0)} (pulled 30% toward 22)`;
+  }
+  if(_haircutApplied)reasoning.push(`[V10.2.44 HAIRCUT] ${_haircutApplied}`);
+  const finalPosterior=Math.max(1,Math.min(99,_haircutFinal));
   const displayPosterior=finalPosterior; // V144: same as final, no cosmetic divergence
 
   reasoning.push(`[ATR] Volatility: ${atrBps.toFixed(1)} bps | Regime: ${regime}${isPostDecay?' | POST-DECAY':''}`);
@@ -9370,6 +9515,13 @@ const computeV99Posterior=(params)=>{
   _v10_2_40_regimeConfidence:_regimeConfidence,
   _v10_2_40_primaryRegime:_primaryRegime,
   _v10_2_40_dampened:_v10_2_40_dampened,
+  // V10.2.43 — Regime-aware structure/technical correction stamps
+  _v10_2_43_regimeMult:_regimeMult,
+  _v10_2_43_structOrig:_structOrig,
+  _v10_2_43_techOrig:_techOrig,
+  // V10.2.44 — calibration haircut stamps
+  _v10_2_44_haircutApplied:_haircutApplied,
+  _v10_2_44_postBeforeHaircut:dirCalibrated,
   // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
   //   for post-hoc audit. Tells us which gates fired on which trades, so we can
   //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
@@ -29709,7 +29861,13 @@ function TaraApp(){
       //   fire on more reasonable conviction in the regime designed to favor it).
       if(regime==='TRENDING DOWN'){_baseUpThr=is15m?85:83; _baseDnThr=is15m?26:28;}
       else if(regime==='LONG SQUEEZE'){_baseUpThr=is15m?75:73; _baseDnThr=is15m?36:34;}
-      else if(regime==='TRENDING UP'){_baseUpThr=is15m?60:58; _baseDnThr=is15m?20:22;}
+      // V10.2.44 PHASE 4 — TIGHTENED TRENDING UP base threshold from 60/20 to 65/25.
+      //   Audit: TRENDING UP had the WORST WR of real regimes (61.3% on n=93),
+      //   yet had the LOOSEST UP threshold. The asymmetry was backwards. Now
+      //   65/25 brings TU in line with the other regimes (closer to TD's 85/26
+      //   and SS's 72/26). UP locks in TU now require slightly more conviction.
+      //   Expected: TU WR rises from 61% toward 65-66%.
+      else if(regime==='TRENDING UP'){_baseUpThr=is15m?65:63; _baseDnThr=is15m?25:27;}
       // V3.2.4: Apply the SS rebalance from V3.2.1 to the actual lock-gate thresholds.
       //   The line 2067 fix changed the regime classifier values but those are dead-ish; the
       //   real lock decision uses these `_baseUpThr` / `_baseDnThr` values. So V3.2.1's
@@ -29722,6 +29880,33 @@ function TaraApp(){
       //       Now UP 65 / DN 35 (both 15pt of conviction from neutral 50).
       //       Direct response to UP-bias pattern — UP fires too easily in unclear conditions.
       else {_baseUpThr=is15m?65:63; _baseDnThr=is15m?35:37;}
+      // V10.2.40.2 — LOW-CONFIDENCE DAMPENING NOW APPLIES TO LOCK DECISIONS.
+      //   V10.2.40 originally dampened upThreshold/downThreshold, but those vars
+      //   are unused by the lock state machine (dead-variable note at line 8388).
+      //   Real lock decisions read _baseUpThr/_baseDnThr from the regime-string
+      //   ladder above. This fix applies dampening AFTER that ladder runs, BEFORE
+      //   LOCK_THRESHOLD_UP/DN_EFFECTIVE is computed — so dampening now actually
+      //   affects whether a lock fires.
+      //
+      //   When regime confidence < 45% AND regime is directional (not chop/highvol),
+      //   blend _baseUpThr/_baseDnThr 50/50 toward neutral chop values. This makes
+      //   it harder to commit to a directional lock when the regime classification
+      //   is weakly supported by evidence.
+      //
+      //   Why not flip the regime to RANGE-CHOP instead: that would also affect
+      //   regime weights, regime calibration, qScoreV2 — bigger surface, bigger
+      //   risk. Dampening just the threshold is the minimum change to get the
+      //   intended directional skepticism without disrupting other consumers.
+      const _engConf=Number(eng._v10_2_40_regimeConfidence||0);
+      const _engPrimary=eng._v10_2_40_primaryRegime||'';
+      if(_engConf>0&&_engConf<0.45&&regime!=='RANGE-CHOP'&&regime!=='HIGH VOL CHOP'){
+        const _neutralUp=is15m?65:63;
+        const _neutralDn=is15m?35:37;
+        const _origUp=_baseUpThr,_origDn=_baseDnThr;
+        _baseUpThr=Math.round(_baseUpThr*0.5+_neutralUp*0.5);
+        _baseDnThr=Math.round(_baseDnThr*0.5+_neutralDn*0.5);
+        try{console.info('[V10.2.40.2 LOCK-DAMPEN] regime',regime,'conf',Math.round(_engConf*100)+'%','primary='+_engPrimary,'thresholds',_origUp+'/'+_origDn,'→',_baseUpThr+'/'+_baseDnThr);}catch(_){}
+      }
       const LOCK_THRESHOLD_DN_EFFECTIVE=_baseDnThr-_sessThreshAdj-_srThreshAdj;
       const LOCK_THRESHOLD_UP_EFFECTIVE=_baseUpThr+_sessThreshAdj+_srThreshAdj;
       // V141: Now we can compute bullCount/bearCount with the regime-aware effective thresholds.
@@ -30625,6 +30810,11 @@ function TaraApp(){
         _v10_2_40_regimeConfidence:eng._v10_2_40_regimeConfidence??null,
         _v10_2_40_primaryRegime:eng._v10_2_40_primaryRegime||null,
         _v10_2_40_dampened:eng._v10_2_40_dampened===true,
+        _v10_2_43_regimeMult:eng._v10_2_43_regimeMult??1.0,
+        _v10_2_43_structOrig:eng._v10_2_43_structOrig??0,
+        _v10_2_43_techOrig:eng._v10_2_43_techOrig??0,
+        _v10_2_44_haircutApplied:eng._v10_2_44_haircutApplied||null,
+        _v10_2_44_postBeforeHaircut:eng._v10_2_44_postBeforeHaircut??null,
         // V9.10.10 → V9.11.0: pass through pattern + futures telemetry blocks so the
         //   entry-stamping code at L23722/23792/23991/24733 can read them.
         //   BUG FIX V9.11.1: these were being computed by the engine but stripped from
@@ -33829,6 +34019,11 @@ function TaraApp(){
           _v10_2_40_regimeConfidence:analysis?._v10_2_40_regimeConfidence??null,
           _v10_2_40_primaryRegime:analysis?._v10_2_40_primaryRegime||null,
           _v10_2_40_dampened:analysis?._v10_2_40_dampened===true,
+          _v10_2_43_regimeMult:analysis?._v10_2_43_regimeMult??1.0,
+          _v10_2_43_structOrig:analysis?._v10_2_43_structOrig??0,
+          _v10_2_43_techOrig:analysis?._v10_2_43_techOrig??0,
+          _v10_2_44_haircutApplied:analysis?._v10_2_44_haircutApplied||null,
+          _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
         result:null,
       };
       setTaraCallLog(prev=>{
@@ -33967,6 +34162,11 @@ function TaraApp(){
           _v10_2_40_regimeConfidence:analysis?._v10_2_40_regimeConfidence??null,
           _v10_2_40_primaryRegime:analysis?._v10_2_40_primaryRegime||null,
           _v10_2_40_dampened:analysis?._v10_2_40_dampened===true,
+          _v10_2_43_regimeMult:analysis?._v10_2_43_regimeMult??1.0,
+          _v10_2_43_structOrig:analysis?._v10_2_43_structOrig??0,
+          _v10_2_43_techOrig:analysis?._v10_2_43_techOrig??0,
+          _v10_2_44_haircutApplied:analysis?._v10_2_44_haircutApplied||null,
+          _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
           result:null, // populated at rollover
         };
         setTaraCallLog(prev=>{
@@ -34205,6 +34405,11 @@ function TaraApp(){
           _v10_2_40_regimeConfidence:analysis?._v10_2_40_regimeConfidence??null,
           _v10_2_40_primaryRegime:analysis?._v10_2_40_primaryRegime||null,
           _v10_2_40_dampened:analysis?._v10_2_40_dampened===true,
+          _v10_2_43_regimeMult:analysis?._v10_2_43_regimeMult??1.0,
+          _v10_2_43_structOrig:analysis?._v10_2_43_structOrig??0,
+          _v10_2_43_techOrig:analysis?._v10_2_43_techOrig??0,
+          _v10_2_44_haircutApplied:analysis?._v10_2_44_haircutApplied||null,
+          _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
           // result:null populates at rollover scoring. NO_TRADE entries skip resolution
@@ -35032,6 +35237,11 @@ function TaraApp(){
           _v10_2_40_regimeConfidence:analysis?._v10_2_40_regimeConfidence??null,
           _v10_2_40_primaryRegime:analysis?._v10_2_40_primaryRegime||null,
           _v10_2_40_dampened:analysis?._v10_2_40_dampened===true,
+          _v10_2_43_regimeMult:analysis?._v10_2_43_regimeMult??1.0,
+          _v10_2_43_structOrig:analysis?._v10_2_43_structOrig??0,
+          _v10_2_43_techOrig:analysis?._v10_2_43_techOrig??0,
+          _v10_2_44_haircutApplied:analysis?._v10_2_44_haircutApplied||null,
+          _v10_2_44_postBeforeHaircut:analysis?._v10_2_44_postBeforeHaircut??null,
         result:null, // populated at rollover scoring
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
