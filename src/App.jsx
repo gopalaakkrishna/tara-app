@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.16-v10.3.2-targeted-sitout-fixes';
+const BASELINE_VERSION='2026.05.16-v10.3.3-chop-fixes-and-cleanup';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.3.2';
+const TARA_VERSION_DISPLAY='Tara 10.3.3';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -8550,7 +8550,30 @@ const computeV99Posterior=(params)=>{
   const _structOrig=rawSignalScores.structure||0;
   const _techOrig=rawSignalScores.technical||0;
   let _regimeMult=1.0;
-  if(regime==='RANGE-CHOP')_regimeMult=-0.7;
+  // V10.3.3 — RANGE-BEARISH / RANGE-BULLISH DETECTOR.
+  //   Pure RANGE-CHOP gets ×-0.7 inversion because structure/technical fired wrong
+  //   in pure chop per the audit. BUT in hybrid range-bearish (chop pattern + strong
+  //   bearish drift) or range-bullish, the structure signal IS pointing the right
+  //   way — the drift is real. Inverting it fights the right answer.
+  //
+  //   Detection: Grand Tr projection ≤-100bps (strong DOWN) OR ≥+100bps (strong UP)
+  //   while regime is RANGE-CHOP. When detected, skip the inversion (×1.0 instead
+  //   of ×-0.7). Other chop dampeners still apply.
+  let _v10_3_3_rangeHybrid=null;
+  const _gtProj=_grandTrend?.valid?_grandTrend.projectionBps:0;
+  const _strongBearishDrift=regime==='RANGE-CHOP'&&_gtProj<=-100;
+  const _strongBullishDrift=regime==='RANGE-CHOP'&&_gtProj>=100;
+  if(_strongBearishDrift){
+    _regimeMult=1.0;
+    _v10_3_3_rangeHybrid={type:'range-bearish',gtProj:_gtProj,inversionSkipped:true};
+    reasoning.push(`[V10.3.3 RANGE-BEARISH] RANGE-CHOP + Grand Tr ${_gtProj}bps → bearish drift is real, skip ×-0.7 inversion`);
+  }else if(_strongBullishDrift){
+    _regimeMult=1.0;
+    _v10_3_3_rangeHybrid={type:'range-bullish',gtProj:_gtProj,inversionSkipped:true};
+    reasoning.push(`[V10.3.3 RANGE-BULLISH] RANGE-CHOP + Grand Tr ${_gtProj}bps → bullish drift is real, skip ×-0.7 inversion`);
+  }else if(regime==='RANGE-CHOP'){
+    _regimeMult=-0.7; // pure chop — apply inversion
+  }
   else if(regime==='SHORT SQUEEZE'||regime==='LONG SQUEEZE')_regimeMult=0.5;
   else if(regime==='HIGH VOL CHOP')_regimeMult=0.5;
   // TRENDING UP and TRENDING DOWN keep ×1.0 (current behavior preserved)
@@ -8744,29 +8767,46 @@ const computeV99Posterior=(params)=>{
           _v10_3_0_rangeBroken=true;
           reasoning.push(`[V10.3.0 RANGE-BROKEN] health ${Math.round(_rangeHealth)}% < 70% — range integrity weak, skip fade logic`);
         }else{
+          // V10.3.3 — SMOOTH-DRIFT OVERRIDE for range-fade.
+          //   Original V10.3.0 required a rejection candle (wick ≥1.5× body) at the
+          //   boundary to fire range-fade. Real-world failure: smooth drifts to the
+          //   range edge don't produce wick rejections — price just slides up to the
+          //   top with no bounce. May 16 02:23 PM showed PIR 100% + Flow -46 + 3-TF
+          //   doubleTop confluence sat out because no rejection candle. Actual: DOWN.
+          //
+          //   Fix: when PIR is extreme (≥95% or ≤5%) AND flow magnitude is strong
+          //   (≥30 in the fade direction), fire range-fade without rejection candle.
+          //   Strong flow at the range edge IS the rejection signal — the market is
+          //   telling us the boundary is being defended.
+          const _flowScore=rawSignalScores.flow||0;
+          const _smoothDriftTop=_pir>=95&&_flowScore<=-30;
+          const _smoothDriftBottom=_pir<=5&&_flowScore>=30;
           // Range is healthy — apply fade logic
           // V10.3.0 FADE: only at PIR extremes with rejection
-          if(_pir>=80&&_topRejection>=1){
+          // V10.3.3: OR smooth-drift override (PIR extreme + strong flow)
+          if((_pir>=80&&_topRejection>=1)||_smoothDriftTop){
             // Strong DOWN fade signal — push posterior DOWN
-            // Magnitude scales with PIR extremity AND rejection strength
+            // Magnitude scales with PIR extremity AND rejection strength (or flow)
             const _pirBoost=Math.min(15,(_pir-80)*0.75); // 0 at PIR=80, 15 at PIR=100
-            const _rejBoost=Math.min(15,_topRejStrength*4); // capped at 15
+            const _rejBoost=_topRejection>=1?Math.min(15,_topRejStrength*4):Math.min(15,Math.abs(_flowScore)*0.3); // wick OR flow proxy
             const _fadeAdj=-Math.round(15+_pirBoost+_rejBoost); // -15 to -45
             totalScore+=_fadeAdj;
             rawSignalScores.rangeFade=_fadeAdj;
-            _v10_3_0_rangeFadeFired={dir:'DOWN',magnitude:_fadeAdj,pir:Math.round(_pir),rejections:_topRejection,rejStrength:_topRejStrength.toFixed(1),health:Math.round(_rangeHealth)};
+            const _trigger=_topRejection>=1?'rejection':'smooth-drift';
+            _v10_3_0_rangeFadeFired={dir:'DOWN',magnitude:_fadeAdj,pir:Math.round(_pir),rejections:_topRejection,rejStrength:_topRejStrength.toFixed(1),health:Math.round(_rangeHealth),trigger:_trigger,flowScore:Math.round(_flowScore)};
             // Drop downThreshold to make DOWN lock fire on this signal
             const _origDn=downThreshold;
             downThreshold=Math.min(50,downThreshold+20);
-            reasoning.push(`[V10.3.0 RANGE-FADE-DOWN] PIR ${Math.round(_pir)}% + ${_topRejection} top rejections (strength ${_topRejStrength.toFixed(1)}) + health ${Math.round(_rangeHealth)}% → ${_fadeAdj}, downThreshold ${_origDn}→${downThreshold}`);
-          }else if(_pir<=20&&_bottomRejection>=1){
+            reasoning.push(`[V10.3.0 RANGE-FADE-DOWN] PIR ${Math.round(_pir)}% + ${_trigger}${_topRejection>=1?` (rej×${_topRejection}, str ${_topRejStrength.toFixed(1)})`:` (flow ${Math.round(_flowScore)})`} + health ${Math.round(_rangeHealth)}% → ${_fadeAdj}, downThreshold ${_origDn}→${downThreshold}`);
+          }else if((_pir<=20&&_bottomRejection>=1)||_smoothDriftBottom){
             // Strong UP fade signal
             const _pirBoost=Math.min(15,(20-_pir)*0.75);
-            const _rejBoost=Math.min(15,_botRejStrength*4);
+            const _rejBoost=_bottomRejection>=1?Math.min(15,_botRejStrength*4):Math.min(15,Math.abs(_flowScore)*0.3);
             const _fadeAdj=Math.round(15+_pirBoost+_rejBoost);
             totalScore+=_fadeAdj;
             rawSignalScores.rangeFade=_fadeAdj;
-            _v10_3_0_rangeFadeFired={dir:'UP',magnitude:_fadeAdj,pir:Math.round(_pir),rejections:_bottomRejection,rejStrength:_botRejStrength.toFixed(1),health:Math.round(_rangeHealth)};
+            const _trigger=_bottomRejection>=1?'rejection':'smooth-drift';
+            _v10_3_0_rangeFadeFired={dir:'UP',magnitude:_fadeAdj,pir:Math.round(_pir),rejections:_bottomRejection,rejStrength:_botRejStrength.toFixed(1),health:Math.round(_rangeHealth),trigger:_trigger,flowScore:Math.round(_flowScore)};
             const _origUp=upThreshold;
             upThreshold=Math.max(50,upThreshold-20);
             reasoning.push(`[V10.3.0 RANGE-FADE-UP] PIR ${Math.round(_pir)}% + ${_bottomRejection} bottom rejections (strength ${_botRejStrength.toFixed(1)}) + health ${Math.round(_rangeHealth)}% → +${_fadeAdj}, upThreshold ${_origUp}→${upThreshold}`);
@@ -8988,8 +9028,14 @@ const computeV99Posterior=(params)=>{
   //   Now: w15≥60, w30≥58, w60≥55 — fires on developing one-sided tape, while
   //   the move is still building but exhaustion is detectable.
   //   Mirror thresholds for DOWN side.
-  const _tapeConsensusUp=_w15Buy!=null&&_w30Buy!=null&&_w60Buy!=null&&_w15Buy>=60&&_w30Buy>=58&&_w60Buy>=55;
-  const _tapeConsensusDown=_w15Buy!=null&&_w30Buy!=null&&_w60Buy!=null&&_w15Buy<=40&&_w30Buy<=42&&_w60Buy<=45;
+  // V10.3.3 — Further loosened: w15≥55, w30≥54, w60≥53. Audit showed 6/695 fires
+  //   under V10.2.42 thresholds — still too tight. When meanReversion does fire,
+  //   it's correct (no LOSS bias), so loosening should add accurate trades.
+  //   NOTE: `reversal` and `rangePosition` signals (also lifted in V10.2.42) are
+  //   now considered superseded by V10.3.0 range-fade. Leaving them in place for
+  //   the rare cases they fire but no further threshold tuning planned.
+  const _tapeConsensusUp=_w15Buy!=null&&_w30Buy!=null&&_w60Buy!=null&&_w15Buy>=55&&_w30Buy>=54&&_w60Buy>=53;
+  const _tapeConsensusDown=_w15Buy!=null&&_w30Buy!=null&&_w60Buy!=null&&_w15Buy<=45&&_w30Buy<=46&&_w60Buy<=47;
   if((_allChaseUp&&_tapeConsensusUp)&&!_isClearTrend&&_earlyEnough){
     // All three signals + tape pumping UP — call the reversal
     const _sumMag=_gapS+_momS+_flowS;
@@ -9808,6 +9854,8 @@ const computeV99Posterior=(params)=>{
   // V10.3.1 — Coin-flip detection + TRENDING UP penalty stamps
   _v10_3_1_coinFlip:_v10_3_1_coinFlip,
   _v10_3_1_trendingUpPenalty:_v10_3_1_trendingUpPenalty,
+  // V10.3.3 telemetry: range-hybrid detector
+  _v10_3_3_rangeHybrid:_v10_3_3_rangeHybrid,
   // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
   //   for post-hoc audit. Tells us which gates fired on which trades, so we can
   //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
@@ -31114,6 +31162,7 @@ function TaraApp(){
         _v10_3_0_rangeBroken:eng._v10_3_0_rangeBroken===true,
         _v10_3_1_coinFlip:eng._v10_3_1_coinFlip||null,
         _v10_3_1_trendingUpPenalty:eng._v10_3_1_trendingUpPenalty||null,
+        _v10_3_3_rangeHybrid:eng._v10_3_3_rangeHybrid||null,
         // V9.10.10 → V9.11.0: pass through pattern + futures telemetry blocks so the
         //   entry-stamping code at L23722/23792/23991/24733 can read them.
         //   BUG FIX V9.11.1: these were being computed by the engine but stripped from
@@ -34348,6 +34397,7 @@ function TaraApp(){
           _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
           _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
           _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
+          _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
         result:null,
       };
       setTaraCallLog(prev=>{
@@ -34500,6 +34550,7 @@ function TaraApp(){
           _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
           _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
           _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
+          _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
           result:null, // populated at rollover
         };
         setTaraCallLog(prev=>{
@@ -34752,6 +34803,7 @@ function TaraApp(){
           _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
           _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
           _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
+          _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
           // result:null populates at rollover scoring. NO_TRADE entries skip resolution
@@ -34994,7 +35046,12 @@ function TaraApp(){
         //   58% break-even on time-cap pricing. The old 68% threshold was too low.
         //   At 78%, only genuinely high-conviction commits go through; everything
         //   else (the 70-77% band that's been losing) becomes a sit-out.
-        const _v10250ChopGuard=(analysis?.regime==='RANGE-CHOP'&&_commitConf<78);
+        // V10.3.3 — LOWERED 78→72. The 78 threshold blocked legitimate
+        //   high-conviction calls (May 16 02:23 PM: 76% DOWN with PIR 100% + Flow
+        //   -46 + 3-TF doubleTop confluence — sat out and DOWN won). 72% is the
+        //   middle ground: still blocks the truly marginal 65-71% range that
+        //   historically loses, but lets 72%+ conviction calls through.
+        const _v10250ChopGuard=(analysis?.regime==='RANGE-CHOP'&&_commitConf<72);
         if(_v10250ChopGuard){
           const _sitSnap={
             call:'SIT_OUT',direction:'SIT_OUT',
@@ -35697,6 +35754,7 @@ function TaraApp(){
           _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
           _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
           _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
+          _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
         result:null, // populated at rollover scoring
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
