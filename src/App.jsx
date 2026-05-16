@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.16-v10.3.1-coin-flip-detector';
+const BASELINE_VERSION='2026.05.16-v10.3.2-targeted-sitout-fixes';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.3.1';
+const TARA_VERSION_DISPLAY='Tara 10.3.2';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -31738,17 +31738,31 @@ function TaraApp(){
     //   inform tier labeling for analytics (per-tier WR audit) but no longer block locks.
     //   Q-floor and conviction-floor checks below are similarly relaxed via the always-
     //   commit ladder in the lifecycle (Path A/B/C above).
+    // V10.3.2 — HIGH-CONVICTION BYPASS for Q_FLOOR, CONV_FLOOR, FGT-mixed.
+    //   May 16 audit: 5 sit-outs blocked legitimate high-conviction calls that would have
+    //   won (01:13 quality 35<39 with posterior 23, 01:43 FGT-mixed with posterior 76,
+    //   02:59/09:43/13:43 coin-flip 5-8pt with posteriors 56-58 that ended up correct).
+    //   When posterior is strong (≥72% UP or ≤28% DOWN), bypass these soft gates.
+    //   Kalshi-extreme and tape-opposes guards REMAIN ENFORCED — those caught real errors
+    //   (10:28, 12:58) and shouldn't be loosened.
+    const _v10_3_2_highConv=(post>=72)||(post<=28);
     // Gate 1: quality floor
     // V6.0.7: tape-led bypass. When tape is super-strong agreeing, q-floor is irrelevant —
     //   raw order flow is direct evidence; quality score is a lagging aggregate.
-    if(q<Q_FLOOR&&!isTapeLed){
+    // V10.3.2: high-conviction bypass added — strong posterior overrides quality requirement.
+    if(q<Q_FLOOR&&!isTapeLed&&!_v10_3_2_highConv){
       return{call:'SIT_OUT',reason:`Signal weak — quality ${q}/${Q_FLOOR}`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // Gate 2: conviction floor (THE coin-flip filter)
     // V6.0.7: tape-led bypass — tape ≥70% across windows is enough directional evidence
     //   even when posterior is still developing.
-    if(conviction<CONV_FLOOR&&!isTapeLed){
-      return{call:'SIT_OUT',reason:`Coin flip — only ${conviction.toFixed(0)}pt off neutral (need ${CONV_FLOOR})`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
+    // V10.3.2: LOWERED THRESHOLD from base 7 (~9pt at dial 65) → effective ~6pt.
+    //   Achieved via direct comparison: require conviction < CONV_FLOOR-2 to sit out.
+    //   This converts borderline coin-flips (conviction 5-8) into locks. Audit showed
+    //   3 of 5 such cases would have won today.
+    const _v10_3_2_coinFlipEffective=Math.max(1,CONV_FLOOR-2);
+    if(conviction<_v10_3_2_coinFlipEffective&&!isTapeLed&&!_v10_3_2_highConv){
+      return{call:'SIT_OUT',reason:`Coin flip — only ${conviction.toFixed(0)}pt off neutral (need ${_v10_3_2_coinFlipEffective})`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // V5.7.7 Gate 2.5: TAPE-OPPOSES veto. The most direct fix for FGT-alone failures.
     //   When two tape windows show ≥70% the OTHER way, no posterior can save this call —
@@ -31835,9 +31849,11 @@ function TaraApp(){
       return{call:'SIT_OUT',reason:`${_dirLead} — Kalshi ${_kPct}% disagrees, conviction insufficient to fade`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // Gate 4: FGT support — primary multi-timeframe signal must show some pulse
+    // V10.3.2: high-conviction bypass — strong posterior (≥72 or ≤28) overrides FGT-mixed.
+    //   Audit: 01:43 had posterior 76 UP sat out for FGT 0.0/4 mixed, actual was UP.
     const isFastTrackRegime=['TRENDING UP','TRENDING DOWN','SHORT SQUEEZE','LONG SQUEEZE'].includes(analysis.regime);
     const fgtMin=tapeStronglyAgrees||kalshiStronglyAgrees?0.5:1.0; // V5.6.4: was 0.0/0.4/0.7
-    if(fgtAbs<fgtMin&&!isFastTrackRegime){
+    if(fgtAbs<fgtMin&&!isFastTrackRegime&&!_v10_3_2_highConv){
       return{call:'SIT_OUT',reason:`${_dirLead} — FGT ${fgtAbs.toFixed(1)}/4 mixed across timeframes`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
     // V6.0.9 Gate 4.5: LATE-COMMIT GUARD. When elapsed > 70% of window, only high-quality
