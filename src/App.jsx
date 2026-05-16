@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.16-v10.3.0-range-fade-module';
+const BASELINE_VERSION='2026.05.16-v10.3.1-coin-flip-detector';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.3.0';
+const TARA_VERSION_DISPLAY='Tara 10.3.1';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -9461,6 +9461,54 @@ const computeV99Posterior=(params)=>{
     _haircutApplied=`11-20 haircut: ${dirCalibrated.toFixed(0)}→${_haircutFinal.toFixed(0)} (pulled 30% toward 22)`;
   }
   if(_haircutApplied)reasoning.push(`[V10.2.44 HAIRCUT] ${_haircutApplied}`);
+  // V10.3.1 — CONFLUENCE-AWARE COIN-FLIP DETECTION
+  //   Audit of 693 resolved trades revealed the 75-84% conviction band wins
+  //   only 63% (n=381) — worst of upper bands. KEY TELL: htfPatterns and flow
+  //   are systematically WEAKER in losing trades:
+  //     55-64% winning band: |htfPatterns| avg 30.8, |flow| avg 41.2
+  //     75-84% coin-flip band: |htfPatterns| avg 17.4, |flow| avg 35.3
+  //
+  //   When confidence reaches 75-84% WITHOUT strong core signals, that's
+  //   overconfidence — tag it. Two outcomes:
+  //     1. Pull confidence down to 67% (the actual WR these trades earn)
+  //     2. Tag as 'coin-flip' so user sees the awareness badge in UI
+  //
+  //   Trades with STRONG core signals (htfPatterns≥20 OR flow≥30) keep their
+  //   conviction — they're genuinely confident, not overconfident.
+  let _v10_3_1_coinFlip=null;
+  const _absHtfPatterns=Math.abs(rawSignalScores.htfPatterns||0);
+  const _absFlow=Math.abs(rawSignalScores.flow||0);
+  const _confAfter=_haircutFinal; // post V10.2.44 haircut
+  // Apply coin-flip detection on either side (high UP conviction or low/high DOWN)
+  const _isMidHighConv=(_confAfter>=75&&_confAfter<=84)||(_confAfter>=16&&_confAfter<=25);
+  const _coreWeak=_absHtfPatterns<15&&_absFlow<25;
+  if(_isMidHighConv&&_coreWeak){
+    // Coin flip: pull toward 67/33
+    const _isUpSide=_confAfter>=50;
+    const _target=_isUpSide?67:33;
+    const _pulled=_confAfter-(_confAfter-_target)*0.5;
+    _v10_3_1_coinFlip={
+      origConf:Math.round(_confAfter),
+      pulledTo:Math.round(_pulled),
+      htfPatterns:Math.round(_absHtfPatterns),
+      flow:Math.round(_absFlow),
+      reason:`75-84 band w/ weak core (htfPatterns ${Math.round(_absHtfPatterns)}<15, flow ${Math.round(_absFlow)}<25)`,
+    };
+    _haircutFinal=_pulled;
+    reasoning.push(`[V10.3.1 COIN-FLIP] ${_confAfter.toFixed(0)}% → ${_pulled.toFixed(0)}% — weak core signals (htfPatterns ${Math.round(_absHtfPatterns)}, flow ${Math.round(_absFlow)})`);
+  }
+  // V10.3.1 — TRENDING UP confidence penalty
+  //   Audit showed TRENDING UP at 55-64% conf = 46% WR (only sub-50% category in
+  //   the otherwise-winning band). Apply a -5pt penalty to all TRENDING UP locks
+  //   until deeper diagnosis. Symmetric: subtract 5 from UP conviction, add 5 to
+  //   DOWN-side equivalent. This is a holding action, not a permanent fix.
+  let _v10_3_1_trendingUpPenalty=null;
+  if(regime==='TRENDING UP'&&_haircutFinal>=50&&_haircutFinal<=95){
+    const _before=_haircutFinal;
+    _haircutFinal=Math.max(50,_haircutFinal-5);
+    _v10_3_1_trendingUpPenalty={before:Math.round(_before),after:Math.round(_haircutFinal),penalty:5};
+    reasoning.push(`[V10.3.1 TRENDING-UP-PENALTY] regime weak (46% WR audit) → -5pt: ${_before.toFixed(0)}%→${_haircutFinal.toFixed(0)}%`);
+  }
   const finalPosterior=Math.max(1,Math.min(99,_haircutFinal));
   const displayPosterior=finalPosterior; // V144: same as final, no cosmetic divergence
 
@@ -9757,6 +9805,9 @@ const computeV99Posterior=(params)=>{
   _v10_3_0_rangeFadeFired:_v10_3_0_rangeFadeFired,
   _v10_3_0_midRangeSitout:_v10_3_0_midRangeSitout,
   _v10_3_0_rangeBroken:_v10_3_0_rangeBroken,
+  // V10.3.1 — Coin-flip detection + TRENDING UP penalty stamps
+  _v10_3_1_coinFlip:_v10_3_1_coinFlip,
+  _v10_3_1_trendingUpPenalty:_v10_3_1_trendingUpPenalty,
   // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
   //   for post-hoc audit. Tells us which gates fired on which trades, so we can
   //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
@@ -11484,6 +11535,10 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           <div className="flex items-baseline gap-2">
             {/* V6.2.0: structural-led — primary tier. Grand trend + channel align. */}
             {(tc?._ctx?.isStructuralLed||snap?.isStructuralLed)&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:'#C4B5FD'}}>◈ structural-led</span>}
+            {/* V10.3.1: coin-flip detector — high conviction but weak core signals.
+                Locks still fire, but user sees the awareness badge. Audit showed 75-84%
+                conviction with weak htfPatterns/flow = 50% WR (true coin flip). */}
+            {analysis?._v10_3_1_coinFlip&&!snap?.isStructuralLed&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:'#F59E0B'}}>⚠ coin-flip · weak core</span>}
             {/* V5.7.7: Confluence indicator — visible while forming and after lock. */}
             {!(tc?._ctx?.isStructuralLed||snap?.isStructuralLed)&&(tc?._ctx?.isSuperConfluent||snap?.isSuperConfluent)&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:T2_GOLD}}>★ super-confluence</span>}
             {!(tc?._ctx?.isStructuralLed||snap?.isStructuralLed)&&!(tc?._ctx?.isSuperConfluent||snap?.isSuperConfluent)&&(tc?._ctx?.isConfluent||snap?.isConfluent)&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:T2_GOLD}}>★ confluence</span>}
@@ -31057,6 +31112,8 @@ function TaraApp(){
         _v10_3_0_rangeFadeFired:eng._v10_3_0_rangeFadeFired||null,
         _v10_3_0_midRangeSitout:eng._v10_3_0_midRangeSitout===true,
         _v10_3_0_rangeBroken:eng._v10_3_0_rangeBroken===true,
+        _v10_3_1_coinFlip:eng._v10_3_1_coinFlip||null,
+        _v10_3_1_trendingUpPenalty:eng._v10_3_1_trendingUpPenalty||null,
         // V9.10.10 → V9.11.0: pass through pattern + futures telemetry blocks so the
         //   entry-stamping code at L23722/23792/23991/24733 can read them.
         //   BUG FIX V9.11.1: these were being computed by the engine but stripped from
@@ -34273,6 +34330,8 @@ function TaraApp(){
           _v10_3_0_rangeFadeFired:analysis?._v10_3_0_rangeFadeFired||null,
           _v10_3_0_midRangeSitout:analysis?._v10_3_0_midRangeSitout===true,
           _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
+          _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
+          _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
         result:null,
       };
       setTaraCallLog(prev=>{
@@ -34423,6 +34482,8 @@ function TaraApp(){
           _v10_3_0_rangeFadeFired:analysis?._v10_3_0_rangeFadeFired||null,
           _v10_3_0_midRangeSitout:analysis?._v10_3_0_midRangeSitout===true,
           _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
+          _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
+          _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
           result:null, // populated at rollover
         };
         setTaraCallLog(prev=>{
@@ -34673,6 +34734,8 @@ function TaraApp(){
           _v10_3_0_rangeFadeFired:analysis?._v10_3_0_rangeFadeFired||null,
           _v10_3_0_midRangeSitout:analysis?._v10_3_0_midRangeSitout===true,
           _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
+          _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
+          _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
           // result:null populates at rollover scoring. NO_TRADE entries skip resolution
@@ -34757,7 +34820,13 @@ function TaraApp(){
       //   The engine flagged this via _v10_3_0_midRangeSitout. Only fires when
       //   range is healthy (not breaking) — broken-range chop falls through to
       //   normal logic in case the chop is transitioning to trend.
-      if(analysis?._v10_3_0_midRangeSitout===true&&!analysis?._v10_3_0_rangeFadeFired){
+      // V10.3.1 — CONVICTION GATE: don't sit-out mid-range when Tara has earned
+      //   genuine high conviction (≥75% or ≤25%). Audit showed RANGE-CHOP at
+      //   75-84% conviction wins 71% (n=31) — these are legitimate locks. The
+      //   mid-range sit-out should only apply when conviction is ALSO weak
+      //   (<70% AND >30%), meaning truly no edge in any direction.
+      const _midRangeChopConvWeak=_commitConf!=null&&_commitConf<70&&_commitConf>30;
+      if(analysis?._v10_3_0_midRangeSitout===true&&!analysis?._v10_3_0_rangeFadeFired&&_midRangeChopConvWeak){
         const _rd=analysis?._v10_3_0_rangeData||{};
         const _sitSnap={
           call:'SIT_OUT',direction:'SIT_OUT',
@@ -35610,6 +35679,8 @@ function TaraApp(){
           _v10_3_0_rangeFadeFired:analysis?._v10_3_0_rangeFadeFired||null,
           _v10_3_0_midRangeSitout:analysis?._v10_3_0_midRangeSitout===true,
           _v10_3_0_rangeBroken:analysis?._v10_3_0_rangeBroken===true,
+          _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
+          _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
         result:null, // populated at rollover scoring
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
