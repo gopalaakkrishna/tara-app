@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.16-v10.3.3-chop-fixes-and-cleanup';
+const BASELINE_VERSION='2026.05.17-v10.3.4-kill-smooth-drift';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.3.3';
+const TARA_VERSION_DISPLAY='Tara 10.3.4';
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -8779,33 +8779,31 @@ const computeV99Posterior=(params)=>{
           //   Strong flow at the range edge IS the rejection signal — the market is
           //   telling us the boundary is being defended.
           const _flowScore=rawSignalScores.flow||0;
-          const _smoothDriftTop=_pir>=95&&_flowScore<=-30;
-          const _smoothDriftBottom=_pir<=5&&_flowScore>=30;
           // Range is healthy — apply fade logic
-          // V10.3.0 FADE: only at PIR extremes with rejection
-          // V10.3.3: OR smooth-drift override (PIR extreme + strong flow)
-          if((_pir>=80&&_topRejection>=1)||_smoothDriftTop){
+          // V10.3.0 FADE: only at PIR extremes with rejection candle
+          // V10.3.4: smooth-drift override removed (1W/6L = 14% WR, rejection alone is 90%)
+          if(_pir>=80&&_topRejection>=1){
             // Strong DOWN fade signal — push posterior DOWN
             // Magnitude scales with PIR extremity AND rejection strength (or flow)
             const _pirBoost=Math.min(15,(_pir-80)*0.75); // 0 at PIR=80, 15 at PIR=100
-            const _rejBoost=_topRejection>=1?Math.min(15,_topRejStrength*4):Math.min(15,Math.abs(_flowScore)*0.3); // wick OR flow proxy
+            const _rejBoost=Math.min(15,_topRejStrength*4); // V10.3.4: smooth-drift removed, rejection always required
             const _fadeAdj=-Math.round(15+_pirBoost+_rejBoost); // -15 to -45
             totalScore+=_fadeAdj;
             rawSignalScores.rangeFade=_fadeAdj;
-            const _trigger=_topRejection>=1?'rejection':'smooth-drift';
+            const _trigger='rejection';
             _v10_3_0_rangeFadeFired={dir:'DOWN',magnitude:_fadeAdj,pir:Math.round(_pir),rejections:_topRejection,rejStrength:_topRejStrength.toFixed(1),health:Math.round(_rangeHealth),trigger:_trigger,flowScore:Math.round(_flowScore)};
             // Drop downThreshold to make DOWN lock fire on this signal
             const _origDn=downThreshold;
             downThreshold=Math.min(50,downThreshold+20);
             reasoning.push(`[V10.3.0 RANGE-FADE-DOWN] PIR ${Math.round(_pir)}% + ${_trigger}${_topRejection>=1?` (rej×${_topRejection}, str ${_topRejStrength.toFixed(1)})`:` (flow ${Math.round(_flowScore)})`} + health ${Math.round(_rangeHealth)}% → ${_fadeAdj}, downThreshold ${_origDn}→${downThreshold}`);
-          }else if((_pir<=20&&_bottomRejection>=1)||_smoothDriftBottom){
+          }else if(_pir<=20&&_bottomRejection>=1){
             // Strong UP fade signal
             const _pirBoost=Math.min(15,(20-_pir)*0.75);
-            const _rejBoost=_bottomRejection>=1?Math.min(15,_botRejStrength*4):Math.min(15,Math.abs(_flowScore)*0.3);
+            const _rejBoost=Math.min(15,_botRejStrength*4); // V10.3.4: smooth-drift removed
             const _fadeAdj=Math.round(15+_pirBoost+_rejBoost);
             totalScore+=_fadeAdj;
             rawSignalScores.rangeFade=_fadeAdj;
-            const _trigger=_bottomRejection>=1?'rejection':'smooth-drift';
+            const _trigger='rejection';
             _v10_3_0_rangeFadeFired={dir:'UP',magnitude:_fadeAdj,pir:Math.round(_pir),rejections:_bottomRejection,rejStrength:_botRejStrength.toFixed(1),health:Math.round(_rangeHealth),trigger:_trigger,flowScore:Math.round(_flowScore)};
             const _origUp=upThreshold;
             upThreshold=Math.max(50,upThreshold-20);
