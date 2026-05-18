@@ -3866,10 +3866,115 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.17-v10.3.4-kill-smooth-drift';
+const BASELINE_VERSION='2026.05.18-v10.4.0-calibration-tables';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.3.4';
+const TARA_VERSION_DISPLAY='Tara 10.4.0';
+
+// ═════════════════════════════════════════════════════════════════════════════
+// V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
+// ═════════════════════════════════════════════════════════════════════════════
+// Replaces hardcoded reality caps and conviction floors with data-driven values
+// pulled from the actual call log. Seeded from 885 resolved trades through
+// 5/17/2026. Auto-recalibrates on every render from a rolling 200-trade window
+// per cell. Cells with n<CALIBRATION_TRUST_FLOOR fall back to seed values.
+// Feature-flagged so we can rollback instantly if anything goes sideways.
+const USE_V104_CALIBRATION_TABLES=true; // Set false for instant rollback
+const V104_CALIBRATION_TRUST_FLOOR=20; // Cells with n<20 use seed values
+const V104_ROLLING_WINDOW=200; // Per-cell rolling window for auto-recal
+
+// Seed table from full 885-trade resolved log. Format: WR (0-1), EV (cents/trade), n (sample size)
+// Cells with n=0 are unobserved — engine falls back to legacy logic for those.
+const V104_SEED_CALIBRATION={
+  'HIGH VOL CHOP':{
+    'UP':{'<45':{wr:1.0000,ev:41.00,n:1},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:1.0000,ev:27.00,n:1},'65-74':{wr:0.5000,ev:0.00,n:0},'75-84':{wr:1.0000,ev:50.00,n:1},'85+':{wr:1.0000,ev:5.00,n:1}},
+    'DOWN':{'<45':{wr:0.5000,ev:0.00,n:0},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:0.5000,ev:0.00,n:0},'65-74':{wr:0.5000,ev:0.00,n:0},'75-84':{wr:1.0000,ev:88.00,n:2},'85+':{wr:0.6667,ev:23.00,n:3}}
+  },
+  'RANGE-CHOP':{
+    'UP':{'<45':{wr:1.0000,ev:50.00,n:2},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:0.7000,ev:15.00,n:10},'65-74':{wr:0.5294,ev:-15.82,n:17},'75-84':{wr:0.6129,ev:1.10,n:31},'85+':{wr:0.8000,ev:15.60,n:10}},
+    'DOWN':{'<45':{wr:0.6667,ev:31.33,n:3},'45-54':{wr:1.0000,ev:50.00,n:2},'55-64':{wr:0.6667,ev:23.00,n:9},'65-74':{wr:0.7143,ev:25.60,n:35},'75-84':{wr:0.6053,ev:11.66,n:76},'85+':{wr:0.8571,ev:53.86,n:7}}
+  },
+  'SHORT SQUEEZE':{
+    'UP':{'<45':{wr:1.0000,ev:52.00,n:1},'45-54':{wr:1.0000,ev:31.00,n:1},'55-64':{wr:0.6000,ev:-1.04,n:25},'65-74':{wr:0.6818,ev:10.57,n:44},'75-84':{wr:0.6372,ev:2.94,n:113},'85+':{wr:0.6364,ev:0.68,n:22}},
+    'DOWN':{'<45':{wr:0.5000,ev:0.00,n:0},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:1.0000,ev:47.00,n:1},'65-74':{wr:0.4286,ev:-8.43,n:7},'75-84':{wr:0.5000,ev:3.83,n:6},'85+':{wr:0.0000,ev:-100.00,n:1}}
+  },
+  'TRENDING DOWN':{
+    'UP':{'<45':{wr:0.5000,ev:0.00,n:0},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:0.5000,ev:0.00,n:0},'65-74':{wr:0.5000,ev:-21.75,n:4},'75-84':{wr:1.0000,ev:26.00,n:1},'85+':{wr:0.5000,ev:0.00,n:0}},
+    'DOWN':{'<45':{wr:0.5000,ev:3.25,n:4},'45-54':{wr:0.5556,ev:14.00,n:9},'55-64':{wr:0.8824,ev:47.94,n:17},'65-74':{wr:0.7313,ev:32.28,n:67},'75-84':{wr:0.6000,ev:16.79,n:185},'85+':{wr:0.7167,ev:32.08,n:60}}
+  },
+  'TRENDING UP':{
+    'UP':{'<45':{wr:0.0000,ev:-44.00,n:2},'45-54':{wr:0.2500,ev:-36.00,n:4},'55-64':{wr:0.4615,ev:-11.38,n:13},'65-74':{wr:0.6667,ev:-0.17,n:18},'75-84':{wr:0.6800,ev:5.84,n:50},'85+':{wr:0.7143,ev:5.29,n:7}},
+    'DOWN':{'<45':{wr:0.5000,ev:0.00,n:0},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:0.5000,ev:0.00,n:0},'65-74':{wr:0.5000,ev:0.00,n:0},'75-84':{wr:0.5000,ev:0.00,n:0},'85+':{wr:0.0000,ev:-83.00,n:1}}
+  }
+};
+
+// Per-regime reality caps observed from the data. Replaces hardcoded 75/25.
+// Format: [hi-cap, lo-cap]. Used when isHighGap is true.
+const V104_REGIME_CAPS={
+  'HIGH VOL CHOP':{hi:78,lo:25},
+  'RANGE-CHOP':{hi:80,lo:25},
+  'SHORT SQUEEZE':{hi:68,lo:32}, // tighter — squeeze regimes are noisier
+  'TRENDING DOWN':{hi:85,lo:22}, // strongest cell, can stretch
+  'TRENDING UP':{hi:68,lo:25}, // miscalibrated regime — tighten until V10.4.x retrain
+  '_default':{hi:75,lo:25}
+};
+
+// Conviction band classifier — must match the keys in V104_SEED_CALIBRATION
+function _v104ConvBand(c){
+  if(c>=85)return'85+';
+  if(c>=75)return'75-84';
+  if(c>=65)return'65-74';
+  if(c>=55)return'55-64';
+  if(c>=45)return'45-54';
+  return'<45';
+}
+
+// Build a rolling-window calibration table from the live call log.
+// Merges with seed when cell sample is thin (<TRUST_FLOOR).
+// Returns table in the same shape as V104_SEED_CALIBRATION.
+function buildV104Table(callLog){
+  if(!USE_V104_CALIBRATION_TABLES||!Array.isArray(callLog)||callLog.length===0){
+    return V104_SEED_CALIBRATION;
+  }
+  // Filter resolved trades only, take last N per cell
+  const resolved=callLog.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS'));
+  if(resolved.length===0)return V104_SEED_CALIBRATION;
+  // Bucket by regime/dir/band, keep newest V104_ROLLING_WINDOW per cell
+  const buckets={};
+  for(let i=resolved.length-1;i>=0;i--){
+    const e=resolved[i];
+    if(!e.regime||!e.dir||typeof e.confidence!=='number')continue;
+    const band=_v104ConvBand(e.confidence);
+    const key=e.regime+'|'+e.dir+'|'+band;
+    if(!buckets[key])buckets[key]={w:0,l:0,pnl:0,n:0};
+    if(buckets[key].n>=V104_ROLLING_WINDOW)continue;
+    const k=e.kalshiAtLock||50;
+    if(e.result==='WIN'){buckets[key].w++;buckets[key].pnl+=(100-k);}
+    else{buckets[key].l++;buckets[key].pnl-=k;}
+    buckets[key].n++;
+  }
+  // Compose final table: live data overrides seed when n>=TRUST_FLOOR, else seed
+  const table=JSON.parse(JSON.stringify(V104_SEED_CALIBRATION)); // deep clone seed
+  for(const key of Object.keys(buckets)){
+    const[regime,dir,band]=key.split('|');
+    const b=buckets[key];
+    if(b.n>=V104_CALIBRATION_TRUST_FLOOR&&table[regime]&&table[regime][dir]){
+      table[regime][dir][band]={wr:b.w/b.n,ev:b.pnl/b.n,n:b.n};
+    }
+  }
+  return table;
+}
+
+// Look up a (regime, dir, displayedConf) cell. Returns {wr, ev, n, source} or null.
+function lookupV104Cell(table,regime,dir,confidence){
+  if(!USE_V104_CALIBRATION_TABLES||!table||!regime||!dir||typeof confidence!=='number')return null;
+  const band=_v104ConvBand(confidence);
+  const cell=table[regime]&&table[regime][dir]&&table[regime][dir][band];
+  if(!cell)return null;
+  const source=cell.n>=V104_CALIBRATION_TRUST_FLOOR?'live':'seed';
+  return{wr:cell.wr,ev:cell.ev,n:cell.n,band,source};
+}
+// ═════════════════════════════════════════════════════════════════════════════
 
 // V9.10.6: Maximum entries kept in taraCallLog across in-memory state, localStorage,
 //   and cloud RMW. Was hardcoded 500 in 11 places — user hit the cap (BTC 463 + ETH 36
@@ -9333,11 +9438,18 @@ const computeV99Posterior=(params)=>{
   //   weren't earning their certainty — the caps were FORCING posteriors into
   //   ranges they didn't deserve. Loosened to 75/25 outer, 28/72 mid. Caps still
   //   function (preventing absurd misalignment) but stop manufacturing fake confidence.
-  if(realGapBps<-35){posterior=Math.min(posterior,25);reasoning.push(`[CAP] Deep underwater — UP capped at 25% (V10.2.44: was 18)`);}
-  else if(realGapBps<-25){posterior=Math.min(posterior,32);reasoning.push(`[CAP] Adverse gap — UP capped at 32% (V10.2.44: was 30)`);}
+  // V10.4.0: Reality caps now regime-aware. TRENDING UP and SHORT SQUEEZE
+  //   tightened (68/32) because audit showed those regimes overconfident.
+  //   TRENDING DOWN can stretch (85/22) because cell EVs support it.
+  //   Falls back to legacy 75/25 if flag off or regime unknown.
+  const _v104Caps=USE_V104_CALIBRATION_TABLES?(V104_REGIME_CAPS[_regime]||V104_REGIME_CAPS._default):V104_REGIME_CAPS._default;
+  const _capHi=_v104Caps.hi;
+  const _capLo=_v104Caps.lo;
+  if(realGapBps<-35){posterior=Math.min(posterior,_capLo);reasoning.push(`[CAP] Deep underwater — UP capped at ${_capLo}% (V10.4.0 regime: ${_regime})`);}
+  else if(realGapBps<-25){posterior=Math.min(posterior,Math.min(_capLo+7,42));reasoning.push(`[CAP] Adverse gap — UP capped at ${Math.min(_capLo+7,42)}% (V10.4.0)`);}
   else if(realGapBps<-12){posterior=Math.min(posterior,42);}
-  else if(realGapBps>35){posterior=Math.max(posterior,75);reasoning.push(`[CAP] Deep ITM — UP floored at 75% (V10.2.44: was 82)`);}
-  else if(realGapBps>25){posterior=Math.max(posterior,68);reasoning.push(`[CAP] Strong favorable — UP floored at 68% (V10.2.44: was 70)`);}
+  else if(realGapBps>35){posterior=Math.max(posterior,_capHi);reasoning.push(`[CAP] Deep ITM — UP floored at ${_capHi}% (V10.4.0 regime: ${_regime})`);}
+  else if(realGapBps>25){posterior=Math.max(posterior,Math.max(_capHi-7,58));reasoning.push(`[CAP] Strong favorable — UP floored at ${Math.max(_capHi-7,58)}% (V10.4.0)`);}
   else if(realGapBps>12){posterior=Math.max(posterior,58);}
 
   // Apply calibration if available (makes % accurate to actual historical win rate)
@@ -9389,6 +9501,43 @@ const computeV99Posterior=(params)=>{
       }
     }
   }
+
+  // ── V10.4.0: BAND-SPECIFIC CALIBRATION ──────────────────────────────────
+  // The existing regime×dir cal above operates at regime granularity. V10.4.0
+  // adds a finer regime×dir×conviction-band layer pulled from the rolling
+  // 200-trade window per cell. Only applies when the cell has at least
+  // V104_CALIBRATION_TRUST_FLOOR (20) samples — thin cells fall through to
+  // legacy logic. Pull is capped at ±6pt to prevent table from becoming the
+  // sole signal. Stamps _v10_4_0_calibration on the call log for audit.
+  let _diagV104Cal=null;
+  if(USE_V104_CALIBRATION_TABLES&&_regime){
+    const _v104Table=params._v104Table; // built upstream; passed in via params
+    if(_v104Table){
+      const _engineDir=dirCalibrated>=50?'UP':'DOWN';
+      const _engineConf=_engineDir==='UP'?dirCalibrated:(100-dirCalibrated);
+      const _cell=lookupV104Cell(_v104Table,_regime,_engineDir,_engineConf);
+      if(_cell&&_cell.source==='live'){
+        const _observedConf=_cell.wr*100;
+        // Sample-size weighted blend: more samples = more pull. Caps at 0.40.
+        const _w=Math.min(0.40,_cell.n/200);
+        const _blended=_engineConf*(1-_w)+_observedConf*_w;
+        const _rawDelta=_blended-_engineConf;
+        const _cappedDelta=Math.max(-6,Math.min(6,_rawDelta));
+        const _newConf=_engineConf+_cappedDelta;
+        const _newCal=_engineDir==='UP'?_newConf:(100-_newConf);
+        if(Math.abs(_newCal-dirCalibrated)>=1){
+          reasoning.push(`[V10.4.0-CAL] ${_regime}×${_engineDir}×${_cell.band} WR ${(_cell.wr*100).toFixed(1)}% EV ${_cell.ev>=0?'+':''}${_cell.ev.toFixed(1)}¢ (n=${_cell.n},w=${_w.toFixed(2)}) → ${dirCalibrated.toFixed(1)}%→${_newCal.toFixed(1)}%`);
+          _diagV104Cal={applied:true,regime:_regime,dir:_engineDir,band:_cell.band,wr:_cell.wr,ev:_cell.ev,n:_cell.n,weight:_w,shift:_newCal-dirCalibrated,source:_cell.source};
+          dirCalibrated=_newCal;
+        }else{
+          _diagV104Cal={applied:false,regime:_regime,dir:_engineDir,band:_cell.band,wr:_cell.wr,ev:_cell.ev,n:_cell.n,weight:_w,shift:0,source:_cell.source,reason:'below-1pt-threshold'};
+        }
+      }else if(_cell){
+        _diagV104Cal={applied:false,regime:_regime,dir:_engineDir,band:_cell.band,n:_cell.n,source:_cell.source,reason:'below-trust-floor'};
+      }
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   // ── V9.7.8: FGT-COUNTER GATE ─────────────────────────────────────────────
   // When FGT (multi-timeframe alignment) is pulling against the lock direction,
@@ -9854,6 +10003,9 @@ const computeV99Posterior=(params)=>{
   _v10_3_1_trendingUpPenalty:_v10_3_1_trendingUpPenalty,
   // V10.3.3 telemetry: range-hybrid detector
   _v10_3_3_rangeHybrid:_v10_3_3_rangeHybrid,
+  // V10.4.0 — Band-specific calibration telemetry
+  _v10_4_0_calibration:_diagV104Cal,
+  _v10_4_0_regimeCaps:USE_V104_CALIBRATION_TABLES?{regime:_regime,hi:_capHi,lo:_capLo}:null,
   // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
   //   for post-hoc audit. Tells us which gates fired on which trades, so we can
   //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
@@ -30057,7 +30209,14 @@ function TaraApp(){
           return _resolved.map(e=>((e.closingPrice-e.strike)/e.strike)*10000);
         }catch(_){return[];}
       })();
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,recentWindowMovesBps:_recentWindowMovesBps});
+      // V10.4.0: Build the rolling-window calibration table from the live call log
+      //   and pass it into the engine. Auto-recalibrates every render. Cells with
+      //   n<V104_CALIBRATION_TRUST_FLOOR fall back to seed values automatically.
+      const _v104Table=(()=>{
+        try{return buildV104Table(taraCallLogRef.current||[]);}
+        catch(_){return V104_SEED_CALIBRATION;}
+      })();
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,recentWindowMovesBps:_recentWindowMovesBps,_v104Table});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
@@ -31161,6 +31320,8 @@ function TaraApp(){
         _v10_3_1_coinFlip:eng._v10_3_1_coinFlip||null,
         _v10_3_1_trendingUpPenalty:eng._v10_3_1_trendingUpPenalty||null,
         _v10_3_3_rangeHybrid:eng._v10_3_3_rangeHybrid||null,
+        _v10_4_0_calibration:eng._v10_4_0_calibration||null,
+        _v10_4_0_regimeCaps:eng._v10_4_0_regimeCaps||null,
         // V9.10.10 → V9.11.0: pass through pattern + futures telemetry blocks so the
         //   entry-stamping code at L23722/23792/23991/24733 can read them.
         //   BUG FIX V9.11.1: these were being computed by the engine but stripped from
@@ -34396,6 +34557,8 @@ function TaraApp(){
           _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
           _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
+          _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
+          _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
         result:null,
       };
       setTaraCallLog(prev=>{
@@ -34549,6 +34712,8 @@ function TaraApp(){
           _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
           _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
+          _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
+          _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           result:null, // populated at rollover
         };
         setTaraCallLog(prev=>{
@@ -34802,6 +34967,8 @@ function TaraApp(){
           _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
           _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
+          _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
+          _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
           // result:null populates at rollover scoring. NO_TRADE entries skip resolution
@@ -35753,6 +35920,8 @@ function TaraApp(){
           _v10_3_1_coinFlip:analysis?._v10_3_1_coinFlip||null,
           _v10_3_1_trendingUpPenalty:analysis?._v10_3_1_trendingUpPenalty||null,
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
+          _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
+          _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
         result:null, // populated at rollover scoring
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
