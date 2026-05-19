@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.7-strength-aware-bet-sizing';
+const BASELINE_VERSION='2026.05.19-v10.7.8-rollover-race-fix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.7';
+const TARA_VERSION_DISPLAY='Tara 10.7.8';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35923,6 +35923,55 @@ function TaraApp(){
           }
           return [...prev,_entry].slice(-TARA_CALL_LOG_CAP);
         });
+        // V10.7.8 — DEFENSIVE RETRY for rollover race condition
+        //   User report: "rollover window doesnt get logged or saved properly sometimes.
+        //   it still scans and locks though. refreshing the page works."
+        //   The initial setTaraCallLog can get its update lost during rollover state
+        //   churn (cloud-restore re-arm, refs clearing). Defensive retry 800ms later
+        //   re-attempts the add. Dedup logic above is the no-op fallback — if the
+        //   first push succeeded, retry sees the existing entry and returns prev.
+        setTimeout(()=>{
+          try{
+            setTaraCallLog(prev=>{
+              const _logAsset=_entry.asset||'BTC';
+              const _existing=prev.find(e=>e&&e.windowId===_wid&&e.windowType===windowType&&(e.asset||'BTC')===_logAsset);
+              if(_existing)return prev; // first push succeeded, dedup catches retry
+              // First push was lost to rollover race — re-add now
+              try{console.info('[V10.7.8] rollover-race retry rescued entry',{wid:_wid,asset:_logAsset,dir:_entry.dir,tier:_entry.tier});}catch(_){}
+              _auditLogEvent('v10_7_8_rollover_retry_rescued',{
+                source:'_logSnapshotEntry-retry',
+                wid:_wid,
+                asset:_logAsset,
+                dir:_entry.dir,
+                tier:_entry.tier,
+                msSinceOriginal:800,
+              });
+              return [...prev,_entry].slice(-TARA_CALL_LOG_CAP);
+            });
+          }catch(_){}
+        },800);
+        // V10.7.8 — second retry at 2500ms in case the 800ms one ALSO got lost to a
+        //   prolonged rollover state propagation. Three chances is enough; if all fail
+        //   there's a deeper problem worth investigating.
+        setTimeout(()=>{
+          try{
+            setTaraCallLog(prev=>{
+              const _logAsset=_entry.asset||'BTC';
+              const _existing=prev.find(e=>e&&e.windowId===_wid&&e.windowType===windowType&&(e.asset||'BTC')===_logAsset);
+              if(_existing)return prev;
+              try{console.warn('[V10.7.8] rollover-race second-retry rescued entry — first retry also lost',{wid:_wid,asset:_logAsset});}catch(_){}
+              _auditLogEvent('v10_7_8_rollover_retry_2_rescued',{
+                source:'_logSnapshotEntry-retry-2',
+                wid:_wid,
+                asset:_logAsset,
+                dir:_entry.dir,
+                tier:_entry.tier,
+                msSinceOriginal:2500,
+              });
+              return [...prev,_entry].slice(-TARA_CALL_LOG_CAP);
+            });
+          }catch(_){}
+        },2500);
       }catch(e){
         try{console.error('[V7.10.1] _logSnapshotEntry failed',e);}catch(_){}
         // V9.10.7: surface caught throws to audit log. Before this, _logSnapshotEntry
