@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.13-concrete-priority-trajectory-brti';
+const BASELINE_VERSION='2026.05.19-v10.7.13a-hotfix-v107_6-scope';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.13';
+const TARA_VERSION_DISPLAY='Tara 10.7.13a';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -36406,8 +36406,10 @@ function TaraApp(){
         const _rangeBps=_wa?.rangeBps||0;
         const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
         if(!_isDeadWindow){
-          const _forceDir=_post>=50?'UP':'DOWN';
-          const _forceConf=Math.round(Math.abs(_post-50)+50);
+          // V10.7.6 — check for reversal signals before committing
+          const _v107_6=_v10_7_6_reversalCheck(_post,analysis);
+          const _forceDir=_v107_6.dir;
+          const _forceConf=_v107_6.conf;
           const _forceSnap={
             call:_forceDir,direction:_forceDir,
             confidence:_forceConf,
