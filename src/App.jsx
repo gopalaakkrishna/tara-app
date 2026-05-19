@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.4.1d-tape-flow-tablet-fix';
+const BASELINE_VERSION='2026.05.19-v10.4.2-posterior-presets-losspattern';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.4.1d';
+const TARA_VERSION_DISPLAY='Tara 10.4.2';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4426,6 +4426,12 @@ const buildCalibration=(tradeLog)=>{
       cal[k]=DEFAULT_CALIBRATION[k];
     }
   });
+  // V10.4.2: Attach raw bucket counts as side-channel so calibratePosterior can
+  //   decide how aggressive to pull at the tails (where overconfidence sits).
+  //   Audit showed 85% confident → actual 63% (22pp gap). Current ±10pt cap can
+  //   only pull 85 down to 75 — not enough. With sample-aware tails, we can
+  //   pull harder when there's data to justify it.
+  Object.defineProperty(cal,'__buckets',{value:buckets,enumerable:false});
   return cal;
 };
 
@@ -5252,17 +5258,27 @@ const computeKalshiLead=({kalshiHist,tickHist,nowMs})=>{
 const calibratePosterior=(raw,calibration)=>{
   if(!calibration)return raw;
   const bucket=Math.floor(raw/10)*10;
-  const calVal=calibration[Math.max(0,Math.min(90,bucket))];
+  const key=Math.max(0,Math.min(90,bucket));
+  const calVal=calibration[key];
   if(calVal==null)return raw; // no data for this bucket
-  const isHighConfUp=raw>=80;
-  const calWeight=isHighConfUp?0.85:0.7;
+  // V10.4.2: TAIL-AWARE OVERCONFIDENCE CORRECTION
+  //   Audit found 22pp gap at tails (85%+ claimed → 63% actual, 90%+ → 70%).
+  //   Old logic: weight 0.85 at high conf, cap ±10pt. Could only pull 85→75.
+  //   New logic: when sample size in that tail bucket is ≥25, allow weight 0.90
+  //   and cap ±15pt. Mids unchanged. Sample-aware to avoid overcorrecting on thin
+  //   buckets. Tail = ≥80% or ≤20% posterior.
+  const _buckets=calibration.__buckets;
+  const _n=_buckets&&_buckets[key]?_buckets[key].total:0;
+  const _isTail=raw>=80||raw<=20;
+  const _hasTailData=_isTail&&_n>=25;
+  const calWeight=_hasTailData?0.90:(raw>=80?0.85:0.7);
   const blended=calVal*calWeight+raw*(1-calWeight);
-  // V6.3.3: Cap calibration swing at ±10 points. Without this cap, a small-sample bucket
-  //   could shift the posterior by 30+ points and even flip its sign (raw=-35% → cal=+1%).
-  //   Calibration's job is fine-tuning, not signal override. If the underlying signals
-  //   genuinely say DOWN with 35% conviction, calibration should at most dial that to
-  //   25% or amplify to 45% — never flip to UP.
-  const CAL_CAP=10;
+  const CAL_CAP=_hasTailData?15:10;
+  // V6.3.3: Cap calibration swing at ±10 points (±15 at tails with data).
+  //   Without this cap, a small-sample bucket could shift the posterior by 30+
+  //   points and even flip its sign. Calibration's job is fine-tuning, not
+  //   signal override. With the tail-aware cap, we can pull harder on
+  //   well-sampled overconfident buckets without risking flip behavior.
   if(blended-raw>CAL_CAP)return raw+CAL_CAP;
   if(raw-blended>CAL_CAP)return raw-CAL_CAP;
   return blended;
@@ -6094,19 +6110,46 @@ const classifyLossPattern=(trade)=>{
   if(hasContrayWhale)return'WHALE_SPIKE';
   const hadShock=(trade.windowMaxGeoRisk||0)>=0.5||!!trade.windowHadMacroEvent;
   if(hadShock)return'MACRO_SHOCK';
-  // Path-based — straightforward bucket from peak position
-  if(mfe==null||mfe<=0)return'WRONG_FROM_START';
-  // Reversal-flagged path losses
-  if(reversed){
-    if(peakPos==='LATE')return'LATE_REVERSAL';
-    if(peakPos==='MID')return'MID_REVERSAL';
-    if(peakPos==='EARLY')return'EARLY_PEAK';
+  // V10.4.2c: NEW DATA-DRIVEN CATEGORIES (audit found 82% of losses falling
+  //   into WRONG_FROM_START because MFE tracking is sparse). These use fields
+  //   we reliably have (kalshiAtLock, closingGapBps, dir) and split the catchall
+  //   into actionable buckets the engine can actually learn from.
+  const _gap=trade.closingGapBps;
+  const _dir=trade.dir;
+  const _kLock=trade.kalshiAtLock;
+  // Compute loss margin in bps (how far on the wrong side at close)
+  const _lossMarginBps=_gap!=null
+    ?(_dir==='DOWN'?_gap:-_gap) // for DOWN, positive gap = lost (price above strike)
+    :null;
+  // EXPENSIVE_ENTRY_LOSS: k$50+ at lock, lost. This is the V10.4.1 target bucket
+  //   — expensive entries that don't justify their cost. Audit showed these
+  //   bleed EV regardless of WR.
+  if(_kLock!=null){
+    const _kForDir=_dir==='UP'?_kLock:(100-_kLock);
+    if(_kForDir>=60)return'EXPENSIVE_ENTRY_LOSS';
   }
-  // Edge case: meaningful MFE but no clean peakPos — fall back on last60s drift sign
-  if(last60s!=null&&Math.abs(last60s)>=10){
-    return last60s*(trade.dir==='UP'?1:-1)<0?'LATE_REVERSAL':'EARLY_PEAK';
+  // NARROW_SETTLEMENT_LOSS: lost by less than 3bps at close. These are the
+  //   BRTI 60s-averaging victims — would be addressable by V10.5.1 cross-exchange
+  //   approximation. Tara's signal was directionally right; the trimmed avg
+  //   beat us in the final minute.
+  if(_lossMarginBps!=null&&_lossMarginBps>0&&_lossMarginBps<3)return'NARROW_SETTLEMENT_LOSS';
+  // Path-based (existing) — uses MFE if available
+  if(mfe!=null&&mfe>0){
+    if(reversed){
+      if(peakPos==='LATE')return'LATE_REVERSAL';
+      if(peakPos==='MID')return'MID_REVERSAL';
+      if(peakPos==='EARLY')return'EARLY_PEAK';
+    }
+    // Edge case: meaningful MFE but no clean peakPos — fall back on last60s drift sign
+    if(last60s!=null&&Math.abs(last60s)>=10){
+      return last60s*(trade.dir==='UP'?1:-1)<0?'LATE_REVERSAL':'EARLY_PEAK';
+    }
   }
-  return'WRONG_FROM_START'; // default — couldn't classify cleanly
+  // WRONG_DIRECTION: lost by >15bps. Signal genuinely picked the wrong side.
+  //   Audit gives the ML retrain a clean target — these are where the model
+  //   actually missed, not where settlement caught us.
+  if(_lossMarginBps!=null&&_lossMarginBps>=15)return'WRONG_DIRECTION';
+  return'WRONG_FROM_START'; // catchall fallback
 };
 const LOSS_PATTERN_LABELS={
   WRONG_FROM_START:{label:'Wrong from start',color:'rgba(244,114,182,0.95)',icon:'✗',hint:'Signal read was off entry. Tighten entry filter.'},
@@ -6115,6 +6158,10 @@ const LOSS_PATTERN_LABELS={
   LATE_REVERSAL:  {label:'Late reversal',    color:'rgba(244,114,182,0.85)',icon:'⚡',hint:'Winning until last minute. Tighter trailing stop in final 90s.'},
   WHALE_SPIKE:    {label:'Whale spike',      color:'rgba(168,85,247,0.85)',icon:'🐋',hint:'Large contrary print near close. Not your read — circumstance.'},
   MACRO_SHOCK:    {label:'Macro shock',      color:'rgba(168,85,247,0.85)',icon:'⚠',hint:'External event spike during window. Not your read — circumstance.'},
+  // V10.4.2c — new data-driven categories
+  EXPENSIVE_ENTRY_LOSS:{label:'Expensive entry',color:'rgba(251,191,36,0.85)',icon:'💸',hint:'k$60+ entry that didn\'t justify cost. V10.4.1 delay gate target.'},
+  NARROW_SETTLEMENT_LOSS:{label:'Narrow settlement',color:'rgba(96,165,250,0.85)',icon:'📏',hint:'Lost by <3bps. BRTI averaging hit us. V10.5.1 target.'},
+  WRONG_DIRECTION:{label:'Wrong direction',color:'rgba(244,114,182,0.95)',icon:'❌',hint:'Lost by >15bps. Genuine signal miss — ML retrain target.'},
 };
 // Patterns where signals were correct but external shock caused the loss.
 //   Used by applyTradeLearning to skip/dampen gradient descent — don't punish
@@ -13526,7 +13573,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     ...prev,
                     minTier:'tape',
                     minQualityScore:40,
-                    maxEdgePt:8,
+                    maxEdgePt:6, // V10.4.2: tightened from 8. Audit: edge 20+pt = 59% WR, 30+pt = 59%. High-edge trades underperform.
                     tradeTimingMode:'advisory',
                     skipTimeCapCommit:true,
                     tccSmartBypass:true,
@@ -13574,7 +13621,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     ...prev,
                     minTier:'tape',
                     minQualityScore:50,
-                    maxEdgePt:8,
+                    maxEdgePt:5, // V10.4.2: tightened from 8. HAWK is the discipline preset — tightest edge cap. Audit shows edge 0-5pt is the sweet spot (74% WR, +$0.24/trade).
                     tradeTimingMode:'advisory',
                     skipTimeCapCommit:true,
                     tccSmartBypass:true,
