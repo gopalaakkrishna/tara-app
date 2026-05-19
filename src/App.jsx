@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.18-v10.4.0-calibration-tables';
+const BASELINE_VERSION='2026.05.19-v10.4.1-ev-aware-delay-gate';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.4.0';
+const TARA_VERSION_DISPLAY='Tara 10.4.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -3882,6 +3882,16 @@ const TARA_VERSION_DISPLAY='Tara 10.4.0';
 const USE_V104_CALIBRATION_TABLES=true; // Set false for instant rollback
 const V104_CALIBRATION_TRUST_FLOOR=20; // Cells with n<20 use seed values
 const V104_ROLLING_WINDOW=200; // Per-cell rolling window for auto-recal
+
+// V10.4.1 — EV-AWARE DELAY GATE (Module A)
+// Audit found 38% of loss $ in expensive-entry trades. Module A delays the
+// lock when entry is k$50+ AND conviction sub-85% AND time remaining >180s.
+// Never sit-out. Always locks eventually (deadline = 180s remaining).
+// See _v10_4_1_delayed telemetry for fire rate and triggers.
+const USE_V104_1_DELAY_GATE=true;
+const V104_1_KALSHI_EXPENSIVE_THRESHOLD=50; // k$50+ is the EV-cliff zone
+const V104_1_CONVICTION_STRONG_THRESHOLD=85; // 85%+ justifies expensive entry
+const V104_1_DEADLINE_SECONDS_LEFT=180; // Lock by 3 minutes remaining no matter what
 
 // Seed table from full 885-trade resolved log. Format: WR (0-1), EV (cents/trade), n (sample size)
 // Cells with n=0 are unobserved — engine falls back to legacy logic for those.
@@ -25700,6 +25710,10 @@ function TaraApp(){
   //   Both reset on window change.
   const softHintRef=useRef(0);
   const hardForceRef=useRef(0);
+  // V10.4.1 Module A — delay gate state. Tracks per-window delay duration
+  // and the conditions when delay first triggered (for telemetry).
+  const _v104_1_delayStateRef=useRef(null);
+  const _v104_1_pendingDelayStampRef=useRef(null);
   // V6.2.7: KALSHI ENTRY WINDOW tracking. Replaces the time-based hard cap.
   //   kalshiWasBelowThreshUp: has Kalshi YES (UP price) ever been ≤65% this window?
   //   kalshiWasBelowThreshDown: has Kalshi NO (100-YES, DOWN-implied) ever been ≤65% this window?
@@ -34416,6 +34430,62 @@ function TaraApp(){
     if(taraCallSnapshotRef.current!==null)return; // already snapshotted this window
     const tc=taraCall;
     const isCall=tc.call==='UP'||tc.call==='DOWN';
+
+    // ─────────────────────────────────────────────────────────────────────
+    // V10.4.1 MODULE A — EV-AWARE DELAY GATE
+    // ─────────────────────────────────────────────────────────────────────
+    // Audit (May 18): trades at k$60+ bled $5+ regardless of WR. The asymmetric
+    //   payout makes expensive entries EV-negative even at 70%+ WR. Module A
+    //   delays the lock when entry is expensive AND conviction sub-85% AND
+    //   we have time to wait. Never SKIPs (existing coin-flip detector handles
+    //   that). Just waits for one of: cheaper price, stronger conviction, or
+    //   the 180s-remaining deadline that forces a lock.
+    //
+    // Feature flag: USE_V104_1_DELAY_GATE — set false for instant rollback.
+    // Telemetry: _v10_4_1_delayed, _v10_4_1_delayTicks, _v10_4_1_lockTrigger
+    if(USE_V104_1_DELAY_GATE&&isCall&&!(hardForceRef.current>0&&(Date.now()-hardForceRef.current)<5000)){
+      const _kNow=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
+      const _convNow=tc.confidence||0;
+      const _dirNow=tc.call;
+      // Kalshi price FROM TARA'S DIRECTION — if Tara says DOWN and Kalshi YES is 35,
+      //   then betting DOWN costs ~$0.65 (100-35). So "expensive entry" for DOWN
+      //   means kalshiYesPrice is LOW. Flip per direction.
+      const _kForDir=_kNow!=null?(_dirNow==='UP'?_kNow:(100-_kNow)):null;
+      const _secsLeft=timeState.minsRemaining*60+timeState.secsRemaining;
+      // Trigger: expensive entry (≥50¢) + marginal conviction (<85%) + time to wait (>180s)
+      const _expensiveEntry=_kForDir!=null&&_kForDir>=V104_1_KALSHI_EXPENSIVE_THRESHOLD;
+      const _marginalConv=_convNow<V104_1_CONVICTION_STRONG_THRESHOLD;
+      const _hasTimeToWait=_secsLeft>V104_1_DEADLINE_SECONDS_LEFT;
+      if(_expensiveEntry&&_marginalConv&&_hasTimeToWait){
+        // Track delay duration per window
+        if(!_v104_1_delayStateRef.current||_v104_1_delayStateRef.current.windowId!==computeWindowId(windowType)){
+          _v104_1_delayStateRef.current={windowId:computeWindowId(windowType),ticks:0,firstSeenAt:Date.now(),firstKForDir:_kForDir,firstConv:_convNow};
+        }
+        _v104_1_delayStateRef.current.ticks++;
+        // Don't lock this tick — let conditions evolve. Re-evaluated next tick.
+        return;
+      }
+      // If we got here with a delay state, we're about to lock — stamp WHY
+      if(_v104_1_delayStateRef.current&&_v104_1_delayStateRef.current.windowId===computeWindowId(windowType)){
+        let _trigger='conditions-improved';
+        if(!_hasTimeToWait)_trigger='deadline';
+        else if(!_expensiveEntry)_trigger='price-improved';
+        else if(!_marginalConv)_trigger='conv-strengthened';
+        _v104_1_pendingDelayStampRef.current={
+          delayed:true,
+          delayTicks:_v104_1_delayStateRef.current.ticks,
+          delaySeconds:Math.round((Date.now()-_v104_1_delayStateRef.current.firstSeenAt)/1000),
+          firstKForDir:_v104_1_delayStateRef.current.firstKForDir,
+          firstConv:_v104_1_delayStateRef.current.firstConv,
+          finalKForDir:_kForDir,
+          finalConv:_convNow,
+          lockTrigger:_trigger,
+        };
+        _v104_1_delayStateRef.current=null; // clear for next window
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
     // V6.2.6: HARD FORCE early-path. If user pressed Override Gates, commit immediately
     //   regardless of tc.call state. Direction picked from posterior — whichever side has
     //   the most confidence right now. Bypasses ALL safeguards. This is the explicit
@@ -34559,6 +34629,7 @@ function TaraApp(){
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
+          _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null,
       };
       setTaraCallLog(prev=>{
@@ -34714,6 +34785,7 @@ function TaraApp(){
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
+          _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           result:null, // populated at rollover
         };
         setTaraCallLog(prev=>{
@@ -34825,6 +34897,11 @@ function TaraApp(){
     //   compounded each version since.
     const _logSnapshotEntry=(snapshot)=>{
       try{
+        // V10.4.1: clear the pending delay stamp ref after one snapshot fires
+        //   so subsequent entries in the same window don't re-stamp it. The
+        //   stamp gets included into the entry via the spread sites elsewhere.
+        const _v104_1_clearDelayAfterLog=()=>{_v104_1_pendingDelayStampRef.current=null;};
+        setTimeout(_v104_1_clearDelayAfterLog,0);
         // V9.1.8: SITOUT logging gate. User feedback: only count SITOUT when site is
         //   opened with ≤2-3 mins remaining. Otherwise let the window roll over without
         //   an entry. Real directional calls (UP/DOWN) always log; NO_TRADE explicit
@@ -34969,6 +35046,7 @@ function TaraApp(){
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
+          _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
           // result:null populates at rollover scoring. NO_TRADE entries skip resolution
@@ -35922,6 +36000,7 @@ function TaraApp(){
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
+          _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null, // populated at rollover scoring
       };
       // V5.6.9 / V6.3.4: At-append dedup. Match by windowId AND windowType. If a duplicate
