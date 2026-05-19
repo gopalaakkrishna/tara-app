@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.4.2-posterior-presets-losspattern';
+const BASELINE_VERSION='2026.05.19-v10.4.3-multi-window-memory';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.4.2';
+const TARA_VERSION_DISPLAY='Tara 10.4.3';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -8394,6 +8394,39 @@ const computeV99Posterior=(params)=>{
       }
     }
   }
+  // V10.4.3 — MULTI-WINDOW DIRECTIONAL CONTEXT (mean-reversion detection)
+  //   The same `_recentMoves` array carries SIGNED bps (positive = closed above
+  //   strike = UP window won, negative = DOWN window won). Track directional
+  //   streaks: if last 5 windows show ≥4 same direction, mean-reversion is
+  //   statistically likely. Apply small conviction haircut on same-direction
+  //   calls (don't chase the streak), small boost on contrarian calls.
+  //   Magnitude is intentionally small (5pt max) because mean-reversion timing
+  //   is noisy — this is a tilt, not an override.
+  let _v104_3_windowCtx=null;
+  if(_recentMoves&&_recentMoves.length>=5){
+    const _last5=_recentMoves.slice(-5).filter(b=>Number.isFinite(b));
+    if(_last5.length>=5){
+      const _ups=_last5.filter(b=>b>0).length;
+      const _downs=_last5.filter(b=>b<0).length;
+      // Streak threshold: 4 of last 5 same direction
+      if(_ups>=4||_downs>=4){
+        const _streakDir=_ups>=4?'UP':'DOWN';
+        // Haircut on continuation, boost on reversion. 5pt magnitude.
+        const _shift=_streakDir==='UP'?-5:5; // shift posterior away from streak
+        const _newPost=Math.max(15,Math.min(85,posterior+_shift));
+        _v104_3_windowCtx={
+          streakDir:_streakDir,
+          streakCount:Math.max(_ups,_downs),
+          window:5,
+          posteriorBefore:posterior,
+          posteriorAfter:_newPost,
+          shift:_newPost-posterior,
+        };
+        reasoning.push(`[V10.4.3] ${_streakDir} streak ${Math.max(_ups,_downs)}/5 → mean-reversion tilt ${posterior.toFixed(1)}%→${_newPost.toFixed(1)}%`);
+        posterior=_newPost;
+      }
+    }
+  }
   // V10.2.37 — REALIZED-VS-EXPECTED MOVE DETECTION (Option 2).
   //   Within the CURRENT window, compute how much price has moved so far
   //   vs how much we'd expect given ATR and elapsed time. If realized move
@@ -10063,6 +10096,8 @@ const computeV99Posterior=(params)=>{
   // V10.4.0 — Band-specific calibration telemetry
   _v10_4_0_calibration:_diagV104Cal,
   _v10_4_0_regimeCaps:USE_V104_CALIBRATION_TABLES?{regime:_regime,hi:_capHi,lo:_capLo}:null,
+  // V10.4.3 — Multi-window directional context (mean-reversion detector)
+  _v10_4_3_windowCtx:_v104_3_windowCtx,
   // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
   //   for post-hoc audit. Tells us which gates fired on which trades, so we can
   //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
@@ -31375,6 +31410,7 @@ function TaraApp(){
         _v10_3_3_rangeHybrid:eng._v10_3_3_rangeHybrid||null,
         _v10_4_0_calibration:eng._v10_4_0_calibration||null,
         _v10_4_0_regimeCaps:eng._v10_4_0_regimeCaps||null,
+        _v10_4_3_windowCtx:eng._v10_4_3_windowCtx||null,
         // V9.10.10 → V9.11.0: pass through pattern + futures telemetry blocks so the
         //   entry-stamping code at L23722/23792/23991/24733 can read them.
         //   BUG FIX V9.11.1: these were being computed by the engine but stripped from
@@ -34668,6 +34704,7 @@ function TaraApp(){
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
+          _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null,
       };
@@ -34824,6 +34861,7 @@ function TaraApp(){
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
+          _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           result:null, // populated at rollover
         };
@@ -35085,6 +35123,7 @@ function TaraApp(){
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
+          _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
@@ -36039,6 +36078,7 @@ function TaraApp(){
           _v10_3_3_rangeHybrid:analysis?._v10_3_3_rangeHybrid||null,
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
+          _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null, // populated at rollover scoring
       };
