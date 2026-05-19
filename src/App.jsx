@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.6.3-slippage-aware-ev';
+const BASELINE_VERSION='2026.05.19-v10.6.3a-hotfix-posterior-init';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.6.3';
+const TARA_VERSION_DISPLAY='Tara 10.6.3a';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -8572,39 +8572,8 @@ const computeV99Posterior=(params)=>{
       }
     }
   }
-  // V10.4.3 — MULTI-WINDOW DIRECTIONAL CONTEXT (mean-reversion detection)
-  //   The same `_recentMoves` array carries SIGNED bps (positive = closed above
-  //   strike = UP window won, negative = DOWN window won). Track directional
-  //   streaks: if last 5 windows show ≥4 same direction, mean-reversion is
-  //   statistically likely. Apply small conviction haircut on same-direction
-  //   calls (don't chase the streak), small boost on contrarian calls.
-  //   Magnitude is intentionally small (5pt max) because mean-reversion timing
-  //   is noisy — this is a tilt, not an override.
+  // V10.4.3 — MULTI-WINDOW DIRECTIONAL CONTEXT — MOVED BELOW (posterior not yet declared here)
   let _v104_3_windowCtx=null;
-  if(_recentMoves&&_recentMoves.length>=5){
-    const _last5=_recentMoves.slice(-5).filter(b=>Number.isFinite(b));
-    if(_last5.length>=5){
-      const _ups=_last5.filter(b=>b>0).length;
-      const _downs=_last5.filter(b=>b<0).length;
-      // Streak threshold: 4 of last 5 same direction
-      if(_ups>=4||_downs>=4){
-        const _streakDir=_ups>=4?'UP':'DOWN';
-        // Haircut on continuation, boost on reversion. 5pt magnitude.
-        const _shift=_streakDir==='UP'?-5:5; // shift posterior away from streak
-        const _newPost=Math.max(15,Math.min(85,posterior+_shift));
-        _v104_3_windowCtx={
-          streakDir:_streakDir,
-          streakCount:Math.max(_ups,_downs),
-          window:5,
-          posteriorBefore:posterior,
-          posteriorAfter:_newPost,
-          shift:_newPost-posterior,
-        };
-        reasoning.push(`[V10.4.3] ${_streakDir} streak ${Math.max(_ups,_downs)}/5 → mean-reversion tilt ${posterior.toFixed(1)}%→${_newPost.toFixed(1)}%`);
-        posterior=_newPost;
-      }
-    }
-  }
   // V10.2.37 — REALIZED-VS-EXPECTED MOVE DETECTION (Option 2).
   //   Within the CURRENT window, compute how much price has moved so far
   //   vs how much we'd expect given ATR and elapsed time. If realized move
@@ -9702,6 +9671,38 @@ const computeV99Posterior=(params)=>{
   // Convert to posterior
   const rawPosterior=50+totalScore*0.95;
   let posterior=Math.max(1,Math.min(99,rawPosterior));
+  // V10.4.3 — MULTI-WINDOW DIRECTIONAL CONTEXT (mean-reversion detection)
+  //   The same `_recentMoves` array carries SIGNED bps (positive = closed above
+  //   strike = UP window won, negative = DOWN window won). Track directional
+  //   streaks: if last 5 windows show ≥4 same direction, mean-reversion is
+  //   statistically likely. Apply small conviction haircut on same-direction
+  //   calls (don't chase the streak), small boost on contrarian calls.
+  //   Magnitude is intentionally small (5pt max) because mean-reversion timing
+  //   is noisy — this is a tilt, not an override.
+  //   Moved here (post-posterior declaration) in V10.6.2-hotfix to resolve
+  //   "posterior before initialization" ReferenceError.
+  if(_recentMoves&&_recentMoves.length>=5){
+    const _last5=_recentMoves.slice(-5).filter(b=>Number.isFinite(b));
+    if(_last5.length>=5){
+      const _ups=_last5.filter(b=>b>0).length;
+      const _downs=_last5.filter(b=>b<0).length;
+      if(_ups>=4||_downs>=4){
+        const _streakDir=_ups>=4?'UP':'DOWN';
+        const _shift=_streakDir==='UP'?-5:5;
+        const _newPost=Math.max(15,Math.min(85,posterior+_shift));
+        _v104_3_windowCtx={
+          streakDir:_streakDir,
+          streakCount:Math.max(_ups,_downs),
+          window:5,
+          posteriorBefore:posterior,
+          posteriorAfter:_newPost,
+          shift:_newPost-posterior,
+        };
+        reasoning.push(`[V10.4.3] ${_streakDir} streak ${Math.max(_ups,_downs)}/5 → mean-reversion tilt ${posterior.toFixed(1)}%→${_newPost.toFixed(1)}%`);
+        posterior=_newPost;
+      }
+    }
+  }
 
   // Reality caps
   // V135: Tightened activation thresholds (-18→-12, +18→+12) so adverse price action
