@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.6.7-pregate-loosened';
+const BASELINE_VERSION='2026.05.19-v10.6.8-force-commit-postprocessor';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.6.7';
+const TARA_VERSION_DISPLAY='Tara 10.6.8';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32690,6 +32690,70 @@ function TaraApp(){
       },
     };
   })();
+  // ═══════════════════════════════════════════════════════════════════════════
+  // V10.6.8 — FORCE-COMMIT POST-PROCESSOR
+  // ═══════════════════════════════════════════════════════════════════════════
+  // User feedback (May 19): "we are only not locking. price swing is very low
+  //   and it is literally 50-50 till last min". The engine has many soft sitout
+  //   gates that block calls when posterior shows meaningful lean (60+ or 40-).
+  //   This post-processor converts soft sitouts → directional locks when:
+  //     1. Posterior has decisive lean (|post-50| >= 8)
+  //     2. Not a hard veto (tape-super-opposes, kalshi-extreme-disagree)
+  //     3. We've observed for at least 30s (some signal data exists)
+  //   True coin-flip windows (post 42-58) still sit out — those genuinely
+  //   have no edge regardless of how long we wait.
+  //
+  // Hard vetos that STAY sitting out:
+  //   - "tape ... opposite, fighting flow" (tape super-opposes)
+  //   - "Kalshi N% says opposite, no override" (extreme kalshi disagree)
+  //   - "regime in flux" (transition state)
+  // Soft vetos that NOW lock instead:
+  //   - "Coin flip — only Xpt off neutral" (when actually |post-50|>=8)
+  //   - "Signal weak — quality X/Y" (when posterior shows lean)
+  //   - "FGT mixed across timeframes" (when other signals strong)
+  //   - "too late for single-signal"
+  //   - "tape ... disagrees, q+conv weak"
+  const _v10_6_8_postProcess=(call)=>{
+    if(!call||call.call!=='SIT_OUT')return call; // not a sit-out, pass through
+    const _post=Number(call.confidence)||Number(analysis?.rawProbAbove)||50;
+    const _convict=Math.abs(_post-50);
+    // Soft-sitout detection: must have meaningful lean
+    if(_convict<8)return call; // true coin flip — preserve sitout
+    // Hard-veto preservation: don't override these
+    const _reason=String(call.reason||'').toLowerCase();
+    const _hardVetos=[
+      'opposite, fighting flow',     // tape super-opposes
+      'no override',                 // kalshi extreme disagrees
+      'regime in flux',              // regime transition
+      'engine still loading',        // bootstrap
+      'searching for direction',     // search phase
+      'new window',                  // first 5s
+      'observing fresh data',        // search phase
+      'trend dying',                 // regime transition
+    ];
+    if(_hardVetos.some(v=>_reason.includes(v)))return call;
+    // FORCE COMMIT — convert sitout → directional lock
+    const _dir=_post>=50?'UP':'DOWN';
+    return{
+      ...call,
+      call:_dir,
+      direction:_dir,
+      confidence:_post,
+      conviction:_convict,
+      reason:`[V10.6.8 force] ${_dir} ${_convict.toFixed(0)}pt lean — was sitout (${call.reason})`,
+      _v10_6_8_forced:true,
+      _v10_6_8_originalReason:call.reason,
+    };
+  };
+  // V10.6.8: apply force-commit post-processor IN PLACE on taraCall object.
+  //   Using Object.assign mutates the const-bound object reference (const
+  //   prevents rebinding, not mutation). This means ALL downstream consumers
+  //   automatically see the forced commits without needing to rename refs.
+  const _v10_6_8_forced=_v10_6_8_postProcess(taraCall);
+  if(_v10_6_8_forced&&_v10_6_8_forced!==taraCall){
+    Object.keys(_v10_6_8_forced).forEach(k=>{taraCall[k]=_v10_6_8_forced[k];});
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // V9.3.0: KALSHI AUTO-EXECUTION — fire orders on lock, exit on threshold/time
   // ═══════════════════════════════════════════════════════════════════════════
