@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.4.1b-cooldown-tp-merged';
+const BASELINE_VERSION='2026.05.19-v10.4.1c-live-price-chip-overflow';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.4.1b';
+const TARA_VERSION_DISPLAY='Tara 10.4.1c';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38044,7 +38044,7 @@ function TaraApp(){
         }
       `}</style>
       <main
-        className="flex-1 w-full max-w-[1600px] mx-auto px-2 sm:px-3 lg:px-4 py-2 sm:py-3 flex flex-col gap-3 min-h-0"
+        className="flex-1 w-full max-w-[1600px] mx-auto px-2 sm:px-3 lg:px-4 py-2 sm:py-3 flex flex-col gap-3 min-h-0 min-w-0 overflow-x-hidden"
       >
         
         {/* STATS BAR */}
@@ -38053,9 +38053,26 @@ function TaraApp(){
           <div className="p-2 sm:p-3 grid grid-cols-2 lg:grid-cols-none lg:flex lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-auto">
             
             {/* Strike — auto or manual */}
-            <div className="flex flex-col min-w-0 w-full lg:min-w-[130px] lg:w-auto col-span-1">
-              <div className="flex items-center justify-between mb-1 gap-2">
-                <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide'}>Strike</div>
+            <div className="flex flex-col min-w-0 w-full lg:min-w-[160px] lg:w-auto col-span-1">
+              <div className="flex items-center justify-between mb-1 gap-2 min-w-0">
+                <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide shrink-0'}>Strike</div>
+                {/* V10.4.1c — live BTC price chip next to strike for quick visual gap-check.
+                    Shows current spot vs strike at a glance. */}
+                {currentPrice>0&&(
+                  <div className="text-[10px] text-[#E8E9E4]/60 tabular-nums truncate">
+                    <span className="text-[#E8E9E4]/40">spot </span>
+                    <span className={
+                      targetMargin>0
+                        ?(currentPrice>=targetMargin?'text-emerald-400 font-bold':'text-rose-400 font-bold')
+                        :'text-white font-bold'
+                    }>${currentPrice.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                    {targetMargin>0&&(
+                      <span className="text-[#E8E9E4]/45 ml-1">
+                        ({(((currentPrice-targetMargin)/targetMargin)*10000).toFixed(0)}bps)
+                      </span>
+                    )}
+                  </div>
+                )}
                 <span
                   onClick={()=>{isManualStrikeRef.current=false;hasSetInitialMargin.current=false;setWindowOpenStrike(currentPriceRef.current||currentPrice);}}
                   title={(()=>{
