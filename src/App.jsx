@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.5-chop-guards-disabled';
+const BASELINE_VERSION='2026.05.19-v10.7.6-reversal-aware-override';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.5';
+const TARA_VERSION_DISPLAY='Tara 10.7.6';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32856,6 +32856,111 @@ function TaraApp(){
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // V10.7.6 — REVERSAL-AWARE OVERRIDE HELPER
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Used by V10.7.5 force-commit sites. When forcing a commit on weak posterior
+  //   (the chop guards V10.7.5 bypassed), check if reversal signals are SCREAMING.
+  //   If yes, flip the direction to the reversal side instead of trusting the
+  //   weak posterior.
+  //
+  // Reversal evidence checks (each contributes 1 vote):
+  //   1. Channel exhaustion — _tc.channelPos at extreme contrary to posterior direction
+  //   2. VPOC blocking — VPOC resistance level in posterior direction
+  //   3. Tape divergence — tape running opposite to posterior
+  //   4. HTF reversal pattern — doubleTop/doubleBottom against posterior
+  //   5. Recent reversal — last 60s drift opposite to posterior
+  //
+  // Returns {dir, conf, reversalVotes, reasons} — caller uses these instead of
+  //   raw posterior direction when reversalVotes >= 2.
+  //
+  // Why threshold=2: single signal could be noise. Two independent reversal
+  //   signals = real consensus. Three+ = essentially certainty.
+  const _v10_7_6_reversalCheck=(postValue,analysisObj)=>{
+    const _p=Number(postValue)||50;
+    if(_p===50)return{flipped:false,dir:null,reasons:[]};
+    const _proposedDir=_p>=50?'UP':'DOWN';
+    const _oppositeDir=_proposedDir==='UP'?'DOWN':'UP';
+    const _ana=analysisObj||{};
+    let _revVotes=0;
+    const _revReasons=[];
+    // 1. Channel exhaustion in the proposed direction
+    const _tc=_ana.trendChannel;
+    if(_tc?.valid){
+      const _pos=_tc.channelPos;
+      const _atExtremeContra=(_proposedDir==='UP'&&_pos>=0.85)||(_proposedDir==='DOWN'&&_pos<=0.15);
+      if(_atExtremeContra){
+        _revVotes++;
+        _revReasons.push(`channel exhausted (pos ${(_pos*100).toFixed(0)}%)`);
+      }
+    }
+    // 2. VPOC blocking the proposed direction
+    //   analysis.vpocResistance / vpocSupport fields indicate volume-profile barriers
+    const _vpocBlocking=_ana.vpocBlockingDir;
+    if(_vpocBlocking&&_vpocBlocking===_proposedDir){
+      _revVotes++;
+      _revReasons.push(`VPOC blocking ${_proposedDir}`);
+    }
+    // 3. Tape divergence — tape running opposite
+    const _tw=tapeWindows;
+    if(_tw?.w15&&_tw?.w30){
+      const _t15=_tw.w15.buyPct;
+      const _t30=_tw.w30.buyPct;
+      if(_t15!=null&&_t30!=null){
+        // Both 15s and 30s tape >65% AGAINST our proposed direction
+        const _bothOpposite=_proposedDir==='UP'?(_t15<=35&&_t30<=35):(_t15>=65&&_t30>=65);
+        if(_bothOpposite){
+          _revVotes++;
+          _revReasons.push(`tape 15s+30s opposite (${_t15.toFixed(0)}%/${_t30.toFixed(0)}%)`);
+        }
+      }
+    }
+    // 4. HTF reversal pattern against proposed direction
+    const _htf=_ana.patternsV9_11_0;
+    if(_htf){
+      const _patterns=[_htf.pattern1m,_htf.pattern5m,_htf.pattern15m].filter(Boolean);
+      // doubleTop is bearish, doubleBottom is bullish
+      const _bearPatterns=_patterns.filter(p=>String(p||'').toLowerCase().includes('top')).length;
+      const _bullPatterns=_patterns.filter(p=>String(p||'').toLowerCase().includes('bottom')).length;
+      if(_proposedDir==='UP'&&_bearPatterns>=2){
+        _revVotes++;
+        _revReasons.push(`${_bearPatterns} HTF bearish patterns`);
+      }else if(_proposedDir==='DOWN'&&_bullPatterns>=2){
+        _revVotes++;
+        _revReasons.push(`${_bullPatterns} HTF bullish patterns`);
+      }
+    }
+    // 5. Last 60s drift opposite to proposed direction
+    const _drift=Number(_ana.last60sDriftBps)||0;
+    if(Math.abs(_drift)>=8){
+      const _driftDir=_drift>0?'UP':'DOWN';
+      if(_driftDir===_oppositeDir){
+        _revVotes++;
+        _revReasons.push(`last 60s ${_drift>0?'+':''}${_drift.toFixed(0)}bps opposite`);
+      }
+    }
+    // FLIP DECISION — 2+ reversal votes
+    if(_revVotes>=2){
+      // Flip: use opposite direction with mirrored conviction
+      return{
+        flipped:true,
+        dir:_oppositeDir,
+        conf:Math.round(50+Math.abs(_p-50)), // same magnitude on flipped side
+        originalDir:_proposedDir,
+        revVotes:_revVotes,
+        reasons:_revReasons,
+      };
+    }
+    // No flip — return original direction
+    return{
+      flipped:false,
+      dir:_proposedDir,
+      conf:Math.round(_p),
+      revVotes:_revVotes,
+      reasons:_revReasons,
+    };
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // V9.3.0: KALSHI AUTO-EXECUTION — fire orders on lock, exit on threshold/time
   // ═══════════════════════════════════════════════════════════════════════════
   // Three coordinated effects, all gated by the same enable + kill-switch checks:
@@ -35316,8 +35421,10 @@ function TaraApp(){
         const _postNow=Number(analysis?.rawProbAbove)||50;
         if(!_isDeadWindow&&_postNow!==50){
           // Force-commit instead of ambiguous SITOUT
-          const _forceDir=_postNow>=50?'UP':'DOWN';
-          const _forceConf=Math.round(Math.abs(_postNow-50)+50);
+          // V10.7.6 — check for reversal signals before committing
+          const _v107_6=_v10_7_6_reversalCheck(_postNow,analysis);
+          const _forceDir=_v107_6.dir;
+          const _forceConf=_v107_6.conf;
           taraCallSnapshotRef.current={
             call:_forceDir,direction:_forceDir,confidence:_forceConf,
             reason:`[V10.7.5 force-commit] ${_forceDir} ${(_forceConf-50).toFixed(0)}pt — system-lock end-of-window, window moving ${_rangeBps.toFixed(0)}bps`,
@@ -35326,6 +35433,10 @@ function TaraApp(){
             locked:true,earlyLock:false,
             _v10_7_5_forced:true,
             _v10_7_5_originalGuard:'isSystemLocked',
+            _v10_7_6_reversalFlipped:_v107_6.flipped,
+            _v10_7_6_revVotes:_v107_6.revVotes,
+            _v10_7_6_revReasons:_v107_6.reasons,
+            _v10_7_6_originalDir:_v107_6.flipped?_v107_6.originalDir:null,
             _v10_7_5_rangeBps:_rangeBps,
           };
           _persistLock();
@@ -35827,6 +35938,10 @@ function TaraApp(){
             _committedAt:Date.now(),
             _v10_7_5_forced:true,
             _v10_7_5_originalGuard:'V10.3.0-midrange',
+            _v10_7_6_reversalFlipped:_v107_6.flipped,
+            _v10_7_6_revVotes:_v107_6.revVotes,
+            _v10_7_6_revReasons:_v107_6.reasons,
+            _v10_7_6_originalDir:_v107_6.flipped?_v107_6.originalDir:null,
             _v10_7_5_rangeBps:_rangeBps,
           };
           taraCallSnapshotRef.current=_forceSnap;
@@ -35922,8 +36037,10 @@ function TaraApp(){
           const _rangeBps=_wa?.rangeBps||0;
           const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
           if(!_isDeadWindow){
-            const _forceDir=_post>=50?'UP':'DOWN';
-            const _forceConf=Math.round(Math.abs(_post-50)+50);
+            // V10.7.6 — check for reversal signals before committing
+            const _v107_6=_v10_7_6_reversalCheck(_post,analysis);
+            const _forceDir=_v107_6.dir;
+            const _forceConf=_v107_6.conf;
             const _forceSnap={
               call:_forceDir,direction:_forceDir,
               confidence:_forceConf,
@@ -35943,6 +36060,10 @@ function TaraApp(){
               _committedAt:Date.now(),
               _v10_7_5_forced:true,
               _v10_7_5_originalGuard:'V10.3.0-nogoedge',
+              _v10_7_6_reversalFlipped:_v107_6.flipped,
+              _v10_7_6_revVotes:_v107_6.revVotes,
+              _v10_7_6_revReasons:_v107_6.reasons,
+              _v10_7_6_originalDir:_v107_6.flipped?_v107_6.originalDir:null,
               _v10_7_5_rangeBps:_rangeBps,
             };
             taraCallSnapshotRef.current=_forceSnap;
@@ -36034,8 +36155,10 @@ function TaraApp(){
           const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
           if(!_isDeadWindow){
             // Force-commit to posterior direction. Skip the sitout snapshot entirely.
-            const _forceDir=_post>=50?'UP':'DOWN';
-            const _forceConf=Math.round(Math.abs(_post-50)+50);
+            // V10.7.6 — check for reversal signals before committing
+            const _v107_6=_v10_7_6_reversalCheck(_post,analysis);
+            const _forceDir=_v107_6.dir;
+            const _forceConf=_v107_6.conf;
             const _forceSnap={
               call:_forceDir,direction:_forceDir,
               confidence:_forceConf,
@@ -36055,6 +36178,10 @@ function TaraApp(){
               _committedAt:Date.now(),
               _v10_7_5_forced:true,
               _v10_7_5_originalGuard:'V10.2.50',
+              _v10_7_6_reversalFlipped:_v107_6.flipped,
+              _v10_7_6_revVotes:_v107_6.revVotes,
+              _v10_7_6_revReasons:_v107_6.reasons,
+              _v10_7_6_originalDir:_v107_6.flipped?_v107_6.originalDir:null,
               _v10_7_5_rangeBps:_rangeBps,
             };
             taraCallSnapshotRef.current=_forceSnap;
