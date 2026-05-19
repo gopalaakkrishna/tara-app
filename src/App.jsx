@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.6-reversal-aware-override';
+const BASELINE_VERSION='2026.05.19-v10.7.7-strength-aware-bet-sizing';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.6';
+const TARA_VERSION_DISPLAY='Tara 10.7.7';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34033,7 +34033,56 @@ function TaraApp(){
       });
       return;
     }
-    const _bet=_sizeRes.intendedDollars;
+    let _bet=_sizeRes.intendedDollars;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // V10.7.7 — STRENGTH-AWARE BET SIZING
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Scales the computed bet down on weak-conviction trades to protect against
+    //   losses on the marginal force-committed posteriors that V10.7.5 bypasses.
+    //   Same expected WR distribution → less money risked per weak call.
+    //
+    // Scale curve based on |posterior - 50|:
+    //   conv < 5  →  0.40x bet  (very weak, was sit-out territory pre-V10.7.5)
+    //   conv 5-10 → 0.60x bet   (weak, mid-conviction chop trade)
+    //   conv 10-15 → 0.80x bet  (moderate)
+    //   conv >= 15 → 1.00x bet  (strong conviction, full size)
+    //
+    // Skip-conditions where we DON'T scale down:
+    //   - User manual override (hardForce) — they explicitly want full bet
+    //   - Mission mode (mission has its own sizing logic)
+    //   - Tier >= structural (already a high-quality setup)
+    //
+    // Note: this scales DOWN only. Never scales up beyond the computed _bet.
+    const _v10_7_7_originalBet=_bet;
+    let _v10_7_7_scale=1.0;
+    let _v10_7_7_reason=null;
+    const _v10_7_7_post=Number(analysis?.rawProbAbove)||50;
+    const _v10_7_7_conv=Math.abs(_v10_7_7_post-50);
+    const _v10_7_7_skipScale=(
+      _isManual||                                // manual override
+      _missionInfo||                             // mission has own sizing
+      _tierRank>=3                               // tier3+ (structural-led or better)
+    );
+    if(!_v10_7_7_skipScale){
+      if(_v10_7_7_conv<5){
+        _v10_7_7_scale=0.40;
+        _v10_7_7_reason=`conv ${_v10_7_7_conv.toFixed(0)}pt (very weak) → 0.40x`;
+      }else if(_v10_7_7_conv<10){
+        _v10_7_7_scale=0.60;
+        _v10_7_7_reason=`conv ${_v10_7_7_conv.toFixed(0)}pt (weak) → 0.60x`;
+      }else if(_v10_7_7_conv<15){
+        _v10_7_7_scale=0.80;
+        _v10_7_7_reason=`conv ${_v10_7_7_conv.toFixed(0)}pt (moderate) → 0.80x`;
+      }
+      // conv >= 15: scale stays at 1.0 (full bet)
+      if(_v10_7_7_scale<1.0){
+        _bet=Math.max(0.5,Math.round(_v10_7_7_originalBet*_v10_7_7_scale*100)/100); // min $0.50 floor
+        try{console.info('[V10.7.7] strength-aware sizing',{
+          originalBet:_v10_7_7_originalBet,scaledBet:_bet,scale:_v10_7_7_scale,
+          conviction:_v10_7_7_conv,posterior:_v10_7_7_post,reason:_v10_7_7_reason,
+        });}catch(_){}
+      }
+    }
     _autoExecLastFiredKeyRef.current=_key;
     // V9.18.3: mark this window as ATTEMPTED. Hard cap — even if the order
     //   errors / cancels / never fills, the entry effect will NOT re-fire on
