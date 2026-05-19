@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.10-smart-cashout-ui';
+const BASELINE_VERSION='2026.05.19-v10.7.11-universal-reversal-strike-distance';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.10';
+const TARA_VERSION_DISPLAY='Tara 10.7.11';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32855,7 +32855,7 @@ function TaraApp(){
       direction:_dir,
       confidence:_post,
       conviction:_convict,
-      reason:`[V10.6.8b force] ${_dir} ${_convict.toFixed(0)}pt — window moving ${_rangeBps.toFixed(0)}bps (was: ${call.reason})`,
+      reason:`Directional lock · ${_dir} ${_convict.toFixed(0)}pt · ${_rangeBps.toFixed(0)}bps window momentum`,
       _v10_6_8_forced:true,
       _v10_6_8_originalReason:call.reason,
       _v10_6_8_rangeBps:_rangeBps,
@@ -32971,7 +32971,6 @@ function TaraApp(){
   if(_v10_7_4_result&&_v10_7_4_result!==taraCall){
     Object.keys(_v10_7_4_result).forEach(k=>{taraCall[k]=_v10_7_4_result[k];});
   }
-
   // ═══════════════════════════════════════════════════════════════════════════
   // V10.7.6 — REVERSAL-AWARE OVERRIDE HELPER
   // ═══════════════════════════════════════════════════════════════════════════
@@ -33078,8 +33077,108 @@ function TaraApp(){
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // V9.3.0: KALSHI AUTO-EXECUTION — fire orders on lock, exit on threshold/time
+  // V10.7.11 — UNIVERSAL REVERSAL + STRIKE-DISTANCE OVERRIDE
   // ═══════════════════════════════════════════════════════════════════════════
+  // User report (May 19, 6:35pm): Tara locked DOWN at $76,614 (just $19 above
+  //   strike $76,595) right as price was bottoming and about to reverse UP.
+  //   Other bots (Jerome, Wok) locked 1-2min LATER with clearer reversal data
+  //   and correctly bet UP. Tara was on the wrong side of an obvious reversal.
+  //
+  // Root cause: V10.7.6 (reversal-aware override) ONLY ran inside V10.7.5
+  //   force-commit paths. Natural early-locks bypassed it. So engine could
+  //   commit early without any reversal check, and bottom-pick wrong.
+  //
+  // V10.7.11 = Run the reversal check on EVERY taraCall, regardless of how
+  //   it formed (natural lock, force-commit, side-flip). Plus add hard
+  //   strike-distance rule to catch obvious gap+time scenarios.
+  //
+  // Strike-distance veto (separate hard rule):
+  //   IF |current_price - strike| > 30bps  (price is materially far from strike)
+  //   AND time_remaining < 8 minutes (close to settlement)
+  //   AND posterior direction != gap direction
+  //   THEN flip direction to match the gap.
+  //
+  // The market spent real money to be 80%+ on one side. That's information.
+  const _v10_7_11_universalOverride=(call)=>{
+    if(!call||(call.call!=='UP'&&call.call!=='DOWN'))return call;
+    const _currentDir=call.call;
+    const _post=Number(call.confidence)||50;
+    // 1. Run V10.7.6 reversal check universally
+    const _revCheck=_v10_7_6_reversalCheck(_currentDir==='UP'?_post:(100-_post),analysis);
+    if(_revCheck.flipped){
+      // Reversal evidence too strong — flip
+      const _flipDir=_revCheck.dir;
+      const _flipConf=_revCheck.conf;
+      return{
+        ...call,
+        call:_flipDir,
+        direction:_flipDir,
+        confidence:_flipConf,
+        conviction:Math.abs(_flipConf-50),
+        reason:`Reversal lock · ${_flipDir} · ${_revCheck.revVotes} signals flipped from ${_currentDir} (${_revCheck.reasons.join(', ')})`,
+        _v10_7_11_universalFlipped:true,
+        _v10_7_11_flipType:'reversal-evidence',
+        _v10_7_11_originalDir:_currentDir,
+        _v10_7_11_votes:_revCheck.revVotes,
+        _v10_7_11_reasons:_revCheck.reasons,
+      };
+    }
+    // 2. Strike-distance hard veto
+    const _strikePrice=Number(call.strike)||Number(analysis?.strike)||null;
+    const _spot=Number(analysis?.spotPrice)||Number(analysis?.btcPrice)||null;
+    if(_strikePrice&&_spot){
+      const _gapBps=((_spot-_strikePrice)/_strikePrice)*10000; // bps from strike
+      const _gapAbs=Math.abs(_gapBps);
+      const _gapDir=_gapBps>0?'UP':'DOWN';
+      const _msLeft=(timeState?.minsRemaining||0)*60000+(timeState?.secsRemaining||0)*1000;
+      const _minsLeft=_msLeft/60000;
+      // Hard veto: gap is material AND we're close to settlement AND direction conflicts
+      if(_gapAbs>=30&&_minsLeft<8&&_currentDir!==_gapDir){
+        return{
+          ...call,
+          call:_gapDir,
+          direction:_gapDir,
+          confidence:Math.min(75,50+Math.min(25,_gapAbs/3)), // conviction scales with gap
+          conviction:Math.min(25,_gapAbs/3),
+          reason:`Strike-distance lock · ${_gapDir} · ${_gapBps.toFixed(0)}bps from strike, ${_minsLeft.toFixed(1)}min left — gap dominates`,
+          _v10_7_11_universalFlipped:true,
+          _v10_7_11_flipType:'strike-distance',
+          _v10_7_11_originalDir:_currentDir,
+          _v10_7_11_gapBps:_gapBps,
+          _v10_7_11_minsLeft:_minsLeft,
+        };
+      }
+    }
+    // 3. Bottom/top bounce detection — recent sharp reversal off extreme
+    //   If last 60s shows a sharp move OPPOSITE to our direction (≥15bps),
+    //   we may be catching a falling/rising knife. Flip to match the bounce.
+    const _last60Drift=Number(analysis?.last60sDriftBps)||0;
+    if(Math.abs(_last60Drift)>=15){
+      const _driftDir=_last60Drift>0?'UP':'DOWN';
+      if(_driftDir!==_currentDir){
+        return{
+          ...call,
+          call:_driftDir,
+          direction:_driftDir,
+          confidence:Math.min(70,50+Math.abs(_last60Drift)/2),
+          conviction:Math.min(20,Math.abs(_last60Drift)/2),
+          reason:`Bounce lock · ${_driftDir} · ${_last60Drift>0?'+':''}${_last60Drift.toFixed(0)}bps last 60s — riding the reversal`,
+          _v10_7_11_universalFlipped:true,
+          _v10_7_11_flipType:'bounce',
+          _v10_7_11_originalDir:_currentDir,
+          _v10_7_11_driftBps:_last60Drift,
+        };
+      }
+    }
+    return call; // no flip needed
+  };
+  // Apply V10.7.11 universal override to taraCall (mutates in place)
+  const _v10_7_11_result=_v10_7_11_universalOverride(taraCall);
+  if(_v10_7_11_result&&_v10_7_11_result!==taraCall){
+    Object.keys(_v10_7_11_result).forEach(k=>{taraCall[k]=_v10_7_11_result[k];});
+  }
+
+
   // Three coordinated effects, all gated by the same enable + kill-switch checks:
   //   1. ENTRY  — when lockedCallRef transitions to a new committed lock
   //   2. POLL   — while an order is working, check status every 2s
@@ -35598,6 +35697,7 @@ function TaraApp(){
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
+          _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null,
       };
@@ -35663,7 +35763,7 @@ function TaraApp(){
           const _forceConf=_v107_6.conf;
           taraCallSnapshotRef.current={
             call:_forceDir,direction:_forceDir,confidence:_forceConf,
-            reason:`[V10.7.5 force-commit] ${_forceDir} ${(_forceConf-50).toFixed(0)}pt — system-lock end-of-window, window moving ${_rangeBps.toFixed(0)}bps`,
+            reason:`Directional lock · ${_forceDir} ${(_forceConf-50).toFixed(0)}pt · late-window momentum (${_rangeBps.toFixed(0)}bps range)`,
             atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
             atPosterior:_postNow,
             locked:true,earlyLock:false,
@@ -35791,6 +35891,7 @@ function TaraApp(){
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
+          _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           result:null, // populated at rollover
         };
@@ -36056,6 +36157,7 @@ function TaraApp(){
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
+          _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
@@ -36207,15 +36309,15 @@ function TaraApp(){
           const _forceSnap={
             call:_forceDir,direction:_forceDir,
             confidence:_forceConf,
-            caution:`[V10.7.5 force] ${_forceDir} — mid-range guard suppressed (window moving ${_rangeBps.toFixed(0)}bps)`,
-            reason:`[V10.7.5 force-commit] ${_forceDir} ${(_forceConf-50).toFixed(0)}pt — was V10.3.0 mid-range sitout, window not dead`,
+            caution:`directional lock · ${_forceDir} · ${_rangeBps.toFixed(0)}bps range momentum`,
+            reason:`Directional lock · ${_forceDir} ${(_forceConf-50).toFixed(0)}pt · structural momentum in ${_rangeBps.toFixed(0)}bps window`,
             atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
             atPosterior:_post,
             kalshiAtLock:_kPctNow,
             locked:true,earlyLock:false,
             isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
             samples:0,needSamples:0,
-            tier:'v10_7_5_force_commit',
+            tier:'directional-lock',
             session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
             regime:analysis?.regime||'',
             qScore:Math.round(_qFast),
@@ -36329,15 +36431,15 @@ function TaraApp(){
             const _forceSnap={
               call:_forceDir,direction:_forceDir,
               confidence:_forceConf,
-              caution:`[V10.7.5 force] ${_forceDir} — no-go-edge chop guard suppressed (window moving ${_rangeBps.toFixed(0)}bps)`,
-              reason:`[V10.7.5 force-commit] ${_forceDir} ${(_forceConf-50).toFixed(0)}pt — was V10.3.0 no-go-edge sitout, window not dead`,
+              caution:`directional lock · ${_forceDir} · ${_rangeBps.toFixed(0)}bps range momentum`,
+              reason:`Directional lock · ${_forceDir} ${(_forceConf-50).toFixed(0)}pt · structural momentum in ${_rangeBps.toFixed(0)}bps window`,
               atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
               atPosterior:_post,
               kalshiAtLock:_kPctNow,
               locked:true,earlyLock:false,
               isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
               samples:0,needSamples:0,
-              tier:'v10_7_5_force_commit',
+              tier:'directional-lock',
               session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
               regime:analysis?.regime||'',
               qScore:Math.round(_qFast),
@@ -36447,15 +36549,15 @@ function TaraApp(){
             const _forceSnap={
               call:_forceDir,direction:_forceDir,
               confidence:_forceConf,
-              caution:`[V10.7.5 force] ${_forceDir} — chop guard suppressed (window moving ${_rangeBps.toFixed(0)}bps)`,
-              reason:`[V10.7.5 force-commit] ${_forceDir} ${(_forceConf-50).toFixed(0)}pt — was V10.2.50 chop time-cap sitout, window not dead`,
+              caution:`directional lock · ${_forceDir} · ${_rangeBps.toFixed(0)}bps range momentum`,
+              reason:`Directional lock · ${_forceDir} ${(_forceConf-50).toFixed(0)}pt · structural momentum in ${_rangeBps.toFixed(0)}bps window`,
               atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
               atPosterior:_post,
               kalshiAtLock:_kPctNow,
               locked:true,earlyLock:false,
               isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
               samples:0,needSamples:0,
-              tier:'v10_7_5_force_commit',
+              tier:'directional-lock',
               session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
               regime:analysis?.regime||'',
               qScore:Math.round(_qFast),
@@ -37183,6 +37285,7 @@ function TaraApp(){
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
+          _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null, // populated at rollover scoring
       };
