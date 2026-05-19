@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.4.5-regime-aware-timing';
+const BASELINE_VERSION='2026.05.19-v10.4.7-ml-reenabled-guarded';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.4.5';
+const TARA_VERSION_DISPLAY='Tara 10.4.7';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4306,6 +4306,25 @@ const updateWeights=(weights,tradeLog,result)=>{
   // V134: Use trade direction (UP/DOWN), not raw posterior sign — handles edge cases
   // where posterior is near 50 but trade direction is committed
   const tradeDirSign=last.dir==='UP'?1:last.dir==='DOWN'?-1:Math.sign(last.posterior-50);
+  // V10.4.6 — EV-WEIGHTED GRADIENT MAGNITUDE
+  //   Replace binary W/L reinforcement with $-outcome reinforcement. With Kalshi
+  //   asymmetric payouts, a $0.80 win is much more valuable than a $0.15 win,
+  //   and a $0.85 loss hurts much more than a $0.20 loss. Scale the learning
+  //   delta by the EV magnitude so the model learns "what makes money" not
+  //   just "what wins."
+  //   Normalization: kalshiAtLock=50 is the baseline (gradient = 1.0).
+  //   Cap at 0.5x and 1.5x to prevent extreme swings on outlier trades.
+  let _evMult=1.0;
+  const _kLock=Number(last.kalshiAtLock);
+  if(Number.isFinite(_kLock)&&_kLock>0&&_kLock<100){
+    if(won){
+      // Profit on win = 100 - kalshiAtLock. Cheaper entry = bigger reinforcement.
+      _evMult=Math.max(0.5,Math.min(1.5,(100-_kLock)/50));
+    }else{
+      // Loss on loss = kalshiAtLock. Expensive entry = bigger punishment.
+      _evMult=Math.max(0.5,Math.min(1.5,_kLock/50));
+    }
+  }
   // V9.11.0: SIGNAL TYPE AWARENESS. Most signals are raw weights (gap, momentum, etc.)
   //   with magnitude ~35. The V9.11.0 new signals (htfPatterns, futures) are multipliers
   //   with magnitude ~1.0. A delta of 0.12 (typical) is 0.3% on a raw weight but 12% on
@@ -4323,7 +4342,7 @@ const updateWeights=(weights,tradeLog,result)=>{
     const _bounds=WEIGHT_BOUNDS[k]||[2,55];
     const _isMultiplier=_bounds[1]<=5;
     const _scaleForType=_isMultiplier?(1/30):1.0;
-    let delta=LEARNING_RATE*contribution*conviction*recencyMult*_scaleForType;
+    let delta=LEARNING_RATE*contribution*conviction*recencyMult*_scaleForType*_evMult; // V10.4.6 EV-weighted
     if(won&&aligned)newW[k]+=delta;          // signal helped, win → reward proportional
     else if(won&&!aligned)newW[k]-=delta*0.3; // signal opposed, win anyway → small demote
     else if(!won&&aligned)newW[k]-=delta;     // signal led us to loss → demote fully
@@ -4349,6 +4368,13 @@ const updateRegimeWeights=(regimeWeightsObj,trade,result)=>{
   const totalAbs=Object.values(sig).reduce((s,v)=>s+Math.abs(v),0)||1;
   const conviction=Math.abs(trade.posterior-50)/50;
   const newW={...weights};
+  // V10.4.6 — EV-weighted gradient (mirror of updateWeights logic)
+  let _evMult=1.0;
+  const _kLock=Number(trade.kalshiAtLock);
+  if(Number.isFinite(_kLock)&&_kLock>0&&_kLock<100){
+    if(won)_evMult=Math.max(0.5,Math.min(1.5,(100-_kLock)/50));
+    else _evMult=Math.max(0.5,Math.min(1.5,_kLock/50));
+  }
   Object.keys(sig).forEach(k=>{
     if(!(k in newW))return;
     const contribution=Math.abs(sig[k])/totalAbs;
@@ -4360,7 +4386,7 @@ const updateRegimeWeights=(regimeWeightsObj,trade,result)=>{
     // V9.11.0: same multiplier-vs-raw-weight scaling as in updateWeights. Multipliers
     //   have magnitude ~1.0 so deltas designed for magnitude ~35 would swing them wildly.
     const _scaleForType=_isMultiplier?(1/30):1.0;
-    let delta=(LEARNING_RATE*2.5)*contribution*conviction*_scaleForType;
+    let delta=(LEARNING_RATE*2.5)*contribution*conviction*_scaleForType*_evMult; // V10.4.6 EV-weighted
     // V143: Per-regime LR multiplier raised 1.2 → 2.5. Previous setting produced
     //       ~1-3pt regime weight differentiation after hundreds of trades. With 2.5x,
     //       regimes meaningfully diverge after ~30-50 trades. Bounds (5-65) keep clamps intact.
@@ -9472,21 +9498,28 @@ const computeV99Posterior=(params)=>{
       const _mlConfidenceBoost=Math.round((_mlProb-0.5)*20); // -10 to +10
       const _currentLeanSign=totalScore>5?1:totalScore<-5?-1:0; // 0 = no clear lean
       const _mlScore=_currentLeanSign*_mlConfidenceBoost;
-      // V10.2.41 PHASE 1 — DISABLED: ML signal showed 49.3% accuracy across 507
-      //   fires in 751-trade audit. That's random output — model hasn't learned.
-      //   Still compute _mlScore for telemetry, but don't apply to totalScore.
-      //   When the ML model is properly retrained, re-enable by removing this guard.
-      const _ML_DISABLED=true; // V10.2.41 — disable until model is retrained
-      if(!_ML_DISABLED&&Math.abs(_mlScore)>=2&&_currentLeanSign!==0){
+      // V10.4.7 — ML SIGNAL RE-ENABLED with strict activation guards.
+      //   V10.2.41 disabled ML because it was 49.3% accurate (random output).
+      //   V10.4.7 keeps it computed for telemetry, but only APPLIES it when:
+      //     1) Model accuracy ≥ 55% (above random) AND
+      //     2) |_mlScore| ≥ 5 (meaningful signal magnitude) AND
+      //     3) _currentLeanSign !== 0 (underlying signals show clear lean)
+      //   Each condition is conservative. The model will activate naturally
+      //   once accumulated post-V10.4 trades push its accuracy past 55%.
+      const _mlAccuracy=Number(_mlModel?.accuracy)||0;
+      const _mlActivated=_mlAccuracy>=0.55&&Math.abs(_mlScore)>=5&&_currentLeanSign!==0;
+      if(_mlActivated){
         totalScore+=_mlScore;
         rawSignalScores.ml=_mlScore;
         const _leanLabel=_currentLeanSign>0?'UP':'DOWN';
-        reasoning.push(`[ML] Model ${(_mlProb*100).toFixed(0)}% WIN chance × ${_leanLabel}-lean → ${_mlScore>0?'+':''}${_mlScore} (trained on ${_mlModel.nTrades} trades, ${(_mlModel.accuracy*100).toFixed(0)}% accuracy)`);
+        reasoning.push(`[V10.4.7 ML] ${(_mlProb*100).toFixed(0)}% WIN × ${_leanLabel}-lean → ${_mlScore>0?'+':''}${_mlScore} (trained ${_mlModel.nTrades}t, ${(_mlAccuracy*100).toFixed(0)}% acc)`);
       } else {
-        // V10.2.41: still track ML output as telemetry (so we can audit if it gets better)
-        // but don't apply to totalScore. Once it improves, flip _ML_DISABLED.
-        rawSignalScores.ml=_mlScore; // shadow tracking only
-        if(_ML_DISABLED&&Math.abs(_mlScore)>=5)reasoning.push(`[ML-DISABLED] Would have applied ${_mlScore>0?'+':''}${_mlScore} (V10.2.41 — model is 49% accurate, suppressed)`);
+        // Track ML output as telemetry (so we can audit gain over time)
+        rawSignalScores.ml=_mlScore;
+        if(Math.abs(_mlScore)>=5){
+          const _why=_mlAccuracy<0.55?`acc ${(_mlAccuracy*100).toFixed(0)}% < 55%`:_currentLeanSign===0?'no clear lean':'|score|<5';
+          reasoning.push(`[V10.4.7 ML-SHADOW] Would have applied ${_mlScore>0?'+':''}${_mlScore} (suppressed: ${_why})`);
+        }
       }
     }
   }
@@ -25987,12 +26020,20 @@ function TaraApp(){
         try{console.info(`[ML] ${resolved.length}/${TARA_ML_MIN_TRADES} resolved trades with signals — need more data`);}catch(_){}
         return;
       }
-      const model=taraMLTrain(resolved);
+      // V10.4.7 — DATA QUALITY FILTER FOR TRAINING.
+      //   When enough post-V10.4 trades exist (n≥150), train ONLY on those.
+      //   The pre-V10.4 era had a logging bug where many trades had all-zero
+      //   signal vectors, which taught the model noise. The _v10_4_0_calibration
+      //   stamp marks clean-data trades. Falls back to all data below the threshold.
+      const _v104Era=resolved.filter(e=>e._v10_4_0_calibration!=null);
+      const _trainOn=_v104Era.length>=150?_v104Era:resolved;
+      const _eraLabel=_v104Era.length>=150?'V10.4+ era':'all-data';
+      const model=taraMLTrain(_trainOn);
       if(model){
         setTaraMLModel(model);
         try{
           localStorage.setItem('taraML_model_v1',JSON.stringify(model));
-          console.info(`[ML] Trained on ${model.nTrades} trades — ${(model.accuracy*100).toFixed(1)}% acc. Top: ${model.importance.slice(0,3).map(f=>`${f.name}(${f.weight>=0?'+':''}${f.weight.toFixed(3)})`).join(', ')}`);
+          console.info(`[V10.4.7 ML] Trained on ${model.nTrades}t (${_eraLabel}) — ${(model.accuracy*100).toFixed(1)}% acc. Top: ${model.importance.slice(0,3).map(f=>`${f.name}(${f.weight>=0?'+':''}${f.weight.toFixed(3)})`).join(', ')}`);
         }catch(_){}
       }
     },2000);
