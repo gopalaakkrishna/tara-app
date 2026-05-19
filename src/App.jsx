@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.6.4-calibration-pass-loosen';
+const BASELINE_VERSION='2026.05.19-v10.6.5-lower-quality-floor';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.6.4';
+const TARA_VERSION_DISPLAY='Tara 10.6.5';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13835,8 +13835,8 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   setAutoExecSettings(prev=>({
                     ...prev,
                     minTier:'tape',
-                    minQualityScore:40,
-                    maxEdgePt:8, // V10.6.4: loosened back from 6 → 8 (was over-filtering)
+                    minQualityScore:30, // V10.6.5: loosened from 40
+                    maxEdgePt:8,
                     tradeTimingMode:'advisory',
                     skipTimeCapCommit:true,
                     tccSmartBypass:true,
@@ -13883,8 +13883,8 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                   setAutoExecSettings(prev=>({
                     ...prev,
                     minTier:'tape',
-                    minQualityScore:50,
-                    maxEdgePt:7, // V10.6.4: loosened from 5 → 7 (was over-filtering; still tighter than original 8)
+                    minQualityScore:40, // V10.6.5: loosened from 50
+                    maxEdgePt:7,
                     tradeTimingMode:'advisory',
                     skipTimeCapCommit:true,
                     tccSmartBypass:true,
