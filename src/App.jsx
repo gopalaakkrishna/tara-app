@@ -3673,10 +3673,10 @@ const evaluateTradeTimingV1=(inputs)=>{
     const _regime=String(call.regime||'').toUpperCase();
     const _penalty=
       _regime==='TRENDING DOWN'?-6:    // late locks here actually win
-      _regime==='TRENDING UP'?-15:     // late locks here are dangerous
-      _regime==='HIGH VOL CHOP'?-15:   // late locks here noisy
-      -12;                              // RANGE-CHOP / SHORT SQUEEZE / default
-    _bump('tier',_penalty,`time-cap-commit · ${_regime||'?'} → ${_penalty>0?'+':''}${_penalty}pt (V10.4.5 regime-aware)`);
+      _regime==='TRENDING UP'?-10:     // V10.6.4: was -15 — softer
+      _regime==='HIGH VOL CHOP'?-10:   // V10.6.4: was -15 — softer
+      -10;                              // V10.6.4: default was -12, now -10 (overall softer)
+    _bump('tier',_penalty,`time-cap-commit · ${_regime||'?'} → ${_penalty>0?'+':''}${_penalty}pt (V10.4.5 regime-aware, V10.6.4 softened)`);
   }
   else if(_tier==='timer-commit')_bump('tier',-8,'timer-commit — ETA expired (lifetime WR ~64%)');
   else if(_tier==='forced')_bump('tier',-1,'user-forced lock (lifetime WR 67%)');
@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.6.3a-hotfix-posterior-init';
+const BASELINE_VERSION='2026.05.19-v10.6.4-calibration-pass-loosen';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.6.3a';
+const TARA_VERSION_DISPLAY='Tara 10.6.4';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -3894,7 +3894,7 @@ const TARA_VERSION_DISPLAY='Tara 10.6.3a';
 // per cell. Cells with n<CALIBRATION_TRUST_FLOOR fall back to seed values.
 // Feature-flagged so we can rollback instantly if anything goes sideways.
 const USE_V104_CALIBRATION_TABLES=true; // Set false for instant rollback
-const V104_CALIBRATION_TRUST_FLOOR=20; // Cells with n<20 use seed values
+const V104_CALIBRATION_TRUST_FLOOR=15; // V10.6.4: lowered from 20 — more cells active sooner
 const V104_ROLLING_WINDOW=200; // Per-cell rolling window for auto-recal
 
 // V10.4.1 — EV-AWARE DELAY GATE (Module A)
@@ -3902,10 +3902,12 @@ const V104_ROLLING_WINDOW=200; // Per-cell rolling window for auto-recal
 // lock when entry is k$50+ AND conviction sub-85% AND time remaining >180s.
 // Never sit-out. Always locks eventually (deadline = 180s remaining).
 // See _v10_4_1_delayed telemetry for fire rate and triggers.
+// V10.6.4: loosened — fires less often. Threshold raised, conviction lowered,
+//   deadline earlier so locks happen sooner.
 const USE_V104_1_DELAY_GATE=true;
-const V104_1_KALSHI_EXPENSIVE_THRESHOLD=50; // k$50+ is the EV-cliff zone
-const V104_1_CONVICTION_STRONG_THRESHOLD=85; // 85%+ justifies expensive entry
-const V104_1_DEADLINE_SECONDS_LEFT=180; // Lock by 3 minutes remaining no matter what
+const V104_1_KALSHI_EXPENSIVE_THRESHOLD=55; // V10.6.4: was 50 — only truly expensive entries trigger
+const V104_1_CONVICTION_STRONG_THRESHOLD=80; // V10.6.4: was 85 — 80%+ skips the delay
+const V104_1_DEADLINE_SECONDS_LEFT=240; // V10.6.4: was 180 — lock by 4 min remaining (was 3)
 
 // V10.6.3 — SLIPPAGE-AWARE EV
 //   Real Kalshi fills cost ~1¢ more than the lock-time YES mid price due to
@@ -4054,9 +4056,9 @@ function lookupV104Cell(table,regime,dir,confidence){
 //   when a cell has n≥10 AND its weighted WR is meaningfully off baseline (>10pp).
 //   Magnitude intentionally small (±4pt) — DoW×hour can be confounded by recent
 //   session anomalies; we only tilt, never override.
-const V106_2_DOWHOUR_MIN_SAMPLES=10;
+const V106_2_DOWHOUR_MIN_SAMPLES=15; // V10.6.4: was 10 — require more data per cell
 const V106_2_DOWHOUR_BASELINE_WR=0.60; // typical lifetime WR
-const V106_2_DOWHOUR_MAX_SHIFT=4; // ±4pt cap
+const V106_2_DOWHOUR_MAX_SHIFT=3; // V10.6.4: was 4 — softer tilt
 const _DOW_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 function buildDowHourCalibration(callLog){
@@ -9688,7 +9690,7 @@ const computeV99Posterior=(params)=>{
       const _downs=_last5.filter(b=>b<0).length;
       if(_ups>=4||_downs>=4){
         const _streakDir=_ups>=4?'UP':'DOWN';
-        const _shift=_streakDir==='UP'?-5:5;
+        const _shift=_streakDir==='UP'?-3:3; // V10.6.4: softened from 5pt → 3pt
         const _newPost=Math.max(15,Math.min(85,posterior+_shift));
         _v104_3_windowCtx={
           streakDir:_streakDir,
@@ -13834,7 +13836,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     ...prev,
                     minTier:'tape',
                     minQualityScore:40,
-                    maxEdgePt:6, // V10.4.2: tightened from 8. Audit: edge 20+pt = 59% WR, 30+pt = 59%. High-edge trades underperform.
+                    maxEdgePt:8, // V10.6.4: loosened back from 6 → 8 (was over-filtering)
                     tradeTimingMode:'advisory',
                     skipTimeCapCommit:true,
                     tccSmartBypass:true,
@@ -13882,7 +13884,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     ...prev,
                     minTier:'tape',
                     minQualityScore:50,
-                    maxEdgePt:5, // V10.4.2: tightened from 8. HAWK is the discipline preset — tightest edge cap. Audit shows edge 0-5pt is the sweet spot (74% WR, +$0.24/trade).
+                    maxEdgePt:7, // V10.6.4: loosened from 5 → 7 (was over-filtering; still tighter than original 8)
                     tradeTimingMode:'advisory',
                     skipTimeCapCommit:true,
                     tccSmartBypass:true,
