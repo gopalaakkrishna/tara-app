@@ -3663,7 +3663,21 @@ const evaluateTradeTimingV1=(inputs)=>{
   else if(_tier==='structural')_bump('tier',+4,'structural-led tier (lifetime WR 60%)');
   else if(_tier==='tape')_bump('tier',+6,'tape-led tier (lifetime WR 68%)');
   else if(_tier==='single')_bump('tier',-2,'single-signal tier — marginal');
-  else if(_tier==='time-cap-commit')_bump('tier',-12,'time-cap-commit — deadline-forced lock (lifetime WR 62%)');
+  else if(_tier==='time-cap-commit'){
+    // V10.4.5 — REGIME-AWARE TIME-CAP PENALTY
+    // Audit: time-cap locks behave differently per regime.
+    //   TRENDING DOWN sec 60-120: 76% WR (+$0.36) → don't penalize as hard
+    //   RANGE-CHOP sec 60-120: 50% WR (-$0.01) → keep penalty
+    //   TRENDING UP late: 20% WR → penalize more
+    //   HIGH VOL CHOP: noisy → penalize more
+    const _regime=String(call.regime||'').toUpperCase();
+    const _penalty=
+      _regime==='TRENDING DOWN'?-6:    // late locks here actually win
+      _regime==='TRENDING UP'?-15:     // late locks here are dangerous
+      _regime==='HIGH VOL CHOP'?-15:   // late locks here noisy
+      -12;                              // RANGE-CHOP / SHORT SQUEEZE / default
+    _bump('tier',_penalty,`time-cap-commit · ${_regime||'?'} → ${_penalty>0?'+':''}${_penalty}pt (V10.4.5 regime-aware)`);
+  }
   else if(_tier==='timer-commit')_bump('tier',-8,'timer-commit — ETA expired (lifetime WR ~64%)');
   else if(_tier==='forced')_bump('tier',-1,'user-forced lock (lifetime WR 67%)');
   else _bump('tier',0,`unknown tier '${_tier||'(empty)'}'`);
@@ -3866,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.4.4-mae-mfe-aware-learning';
+const BASELINE_VERSION='2026.05.19-v10.4.5-regime-aware-timing';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.4.4';
+const TARA_VERSION_DISPLAY='Tara 10.4.5';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
