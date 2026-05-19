@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.6.8-force-commit-postprocessor';
+const BASELINE_VERSION='2026.05.19-v10.6.8a-whitelist-force-commit';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.6.8';
+const TARA_VERSION_DISPLAY='Tara 10.6.8a';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32690,49 +32690,40 @@ function TaraApp(){
       },
     };
   })();
-  // ═══════════════════════════════════════════════════════════════════════════
-  // V10.6.8 — FORCE-COMMIT POST-PROCESSOR
-  // ═══════════════════════════════════════════════════════════════════════════
-  // User feedback (May 19): "we are only not locking. price swing is very low
-  //   and it is literally 50-50 till last min". The engine has many soft sitout
-  //   gates that block calls when posterior shows meaningful lean (60+ or 40-).
-  //   This post-processor converts soft sitouts → directional locks when:
-  //     1. Posterior has decisive lean (|post-50| >= 8)
-  //     2. Not a hard veto (tape-super-opposes, kalshi-extreme-disagree)
-  //     3. We've observed for at least 30s (some signal data exists)
-  //   True coin-flip windows (post 42-58) still sit out — those genuinely
-  //   have no edge regardless of how long we wait.
+  // V10.6.8a — FORCE-COMMIT WHITELIST (respects full signal stack)
+  // Critique from user (May 19, 1pm): V10.6.8's blacklist approach was wrong —
+  //   it overrode tape/kalshi/FGT signal-conflict sitouts. That's chasing
+  //   posterior direction without listening to the rest of the signal stack.
+  //   FIX: switch to whitelist. ONLY override the two pure-floor sitouts that
+  //   have no signal-conflict reasoning behind them. Every signal-disagreement
+  //   sitout is preserved.
   //
-  // Hard vetos that STAY sitting out:
-  //   - "tape ... opposite, fighting flow" (tape super-opposes)
-  //   - "Kalshi N% says opposite, no override" (extreme kalshi disagree)
-  //   - "regime in flux" (transition state)
-  // Soft vetos that NOW lock instead:
-  //   - "Coin flip — only Xpt off neutral" (when actually |post-50|>=8)
-  //   - "Signal weak — quality X/Y" (when posterior shows lean)
-  //   - "FGT mixed across timeframes" (when other signals strong)
-  //   - "too late for single-signal"
-  //   - "tape ... disagrees, q+conv weak"
+  // Whitelisted (CAN override → directional commit):
+  //   - "Signal weak — quality X/Y"          (Q_FLOOR, structural)
+  //   - "Coin flip — only Xpt off neutral"   (CONV_FLOOR, structural)
+  // Everything else preserves sit-out:
+  //   - tape opposes, kalshi disagrees, FGT mixed, regime in flux,
+  //     trend dying, too-late, no consensus, etc.
+  //
+  // Conditions for override even on whitelisted reasons:
+  //   1. |posterior - 50| >= 8 (decisive lean, not a true coin flip)
+  //   2. We're past initial observation (engine is in WATCHING phase)
   const _v10_6_8_postProcess=(call)=>{
-    if(!call||call.call!=='SIT_OUT')return call; // not a sit-out, pass through
+    if(!call||call.call!=='SIT_OUT')return call; // pass through non-sitouts
     const _post=Number(call.confidence)||Number(analysis?.rawProbAbove)||50;
     const _convict=Math.abs(_post-50);
-    // Soft-sitout detection: must have meaningful lean
     if(_convict<8)return call; // true coin flip — preserve sitout
-    // Hard-veto preservation: don't override these
     const _reason=String(call.reason||'').toLowerCase();
-    const _hardVetos=[
-      'opposite, fighting flow',     // tape super-opposes
-      'no override',                 // kalshi extreme disagrees
-      'regime in flux',              // regime transition
-      'engine still loading',        // bootstrap
-      'searching for direction',     // search phase
-      'new window',                  // first 5s
-      'observing fresh data',        // search phase
-      'trend dying',                 // regime transition
-    ];
-    if(_hardVetos.some(v=>_reason.includes(v)))return call;
-    // FORCE COMMIT — convert sitout → directional lock
+    // WHITELIST: only these two specific reasons get overridden
+    const _isFloorOnly=(
+      _reason.startsWith('signal weak — quality')||
+      _reason.startsWith('coin flip — only')
+    );
+    if(!_isFloorOnly)return call; // signal conflict exists — respect it, preserve sitout
+    // Phase check — only override during WATCHING (engine has processed signals)
+    if(call.phase!=='WATCHING')return call;
+    // SAFE TO FORCE COMMIT — engine's only complaint was a structural floor,
+    //   no signal stack conflict, conviction is genuine
     const _dir=_post>=50?'UP':'DOWN';
     return{
       ...call,
@@ -32740,7 +32731,7 @@ function TaraApp(){
       direction:_dir,
       confidence:_post,
       conviction:_convict,
-      reason:`[V10.6.8 force] ${_dir} ${_convict.toFixed(0)}pt lean — was sitout (${call.reason})`,
+      reason:`[V10.6.8a force] ${_dir} ${_convict.toFixed(0)}pt — floor-only sitout overridden (was: ${call.reason})`,
       _v10_6_8_forced:true,
       _v10_6_8_originalReason:call.reason,
     };
