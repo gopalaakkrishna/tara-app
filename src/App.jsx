@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.6.8b-dead-window-only-sitout';
+const BASELINE_VERSION='2026.05.19-v10.7.4-side-flip-layer';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.6.8b';
+const TARA_VERSION_DISPLAY='Tara 10.7.4';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32754,6 +32754,108 @@ function TaraApp(){
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // V10.7.4 — SIDE-FLIP LAYER
+  // ═══════════════════════════════════════════════════════════════════════════
+  // User rule: never skip, never gate. ONLY way to convert losses → wins is to
+  //   pick the BETTER SIDE more often. This layer runs after engine commits a
+  //   direction (UP or DOWN) and checks 4 contradicting-evidence signals. If
+  //   the evidence overwhelmingly disagrees with the committed side, flip it.
+  //
+  // Evidence checks (each contributes 1 flip vote):
+  //   1. TAPE: 2+ of 3 tape windows show 65%+ opposite direction
+  //   2. MULTI-TF: all 3 timeframes (1m/5m/15m) trend channel disagree
+  //   3. LAST-60s DRIFT: if available, strong opposite drift in late window
+  //   4. GRAND TREND + TC SLOPE: both 5m/15m structure pointing opposite
+  //
+  // Flip triggers when 2+ votes agree the side is wrong. Single contradicting
+  //   signal doesn't flip (could be noise). Two or more = real conflict.
+  // Telemetry: _v10_7_4_flipped, _v10_7_4_votes, _v10_7_4_originalDir
+  const _v10_7_4_sideFlip=(call)=>{
+    if(!call||(call.call!=='UP'&&call.call!=='DOWN'))return call; // only flip directional calls
+    const _currentDir=call.call;
+    const _opposite=_currentDir==='UP'?'DOWN':'UP';
+    let _flipVotes=0;
+    const _voteReasons=[];
+    // CHECK 1 — Tape windows
+    const _tw=tapeWindows;
+    if(_tw&&_tw.w15&&_tw.w30){
+      const _tapeReadings=[_tw.w5?.buyPct,_tw.w15?.buyPct,_tw.w30?.buyPct].filter(p=>p!=null);
+      if(_tapeReadings.length>=2){
+        // Counting tape windows showing 65%+ AGAINST our direction
+        const _againstThreshold=_currentDir==='UP'?(p=>p<=35):(p=>p>=65);
+        const _againstCount=_tapeReadings.filter(_againstThreshold).length;
+        if(_againstCount>=2){
+          _flipVotes++;
+          _voteReasons.push(`tape ${_againstCount}/${_tapeReadings.length} windows opposite`);
+        }
+      }
+    }
+    // CHECK 2 — Multi-TF Trend Channel alignment AGAINST direction
+    //   Already-computed in analysis: trendChannel (5m). Use slope sign as 5m vote.
+    //   Also check grandTrend (longer TF synthesis).
+    const _tc=analysis?.trendChannel;
+    const _gt=analysis?.grandTrend;
+    let _tfAgainst=0;
+    let _tfTotal=0;
+    if(_tc?.valid){
+      const _tcSlope=Number(_tc.slopeBpsPerBar)||0;
+      _tfTotal++;
+      if((_currentDir==='UP'&&_tcSlope<=-0.5)||(_currentDir==='DOWN'&&_tcSlope>=0.5))_tfAgainst++;
+    }
+    if(_gt?.valid){
+      _tfTotal++;
+      if((_currentDir==='UP'&&_gt.dir==='DOWN'&&_gt.strengthBps>=20)||
+         (_currentDir==='DOWN'&&_gt.dir==='UP'&&_gt.strengthBps>=20))_tfAgainst++;
+    }
+    if(_tfTotal>=2&&_tfAgainst===_tfTotal){
+      _flipVotes++;
+      _voteReasons.push(`${_tfAgainst}/${_tfTotal} TF structure opposite`);
+    }
+    // CHECK 3 — Last-60s drift (if window has elapsed enough)
+    //   Pull from analysis if available, otherwise compute from priceMemoryRef
+    const _last60Drift=Number(analysis?.last60sDriftBps)||0;
+    if(Math.abs(_last60Drift)>=5){
+      const _driftDir=_last60Drift>0?'UP':'DOWN';
+      if(_driftDir===_opposite){
+        _flipVotes++;
+        _voteReasons.push(`last 60s ${_last60Drift>0?'+':''}${_last60Drift.toFixed(0)}bps opposite`);
+      }
+    }
+    // CHECK 4 — Tape velocity / 5s acceleration
+    //   tapeAccel divergence often signals reversal
+    const _tw5=tapeWindows?.w5;
+    if(_tw5&&_tw5.buyPct!=null){
+      // If 5s tape shows >70% opposite direction in a sharp move, that's real-time pressure
+      const _t5Against=_currentDir==='UP'?_tw5.buyPct<=30:_tw5.buyPct>=70;
+      if(_t5Against){
+        _flipVotes++;
+        _voteReasons.push(`5s tape ${_tw5.buyPct?.toFixed(0)}% opposite (real-time)`);
+      }
+    }
+    // FLIP DECISION — 2+ votes agree the side is wrong
+    if(_flipVotes>=2){
+      return{
+        ...call,
+        call:_opposite,
+        direction:_opposite,
+        // Keep posterior magnitude but flip sign relative to 50
+        confidence:100-call.confidence,
+        conviction:Math.abs(call.confidence-50),
+        reason:`[V10.7.4 SIDE-FLIP] flipped ${_currentDir}→${_opposite} (${_flipVotes} votes: ${_voteReasons.join(', ')}) — was: ${call.reason}`,
+        _v10_7_4_flipped:true,
+        _v10_7_4_votes:_flipVotes,
+        _v10_7_4_voteReasons:_voteReasons,
+        _v10_7_4_originalDir:_currentDir,
+      };
+    }
+    return call;
+  };
+  const _v10_7_4_result=_v10_7_4_sideFlip(taraCall);
+  if(_v10_7_4_result&&_v10_7_4_result!==taraCall){
+    Object.keys(_v10_7_4_result).forEach(k=>{taraCall[k]=_v10_7_4_result[k];});
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // V9.3.0: KALSHI AUTO-EXECUTION — fire orders on lock, exit on threshold/time
   // ═══════════════════════════════════════════════════════════════════════════
   // Three coordinated effects, all gated by the same enable + kill-switch checks:
@@ -35154,6 +35256,7 @@ function TaraApp(){
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
+          _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null,
       };
@@ -35313,6 +35416,7 @@ function TaraApp(){
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
+          _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           result:null, // populated at rollover
         };
@@ -35577,6 +35681,7 @@ function TaraApp(){
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
+          _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
@@ -36534,6 +36639,7 @@ function TaraApp(){
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
+          _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null, // populated at rollover scoring
       };
