@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.4.3-multi-window-memory';
+const BASELINE_VERSION='2026.05.19-v10.4.4-mae-mfe-aware-learning';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.4.3';
+const TARA_VERSION_DISPLAY='Tara 10.4.4';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26972,13 +26972,39 @@ function TaraApp(){
     //   - EARLY_PEAK:    peaked early, sustained loss → 75% gradient (partial misread)
     //   - WRONG_FROM_START: never above water → 100% gradient (genuine misread)
     //   - WHALE_SPIKE / MACRO_SHOCK: handled by existing shock-dampening (25%)
+    // V10.4.4 extensions:
+    //   - NARROW_SETTLEMENT_LOSS: lost <3bps, BRTI averaging caught us → 30% (signals right, settlement wrong)
+    //   - EXPENSIVE_ENTRY_LOSS: k$60+ at lock → 60% (cost was the issue not the signal)
+    //   - WRONG_DIRECTION: lost >15bps → 100% (genuine miss, full punishment)
     const _lossPattern=resolvedTrade.lossPattern;
-    const _pathDampMultiplier=finalResult==='LOSS'&&_lossPattern&&!_isShockLoss?(
+    let _pathDampMultiplier=finalResult==='LOSS'&&_lossPattern&&!_isShockLoss?(
       _lossPattern==='LATE_REVERSAL'?0.30:
       _lossPattern==='MID_REVERSAL'?0.50:
       _lossPattern==='EARLY_PEAK'?0.75:
+      _lossPattern==='NARROW_SETTLEMENT_LOSS'?0.30:
+      _lossPattern==='EXPENSIVE_ENTRY_LOSS'?0.60:
+      _lossPattern==='WRONG_DIRECTION'?1.0:
       1.0 // WRONG_FROM_START or unknown → full
     ):1.0;
+    // V10.4.4: MAE/MFE QUALITY MULTIPLIER
+    //   On WINS, modulate by adverse excursion — clean wins reinforce more than
+    //   lucky comebacks. On LOSSES, modulate by favorable excursion — losses
+    //   where signals were right initially punish less.
+    //   These STACK on top of path-dampening so a "narrow settlement loss with
+    //   big MFE" gets near-zero gradient (signals were right, settlement caught).
+    let _qualityMult=1.0;
+    if(finalResult==='WIN'){
+      const _mae=Math.abs(Number(resolvedTrade.maxAdverseExcursionBps||0));
+      if(_mae>=8)_qualityMult=0.5;      // big dip mid-trade = lucky win
+      else if(_mae>=4)_qualityMult=0.75; // some dip = moderate quality
+      else _qualityMult=1.0;             // clean win, full reinforcement
+    }else if(finalResult==='LOSS'){
+      const _mfe=Math.abs(Number(resolvedTrade.maxFavorableExcursionBps||0));
+      if(_mfe>=10)_qualityMult=0.4;     // we were clearly winning before this lost
+      else if(_mfe>=5)_qualityMult=0.7;  // some upside seen, partial signal validity
+      else _qualityMult=1.0;             // never really winning, signals were off
+    }
+    _pathDampMultiplier=_pathDampMultiplier*_qualityMult;
     const _isPathDampened=_pathDampMultiplier<1.0;
     if(_isShockLoss){
       try{console.info('[V8.5] Shock loss detected — dampening gradient descent. Pattern:',resolvedTrade.lossPattern);}catch(_){}
