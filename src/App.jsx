@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.4.7-ml-reenabled-guarded';
+const BASELINE_VERSION='2026.05.19-v10.5.1-brti-cross-exchange-phase1';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.4.7';
+const TARA_VERSION_DISPLAY='Tara 10.5.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -25464,6 +25464,20 @@ function TaraApp(){
   const[currentPrice,setCurrentPrice]=useState(null);
   const[tickDirection,setTickDirection]=useState(null);
   const currentPriceRef=useRef(null);
+  // ─── V10.5.1: CROSS-EXCHANGE BRTI APPROXIMATION ────────────────────────
+  //   Kalshi settles on BRTI (Bitcoin Real-Time Index) — a 60-second trimmed
+  //   mean from 8 institutional exchanges. We can't get the BRTI feed directly
+  //   (institutional pricing), but we can APPROXIMATE it by polling 4 consumer
+  //   exchanges (Coinbase, Kraken, OKX, Bitstamp) and computing a trimmed mean.
+  //
+  //   Phase 1 (V10.5.1): Just COLLECT and TELEMETER. Compare brtiApprox to
+  //   Tara's single-source currentPrice. If they diverge meaningfully, we'll
+  //   know — Phase 2 will wire it into the engine.
+  //
+  //   Sample shape: { p: number, t: timestamp, sources: [{name, price}] }
+  //   State holds: { current: trimmedMean, samples: [last 60s], lastUpdate, diverged }
+  const[brtiApprox,setBrtiApprox]=useState(null);
+  const _brtiSamplesRef=useRef([]); // rolling 60s window of multi-exchange samples
   // ─── V9.8.18: TARA TOAST SYSTEM ─────────────────────────────────────────
   // Stack of active popup notifications. State is array-of-toasts; per-kind cooldowns
   //   live on a ref so successive setToasts calls don't lose dedup state. pushToast
@@ -28057,6 +28071,73 @@ function TaraApp(){
   // Live price — V9.8.4 source-aware (Coinbase / Kraken / Bitstamp via PRICE_SOURCES)
   //   Tracks lastPriceChangeRef so the stale-tick guard can detect frozen feeds.
   useEffect(()=>{let last=0;let _lastTradeId=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();/* V9.8.12: stale CDN guard — Coinbase ticker has monotonic trade_id. If a fetch returns an older id than we've already seen, the edge cache is replaying a stale response (this happened post-CB-outage 2026-05-07: 1-2s flashes back to last night's frozen price). Discard. Sources without parseTradeId (Kraken, OKX) skip this check. */if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_newId&&_lastTradeId&&_newId<_lastTradeId)return;if(_newId)_lastTradeId=_newId;}const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);},[currentAsset,priceSource]);
+
+  // V10.5.1 — CROSS-EXCHANGE BRTI APPROXIMATION (Phase 1: collect + telemeter only)
+  //   Poll 4 exchanges every 3s in parallel. Compute trimmed mean across
+  //   available sources (drop min + max, average the rest if ≥3 succeeded;
+  //   simple mean if only 2; null if <2). Keep 60-second rolling window of
+  //   per-poll trimmed means and expose the 60s-average as the BRTI approx
+  //   (matching Kalshi's actual settlement window). Read-only; not wired
+  //   into engine yet.
+  useEffect(()=>{
+    const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;
+    // Bitstamp ticker — public REST, CORS-enabled. asset 'BTC' → btcusd, 'ETH' → ethusd
+    const _bitstampUrl=`https://www.bitstamp.net/api/v2/ticker/${currentAsset==='BTC'?'btcusd':'ethusd'}/`;
+    const _fetchOne=async(url,parsePrice,name)=>{
+      try{
+        const r=await fetch(url,{cache:'no-store'});
+        if(!r.ok)return null;
+        const d=await r.json();
+        const p=parsePrice(d);
+        return p&&Number.isFinite(p)&&p>0?{name,price:p}:null;
+      }catch(_){return null;}
+    };
+    const _poll=async()=>{
+      const _cb=PRICE_SOURCES.coinbase;
+      const _kr=PRICE_SOURCES.kraken;
+      const _ox=PRICE_SOURCES.okx;
+      const _results=await Promise.all([
+        _fetchOne(_cb.url(_cfg,currentAsset),_cb.parsePrice,'CB'),
+        _fetchOne(_kr.url(_cfg,currentAsset),_kr.parsePrice,'KR'),
+        _fetchOne(_ox.url(_cfg,currentAsset),_ox.parsePrice,'OX'),
+        _fetchOne(_bitstampUrl,(d)=>d?.last?parseFloat(d.last):null,'BS'),
+      ]);
+      const _ok=_results.filter(x=>x&&x.price>0);
+      if(_ok.length<2)return; // need at least 2 sources
+      // Trimmed mean: drop min and max if ≥3 sources, simple mean if 2
+      let _trimmed;
+      if(_ok.length>=3){
+        const _sorted=[..._ok].sort((a,b)=>a.price-b.price);
+        const _middle=_sorted.slice(1,-1); // drop top + bottom
+        _trimmed=_middle.reduce((s,x)=>s+x.price,0)/_middle.length;
+      }else{
+        _trimmed=(_ok[0].price+_ok[1].price)/2;
+      }
+      const _now=Date.now();
+      // Add to rolling 60s window
+      _brtiSamplesRef.current.push({p:_trimmed,t:_now,sources:_ok.map(x=>x.name)});
+      _brtiSamplesRef.current=_brtiSamplesRef.current.filter(s=>_now-s.t<60000);
+      // 60s-average matches Kalshi's real BRTI window
+      const _samples=_brtiSamplesRef.current;
+      if(_samples.length===0)return;
+      const _avgPrice=_samples.reduce((s,x)=>s+x.p,0)/_samples.length;
+      // Divergence from single-source feed
+      const _singlePrice=Number(currentPriceRef.current)||null;
+      const _divBps=(_singlePrice&&_avgPrice)?((_singlePrice-_avgPrice)/_avgPrice)*10000:null;
+      setBrtiApprox({
+        current:Math.round(_avgPrice*100)/100,
+        instant:Math.round(_trimmed*100)/100,
+        samples60s:_samples.length,
+        sources:_ok.map(x=>x.name),
+        sourceCount:_ok.length,
+        divergenceBps:_divBps!=null?Math.round(_divBps*10)/10:null,
+        lastUpdate:_now,
+      });
+    };
+    _poll(); // immediate
+    const iv=setInterval(_poll,3000); // every 3s = ~20 samples/min
+    return()=>{clearInterval(iv);};
+  },[currentAsset]);
 
   // V9.8.4: Stale-tick monitor — runs once per second, computes age of last
   //   price change. UI reads feedStaleSeconds for banner + lock-gate decisions.
@@ -34786,6 +34867,7 @@ function TaraApp(){
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
+          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null,
       };
@@ -34943,6 +35025,7 @@ function TaraApp(){
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
+          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           result:null, // populated at rollover
         };
@@ -35205,6 +35288,7 @@ function TaraApp(){
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
+          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
@@ -36160,6 +36244,7 @@ function TaraApp(){
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
+          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null, // populated at rollover scoring
       };
