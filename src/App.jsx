@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.4-side-flip-layer';
+const BASELINE_VERSION='2026.05.19-v10.7.5-chop-guards-disabled';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.4';
+const TARA_VERSION_DISPLAY='Tara 10.7.5';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35306,6 +35306,33 @@ function TaraApp(){
       //   from where it left off. Only the rollover effect resets samples for a new window.
       // Endgame freeze still triggers a snapshot for SIT_OUT path
       if(analysis?.isSystemLocked){
+        // V10.7.5 — DEAD-WINDOW-ONLY SITOUT RULE
+        //   When system reaches end-of-window without a commit, check if window
+        //   is actually dead. If not, force-commit using posterior direction.
+        //   This catches the case where engine stayed in SCANNING/WATCHING forever.
+        const _wa=analysis?.windowAmplitude;
+        const _rangeBps=_wa?.rangeBps||0;
+        const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
+        const _postNow=Number(analysis?.rawProbAbove)||50;
+        if(!_isDeadWindow&&_postNow!==50){
+          // Force-commit instead of ambiguous SITOUT
+          const _forceDir=_postNow>=50?'UP':'DOWN';
+          const _forceConf=Math.round(Math.abs(_postNow-50)+50);
+          taraCallSnapshotRef.current={
+            call:_forceDir,direction:_forceDir,confidence:_forceConf,
+            reason:`[V10.7.5 force-commit] ${_forceDir} ${(_forceConf-50).toFixed(0)}pt — system-lock end-of-window, window moving ${_rangeBps.toFixed(0)}bps`,
+            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+            atPosterior:_postNow,
+            locked:true,earlyLock:false,
+            _v10_7_5_forced:true,
+            _v10_7_5_originalGuard:'isSystemLocked',
+            _v10_7_5_rangeBps:_rangeBps,
+          };
+          _persistLock();
+          // Log the force-commit entry
+          _logSnapshotEntry(taraCallSnapshotRef.current);
+          return;
+        }
         taraCallSnapshotRef.current={
           call:tc.call,direction:null,confidence:tc.confidence,reason:tc.reason,
           atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
@@ -35774,6 +35801,39 @@ function TaraApp(){
       //   (<70% AND >30%), meaning truly no edge in any direction.
       const _midRangeChopConvWeak=_commitConf!=null&&_commitConf<70&&_commitConf>30;
       if(analysis?._v10_3_0_midRangeSitout===true&&!analysis?._v10_3_0_rangeFadeFired&&_midRangeChopConvWeak){
+        // V10.7.5 — dead-window-only sitout rule (mid-range chop guard)
+        const _wa=analysis?.windowAmplitude;
+        const _rangeBps=_wa?.rangeBps||0;
+        const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
+        if(!_isDeadWindow){
+          const _forceDir=_post>=50?'UP':'DOWN';
+          const _forceConf=Math.round(Math.abs(_post-50)+50);
+          const _forceSnap={
+            call:_forceDir,direction:_forceDir,
+            confidence:_forceConf,
+            caution:`[V10.7.5 force] ${_forceDir} — mid-range guard suppressed (window moving ${_rangeBps.toFixed(0)}bps)`,
+            reason:`[V10.7.5 force-commit] ${_forceDir} ${(_forceConf-50).toFixed(0)}pt — was V10.3.0 mid-range sitout, window not dead`,
+            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+            atPosterior:_post,
+            kalshiAtLock:_kPctNow,
+            locked:true,earlyLock:false,
+            isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+            samples:0,needSamples:0,
+            tier:'v10_7_5_force_commit',
+            session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+            regime:analysis?.regime||'',
+            qScore:Math.round(_qFast),
+            fgt:analysis?.mtfAlignment,
+            _committedAt:Date.now(),
+            _v10_7_5_forced:true,
+            _v10_7_5_originalGuard:'V10.3.0-midrange',
+            _v10_7_5_rangeBps:_rangeBps,
+          };
+          taraCallSnapshotRef.current=_forceSnap;
+          _logSnapshotEntry(_forceSnap);
+          _persistLock();
+          return;
+        }
         const _rd=analysis?._v10_3_0_rangeData||{};
         const _sitSnap={
           call:'SIT_OUT',direction:'SIT_OUT',
@@ -35857,6 +35917,39 @@ function TaraApp(){
         //   Fix: in RANGE-CHOP, no-go-edge converts to SIT_OUT. Outside chop, keep
         //   warned-lock behavior (trends can still be tradeable with thin edge).
         if(_noGoTier==='no-go-edge'&&analysis?.regime==='RANGE-CHOP'){
+          // V10.7.5 — dead-window-only sitout rule (no-go-edge chop guard)
+          const _wa=analysis?.windowAmplitude;
+          const _rangeBps=_wa?.rangeBps||0;
+          const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
+          if(!_isDeadWindow){
+            const _forceDir=_post>=50?'UP':'DOWN';
+            const _forceConf=Math.round(Math.abs(_post-50)+50);
+            const _forceSnap={
+              call:_forceDir,direction:_forceDir,
+              confidence:_forceConf,
+              caution:`[V10.7.5 force] ${_forceDir} — no-go-edge chop guard suppressed (window moving ${_rangeBps.toFixed(0)}bps)`,
+              reason:`[V10.7.5 force-commit] ${_forceDir} ${(_forceConf-50).toFixed(0)}pt — was V10.3.0 no-go-edge sitout, window not dead`,
+              atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+              atPosterior:_post,
+              kalshiAtLock:_kPctNow,
+              locked:true,earlyLock:false,
+              isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+              samples:0,needSamples:0,
+              tier:'v10_7_5_force_commit',
+              session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+              regime:analysis?.regime||'',
+              qScore:Math.round(_qFast),
+              fgt:analysis?.mtfAlignment,
+              _committedAt:Date.now(),
+              _v10_7_5_forced:true,
+              _v10_7_5_originalGuard:'V10.3.0-nogoedge',
+              _v10_7_5_rangeBps:_rangeBps,
+            };
+            taraCallSnapshotRef.current=_forceSnap;
+            _logSnapshotEntry(_forceSnap);
+            _persistLock();
+            return;
+          }
           const _sitSnap={
             call:'SIT_OUT',direction:'SIT_OUT',
             confidence:_commitConf,
@@ -35932,6 +36025,44 @@ function TaraApp(){
         //   historically loses, but lets 72%+ conviction calls through.
         const _v10250ChopGuard=(analysis?.regime==='RANGE-CHOP'&&_commitConf<72);
         if(_v10250ChopGuard){
+          // V10.7.5 — DEAD-WINDOW-ONLY SITOUT RULE
+          //   User rule: never sit out except when window is literally dead.
+          //   Check windowAmplitude — if rangeBps<5 AND past opening phase, true dead.
+          //   Otherwise: convert chop time-cap sitout to force-commit using posterior.
+          const _wa=analysis?.windowAmplitude;
+          const _rangeBps=_wa?.rangeBps||0;
+          const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
+          if(!_isDeadWindow){
+            // Force-commit to posterior direction. Skip the sitout snapshot entirely.
+            const _forceDir=_post>=50?'UP':'DOWN';
+            const _forceConf=Math.round(Math.abs(_post-50)+50);
+            const _forceSnap={
+              call:_forceDir,direction:_forceDir,
+              confidence:_forceConf,
+              caution:`[V10.7.5 force] ${_forceDir} — chop guard suppressed (window moving ${_rangeBps.toFixed(0)}bps)`,
+              reason:`[V10.7.5 force-commit] ${_forceDir} ${(_forceConf-50).toFixed(0)}pt — was V10.2.50 chop time-cap sitout, window not dead`,
+              atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+              atPosterior:_post,
+              kalshiAtLock:_kPctNow,
+              locked:true,earlyLock:false,
+              isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+              samples:0,needSamples:0,
+              tier:'v10_7_5_force_commit',
+              session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+              regime:analysis?.regime||'',
+              qScore:Math.round(_qFast),
+              fgt:analysis?.mtfAlignment,
+              _committedAt:Date.now(),
+              _v10_7_5_forced:true,
+              _v10_7_5_originalGuard:'V10.2.50',
+              _v10_7_5_rangeBps:_rangeBps,
+            };
+            taraCallSnapshotRef.current=_forceSnap;
+            _logSnapshotEntry(_forceSnap);
+            _persistLock();
+            return;
+          }
+          // Genuine dead window — preserve sit out
           const _sitSnap={
             call:'SIT_OUT',direction:'SIT_OUT',
             confidence:_commitConf,
