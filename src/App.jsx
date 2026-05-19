@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.11-universal-reversal-strike-distance';
+const BASELINE_VERSION='2026.05.19-v10.7.13-concrete-priority-trajectory-brti';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.11';
+const TARA_VERSION_DISPLAY='Tara 10.7.13';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -7781,10 +7781,16 @@ const computeV99Posterior=(params)=>{
   // V134: SMOOTH TRAJECTORY — blend 5s with 30s velocity to prevent tick-induced flip-flops
   // Old version used only v5s × √secs which caused 30+ point posterior swings on a single tick
   // Now we use a 70/30 blend favoring stable velocity; recent ticks still matter but don't dominate
+  // V10.7.13: REWEIGHTED — old blend (30/40/30) used stale momentum and missed reversals.
+  //   Tonight's bottom-pick fail (Tara locked DOWN as price was bouncing UP off bottom)
+  //   was caused by projection using 30s downtrend velocity when 5s already reversed UP.
+  //   Fix: weight recent 5s heavier (55%), medium 15s (35%), drop 30s influence (10%).
+  //   Catches reversals 2-3 minutes earlier. Tradeoff: slightly more flip-flop on noisy
+  //   ticks, but V10.4.3 multi-window memory + V10.7.12 concrete priority dampen this.
   const _v15sNum=velocityRef?.current?.v15s||0;
   const _v30sNum=velocityRef?.current?.v30s||_v15sNum||0;
-  // Blended velocity: 30% of recent + 40% of medium + 30% of stable
-  const _vBlended=(_v5sNum*0.3)+(_v15sNum*0.4)+(_v30sNum*0.3);
+  // V10.7.13: 55/35/10 blend favoring recency (was 30/40/30 favoring stability)
+  const _vBlended=(_v5sNum*0.55)+(_v15sNum*0.35)+(_v30sNum*0.10);
   // Dampen far-out projections (uncertainty grows with time)
   const _decayedTime=Math.sqrt(_secsLeft); // effective projection time
   const _projectedDrift=(_vBlended*_decayedTime)+(_accelNum*_decayedTime*_decayedTime*0.3);
@@ -9703,6 +9709,63 @@ const computeV99Posterior=(params)=>{
         reasoning.push(`[V10.4.3] ${_streakDir} streak ${Math.max(_ups,_downs)}/5 → mean-reversion tilt ${posterior.toFixed(1)}%→${_newPost.toFixed(1)}%`);
         posterior=_newPost;
       }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // V10.7.12 — CONCRETE-OVER-STRUCTURAL PRIORITY
+  // ═══════════════════════════════════════════════════════════════════════════
+  // User report (May 19, 6:35pm): Score breakdown showed +52 UP (Gap +22, Flow
+  //   +26, Momentum +5, FGT +6) — all CONCRETE signals saying UP. Yet posterior
+  //   landed at 39% UP (i.e., 61% DOWN). Structural overrides (regime cells,
+  //   trajectory projection, multi-window memory) dominated despite concrete
+  //   evidence to the contrary.
+  //
+  // Fix: when concrete signals (gap + flow + momentum + tape + FGT) all agree
+  //   on direction with combined weight ≥25pts, they DOMINATE structural
+  //   overrides that point the other way. Posterior gets pulled toward the
+  //   concrete consensus direction.
+  //
+  // The concrete signals are:
+  //   - Gap: current price vs strike (most direct evidence of where we are)
+  //   - Flow: order book imbalance (where buyers/sellers are positioned)
+  //   - Momentum: recent price velocity
+  //   - FGT alignment: multi-TF momentum coherence
+  //   - Tape: real-time buyer/seller pressure
+  //
+  // Structural signals (what we OVERRIDE):
+  //   - Regime calibration (historical cell)
+  //   - Multi-window memory (last 5 windows)
+  //   - Trajectory projection (can use stale momentum)
+  //   - Time-of-day baseline
+  //
+  // The market spending real money RIGHT NOW (concrete) is stronger evidence
+  //   than historical patterns (structural). When they disagree, follow live.
+  const _v10_7_12_concrete={
+    gap:Number(rawSignalScores.gap)||0,
+    flow:Number(rawSignalScores.flow)||0,
+    momentum:Number(rawSignalScores.momentum)||0,
+    fgt:Number(rawSignalScores.fgtAlignment)||0,
+    tape:Number(rawSignalScores.tape)||0,
+  };
+  const _v10_7_12_concreteSum=_v10_7_12_concrete.gap+_v10_7_12_concrete.flow+_v10_7_12_concrete.momentum+_v10_7_12_concrete.fgt+_v10_7_12_concrete.tape;
+  const _v10_7_12_concreteDir=_v10_7_12_concreteSum>0?'UP':'DOWN';
+  const _v10_7_12_currentDir=posterior>=50?'UP':'DOWN';
+  // Trigger: concrete sum ≥25 in one direction, posterior opposite
+  if(Math.abs(_v10_7_12_concreteSum)>=25&&_v10_7_12_concreteDir!==_v10_7_12_currentDir){
+    // Count how many of the 5 signals AGREE with concrete direction
+    const _signsAgree=Object.values(_v10_7_12_concrete).filter(v=>
+      (_v10_7_12_concreteDir==='UP'&&v>2)||(_v10_7_12_concreteDir==='DOWN'&&v<-2)
+    ).length;
+    // Need at least 3 of 5 concrete signals strongly agreeing
+    if(_signsAgree>=3){
+      // Pull posterior toward concrete direction. Magnitude = min(20, concreteSum/2)
+      const _pullMagnitude=Math.min(20,Math.abs(_v10_7_12_concreteSum)/2);
+      const _newPosterior=_v10_7_12_concreteDir==='UP'
+        ?Math.max(55,Math.min(85,50+_pullMagnitude))
+        :Math.max(15,Math.min(45,50-_pullMagnitude));
+      reasoning.push(`[V10.7.12] CONCRETE OVERRIDE: ${_signsAgree}/5 concrete signals agree ${_v10_7_12_concreteDir} (sum ${_v10_7_12_concreteSum>0?'+':''}${_v10_7_12_concreteSum.toFixed(0)}) — pulling posterior ${posterior.toFixed(0)}→${_newPosterior.toFixed(0)}`);
+      posterior=_newPosterior;
     }
   }
 
@@ -33168,6 +33231,45 @@ function TaraApp(){
           _v10_7_11_originalDir:_currentDir,
           _v10_7_11_driftBps:_last60Drift,
         };
+      }
+    }
+    // 4. V10.5.2 — BRTI DIVERGENCE MEAN-REVERSION SIGNAL
+    //   BRTI = Bitcoin Reference Trim-mean Index (computed from Coinbase + Kraken
+    //   + OKX + Bitstamp). When BRTI diverges meaningfully from Coinbase (our
+    //   primary feed), it signals that ONE exchange has anomalous pricing —
+    //   typically mean-reverts within 60-90s.
+    //
+    //   Logic:
+    //   - Coinbase price > BRTI by 3+ bps: Coinbase is "too high" → likely
+    //     reverts DOWN. If we're locked UP, that's a warning. Flip to DOWN.
+    //   - Coinbase < BRTI by 3+ bps: Coinbase "too low" → likely reverts UP.
+    //     If we're locked DOWN, warning. Flip to UP.
+    //   Only fires when:
+    //   - We have ≥3 active source exchanges (data quality)
+    //   - BRTI samples ≥10 (statistical confidence)
+    //   - Divergence ≥3bps (above noise)
+    //   - Direction conflicts with current
+    if(brtiApprox&&brtiApprox.sourceCount>=3&&brtiApprox.samples60s>=10){
+      const _divBps=Number(brtiApprox.divergenceBps)||0;
+      // Positive divBps = Coinbase ABOVE BRTI = Coinbase rich = likely revert DOWN
+      // Negative divBps = Coinbase BELOW BRTI = Coinbase cheap = likely revert UP
+      if(Math.abs(_divBps)>=3){
+        const _brtiSnapDir=_divBps>0?'DOWN':'UP'; // direction of expected snap-back
+        if(_brtiSnapDir!==_currentDir){
+          return{
+            ...call,
+            call:_brtiSnapDir,
+            direction:_brtiSnapDir,
+            confidence:Math.min(65,50+Math.abs(_divBps)*2), // modest conviction
+            conviction:Math.min(15,Math.abs(_divBps)*2),
+            reason:`BRTI snap-back lock · ${_brtiSnapDir} · Coinbase ${_divBps>0?'+':''}${_divBps.toFixed(1)}bps vs ${brtiApprox.sourceCount}-exchange mean → mean-reversion`,
+            _v10_7_11_universalFlipped:true,
+            _v10_7_11_flipType:'brti-divergence',
+            _v10_7_11_originalDir:_currentDir,
+            _v10_7_11_brtiDivBps:_divBps,
+            _v10_7_11_brtiSources:brtiApprox.sourceCount,
+          };
+        }
       }
     }
     return call; // no flip needed
