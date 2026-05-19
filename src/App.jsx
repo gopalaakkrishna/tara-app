@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.6.8a-whitelist-force-commit';
+const BASELINE_VERSION='2026.05.19-v10.6.8b-dead-window-only-sitout';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.6.8a';
+const TARA_VERSION_DISPLAY='Tara 10.6.8b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32690,50 +32690,58 @@ function TaraApp(){
       },
     };
   })();
-  // V10.6.8a — FORCE-COMMIT WHITELIST (respects full signal stack)
-  // Critique from user (May 19, 1pm): V10.6.8's blacklist approach was wrong —
-  //   it overrode tape/kalshi/FGT signal-conflict sitouts. That's chasing
-  //   posterior direction without listening to the rest of the signal stack.
-  //   FIX: switch to whitelist. ONLY override the two pure-floor sitouts that
-  //   have no signal-conflict reasoning behind them. Every signal-disagreement
-  //   sitout is preserved.
+  // V10.6.8b — DEAD-WINDOW-ONLY SITOUT RULE
+  // User rule (May 19, 1pm): "sit out ONLY when the price is literally not
+  //   moving at all." Every other sitout reason gets overridden into a
+  //   directional commit using posterior (which is the synthesized view of
+  //   tape + structure + FGT + recent windows + everything else).
   //
-  // Whitelisted (CAN override → directional commit):
-  //   - "Signal weak — quality X/Y"          (Q_FLOOR, structural)
-  //   - "Coin flip — only Xpt off neutral"   (CONV_FLOOR, structural)
-  // Everything else preserves sit-out:
-  //   - tape opposes, kalshi disagrees, FGT mixed, regime in flux,
-  //     trend dying, too-late, no consensus, etc.
+  // Sitout PRESERVED only when:
+  //   1. Engine still loading / data not ready (physical constraint)
+  //   2. New window observation phase (first 5s - physical constraint)
+  //   3. Search phase active (engine literally collecting samples)
+  //   4. DEAD WINDOW: windowAmplitude.rangeBps < 5 AND >=2 min elapsed
+  //      (genuinely no price movement to predict)
   //
-  // Conditions for override even on whitelisted reasons:
-  //   1. |posterior - 50| >= 8 (decisive lean, not a true coin flip)
-  //   2. We're past initial observation (engine is in WATCHING phase)
+  // Everything else (signal disagreements, floors, kalshi conflicts, tape
+  //   conflicts) → committed to posterior direction. The posterior already
+  //   encodes those signals' disagreement as weaker conviction — but a lean
+  //   is a lean. Take the side, ride the movement.
   const _v10_6_8_postProcess=(call)=>{
-    if(!call||call.call!=='SIT_OUT')return call; // pass through non-sitouts
-    const _post=Number(call.confidence)||Number(analysis?.rawProbAbove)||50;
-    const _convict=Math.abs(_post-50);
-    if(_convict<8)return call; // true coin flip — preserve sitout
+    if(!call||call.call!=='SIT_OUT')return call;
     const _reason=String(call.reason||'').toLowerCase();
-    // WHITELIST: only these two specific reasons get overridden
-    const _isFloorOnly=(
-      _reason.startsWith('signal weak — quality')||
-      _reason.startsWith('coin flip — only')
-    );
-    if(!_isFloorOnly)return call; // signal conflict exists — respect it, preserve sitout
-    // Phase check — only override during WATCHING (engine has processed signals)
-    if(call.phase!=='WATCHING')return call;
-    // SAFE TO FORCE COMMIT — engine's only complaint was a structural floor,
-    //   no signal stack conflict, conviction is genuine
+    // Physical constraints — engine hasn't formed a view yet
+    if(_reason.includes('engine still loading'))return call;
+    if(_reason.includes('new window'))return call;
+    if(_reason.includes('searching for direction'))return call;
+    if(_reason.includes('observing fresh data'))return call;
+    // Dead-window check — the ONE legitimate sitout
+    const _wa=analysis?.windowAmplitude;
+    const _rangeBps=_wa?.rangeBps||0;
+    const _isOpening=_wa?.label==='OPENING';
+    const _isDead=!_isOpening&&_rangeBps<5;
+    if(_isDead){
+      return{
+        ...call,
+        reason:`[V10.6.8b] Dead window — only ${_rangeBps.toFixed(1)}bps range, true sitout`,
+        _v10_6_8_deadWindow:true,
+      };
+    }
+    // WINDOW IS MOVING — commit to posterior direction
+    const _post=Number(analysis?.rawProbAbove)||50;
+    if(_post===50)return call; // exactly neutral, nothing to commit to
     const _dir=_post>=50?'UP':'DOWN';
+    const _convict=Math.abs(_post-50);
     return{
       ...call,
       call:_dir,
       direction:_dir,
       confidence:_post,
       conviction:_convict,
-      reason:`[V10.6.8a force] ${_dir} ${_convict.toFixed(0)}pt — floor-only sitout overridden (was: ${call.reason})`,
+      reason:`[V10.6.8b force] ${_dir} ${_convict.toFixed(0)}pt — window moving ${_rangeBps.toFixed(0)}bps (was: ${call.reason})`,
       _v10_6_8_forced:true,
       _v10_6_8_originalReason:call.reason,
+      _v10_6_8_rangeBps:_rangeBps,
     };
   };
   // V10.6.8: apply force-commit post-processor IN PLACE on taraCall object.
