@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.5.1-brti-cross-exchange-phase1';
+const BASELINE_VERSION='2026.05.19-v10.6.3-slippage-aware-ev';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.5.1';
+const TARA_VERSION_DISPLAY='Tara 10.6.3';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -3906,6 +3906,23 @@ const USE_V104_1_DELAY_GATE=true;
 const V104_1_KALSHI_EXPENSIVE_THRESHOLD=50; // k$50+ is the EV-cliff zone
 const V104_1_CONVICTION_STRONG_THRESHOLD=85; // 85%+ justifies expensive entry
 const V104_1_DEADLINE_SECONDS_LEFT=180; // Lock by 3 minutes remaining no matter what
+
+// V10.6.3 — SLIPPAGE-AWARE EV
+//   Real Kalshi fills cost ~1¢ more than the lock-time YES mid price due to
+//   bid-ask spread (need to cross the spread to actually fill on the ask side).
+//   On a $0.50 trade, that's 2% of cost. Over 100 trades = ~$1 in pure fees
+//   invisible to existing EV calculations.
+//
+//   This constant is used in:
+//   1) V10.4.1 delay gate: effective expensive threshold is V104_1_KALSHI_EXPENSIVE_THRESHOLD
+//      MINUS slippage, because the displayed kalshiYesPrice will become MORE expensive
+//      at fill time.
+//   2) V10.4.6 EV-weighted learning: win profit reduced by slippage, loss cost increased.
+//   3) Calibration table EVs (buildV104Table, buildDowHourCalibration): cell EV now
+//      reflects real $-outcome with slippage applied.
+//
+//   Conservative estimate of 1.0¢ for 15m BTC markets. Refine when we have fill data.
+const V106_3_AVG_SLIPPAGE_CENTS=1.0;
 
 // Seed table from full 885-trade resolved log. Format: WR (0-1), EV (cents/trade), n (sample size)
 // Cells with n=0 are unobserved — engine falls back to legacy logic for those.
@@ -3963,6 +3980,16 @@ function buildV104Table(callLog){
   // Filter resolved trades only, take last N per cell
   const resolved=callLog.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS'));
   if(resolved.length===0)return V104_SEED_CALIBRATION;
+  // V10.6.1 — RECENCY-WEIGHTED ROLLING WINDOW
+  //   Old logic: count last 200 trades per cell with equal weight. A cell
+  //   spanning 3 months blends ancient market conditions with current ones.
+  //   New logic: each trade contributes weight = exp(-age_days/HALF_LIFE).
+  //   Trades 30 days old weigh ~0.37, 60 days old weigh ~0.14, 90 days old
+  //   weigh ~0.05. Cell WR/EV = weighted sums / weighted total. Raw n still
+  //   tracked for trust-floor check (need ≥20 actual trades regardless of weight).
+  const _RECENCY_HALF_LIFE_DAYS=30;
+  const _now=Date.now();
+  const _msPerDay=86400000;
   // Bucket by regime/dir/band, keep newest V104_ROLLING_WINDOW per cell
   const buckets={};
   for(let i=resolved.length-1;i>=0;i--){
@@ -3970,12 +3997,29 @@ function buildV104Table(callLog){
     if(!e.regime||!e.dir||typeof e.confidence!=='number')continue;
     const band=_v104ConvBand(e.confidence);
     const key=e.regime+'|'+e.dir+'|'+band;
-    if(!buckets[key])buckets[key]={w:0,l:0,pnl:0,n:0};
+    if(!buckets[key])buckets[key]={w:0,l:0,pnl:0,n:0,wSum:0,wWins:0,wPnl:0};
     if(buckets[key].n>=V104_ROLLING_WINDOW)continue;
     const k=e.kalshiAtLock||50;
-    if(e.result==='WIN'){buckets[key].w++;buckets[key].pnl+=(100-k);}
-    else{buckets[key].l++;buckets[key].pnl-=k;}
+    // V10.6.1 — compute recency weight
+    const _tradeTime=Number(e.time)||_now;
+    const _ageDays=Math.max(0,(_now-_tradeTime)/_msPerDay);
+    const _weight=Math.exp(-_ageDays/_RECENCY_HALF_LIFE_DAYS);
+    if(e.result==='WIN'){
+      buckets[key].w++;
+      // V10.6.3 — real profit = (100 - k - slippage)
+      const _realProfit=Math.max(0,100-k-V106_3_AVG_SLIPPAGE_CENTS);
+      buckets[key].pnl+=_realProfit;
+      buckets[key].wWins+=_weight;
+      buckets[key].wPnl+=_weight*_realProfit;
+    }else{
+      buckets[key].l++;
+      // V10.6.3 — real loss = -(k + slippage)
+      const _realLoss=k+V106_3_AVG_SLIPPAGE_CENTS;
+      buckets[key].pnl-=_realLoss;
+      buckets[key].wPnl-=_weight*_realLoss;
+    }
     buckets[key].n++;
+    buckets[key].wSum+=_weight;
   }
   // Compose final table: live data overrides seed when n>=TRUST_FLOOR, else seed
   const table=JSON.parse(JSON.stringify(V104_SEED_CALIBRATION)); // deep clone seed
@@ -3983,7 +4027,10 @@ function buildV104Table(callLog){
     const[regime,dir,band]=key.split('|');
     const b=buckets[key];
     if(b.n>=V104_CALIBRATION_TRUST_FLOOR&&table[regime]&&table[regime][dir]){
-      table[regime][dir][band]={wr:b.w/b.n,ev:b.pnl/b.n,n:b.n};
+      // V10.6.1 — use weighted WR/EV instead of raw averages
+      const _wWR=b.wSum>0?b.wWins/b.wSum:b.w/b.n;
+      const _wEV=b.wSum>0?b.wPnl/b.wSum:b.pnl/b.n;
+      table[regime][dir][band]={wr:_wWR,ev:_wEV,n:b.n};
     }
   }
   return table;
@@ -3997,6 +4044,89 @@ function lookupV104Cell(table,regime,dir,confidence){
   if(!cell)return null;
   const source=cell.n>=V104_CALIBRATION_TRUST_FLOOR?'live':'seed';
   return{wr:cell.wr,ev:cell.ev,n:cell.n,band,source};
+}
+
+// V10.6.2 — DOW × HOUR CALIBRATION TABLE
+//   Audit found DoW × hour cells span 18-92% WR with sample sizes ≥10. Mon 21:00 UTC
+//   is 18% WR (-$0.37/trade), Sun 20:00 UTC is 92% WR (+$0.45/trade). This is a
+//   real, exploitable pattern beyond regime/session granularity. We bucket by
+//   (UTC day-of-week × UTC hour) — 168 cells total. Apply ±4pt posterior shift
+//   when a cell has n≥10 AND its weighted WR is meaningfully off baseline (>10pp).
+//   Magnitude intentionally small (±4pt) — DoW×hour can be confounded by recent
+//   session anomalies; we only tilt, never override.
+const V106_2_DOWHOUR_MIN_SAMPLES=10;
+const V106_2_DOWHOUR_BASELINE_WR=0.60; // typical lifetime WR
+const V106_2_DOWHOUR_MAX_SHIFT=4; // ±4pt cap
+const _DOW_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function buildDowHourCalibration(callLog){
+  if(!Array.isArray(callLog)||callLog.length===0)return null;
+  const resolved=callLog.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&e.time);
+  if(resolved.length<50)return null;
+  // V10.6.1-style recency weighting (30-day half-life) reused for consistency
+  const _HALF_LIFE_DAYS=30;
+  const _now=Date.now();
+  const _msPerDay=86400000;
+  const cells={};
+  for(const e of resolved){
+    const _t=new Date(e.time);
+    const _key=_t.getUTCDay()+'-'+_t.getUTCHours();
+    if(!cells[_key])cells[_key]={w:0,n:0,wWins:0,wSum:0,pnl:0,wPnl:0};
+    const _ageDays=Math.max(0,(_now-e.time)/_msPerDay);
+    const _wt=Math.exp(-_ageDays/_HALF_LIFE_DAYS);
+    const k=e.kalshiAtLock||50;
+    if(e.result==='WIN'){
+      cells[_key].w++;
+      cells[_key].wWins+=_wt;
+      // V10.6.3 — real profit = (100 - k - slippage)
+      const _realProfit=Math.max(0,100-k-V106_3_AVG_SLIPPAGE_CENTS);
+      cells[_key].pnl+=_realProfit;
+      cells[_key].wPnl+=_wt*_realProfit;
+    }else{
+      // V10.6.3 — real loss = -(k + slippage)
+      const _realLoss=k+V106_3_AVG_SLIPPAGE_CENTS;
+      cells[_key].pnl-=_realLoss;
+      cells[_key].wPnl-=_wt*_realLoss;
+    }
+    cells[_key].n++;
+    cells[_key].wSum+=_wt;
+  }
+  // Finalize: keep only cells with n>=V106_2_DOWHOUR_MIN_SAMPLES
+  const table={};
+  for(const k of Object.keys(cells)){
+    const c=cells[k];
+    if(c.n<V106_2_DOWHOUR_MIN_SAMPLES)continue;
+    table[k]={
+      wr:c.wSum>0?c.wWins/c.wSum:c.w/c.n,
+      ev:c.wSum>0?c.wPnl/c.wSum:c.pnl/c.n,
+      n:c.n,
+    };
+  }
+  return table;
+}
+
+// Look up current DoW×hour cell and return posterior shift recommendation.
+//   Returns null if no cell or insufficient samples. Returns {shift, cell} when
+//   there's a tradable tilt. Shift is signed pts to add to posterior (favorable
+//   cells boost UP-confidence, unfavorable cells pull toward 50).
+function computeDowHourShift(dowHourTable,now){
+  if(!dowHourTable)return null;
+  const _t=new Date(now||Date.now());
+  const _key=_t.getUTCDay()+'-'+_t.getUTCHours();
+  const cell=dowHourTable[_key];
+  if(!cell)return null;
+  // WR delta from baseline. Each 10pp = ~2pt shift, capped at ±4pt.
+  const _wrDelta=cell.wr-V106_2_DOWHOUR_BASELINE_WR;
+  if(Math.abs(_wrDelta)<0.10)return null; // need >10pp deviation to tilt
+  const _rawShift=_wrDelta*20; // 10pp = 2pt, 20pp = 4pt
+  const _shift=Math.max(-V106_2_DOWHOUR_MAX_SHIFT,Math.min(V106_2_DOWHOUR_MAX_SHIFT,_rawShift));
+  return{
+    shift:Math.round(_shift*10)/10,
+    cellWR:cell.wr,
+    cellN:cell.n,
+    cellEV:cell.ev,
+    dowHour:`${_DOW_NAMES[_t.getUTCDay()]} ${_t.getUTCHours()}:00`,
+  };
 }
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -4317,12 +4447,14 @@ const updateWeights=(weights,tradeLog,result)=>{
   let _evMult=1.0;
   const _kLock=Number(last.kalshiAtLock);
   if(Number.isFinite(_kLock)&&_kLock>0&&_kLock<100){
+    // V10.6.3 — slippage adjustment. Real fills cost ~1¢ more than displayed kalshiAtLock.
+    //   Win profit = (100 - kLock - slippage). Loss cost = (kLock + slippage).
     if(won){
-      // Profit on win = 100 - kalshiAtLock. Cheaper entry = bigger reinforcement.
-      _evMult=Math.max(0.5,Math.min(1.5,(100-_kLock)/50));
+      const _realProfit=Math.max(0.1,100-_kLock-V106_3_AVG_SLIPPAGE_CENTS);
+      _evMult=Math.max(0.5,Math.min(1.5,_realProfit/50));
     }else{
-      // Loss on loss = kalshiAtLock. Expensive entry = bigger punishment.
-      _evMult=Math.max(0.5,Math.min(1.5,_kLock/50));
+      const _realLoss=_kLock+V106_3_AVG_SLIPPAGE_CENTS;
+      _evMult=Math.max(0.5,Math.min(1.5,_realLoss/50));
     }
   }
   // V9.11.0: SIGNAL TYPE AWARENESS. Most signals are raw weights (gap, momentum, etc.)
@@ -4369,11 +4501,17 @@ const updateRegimeWeights=(regimeWeightsObj,trade,result)=>{
   const conviction=Math.abs(trade.posterior-50)/50;
   const newW={...weights};
   // V10.4.6 — EV-weighted gradient (mirror of updateWeights logic)
+  // V10.6.3 — slippage applied (real fills cost ~1¢ more than displayed kalshiAtLock)
   let _evMult=1.0;
   const _kLock=Number(trade.kalshiAtLock);
   if(Number.isFinite(_kLock)&&_kLock>0&&_kLock<100){
-    if(won)_evMult=Math.max(0.5,Math.min(1.5,(100-_kLock)/50));
-    else _evMult=Math.max(0.5,Math.min(1.5,_kLock/50));
+    if(won){
+      const _realProfit=Math.max(0.1,100-_kLock-V106_3_AVG_SLIPPAGE_CENTS);
+      _evMult=Math.max(0.5,Math.min(1.5,_realProfit/50));
+    }else{
+      const _realLoss=_kLock+V106_3_AVG_SLIPPAGE_CENTS;
+      _evMult=Math.max(0.5,Math.min(1.5,_realLoss/50));
+    }
   }
   Object.keys(sig).forEach(k=>{
     if(!(k in newW))return;
@@ -9676,6 +9814,44 @@ const computeV99Posterior=(params)=>{
   }
   // ─────────────────────────────────────────────────────────────────────────
 
+  // V10.6.2 — DOW × HOUR CALIBRATION
+  //   Apply small posterior shift (±4pt max) based on (UTC day-of-week, UTC hour)
+  //   cell. Audit found Sun 20:00 = 92% WR (+$0.45/trade) and Mon 21:00 = 18% WR
+  //   (-$0.37/trade) — these are real, exploitable patterns. The shift pushes
+  //   posterior toward UP when current cell is favorable (cell.wr - 0.60) > 0.
+  //   This is intentionally directional-agnostic — favorable cells boost confidence
+  //   in whichever direction the rest of the engine already leans.
+  let _v106_2_dowHourShift=null;
+  if(params._dowHourTable){
+    const _dwh=computeDowHourShift(params._dowHourTable,Date.now());
+    if(_dwh){
+      // Apply shift in direction of current lean: if dirCalibrated>=50, add UP-bias;
+      //   if <50, add DOWN-bias. Magnitude scales with |dirCalibrated-50| so a 50/50
+      //   call doesn't get shifted in either direction arbitrarily.
+      const _leanSign=dirCalibrated>=50?1:-1;
+      const _leanStrength=Math.min(1,Math.abs(dirCalibrated-50)/30); // 0 at 50, 1 at 80+
+      const _appliedShift=_dwh.shift*_leanSign*_leanStrength;
+      const _capped=Math.max(-V106_2_DOWHOUR_MAX_SHIFT,Math.min(V106_2_DOWHOUR_MAX_SHIFT,_appliedShift));
+      if(Math.abs(_capped)>=0.5){
+        const _newConf=Math.max(15,Math.min(85,dirCalibrated+_capped));
+        reasoning.push(`[V10.6.2-DOW×HR] ${_dwh.dowHour} WR ${(_dwh.cellWR*100).toFixed(0)}% (n=${_dwh.cellN}) → ${_capped>=0?'+':''}${_capped.toFixed(1)}pt → ${dirCalibrated.toFixed(1)}%→${_newConf.toFixed(1)}%`);
+        _v106_2_dowHourShift={
+          dowHour:_dwh.dowHour,
+          cellWR:_dwh.cellWR,
+          cellN:_dwh.cellN,
+          cellEV:_dwh.cellEV,
+          rawShift:_dwh.shift,
+          appliedShift:_capped,
+          posteriorBefore:dirCalibrated,
+          posteriorAfter:_newConf,
+        };
+        dirCalibrated=_newConf;
+      }else{
+        _v106_2_dowHourShift={dowHour:_dwh.dowHour,cellWR:_dwh.cellWR,cellN:_dwh.cellN,cellEV:_dwh.cellEV,rawShift:_dwh.shift,appliedShift:_capped,reason:'below-0.5pt-threshold'};
+      }
+    }
+  }
+
   // ── V9.7.8: FGT-COUNTER GATE ─────────────────────────────────────────────
   // When FGT (multi-timeframe alignment) is pulling against the lock direction,
   // cap conviction at 65%. The May 7 reversal trade locked DOWN at 74% with
@@ -10145,6 +10321,8 @@ const computeV99Posterior=(params)=>{
   _v10_4_0_regimeCaps:USE_V104_CALIBRATION_TABLES?{regime:_regime,hi:_capHi,lo:_capLo}:null,
   // V10.4.3 — Multi-window directional context (mean-reversion detector)
   _v10_4_3_windowCtx:_v104_3_windowCtx,
+  // V10.6.2 — Day-of-week × hour calibration shift
+  _v10_6_2_dowHour:_v106_2_dowHourShift,
   // V9.7.9: diagnostic state from V9.7.x gates — stamped onto trade log entries
   //   for post-hoc audit. Tells us which gates fired on which trades, so we can
   //   answer "did the FGT cap rescue trades?" / "did the reversal damper prevent
@@ -30466,7 +30644,13 @@ function TaraApp(){
         try{return buildV104Table(taraCallLogRef.current||[]);}
         catch(_){return V104_SEED_CALIBRATION;}
       })();
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,recentWindowMovesBps:_recentWindowMovesBps,_v104Table});
+      // V10.6.2 — DoW × hour table built fresh per render. Cached automatically
+      //   by React render cycle. Same recency weighting as V10.6.1.
+      const _dowHourTable=(()=>{
+        try{return buildDowHourCalibration(taraCallLogRef.current||[]);}
+        catch(_){return null;}
+      })();
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
@@ -34690,7 +34874,11 @@ function TaraApp(){
       const _kForDir=_kNow!=null?(_dirNow==='UP'?_kNow:(100-_kNow)):null;
       const _secsLeft=timeState.minsRemaining*60+timeState.secsRemaining;
       // Trigger: expensive entry (≥50¢) + marginal conviction (<85%) + time to wait (>180s)
-      const _expensiveEntry=_kForDir!=null&&_kForDir>=V104_1_KALSHI_EXPENSIVE_THRESHOLD;
+      // V10.6.3: effective threshold is V104_1_KALSHI_EXPENSIVE_THRESHOLD minus
+      //   slippage because the displayed kalshiYesPrice will become MORE expensive
+      //   at actual fill time. A trade showing k$49 will fill at k$50+.
+      const _slippageAdjustedThreshold=V104_1_KALSHI_EXPENSIVE_THRESHOLD-V106_3_AVG_SLIPPAGE_CENTS;
+      const _expensiveEntry=_kForDir!=null&&_kForDir>=_slippageAdjustedThreshold;
       const _marginalConv=_convNow<V104_1_CONVICTION_STRONG_THRESHOLD;
       const _hasTimeToWait=_secsLeft>V104_1_DEADLINE_SECONDS_LEFT;
       if(_expensiveEntry&&_marginalConv&&_hasTimeToWait){
@@ -34868,6 +35056,7 @@ function TaraApp(){
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
+          _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null,
       };
@@ -35026,6 +35215,7 @@ function TaraApp(){
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
+          _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           result:null, // populated at rollover
         };
@@ -35289,6 +35479,7 @@ function TaraApp(){
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
+          _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
@@ -36245,6 +36436,7 @@ function TaraApp(){
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
           _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
+          _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null, // populated at rollover scoring
       };
