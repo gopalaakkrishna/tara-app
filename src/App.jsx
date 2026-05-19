@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.6.6a-hotfix-params';
+const BASELINE_VERSION='2026.05.19-v10.6.7-pregate-loosened';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.6.6a';
+const TARA_VERSION_DISPLAY='Tara 10.6.7';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32363,18 +32363,23 @@ function TaraApp(){
     //   Triggers MORE locks, but only the high-confidence early ones — not the
     //   deadline-forced weak ones (those still go through the standard path).
     //   Fix: use _elapsed (seconds into window, already in scope) not params.*
+    //   V10.6.7: loosened thresholds — pregate now fires when Tara is still
+    //   forming a view but 15m structure already shows alignment. The original
+    //   thresholds (TC slope ≥1.0, kalshi ≤40/≥60) required perfect setups that
+    //   rarely materialize in chop. Real-world need is to catch the "Kalshi
+    //   is still 45-55 because no one knows, but 15m has a slight lean" moments.
     const _secsIntoWindow=Number(_elapsed)||0;
-    const _earlyWindow=_secsIntoWindow<240; // first 4 minutes
+    const _earlyWindow=_secsIntoWindow<300; // V10.6.7: was 240 → first 5 minutes (was 4)
     const _tcFullyAligned=_tc?.valid&&(
-      (dir==='UP'&&_tcSlope>=1.0&&!_tcExhausted)||
-      (dir==='DOWN'&&_tcSlope<=-1.0&&!_tcExhausted)
+      (dir==='UP'&&_tcSlope>=0.5&&!_tcExhausted)||  // V10.6.7: was 1.0 → 0.5 (catches modest slopes)
+      (dir==='DOWN'&&_tcSlope<=-0.5&&!_tcExhausted)
     );
     const _kForDirCheap=kalshiAvail&&(
-      (dir==='UP'&&_kPct<=40)||
-      (dir==='DOWN'&&_kPct>=60)
+      (dir==='UP'&&_kPct<=48)||   // V10.6.7: was 40 → 48 (catches 45-48 zone)
+      (dir==='DOWN'&&_kPct>=52)   // V10.6.7: was 60 → 52
     );
     const _v10_6_6_pregate=_earlyWindow&&_tcFullyAligned&&_kForDirCheap
-      &&conviction>=4 // softer than standard 6 — pregate trusts 15m structure
+      &&conviction>=3 // V10.6.7: was 4 → 3 — trust 15m structure when Tara hasn't formed view yet
       &&!tapeSuperOpposes // tape veto still respected
       &&!kalshiExtremeDisagrees;
     if(_v10_6_6_pregate&&!isStructuralLed){
