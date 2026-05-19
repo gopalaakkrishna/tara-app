@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.6.5-lower-quality-floor';
+const BASELINE_VERSION='2026.05.19-v10.6.6-pregate-predictor';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.6.5';
+const TARA_VERSION_DISPLAY='Tara 10.6.6';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32348,13 +32348,38 @@ function TaraApp(){
     const _structStrong=_struct?.dir===dir&&_struct?.count>=5&&_gtStrengthOk&&!_tcExhausted;
     // Standard structural-led: 4 of 6 align + favorable channel position + meaningful strength
     // V9.2.0: Added exhaustion block + slope-contrary penalty
-    const isStructuralLed=(_structStrong||(_structAgreesDir&&(_tcPosFavors||_gtStrengthOk)))
+    let isStructuralLed=(_structStrong||(_structAgreesDir&&(_tcPosFavors||_gtStrengthOk)))
       &&!_tcExhausted              // V9.2.0: exhaustion gate
       &&!(_tcSlopeContrary&&_gtSlopeContrary) // V9.2.0: BOTH slopes contrary = wrong direction
       &&conviction>=6
       &&!tapeSuperOpposes
       &&_strikeReasonable
       &&!kalshiExtremeDisagrees;
+    // V10.6.6 — PREGATE PREDICTOR (early-commit on 15m alignment)
+    //   When in the first 4 minutes of window AND 15m TC is fully aligned with
+    //   our direction AND Kalshi is still cheap for our side AND no major veto,
+    //   force the structural-led tier. This captures the "I can see this from
+    //   the 15m chart but Tara's slower signals haven't built up yet" pattern.
+    //   Triggers MORE locks, but only the high-confidence early ones — not the
+    //   deadline-forced weak ones (those still go through the standard path).
+    const _secsIntoWindow=Number(params.secondsIntoWindow)||0;
+    const _earlyWindow=_secsIntoWindow<240; // first 4 minutes
+    const _tcFullyAligned=_tc?.valid&&(
+      (dir==='UP'&&_tcSlope>=1.0&&!_tcExhausted)||
+      (dir==='DOWN'&&_tcSlope<=-1.0&&!_tcExhausted)
+    );
+    const _kForDirCheap=kalshiAvail&&(
+      (dir==='UP'&&_kPct<=40)||
+      (dir==='DOWN'&&_kPct>=60)
+    );
+    const _v10_6_6_pregate=_earlyWindow&&_tcFullyAligned&&_kForDirCheap
+      &&conviction>=4 // softer than standard 6 — pregate trusts 15m structure
+      &&!tapeSuperOpposes // tape veto still respected
+      &&!kalshiExtremeDisagrees;
+    if(_v10_6_6_pregate&&!isStructuralLed){
+      isStructuralLed=true; // promote to structural-led tier
+      reasoning&&Array.isArray(reasoning)&&reasoning.push(`[V10.6.6 PREGATE] TC fully aligned ${dir} + kalshi cheap (k${_kPct.toFixed(0)}) + early window (${_secsIntoWindow.toFixed(0)}s) → forced structural-led`);
+    }
     const _strikeActionable=strikeFavorable||Math.abs(_gapBpsForDir)<=20;
     // Rising-confluence requires 3 of {15s tape, FGT-leans, score-leans, strike-actionable}
     //   plus existing vetoes still apply. Don't fire if already isConfluent — we have a
