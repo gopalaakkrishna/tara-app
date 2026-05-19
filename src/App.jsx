@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.8-rollover-race-fix';
+const BASELINE_VERSION='2026.05.19-v10.7.10-smart-cashout-ui';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.8';
+const TARA_VERSION_DISPLAY='Tara 10.7.10';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14637,6 +14637,115 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             ),
             autoExecSettings?.smartExitsEnabled&&React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 leading-relaxed'},
               'Example with reversal=70%, min-profit=5¢, extend=ON@5¢: filled at 50¢ → tape stays UP 80% → target rises 85→90¢. Filled at 50¢ → at 58¢, tape flips to DOWN at 75% → early exit locks +8¢/contract. Uses scalper engine signal data, independent of whether scalper advisor is enabled.',
+            ),
+          ),
+        ),
+        // ── V10.7.10: SMART CASHOUT (peak-tracking trailing stop + asymmetric loss cut) ──
+        React.createElement('details',{className:'mb-3 rounded',style:{background:'rgba(110,231,183,0.04)',border:'1px solid rgba(110,231,183,0.16)'}},
+          React.createElement('summary',{className:'px-2.5 py-2 cursor-pointer flex items-baseline justify-between gap-2 select-none',style:{color:'#6EE7B7'}},
+            React.createElement('span',{className:'text-[11px] uppercase font-bold tracking-[0.16em]'},'Smart cashout'),
+            React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45'},'V10.7.10 · profit lock + loss cut'),
+          ),
+          React.createElement('div',{className:'px-2.5 pb-3 pt-1 space-y-2'},
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55 leading-relaxed'},
+              'Tracks peak unrealized profit. Locks profit on retrace, cuts losses faster than fixed stop-loss, force-exits in last seconds of window. Runs BEFORE fixed take-profit/stop-loss.',
+            ),
+            // Enable toggle
+            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
+              React.createElement('div',null,
+                React.createElement('div',{className:'text-[11px] font-bold text-white'},'Enable smart cashout'),
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Default ON · V10.7.9 logic'),
+              ),
+              React.createElement('input',{
+                type:'checkbox',
+                checked:autoExecSettings?.smartCashoutEnabled!==false,
+                onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutEnabled:e.target.checked})),
+                className:'ml-2',
+              }),
+            ),
+            // 6 threshold inputs in 2-col grid
+            (autoExecSettings?.smartCashoutEnabled!==false)&&React.createElement('div',{className:'grid grid-cols-2 gap-2 pt-2 border-t border-[#E8E9E4]/8'},
+              // 1. Peak trigger
+              React.createElement('label',{className:'block'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Peak trigger ¢'),
+                React.createElement('input',{
+                  type:'number',min:5,max:50,step:1,
+                  value:autoExecSettings?.smartCashoutPeakTrigger??15,
+                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutPeakTrigger:Math.max(5,Math.min(50,_num(e.target.value,15)))})),
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                }),
+                React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
+                  `peak must hit ${autoExecSettings?.smartCashoutPeakTrigger??15}¢ before trail arms`,
+                ),
+              ),
+              // 2. Trail floor %
+              React.createElement('label',{className:'block'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Trail floor %'),
+                React.createElement('input',{
+                  type:'number',min:25,max:90,step:5,
+                  value:autoExecSettings?.smartCashoutTrailFloorPct??50,
+                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutTrailFloorPct:Math.max(25,Math.min(90,_num(e.target.value,50)))})),
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                }),
+                React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
+                  `exit if profit < peak × ${autoExecSettings?.smartCashoutTrailFloorPct??50}%`,
+                ),
+              ),
+              // 3. Loss cut
+              React.createElement('label',{className:'block'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Loss cut ¢'),
+                React.createElement('input',{
+                  type:'number',min:10,max:60,step:5,
+                  value:autoExecSettings?.smartCashoutLossCutCents??25,
+                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLossCutCents:Math.max(10,Math.min(60,_num(e.target.value,25)))})),
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                }),
+                React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
+                  `exit if down ≥${autoExecSettings?.smartCashoutLossCutCents??25}¢ from entry`,
+                ),
+              ),
+              // 4. Late-window seconds
+              React.createElement('label',{className:'block'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Late window (s)'),
+                React.createElement('input',{
+                  type:'number',min:15,max:180,step:15,
+                  value:autoExecSettings?.smartCashoutLateWindowSecs??60,
+                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLateWindowSecs:Math.max(15,Math.min(180,_num(e.target.value,60)))})),
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                }),
+                React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
+                  `last ${autoExecSettings?.smartCashoutLateWindowSecs??60}s of window = late zone`,
+                ),
+              ),
+              // 5. Late profit lock
+              React.createElement('label',{className:'block'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Late profit lock ¢'),
+                React.createElement('input',{
+                  type:'number',min:1,max:30,step:1,
+                  value:autoExecSettings?.smartCashoutLateProfitCents??5,
+                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLateProfitCents:Math.max(1,Math.min(30,_num(e.target.value,5)))})),
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                }),
+                React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
+                  `in late zone, exit if profit ≥${autoExecSettings?.smartCashoutLateProfitCents??5}¢`,
+                ),
+              ),
+              // 6. Late loss cut
+              React.createElement('label',{className:'block'},
+                React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Late loss cut ¢'),
+                React.createElement('input',{
+                  type:'number',min:5,max:50,step:5,
+                  value:autoExecSettings?.smartCashoutLateLossCents??15,
+                  onChange:(e)=>setAutoExecSettings(prev=>({...prev,smartCashoutLateLossCents:Math.max(5,Math.min(50,_num(e.target.value,15)))})),
+                  className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
+                }),
+                React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
+                  `in late zone, exit if loss ≥${autoExecSettings?.smartCashoutLateLossCents??15}¢`,
+                ),
+              ),
+            ),
+            (autoExecSettings?.smartCashoutEnabled!==false)&&React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/45 leading-relaxed pt-2 border-t border-[#E8E9E4]/8'},
+              `Example: filled at 58¢ → spikes to 88¢ peak (+30¢) → retraces to 72¢ (+14¢, below ${autoExecSettings?.smartCashoutTrailFloorPct??50}% of 30 = ${Math.floor((autoExecSettings?.smartCashoutTrailFloorPct??50)/100*30)}¢) → trail-stop exits at +14¢ instead of waiting for full retrace. Or: filled at 58¢ → drops to 33¢ (-25¢) → loss-cut at -${autoExecSettings?.smartCashoutLossCutCents??25}¢ before going further.`,
             ),
           ),
         ),
@@ -26011,6 +26120,14 @@ function TaraApp(){
   },[]);
   // V9.18.4: rate-limit smart-exit diagnostic logs to once per ~3s.
   const _smartExitLogLastRef=useRef(0);
+  // V10.7.9 — SMART CASHOUT peak tracking.
+  //   Tracks peak unrealized profit per auto-exec position so we can:
+  //   (1) trailing-stop on retrace from peak
+  //   (2) lock profits in late-window
+  //   (3) asymmetric loss cut faster than fixed stop-loss
+  //   Keyed by orderId so each position has its own peak. Reset implicitly
+  //   when orderId changes.
+  const _v10_7_9_peakRef=useRef({orderId:null,peakCents:0});
   // V6.2.6: Force-call refs. User-initiated overrides via buttons on Tara's Call card.
   //   softHintRef: timestamp of last "Hint to Lock Faster" press. Active for 10s after press.
   //     Lowers q-floor 30→20, conv-floor 10→6, and trims sample requirements by 40%.
@@ -34857,7 +34974,77 @@ function TaraApp(){
     }
     if(!_exitReason&&_ourSideCents>=_effectiveExitOffer){
       _exitReason=`take-profit at ${_ourSideCents}¢${_effectiveExitOffer!==autoExecSettings.autoExitOffer?' (extended target — strong tape)':''}`;
-    }else if(!_exitReason&&autoExecSettings.stopLossDeltaCents>0&&_effectiveFillPrice!=null&&(_effectiveFillPrice-_ourSideCents)>=autoExecSettings.stopLossDeltaCents){
+    }
+    // ═══════════════════════════════════════════════════════════════════════
+    // V10.7.9 — TRUE SMART CASHOUT (peak tracking + trailing stop + loss cut)
+    // V10.7.10 — Thresholds now editable in settings panel.
+    // ═══════════════════════════════════════════════════════════════════════
+    // User report (May 19): "for this round it pulled out at 88c profit which
+    //   is good but ... can the cashouts be smarter like if we are winning
+    //   the round we wait for maximum payout. and it is going against us we
+    //   pull out with minimal loss or some profit"
+    //
+    // FIXED-THRESHOLD problem: take-profit at 85¢ misses cases where price
+    //   spikes to 88¢ then retraces to 60¢ before the order can fill at 85¢.
+    //   Same for stop-loss: by the time fixed stopLossDeltaCents triggers,
+    //   the position may already be deep in the red.
+    //
+    // SMART CASHOUT rules (all run BEFORE stop-loss / time-exit):
+    //   (a) TRAILING STOP — once peak unrealized ≥ peakTrigger, exit if value
+    //       drops below trailFloorPct of peak (locks profit on retrace).
+    //   (b) ASYMMETRIC LOSS CUT — exit if down ≥ lossCutCents (faster
+    //       than default stop-loss; protects from -75¢ disasters).
+    //   (c) LATE-WINDOW PROFIT LOCK — in last lateWindowSecs of window, exit
+    //       if any profit ≥ lateProfitCents (don't risk it on settlement noise).
+    //   (d) LATE-WINDOW LOSS CUT — in last lateWindowSecs, exit if loss
+    //       ≥ lateLossCents (cut before full -85¢ realization).
+    //
+    // Defaults (editable in settings):
+    //   smartCashoutEnabled         = true
+    //   smartCashoutPeakTrigger     = 15  (¢ — peak needs to hit this before trail arms)
+    //   smartCashoutTrailFloorPct   = 50  (% — exit if profit < peak × pct)
+    //   smartCashoutLossCutCents    = 25  (¢ — asymmetric loss cut)
+    //   smartCashoutLateWindowSecs  = 60  (s — what counts as "late window")
+    //   smartCashoutLateProfitCents = 5   (¢ — late-window profit lock threshold)
+    //   smartCashoutLateLossCents   = 15  (¢ — late-window loss cut threshold)
+    if(!_exitReason&&_effectiveFillPrice!=null&&autoExecSettings.smartCashoutEnabled!==false){
+      const _profitCents=_ourSideCents-_effectiveFillPrice;
+      // Initialize / update peak for this orderId
+      const _orderId=_aos.orderId||_aos.id||null;
+      if(_v10_7_9_peakRef.current.orderId!==_orderId){
+        _v10_7_9_peakRef.current={orderId:_orderId,peakCents:0};
+      }
+      if(_profitCents>_v10_7_9_peakRef.current.peakCents){
+        _v10_7_9_peakRef.current.peakCents=_profitCents;
+      }
+      const _peak=_v10_7_9_peakRef.current.peakCents;
+      const _msLeft=(timeState?.minsRemaining||0)*60000+(timeState?.secsRemaining||0)*1000;
+      // Read settings with defaults
+      const _peakTrigger=Number(autoExecSettings.smartCashoutPeakTrigger)||15;
+      const _trailPct=(Number(autoExecSettings.smartCashoutTrailFloorPct)||50)/100;
+      const _lossCut=Number(autoExecSettings.smartCashoutLossCutCents)||25;
+      const _lateWinSecs=Number(autoExecSettings.smartCashoutLateWindowSecs)||60;
+      const _lateProfitC=Number(autoExecSettings.smartCashoutLateProfitCents)||5;
+      const _lateLossC=Number(autoExecSettings.smartCashoutLateLossCents)||15;
+      const _isLateWindow=_msLeft>0&&_msLeft<=_lateWinSecs*1000;
+      // (a) Trailing stop
+      if(_peak>=_peakTrigger&&_profitCents<Math.floor(_peak*_trailPct)){
+        _exitReason=`[V10.7.9] trailing stop · peak +${_peak}¢, now ${_profitCents>=0?'+':''}${_profitCents}¢ (below ${Math.round(_trailPct*100)}% of peak)`;
+      }
+      // (b) Asymmetric loss cut
+      else if(_profitCents<=-_lossCut){
+        _exitReason=`[V10.7.9] loss cut · down ${-_profitCents}¢ from entry (limit ${_lossCut}¢)`;
+      }
+      // (c) Late-window profit lock
+      else if(_isLateWindow&&_profitCents>=_lateProfitC){
+        _exitReason=`[V10.7.9] late-window profit lock · +${_profitCents}¢ with ${Math.round(_msLeft/1000)}s left`;
+      }
+      // (d) Late-window loss cut
+      else if(_isLateWindow&&_profitCents<=-_lateLossC){
+        _exitReason=`[V10.7.9] late-window loss cut · down ${-_profitCents}¢ with ${Math.round(_msLeft/1000)}s left`;
+      }
+    }
+    if(!_exitReason&&autoExecSettings.stopLossDeltaCents>0&&_effectiveFillPrice!=null&&(_effectiveFillPrice-_ourSideCents)>=autoExecSettings.stopLossDeltaCents){
       _exitReason=`stop-loss at ${_ourSideCents}¢ (down ${_effectiveFillPrice-_ourSideCents}¢ from ${_effectiveFillPrice}¢${_aos.fillPrice==null?' [est]':''})`;
     }else if(!_exitReason&&autoExecSettings.timeExitSecLeft>0){
       const _msLeft=(timeState?.minsRemaining||0)*60000+(timeState?.secsRemaining||0)*1000;
