@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.4.1c-live-price-chip-overflow';
+const BASELINE_VERSION='2026.05.19-v10.4.1d-tape-flow-tablet-fix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.4.1c';
+const TARA_VERSION_DISPLAY='Tara 10.4.1d';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38214,10 +38214,10 @@ function TaraApp(){
               );
             };
             return(
-              <div className="px-3 pb-2 hidden sm:block">
-                <div className="flex items-baseline justify-between mb-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-xs text-[#E8E9E4]/30 uppercase tracking-wide">Depth of Market</span>
+              <div className="px-3 pb-2 block">
+                <div className="flex items-baseline justify-between mb-1 gap-2 min-w-0">
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="text-xs text-[#E8E9E4]/30 uppercase tracking-wide whitespace-nowrap">Depth of Market</span>
                     {_qColor&&React.createElement('span',{className:'inline-flex items-center gap-1'},
                       React.createElement('span',{className:'inline-flex gap-0.5'},
                         [0,1,2].map(i=>React.createElement('span',{
@@ -38296,10 +38296,10 @@ function TaraApp(){
             };
             const _domDominantPct=Math.max(_tBuyPct,_tSellPct);
             return(
-              <div className="px-3 pb-2 hidden sm:block">
-                <div className="flex items-baseline justify-between mb-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-xs text-[#E8E9E4]/30 uppercase tracking-wide">Tape Flow · 30s</span>
+              <div className="px-3 pb-2 block">
+                <div className="flex items-baseline justify-between mb-1 gap-2 min-w-0">
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="text-xs text-[#E8E9E4]/30 uppercase tracking-wide whitespace-nowrap">Tape Flow · 30s</span>
                     {_qColor&&React.createElement('span',{className:'inline-flex items-center gap-1'},
                       React.createElement('span',{className:'inline-flex gap-0.5'},
                         [0,1,2].map(i=>React.createElement('span',{
