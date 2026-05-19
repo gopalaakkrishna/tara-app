@@ -3866,10 +3866,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.4.1-ev-aware-delay-gate';
+const BASELINE_VERSION='2026.05.19-v10.4.1b-cooldown-tp-merged';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.4.1';
+const TARA_VERSION_DISPLAY='Tara 10.4.1b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13093,6 +13093,9 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
   // V9.19.25: tap-to-reveal tooltip state. Each setting has a stable id; clicking
   //   the (?) icon opens its tooltip inline. Click again or click another to dismiss.
   const[_settingsTip,_setSettingsTip]=React.useState(null);
+  // V10.4.1a: legacy presets hidden by default — clutter for choices that data
+  //   shows aren't optimal in current market. Click to reveal if needed.
+  const[_showLegacyPresets,_setShowLegacyPresets]=React.useState(false);
   // V9.19.25: helper to render a label with hover-tooltip (desktop, via title)
   //   + tap-tooltip (mobile, via inline expansion). Used by settings rows that
   //   need more explanation than a 1-liner hint can give.
@@ -13136,8 +13139,13 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
         React.createElement('button',{onClick:onClose,className:'text-[#E8E9E4]/40 hover:text-white text-xl leading-none'},'×'),
       ),
       // Bet size + win payout
+      //   V10.4.1a: REMOVED misleading "Net per win / Required WR for breakeven"
+      //   calculation. That math doesn't reflect Kalshi binary mechanics — actual
+      //   payouts depend on kalshiAtLock entry price, not a fixed 2:1 ratio.
+      //   The fields stay (used for P&L stats display + Kelly sizing math) but
+      //   the misleading subtitle is replaced with a clarifying note.
       React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8'},
-        React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-2'},'Position Sizing'),
+        React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-2'},'Position Sizing — Stats Display'),
         React.createElement('div',{className:'grid grid-cols-2 gap-3'},
           React.createElement('label',{className:'block'},
             React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Bet size ($)'),
@@ -13146,9 +13154,8 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               onChange:(e)=>_update('betSize',_num(e.target.value,10)),
               className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
             }),
-            // V9.17.20: live unit hint under input
             React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
-              `= $${(Number(settings.betSize)||0).toFixed(2)} dollars per trade (your stake)`,
+              `= $${(Number(settings.betSize)||0).toFixed(2)} per trade (for P&L tracking)`,
             ),
           ),
           React.createElement('label',{className:'block'},
@@ -13158,15 +13165,13 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               onChange:(e)=>_update('winPayout',_num(e.target.value,8.5)),
               className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
             }),
-            // V9.17.20: live unit hint
             React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
-              `= $${(Number(settings.winPayout)||0).toFixed(2)} dollars net profit when you win`,
+              `= average net profit when you win (for stats display)`,
             ),
           ),
         ),
-        React.createElement('div',{className:'mt-2 text-[10px] text-[#E8E9E4]/45'},
-          'Net per win: +$',(settings.winPayout||0).toFixed(2),' · per loss: -$',(settings.betSize||0).toFixed(2),
-          '. Required WR for breakeven: ',(settings.winPayout&&settings.betSize?Math.round((settings.betSize/(settings.winPayout+settings.betSize))*100):0),'%',
+        React.createElement('div',{className:'mt-2 text-[10px] text-[#E5C870]/70'},
+          '⚠ Actual Kalshi payouts vary by entry price. Real bet sizing is set under "Max bet/trade" in Risk Guardrails below.',
         ),
       ),
       // V9.17.4: ADVANCED SETTINGS — collapsed by default. User said the modal
@@ -13216,40 +13221,16 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           'Tara picks the dial: ⚡FAST in extreme velocity, 🛡PATIENT in whipsaw / dead phases, balanced otherwise. Header shows "auto · NN" instead of "speed: NN rec." Toggle off to set manually.',
         ),
       ),
-      // Anti-tilt
-      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8'},
-        React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
-          React.createElement('div',null,
-            React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-0.5'},'Anti-tilt cooldown'),
-            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Block new locks after a losing streak'),
-          ),
-          React.createElement('input',{type:'checkbox',checked:settings.antiTiltEnabled,onChange:(e)=>_update('antiTiltEnabled',e.target.checked),className:'ml-2'}),
-        ),
-        settings.antiTiltEnabled&&React.createElement('div',{className:'mt-3 grid grid-cols-2 gap-3'},
-          React.createElement('label',{className:'block'},
-            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Trigger after N losses'),
-            React.createElement('input',{
-              type:'number',min:3,max:10,step:1,value:settings.antiTiltStreakLen,
-              onChange:(e)=>_update('antiTiltStreakLen',Math.max(3,Math.min(10,_num(e.target.value,4)))),
-              className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
-            }),
-            // V9.17.20: unit hint
-            React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
-              `= ${settings.antiTiltStreakLen||3} losses in a row`,
-            ),
-          ),
-          React.createElement('label',{className:'block'},
-            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65 mb-1'},'Cooldown duration (min)'),
-            React.createElement('input',{
-              type:'number',min:1,max:120,step:1,value:settings.antiTiltMinutes,
-              onChange:(e)=>_update('antiTiltMinutes',Math.max(1,Math.min(120,_num(e.target.value,15)))),
-              className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
-            }),
-            // V9.17.20: unit hint
-            React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
-              `= ${settings.antiTiltMinutes||15} minutes of no new locks`,
-            ),
-          ),
+      // Anti-tilt cooldown — V10.4.1a: REMOVED, merged into auto-exec cooldown
+      //   below to eliminate duplicate cooldown systems. The auto-exec
+      //   cooldownLossStreak / cooldownMinutes fields (Risk Guardrails section)
+      //   are now the single source of truth. antiTiltEnabled/antiTiltStreakLen/
+      //   antiTiltMinutes settings are kept in localStorage for backward compat
+      //   but no longer wired to any active code path or surfaced in UI.
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/40 border border-[#E8E9E4]/5'},
+        React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/35 mb-1'},'Anti-tilt cooldown'),
+        React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/45 leading-snug'},
+          'Moved into ',React.createElement('span',{style:{color:T2_GOLD,fontWeight:'bold'}},'Cooldown after losses'),' in Kalshi Auto-Execution settings below. Single source of truth, no more duplicates.',
         ),
       ),
       // High-edge Discord filter
@@ -13274,42 +13255,16 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           ),
         ),
       ),
-      // TP / SL rules
-      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8'},
-        React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-2'},'Auto exit suggestions'),
-        React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer mb-2'},
-          React.createElement('div',null,
-            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65'},'Take-profit: suggest exit when offer ≥'),
-          ),
-          React.createElement('input',{type:'checkbox',checked:settings.takeProfitEnabled,onChange:(e)=>_update('takeProfitEnabled',e.target.checked),className:'ml-2'}),
-        ),
-        settings.takeProfitEnabled&&React.createElement('div',{className:'mb-3'},
-          React.createElement('input',{
-            type:'number',min:0.5,max:0.99,step:0.01,value:settings.takeProfitOffer,
-            onChange:(e)=>_update('takeProfitOffer',Math.max(0.5,Math.min(0.99,_num(e.target.value,0.85)))),
-            className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
-          }),
-          // V9.17.20: unit hint — explain decimal-to-cents conversion explicitly
-          React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
-            `= ${Math.round((Number(settings.takeProfitOffer)||0.85)*100)}¢ offer on a $1 contract (sell when worth ${Math.round((Number(settings.takeProfitOffer)||0.85)*100)}% of max)`,
-          ),
-        ),
-        React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer'},
-          React.createElement('div',null,
-            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/65'},'Cut-loss: suggest exit after N min in loss'),
-          ),
-          React.createElement('input',{type:'checkbox',checked:settings.cutLossEnabled,onChange:(e)=>_update('cutLossEnabled',e.target.checked),className:'ml-2'}),
-        ),
-        settings.cutLossEnabled&&React.createElement('div',{className:'mt-2'},
-          React.createElement('input',{
-            type:'number',min:1,max:14,step:0.5,value:settings.cutLossMinutes,
-            onChange:(e)=>_update('cutLossMinutes',Math.max(1,Math.min(14,_num(e.target.value,3)))),
-            className:'w-full bg-transparent border border-[#E8E9E4]/15 rounded px-2 py-1 text-white text-sm tabular-nums focus:border-[#E5C870] focus:outline-none',
-          }),
-          // V9.17.20: unit hint
-          React.createElement('div',{className:'text-[9px] text-[#E8E9E4]/40 mt-1'},
-            `= ${settings.cutLossMinutes||3} minutes underwater before exit suggestion`,
-          ),
+      // Auto exit suggestions — V10.4.1a: REMOVED, merged into Kalshi Auto-Execution
+      //   "Exit thresholds" below (takeProfitAtOffer / stopLossDeltaCents). The
+      //   suggest layer was duplicating the auto-exit layer with weaker math
+      //   (suggested $0.19 exits on $0.84-expected positions per real-world test).
+      //   takeProfitEnabled/Offer/cutLossEnabled/Minutes preserved in localStorage
+      //   for backward compat, no longer surfaced.
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/40 border border-[#E8E9E4]/5'},
+        React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/35 mb-1'},'Auto exit suggestions'),
+        React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/45 leading-snug'},
+          'Moved into ',React.createElement('span',{style:{color:T2_GOLD,fontWeight:'bold'}},'Exit thresholds'),' in Kalshi Auto-Execution below. The auto-exit layer (88¢/13¢) is the active system — single source of truth.',
         ),
       ),
       // ── V9.7.0: MISSION MODE ──────────────────────────────────────────
@@ -13537,7 +13492,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     maxAutoTradesPerWindow:1,
                     maxBetPerTrade:2,
                     maxDailyLoss:4,
-                    cooldownLossStreak:2,
+                    cooldownLossStreak:3,
                     cooldownMinutes:45,
                   }));
                   // Also enable Kalshi-agree live since this is the max-WR preset
@@ -13582,7 +13537,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     maxAutoTradesPerWindow:1,
                     maxBetPerTrade:2.5,
                     maxDailyLoss:6,
-                    cooldownLossStreak:2,
+                    cooldownLossStreak:3,
                     cooldownMinutes:30,
                   }));
                   try{
@@ -13636,7 +13591,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     maxAutoTradesPerWindow:1,
                     maxBetPerTrade:2.5,
                     maxDailyLoss:6,
-                    cooldownLossStreak:2,
+                    cooldownLossStreak:3,
                     cooldownMinutes:30,
                   }));
                   try{
@@ -13660,10 +13615,17 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'72-76% · 4-7/day · V10.2.35'),
               ),
             ),
-            // Divider label for legacy presets
-            React.createElement('div',{className:'text-[8px] uppercase tracking-[0.10em] text-[#E8E9E4]/30 my-1.5'},'Legacy presets (May 14 baseline)'),
+            // V10.4.1a: legacy presets hidden by default. Click to reveal.
+            React.createElement('button',{
+              type:'button',
+              onClick:()=>_setShowLegacyPresets(v=>!v),
+              className:'w-full text-[8px] uppercase tracking-[0.10em] text-[#E8E9E4]/30 hover:text-[#E8E9E4]/50 my-1.5 flex items-center justify-between',
+            },
+              React.createElement('span',null,'Legacy presets (May 14 baseline)'),
+              React.createElement('span',null,_showLegacyPresets?'▼ hide':'▶ show'),
+            ),
             // ROW 2: Surgeon + Balanced + Volume — V10.2.8 legacy
-            React.createElement('div',{className:'grid grid-cols-3 gap-1.5'},
+            _showLegacyPresets&&React.createElement('div',{className:'grid grid-cols-3 gap-1.5'},
               // SURGEON preset — highest WR, lowest volume
               React.createElement('button',{
                 type:'button',
@@ -13682,7 +13644,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     maxAutoTradesPerWindow:1,
                     maxBetPerTrade:2,
                     maxDailyLoss:5,
-                    cooldownLossStreak:2,
+                    cooldownLossStreak:3,
                     cooldownMinutes:30,
                   }));
                   try{console.info('[V10.2.8] SURGEON preset applied');}catch(_){}
@@ -13716,7 +13678,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     maxAutoTradesPerWindow:1,
                     maxBetPerTrade:2,
                     maxDailyLoss:5,
-                    cooldownLossStreak:2,
+                    cooldownLossStreak:3,
                     cooldownMinutes:30,
                   }));
                   try{console.info('[V10.2.8] BALANCED preset applied');}catch(_){}
@@ -14589,7 +14551,16 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             }),
           ),
         ),
-        // Expanded settings ONLY when enabled — reduces clutter when off
+        // V10.4.1a: scalper config wrapped in collapsible — when scalper is enabled,
+        //   the config sections (entry, exit, risk caps, cooldowns, execution) take
+        //   ~400px of vertical space. Most users set once and forget; collapsing
+        //   keeps the settings modal focused on what's actively used.
+        scalperSettings.enabled&&React.createElement('details',{className:'mb-3 rounded-lg',style:{background:'rgba(196,181,253,0.03)',border:'1px solid rgba(196,181,253,0.14)'}},
+          React.createElement('summary',{className:'px-3 py-2 cursor-pointer flex items-baseline justify-between select-none',style:{listStyle:'none'}},
+            React.createElement('span',{className:'text-[11px] font-bold',style:{color:'#C4B5FD',letterSpacing:'0.02em',textTransform:'none'}},'Scalper config'),
+            React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/45'},'entry · exit · risk · cooldowns ▾'),
+          ),
+          React.createElement('div',{className:'px-3 pb-3 pt-1'},
         scalperSettings.enabled&&React.createElement(React.Fragment,null,
           // ── GROUP 1: ENTRY & EXIT (Kalshi cents) ─────────────────────────
           React.createElement('div',{className:'mb-3 p-3 rounded-lg',style:{background:'rgba(0,0,0,0.25)',border:'1px solid rgba(245,245,244,0.06)'}},
@@ -14779,7 +14750,9 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             ),
           ),
         ),
-      ),
+      ), // closes scalperSettings.enabled Fragment
+        ), // V10.4.1a closes the wrapping div inside details
+      ), // V10.4.1a closes the new details collapsible
       React.createElement('button',{
         onClick:onClose,
         className:'w-full px-4 py-2 rounded text-[11px] uppercase font-bold tracking-wider transition-colors',
@@ -14958,9 +14931,17 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
       React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/75'},'$',mission.currentBankroll.toFixed(2),' ≤ floor $',mission.floor.toFixed(2),' · stopped after ',mission.tradesAttempted,' trades · WR ',_runWR.toFixed(0),'%'),
       React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55 mt-2 leading-relaxed'},'Floor protected the rest of the bankroll. The mission stopped before reaching $0. Reset to start a new one with adjusted targets, or review the trade log for what went wrong.'),
     ),
-    mission.status==='expired'&&React.createElement('div',{className:'p-3 rounded mb-3',style:{background:'rgba(251,191,36,0.08)',border:'1px solid rgba(251,191,36,0.30)'}},
-      React.createElement('div',{className:'text-[12px] font-bold mb-1',style:{color:'#FBBF24'}},'Mission expired'),
-      React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/75'},'Final $',mission.currentBankroll.toFixed(2),' · target $',mission.target.toFixed(2),' · ',mission.tradesAttempted,' trades · WR ',_runWR.toFixed(0),'%'),
+    mission.status==='expired'&&React.createElement('div',{className:'p-3 rounded mb-3 flex items-start justify-between gap-2',style:{background:'rgba(251,191,36,0.08)',border:'1px solid rgba(251,191,36,0.30)'}},
+      React.createElement('div',null,
+        React.createElement('div',{className:'text-[12px] font-bold mb-1',style:{color:'#FBBF24'}},'Mission expired'),
+        React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/75'},'Final $',mission.currentBankroll.toFixed(2),' · target $',mission.target.toFixed(2),' · ',mission.tradesAttempted,' trades · WR ',_runWR.toFixed(0),'%'),
+      ),
+      // V10.4.1a: clear-and-restart button so user can dismiss without hunting for the deep reset
+      React.createElement('button',{
+        onClick:_resetMission,
+        className:'text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-[#FBBF24]/40 hover:bg-[#FBBF24]/15 text-[#FBBF24] shrink-0',
+        title:'Clear mission state to start fresh',
+      },'Clear · Reset'),
     ),
     // Active progress
     _isActive&&React.createElement('div',{className:'p-3 rounded mb-3',style:{background:'rgba(110,231,183,0.04)',border:'1px solid rgba(110,231,183,0.20)'}},
@@ -15671,6 +15652,12 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
 function TPSLBanner({settings,userPosition,currentOffer,positionStatus,positionOpenTime}){
   if(!settings)return null;
   if(!userPosition)return null;
+  // V10.4.1a: suggest TP/SL layer disabled — merged into autoExec exit thresholds.
+  //   The "Take-profit hit · offer $0.19" misfires (offering exit at 19¢ on a
+  //   position with 84¢ expected value) were originating from this code path.
+  //   Hard return null; autoExec layer fires actual exits at 88¢/13¢.
+  return null;
+  // eslint-disable-next-line no-unreachable
   const _offerVal=parseFloat(currentOffer)||0;
   const _ageMin=positionOpenTime?(Date.now()-positionOpenTime)/60000:0;
   const _hitTP=settings.takeProfitEnabled&&_offerVal>=Number(settings.takeProfitOffer);
@@ -25161,7 +25148,7 @@ function TaraApp(){
         autoExitOffer:82,autoExitSecLeft:20,
         stopLossDeltaCents:13,timeExitSecLeft:0,
         // Hunter cooldown
-        cooldownLossStreak:2,cooldownMinutes:30,
+        cooldownLossStreak:3,cooldownMinutes:30,
         // Phase 4 advisory (badge shows, doesn't block)
         tradeTimingMode:'advisory',
         // Universal
@@ -27224,6 +27211,11 @@ function TaraApp(){
   // for the configured duration. Cleared automatically when next WIN arrives.
   useEffect(()=>{
     if(!todayData)return;
+    // V10.4.1a: antiTilt merged into autoExec cooldown (single source of truth).
+    //   Hard-disabled here to prevent double-cooldown firing. Saved settings
+    //   are preserved in localStorage for backward compat but no longer active.
+    return;
+    // eslint-disable-next-line no-unreachable
     if(!tradingSettings.antiTiltEnabled)return;
     // Trigger on streak reaching threshold
     if(todayData.lastResult==='LOSS'&&todayData.streak>=tradingSettings.antiTiltStreakLen){
@@ -29343,7 +29335,7 @@ function TaraApp(){
       maxAutoTradesPerWindow:1,
       maxBetPerTrade:2.5,
       maxDailyLoss:6,
-      cooldownLossStreak:2,
+      cooldownLossStreak:3,
       cooldownMinutes:30,
     };
     window.__taraHunterCheck=()=>{
