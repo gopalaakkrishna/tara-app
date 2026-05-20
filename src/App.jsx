@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.32-gap-weight-fgt-brti-sizing-entry-reconcile';
+const BASELINE_VERSION='2026.05.20-v10.7.33-restore-structure-in-chop';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.32';
+const TARA_VERSION_DISPLAY='Tara 10.7.33';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -8851,14 +8851,21 @@ const computeV99Posterior=(params)=>{
   //   Both scores were already added to totalScore earlier. We subtract them
   //   back here when the current regime is in the "kill list" for that signal.
   //
+  //   V10.7.33 UPDATE — Structure restored in RANGE-CHOP based on:
+  //     1) User intuition: had wins on V10.7.25 era when Structure was active in chop
+  //     2) Data: 51% accuracy in chop is essentially neutral (not actively wrong)
+  //     3) Marginal points may help borderline calls land correctly
+  //   Still removed in TRENDING UP/DOWN where data was clear (37-42% wrong).
+  //
   //   Keep ON in:
-  //     Structure: SHORT SQUEEZE only (56% — works)
-  //     Technical: TRENDING UP only (57% — works)
-  //                + RANGE-CHOP (52% — neutral, slight edge)
-  //   Subtract everywhere else.
+  //     Structure: SHORT SQUEEZE (56%), RANGE-CHOP (51%, restored V10.7.33)
+  //     Technical: TRENDING UP (57%), RANGE-CHOP (52%)
+  //   Subtract in:
+  //     Structure: TRENDING UP/DOWN (37-42% wrong), HIGH VOL CHOP
+  //     Technical: TRENDING DOWN (45% wrong), SHORT SQUEEZE (43% wrong), HIGH VOL CHOP
   const _structAddedScore=Number(rawSignalScores.structure)||0;
   const _techAddedScore=Number(rawSignalScores.technical)||0;
-  const _structOkRegimes=new Set(['SHORT SQUEEZE']);
+  const _structOkRegimes=new Set(['SHORT SQUEEZE','RANGE-CHOP']); // V10.7.33: added RANGE-CHOP
   const _techOkRegimes=new Set(['TRENDING UP','RANGE-CHOP']);
   if(!_structOkRegimes.has(regime)&&Math.abs(_structAddedScore)>=1){
     totalScore-=_structAddedScore; // remove the contribution from totalScore
