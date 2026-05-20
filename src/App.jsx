@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.36-regime-rebuild-adx-bbw-vwap';
-const TARA_VERSION_DISPLAY='Tara 10.7.36';
+const BASELINE_VERSION='2026.05.20-v10.7.36a-mtfAligned-crash-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.36a';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -8831,6 +8831,9 @@ const computeV99Posterior=(params)=>{
   const isHighVol=_v10736?_v10736.isHighVol:(atrBps>35); // fallback if not enough bars
   const isCleanUp=_v10736?(_v10736.isTrend&&drift1m>3&&drift5m>3):(drift1m>3&&drift5m>5&&drift15m>8&&delta>200000);
   const isCleanDn=_v10736?(_v10736.isTrend&&drift1m<-3&&drift5m<-3):(drift1m<-3&&drift5m<-5&&drift15m<-8&&delta<-200000);
+  // V10.7.36: keep _mtfUpAligned/_mtfDnAligned for telemetry stamps downstream (line 10814)
+  const _mtfUpAligned=isCleanUp;
+  const _mtfDnAligned=isCleanDn;
   if(_v10736){
     reasoning.push(`[V10.7.36 REGIME] ADX=${_v10736.adx.toFixed(1)} BBW=${_v10736.bbwRank}th-pct whipsaw=${_v10736.whipsawCount} ATRP=${_v10736.atrp.toFixed(2)}% → ${_v10736.isHighVol?'HIGH-VOL':_v10736.isTrend?'TREND':'CHOP'} priceAboveMedian=${_v10736.priceAboveMedian}`);
   }else{
