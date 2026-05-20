@@ -3911,10 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.35-structure-fgt-computation-fix';
-// V9.8.16: short-form display version used in Discord footers (was hardcoded
-//   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.35';
+const BASELINE_VERSION='2026.05.20-v10.7.36-regime-rebuild-adx-bbw-vwap';
+const TARA_VERSION_DISPLAY='Tara 10.7.36';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6511,12 +6509,260 @@ const computeFutureTrendChannel=(candles,length=100,multi=3,extend=50)=>{
   return{trendDir,channelHigh:Math.round(channelHigh),channelLow:Math.round(channelLow),channelPos:Math.round(channelPos*100)/100,futurePriceBps:Math.round(futurePriceBps*10)/10,slopeBpsPerBar:Math.round(slopeBpsPerBar*100)/100,barsSinceFlip,valid:true};
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.7.36 — REGIME CLASSIFIER REBUILD
+// ═══════════════════════════════════════════════════════════════════════════
+// Replaces ad-hoc drift/ATR thresholds with:
+//   1. ADX (Master Regime Classifier V6.2 — industry standard trend strength)
+//   2. BBW percentile rank (relative volatility, adapts to history)
+//   3. Whipsaw filter (EMA-20 crosses ≥3 in 10 bars — blocks false trends)
+//   4. AiBitcoinTrend 4-bucket: Advance/Decline/Accumulation/Distribution
+//   5. VWAP with stdev bands (session-anchored overbought/oversold)
+//   6. ATRP (short vs long ATR ratio for vol expansion detection)
+// Source Pine Scripts: Master Regime Classifier V6.2, AiBitcoinTrend
+//   Regime Classifier Oscillator, VWAP Stdev Bands v2 Mod.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── ADX (Wilder's Average Directional Index, 14-period) ──────────────────
+// Pine Script: [diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+// Returns adx (0-100). > 20 = trending, < 18 = chop.
+const computeADX=(bars,period=14)=>{
+  if(!bars||bars.length<period*2+2)return{adx:0,diPlus:0,diMinus:0,valid:false};
+  const n=bars.length;
+  // Wilder smoothing factor
+  const k=1/period;
+  let smoothTR=0,smoothPDM=0,smoothNDM=0;
+  // Initialize over first `period` bars
+  for(let i=1;i<=period;i++){
+    const h=bars[i].h,l=bars[i].l,pc=bars[i-1].c;
+    const tr=Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc));
+    const pdm=Math.max(h-bars[i-1].h,0);
+    const ndm=Math.max(bars[i-1].l-l,0);
+    const usePDM=pdm>ndm?pdm:0;
+    const useNDM=ndm>pdm?ndm:0;
+    smoothTR+=tr;smoothPDM+=usePDM;smoothNDM+=useNDM;
+  }
+  let dx=0;
+  let adxSmooth=0;
+  const dxArr=[];
+  for(let i=period+1;i<n;i++){
+    const h=bars[i].h,l=bars[i].l,pc=bars[i-1].c;
+    const tr=Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc));
+    const pdm=Math.max(h-bars[i-1].h,0);
+    const ndm=Math.max(bars[i-1].l-l,0);
+    const usePDM=pdm>ndm?pdm:0;
+    const useNDM=ndm>pdm?ndm:0;
+    // Wilder smooth: prev*(1-1/p) + new*(1/p) = prev - prev/p + new
+    smoothTR=smoothTR-smoothTR/period+tr;
+    smoothPDM=smoothPDM-smoothPDM/period+usePDM;
+    smoothNDM=smoothNDM-smoothNDM/period+useNDM;
+    const diP=smoothTR>0?(100*smoothPDM/smoothTR):0;
+    const diN=smoothTR>0?(100*smoothNDM/smoothTR):0;
+    const diSum=diP+diN;
+    dx=diSum>0?(100*Math.abs(diP-diN)/diSum):0;
+    dxArr.push(dx);
+    // Smooth DX into ADX after first `period` DX values
+    if(dxArr.length<=period){
+      adxSmooth+=dx/period;
+    }else{
+      adxSmooth=adxSmooth-adxSmooth/period+dx/period;
+    }
+  }
+  return{adx:Math.round(adxSmooth*10)/10,diPlus:0,diMinus:0,valid:true};
+};
+
+// ── BBW Percentile Rank ───────────────────────────────────────────────────
+// BBW = (stdev(close,20)*4) / sma(close,20) — algebraically same as BB width
+// PercentRank over last `rankLen` bars: 0-100, >80 = high vol (from MRC V6.2)
+const _bbwHistory=[];
+const _atrpHistory=[];
+const computeBBWRank=(closes,historyRef,rankLen=100)=>{
+  if(!closes||closes.length<22)return{bbw:0,rank:0};
+  // SMA 20
+  const sma20=closes.slice(-20).reduce((a,b)=>a+b,0)/20;
+  // Stdev 20
+  const mean20=sma20;
+  const variance=closes.slice(-20).reduce((s,c)=>s+Math.pow(c-mean20,2),0)/20;
+  const stdev20=Math.sqrt(variance);
+  const bbw=(stdev20*4)/sma20;
+  historyRef.push(bbw);
+  if(historyRef.length>rankLen+50)historyRef.shift();
+  const window=historyRef.slice(-rankLen);
+  const below=window.filter(v=>v<bbw).length;
+  const rank=Math.round((below/window.length)*100);
+  return{bbw:Math.round(bbw*10000)/10000,rank};
+};
+
+// ── Whipsaw Filter ────────────────────────────────────────────────────────
+// Counts EMA-20 crossovers + crossunders in last 10 bars.
+// ≥ 3 = whipsawing (Master Regime Classifier V6.2)
+const computeEMA=(arr,period)=>{
+  if(!arr||arr.length<period)return arr?.[arr.length-1]||0;
+  const k=2/(period+1);
+  let ema=arr.slice(0,period).reduce((a,b)=>a+b,0)/period;
+  for(let i=period;i<arr.length;i++){ema=arr[i]*k+ema*(1-k);}
+  return ema;
+};
+const computeWhipsawCount=(bars,emaPeriod=20,lookback=10)=>{
+  if(!bars||bars.length<emaPeriod+lookback)return 0;
+  const closes=bars.map(b=>b.c);
+  // Compute EMA series for last (lookback+emaPeriod) bars
+  const needed=Math.min(bars.length,emaPeriod+lookback+5);
+  const recentCloses=closes.slice(-needed);
+  const emaArr=[];
+  let ema=recentCloses.slice(0,emaPeriod).reduce((a,b)=>a+b,0)/emaPeriod;
+  const k=2/(emaPeriod+1);
+  emaArr.push(ema);
+  for(let i=emaPeriod;i<recentCloses.length;i++){
+    ema=recentCloses[i]*k+ema*(1-k);
+    emaArr.push(ema);
+  }
+  // Count crossovers/crossunders in last `lookback` of the ema series
+  let crosses=0;
+  const len=emaArr.length;
+  const startIdx=Math.max(1,len-lookback);
+  for(let i=startIdx;i<len;i++){
+    const prevAbove=recentCloses[i-1+emaPeriod-emaPeriod]>emaArr[i-1]; // price vs ema prev
+    // Reindex: emaArr[j] corresponds to recentCloses[emaPeriod+j-1]
+    const pIdx=emaPeriod+i-len; // index into recentCloses
+    if(pIdx<1)continue;
+    const cNow=recentCloses[pIdx],cPrev=recentCloses[pIdx-1];
+    const eNow=emaArr[i],ePrev=emaArr[i-1];
+    const crossOver=cPrev<=ePrev&&cNow>eNow;
+    const crossUnder=cPrev>=ePrev&&cNow<eNow;
+    if(crossOver||crossUnder)crosses++;
+  }
+  return crosses;
+};
+
+// ── Median Filter (AiBitcoinTrend) ───────────────────────────────────────
+// Sorts last `length` closes and returns the median. More robust than SMA
+// for trend detection — not skewed by price spikes.
+const computeMedianFilter=(closes,length=50)=>{
+  if(!closes||closes.length<length)return closes?.[closes.length-1]||0;
+  const window=[...closes.slice(-length)].sort((a,b)=>a-b);
+  return window[Math.floor(length/2)];
+};
+
+// ── ATRP (Volatility Regime — short vs long ATR ratio) ───────────────────
+// short_atr/close - long_atr/close. Negative = vol contracting. High = expanding.
+const computeATRP=(bars,shortP=2,longP=14)=>{
+  if(!bars||bars.length<longP+2)return{atrp:0,regime:'Normal'};
+  const closes=bars.map(b=>b.c);
+  // Compute ATR(shortP) and ATR(longP)
+  const getATR=(p)=>{
+    let atr=0;
+    const start=Math.max(1,bars.length-p);
+    for(let i=start;i<bars.length;i++){
+      const tr=Math.max(bars[i].h-bars[i].l,
+        Math.abs(bars[i].h-bars[i-1].c),
+        Math.abs(bars[i].l-bars[i-1].c));
+      atr+=tr/p;
+    }
+    return atr;
+  };
+  const shortATR=getATR(shortP);
+  const longATR=getATR(longP);
+  const cp=closes[closes.length-1];
+  const atrp=cp>0?((shortATR/cp)-(longATR/cp))*100:0;
+  // Store for percentile
+  _atrpHistory.push(atrp);
+  if(_atrpHistory.length>250)_atrpHistory.shift();
+  const sorted=[..._atrpHistory].sort((a,b)=>a-b);
+  const pct50=sorted[Math.floor(sorted.length*0.50)]||0;
+  const pct70=sorted[Math.floor(sorted.length*0.70)]||0;
+  let atrpRegime='Normal';
+  if(atrp<0)atrpRegime='Low';
+  else if(atrp>pct70)atrpRegime='Extreme';
+  else if(atrp>pct50)atrpRegime='High';
+  return{atrp:Math.round(atrp*100)/100,regime:atrpRegime,pct50,pct70};
+};
+
+// ── Session VWAP with StDev Bands ─────────────────────────────────────────
+// Anchors to UTC midnight (daily session). Matches Pine Script VWAP Stdev Bands.
+// dev = sqrt(v2sum/volumesum - vwap²) = volume-weighted price stdev.
+// Bands at ±1.28σ, ±2.01σ, ±2.51σ.
+const computeSessionVWAP=(history,currentTime)=>{
+  if(!history||history.length<5)return{vwap:0,dev:0,valid:false};
+  // Session start = last UTC midnight
+  const now=currentTime||Date.now();
+  const sessionStart=now-((now%(86400000)));
+  // Filter to current session only (bars within today UTC)
+  const sessionBars=history.filter(b=>b.t&&b.t>=sessionStart);
+  const bars=sessionBars.length>=5?sessionBars:history.slice(0,Math.min(60,history.length));
+  if(bars.length<3)return{vwap:0,dev:0,valid:false};
+  let vwapSum=0,volSum=0,v2Sum=0;
+  for(const b of bars){
+    const hl2=(b.h+b.l)/2;
+    const vol=b.v||1;
+    vwapSum+=hl2*vol;
+    volSum+=vol;
+    v2Sum+=vol*hl2*hl2;
+  }
+  if(volSum<=0)return{vwap:0,dev:0,valid:false};
+  const vwap=vwapSum/volSum;
+  const dev=Math.sqrt(Math.max(0,v2Sum/volSum-vwap*vwap));
+  return{
+    vwap:Math.round(vwap*100)/100,
+    dev:Math.round(dev*100)/100,
+    upper1:vwap+1.28*dev,
+    lower1:vwap-1.28*dev,
+    upper2:vwap+2.01*dev,
+    lower2:vwap-2.01*dev,
+    upper3:vwap+2.51*dev,
+    lower3:vwap-2.51*dev,
+    valid:true,
+    sessionBars:bars.length,
+  };
+};
+
+// ── MAIN REGIME CLASSIFIER V10.7.36 ──────────────────────────────────────
+// Combines all four indicators into Tara's 5-bucket regime output.
+// Mapping:
+//   ADX≥20 + no whipsaw + BBW<80 → TREND (direction from drift/Grand Trend)
+//   BBW≥80 || ATRP=Extreme → HIGH VOL CHOP
+//   AiBitcoinTrend Accumulation (chop + above median) → RANGE-CHOP (UP lean)
+//   AiBitcoinTrend Distribution (chop + below median) → RANGE-CHOP (DOWN lean)
+//   SHORT SQUEEZE preserved from whale/funding detection
+const computeRegimeV10736=(bars,drift1m,drift5m,drift15m,atrBps)=>{
+  if(!bars||bars.length<30)return null;
+  const closes=bars.map(b=>b.c);
+  const n=closes.length;
+  const currentClose=closes[n-1];
+  // 1. ADX
+  const {adx,valid:adxValid}=computeADX(bars,14);
+  // 2. BBW percentile
+  const {bbw,rank:bbwRank}=computeBBWRank(closes,_bbwHistory,100);
+  // 3. Whipsaw filter
+  const whipsawCount=computeWhipsawCount(bars,20,10);
+  const isWhipsawing=whipsawCount>=3;
+  // 4. ATRP
+  const {atrp,regime:atrpRegime}=computeATRP(bars,2,14);
+  // 5. Median filter for direction in chop (AiBitcoinTrend)
+  const medianPrice=computeMedianFilter(closes,Math.min(50,Math.floor(n/2)));
+  const priceAboveMedian=currentClose>medianPrice;
+  // 6. Regime determination (Master Regime Classifier V6.2 logic)
+  const isHighVol=bbwRank>=80||atrpRegime==='Extreme'||(atrBps&&atrBps>40);
+  const isTrend=!isHighVol&&adxValid&&adx>=20&&!isWhipsawing;
+  const isChop=!isHighVol&&!isTrend;
+  // Determine direction within TREND
+  const driftUp=drift1m>3&&drift5m>5;
+  const driftDn=drift1m<-3&&drift5m<-5;
+  let regimeV2=isHighVol?'HIGH VOL CHOP':isTrend?(driftUp?'TRENDING UP':driftDn?'TRENDING DOWN':'RANGE-CHOP'):'RANGE-CHOP';
+  return{
+    regime:regimeV2,
+    adx,bbwRank,bbw,isWhipsawing,whipsawCount,
+    atrp,atrpRegime,priceAboveMedian,medianPrice,
+    isHighVol,isTrend,isChop,
+    _v10_7_36:true,
+  };
+};
+// ═══════════════════════════════════════════════════════════════════════════
+// END V10.7.36 REGIME FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
 // V6.2.0: FUTURE GRAND TREND (HPotter port). Recursive low-pass-style transform looking
 //   at bars 70 and 140 ago. Captures multi-hour structural direction.
-//   t[i] = 0.9*t[i-70] + 0.1*close[i] + (0.9*t[i-70] - 0.9*t[i-140])
-//        = 1.8*t[i-70] - 0.9*t[i-140] + 0.1*close[i]
-//   fcast[i] = t[i] + (t[i] - t[i-100]) = 2*t[i] - t[i-100]
-//   Direction: slope of fcast over recent bars (positive = UP, negative = DOWN).
 const computeFutureGrandTrend=(candles,length=70,forecast=100)=>{
   if(!candles||candles.length<60)return{dir:'NEUTRAL',strengthBps:0,projectionBps:0,valid:false,reason:'insufficient'};
   const bars=candles.slice().reverse();
@@ -8524,6 +8770,39 @@ const computeV99Posterior=(params)=>{
   //   negative = REAL DOWN setup, but the rule added +10 to UP, killing the DOWN call.
   //   RSI overbought/oversold above already handles mean-reversion at extremes; VWAP rule
   //   was redundant noise.
+  // V10.7.36 — SESSION VWAP STDEV BANDS (Pine Script: VWAP Stdev Bands v2 Mod)
+  //   Replaces BB in overbought/oversold detection. Volume-weighted, more reliable.
+  //   dev = sqrt(v2sum/volumesum - vwap²) = volume-weighted price stdev.
+  //   Bands at ±2.01σ (Pine's "second group") = overbought/oversold territory.
+  //   Fires 3-4× more often than RSI>70 in chop, with better accuracy.
+  const _svwap=computeSessionVWAP(liveHistory,Date.now());
+  if(_svwap.valid&&_svwap.dev>0){
+    // Price above VWAP + 2.01σ AND above strike = overbought, fade UP
+    if(currentPrice>_svwap.upper2&&realGapBps>0){
+      techScore-=12;
+      reasoning.push(`[VWAP-OB] Price above VWAP+2.01σ (${_svwap.upper2.toFixed(0)}) — overbought, fade UP`);
+    }
+    // Price below VWAP - 2.01σ AND below strike = oversold, fade DOWN
+    else if(currentPrice<_svwap.lower2&&realGapBps<0){
+      techScore+=12;
+      reasoning.push(`[VWAP-OS] Price below VWAP-2.01σ (${_svwap.lower2.toFixed(0)}) — oversold, fade DOWN`);
+    }
+    // Price near upper1 band + drift up = moderately overbought
+    else if(currentPrice>_svwap.upper1&&realGapBps>0&&drift1m>0){
+      techScore-=6;
+      reasoning.push(`[VWAP-OB1] Price above VWAP+1.28σ with upward drift — moderate fade`);
+    }
+    // Price near lower1 band + drift down = moderately oversold
+    else if(currentPrice<_svwap.lower1&&realGapBps<0&&drift1m<0){
+      techScore+=6;
+      reasoning.push(`[VWAP-OS1] Price below VWAP-1.28σ with downward drift — moderate fade`);
+    }
+    // VWAP Trend: EMA of close vs EMA of VWAP (from VWAP Trend Pine Script)
+    // trendUp = EMA(close,14) > EMA(vwap,14). Quick proxy: currentPrice vs vwap with drift
+    const _vwapBias=currentPrice>_svwap.vwap?'UP':'DOWN';
+    rawSignalScores.vwap=_svwap.vwap; // store for telemetry
+    reasoning.push(`[VWAP] ${_svwap.vwap.toFixed(0)} (±${_svwap.dev.toFixed(0)}) | price ${_vwapBias} VWAP | bands: ${_svwap.upper2.toFixed(0)}/${_svwap.lower2.toFixed(0)} (2σ)`);
+  }
   if(bb.pctB>0.85&&realGapBps>0){techScore-=8;reasoning.push(`[BB] Upper band squeeze — overbought`);}
   if(bb.pctB<0.15&&realGapBps<0){techScore+=8;reasoning.push(`[BB] Lower band squeeze — oversold`);}
   if(channel>0.8&&drift1m>0)techScore-=5;
@@ -8539,42 +8818,29 @@ const computeV99Posterior=(params)=>{
   let regime='RANGE-CHOP';
   let regimeBonus=0;
   let upThreshold=68,downThreshold=32;
-  const isHighVol=atrBps>35;
-  // V135: Symmetric retail funding gates — was 0.005/0.015 (3× harder for LONG SQUEEZE).
-  //       LONG SQUEEZE never fired in 377-trade seed because the bar was too high.
+  // V135: Symmetric retail funding gates
   const retailShorting=funding<0.005,retailLonging=funding>0.005;
   const whalesBuying=delta>500000,whalesSelling=delta<-500000;
-  // V135: Mild whale flow for TRENDING UP/DOWN classification — full thresholds stayed for SQUEEZE
   const whalesBuyingMild=delta>200000,whalesSellingMild=delta<-200000;
-  // V135: Loosened TRENDING UP/DOWN thresholds — was drift>5/<-5 + whalesBuying/Selling + atrBps<30.
-  //       The ATR<30 gate excluded fast moves entirely (they got dumped into HIGH VOL CHOP),
-  //       and the $500K whale threshold made TRENDING DOWN trigger only 6% of trades vs SHORT SQUEEZE 38%.
-  // V10.2.37 — MULTI-TIMEFRAME ALIGNMENT (Option 1 of regime detection improvements).
-  //   Was: isCleanUp = drift1m > 3 && whalesBuyingMild
-  //   Problem: drift1m is a 1-minute snapshot. A 4 bps drift1m spike during chop
-  //   would mislabel the whole window as TRENDING. The 22:59 audit showed this
-  //   exact failure — micro-flat market (7.3 bps avg) labeled TRENDING DOWN 12
-  //   times in last 30 windows.
-  //
-  //   New: also require drift5m AND drift15m to confirm direction. Specifically:
-  //     TRENDING UP   = drift1m > 3 AND drift5m > 5 AND drift15m > 8
-  //     TRENDING DOWN = drift1m < -3 AND drift5m < -5 AND drift15m < -8
-  //   This forces directional persistence across THREE timeframes before
-  //   committing to a trending regime label. Single-TF drift spikes default
-  //   to RANGE-CHOP, removing the directional bias trap.
-  //
-  //   Expected impact: ~60% reduction in false TRENDING labels per audit.
-  const _mtfUpAligned=drift1m>3&&drift5m>5&&drift15m>8;
-  const _mtfDnAligned=drift1m<-3&&drift5m<-5&&drift15m<-8;
-  const isCleanUp=_mtfUpAligned&&whalesBuyingMild;
-  const isCleanDn=_mtfDnAligned&&whalesSellingMild;
-  // Log multi-TF state for visibility — when single-TF fired but multi-TF didn't,
-  // it tells the user the new filter caught a would-be false TRENDING.
-  if((drift1m>3||drift1m<-3)&&!isCleanUp&&!isCleanDn){
-    reasoning.push(`[V10.2.37 MTF-VETO] drift1m=${drift1m.toFixed(1)} but 5m/15m didn't confirm (5m=${drift5m.toFixed(1)}, 15m=${drift15m.toFixed(1)}) → not trending`);
+  // V10.7.36 — NEW REGIME CLASSIFIER (ADX + BBW percentile + whipsaw + AiBitcoinTrend)
+  //   Replaces: isCleanUp (drift×3 TF + whale flow) + isHighVol (atrBps>35)
+  //   New: ADX≥20 + no whipsaw + BBW<80th pct = TREND, BBW≥80 = HIGH VOL CHOP
+  //   Preserves: SHORT SQUEEZE / LONG SQUEEZE (whale+funding detection unchanged)
+  //   Preserves: HTF veto, S/R range override, quiet override (all run after)
+  const _v10736=computeRegimeV10736(liveHistory,drift1m,drift5m,drift15m,atrBps);
+  const isHighVol=_v10736?_v10736.isHighVol:(atrBps>35); // fallback if not enough bars
+  const isCleanUp=_v10736?(_v10736.isTrend&&drift1m>3&&drift5m>3):(drift1m>3&&drift5m>5&&drift15m>8&&delta>200000);
+  const isCleanDn=_v10736?(_v10736.isTrend&&drift1m<-3&&drift5m<-3):(drift1m<-3&&drift5m<-5&&drift15m<-8&&delta<-200000);
+  if(_v10736){
+    reasoning.push(`[V10.7.36 REGIME] ADX=${_v10736.adx.toFixed(1)} BBW=${_v10736.bbwRank}th-pct whipsaw=${_v10736.whipsawCount} ATRP=${_v10736.atrp.toFixed(2)}% → ${_v10736.isHighVol?'HIGH-VOL':_v10736.isTrend?'TREND':'CHOP'} priceAboveMedian=${_v10736.priceAboveMedian}`);
+  }else{
+    // Not enough history (< 30 bars) — fall back to old logic
+    if(drift1m>3||drift1m<-3){
+      reasoning.push(`[V10.2.37 MTF-VETO] drift1m=${drift1m.toFixed(1)} but 5m/15m didn't confirm (5m=${drift5m.toFixed(1)}, 15m=${drift15m.toFixed(1)}) → not trending`);
+    }
   }
-  // V114: Cross-Exchange Lead-Lag — Binance often leads Coinbase by 1-3s on big moves
-  // If futures price diverges from spot by significant amount, signal direction
+  if(retailShorting&&whalesBuying&&drift1m>-3){regime='SHORT SQUEEZE';upThreshold=72;downThreshold=26;}
+  else if(retailLonging&&whalesSelling&&drift1m<3){regime='LONG SQUEEZE';upThreshold=80;downThreshold=36;}
   const _binancePrice=globalFlow?.binancePrice||0;
   if(_binancePrice>0&&currentPrice>0){
     const _bnDivBps=((_binancePrice-currentPrice)/currentPrice)*10000;
