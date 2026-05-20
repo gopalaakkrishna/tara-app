@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.26-fill-reconciliation';
+const BASELINE_VERSION='2026.05.20-v10.7.27-regime-gate-structure-technical';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.26';
+const TARA_VERSION_DISPLAY='Tara 10.7.27';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -8825,6 +8825,50 @@ const computeV99Posterior=(params)=>{
     reasoning.push(`[V10.2.39 HTF-VETO] classifier said TRENDING DOWN but 4h is ${_htf4hLabel} (${_htf4hDriftBps?.toFixed(1)}bps) → veto to RANGE-CHOP`);
     regime='RANGE-CHOP';
     upThreshold=68;downThreshold=32;
+  }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // V10.7.27 — REGIME-GATED STRUCTURE + TECHNICAL
+  // ═══════════════════════════════════════════════════════════════════════════
+  //   Audit (May 20): Structure accuracy was 47% standalone — but BY REGIME:
+  //     RANGE-CHOP:    51.2%  (close to noise)
+  //     TRENDING UP:   37.1%  ← actively wrong
+  //     TRENDING DOWN: 42.1%  ← actively wrong
+  //     SHORT SQUEEZE: 56.3%  ← only regime where it works
+  //
+  //   Technical accuracy 47.7% standalone — BY REGIME:
+  //     RANGE-CHOP:    51.8%  (close to noise)
+  //     TRENDING UP:   57.1%  ← only good regime
+  //     TRENDING DOWN: 44.9%  ← actively wrong
+  //     SHORT SQUEEZE: 43.3%  ← actively wrong
+  //
+  //   Diagnosis: signals are regime-misaligned.
+  //   - Structure (consecutive candles): assumes continuation, fires loudest
+  //     in chop where runs reverse → wrong direction
+  //   - Technical (RSI/BB/channel): assumes mean-reversion, fires in trends
+  //     where extremes continue → wrong direction
+  //
+  //   Fix: REVERSE the contribution when regime is wrong for that signal.
+  //   Both scores were already added to totalScore earlier. We subtract them
+  //   back here when the current regime is in the "kill list" for that signal.
+  //
+  //   Keep ON in:
+  //     Structure: SHORT SQUEEZE only (56% — works)
+  //     Technical: TRENDING UP only (57% — works)
+  //                + RANGE-CHOP (52% — neutral, slight edge)
+  //   Subtract everywhere else.
+  const _structAddedScore=Number(rawSignalScores.structure)||0;
+  const _techAddedScore=Number(rawSignalScores.technical)||0;
+  const _structOkRegimes=new Set(['SHORT SQUEEZE']);
+  const _techOkRegimes=new Set(['TRENDING UP','RANGE-CHOP']);
+  if(!_structOkRegimes.has(regime)&&Math.abs(_structAddedScore)>=1){
+    totalScore-=_structAddedScore; // remove the contribution from totalScore
+    reasoning.push(`[V10.7.27] Structure ${_structAddedScore>0?'+':''}${_structAddedScore.toFixed(0)} REVERSED in ${regime} (signal was 37-42% accurate in this regime, removed from posterior)`);
+    rawSignalScores.structure=0; // hide from concrete signal aggregator (V10.7.12)
+  }
+  if(!_techOkRegimes.has(regime)&&Math.abs(_techAddedScore)>=1){
+    totalScore-=_techAddedScore;
+    reasoning.push(`[V10.7.27] Technical ${_techAddedScore>0?'+':''}${_techAddedScore.toFixed(0)} REVERSED in ${regime} (signal was 43-45% accurate in this regime, removed from posterior)`);
+    rawSignalScores.technical=0;
   }
   // V10.2.40 — PROBABILISTIC REGIME (Option 5 of regime improvements — conservative).
   //   Compute soft probability scores over all 6 regimes from raw signals.
