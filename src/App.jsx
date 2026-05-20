@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.13a-hotfix-v107_6-scope';
+const BASELINE_VERSION='2026.05.19-v10.7.14-range-chop-bias-neutralizer';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.13a';
+const TARA_VERSION_DISPLAY='Tara 10.7.14';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -9829,7 +9829,18 @@ const computeV99Posterior=(params)=>{
       //   67-70%, only 5-8pt below the at-lock conviction, well within the existing cap.
       //   The May 10 losses were variance + market regime shape, not miscalibrated weights.
       const _rawDelta=_blended-_engineConf;
-      const _cappedConfDelta=Math.max(-5,Math.min(5,_rawDelta));
+      let _cappedConfDelta=Math.max(-5,Math.min(5,_rawDelta));
+      // V10.7.14 — RANGE-CHOP DIRECTION BIAS NEUTRALIZER (legacy regime-CAL)
+      //   Same fix as V10.4.0 cell pull below — dampen DOWN-favoring pull 60%
+      //   in RANGE-CHOP regime only.
+      if(_regime==='RANGE-CHOP'){
+        const _pullsTowardDown=
+          (_engineDir==='UP'&&_rawDelta<0)||
+          (_engineDir==='DOWN'&&_rawDelta>0);
+        if(_pullsTowardDown){
+          _cappedConfDelta=_cappedConfDelta*0.40;
+        }
+      }
       const _cappedConf=_engineConf+_cappedConfDelta;
       const _newCal=_engineDir==='UP'?_cappedConf:(100-_cappedConf);
       const _delta=_newCal-dirCalibrated;
@@ -9863,7 +9874,36 @@ const computeV99Posterior=(params)=>{
         const _w=Math.min(0.40,_cell.n/200);
         const _blended=_engineConf*(1-_w)+_observedConf*_w;
         const _rawDelta=_blended-_engineConf;
-        const _cappedDelta=Math.max(-6,Math.min(6,_rawDelta));
+        // V10.7.14 — RANGE-CHOP DIRECTION BIAS NEUTRALIZER
+        //   Audit (2026-05-19): RANGE-CHOP regime shows 66% DOWN vs 34% UP calls
+        //   over last 200 trades. This is mechanical bias, not market reality.
+        //   Both directions show ~61% WR in RANGE-CHOP — so DOWN-favoring isn't
+        //   data-driven, it's a self-reinforcing loop where the model learned
+        //   DOWN works → calls DOWN more → cell has more DOWN samples → bigger
+        //   pull toward DOWN.
+        //
+        //   Fix: in RANGE-CHOP only, when the cell pull would shift posterior
+        //   TOWARD DOWN (lower confidence on UP call, OR raise confidence on
+        //   DOWN call), reduce pull magnitude by 60%. Pulls TOWARD UP are
+        //   unaffected. This breaks the feedback loop without distorting other
+        //   regimes (TRENDING DOWN, SHORT SQUEEZE, etc).
+        let _cappedDelta=Math.max(-6,Math.min(6,_rawDelta));
+        if(_regime==='RANGE-CHOP'){
+          // Direction of pull: positive _rawDelta = increases _engineConf
+          //   = strengthens the engine's existing direction
+          // For UP engine: positive delta = more UP confident (FAIR, no cap)
+          // For UP engine: negative delta = pulls toward DOWN (THIS is the bias)
+          // For DOWN engine: positive delta = more DOWN confident (THIS is bias too)
+          // For DOWN engine: negative delta = pulls toward UP (FAIR, no cap)
+          const _pullsTowardDown=
+            (_engineDir==='UP'&&_rawDelta<0)||
+            (_engineDir==='DOWN'&&_rawDelta>0);
+          if(_pullsTowardDown){
+            // Reduce DOWN-favoring pull by 60% in RANGE-CHOP
+            _cappedDelta=_cappedDelta*0.40;
+            reasoning.push(`[V10.7.14] RANGE-CHOP bias neutralizer — DOWN-favoring pull dampened 60% (${(_rawDelta).toFixed(1)} → ${_cappedDelta.toFixed(1)})`);
+          }
+        }
         const _newConf=_engineConf+_cappedDelta;
         const _newCal=_engineDir==='UP'?_newConf:(100-_newConf);
         if(Math.abs(_newCal-dirCalibrated)>=1){
