@@ -2690,7 +2690,38 @@ const calcATR=(h,p=14)=>{if(!h||h.length<p+1)return 0;let s=0;for(let i=0;i<p;i+
 const calcBB=(c,p=20)=>{if(!c||c.length<p)return{upper:0,mid:0,lower:0,pctB:0.5,width:0};const s=c.slice(0,p),m=s.reduce((a,b)=>a+b,0)/p,sd=Math.sqrt(s.reduce((a,b)=>a+Math.pow(b-m,2),0)/p);const u=m+2*sd,l=m-2*sd;return{upper:u,mid:m,lower:l,pctB:(u-l)>0?(c[0]-l)/(u-l):0.5,width:m>0?((u-l)/m)*10000:0};};
 
 // V99 NEW INDICATORS
-const calcConsecutiveCandles=(history)=>{if(!history||history.length<2)return{green:0,red:0};let green=0,red=0;for(const c of history){if(c.c>c.o){if(red>0)break;green++;}else if(c.c<c.o){if(green>0)break;red++;}else break;}return{green,red};};
+// V10.7.35 — FIXED consecutive candle computation to match CC • Yata Pine Script.
+//   OLD: counted each candle individually as green (close>open) or red (close<open)
+//        → pure candle color, no trend requirement
+//   NEW: counts consecutive bars where close > close[4] (up) or close < close[4] (down)
+//        → matches DeMark-style sequential counting used by CC • Yata indicator
+//        → also stores raw count for exhaustion logic (see Structure signal below)
+//   HISTORY NOTE: liveHistory[0] is newest. We want bars[0]=oldest for comparison.
+const calcConsecutiveCandles=(history)=>{
+  if(!history||history.length<6)return{green:0,red:0};
+  // Work oldest→newest (liveHistory is newest-first, so reverse)
+  const bars=history.slice().reverse(); // bars[0]=oldest
+  const n=bars.length;
+  let green=0,red=0;
+  // Start from the most recent bar (index n-1) and count backwards
+  // CC•Yata: close > close[4] = "up bar", close < close[4] = "down bar"
+  for(let i=n-1;i>=4;i--){
+    const isUp=bars[i].c>bars[i-4].c;
+    const isDn=bars[i].c<bars[i-4].c;
+    if(isUp){
+      if(red>0)break; // streak broken
+      green++;
+      if(green>=9){green=9;break;} // CC•Yata caps at 9 then resets
+    } else if(isDn){
+      if(green>0)break;
+      red++;
+      if(red>=9){red=9;break;}
+    } else {
+      break; // neutral bar breaks streak
+    }
+  }
+  return{green,red};
+};
 const calcVolumeRatio=(history,recent=5,baseline=25)=>{if(!history||history.length<baseline)return 1;const rv=history.slice(0,recent).reduce((s,c)=>s+(c.v||0),0)/recent;const bv=history.slice(recent,baseline).reduce((s,c)=>s+(c.v||0),0)/(baseline-recent);return bv>0?rv/bv:1;};
 const calcPriceChannel=(history,n=20)=>{if(!history||history.length<n)return 0.5;const hi=Math.max(...history.slice(0,n).map(c=>c.h));const lo=Math.min(...history.slice(0,n).map(c=>c.l));return hi>lo?(history[0].c-lo)/(hi-lo):0.5;};
 const calcMomentumAlignment=(d1,d5,d15)=>{const signs=[Math.sign(d1),Math.sign(d5),Math.sign(d15)];const sum=signs.reduce((a,b)=>a+b,0);if(Math.abs(sum)===3)return{aligned:true,strong:true,dir:sum>0?1:-1};if(Math.abs(sum)>=2)return{aligned:true,strong:false,dir:sum>0?1:-1};return{aligned:false,strong:false,dir:0};};
@@ -3880,10 +3911,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.33-restore-structure-in-chop';
+const BASELINE_VERSION='2026.05.20-v10.7.35-structure-fgt-computation-fix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.33';
+const TARA_VERSION_DISPLAY='Tara 10.7.35';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6552,16 +6583,23 @@ const computeFGT=(candles,length=70,forecast=100)=>{
     }
     t[i]=0.9*tLag+0.1*src+changeTerm;
   }
-  // Forecast = t[last] + (t[last] - t[last - forecast])
-  const tLast=t[n-1];
-  const tBack=t[Math.max(0,n-1-_forecast)];
-  const fcast=tLast+(tLast-tBack); // linear extrapolation forward
+  const _tLast=t[n-1];
+  const _tBack=t[Math.max(0,n-1-_forecast)];
+  // V10.7.35 — SLOPE FIX: Pine Script FGT direction comes from the SLOPE of the
+  //   t-series line, NOT from comparing the projected value to current price.
+  //   OLD (wrong): forecastBps = (fcast - currentPrice) / currentPrice * 10000
+  //     → mixes smoothed projection (lags price) with raw close → wrong direction
+  //       when t-series lags below rising price (reads DOWN when slope is UP)
+  //   NEW (correct): forecastBps = slope / currentPrice * 10000
+  //     → slope = tLast - tBack = projected change in t-series over forecast bars
+  //     → matches Pine Script line color logic (green if y2>y1, red if y2<y1)
   const currentPrice=bars[n-1].c;
-  const forecastBps=((fcast-currentPrice)/currentPrice)*10000;
+  const slope=_tLast-_tBack;
+  const forecastBps=Math.round((slope/currentPrice)*10000);
   let forecastDir='NEUTRAL';
-  if(forecastBps>10)forecastDir='UP';
-  else if(forecastBps<-10)forecastDir='DOWN';
-  return{forecastDir,forecastBps:Math.round(forecastBps),fcast:Math.round(fcast),valid:true,length:_length,forecast:_forecast};
+  if(forecastBps>3)forecastDir='UP';
+  else if(forecastBps<-3)forecastDir='DOWN';
+  return{forecastDir,forecastBps,fcast:Math.round(_tLast+slope),valid:true,length:_length,forecast:_forecast,slope:Math.round(slope*100)/100};
 };
 
 // V134: Volume Profile — find where most trading happened recently
@@ -8382,29 +8420,62 @@ const computeV99Posterior=(params)=>{
   reasoning.push(`[MOMENTUM] ${drift1m.toFixed(1)} bps/1m | ${drift5m.toFixed(1)} bps/5m${momentumAlign.aligned?' ✦ ALIGNED':''}${_momExhausted?' ⚠ EXHAUSTED':''} | W:${W.momentum.toFixed(0)}${_momentumTaper!==1.0?` ×${_momentumTaper.toFixed(2)}`:''}`);
 
   // ── SIGNAL 3: CANDLE STRUCTURE ──
+  // V10.7.35 — FIXED: CC • Yata uses EXHAUSTION logic, not continuation.
+  //   OLD: consecutive green → +UP (continuation). This was WRONG.
+  //   CC•Yata says: when count reaches 9 → SELL (expect DOWN reversal).
+  //   Building toward 9 = still in trend; AT 9 = exhaustion/reversal.
+  //
+  //   New scoring (matches CC•Yata exhaustion interpretation):
+  //     Count 3-5: mild continuation signal (+count) — early trend, still directional
+  //     Count 6-7: neutral (0) — trend aging, approaching exhaustion zone
+  //     Count 8-9: REVERSAL (-count*2) — exhaustion, expect opposite direction
+  //
+  //   For green run (UP trend building):
+  //     3-5 green: small UP signal (early trend, continuation still likely)
+  //     6-7 green: neutral (fading)
+  //     8-9 green: DOWN signal (exhaustion, CC•Yata SELL signal at 9)
+  //   Same inverted for red run.
   let structScore=0;
-  if(consecutive.green>=3)structScore+=consecutive.green*3;
-  if(consecutive.red>=3)structScore-=consecutive.red*3;
-  if(volRatio>1.5&&consecutive.green>=2)structScore+=8;
-  if(volRatio>1.5&&consecutive.red>=2)structScore-=8;
-  // V114: Volume Profile signal — ghost markets vs conviction
+  const _cGreen=consecutive.green;
+  const _cRed=consecutive.red;
+  if(_cGreen>=8){
+    // Exhaustion: CC•Yata SELL signal territory → expect DOWN
+    structScore-=_cGreen*2;
+    reasoning.push(`[STRUCTURE] ${_cGreen}× green — EXHAUSTION, expect reversal DOWN (CC•Yata logic)`);
+  } else if(_cGreen>=6){
+    // Aging trend: neutral, no score
+    reasoning.push(`[STRUCTURE] ${_cGreen}× green — aging trend, neutral`);
+  } else if(_cGreen>=3){
+    // Early trend: mild continuation
+    structScore+=_cGreen;
+  }
+  if(_cRed>=8){
+    // Exhaustion: CC•Yata BUY signal territory → expect UP
+    structScore+=_cRed*2;
+    reasoning.push(`[STRUCTURE] ${_cRed}× red — EXHAUSTION, expect reversal UP (CC•Yata logic)`);
+  } else if(_cRed>=6){
+    reasoning.push(`[STRUCTURE] ${_cRed}× red — aging trend, neutral`);
+  } else if(_cRed>=3){
+    structScore-=_cRed;
+  }
+  // Volume confirmation (keep as is — volume context is still valid)
+  if(volRatio>1.5&&_cGreen>=2)structScore+=(_cGreen>=8?-4:4); // flip vol boost on exhaustion
+  if(volRatio>1.5&&_cRed>=2)structScore+=(_cRed>=8?4:-4);
   if(volRatio>2.0){
-    // High conviction volume — boost signal in direction of price
-    if(drift1m>3)structScore+=6;
-    else if(drift1m<-3)structScore-=6;
+    if(drift1m>3)structScore+=4;
+    else if(drift1m<-3)structScore-=4;
     reasoning.push(`[VOL] High conviction vol (${volRatio.toFixed(1)}x) — signal boosted`);
   } else if(volRatio<0.5){
-    // Ghost market — fade any signal (low follow-through expected)
     structScore*=0.6;
     reasoning.push(`[VOL] Ghost market (${volRatio.toFixed(1)}x) — signal damped`);
   }
-  // Volume-Price divergence detection (price up but volume down = trap)
+  // Volume-Price divergence detection (unchanged)
   if(drift1m>5&&volRatio<0.7){structScore-=10;reasoning.push(`[VOL-DIV] Price up but volume DOWN — possible UP trap`);}
   if(drift1m<-5&&volRatio<0.7){structScore+=10;reasoning.push(`[VOL-DIV] Price down but volume DOWN — possible DOWN trap`);}
   const structClamped=Math.max(-W.structure,Math.min(W.structure,structScore));
   rawSignalScores.structure=structClamped;
   totalScore+=structClamped;
-  if(consecutive.green>=2||consecutive.red>=2)reasoning.push(`[STRUCTURE] ${consecutive.green>0?consecutive.green+'× green':consecutive.red+'× red'} | Vol: ${volRatio.toFixed(1)}x | W:${W.structure.toFixed(0)}`);
+  if(_cGreen>=2||_cRed>=2)reasoning.push(`[STRUCTURE] ${_cGreen>0?_cGreen+'× green':_cRed+'× red'} | Vol: ${volRatio.toFixed(1)}x | W:${W.structure.toFixed(0)}`);
 
   // ── SIGNAL 4: FLOW IMBALANCE ──
   let flowScore=aggrFlow*(is15m?W.flow:W.flow*1.5);
@@ -33286,17 +33357,19 @@ function TaraApp(){
     // Only in RANGE-CHOP (where bias was diagnosed)
     if(analysis?.regime!=='RANGE-CHOP')return call;
     // V10.7.21 BUGFIX: `confidence` is conviction in CALL's direction (50-100),
-    //   NOT raw posterior. Original V10.7.19 check `_conf<40||_conf>55` was wrong
-    //   because confidence is always ≥50. Correct check: only act on borderline
-    //   conviction (51-62, weak calls). Strong calls (≥63) have real signal.
+    //   NOT raw posterior. Correct check: only act on borderline conviction
+    //   (51-62, weak calls). Strong calls (≥63) have real signal.
     const _conf=Number(call.confidence)||50;
-    if(_conf<51||_conf>62)return call; // weak calls only (was: _conf<40||_conf>55)
+    if(_conf<51||_conf>62)return call; // weak calls only
     // Don't touch structural/confluence/super tiers — these are quality setups
     const _tier=String(call.tier||'').toLowerCase();
     if(_tier.includes('super')||_tier.includes('confluence')||_tier.includes('structural'))return call;
-    // Only flip DOWN calls — that's the biased direction per audit
-    if(call.call!=='DOWN')return call;
-    // Read recent call direction history from taraCallLog
+    // V10.7.34 — SYMMETRIC BALANCE FLOOR
+    //   User request: no UP/DOWN bias preference. Make the balance floor
+    //   work both directions:
+    //   - 65%+ DOWN over last 20 → flip borderline DOWN→UP (counter DOWN-bias)
+    //   - 65%+ UP over last 20 → flip borderline UP→DOWN (counter UP-bias)
+    //   Self-correcting in either direction. True neutrality.
     const _log=Array.isArray(taraCallLog)?taraCallLog:[];
     const _recent20=_log
       .filter(e=>e&&(e.dir==='UP'||e.dir==='DOWN'))
@@ -33304,23 +33377,43 @@ function TaraApp(){
       .slice(0,20);
     if(_recent20.length<10)return call; // need enough history
     const _downCount=_recent20.filter(e=>e.dir==='DOWN').length;
+    const _upCount=_recent20.length-_downCount;
     const _downPct=_downCount/_recent20.length;
-    // Only boost when DOWN bias is meaningfully strong
-    if(_downPct<0.65)return call;
-    // Flip DOWN → UP with modest confidence
-    const _newConfUp=Math.min(60,55+(_conf-51)); // 55-60 based on how borderline
-    return{
-      ...call,
-      call:'UP',
-      direction:'UP',
-      confidence:_newConfUp,
-      conviction:_newConfUp-50,
-      reason:`Balance lock · UP · ${(_downPct*100).toFixed(0)}% DOWN over last ${_recent20.length} — counter-bias flipped borderline DOWN(${_conf.toFixed(0)})`,
-      _v10_7_19_balanced:true,
-      _v10_7_19_downPct:_downPct,
-      _v10_7_19_originalDir:'DOWN',
-      _v10_7_19_originalConf:_conf,
-    };
+    const _upPct=_upCount/_recent20.length;
+    const _currentDir=call.call;
+    // DOWN bias detected: 65%+ DOWN AND current call is borderline DOWN → flip to UP
+    if(_downPct>=0.65&&_currentDir==='DOWN'){
+      const _newConfUp=Math.min(60,55+(_conf-51));
+      return{
+        ...call,
+        call:'UP',
+        direction:'UP',
+        confidence:_newConfUp,
+        conviction:_newConfUp-50,
+        reason:`Balance lock · UP · ${(_downPct*100).toFixed(0)}% DOWN over last ${_recent20.length} — counter-bias flipped borderline DOWN(${_conf.toFixed(0)})`,
+        _v10_7_19_balanced:true,
+        _v10_7_19_downPct:_downPct,
+        _v10_7_19_originalDir:'DOWN',
+        _v10_7_19_originalConf:_conf,
+      };
+    }
+    // V10.7.34: UP bias detected: 65%+ UP AND current call is borderline UP → flip to DOWN
+    if(_upPct>=0.65&&_currentDir==='UP'){
+      const _newConfDown=Math.min(60,55+(_conf-51));
+      return{
+        ...call,
+        call:'DOWN',
+        direction:'DOWN',
+        confidence:_newConfDown,
+        conviction:_newConfDown-50,
+        reason:`Balance lock · DOWN · ${(_upPct*100).toFixed(0)}% UP over last ${_recent20.length} — counter-bias flipped borderline UP(${_conf.toFixed(0)})`,
+        _v10_7_19_balanced:true,
+        _v10_7_19_upPct:_upPct,
+        _v10_7_19_originalDir:'UP',
+        _v10_7_19_originalConf:_conf,
+      };
+    }
+    return call;
   };
   const _v10_7_19_result=_v10_7_19_balanceFloor(taraCall);
   if(_v10_7_19_result&&_v10_7_19_result!==taraCall){
