@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.21-balance-floor-bugfix';
+const BASELINE_VERSION='2026.05.20-v10.7.23-traj-priority-revert-kalshi-extreme';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.21';
+const TARA_VERSION_DISPLAY='Tara 10.7.23';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -33368,6 +33368,56 @@ function TaraApp(){
         _v10_7_11_votes:_revCheck.revVotes,
         _v10_7_11_reasons:_revCheck.reasons,
       };
+    }
+    // V10.7.22 REVERTED — Kalshi-extreme consensus override removed.
+    //   Reason: by the time Kalshi market hits 85%+ consensus, entry cost is
+    //   85¢+ with 15¢ payout — need 85%+ WR to break even. Even amplified by
+    //   strong consensus, Tara's 64% lifetime WR doesn't clear that hurdle.
+    //   Negative EV patch. Removed entirely.
+    //
+    // V10.7.23 — TRAJ-PRIORITY OVERRIDE (positive EV at cheap entries)
+    //   User audit (May 20, 2:55am): Tara locked DOWN at 2:45 window when her
+    //   OWN [TRAJ] projection said UP at +11bps. Stale Grand Trend (-245bps,
+    //   from a move that already ended) and learned weights overrode the
+    //   fresh trajectory data.
+    //
+    //   Logic: when Tara's own trajectory projection direction conflicts with
+    //   her final call AND projection magnitude is ≥5bps, FLIP to match TRAJ.
+    //   TRAJ is fresh data — uses last 5s/15s/30s velocity blend (V10.7.13
+    //   reweighted to favor recent). When Tara ignores her own projection,
+    //   it's because other (often stale) signals dominated. Flip to fresh data.
+    //
+    //   This is EV-positive because it fires AT LOCK TIME (cheap entries),
+    //   not late when Kalshi has priced in. Catches scenarios like 2:45 where
+    //   the right direction is visible but other signals are overriding.
+    const _projectedGapBps=Number(analysis?.projectedGapBps)||0;
+    if(Math.abs(_projectedGapBps)>=5){
+      const _trajDir=_projectedGapBps>0?'UP':'DOWN';
+      if(_trajDir!==_currentDir){
+        // Only override weak/mid conviction — don't fight strong calls
+        const _strongOpposite=_post>=70; // very strong call in opposite direction
+        if(!_strongOpposite){
+          // Conviction scales with TRAJ magnitude
+          //   5-9bps:  flip with 55-58 (weak)
+          //   10-19bps: flip with 58-65 (moderate)
+          //   20+bps:  flip with 65-72 (strong)
+          const _trajAbs=Math.abs(_projectedGapBps);
+          const _flipConf=Math.min(72,55+Math.floor(_trajAbs/3));
+          return{
+            ...call,
+            call:_trajDir,
+            direction:_trajDir,
+            confidence:_flipConf,
+            conviction:_flipConf-50,
+            reason:`TRAJ-priority lock · ${_trajDir} · projection ${_projectedGapBps>0?'+':''}${_projectedGapBps.toFixed(0)}bps to strike — fresh trajectory overrides stale signals`,
+            _v10_7_11_universalFlipped:true,
+            _v10_7_11_flipType:'traj-priority',
+            _v10_7_11_originalDir:_currentDir,
+            _v10_7_23_projectedGapBps:_projectedGapBps,
+            _v10_7_23_originalConf:_post,
+          };
+        }
+      }
     }
     // 2. Strike-distance hard veto
     const _strikePrice=Number(call.strike)||Number(analysis?.strike)||null;
