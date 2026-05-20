@@ -9344,7 +9344,10 @@ const computeV99Posterior=(params)=>{
     const tsdClamped=Math.max(-13,Math.min(13,tsdScore));
     rawSignalScores.delta=tsdClamped;
     rawSignalScores._delta1Pct=_tsd.delta1Pct; // raw delta % for audit
+    rawSignalScores._delta2Pct=_tsd.delta2!==0?Math.round((_tsd.delta2/Math.max(1,Math.abs(_tsd.delta1+_tsd.delta2+_tsd.delta3)))*100):0;
     rawSignalScores._isCoiling=_coil.isCoiling?1:0;
+    rawSignalScores._coilBodyBps=_coil.avgBodyBps; // how tight the coil was
+    rawSignalScores._coilRangeBps=_coil.avgRangeBps;
     totalScore+=tsdClamped;
   }
   const funding=bloomberg?.fundingRate||0;
