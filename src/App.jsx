@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.27-regime-gate-structure-technical';
+const BASELINE_VERSION='2026.05.20-v10.7.28-chop-regime-bet-sizing';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.27';
+const TARA_VERSION_DISPLAY='Tara 10.7.28';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34802,6 +34802,44 @@ function TaraApp(){
         try{console.info('[V10.7.7] strength-aware sizing',{
           originalBet:_v10_7_7_originalBet,scaledBet:_bet,scale:_v10_7_7_scale,
           conviction:_v10_7_7_conv,posterior:_v10_7_7_post,reason:_v10_7_7_reason,
+        });}catch(_){}
+      }
+    }
+    // ═════════════════════════════════════════════════════════════════════════
+    // V10.7.28 — CHOP REGIME BET SIZING
+    // ═════════════════════════════════════════════════════════════════════════
+    //   Audit (May 20): RANGE-CHOP regime is your weakest by WR. Asymmetric
+    //   payouts mean expensive entries in chop bleed capital. Preserve capital
+    //   in chop so trending weeks have ammo.
+    //
+    //   Rule: in RANGE-CHOP regime, scale bet down by 40% (multiply by 0.6).
+    //   In TRENDING UP/DOWN and SHORT SQUEEZE: full sizing (already strongest
+    //   regimes). In HIGH VOL CHOP: scale to 0.7 (slightly less aggressive).
+    //
+    //   Stacks MULTIPLICATIVELY with V10.7.7 conviction scaling. Example:
+    //   - Weak conv (0.6x) + RANGE-CHOP (0.6x) = 0.36x of original bet
+    //   - Strong conv (1.0x) + RANGE-CHOP (0.6x) = 0.60x of original bet
+    //   - Strong conv (1.0x) + TRENDING UP (1.0x) = 1.0x (full)
+    //
+    //   Skipped when: manual, mission, tier 3+ (same as V10.7.7).
+    if(!_v10_7_7_skipScale){
+      const _v10_7_28_regime=String(analysis?.regime||'').toUpperCase();
+      let _v10_7_28_regimeMult=1.0;
+      let _v10_7_28_reason=null;
+      if(_v10_7_28_regime==='RANGE-CHOP'){
+        _v10_7_28_regimeMult=0.6;
+        _v10_7_28_reason='RANGE-CHOP regime (weakest WR) → 0.6x';
+      }else if(_v10_7_28_regime==='HIGH VOL CHOP'){
+        _v10_7_28_regimeMult=0.7;
+        _v10_7_28_reason='HIGH VOL CHOP → 0.7x';
+      }
+      // TRENDING UP / TRENDING DOWN / SHORT SQUEEZE: stay at 1.0
+      if(_v10_7_28_regimeMult<1.0){
+        const _v10_7_28_preMult=_bet;
+        _bet=Math.max(0.5,Math.round(_bet*_v10_7_28_regimeMult*100)/100);
+        try{console.info('[V10.7.28] chop regime sizing',{
+          preMult:_v10_7_28_preMult,postMult:_bet,regimeMult:_v10_7_28_regimeMult,
+          regime:_v10_7_28_regime,reason:_v10_7_28_reason,
         });}catch(_){}
       }
     }
