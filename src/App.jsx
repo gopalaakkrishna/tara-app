@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.39-coil-detector-three-step-delta-telemetry';
-const TARA_VERSION_DISPLAY='Tara 10.7.39';
+const BASELINE_VERSION='2026.05.20-v10.7.40-reversal-risk-posterior-dampener';
+const TARA_VERSION_DISPLAY='Tara 10.7.40';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34603,6 +34603,94 @@ function TaraApp(){
   if(_v10_7_11_result&&_v10_7_11_result!==taraCall){
     Object.keys(_v10_7_11_result).forEach(k=>{taraCall[k]=_v10_7_11_result[k];});
   }
+
+  // ── V10.7.40 — REVERSAL RISK POSTERIOR DAMPENER ──────────────────────────
+  // Previously: computeReversalRisk() was UI-only — displayed as a warning chip
+  //   in Discord/card but never fed back into the posterior. Tara could show
+  //   "Reversal Risk: EXPECTED" AND call 75% UP simultaneously — contradictory.
+  //
+  // Fix: when Reversal Risk is WATCH or EXPECTED AND Kalshi disagrees by ≥20pts,
+  //   both signals are pointing the same way against the call. Dampen confidence.
+  //
+  // Logic:
+  //   Kalshi disagrees = Kalshi UP% is < 50 when call is UP (or > 50 when DOWN)
+  //   Kalshi disagreement magnitude = |50 - kalshiYesPct| when opposing
+  //   
+  //   WATCH (score 30-59) + Kalshi ≥20pts opposing → reduce confidence 6pts
+  //   EXPECTED (score ≥60) + Kalshi ≥20pts opposing → reduce confidence 12pts
+  //   EXPECTED (score ≥60) + Kalshi ≥35pts opposing + weak call (<58 conf) → flip
+  //
+  // Conservative: only dampens, doesn't flip unless EXPECTED + strongly opposing
+  // Preserves strong calls (≥65 conf) from flip — only weak borderline calls flip
+  try{
+    const _rrCall=taraCall?.call;
+    if((_rrCall==='UP'||_rrCall==='DOWN')&&typeof kalshiYesPrice==='number'){
+      const _kPct=kalshiYesPrice; // 0-100
+      const _callIsUp=_rrCall==='UP';
+      // Kalshi disagrees = YES price opposes call direction
+      const _kalshiOpposes=_callIsUp?_kPct<50:_kPct>50;
+      if(_kalshiOpposes){
+        const _kDis=_callIsUp?(50-_kPct):(_kPct-50);
+        if(_kDis>=20){
+          // Get reversal risk for current call
+          const _rrNow=computeReversalRisk({
+            tier:taraCall?._ctx?.tier||taraCall?.tier||'',
+            regime:analysis?.regime||'',
+            dir:_rrCall,
+            qScore:Math.round(analysis?.qualityGateScore||taraCall?.qScore||0),
+            mtfAlignment:analysis?.mtfAlignment||0,
+            secondsIntoWindow:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
+            whaleLog:typeof whaleLog!=='undefined'?whaleLog:[],
+            dayContext:typeof dayContext!=='undefined'?dayContext:null,
+          });
+          const _rrFlag=_rrNow?.flag||'NONE';
+          const _rrScore=_rrNow?.score||0;
+          const _currentConf=Number(taraCall?.confidence)||50;
+          if(_rrFlag==='EXPECTED'&&_kDis>=35&&_currentConf<58){
+            // Strong case: flip the call
+            const _flipDir=_rrCall==='UP'?'DOWN':'UP';
+            const _flipConf=Math.min(62,50+Math.round(_kDis/4));
+            Object.assign(taraCall,{
+              call:_flipDir,
+              direction:_flipDir,
+              confidence:_flipConf,
+              conviction:_flipConf-50,
+              reason:`[V10.7.40] Reversal Risk EXPECTED (${_rrScore}) + Kalshi ${_kDis.toFixed(0)}pt opposing — flipped ${_rrCall}→${_flipDir}`,
+              _v10_7_40_rrDampened:true,
+              _v10_7_40_rrFlipped:true,
+              _v10_7_40_originalDir:_rrCall,
+              _v10_7_40_rrScore:_rrScore,
+              _v10_7_40_kalshiDis:_kDis,
+            });
+          }else if(_rrFlag==='EXPECTED'&&_kDis>=20){
+            // Dampen: reduce confidence 12pts
+            const _newConf=Math.max(50,_currentConf-12);
+            Object.assign(taraCall,{
+              confidence:_newConf,
+              conviction:_newConf-50,
+              _v10_7_40_rrDampened:true,
+              _v10_7_40_rrFlipped:false,
+              _v10_7_40_originalConf:_currentConf,
+              _v10_7_40_rrScore:_rrScore,
+              _v10_7_40_kalshiDis:_kDis,
+            });
+          }else if(_rrFlag==='WATCH'&&_kDis>=20){
+            // Mild dampen: reduce confidence 6pts
+            const _newConf=Math.max(50,_currentConf-6);
+            Object.assign(taraCall,{
+              confidence:_newConf,
+              conviction:_newConf-50,
+              _v10_7_40_rrDampened:true,
+              _v10_7_40_rrFlipped:false,
+              _v10_7_40_originalConf:_currentConf,
+              _v10_7_40_rrScore:_rrScore,
+              _v10_7_40_kalshiDis:_kDis,
+            });
+          }
+        }
+      }
+    }
+  }catch(_){}
 
 
   // Three coordinated effects, all gated by the same enable + kill-switch checks:
