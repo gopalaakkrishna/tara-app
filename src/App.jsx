@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.28-chop-regime-bet-sizing';
+const BASELINE_VERSION='2026.05.20-v10.7.32-gap-weight-fgt-brti-sizing-entry-reconcile';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.28';
+const TARA_VERSION_DISPLAY='Tara 10.7.32';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -9835,12 +9835,20 @@ const computeV99Posterior=(params)=>{
   //   than historical patterns (structural). When they disagree, follow live.
   // V10.7.25: FGT removed from concrete signals (51% standalone accuracy = noise).
   //   Replaced with Channel score which has real directional value.
+  // V10.7.29: WEIGHTED by audit-confirmed signal accuracy:
+  //   Gap: 67.5% accuracy (×1.4 weight — strongest predictor)
+  //   Momentum: 64.8% accuracy (×1.2 weight)
+  //   Flow: 62.3% accuracy (×1.0 weight — baseline)
+  //   Channel: ~60% est (×1.0 weight)
+  //   Tape: 60-65% est (×1.0 weight)
+  //   Was equal weight, now reflects which signals actually predict outcomes.
+  //   Net effect: Gap and Momentum can trigger the concrete override more easily.
   const _v10_7_12_concrete={
-    gap:Number(rawSignalScores.gap)||0,
-    flow:Number(rawSignalScores.flow)||0,
-    momentum:Number(rawSignalScores.momentum)||0,
-    channel:Number(rawSignalScores.channel)||Number(rawSignalScores.structure)||0,
-    tape:Number(rawSignalScores.tape)||0,
+    gap:(Number(rawSignalScores.gap)||0)*1.4,
+    flow:(Number(rawSignalScores.flow)||0)*1.0,
+    momentum:(Number(rawSignalScores.momentum)||0)*1.2,
+    channel:(Number(rawSignalScores.channel)||Number(rawSignalScores.structure)||0)*1.0,
+    tape:(Number(rawSignalScores.tape)||0)*1.0,
   };
   const _v10_7_12_concreteSum=_v10_7_12_concrete.gap+_v10_7_12_concrete.flow+_v10_7_12_concrete.momentum+_v10_7_12_concrete.channel+_v10_7_12_concrete.tape;
   const _v10_7_12_concreteDir=_v10_7_12_concreteSum>0?'UP':'DOWN';
@@ -34842,6 +34850,61 @@ function TaraApp(){
           regime:_v10_7_28_regime,reason:_v10_7_28_reason,
         });}catch(_){}
       }
+      // ═════════════════════════════════════════════════════════════════════
+      // V10.7.30 — FGT AS BET-SIZE MULTIPLIER (not direction signal)
+      // ═════════════════════════════════════════════════════════════════════
+      //   Audit (May 20): FGT removed from posterior direction (V10.7.25 —
+      //   51% standalone accuracy = noise). BUT when FGT fires at any
+      //   strength, Tara's WR jumps from 61.7% (FGT neutral) to 72.7%
+      //   (FGT non-neutral). That's an 11pp lift correlated with FGT
+      //   activity. FGT firing = market is structured = signals work better.
+      //
+      //   Use FGT as "market clarity boost":
+      //   - |FGT| ≥ 2 (medium/strong alignment): bet ×1.20
+      //   - |FGT| ≥ 1 (moderate alignment): bet ×1.10
+      //   - |FGT| < 1: no change
+      //
+      //   This is BET SIZE only — direction stays whatever Tara decided
+      //   without FGT input. Cap at $5 max bet for safety.
+      const _v10_7_30_fgtAbs=Math.abs(Number(analysis?.mtfAlignment)||0);
+      let _v10_7_30_clarityMult=1.0;
+      if(_v10_7_30_fgtAbs>=2){_v10_7_30_clarityMult=1.20;}
+      else if(_v10_7_30_fgtAbs>=1){_v10_7_30_clarityMult=1.10;}
+      if(_v10_7_30_clarityMult>1.0){
+        const _v10_7_30_preBet=_bet;
+        _bet=Math.min(5.0,Math.round(_bet*_v10_7_30_clarityMult*100)/100);
+        try{console.info('[V10.7.30] FGT clarity boost',{
+          fgtAbs:_v10_7_30_fgtAbs,clarityMult:_v10_7_30_clarityMult,
+          preBoost:_v10_7_30_preBet,postBoost:_bet,
+        });}catch(_){}
+      }
+      // ═════════════════════════════════════════════════════════════════════
+      // V10.7.31 — BRTI CONVICTION BOOST (high-conviction = bigger bet)
+      // ═════════════════════════════════════════════════════════════════════
+      //   Audit (May 20): BRTI flips win 83% (5W/1L on small sample).
+      //   That's a real edge. When BRTI fires AND the call is a result of
+      //   BRTI flip (V10.5.2 or V10.7.20 amplified), boost bet size:
+      //   - Regular BRTI flip:    ×1.20
+      //   - BRTI contrarian (V10.7.20 amplified): ×1.30 (higher conviction)
+      //
+      //   Read from analysis. If current taraCall has _v10_7_11_flipType=
+      //   'brti-divergence' or 'brti-contrarian-amplified', apply boost.
+      //   Stacks with V10.7.30 FGT boost. Cap at $5 max bet for safety.
+      const _v10_7_31_flipType=String(_signal?._v10_7_11_flipType||'');
+      let _v10_7_31_brtiMult=1.0;
+      if(_v10_7_31_flipType==='brti-contrarian-amplified'){
+        _v10_7_31_brtiMult=1.30;
+      }else if(_v10_7_31_flipType==='brti-divergence'){
+        _v10_7_31_brtiMult=1.20;
+      }
+      if(_v10_7_31_brtiMult>1.0){
+        const _v10_7_31_preBet=_bet;
+        _bet=Math.min(5.0,Math.round(_bet*_v10_7_31_brtiMult*100)/100);
+        try{console.info('[V10.7.31] BRTI conviction boost',{
+          flipType:_v10_7_31_flipType,brtiMult:_v10_7_31_brtiMult,
+          preBoost:_v10_7_31_preBet,postBoost:_bet,
+        });}catch(_){}
+      }
     }
     _autoExecLastFiredKeyRef.current=_key;
     // V9.18.3: mark this window as ATTEMPTED. Hard cap — even if the order
@@ -35085,7 +35148,10 @@ function TaraApp(){
       const _km=_kalshiActiveMarketRef.current;
       const _activeTicker=_km?.ticker||null;
       // PHANTOM: Tara thinks she has a live position
-      if(_aos&&(_aos.status==='filled'||_aos.status==='exiting')&&_aos.ticker){
+      // V10.7.32: also reconcile when status='exit-pending' (V10.7.26 exit
+      //   limit placed but not yet filled — we want to verify the position
+      //   is still open on Kalshi until fill completes).
+      if(_aos&&(_aos.status==='filled'||_aos.status==='exiting'||_aos.status==='exit-pending')&&_aos.ticker){
         const _match=positions.find(p=>p.ticker===_aos.ticker);
         if(!_match){
           _details.push({
