@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.38c-audit-direction-bbw-median-adx';
-const TARA_VERSION_DISPLAY='Tara 10.7.38c';
+const BASELINE_VERSION='2026.05.20-v10.7.39-coil-detector-three-step-delta-telemetry';
+const TARA_VERSION_DISPLAY='Tara 10.7.39';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -7046,6 +7046,99 @@ const computeAnchoredVWAP=(bars,swingLookback=20)=>{
 // END V10.7.38 ANCHORED VWAP
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.7.39 — THREE-STEP VOLUME DELTA + CONSOLIDATION COIL DETECTOR
+// ═══════════════════════════════════════════════════════════════════════════
+// Source: "Three Step Future-Trend [BigBeluga]" — volume delta logic only.
+// (Future trend projection skipped — Tara's TRAJ does this better with
+//  velocity decay and volume validation.)
+//
+// WHY THIS MATTERS — "the gaslighting problem":
+//   Small indecisive candles create tiny velocity signals. TRAJ amplifies
+//   them into a projected direction. But small candles often mean CONSOLIDATION
+//   before a breakout — and the breakout direction is unknown from velocity alone.
+//   Tara locks the tiny lean → price snaps the OTHER way.
+//
+// THREE-STEP DELTA reads the HIDDEN ORDER FLOW under flat price:
+//   delta_vol per bar = close > open ? +volume : -volume (candle body direction)
+//   delta1 = last 25 bars → current momentum
+//   delta2 = bars 25-50 → recent history
+//   delta3 = bars 50-75 → older history
+//
+//   delta1 strongly positive + flat price = buyers absorbing quietly → UP breakout
+//   delta1 strongly negative + flat price = sellers absorbing quietly → DOWN breakout
+//   delta1 decelerating vs delta2 = momentum fading → caution
+//
+// COIL DETECTOR checks if we're in consolidation:
+//   If last 5 bars all have small bodies (< 30% of ATR) AND small ranges (< 50% ATR)
+//   → we're coiling. TRAJ velocity is noise. Three-Step Delta becomes primary signal.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const computeThreeStepDelta=(bars,period=25)=>{
+  // bars = liveHistory (newest-first)
+  // Need 3 * period bars minimum
+  if(!bars||bars.length<period*3){
+    return{delta1:0,delta2:0,delta3:0,volDelta:0,direction:'NEUTRAL',accelerating:false,valid:false};
+  }
+  // delta_vol per bar = close > open ? +volume : -volume
+  const getDeltaSum=(start,end)=>{
+    let sum=0;
+    for(let i=start;i<Math.min(end,bars.length);i++){
+      const b=bars[i];
+      const dv=(b.c>b.o?1:-1)*(b.v||1);
+      sum+=dv;
+    }
+    return sum;
+  };
+  const delta1=getDeltaSum(0,period);      // most recent `period` bars
+  const delta2=getDeltaSum(period,period*2); // previous `period` bars
+  const delta3=getDeltaSum(period*2,period*3); // oldest `period` bars
+  const volDelta=(delta1+delta2+delta3)/3; // overall bias
+  const direction=delta1>0?'UP':delta1<0?'DOWN':'NEUTRAL';
+  // Accelerating: current period stronger than previous (momentum building)
+  const accelerating=Math.abs(delta1)>Math.abs(delta2);
+  // Shift: delta2 was opposite to delta1 = fresh momentum flip (strong signal)
+  const momentumFlip=(delta1>0&&delta2<0)||(delta1<0&&delta2>0);
+  // Magnitude normalization: delta1 relative to total volume traded
+  const totalVol1=bars.slice(0,period).reduce((s,b)=>s+(b.v||1),0);
+  const delta1Pct=totalVol1>0?(delta1/totalVol1)*100:0; // -100 to +100
+  return{
+    delta1,delta2,delta3,volDelta,
+    direction,accelerating,momentumFlip,
+    delta1Pct:Math.round(delta1Pct*10)/10,
+    valid:true,
+  };
+};
+
+const detectCoilConsolidation=(bars,atrBps,period=5)=>{
+  // bars = liveHistory (newest-first). Check if last `period` bars are small/flat.
+  if(!bars||bars.length<period||!atrBps||atrBps<=0){
+    return{isCoiling:false,avgBodyBps:0,avgRangeBps:0};
+  }
+  const recentBars=bars.slice(0,period);
+  const cp=bars[0]?.c||1;
+  // ATR per bar in bps
+  const atrPerBarBps=atrBps; // already in bps
+  // Body and range in bps
+  const bodies=recentBars.map(b=>Math.abs(b.c-b.o)/cp*10000);
+  const ranges=recentBars.map(b=>(b.h-b.l)/cp*10000);
+  const avgBodyBps=bodies.reduce((a,b)=>a+b,0)/period;
+  const avgRangeBps=ranges.reduce((a,b)=>a+b,0)/period;
+  // Coiling: bodies < 30% ATR AND ranges < 50% ATR per bar
+  const bodyThreshold=atrPerBarBps*0.30;
+  const rangeThreshold=atrPerBarBps*0.50;
+  const isCoiling=avgBodyBps<bodyThreshold&&avgRangeBps<rangeThreshold;
+  return{
+    isCoiling,
+    avgBodyBps:Math.round(avgBodyBps*10)/10,
+    avgRangeBps:Math.round(avgRangeBps*10)/10,
+    bodyThreshold:Math.round(bodyThreshold*10)/10,
+  };
+};
+// ═══════════════════════════════════════════════════════════════════════════
+// END V10.7.39
+// ═══════════════════════════════════════════════════════════════════════════
+
 // V6.2.0: FUTURE GRAND TREND (HPotter port). Recursive low-pass-style transform looking
 //   at bars 70 and 140 ago. Captures multi-hour structural direction.
 const computeFutureGrandTrend=(candles,length=70,forecast=100)=>{
@@ -8363,6 +8456,19 @@ const computeV99Posterior=(params)=>{
   // Dampen far-out projections (uncertainty grows with time)
   const _decayedTime=Math.sqrt(_secsLeft); // effective projection time
   let _projectedDrift=(_vBlended*_decayedTime)+(_accelNum*_decayedTime*_decayedTime*0.3);
+  // V10.7.39 — COIL DETECTOR: suppress tiny velocity noise in consolidation
+  //   Small indecisive candles produce tiny velocity signals that TRAJ amplifies
+  //   into false directional projections ("the gaslighting problem").
+  //   When bars are coiling (avg body < 30% ATR, avg range < 50% ATR),
+  //   velocity is noise — heavily dampen projection so it doesn't drive the call.
+  //   Three-Step Delta (below) takes over as the directional guide in this state.
+  const _coil=detectCoilConsolidation(liveHistory,atrBps,5);
+  if(_coil.isCoiling&&Math.abs(_projectedDrift)<2.0){
+    _projectedDrift*=0.2; // 80% dampen: tiny velocity becomes near-zero
+    reasoning.push(`[COIL] Consolidation detected (body ${_coil.avgBodyBps.toFixed(1)}bps < ${_coil.bodyThreshold.toFixed(1)}bps threshold) — TRAJ velocity suppressed, Delta signal primary`);
+  }else if(_coil.isCoiling){
+    _projectedDrift*=0.5; // 50% dampen even for moderate drift when coiling
+  }
   // V10.7.24A — VOLUME-VALIDATED TRAJ
   //   User report (May 20): TRAJ was projecting UP but other signals overrode it.
   //   Sometimes TRAJ is genuinely wrong because velocity comes from price spikes
@@ -9117,6 +9223,7 @@ const computeV99Posterior=(params)=>{
     }
     const stochClamped=Math.max(-12,Math.min(12,stochScore));
     rawSignalScores.stochRSI=stochClamped;
+    rawSignalScores._stochK=_stochRSI.k; // raw K value for audit
     totalScore+=stochClamped;
   }
 
@@ -9163,6 +9270,8 @@ const computeV99Posterior=(params)=>{
     else if(!_macdOBV.obvBullish&&macdScore>0){macdScore-=2;reasoning.push(`[OBV] Distribution conflicts with MACD UP — dampen`);}
     const macdClamped=Math.max(-15,Math.min(15,macdScore));
     rawSignalScores.macd=macdClamped;
+    rawSignalScores._macdHist=_macdOBV.hist; // raw histogram for audit
+    rawSignalScores._obvBullish=_macdOBV.obvBullish?1:0;
     totalScore+=macdClamped;
   }
 
@@ -9203,6 +9312,41 @@ const computeV99Posterior=(params)=>{
     rawSignalScores.avwap=avwapClamped;
     totalScore+=avwapClamped;
   }
+
+  // ── SIGNAL 5f: THREE-STEP VOLUME DELTA (V10.7.39) ────────────────────────
+  // Detects HIDDEN order flow under flat/small-candle price action.
+  // Fixes the "gaslighting" problem: when small candles mislead TRAJ velocity,
+  // this signal reads cumulative volume pressure to predict breakout direction.
+  //
+  // Scoring (conservative — primarily informational + coil-state directional):
+  //   delta1 strongly positive + accelerating: +10 (fresh buying building)
+  //   delta1 strongly positive + momentum flip from negative: +8 (buyers taking over)
+  //   delta1 positive (mild): +5
+  //   Same logic negative for DOWN
+  //   Bonus when coiling: +3 extra (most relevant in consolidation)
+  const _tsd=computeThreeStepDelta(liveHistory,25);
+  if(_tsd.valid){
+    let tsdScore=0;
+    const _tsdStrong=Math.abs(_tsd.delta1Pct)>=15; // >15% of volume imbalanced
+    const _tsdMild=Math.abs(_tsd.delta1Pct)>=5;
+    const _sign=_tsd.delta1>0?1:-1;
+    if(_tsdStrong&&_tsd.accelerating){tsdScore=_sign*10;}
+    else if(_tsdStrong&&_tsd.momentumFlip){tsdScore=_sign*8;}
+    else if(_tsdStrong){tsdScore=_sign*6;}
+    else if(_tsdMild){tsdScore=_sign*4;}
+    // Extra weight when coiling (this IS the primary signal in consolidation)
+    if(_coil.isCoiling&&Math.abs(tsdScore)>0){
+      tsdScore=Math.sign(tsdScore)*(Math.abs(tsdScore)+3);
+      reasoning.push(`[DELTA] Coiling + ${_tsd.direction} volume delta ${_tsd.delta1Pct.toFixed(1)}% (${_tsd.accelerating?'accelerating':'sustained'}) — primary consolidation signal`);
+    }else if(Math.abs(tsdScore)>0){
+      reasoning.push(`[DELTA] ${_tsd.direction} delta ${_tsd.delta1Pct.toFixed(1)}% | d1=${_tsd.delta1.toFixed(0)} d2=${_tsd.delta2.toFixed(0)}${_tsd.momentumFlip?' ← FLIP':_tsd.accelerating?' ↑ ACCEL':''}`);
+    }
+    const tsdClamped=Math.max(-13,Math.min(13,tsdScore));
+    rawSignalScores.delta=tsdClamped;
+    rawSignalScores._delta1Pct=_tsd.delta1Pct; // raw delta % for audit
+    rawSignalScores._isCoiling=_coil.isCoiling?1:0;
+    totalScore+=tsdClamped;
+  }
   const funding=bloomberg?.fundingRate||0;
   const fundingPrev=bloomberg?.fundingRatePrev||0;
   const delta=globalFlow.deltaUSD||0;
@@ -9227,6 +9371,11 @@ const computeV99Posterior=(params)=>{
   const _mtfDnAligned=isCleanDn;
   if(_v10736){
     reasoning.push(`[V10.7.36 REGIME] ADX=${_v10736.adx.toFixed(1)} BBW=${_v10736.bbwRank}th-pct whipsaw=${_v10736.whipsawCount} ATRP=${_v10736.atrp.toFixed(2)}% → ${_v10736.isHighVol?'HIGH-VOL':_v10736.isTrend?'TREND':'CHOP'} priceAboveMedian=${_v10736.priceAboveMedian}`);
+    // V10.7.39: stamp raw indicator values for audit (not just clamped scores)
+    rawSignalScores._adx=_v10736.adx;
+    rawSignalScores._bbwRank=_v10736.bbwRank;
+    rawSignalScores._atrp=_v10736.atrp;
+    rawSignalScores._whipsaw=_v10736.whipsawCount;
   }else{
     // Not enough history (< 30 bars) — fall back to old logic
     if(drift1m>3||drift1m<-3){
