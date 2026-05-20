@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.14-range-chop-bias-neutralizer';
+const BASELINE_VERSION='2026.05.19-v10.7.18-bargain-hunter-preset';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.14';
+const TARA_VERSION_DISPLAY='Tara 10.7.18';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14026,6 +14026,69 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
               },
                 React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Hawk'),
                 React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'72-76% · 4-7/day · V10.2.35'),
+              ),
+            ),
+            // ── V10.7.18: BARGAIN HUNTER — "deep value + smart cashout" preset ──
+            // Targets sub-55¢ entries only. Higher quality bar than HAWK. Pairs with
+            //   V10.7.9 smart cashout (trailing stop + asymmetric loss cut) so we
+            //   capture maximum upside when right + cut early when wrong.
+            React.createElement('div',{className:'grid grid-cols-1 gap-1.5 mt-1.5'},
+              React.createElement('button',{
+                type:'button',
+                onClick:()=>{
+                  if(typeof setAutoExecSettings!=='function')return;
+                  if(!confirm('Apply BARGAIN HUNTER preset?\\n\\n"Deep value entries + smart cashout":\\n\\n• PATIENT ENTRY: max 55¢ (vs Hawk\'s 70¢)\\n  → Waits up to 90s for offer to drop to ≤55¢\\n  → If 90s passes → sit out (no expensive entries)\\n\\n• Min tier: tape+\\n• Min qScoreV2: 55 (higher bar than Hawk)\\n• Edge cap: 6pt (tightest)\\n• Skip marginal-caution + time-cap: ON\\n\\n• SMART CASHOUT V10.7.9: ENABLED\\n  → Peak trigger: 12¢ (arms earlier)\\n  → Trail floor: 45% (locks more of peak)\\n  → Loss cut: 18¢ (cut faster)\\n  → Late-window profit lock: 4¢ in last 60s\\n  → Late-window loss cut: 10¢ in last 60s\\n\\n• Take-profit (max payout): 92¢\\n• Stop-loss fallback: 12¢\\n• Max trades/day: 10\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 70-75% WR, 3-6 trades/day.\\nFew trades, cheap entries, max upside captured.\\n\\nNOTE: requires V10.7.5 dead-window sitout to be OFF since this preset enforces price-based sitouts for expensive entries.'))return;
+                  setAutoExecSettings(prev=>({
+                    ...prev,
+                    minTier:'tape',
+                    minQualityScore:55,
+                    maxEdgePt:6,
+                    tradeTimingMode:'advisory',
+                    skipTimeCapCommit:true,
+                    tccSmartBypass:true,
+                    skipMarginalCaution:true,
+                    // PATIENT ENTRY — defining BARGAIN HUNTER feature
+                    patientEntryEnabled:true,
+                    patientEntryMaxCents:55, // 15¢ cheaper than Hawk
+                    patientEntryMaxWaitSec:90, // 30s more patient than Hawk
+                    // SMART CASHOUT V10.7.9 — aggressive profit-locking
+                    smartCashoutEnabled:true,
+                    smartCashoutPeakTrigger:12, // arms 3¢ earlier than default
+                    smartCashoutTrailFloorPct:45, // locks 5pp more of peak
+                    smartCashoutLossCutCents:18, // 7¢ tighter than default
+                    smartCashoutLateWindowSecs:60,
+                    smartCashoutLateProfitCents:4, // 1¢ tighter than default
+                    smartCashoutLateLossCents:10, // 5¢ tighter than default
+                    // Exits — wait for max payout
+                    autoExitOffer:92, // higher than Hawk's 88
+                    stopLossDeltaCents:12, // tighter than Hawk's 13
+                    // Caps
+                    maxAutoTradesPerDay:10,
+                    maxAutoTradesPerWindow:1,
+                    maxBetPerTrade:2.5,
+                    maxDailyLoss:6,
+                    cooldownLossStreak:3,
+                    cooldownMinutes:30,
+                  }));
+                  try{
+                    const _cur=localStorage.getItem('taraKalshiAgreeMode');
+                    if(_cur!=='live'){
+                      localStorage.setItem('taraKalshiAgreeMode','live');
+                      if(typeof setKalshiAgreeMode==='function')setKalshiAgreeMode('live');
+                    }
+                  }catch(_){}
+                  try{console.info('[V10.7.18] BARGAIN HUNTER preset applied — patient entry @≤55¢, qScore≥55, smart cashout aggressive');}catch(_){}
+                },
+                className:'text-[10px] py-2.5 px-2 rounded transition-colors',
+                style:{
+                  background:'rgba(110,231,183,0.10)',
+                  border:'1px solid rgba(110,231,183,0.50)',
+                  color:'rgb(110,231,183)',
+                },
+                title:'Bargain Hunter: max 55¢ entries + smart trail-stop cashout + early loss cuts. Few trades, best risk/reward per trade.',
+              },
+                React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Bargain Hunter'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'70-75% · 3-6/day · ≤55¢ entry + smart cashout · V10.7.18'),
               ),
             ),
             // V10.4.1a: legacy presets hidden by default. Click to reveal.
