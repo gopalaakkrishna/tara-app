@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.38a-audit-fixes-whipsaw-vwap-macd';
-const TARA_VERSION_DISPLAY='Tara 10.7.38a';
+const BASELINE_VERSION='2026.05.20-v10.7.38b-audit-direction-fixes';
+const TARA_VERSION_DISPLAY='Tara 10.7.38b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6646,21 +6646,22 @@ const computeMedianFilter=(closes,length=50)=>{
 const computeATRP=(bars,shortP=2,longP=14)=>{
   if(!bars||bars.length<longP+2)return{atrp:0,regime:'Normal'};
   const closes=bars.map(b=>b.c);
-  // Compute ATR(shortP) and ATR(longP)
+  // Compute ATR(shortP) and ATR(longP) — use MOST RECENT bars (newest-first slice)
   const getATR=(p)=>{
     let atr=0;
-    const start=Math.max(1,bars.length-p);
-    for(let i=start;i<bars.length;i++){
-      const tr=Math.max(bars[i].h-bars[i].l,
-        Math.abs(bars[i].h-bars[i-1].c),
-        Math.abs(bars[i].l-bars[i-1].c));
+    // bars[0]=newest. Take first p bars (most recent) for ATR
+    const end=Math.min(p+1,bars.length);
+    for(let i=1;i<end;i++){
+      const tr=Math.max(bars[i-1].h-bars[i-1].l,
+        Math.abs(bars[i-1].h-bars[i].c),
+        Math.abs(bars[i-1].l-bars[i].c));
       atr+=tr/p;
     }
     return atr;
   };
   const shortATR=getATR(shortP);
   const longATR=getATR(longP);
-  const cp=closes[closes.length-1];
+  const cp=closes[0]; // bars[0] = newest bar's close
   const atrp=cp>0?((shortATR/cp)-(longATR/cp))*100:0;
   // Store for percentile
   _atrpHistory.push(atrp);
@@ -6779,9 +6780,10 @@ const computeStochRSI=(closes,rsiPeriod=14,stochPeriod=14,smoothK=3,smoothD=3)=>
   if(!closes||closes.length<rsiPeriod+stochPeriod+smoothK+smoothD+5){
     return{k:50,d:50,overbought:false,oversold:false,valid:false};
   }
-  // Build RSI series for enough bars
+  // V10.7.38a AUDIT FIX: liveHistory is newest-first. Reverse to oldest-first
+  // so RSI/stochastic math works chronologically (older→newer = price going up).
   const needed=rsiPeriod+stochPeriod+smoothK+smoothD+10;
-  const slice=closes.slice(-needed);
+  const slice=closes.slice(-needed).reverse(); // oldest-first now
   const n=slice.length;
   // RSI series
   const rsiSeries=[];
@@ -6842,10 +6844,13 @@ const computeMarketStructureBOS=(bars,fastLen=20,slowLen=50,swingLen=5)=>{
   if(!bars||bars.length<slowLen+swingLen+2){
     return{confirmLong:false,confirmShort:false,bosBull:false,bosBear:false,bullTrend:false,valid:false};
   }
-  const closes=bars.map(b=>b.c);
-  const highs=bars.map(b=>b.h);
-  const lows=bars.map(b=>b.l);
-  const n=bars.length;
+  // V10.7.38a AUDIT FIX: liveHistory is newest-first. Reverse to oldest-first
+  // so EMA calculations build chronologically (EMAs grow forward in time).
+  const barsOF=bars.slice().reverse(); // oldest-first
+  const closes=barsOF.map(b=>b.c);
+  const highs=barsOF.map(b=>b.h);
+  const lows=barsOF.map(b=>b.l);
+  const n=barsOF.length;
   // Fast EMA(20) and Slow EMA(50)
   const getEMAFull=(arr,p)=>{
     const k=2/(p+1);
@@ -6858,8 +6863,8 @@ const computeMarketStructureBOS=(bars,fastLen=20,slowLen=50,swingLen=5)=>{
   const slowSeries=getEMAFull(closes,slowLen);
   const fastEMA=fastSeries[fastSeries.length-1];
   const slowEMA=slowSeries[slowSeries.length-1];
-  const currentClose=closes[n-1];
-  // Swing high/low over last swingLen bars (EXCLUDING current bar = [1] in Pine)
+  const currentClose=closes[n-1]; // newest close (last in oldest-first)
+  // Swing high/low: last swingLen bars BEFORE current bar (oldest-first indexing)
   const prevHighs=highs.slice(n-1-swingLen,n-1);
   const prevLows=lows.slice(n-1-swingLen,n-1);
   const swingHigh=Math.max(...prevHighs); // swingHigh[1] in Pine
@@ -6892,10 +6897,13 @@ const computeMACDAndOBV=(bars,fast=12,slow=26,sig=9,obvSmooth=10)=>{
   if(!bars||bars.length<slow+sig+obvSmooth+5){
     return{hist:0,macd:0,signal:0,bullish:false,crossUp:false,crossDown:false,obvBullish:false,valid:false};
   }
-  const hl2=bars.map(b=>(b.h+b.l)/2);
-  const closes=bars.map(b=>b.c);
-  const volumes=bars.map(b=>b.v||1);
-  const n=bars.length;
+  // V10.7.38a AUDIT FIX: liveHistory is newest-first. Reverse to oldest-first
+  // so EMA builds forward in time and OBV accumulates correctly.
+  const barsOF=bars.slice().reverse(); // oldest-first
+  const hl2=barsOF.map(b=>(b.h+b.l)/2);
+  const closes=barsOF.map(b=>b.c);
+  const volumes=barsOF.map(b=>b.v||1);
+  const n=barsOF.length;
   // EMA of hl2
   const getEMA=(arr,p)=>{
     const k=2/(p+1);
@@ -9210,8 +9218,8 @@ const computeV99Posterior=(params)=>{
   //   Preserves: HTF veto, S/R range override, quiet override (all run after)
   const _v10736=computeRegimeV10736(liveHistory,drift1m,drift5m,drift15m,atrBps);
   const isHighVol=_v10736?_v10736.isHighVol:(atrBps>35); // fallback if not enough bars
-  const isCleanUp=_v10736?(_v10736.isTrend&&drift1m>3&&drift5m>3):(drift1m>3&&drift5m>5&&drift15m>8&&delta>200000);
-  const isCleanDn=_v10736?(_v10736.isTrend&&drift1m<-3&&drift5m<-3):(drift1m<-3&&drift5m<-5&&drift15m<-8&&delta<-200000);
+  const isCleanUp=_v10736?(_v10736.isTrend&&drift1m>3&&drift5m>3&&drift15m>5):(drift1m>3&&drift5m>5&&drift15m>8&&delta>200000);
+  const isCleanDn=_v10736?(_v10736.isTrend&&drift1m<-3&&drift5m<-3&&drift15m<-5):(drift1m<-3&&drift5m<-5&&drift15m<-8&&delta<-200000);
   // V10.7.36: keep _mtfUpAligned/_mtfDnAligned for telemetry stamps downstream (line 10814)
   const _mtfUpAligned=isCleanUp;
   const _mtfDnAligned=isCleanDn;
