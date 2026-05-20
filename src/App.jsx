@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.19-direction-balance-floor';
+const BASELINE_VERSION='2026.05.19-v10.7.20-brti-amplifier-and-ladder';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.19';
+const TARA_VERSION_DISPLAY='Tara 10.7.20';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14037,7 +14037,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 type:'button',
                 onClick:()=>{
                   if(typeof setAutoExecSettings!=='function')return;
-                  if(!confirm('Apply BARGAIN HUNTER preset?\\n\\n"Deep value entries + smart cashout":\\n\\n• PATIENT ENTRY: max 55¢ (vs Hawk\'s 70¢)\\n  → Waits up to 90s for offer to drop to ≤55¢\\n  → If 90s passes → sit out (no expensive entries)\\n\\n• Min tier: tape+\\n• Min qScoreV2: 55 (higher bar than Hawk)\\n• Edge cap: 6pt (tightest)\\n• Skip marginal-caution + time-cap: ON\\n\\n• SMART CASHOUT V10.7.9: ENABLED\\n  → Peak trigger: 12¢ (arms earlier)\\n  → Trail floor: 45% (locks more of peak)\\n  → Loss cut: 18¢ (cut faster)\\n  → Late-window profit lock: 4¢ in last 60s\\n  → Late-window loss cut: 10¢ in last 60s\\n\\n• Take-profit (max payout): 92¢\\n• Stop-loss fallback: 12¢\\n• Max trades/day: 10\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 70-75% WR, 3-6 trades/day.\\nFew trades, cheap entries, max upside captured.\\n\\nNOTE: requires V10.7.5 dead-window sitout to be OFF since this preset enforces price-based sitouts for expensive entries.'))return;
+                  if(!confirm('Apply BARGAIN HUNTER preset?\\n\\n"Deep value entries + smart cashout":\\n\\n• PATIENT ENTRY: max 55¢ (vs Hawk\'s 70¢)\\n  → Waits up to 90s for offer to drop to ≤55¢\\n  → If 90s passes → sit out (no expensive entries)\\n\\n• ENTRY LADDER (V10.7.16): ON\\n  → Submits limit 4¢ below offer, waits 15s\\n  → If unfilled, retry 2¢ below, wait 15s more\\n  → Then takes market (saves 2-4¢/contract avg)\\n\\n• Min tier: tape+\\n• Min qScoreV2: 55 (higher bar than Hawk)\\n• Edge cap: 6pt (tightest)\\n• Skip marginal-caution + time-cap: ON\\n\\n• SMART CASHOUT V10.7.9: ENABLED\\n  → Peak trigger: 12¢ (arms earlier)\\n  → Trail floor: 45% (locks more of peak)\\n  → Loss cut: 18¢ (cut faster)\\n  → Late-window profit lock: 4¢ in last 60s\\n  → Late-window loss cut: 10¢ in last 60s\\n\\n• Take-profit (max payout): 92¢\\n• Stop-loss fallback: 12¢\\n• Max trades/day: 10\\n• Max bet: $2.50\\n• Cooldown: 2 losses → 30 min\\n\\nExpected: 70-75% WR, 3-6 trades/day.\\nFew trades, cheap entries, max upside captured.'))return;
                   setAutoExecSettings(prev=>({
                     ...prev,
                     minTier:'tape',
@@ -14059,6 +14059,14 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                     smartCashoutLateWindowSecs:60,
                     smartCashoutLateProfitCents:4, // 1¢ tighter than default
                     smartCashoutLateLossCents:10, // 5¢ tighter than default
+                    // V10.7.16 — ENTRY LADDER for cheaper fills
+                    //   Submits limit 4¢ below current offer, waits 15s, retries
+                    //   2¢ below offer for 10s more, then takes market.
+                    //   Average savings: 2-4¢ per entry on fills.
+                    entryLadderEnabled:true,
+                    entryLadderUndercutCents:4, // start 4¢ below offer
+                    entryLadderStepSec:15, // wait 15s per rung
+                    entryLadderMaxSteps:2, // 2 attempts (4¢, then 2¢) before market
                     // Exits — wait for max payout
                     autoExitOffer:92, // higher than Hawk's 88
                     stopLossDeltaCents:12, // tighter than Hawk's 13
@@ -14088,7 +14096,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 title:'Bargain Hunter: max 55¢ entries + smart trail-stop cashout + early loss cuts. Few trades, best risk/reward per trade.',
               },
                 React.createElement('div',{className:'text-[11px] font-bold uppercase tracking-wider'},'Bargain Hunter'),
-                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'70-75% · 3-6/day · ≤55¢ entry + smart cashout · V10.7.18'),
+                React.createElement('div',{className:'text-[8px] mt-0.5 opacity-80'},'70-75% · 3-6/day · ≤55¢ entry + ladder + smart cashout · V10.7.18/16'),
               ),
             ),
             // V10.4.1a: legacy presets hidden by default. Click to reveal.
@@ -33426,21 +33434,39 @@ function TaraApp(){
       const _divBps=Number(brtiApprox.divergenceBps)||0;
       // Positive divBps = Coinbase ABOVE BRTI = Coinbase rich = likely revert DOWN
       // Negative divBps = Coinbase BELOW BRTI = Coinbase cheap = likely revert UP
-      if(Math.abs(_divBps)>=3){
+      // V10.7.20: lowered threshold from 3 to 2.5bps when BRTI is contrarian to
+      //   strong consensus (catches more contrarian opportunities)
+      const _wasStrongConsensus=Math.abs(_post-50)>=15; // original was high-conviction
+      const _threshold=_wasStrongConsensus?2.5:3;
+      if(Math.abs(_divBps)>=_threshold){
         const _brtiSnapDir=_divBps>0?'DOWN':'UP'; // direction of expected snap-back
         if(_brtiSnapDir!==_currentDir){
+          // V10.7.20 — CONTRARIAN AMPLIFIER
+          //   Original V10.5.2: confidence cap at 65, multiplier 2x divBps.
+          //   When BRTI flips a STRONG consensus call (original conviction ≥15pt),
+          //   that's a high-precision contrarian setup. Amplify conviction:
+          //   - Multiplier 2.5x divBps (was 2x)
+          //   - Cap raised to 75 (was 65)
+          //   Logic: BRTI's mean-reversion edge is strongest when fighting consensus.
+          //   The whole market sees one thing, BRTI sees pricing anomaly. Reward this.
+          const _confMult=_wasStrongConsensus?2.5:2.0;
+          const _confCap=_wasStrongConsensus?75:65;
+          const _convCap=_wasStrongConsensus?25:15;
+          const _flipConf=Math.min(_confCap,50+Math.abs(_divBps)*_confMult);
           return{
             ...call,
             call:_brtiSnapDir,
             direction:_brtiSnapDir,
-            confidence:Math.min(65,50+Math.abs(_divBps)*2), // modest conviction
-            conviction:Math.min(15,Math.abs(_divBps)*2),
-            reason:`BRTI snap-back lock · ${_brtiSnapDir} · Coinbase ${_divBps>0?'+':''}${_divBps.toFixed(1)}bps vs ${brtiApprox.sourceCount}-exchange mean → mean-reversion`,
+            confidence:_flipConf,
+            conviction:Math.min(_convCap,Math.abs(_divBps)*_confMult),
+            reason:`BRTI ${_wasStrongConsensus?'contrarian-amplified':'snap-back'} lock · ${_brtiSnapDir} · Coinbase ${_divBps>0?'+':''}${_divBps.toFixed(1)}bps vs ${brtiApprox.sourceCount}-exchange mean${_wasStrongConsensus?' (fighting consensus '+_post.toFixed(0)+'%)':''}`,
             _v10_7_11_universalFlipped:true,
-            _v10_7_11_flipType:'brti-divergence',
+            _v10_7_11_flipType:_wasStrongConsensus?'brti-contrarian-amplified':'brti-divergence',
             _v10_7_11_originalDir:_currentDir,
             _v10_7_11_brtiDivBps:_divBps,
             _v10_7_11_brtiSources:brtiApprox.sourceCount,
+            _v10_7_20_amplified:_wasStrongConsensus,
+            _v10_7_20_originalConf:_wasStrongConsensus?_post:null,
           };
         }
       }
