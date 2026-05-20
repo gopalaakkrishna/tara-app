@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.38b-audit-direction-fixes';
-const TARA_VERSION_DISPLAY='Tara 10.7.38b';
+const BASELINE_VERSION='2026.05.20-v10.7.38c-audit-direction-bbw-median-adx';
+const TARA_VERSION_DISPLAY='Tara 10.7.38c';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6528,16 +6528,18 @@ const computeFutureTrendChannel=(candles,length=100,multi=3,extend=50)=>{
 // Returns adx (0-100). > 20 = trending, < 18 = chop.
 const computeADX=(bars,period=14)=>{
   if(!bars||bars.length<period*2+2)return{adx:0,diPlus:0,diMinus:0,valid:false};
-  const n=bars.length;
+  // V10.7.38c: reverse to oldest-first so DM direction is computed correctly
+  const b=bars.slice().reverse(); // b[0]=oldest, b[n-1]=newest
+  const n=b.length;
   // Wilder smoothing factor
   const k=1/period;
   let smoothTR=0,smoothPDM=0,smoothNDM=0;
-  // Initialize over first `period` bars
+  // Initialize over first `period` bars (b is oldest-first)
   for(let i=1;i<=period;i++){
-    const h=bars[i].h,l=bars[i].l,pc=bars[i-1].c;
+    const h=b[i].h,l=b[i].l,pc=b[i-1].c;
     const tr=Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc));
-    const pdm=Math.max(h-bars[i-1].h,0);
-    const ndm=Math.max(bars[i-1].l-l,0);
+    const pdm=Math.max(h-b[i-1].h,0);
+    const ndm=Math.max(b[i-1].l-l,0);
     const usePDM=pdm>ndm?pdm:0;
     const useNDM=ndm>pdm?ndm:0;
     smoothTR+=tr;smoothPDM+=usePDM;smoothNDM+=useNDM;
@@ -6546,10 +6548,10 @@ const computeADX=(bars,period=14)=>{
   let adxSmooth=0;
   const dxArr=[];
   for(let i=period+1;i<n;i++){
-    const h=bars[i].h,l=bars[i].l,pc=bars[i-1].c;
+    const h=b[i].h,l=b[i].l,pc=b[i-1].c;
     const tr=Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc));
-    const pdm=Math.max(h-bars[i-1].h,0);
-    const ndm=Math.max(bars[i-1].l-l,0);
+    const pdm=Math.max(h-b[i-1].h,0);
+    const ndm=Math.max(b[i-1].l-l,0);
     const usePDM=pdm>ndm?pdm:0;
     const useNDM=ndm>pdm?ndm:0;
     // Wilder smooth: prev*(1-1/p) + new*(1/p) = prev - prev/p + new
@@ -6578,11 +6580,10 @@ const _bbwHistory=[];
 const _atrpHistory=[];
 const computeBBWRank=(closes,historyRef,rankLen=100)=>{
   if(!closes||closes.length<22)return{bbw:0,rank:0};
-  // SMA 20
-  const sma20=closes.slice(-20).reduce((a,b)=>a+b,0)/20;
-  // Stdev 20
-  const mean20=sma20;
-  const variance=closes.slice(-20).reduce((s,c)=>s+Math.pow(c-mean20,2),0)/20;
+  // closes is newest-first (liveHistory order). Use first 20 = most recent 20 bars.
+  const recent20=closes.slice(0,20);
+  const sma20=recent20.reduce((a,b)=>a+b,0)/20;
+  const variance=recent20.reduce((s,c)=>s+Math.pow(c-sma20,2),0)/20;
   const stdev20=Math.sqrt(variance);
   const bbw=(stdev20*4)/sma20;
   historyRef.push(bbw);
@@ -6636,8 +6637,9 @@ const computeWhipsawCount=(bars,emaPeriod=20,lookback=10)=>{
 // Sorts last `length` closes and returns the median. More robust than SMA
 // for trend detection — not skewed by price spikes.
 const computeMedianFilter=(closes,length=50)=>{
-  if(!closes||closes.length<length)return closes?.[closes.length-1]||0;
-  const window=[...closes.slice(-length)].sort((a,b)=>a-b);
+  if(!closes||closes.length<length)return closes?.[0]||0; // closes[0] = newest
+  // closes is newest-first. Use first `length` elements = most recent bars.
+  const window=[...closes.slice(0,length)].sort((a,b)=>a-b);
   return window[Math.floor(length/2)];
 };
 
