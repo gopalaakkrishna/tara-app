@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.25-remove-fgt-from-synthesis';
+const BASELINE_VERSION='2026.05.20-v10.7.26-fill-reconciliation';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.25';
+const TARA_VERSION_DISPLAY='Tara 10.7.26';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35219,6 +35219,135 @@ function TaraApp(){
     return()=>{_stopped=true;clearInterval(iv);};
   },[autoOrderState?.orderId,autoOrderState?.status,autoOrderState?.dryRun,kalshiCreds,killSwitchEngaged]);
 
+  // ─────────────────────────────────────────────────────────────────────
+  // V10.7.21 — EXIT-POLL EFFECT (matches entry poll architecture)
+  // ─────────────────────────────────────────────────────────────────────
+  //   Polls the exit order every 2s while status='exit-pending'. When the
+  //   limit fills, sets status='exited' with actual fill price. After 15s
+  //   of no fill, cancels the limit and places a MARKET order as fallback
+  //   so the exit actually happens (no stuck limits resting in the book).
+  useEffect(()=>{
+    if(killSwitchEngaged)return;
+    if(!autoOrderState||autoOrderState.status!=='exit-pending')return;
+    if(!autoOrderState.exitOrderId||String(autoOrderState.exitOrderId).startsWith('pending_'))return;
+    if(!kalshiCreds?.apiKeyId||!kalshiCreds?.privateKeyPem)return;
+    let _stopped=false;
+    let _consecutiveErrors=0;
+    let _marketFallbackFired=false;
+    const _tick=async()=>{
+      if(_stopped)return;
+      const _aos=autoOrderState;
+      if(!_aos||_aos.status!=='exit-pending'||!_aos.exitOrderId)return;
+      // Dry-run: simulate fill at trigger after 2s
+      if(_aos.dryRun){
+        setAutoOrderState(prev=>prev?{
+          ...prev,
+          status:'exited',
+          exitFillPrice:prev.exitTriggerCents!=null?prev.exitTriggerCents:prev.exitFillPrice,
+          exitFillConfirmedAt:Date.now(),
+        }:null);
+        setUserPosition(null);setPositionEntry(null);
+        return;
+      }
+      // Real: poll Kalshi for exit order status
+      try{
+        const r=await kalshiGetOrder({
+          apiKeyId:kalshiCreds.apiKeyId,
+          privateKeyPem:kalshiCreds.privateKeyPem,
+          orderId:_aos.exitOrderId,
+          dryRun:false,
+        });
+        if(!r.ok){
+          _consecutiveErrors++;
+          if(_consecutiveErrors>=3){
+            try{console.warn('[V10.7.21] exit-poll failed 3x',r.reason);}catch(_){}
+          }
+          return;
+        }
+        _consecutiveErrors=0;
+        const _ord=r.order||{};
+        const _norm=kalshiNormalizeOrder(_ord);
+        const _exitFill=_norm.fillPriceCents;
+        const _filled=(_norm.status==='filled'||_norm.status==='executed')&&_exitFill!=null;
+        if(_filled){
+          try{console.info('[V10.7.21] exit FILLED (poll)',{exitFillCents:_exitFill,orderId:_aos.exitOrderId});}catch(_){}
+          setAutoOrderState(prev=>prev?{
+            ...prev,
+            status:'exited',
+            exitFillPrice:_exitFill,
+            exitFillConfirmedAt:Date.now(),
+          }:null);
+          setUserPosition(null);setPositionEntry(null);
+          _stopped=true;
+          return;
+        }
+        // Not filled yet — check time elapsed since exit was placed
+        const _placedAt=_aos.exitPlacedAt||Date.now();
+        const _elapsedSec=(Date.now()-_placedAt)/1000;
+        if(_elapsedSec>=15&&!_marketFallbackFired){
+          _marketFallbackFired=true;
+          try{console.warn('[V10.7.21] exit limit not filled in 15s — canceling and placing MARKET',{exitOrderId:_aos.exitOrderId,elapsedSec:_elapsedSec});}catch(_){}
+          // Cancel resting limit
+          try{
+            await kalshiCancelOrder({
+              apiKeyId:kalshiCreds.apiKeyId,
+              privateKeyPem:kalshiCreds.privateKeyPem,
+              orderId:_aos.exitOrderId,
+              dryRun:false,
+            });
+          }catch(_){}
+          // Place market sell (limit at far-aggressive price = effectively market)
+          //   For exit: we sell our YES/NO contracts. Use limitCents at 1 (or 99 depending on side)
+          //   to ensure marketability.
+          try{
+            const _marketLimit=_aos.dir==='UP'?1:99; // sell UP at any price ≥1, sell DOWN at any price ≤99
+            const _marketRes=await kalshiExitPosition({
+              apiKeyId:kalshiCreds.apiKeyId,
+              privateKeyPem:kalshiCreds.privateKeyPem,
+              ticker:_aos.ticker,
+              side:_aos.side,
+              count:_aos.count,
+              limitCents:_marketLimit,
+              dryRun:false,
+            });
+            if(_marketRes.ok){
+              const _mOrd=_marketRes.order||{};
+              const _mNorm=kalshiNormalizeOrder(_mOrd);
+              const _mFill=_mNorm.fillPriceCents;
+              const _mFilled=(_mNorm.status==='filled'||_mNorm.status==='executed')&&_mFill!=null;
+              if(_mFilled){
+                try{console.info('[V10.7.21] market fallback FILLED',{exitFillCents:_mFill});}catch(_){}
+                setAutoOrderState(prev=>prev?{
+                  ...prev,
+                  status:'exited',
+                  exitOrderId:_mOrd.order_id||_mOrd.id||prev.exitOrderId,
+                  exitFillPrice:_mFill,
+                  exitFillConfirmedAt:Date.now(),
+                  exitMarketFallback:true,
+                }:null);
+                setUserPosition(null);setPositionEntry(null);
+                _stopped=true;
+              }else{
+                // Even market didn't fill instantly — update exitOrderId so poll continues on it
+                setAutoOrderState(prev=>prev?{
+                  ...prev,
+                  exitOrderId:_mOrd.order_id||_mOrd.id||prev.exitOrderId,
+                  exitMarketFallback:true,
+                  exitPlacedAt:Date.now(), // reset clock so 15s rule applies to market order too
+                }:null);
+              }
+            }
+          }catch(e){
+            try{console.error('[V10.7.21] market fallback error',e?.message);}catch(_){}
+          }
+        }
+      }catch(_){}
+    };
+    _tick();
+    const iv=setInterval(_tick,2000);
+    return()=>{_stopped=true;clearInterval(iv);};
+  },[autoOrderState?.status,autoOrderState?.exitOrderId,autoOrderState?.dryRun,kalshiCreds,killSwitchEngaged]);
+
   // V9.7.4: 1Hz tick used by the ladder lifecycle effect below to re-evaluate
   //   the age check every second while resting. Declared HERE (before the
   //   effect that references it in its deps) to avoid a TDZ ReferenceError.
@@ -35652,15 +35781,49 @@ function TaraApp(){
           //   real exits → realized P&L showed wrong, fills logged wrong.
           const _norm=kalshiNormalizeOrder(_ord);
           const _safeExitFill=_norm.fillPriceCents;
-          try{console.info('[V9.18.10] exit parsed',{status:_norm.status,exitFillCents:_safeExitFill,rawStatus:_ord.status});}catch(_){}
-          setAutoOrderState(prev=>prev?{
-            ...prev,
-            exitOrderId:_ord.order_id||_ord.id||`pending_${Date.now()}`,
-            status:'exited',
-            exitFillPrice:_safeExitFill!=null?_safeExitFill:(prev.exitTriggerCents!=null?prev.exitTriggerCents:null),
-          }:null);
-          // Mirror to UI: clear the position so the existing trade-log path can record it
-          setUserPosition(null);setPositionEntry(null);
+          const _exitOrderId=_ord.order_id||_ord.id||`pending_${Date.now()}`;
+          // V10.7.21 — FILL RECONCILIATION
+          //   User report (May 19, 11:50pm): Tara showed "EXITED at 48¢ +profit"
+          //   but actual Kalshi position was still OPEN with 3 No contracts at
+          //   51¢ avg. Tara's UI was lying about the exit completing.
+          //
+          //   Root cause: when exit limit order placed but not immediately
+          //   filled (which is normal for non-marketable limits), _safeExitFill
+          //   came back null. The old code fell back to exitTriggerCents as
+          //   the "fill price" and set status:'exited' — claiming exit done.
+          //   But the Kalshi position was still open with the limit resting.
+          //
+          //   Fix: only set status:'exited' if Kalshi confirms fill. Otherwise
+          //   set status:'exit-pending' so the exit-poll loop (added below)
+          //   can track the order and update on actual fill. Don't clear
+          //   userPosition until status truly becomes 'exited'.
+          const _kalshiConfirmedFill=(_norm.status==='filled'||_norm.status==='executed')&&_safeExitFill!=null;
+          const _isDryRun=!!_aos.dryRun;
+          if(_kalshiConfirmedFill||_isDryRun){
+            // Real fill confirmed (or dry-run): set exited with actual fill price
+            try{console.info('[V10.7.21] exit confirmed fill',{status:_norm.status,exitFillCents:_safeExitFill,orderId:_exitOrderId});}catch(_){}
+            setAutoOrderState(prev=>prev?{
+              ...prev,
+              exitOrderId:_exitOrderId,
+              status:'exited',
+              exitFillPrice:_safeExitFill!=null?_safeExitFill:(prev.exitTriggerCents!=null?prev.exitTriggerCents:null),
+              exitFillConfirmedAt:Date.now(),
+            }:null);
+            // Mirror to UI: clear the position so the existing trade-log path can record it
+            setUserPosition(null);setPositionEntry(null);
+          }else{
+            // Order placed but NOT yet filled — exit-pending. Don't clear
+            //   position, don't claim fill. Exit-poll effect will handle it.
+            try{console.info('[V10.7.21] exit pending — limit resting, exitOrderId='+_exitOrderId,{rawStatus:_ord.status});}catch(_){}
+            setAutoOrderState(prev=>prev?{
+              ...prev,
+              exitOrderId:_exitOrderId,
+              status:'exit-pending',
+              exitPlacedAt:Date.now(),
+              // exitFillPrice stays null until real fill arrives
+            }:null);
+            // DO NOT clear userPosition — exit hasn't actually happened
+          }
         }catch(e){
           setAutoOrderState(prev=>prev?{...prev,status:'error',error:e?.message||String(e)}:null);
         }
