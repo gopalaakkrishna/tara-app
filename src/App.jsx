@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.20-brti-amplifier-and-ladder';
+const BASELINE_VERSION='2026.05.19-v10.7.21-balance-floor-bugfix';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.20';
+const TARA_VERSION_DISPLAY='Tara 10.7.21';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -33176,12 +33176,17 @@ function TaraApp(){
     if(!call||(call.call!=='UP'&&call.call!=='DOWN'))return call;
     // Only in RANGE-CHOP (where bias was diagnosed)
     if(analysis?.regime!=='RANGE-CHOP')return call;
-    // Don't touch strong-conviction calls — engine has real signal
+    // V10.7.21 BUGFIX: `confidence` is conviction in CALL's direction (50-100),
+    //   NOT raw posterior. Original V10.7.19 check `_conf<40||_conf>55` was wrong
+    //   because confidence is always ≥50. Correct check: only act on borderline
+    //   conviction (51-62, weak calls). Strong calls (≥63) have real signal.
     const _conf=Number(call.confidence)||50;
-    if(_conf<40||_conf>55)return call;
+    if(_conf<51||_conf>62)return call; // weak calls only (was: _conf<40||_conf>55)
     // Don't touch structural/confluence/super tiers — these are quality setups
     const _tier=String(call.tier||'').toLowerCase();
     if(_tier.includes('super')||_tier.includes('confluence')||_tier.includes('structural'))return call;
+    // Only flip DOWN calls — that's the biased direction per audit
+    if(call.call!=='DOWN')return call;
     // Read recent call direction history from taraCallLog
     const _log=Array.isArray(taraCallLog)?taraCallLog:[];
     const _recent20=_log
@@ -33193,23 +33198,20 @@ function TaraApp(){
     const _downPct=_downCount/_recent20.length;
     // Only boost when DOWN bias is meaningfully strong
     if(_downPct<0.65)return call;
-    // Apply +8pt boost; flip to UP if it crosses 50
-    const _newPost=Math.min(62,_conf+8);
-    if(_newPost>50&&call.call==='DOWN'){
-      return{
-        ...call,
-        call:'UP',
-        direction:'UP',
-        confidence:_newPost,
-        conviction:_newPost-50,
-        reason:`Balance lock · UP · ${(_downPct*100).toFixed(0)}% DOWN over last ${_recent20.length} — counter-bias on borderline`,
-        _v10_7_19_balanced:true,
-        _v10_7_19_downPct:_downPct,
-        _v10_7_19_originalDir:'DOWN',
-        _v10_7_19_originalConf:_conf,
-      };
-    }
-    return call;
+    // Flip DOWN → UP with modest confidence
+    const _newConfUp=Math.min(60,55+(_conf-51)); // 55-60 based on how borderline
+    return{
+      ...call,
+      call:'UP',
+      direction:'UP',
+      confidence:_newConfUp,
+      conviction:_newConfUp-50,
+      reason:`Balance lock · UP · ${(_downPct*100).toFixed(0)}% DOWN over last ${_recent20.length} — counter-bias flipped borderline DOWN(${_conf.toFixed(0)})`,
+      _v10_7_19_balanced:true,
+      _v10_7_19_downPct:_downPct,
+      _v10_7_19_originalDir:'DOWN',
+      _v10_7_19_originalConf:_conf,
+    };
   };
   const _v10_7_19_result=_v10_7_19_balanceFloor(taraCall);
   if(_v10_7_19_result&&_v10_7_19_result!==taraCall){
