@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.38-anchored-vwap-auto-hi-lo';
-const TARA_VERSION_DISPLAY='Tara 10.7.38';
+const BASELINE_VERSION='2026.05.20-v10.7.38a-audit-fixes-whipsaw-vwap-macd';
+const TARA_VERSION_DISPLAY='Tara 10.7.38a';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6606,28 +6606,25 @@ const computeEMA=(arr,period)=>{
 const computeWhipsawCount=(bars,emaPeriod=20,lookback=10)=>{
   if(!bars||bars.length<emaPeriod+lookback)return 0;
   const closes=bars.map(b=>b.c);
-  // Compute EMA series for last (lookback+emaPeriod) bars
   const needed=Math.min(bars.length,emaPeriod+lookback+5);
   const recentCloses=closes.slice(-needed);
-  const emaArr=[];
+  const n=recentCloses.length;
+  // Build EMA series
   let ema=recentCloses.slice(0,emaPeriod).reduce((a,b)=>a+b,0)/emaPeriod;
   const k=2/(emaPeriod+1);
-  emaArr.push(ema);
-  for(let i=emaPeriod;i<recentCloses.length;i++){
+  // emaArr[i] = EMA at recentCloses[emaPeriod + i] (i=0 is first full EMA bar)
+  const emaArr=[];
+  for(let i=emaPeriod;i<n;i++){
     ema=recentCloses[i]*k+ema*(1-k);
-    emaArr.push(ema);
+    emaArr.push({ema,price:recentCloses[i]});
   }
-  // Count crossovers/crossunders in last `lookback` of the ema series
+  // Count crossovers/crossunders in last `lookback` bars of emaArr
   let crosses=0;
   const len=emaArr.length;
   const startIdx=Math.max(1,len-lookback);
   for(let i=startIdx;i<len;i++){
-    const prevAbove=recentCloses[i-1+emaPeriod-emaPeriod]>emaArr[i-1]; // price vs ema prev
-    // Reindex: emaArr[j] corresponds to recentCloses[emaPeriod+j-1]
-    const pIdx=emaPeriod+i-len; // index into recentCloses
-    if(pIdx<1)continue;
-    const cNow=recentCloses[pIdx],cPrev=recentCloses[pIdx-1];
-    const eNow=emaArr[i],ePrev=emaArr[i-1];
+    const cNow=emaArr[i].price,cPrev=emaArr[i-1].price;
+    const eNow=emaArr[i].ema,ePrev=emaArr[i-1].ema;
     const crossOver=cPrev<=ePrev&&cNow>eNow;
     const crossUnder=cPrev>=ePrev&&cNow<eNow;
     if(crossOver||crossUnder)crosses++;
@@ -6688,7 +6685,11 @@ const computeSessionVWAP=(history,currentTime)=>{
   const now=currentTime||Date.now();
   const sessionStart=now-((now%(86400000)));
   // Filter to current session only (bars within today UTC)
-  const sessionBars=history.filter(b=>b.t&&b.t>=sessionStart);
+  // Bars use `time` field (Unix seconds from Coinbase) OR `t` field (ms) depending on source
+  const sessionBars=history.filter(b=>{
+    const barMs=b.t?b.t:(b.time?b.time*1000:0);
+    return barMs>=sessionStart;
+  });
   const bars=sessionBars.length>=5?sessionBars:history.slice(0,Math.min(60,history.length));
   if(bars.length<3)return{vwap:0,dev:0,valid:false};
   let vwapSum=0,volSum=0,v2Sum=0;
@@ -9094,8 +9095,16 @@ const computeV99Posterior=(params)=>{
     let stochScore=0;
     if(_stochRSI.overbought&&realGapBps>0){stochScore-=10;reasoning.push(`[StochRSI] K=${_stochRSI.k.toFixed(0)} overbought — fade UP`);}
     else if(_stochRSI.oversold&&realGapBps<0){stochScore+=10;reasoning.push(`[StochRSI] K=${_stochRSI.k.toFixed(0)} oversold — fade DOWN`);}
-    else if(_stochRSI.k>65&&realGapBps>0&&drift1m>0){stochScore-=5;reasoning.push(`[StochRSI] K=${_stochRSI.k.toFixed(0)} high — moderate fade UP`);}
-    else if(_stochRSI.k<35&&realGapBps<0&&drift1m<0){stochScore+=5;reasoning.push(`[StochRSI] K=${_stochRSI.k.toFixed(0)} low — moderate fade DOWN`);}
+    // Moderate zone: scale with K value (K=79 fires harder than K=66)
+    else if(_stochRSI.k>65&&realGapBps>0&&drift1m>0){
+      const _stochMod=Math.round((_stochRSI.k-65)/14*5); // 0-5 scale
+      stochScore-=_stochMod;
+      if(_stochMod>0)reasoning.push(`[StochRSI] K=${_stochRSI.k.toFixed(0)} elevated — moderate fade UP (-${_stochMod})`);
+    }else if(_stochRSI.k<35&&realGapBps<0&&drift1m<0){
+      const _stochMod=Math.round((35-_stochRSI.k)/35*5);
+      stochScore+=_stochMod;
+      if(_stochMod>0)reasoning.push(`[StochRSI] K=${_stochRSI.k.toFixed(0)} depressed — moderate fade DOWN (+${_stochMod})`);
+    }
     const stochClamped=Math.max(-12,Math.min(12,stochScore));
     rawSignalScores.stochRSI=stochClamped;
     totalScore+=stochClamped;
@@ -9130,9 +9139,13 @@ const computeV99Posterior=(params)=>{
     // Strong: histogram zero-cross
     if(_macdOBV.crossUp){macdScore+=10;reasoning.push(`[MACD] Histogram crossed UP (${_macdOBV.histPrev.toFixed(2)}→${_macdOBV.hist.toFixed(2)}) — bullish momentum flip`);}
     else if(_macdOBV.crossDown){macdScore-=10;reasoning.push(`[MACD] Histogram crossed DOWN (${_macdOBV.histPrev.toFixed(2)}→${_macdOBV.hist.toFixed(2)}) — bearish momentum flip`);}
-    // Moderate: histogram direction
-    else if(_macdOBV.bullish){macdScore+=5;reasoning.push(`[MACD] Histogram +${_macdOBV.hist.toFixed(2)} — bullish`);}
-    else{macdScore-=5;reasoning.push(`[MACD] Histogram ${_macdOBV.hist.toFixed(2)} — bearish`);}
+    // Moderate: histogram direction — only fire if meaningfully non-zero
+    // V10.7.38 calibration fix: in chop, histogram oscillates near 0
+    // Threshold: |hist| > 0.5 prevents firing on noise (was firing on +0.01)
+    else if(Math.abs(_macdOBV.hist)>0.5){
+      if(_macdOBV.bullish){macdScore+=5;reasoning.push(`[MACD] Histogram +${_macdOBV.hist.toFixed(2)} — bullish`);}
+      else{macdScore-=5;reasoning.push(`[MACD] Histogram ${_macdOBV.hist.toFixed(2)} — bearish`);}
+    }
     // OBV confirmation/contradiction
     if(_macdOBV.obvBullish&&macdScore>0){macdScore+=4;reasoning.push(`[OBV] Accumulation (OBV>${_macdOBV.obvSMA.toFixed(0)}) confirms UP`);}
     else if(!_macdOBV.obvBullish&&macdScore<0){macdScore-=4;reasoning.push(`[OBV] Distribution (OBV<${_macdOBV.obvSMA.toFixed(0)}) confirms DOWN`);}
