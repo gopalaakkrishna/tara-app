@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.19-v10.7.18-bargain-hunter-preset';
+const BASELINE_VERSION='2026.05.19-v10.7.19-direction-balance-floor';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.18';
+const TARA_VERSION_DISPLAY='Tara 10.7.19';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -33137,6 +33137,76 @@ function TaraApp(){
   if(_v10_7_4_result&&_v10_7_4_result!==taraCall){
     Object.keys(_v10_7_4_result).forEach(k=>{taraCall[k]=_v10_7_4_result[k];});
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // V10.7.19 — DIRECTION BALANCE FLOOR
+  // ═══════════════════════════════════════════════════════════════════════════
+  // User audit (May 20): V10.7.14 RANGE-CHOP calibration neutralizer ISN'T
+  //   enough. Looking at last 30 trades: 21 DOWN calls (70%) vs 9 UP (30%),
+  //   posteriors landing 29-48 range (mostly DOWN territory). V10.7.14 dampens
+  //   the LAST calibration step but the bias is upstream — base posterior is
+  //   already DOWN before calibration runs.
+  //
+  // V10.7.19 = final post-processor that operates on the AFTER-everything
+  //   call. Reads rolling 20-call direction history from taraCallLog. If
+  //   we've been calling DOWN ≥65% AND current call is borderline (40-55%
+  //   posterior) AND in RANGE-CHOP regime, apply +8pt UP boost to flip the
+  //   borderline.
+  //
+  // Why this works where V10.7.14 didn't:
+  //   - Operates on FINAL posterior, not intermediate calibration step
+  //   - Doesn't need to fix self-learned weights (which would require retrain)
+  //   - Only fires on borderline cases (not strong-conviction calls)
+  //   - Self-correcting: as more UP calls fire, downPct drops below 65%, stops firing
+  //
+  // Preserves:
+  //   - Strong-conviction calls (post < 40 or > 55) — engine has real signal
+  //   - Structural/confluence/super tiers — high-quality setups
+  //   - Non-RANGE-CHOP regimes — bias doesn't apply there
+  //   - V10.7.11 still runs AFTER — can re-flip if reversal evidence is strong
+  const _v10_7_19_balanceFloor=(call)=>{
+    if(!call||(call.call!=='UP'&&call.call!=='DOWN'))return call;
+    // Only in RANGE-CHOP (where bias was diagnosed)
+    if(analysis?.regime!=='RANGE-CHOP')return call;
+    // Don't touch strong-conviction calls — engine has real signal
+    const _conf=Number(call.confidence)||50;
+    if(_conf<40||_conf>55)return call;
+    // Don't touch structural/confluence/super tiers — these are quality setups
+    const _tier=String(call.tier||'').toLowerCase();
+    if(_tier.includes('super')||_tier.includes('confluence')||_tier.includes('structural'))return call;
+    // Read recent call direction history from taraCallLog
+    const _log=Array.isArray(taraCallLog)?taraCallLog:[];
+    const _recent20=_log
+      .filter(e=>e&&(e.dir==='UP'||e.dir==='DOWN'))
+      .sort((a,b)=>(b.time||0)-(a.time||0))
+      .slice(0,20);
+    if(_recent20.length<10)return call; // need enough history
+    const _downCount=_recent20.filter(e=>e.dir==='DOWN').length;
+    const _downPct=_downCount/_recent20.length;
+    // Only boost when DOWN bias is meaningfully strong
+    if(_downPct<0.65)return call;
+    // Apply +8pt boost; flip to UP if it crosses 50
+    const _newPost=Math.min(62,_conf+8);
+    if(_newPost>50&&call.call==='DOWN'){
+      return{
+        ...call,
+        call:'UP',
+        direction:'UP',
+        confidence:_newPost,
+        conviction:_newPost-50,
+        reason:`Balance lock · UP · ${(_downPct*100).toFixed(0)}% DOWN over last ${_recent20.length} — counter-bias on borderline`,
+        _v10_7_19_balanced:true,
+        _v10_7_19_downPct:_downPct,
+        _v10_7_19_originalDir:'DOWN',
+        _v10_7_19_originalConf:_conf,
+      };
+    }
+    return call;
+  };
+  const _v10_7_19_result=_v10_7_19_balanceFloor(taraCall);
+  if(_v10_7_19_result&&_v10_7_19_result!==taraCall){
+    Object.keys(_v10_7_19_result).forEach(k=>{taraCall[k]=_v10_7_19_result[k];});
+  }
   // ═══════════════════════════════════════════════════════════════════════════
   // V10.7.6 — REVERSAL-AWARE OVERRIDE HELPER
   // ═══════════════════════════════════════════════════════════════════════════
@@ -35903,6 +35973,7 @@ function TaraApp(){
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
+          _v10_7_19_balanced:taraCall?._v10_7_19_balanced?{downPct:taraCall._v10_7_19_downPct,originalDir:taraCall._v10_7_19_originalDir,originalConf:taraCall._v10_7_19_originalConf}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null,
       };
@@ -36097,6 +36168,7 @@ function TaraApp(){
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
+          _v10_7_19_balanced:taraCall?._v10_7_19_balanced?{downPct:taraCall._v10_7_19_downPct,originalDir:taraCall._v10_7_19_originalDir,originalConf:taraCall._v10_7_19_originalConf}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           result:null, // populated at rollover
         };
@@ -36363,6 +36435,7 @@ function TaraApp(){
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
+          _v10_7_19_balanced:taraCall?._v10_7_19_balanced?{downPct:taraCall._v10_7_19_downPct,originalDir:taraCall._v10_7_19_originalDir,originalConf:taraCall._v10_7_19_originalConf}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
           samples:snapshot.samples||0,
           needSamples:snapshot.needSamples||0,
@@ -37493,6 +37566,7 @@ function TaraApp(){
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
+          _v10_7_19_balanced:taraCall?._v10_7_19_balanced?{downPct:taraCall._v10_7_19_downPct,originalDir:taraCall._v10_7_19_originalDir,originalConf:taraCall._v10_7_19_originalConf}:null,
           _v10_4_1_delayed:_v104_1_pendingDelayStampRef.current||null,
         result:null, // populated at rollover scoring
       };
