@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.24-volume-aware-traj-and-pump-dump';
+const BASELINE_VERSION='2026.05.20-v10.7.25-remove-fgt-from-synthesis';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.24';
+const TARA_VERSION_DISPLAY='Tara 10.7.25';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -7961,9 +7961,21 @@ const computeV99Posterior=(params)=>{
     else if(absAlign>=1.5)mtfBonus=Math.sign(mtfAlignment)*14;
     else if(absAlign>=0.7)mtfBonus=Math.sign(mtfAlignment)*6;
     if(mtfBonus!==0){
-      totalScore+=mtfBonus;
+      // V10.7.25 — FGT REMOVED FROM DIRECTIONAL SYNTHESIS
+      //   Audit (May 20): FGT standalone direction accuracy = 51% (coin flip).
+      //   When FGT agreed with Tara → 72.7% WR. When FGT DISAGREED → 70.2% WR
+      //   (also high, meaning Tara was right to overrule it). When FGT neutral
+      //   → 61.7%. Net: FGT firing correlates with market clarity (good signal
+      //   environment) but FGT direction itself is noise.
+      //
+      //   Decision: stop adding FGT bonus to totalScore. Keep mtfBonus as
+      //   metadata for telemetry/UI display but it no longer pulls posterior.
+      //   The 51% standalone accuracy means including it adds randomness.
+      //
+      // OLD: totalScore += mtfBonus
+      // NEW: do not add. mtfBonus stays in return object for UI/audit only.
       const dirLabel=mtfBonus>0?'UP':'DOWN';
-      reasoning.push(`[FGT] alignment ${mtfAlignment>=0?'+':''}${mtfAlignment.toFixed(1)}/4.0 ${dirLabel} (1m${tfArrows[0]} 5m${tfArrows[1]} 15m${tfArrows[2]}) → ${mtfBonus>0?'+':''}${mtfBonus}`);
+      reasoning.push(`[FGT] alignment ${mtfAlignment>=0?'+':''}${mtfAlignment.toFixed(1)}/4.0 ${dirLabel} (1m${tfArrows[0]} 5m${tfArrows[1]} 15m${tfArrows[2]}) → display-only (V10.7.25 removed from synthesis)`);
       // Detailed forecast values
       const detail=tfList.map((tf,i)=>{
         const f=fgtResults[tf.label];
@@ -9766,7 +9778,7 @@ const computeV99Posterior=(params)=>{
   //   - Gap: current price vs strike (most direct evidence of where we are)
   //   - Flow: order book imbalance (where buyers/sellers are positioned)
   //   - Momentum: recent price velocity
-  //   - FGT alignment: multi-TF momentum coherence
+  //   - Channel: trend channel direction (V10.7.25: replaced FGT which was noise)
   //   - Tape: real-time buyer/seller pressure
   //
   // Structural signals (what we OVERRIDE):
@@ -9777,14 +9789,16 @@ const computeV99Posterior=(params)=>{
   //
   // The market spending real money RIGHT NOW (concrete) is stronger evidence
   //   than historical patterns (structural). When they disagree, follow live.
+  // V10.7.25: FGT removed from concrete signals (51% standalone accuracy = noise).
+  //   Replaced with Channel score which has real directional value.
   const _v10_7_12_concrete={
     gap:Number(rawSignalScores.gap)||0,
     flow:Number(rawSignalScores.flow)||0,
     momentum:Number(rawSignalScores.momentum)||0,
-    fgt:Number(rawSignalScores.fgtAlignment)||0,
+    channel:Number(rawSignalScores.channel)||Number(rawSignalScores.structure)||0,
     tape:Number(rawSignalScores.tape)||0,
   };
-  const _v10_7_12_concreteSum=_v10_7_12_concrete.gap+_v10_7_12_concrete.flow+_v10_7_12_concrete.momentum+_v10_7_12_concrete.fgt+_v10_7_12_concrete.tape;
+  const _v10_7_12_concreteSum=_v10_7_12_concrete.gap+_v10_7_12_concrete.flow+_v10_7_12_concrete.momentum+_v10_7_12_concrete.channel+_v10_7_12_concrete.tape;
   const _v10_7_12_concreteDir=_v10_7_12_concreteSum>0?'UP':'DOWN';
   const _v10_7_12_currentDir=posterior>=50?'UP':'DOWN';
   // Trigger: concrete sum ≥25 in one direction, posterior opposite
