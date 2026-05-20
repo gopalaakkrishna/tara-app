@@ -3880,10 +3880,10 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.23-traj-priority-revert-kalshi-extreme';
+const BASELINE_VERSION='2026.05.20-v10.7.24-volume-aware-traj-and-pump-dump';
 // V9.8.16: short-form display version used in Discord footers (was hardcoded
 //   "Tara 7.10.6" in 13 places). Update at every version bump alongside BASELINE_VERSION.
-const TARA_VERSION_DISPLAY='Tara 10.7.23';
+const TARA_VERSION_DISPLAY='Tara 10.7.24';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -7793,7 +7793,43 @@ const computeV99Posterior=(params)=>{
   const _vBlended=(_v5sNum*0.55)+(_v15sNum*0.35)+(_v30sNum*0.10);
   // Dampen far-out projections (uncertainty grows with time)
   const _decayedTime=Math.sqrt(_secsLeft); // effective projection time
-  const _projectedDrift=(_vBlended*_decayedTime)+(_accelNum*_decayedTime*_decayedTime*0.3);
+  let _projectedDrift=(_vBlended*_decayedTime)+(_accelNum*_decayedTime*_decayedTime*0.3);
+  // V10.7.24A — VOLUME-VALIDATED TRAJ
+  //   User report (May 20): TRAJ was projecting UP but other signals overrode it.
+  //   Sometimes TRAJ is genuinely wrong because velocity comes from price spikes
+  //   that aren't tape-supported (whale ticks, low-volume fake moves). Solution:
+  //   cross-check projection direction against tape buy% on 30s window.
+  //
+  //   Logic:
+  //   - Projection UP but tape says SELL (buyPct < 40%): dampen drift by 50% (likely fake)
+  //   - Projection DOWN but tape says BUY (buyPct > 60%): dampen drift by 50% (likely fake)
+  //   - Projection UP and tape says BUY (buyPct > 65%): boost drift by 20% (volume confirms)
+  //   - Projection DOWN and tape says SELL (buyPct < 35%): boost drift by 20% (volume confirms)
+  //   Result: TRAJ now uses BOTH price velocity AND volume direction.
+  let _volSupportMult=1.0;
+  let _volSupportReason='';
+  try{
+    const _tape30BuyPct=tapeWindows?.w30?.buyPct;
+    if(Number.isFinite(_tape30BuyPct)&&Math.abs(_projectedDrift)>0.5){
+      const _projectedUp=_projectedDrift>0;
+      if(_projectedUp&&_tape30BuyPct<40){
+        _volSupportMult=0.5;
+        _volSupportReason='tape-SELL contradicts UP projection';
+      }else if(!_projectedUp&&_tape30BuyPct>60){
+        _volSupportMult=0.5;
+        _volSupportReason='tape-BUY contradicts DOWN projection';
+      }else if(_projectedUp&&_tape30BuyPct>65){
+        _volSupportMult=1.2;
+        _volSupportReason=`tape-BUY ${_tape30BuyPct.toFixed(0)}% confirms UP`;
+      }else if(!_projectedUp&&_tape30BuyPct<35){
+        _volSupportMult=1.2;
+        _volSupportReason=`tape-SELL ${(100-_tape30BuyPct).toFixed(0)}% confirms DOWN`;
+      }
+      if(_volSupportMult!==1.0){
+        _projectedDrift=_projectedDrift*_volSupportMult;
+      }
+    }
+  }catch(_){}
   const _projectedPrice=currentPrice+_projectedDrift;
   const _projectedGapBps=targetMargin>0?((_projectedPrice-targetMargin)/targetMargin)*10000:0;
   // If projection points strongly toward a direction relative to strike, boost confidence early
@@ -7812,7 +7848,7 @@ const computeV99Posterior=(params)=>{
       trajectoryAdj=Math.max(-12,_projectedGapBps*0.35);
       trajectoryDirHint='DOWN';
     }
-    reasoning.push(`[TRAJ] Projected end @ $${_projectedPrice.toFixed(0)} (${_projectedGapBps>0?'+':''}${_projectedGapBps.toFixed(0)}bps to strike) → favors ${trajectoryDirHint}`);
+    reasoning.push(`[TRAJ] Projected end @ $${_projectedPrice.toFixed(0)} (${_projectedGapBps>0?'+':''}${_projectedGapBps.toFixed(0)}bps to strike) → favors ${trajectoryDirHint}${_volSupportReason?' · '+_volSupportReason:''}`);
   }
   // V134: HPotter Future Grand Trend on 1m/3m/5m/15m
   // V2.9: Weighted timeframe voting + increased FGT contribution to posterior.
@@ -33374,6 +33410,65 @@ function TaraApp(){
     //   85¢+ with 15¢ payout — need 85%+ WR to break even. Even amplified by
     //   strong consensus, Tara's 64% lifetime WR doesn't clear that hurdle.
     //   Negative EV patch. Removed entirely.
+    //
+    // V10.7.24B — PUMP/DUMP DETECTOR
+    //   When tape goes EXTREME (>85% one side) AND price spiked in same direction,
+    //   that's a textbook pump (or dump). Mean reversion typically occurs within
+    //   60-90s. If we're locked AGAINST the mean reversion (riding the pump),
+    //   flip to the reversion direction.
+    //
+    //   Pump pattern (DUMP-DOWN expected after):
+    //   - Tape 15s: buyPct ≥ 85 (extreme buying)
+    //   - AND price moved UP ≥ 8bps in last 60s
+    //   - → reversal DOWN expected
+    //
+    //   Dump pattern (PUMP-UP expected after):
+    //   - Tape 15s: buyPct ≤ 15 (extreme selling)
+    //   - AND price moved DOWN ≥ 8bps in last 60s
+    //   - → reversal UP expected
+    //
+    //   This is similar to BRTI (cross-exchange mean reversion) but uses
+    //   single-exchange tape data. Catches local pumps/dumps even when BRTI
+    //   doesn't show divergence yet.
+    try{
+      const _tape15=_ana?.tapeWindows?.w15;
+      const _drift60=Number(_ana?.last60sDriftBps)||0;
+      if(_tape15&&Number.isFinite(_tape15.buyPct)){
+        const _tapeBuyPct=_tape15.buyPct;
+        const _isPump=_tapeBuyPct>=85&&_drift60>=8;
+        const _isDump=_tapeBuyPct<=15&&_drift60<=-8;
+        if(_isPump&&_currentDir==='UP'){
+          return{
+            ...call,
+            call:'DOWN',
+            direction:'DOWN',
+            confidence:62, // moderate conviction for pump-reversion
+            conviction:12,
+            reason:`Pump-reversion lock · DOWN · tape ${_tapeBuyPct.toFixed(0)}% BUY + ${_drift60.toFixed(0)}bps UP move → mean reversion expected`,
+            _v10_7_11_universalFlipped:true,
+            _v10_7_11_flipType:'pump-reversion',
+            _v10_7_11_originalDir:'UP',
+            _v10_7_24_tapeBuyPct:_tapeBuyPct,
+            _v10_7_24_drift60Bps:_drift60,
+          };
+        }
+        if(_isDump&&_currentDir==='DOWN'){
+          return{
+            ...call,
+            call:'UP',
+            direction:'UP',
+            confidence:62,
+            conviction:12,
+            reason:`Dump-reversion lock · UP · tape ${(100-_tapeBuyPct).toFixed(0)}% SELL + ${_drift60.toFixed(0)}bps DOWN move → mean reversion expected`,
+            _v10_7_11_universalFlipped:true,
+            _v10_7_11_flipType:'dump-reversion',
+            _v10_7_11_originalDir:'DOWN',
+            _v10_7_24_tapeBuyPct:_tapeBuyPct,
+            _v10_7_24_drift60Bps:_drift60,
+          };
+        }
+      }
+    }catch(_){}
     //
     // V10.7.23 — TRAJ-PRIORITY OVERRIDE (positive EV at cheap entries)
     //   User audit (May 20, 2:55am): Tara locked DOWN at 2:45 window when her
