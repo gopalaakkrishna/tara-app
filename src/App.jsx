@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.36a-mtfAligned-crash-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.36a';
+const BASELINE_VERSION='2026.05.20-v10.7.38-anchored-vwap-auto-hi-lo';
+const TARA_VERSION_DISPLAY='Tara 10.7.38';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6761,6 +6761,280 @@ const computeRegimeV10736=(bars,drift1m,drift5m,drift15m,atrBps)=>{
 // END V10.7.36 REGIME FUNCTIONS
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.7.37 — STOCHASTIC RSI + MARKET STRUCTURE BOS + MACD + OBV
+// ═══════════════════════════════════════════════════════════════════════════
+// Sources:
+//   StochRSI: TradingView built-in defaults (period 14, K smooth 3, D smooth 3)
+//   Market Structure: "Advanced Crypto Market Structure PRO 15M" (adapted for 1M)
+//   MACD + OBV: "Full strategy" by SoftKill21 (fast 12, slow 26, signal 9, hl2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Stochastic RSI ─────────────────────────────────────────────────────────
+// StochRSI = (RSI - lowest(RSI,stochPeriod)) / (highest(RSI,stochPeriod) - lowest(RSI,stochPeriod))
+// K = SMA(StochRSI * 100, smoothK). D = SMA(K, smoothD).
+// K > 80 = overbought. K < 20 = oversold. 4× more sensitive than RSI>70.
+const computeStochRSI=(closes,rsiPeriod=14,stochPeriod=14,smoothK=3,smoothD=3)=>{
+  if(!closes||closes.length<rsiPeriod+stochPeriod+smoothK+smoothD+5){
+    return{k:50,d:50,overbought:false,oversold:false,valid:false};
+  }
+  // Build RSI series for enough bars
+  const needed=rsiPeriod+stochPeriod+smoothK+smoothD+10;
+  const slice=closes.slice(-needed);
+  const n=slice.length;
+  // RSI series
+  const rsiSeries=[];
+  let ag=0,al=0;
+  for(let i=1;i<=rsiPeriod;i++){
+    const chg=slice[i]-slice[i-1];
+    if(chg>0)ag+=chg; else al-=chg;
+  }
+  ag/=rsiPeriod; al/=rsiPeriod;
+  for(let i=rsiPeriod+1;i<n;i++){
+    const chg=slice[i]-slice[i-1];
+    ag=(ag*(rsiPeriod-1)+Math.max(chg,0))/rsiPeriod;
+    al=(al*(rsiPeriod-1)+Math.max(-chg,0))/rsiPeriod;
+    const rsiVal=al===0?100:100-(100/(1+(ag/al)));
+    rsiSeries.push(rsiVal);
+  }
+  // Stochastic of RSI series
+  const stochRSI=[];
+  for(let i=stochPeriod-1;i<rsiSeries.length;i++){
+    const window=rsiSeries.slice(i-stochPeriod+1,i+1);
+    const lo=Math.min(...window),hi=Math.max(...window);
+    stochRSI.push(hi===lo?50:((rsiSeries[i]-lo)/(hi-lo))*100);
+  }
+  // SMA(stochRSI, smoothK) = K line
+  const kLine=[];
+  for(let i=smoothK-1;i<stochRSI.length;i++){
+    kLine.push(stochRSI.slice(i-smoothK+1,i+1).reduce((a,b)=>a+b,0)/smoothK);
+  }
+  // SMA(K, smoothD) = D line
+  const dLine=[];
+  for(let i=smoothD-1;i<kLine.length;i++){
+    dLine.push(kLine.slice(i-smoothD+1,i+1).reduce((a,b)=>a+b,0)/smoothD);
+  }
+  if(!kLine.length||!dLine.length)return{k:50,d:50,overbought:false,oversold:false,valid:false};
+  const k=kLine[kLine.length-1];
+  const d=dLine[dLine.length-1];
+  const kPrev=kLine.length>1?kLine[kLine.length-2]:k;
+  return{
+    k:Math.round(k*10)/10,
+    d:Math.round(d*10)/10,
+    overbought:k>80,
+    oversold:k<20,
+    crossUp:kPrev<20&&k>=20, // crossed up from oversold
+    crossDown:kPrev>80&&k<=80, // crossed down from overbought
+    valid:true,
+  };
+};
+
+// ── Market Structure BOS ──────────────────────────────────────────────────
+// Pine Script: "Advanced Crypto Market Structure PRO 15M" by user
+// Adapted for 1M bars in Tara (same math, different timeframe).
+// swingHigh = highest(high, swingLen). swingLow = lowest(low, swingLen).
+// BOS Bull = close > swingHigh[1]: close breaks prev swing high.
+// BOS Bear = close < swingLow[1]: close breaks prev swing low.
+// Confirm Long: close > EMA20 AND EMA20 > EMA50 AND BOS bull.
+// Confirm Short: close < EMA20 AND EMA20 < EMA50 AND BOS bear.
+const computeMarketStructureBOS=(bars,fastLen=20,slowLen=50,swingLen=5)=>{
+  if(!bars||bars.length<slowLen+swingLen+2){
+    return{confirmLong:false,confirmShort:false,bosBull:false,bosBear:false,bullTrend:false,valid:false};
+  }
+  const closes=bars.map(b=>b.c);
+  const highs=bars.map(b=>b.h);
+  const lows=bars.map(b=>b.l);
+  const n=bars.length;
+  // Fast EMA(20) and Slow EMA(50)
+  const getEMAFull=(arr,p)=>{
+    const k=2/(p+1);
+    let ema=arr.slice(0,p).reduce((a,b)=>a+b,0)/p;
+    const series=[ema];
+    for(let i=p;i<arr.length;i++){ema=arr[i]*k+ema*(1-k);series.push(ema);}
+    return series;
+  };
+  const fastSeries=getEMAFull(closes,fastLen);
+  const slowSeries=getEMAFull(closes,slowLen);
+  const fastEMA=fastSeries[fastSeries.length-1];
+  const slowEMA=slowSeries[slowSeries.length-1];
+  const currentClose=closes[n-1];
+  // Swing high/low over last swingLen bars (EXCLUDING current bar = [1] in Pine)
+  const prevHighs=highs.slice(n-1-swingLen,n-1);
+  const prevLows=lows.slice(n-1-swingLen,n-1);
+  const swingHigh=Math.max(...prevHighs); // swingHigh[1] in Pine
+  const swingLow=Math.min(...prevLows);   // swingLow[1] in Pine
+  // Break of Structure
+  const bosBull=currentClose>swingHigh;
+  const bosBear=currentClose<swingLow;
+  // Trend filter
+  const bullTrend=fastEMA>slowEMA;
+  const bearTrend=fastEMA<slowEMA;
+  // Confirmed signals
+  const readyLong=currentClose>fastEMA&&bullTrend;
+  const readyShort=currentClose<fastEMA&&bearTrend;
+  const confirmLong=readyLong&&bosBull;
+  const confirmShort=readyShort&&bosBear;
+  return{
+    confirmLong,confirmShort,bosBull,bosBear,
+    bullTrend,bearTrend,fastEMA:Math.round(fastEMA),slowEMA:Math.round(slowEMA),
+    swingHigh:Math.round(swingHigh),swingLow:Math.round(swingLow),valid:true,
+  };
+};
+
+// ── MACD + OBV ────────────────────────────────────────────────────────────
+// Pine Script: "Full strategy" by SoftKill21. MACD on hl2, standard (12,26,9).
+// macd = EMA(hl2,12) - EMA(hl2,26). Signal = EMA(macd,9). Hist = macd - signal.
+// Key signal: hist crosses 0 = strong momentum flip.
+// OBV (On Balance Volume): cumulative volume flow.
+//   OBV > SMA(OBV,10) = accumulation (bullish). < = distribution (bearish).
+const computeMACDAndOBV=(bars,fast=12,slow=26,sig=9,obvSmooth=10)=>{
+  if(!bars||bars.length<slow+sig+obvSmooth+5){
+    return{hist:0,macd:0,signal:0,bullish:false,crossUp:false,crossDown:false,obvBullish:false,valid:false};
+  }
+  const hl2=bars.map(b=>(b.h+b.l)/2);
+  const closes=bars.map(b=>b.c);
+  const volumes=bars.map(b=>b.v||1);
+  const n=bars.length;
+  // EMA of hl2
+  const getEMA=(arr,p)=>{
+    const k=2/(p+1);
+    let ema=arr.slice(0,p).reduce((a,b)=>a+b,0)/p;
+    for(let i=p;i<arr.length;i++){ema=arr[i]*k+ema*(1-k);}
+    return ema;
+  };
+  const getEMAFull=(arr,p)=>{
+    const k=2/(p+1);
+    let ema=arr.slice(0,p).reduce((a,b)=>a+b,0)/p;
+    const series=[ema];
+    for(let i=p;i<arr.length;i++){ema=arr[i]*k+ema*(1-k);series.push(ema);}
+    return series;
+  };
+  const fastEMAFull=getEMAFull(hl2,fast);
+  const slowEMAFull=getEMAFull(hl2,slow);
+  // MACD line series (aligned at slowLen start)
+  const startIdx=slow-fast; // fastSeries starts fast bars in, slowSeries starts slow bars in
+  const macdSeries=[];
+  for(let i=0;i<slowEMAFull.length;i++){
+    const fi=i+startIdx;
+    if(fi>=0&&fi<fastEMAFull.length){
+      macdSeries.push(fastEMAFull[fi]-slowEMAFull[i]);
+    }
+  }
+  if(macdSeries.length<sig+2)return{hist:0,macd:0,signal:0,bullish:false,crossUp:false,crossDown:false,obvBullish:false,valid:false};
+  // Signal = EMA(macd, sig)
+  const signalSeries=getEMAFull(macdSeries,sig);
+  const macdNow=macdSeries[macdSeries.length-1];
+  const signalNow=signalSeries[signalSeries.length-1];
+  const histNow=macdNow-signalNow;
+  const histPrev=macdSeries.length>1&&signalSeries.length>1?
+    (macdSeries[macdSeries.length-2]-signalSeries[signalSeries.length-2]):0;
+  // OBV: cumulative sum, +volume when close rises, -volume when close falls
+  let obv=0;
+  const obvSeries=[];
+  for(let i=1;i<n;i++){
+    const chg=closes[i]-closes[i-1];
+    obv+=chg>0?volumes[i]:chg<0?-volumes[i]:0;
+    obvSeries.push(obv);
+  }
+  // OBV SMA(10)
+  const obvNow=obvSeries[obvSeries.length-1];
+  const obvSMA=obvSmooth<=obvSeries.length?
+    obvSeries.slice(-obvSmooth).reduce((a,b)=>a+b,0)/obvSmooth:obvNow;
+  return{
+    hist:Math.round(histNow*100)/100,
+    histPrev:Math.round(histPrev*100)/100,
+    macd:Math.round(macdNow*100)/100,
+    signal:Math.round(signalNow*100)/100,
+    bullish:histNow>0,
+    crossUp:histPrev<=0&&histNow>0, // histogram just crossed above 0
+    crossDown:histPrev>=0&&histNow<0, // histogram just crossed below 0
+    obvBullish:obvNow>obvSMA, // OBV above its SMA = accumulation
+    obv:Math.round(obvNow),
+    obvSMA:Math.round(obvSMA),
+    valid:true,
+  };
+};
+// ═══════════════════════════════════════════════════════════════════════════
+// END V10.7.37 INDICATOR FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.7.38 — ANCHORED VWAP (AUTO HIGH & LOW)
+// ═══════════════════════════════════════════════════════════════════════════
+// Source: "Anchored VWAP (Auto High & Low)" by liquid-trader on TradingView.
+// Logic: auto-reanchors to last swing high/low within lookback window.
+//   anchoredHi = VWAP from last swing high bar forward
+//   anchoredLo = VWAP from last swing low bar forward
+//   anchoredMean = midpoint (equilibrium / fair value)
+//
+// Pine Script logic (simplified for Tara):
+//   breakingHigher = rising candle AND close > hi (previous anchor high)
+//   → resetHiAnchor := true, hi := h
+//   anchoredHi = ta.vwap(high, resetHiAnchor)
+//
+// Tara implementation: find the bar with the highest high (or lowest low)
+//   within the last swingLookback bars. That bar becomes the VWAP anchor.
+//   Compute cumulative volume-weighted hl2 from anchor bar to current bar.
+//
+// Signal interpretation:
+//   Price > anchoredHi → trading above recent high buyers → bullish
+//   Price < anchoredLo → trading below recent low sellers → bearish
+//   Price near anchoredMean → equilibrium (chop / fair value)
+//   Price crossing mean ↑ → directional shift UP
+//   Price crossing mean ↓ → directional shift DOWN
+// ═══════════════════════════════════════════════════════════════════════════
+const computeAnchoredVWAP=(bars,swingLookback=20)=>{
+  if(!bars||bars.length<swingLookback+2){
+    return{anchoredHi:0,anchoredLo:0,anchoredMean:0,aboveHi:false,belowLo:false,aboveMean:false,valid:false};
+  }
+  const n=bars.length;
+  const lb=Math.min(swingLookback,n);
+  // Find highest high within lookback (anchor for Hi VWAP)
+  let hiIdx=n-1,hiVal=bars[n-1].h;
+  for(let i=n-2;i>=n-lb;i--){
+    if(bars[i].h>hiVal){hiVal=bars[i].h;hiIdx=i;}
+  }
+  // Find lowest low within lookback (anchor for Lo VWAP)
+  let loIdx=n-1,loVal=bars[n-1].l;
+  for(let i=n-2;i>=n-lb;i--){
+    if(bars[i].l<loVal){loVal=bars[i].l;loIdx=i;}
+  }
+  // Compute VWAP from hi anchor → current (hl2 weighted by volume)
+  let hiVwapSum=0,hiVolSum=0;
+  for(let i=hiIdx;i<n;i++){
+    const hl2=(bars[i].h+bars[i].l)/2;
+    const vol=bars[i].v||1;
+    hiVwapSum+=hl2*vol;hiVolSum+=vol;
+  }
+  const anchoredHi=hiVolSum>0?hiVwapSum/hiVolSum:bars[n-1].c;
+  // Compute VWAP from lo anchor → current
+  let loVwapSum=0,loVolSum=0;
+  for(let i=loIdx;i<n;i++){
+    const hl2=(bars[i].h+bars[i].l)/2;
+    const vol=bars[i].v||1;
+    loVwapSum+=hl2*vol;loVolSum+=vol;
+  }
+  const anchoredLo=loVolSum>0?loVwapSum/loVolSum:bars[n-1].c;
+  const anchoredMean=(anchoredHi+anchoredLo)/2;
+  const currentClose=bars[n-1].c;
+  // Distance from mean (bps) — how far price is from fair value
+  const distFromMeanBps=anchoredMean>0?((currentClose-anchoredMean)/anchoredMean)*10000:0;
+  return{
+    anchoredHi:Math.round(anchoredHi*100)/100,
+    anchoredLo:Math.round(anchoredLo*100)/100,
+    anchoredMean:Math.round(anchoredMean*100)/100,
+    aboveHi:currentClose>anchoredHi,
+    belowLo:currentClose<anchoredLo,
+    aboveMean:currentClose>anchoredMean,
+    distFromMeanBps:Math.round(distFromMeanBps*10)/10,
+    hiIdx,loIdx,
+    valid:true,
+  };
+};
+// ═══════════════════════════════════════════════════════════════════════════
+// END V10.7.38 ANCHORED VWAP
+// ═══════════════════════════════════════════════════════════════════════════
+
 // V6.2.0: FUTURE GRAND TREND (HPotter port). Recursive low-pass-style transform looking
 //   at bars 70 and 140 ago. Captures multi-hour structural direction.
 const computeFutureGrandTrend=(candles,length=70,forecast=100)=>{
@@ -8811,7 +9085,101 @@ const computeV99Posterior=(params)=>{
   rawSignalScores.technical=techClamped;
   totalScore+=techClamped;
 
-  // ── SIGNAL 6: FUNDING & REGIME ──
+  // ── SIGNAL 5b: STOCHASTIC RSI (V10.7.37) ─────────────────────────────────
+  // Replaces RSI>70/<30 with more sensitive StochRSI. 4× more firing rate.
+  // K>80 + above strike = overbought fade. K<20 + below strike = oversold fade.
+  // Conservative weights: ±10 overbought/oversold, ±5 moderate zone.
+  const _stochRSI=computeStochRSI(closes,14,14,3,3);
+  if(_stochRSI.valid){
+    let stochScore=0;
+    if(_stochRSI.overbought&&realGapBps>0){stochScore-=10;reasoning.push(`[StochRSI] K=${_stochRSI.k.toFixed(0)} overbought — fade UP`);}
+    else if(_stochRSI.oversold&&realGapBps<0){stochScore+=10;reasoning.push(`[StochRSI] K=${_stochRSI.k.toFixed(0)} oversold — fade DOWN`);}
+    else if(_stochRSI.k>65&&realGapBps>0&&drift1m>0){stochScore-=5;reasoning.push(`[StochRSI] K=${_stochRSI.k.toFixed(0)} high — moderate fade UP`);}
+    else if(_stochRSI.k<35&&realGapBps<0&&drift1m<0){stochScore+=5;reasoning.push(`[StochRSI] K=${_stochRSI.k.toFixed(0)} low — moderate fade DOWN`);}
+    const stochClamped=Math.max(-12,Math.min(12,stochScore));
+    rawSignalScores.stochRSI=stochClamped;
+    totalScore+=stochClamped;
+  }
+
+  // ── SIGNAL 5c: MARKET STRUCTURE BOS (V10.7.37) ───────────────────────────
+  // Break of Structure: close breaks prev swing high/low with EMA trend aligned.
+  // Confirmed Long (bosBull + EMA20>EMA50 + close>EMA20): strong UP structural signal.
+  // Confirmed Short (bosBear + EMA20<EMA50 + close<EMA20): strong DOWN structural signal.
+  // Conservative: ±12 for confirmed BOS, ±6 for trend-only (no BOS).
+  const _msBOS=computeMarketStructureBOS(liveHistory,20,50,5);
+  if(_msBOS.valid){
+    let bosScore=0;
+    if(_msBOS.confirmLong){bosScore+=12;reasoning.push(`[BOS] Confirmed LONG — break above swing ${_msBOS.swingHigh}, EMA20(${_msBOS.fastEMA})>EMA50(${_msBOS.slowEMA})`);}
+    else if(_msBOS.confirmShort){bosScore-=12;reasoning.push(`[BOS] Confirmed SHORT — break below swing ${_msBOS.swingLow}, EMA20<EMA50`);}
+    else if(_msBOS.bullTrend&&_msBOS.bosBull){bosScore+=8;reasoning.push(`[BOS] Bull break above swing (no EMA confirm yet)`);}
+    else if(_msBOS.bearTrend&&_msBOS.bosBear){bosScore-=8;reasoning.push(`[BOS] Bear break below swing (no EMA confirm yet)`);}
+    else if(_msBOS.bullTrend){bosScore+=4;reasoning.push(`[BOS] Bull trend (EMA20>EMA50) — no break yet`);}
+    else if(_msBOS.bearTrend){bosScore-=4;reasoning.push(`[BOS] Bear trend (EMA20<EMA50) — no break yet`);}
+    const bosClamped=Math.max(-15,Math.min(15,bosScore));
+    rawSignalScores.bos=bosClamped;
+    totalScore+=bosClamped;
+  }
+
+  // ── SIGNAL 5d: MACD + OBV (V10.7.37) ────────────────────────────────────
+  // MACD(12,26,9) on hl2. Histogram zero-cross = strong momentum flip.
+  // OBV confirms volume direction (OBV > SMA10 = accumulation = bullish).
+  // Combined: hist cross + OBV agreement = high-confidence momentum signal.
+  const _macdOBV=computeMACDAndOBV(liveHistory,12,26,9,10);
+  if(_macdOBV.valid){
+    let macdScore=0;
+    // Strong: histogram zero-cross
+    if(_macdOBV.crossUp){macdScore+=10;reasoning.push(`[MACD] Histogram crossed UP (${_macdOBV.histPrev.toFixed(2)}→${_macdOBV.hist.toFixed(2)}) — bullish momentum flip`);}
+    else if(_macdOBV.crossDown){macdScore-=10;reasoning.push(`[MACD] Histogram crossed DOWN (${_macdOBV.histPrev.toFixed(2)}→${_macdOBV.hist.toFixed(2)}) — bearish momentum flip`);}
+    // Moderate: histogram direction
+    else if(_macdOBV.bullish){macdScore+=5;reasoning.push(`[MACD] Histogram +${_macdOBV.hist.toFixed(2)} — bullish`);}
+    else{macdScore-=5;reasoning.push(`[MACD] Histogram ${_macdOBV.hist.toFixed(2)} — bearish`);}
+    // OBV confirmation/contradiction
+    if(_macdOBV.obvBullish&&macdScore>0){macdScore+=4;reasoning.push(`[OBV] Accumulation (OBV>${_macdOBV.obvSMA.toFixed(0)}) confirms UP`);}
+    else if(!_macdOBV.obvBullish&&macdScore<0){macdScore-=4;reasoning.push(`[OBV] Distribution (OBV<${_macdOBV.obvSMA.toFixed(0)}) confirms DOWN`);}
+    else if(_macdOBV.obvBullish&&macdScore<0){macdScore+=2;reasoning.push(`[OBV] Accumulation conflicts with MACD DOWN — dampen`);}
+    else if(!_macdOBV.obvBullish&&macdScore>0){macdScore-=2;reasoning.push(`[OBV] Distribution conflicts with MACD UP — dampen`);}
+    const macdClamped=Math.max(-15,Math.min(15,macdScore));
+    rawSignalScores.macd=macdClamped;
+    totalScore+=macdClamped;
+  }
+
+  // ── SIGNAL 5e: ANCHORED VWAP (V10.7.38) ──────────────────────────────────
+  // Auto High & Low anchored VWAP by liquid-trader. Anchors to swing high/low
+  // in last 20 bars. Signals where committed buyers/sellers are positioned.
+  //   Price > anchoredHi: above where recent high buyers sit → bullish
+  //   Price < anchoredLo: below where recent low sellers sit → bearish
+  //   Price crosses anchoredMean: bias shift signal (equilibrium cross)
+  //   Price far above mean (>5bps): extended, slight fade
+  //   Price far below mean (<-5bps): extended, slight fade
+  const _avwap=computeAnchoredVWAP(liveHistory,20);
+  if(_avwap.valid){
+    let avwapScore=0;
+    if(_avwap.aboveHi){
+      // Above high anchor VWAP = strong bullish momentum
+      avwapScore+=8;
+      reasoning.push(`[AVWAP] Price ${currentPrice.toFixed(0)} > Hi-anchor ${_avwap.anchoredHi.toFixed(0)} — above committed buyers → bullish`);
+    }else if(_avwap.belowLo){
+      // Below low anchor VWAP = strong bearish momentum
+      avwapScore-=8;
+      reasoning.push(`[AVWAP] Price ${currentPrice.toFixed(0)} < Lo-anchor ${_avwap.anchoredLo.toFixed(0)} — below committed sellers → bearish`);
+    }else if(_avwap.aboveMean){
+      // Between mean and hi anchor = mild bullish
+      avwapScore+=4;
+      reasoning.push(`[AVWAP] Price above mean ${_avwap.anchoredMean.toFixed(0)} (Hi:${_avwap.anchoredHi.toFixed(0)} Lo:${_avwap.anchoredLo.toFixed(0)}) → mild bullish`);
+    }else{
+      // Between lo anchor and mean = mild bearish
+      avwapScore-=4;
+      reasoning.push(`[AVWAP] Price below mean ${_avwap.anchoredMean.toFixed(0)} (Hi:${_avwap.anchoredHi.toFixed(0)} Lo:${_avwap.anchoredLo.toFixed(0)}) → mild bearish`);
+    }
+    // Extended from mean: slight fade (same as VWAP mean reversion logic)
+    if(Math.abs(_avwap.distFromMeanBps)>8&&avwapScore>0){
+      avwapScore-=2;
+      reasoning.push(`[AVWAP-EXT] ${_avwap.distFromMeanBps.toFixed(1)}bps from mean — slightly extended, minor fade`);
+    }
+    const avwapClamped=Math.max(-10,Math.min(10,avwapScore));
+    rawSignalScores.avwap=avwapClamped;
+    totalScore+=avwapClamped;
+  }
   const funding=bloomberg?.fundingRate||0;
   const fundingPrev=bloomberg?.fundingRatePrev||0;
   const delta=globalFlow.deltaUSD||0;
