@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.42a-regime-order-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.42a';
+const BASELINE_VERSION='2026.05.20-v10.7.43-outcome-calibration-clear-unverifiable';
+const TARA_VERSION_DISPLAY='Tara 10.7.43';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5280,6 +5280,98 @@ const buildRegimeDirCalibration=(tradeLog)=>{
 //   per-trade growth rate and variance. Single-pass approximation, not Monte
 //   Carlo (cheap to compute every render).
 // ───────────────────────────────────────────────────────────────────────────
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V10.7.43 — FINE-GRAINED OUTCOME CALIBRATION
+// ═══════════════════════════════════════════════════════════════════════════
+// Existing regimeDirCalibration buckets by (regime|dir) only — too coarse.
+// This adds finer buckets: (regime|tier|dir|kalshiBucket|posteriorBucket).
+//
+// Built from taraCallLog historical resolutions. At lock time, looks up the
+// current context bucket and either:
+//   • Reduces confidence if bucket has historical WR <50% (n≥15)
+//   • Boosts confidence if bucket has historical WR >65% (n≥15)
+//   • Flips direction if bucket has WR <40% (n≥20) AND low current confidence
+// No effect if bucket has insufficient samples (n<15).
+//
+// Key insight: this catches patterns the engine doesn't know about. Example:
+//   "structural-led × UP × RANGE-CHOP × Kalshi 30-50" might have 47% WR
+//   despite Tara's posterior saying 75%. Calibration overrides reality > theory.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Bucket the Kalshi price into coarse ranges (matches data resolution)
+const _calBucketKalshi=(k)=>{
+  if(k==null||!Number.isFinite(k))return 'na';
+  if(k<25)return '<25';
+  if(k<40)return '25-40';
+  if(k<55)return '40-55';
+  if(k<70)return '55-70';
+  return '70+';
+};
+// Bucket posterior into 10pt bands above/below 50 (conviction proxy)
+const _calBucketPosterior=(p)=>{
+  if(p==null||!Number.isFinite(p))return 'na';
+  if(p<35)return 'p<35';
+  if(p<50)return 'p35-50';
+  if(p<60)return 'p50-60';
+  if(p<70)return 'p60-70';
+  if(p<80)return 'p70-80';
+  return 'p80+';
+};
+// Canonicalize tier label (matches V9.9.1 logic in computeReversalRisk)
+const _calTierCanon=(t)=>{
+  if(!t)return 'unknown';
+  if(t==='structural-led'||t==='structural')return 'structural';
+  if(t==='tape-led'||t==='tape')return 'tape';
+  if(t==='super-confluence'||t==='super')return 'super';
+  if(t==='rising-confluence'||t==='rising')return 'rising';
+  if(t==='confluence')return 'confluence';
+  if(t==='time-cap-commit')return 'time-cap';
+  if(t==='directional-lock')return 'directional';
+  return t;
+};
+
+// Build the calibration table from a call log array.
+// Returns: { 'bucketKey': {wins, losses, n, wr} }
+// Bucket key format: "regime|tier|dir|kBucket"
+//   (posterior bucket excluded from key — we look up by posterior at apply time)
+const buildCalibrationTable=(callLog)=>{
+  const table={};
+  if(!Array.isArray(callLog)||callLog.length===0)return table;
+  for(const e of callLog){
+    if(!e||(e.result!=='WIN'&&e.result!=='LOSS'))continue;
+    if(!e.regime||!e.tier||!e.dir)continue;
+    if(e.dir!=='UP'&&e.dir!=='DOWN')continue;
+    const _regime=e.regime;
+    const _tier=_calTierCanon(e.tier);
+    const _dir=e.dir;
+    const _kBucket=_calBucketKalshi(e.kalshiAtLock);
+    const _key=`${_regime}|${_tier}|${_dir}|${_kBucket}`;
+    if(!table[_key])table[_key]={wins:0,losses:0,n:0,wr:0};
+    if(e.result==='WIN')table[_key].wins++;
+    else table[_key].losses++;
+    table[_key].n++;
+    table[_key].wr=table[_key].wins/table[_key].n;
+  }
+  return table;
+};
+
+// Look up the bucket's historical WR for a given context.
+// Returns {wr, n, found} where found=true if bucket exists with n>=minN.
+const lookupCalibration=(table,context,minN=15)=>{
+  if(!table||!context)return{wr:null,n:0,found:false};
+  const{regime,tier,dir,kalshiAtLock}=context;
+  if(!regime||!tier||!dir)return{wr:null,n:0,found:false};
+  const _tier=_calTierCanon(tier);
+  const _kBucket=_calBucketKalshi(kalshiAtLock);
+  const _key=`${regime}|${_tier}|${dir}|${_kBucket}`;
+  const _entry=table[_key];
+  if(!_entry||_entry.n<minN)return{wr:null,n:_entry?_entry.n:0,found:false,key:_key};
+  return{wr:_entry.wr,n:_entry.n,found:true,key:_key};
+};
+// ═══════════════════════════════════════════════════════════════════════════
+// END V10.7.43 CALIBRATION FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
 
 // Cluster-WR lookup: given (regime, dir, tier), return {wr, n} from the
 // regimeDirCalibration table + tier-specific haircut/boost. If sample is
@@ -12999,7 +13091,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   );
 }
 
-function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,reversalRisk}){
+function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,reversalRisk}){
   if(!taraCall)return null;
     const tc=taraCall;
     const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
@@ -19496,7 +19588,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         // V9.17.12: Bulk apply bar. Two buttons — "apply all pending" and
         //   "apply all mismatches" — so the user doesn't have to click 40+
         //   times to fix a backlog of stale entries.
-        reconcileResult.issues.length>1&&onEditEntry?React.createElement('div',{
+        reconcileResult.issues.length>1&&(onEditEntry||onDeleteEntry)?React.createElement('div',{
           key:'bulk',
           className:'flex items-center gap-2 mb-2 flex-wrap',
         },(()=>{
@@ -19526,6 +19618,23 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               className:'px-3 py-1.5 rounded text-[10px] uppercase tracking-wider font-bold',
               style:{background:'rgba(110,231,183,0.15)',color:'rgb(110,231,183)',border:'1px solid rgba(110,231,183,0.40)'},
             },`Apply all ${_mismatches.length} fixes`));
+          }
+          // V10.7.43: bulk delete unverifiable entries (missing strike or closingPrice).
+          //   These can never be audited (no way to verify WIN/LOSS without prices) and
+          //   pollute the calibration training set. One-click clear with confirmation.
+          const _unverifiable=reconcileResult.issues.filter(i=>i.kind==='missing-strike'||i.kind==='missing-close');
+          const _unverifiableIds=[...new Set(_unverifiable.map(i=>i.entryId))]; // dedupe (one entry can have both kinds)
+          if(_unverifiableIds.length>0&&onDeleteEntry){
+            _btns.push(React.createElement('button',{
+              key:'clear-unverifiable',
+              onClick:()=>{
+                if(!window.confirm(`DELETE ${_unverifiableIds.length} unverifiable entr${_unverifiableIds.length===1?'y':'ies'} from your log?\n\nThese trades are missing strike or closingPrice data and can't be audited. Removing them cleans the log and improves calibration accuracy.\n\nThis cannot be undone.`))return;
+                _unverifiableIds.forEach(_id=>onDeleteEntry(_id));
+                setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='missing-strike'&&i.kind!=='missing-close')}:null);
+              },
+              className:'px-3 py-1.5 rounded text-[10px] uppercase tracking-wider font-bold',
+              style:{background:'rgba(248,113,113,0.15)',color:'rgb(248,113,113)',border:'1px solid rgba(248,113,113,0.40)'},
+            },`Clear ${_unverifiableIds.length} unverifiable`));
           }
           return _btns;
         })()):null,
@@ -20032,7 +20141,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -20046,7 +20155,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
           V6.2.3: hidden lg:block (was md:block). */}
-      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={reversalRisk} className="hidden lg:block"/>
+      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} onDeleteEntry={onDeleteEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={reversalRisk} className="hidden lg:block"/>
 
       {/* V9.1.5: Tape + Depth render as upgraded compact strips next to the small
           DOM bar at the top of the analysis card. No big panels here anymore. */}
@@ -34734,6 +34843,63 @@ function TaraApp(){
     }
   }catch(_){}
 
+  // ── V10.7.43 — OUTCOME CALIBRATION OVERRIDE ──────────────────────────────
+  // Build fine-grained WR table from historical taraCallLog, lookup current
+  //   context bucket, apply override if bucket has enough samples (n≥15).
+  // Logic:
+  //   wr < 0.40 (n≥20) + weak conviction (<58) → FLIP direction
+  //   wr < 0.50 (n≥15) → reduce confidence by 8pts (dampen)
+  //   wr > 0.65 (n≥15) → boost confidence by 5pts
+  //   Otherwise: no change (insufficient evidence)
+  try{
+    const _calCall=taraCall?.call;
+    if(_calCall==='UP'||_calCall==='DOWN'){
+      const _calTable=buildCalibrationTable(taraCallLogRef.current||[]);
+      const _calLookup=lookupCalibration(_calTable,{
+        regime:analysis?.regime||'',
+        tier:taraCall?._ctx?.tier||taraCall?.tier||'',
+        dir:_calCall,
+        kalshiAtLock:typeof kalshiYesPrice==='number'?kalshiYesPrice:null,
+      },15);
+      if(_calLookup.found){
+        const _histWR=_calLookup.wr;
+        const _histN=_calLookup.n;
+        const _currentConf=Number(taraCall?.confidence)||50;
+        taraCall._v10_7_43_calBucket=_calLookup.key;
+        taraCall._v10_7_43_calHistWR=Math.round(_histWR*1000)/10;
+        taraCall._v10_7_43_calHistN=_histN;
+        if(_histWR<0.40&&_histN>=20&&_currentConf<58){
+          const _flipDir=_calCall==='UP'?'DOWN':'UP';
+          Object.assign(taraCall,{
+            call:_flipDir,
+            direction:_flipDir,
+            confidence:55,
+            conviction:5,
+            reason:`[V10.7.43] Calibration FLIP: bucket "${_calLookup.key}" historical WR ${(_histWR*100).toFixed(0)}% (n=${_histN}) — flipped ${_calCall}→${_flipDir}`,
+            _v10_7_43_calFlipped:true,
+            _v10_7_43_calOriginalDir:_calCall,
+          });
+        }else if(_histWR<0.50&&_histN>=15){
+          const _newConf=Math.max(50,_currentConf-8);
+          Object.assign(taraCall,{
+            confidence:_newConf,
+            conviction:_newConf-50,
+            _v10_7_43_calDampened:true,
+            _v10_7_43_calOriginalConf:_currentConf,
+          });
+        }else if(_histWR>0.65&&_histN>=15){
+          const _newConf=Math.min(85,_currentConf+5);
+          Object.assign(taraCall,{
+            confidence:_newConf,
+            conviction:_newConf-50,
+            _v10_7_43_calBoosted:true,
+            _v10_7_43_calOriginalConf:_currentConf,
+          });
+        }
+      }
+    }
+  }catch(_){}
+
 
   // Three coordinated effects, all gated by the same enable + kill-switch checks:
   //   1. ENTRY  — when lockedCallRef transitions to a new committed lock
@@ -41830,6 +41996,13 @@ function TaraApp(){
                 setTimeout(()=>_recomputeLearningsFromLog(next),0);
                 return next;
               });
+            }} onDeleteEntry={(entryId)=>{
+              // V10.7.43: hard delete from log. Used by "Clear All Unverifiable" in Storage Audit.
+              setTaraCallLog(prev=>{
+                const next=prev.filter(e=>e.id!==entryId);
+                setTimeout(()=>_recomputeLearningsFromLog(next),0);
+                return next;
+              });
             }} className="lg:hidden"/>
 
             {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
@@ -41932,6 +42105,13 @@ function TaraApp(){
                   return{...e,result:_valUp,manualEdit:true,manualEditedAt:Date.now()};
                 }
               });
+              setTimeout(()=>_recomputeLearningsFromLog(next),0);
+              return next;
+            });
+          }} onDeleteEntry={(entryId)=>{
+            // V10.7.43: hard delete from log. Used by "Clear All Unverifiable" in Storage Audit.
+            setTaraCallLog(prev=>{
+              const next=prev.filter(e=>e.id!==entryId);
               setTimeout(()=>_recomputeLearningsFromLog(next),0);
               return next;
             });
