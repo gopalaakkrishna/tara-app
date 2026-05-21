@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.40-reversal-risk-posterior-dampener';
-const TARA_VERSION_DISPLAY='Tara 10.7.40';
+const BASELINE_VERSION='2026.05.20-v10.7.41-history-100bars-indicator-integrity';
+const TARA_VERSION_DISPLAY='Tara 10.7.41';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -29874,7 +29874,7 @@ function TaraApp(){
   // Heavy data — V9.8.6: candles AND order book follow active source
   //   Both endpoints normalize to a common shape via parseCandles/parseBook so the
   //   downstream forEach + band math works identically across all 3 sources.
-  useEffect(()=>{const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const gran=windowType==='15m'?900:300;try{const r=await fetch(_src.candleUrl(_cfg,currentAsset,gran),{cache:'no-store'});if(r.ok){const d=await r.json();const _candles=_src.parseCandles(d);if(_candles.length>0)setHistory(_candles.slice(0,60));}}catch(_e){}const r2=await fetch(_src.bookUrl(_cfg,currentAsset),{cache:'no-store'});if(r2.ok){const d2raw=await r2.json();const d2=_src.parseBook(d2raw);if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});
+  useEffect(()=>{const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const gran=windowType==='15m'?900:300;try{const r=await fetch(_src.candleUrl(_cfg,currentAsset,gran),{cache:'no-store'});if(r.ok){const d=await r.json();const _candles=_src.parseCandles(d);if(_candles.length>0)setHistory(_candles.slice(0,100));}}catch(_e){}const r2=await fetch(_src.bookUrl(_cfg,currentAsset),{cache:'no-store'});if(r2.ok){const d2raw=await r2.json();const d2=_src.parseBook(d2raw);if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});
     // V9.1.4: multi-band depth — TIGHT (0.05%), CLOSE (0.1%), STANDARD (0.2%), WIDE (0.5%).
     //   Each band captures bid and ask sizes within that distance from strike. Fed to
     //   DepthStrip for the 4-column breakdown that mirrors TapeStrip's time windows.
