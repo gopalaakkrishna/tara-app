@@ -767,6 +767,137 @@ const _auditLogEvent=(kind,details)=>{
 try{if(typeof window!=='undefined'){window._tara_audit=()=>_loadAuditBuffer();}}catch(_){}
 // ─────────────────────────────────────────────────────────────────────────────
 
+// V10.7.45: WINDOW LIFECYCLE TRACKER
+//   Purpose: diagnose "Tara locked but no entry logged" gaps.
+//   Tracks each window from open → snapshot set → _logSnapshotEntry called → entry
+//   confirmed in taraCallLog. Persists last 30 windows to localStorage so user can
+//   export when a gap occurs and we can pinpoint EXACTLY which step broke.
+const _LIFECYCLE_LS_KEY='taraWindowLifecycle_v1';
+const _LIFECYCLE_CAP=30;
+let _lifecycleBuffer=null;
+const _loadLifecycle=()=>{
+  if(_lifecycleBuffer)return _lifecycleBuffer;
+  try{
+    const _raw=typeof localStorage!=='undefined'?localStorage.getItem(_LIFECYCLE_LS_KEY):null;
+    _lifecycleBuffer=_raw?JSON.parse(_raw):[];
+    if(!Array.isArray(_lifecycleBuffer))_lifecycleBuffer=[];
+  }catch(_){_lifecycleBuffer=[];}
+  return _lifecycleBuffer;
+};
+const _persistLifecycle=()=>{
+  try{
+    if(typeof localStorage!=='undefined'){
+      localStorage.setItem(_LIFECYCLE_LS_KEY,JSON.stringify((_lifecycleBuffer||[]).slice(-_LIFECYCLE_CAP)));
+    }
+  }catch(_){}
+};
+const _lifecycleFindOrCreate=(wid,windowType,asset)=>{
+  const _buf=_loadLifecycle();
+  let _rec=_buf.find(r=>r.wid===wid&&r.asset===asset);
+  if(!_rec){
+    _rec={
+      wid,windowType,asset,
+      openedAt:Date.now(),
+      snapshotSets:[],   // every time taraCallSnapshotRef.current was assigned (kind, dir, tier, at)
+      logCalls:[],       // every _logSnapshotEntry call (snapshotCall, snapshotTier, at, callSite)
+      logResult:null,    // 'pushed' | 'dedup-blocked' | 'retry-rescued' | 'all-failed' | null
+      logConfirmedAt:null, // when entry was actually seen in taraCallLog
+      rolloverAt:null,   // when rollover fired for this window
+      events:[],         // misc events (auditLog mirrors)
+    };
+    _buf.push(_rec);
+    while(_buf.length>_LIFECYCLE_CAP)_buf.shift();
+  }
+  return _rec;
+};
+const _lifecycleRecordOpen=(wid,windowType,asset)=>{
+  try{
+    _lifecycleFindOrCreate(wid,windowType,asset);
+    _persistLifecycle();
+  }catch(_){}
+};
+const _lifecycleRecordSnapshot=(wid,windowType,asset,snapshot,callSite)=>{
+  try{
+    const _rec=_lifecycleFindOrCreate(wid,windowType,asset);
+    _rec.snapshotSets.push({
+      callSite:callSite||'?',
+      call:snapshot?.call||null,
+      direction:snapshot?.direction||null,
+      tier:snapshot?.tier||null,
+      confidence:snapshot?.confidence||null,
+      at:Date.now(),
+    });
+    _persistLifecycle();
+  }catch(_){}
+};
+const _lifecycleRecordLogCall=(wid,windowType,asset,snapshot,callSite)=>{
+  try{
+    const _rec=_lifecycleFindOrCreate(wid,windowType,asset);
+    _rec.logCalls.push({
+      callSite:callSite||'?',
+      snapshotCall:snapshot?.call||null,
+      snapshotTier:snapshot?.tier||null,
+      snapshotDir:snapshot?.direction||null,
+      at:Date.now(),
+    });
+    _persistLifecycle();
+  }catch(_){}
+};
+const _lifecycleRecordLogResult=(wid,asset,result,detail)=>{
+  try{
+    const _buf=_loadLifecycle();
+    const _rec=_buf.find(r=>r.wid===wid&&r.asset===asset);
+    if(!_rec)return;
+    _rec.logResult=result;
+    if(detail)_rec.events.push({type:'logResult',result,detail,at:Date.now()});
+    _persistLifecycle();
+  }catch(_){}
+};
+const _lifecycleRecordConfirmed=(wid,asset)=>{
+  try{
+    const _buf=_loadLifecycle();
+    const _rec=_buf.find(r=>r.wid===wid&&r.asset===asset);
+    if(!_rec)return;
+    if(_rec.logConfirmedAt==null){
+      _rec.logConfirmedAt=Date.now();
+      _persistLifecycle();
+    }
+  }catch(_){}
+};
+const _lifecycleRecordRollover=(wid,asset)=>{
+  try{
+    const _buf=_loadLifecycle();
+    const _rec=_buf.find(r=>r.wid===wid&&r.asset===asset);
+    if(!_rec)return;
+    _rec.rolloverAt=Date.now();
+    // Compute gap status
+    const _hadSnapshot=_rec.snapshotSets.length>0;
+    const _hadLogCall=_rec.logCalls.length>0;
+    const _wasConfirmed=_rec.logConfirmedAt!=null;
+    let _diagnosis=null;
+    if(!_hadSnapshot&&!_hadLogCall)_diagnosis='no-commit-attempted';
+    else if(_hadSnapshot&&!_hadLogCall)_diagnosis='snapshot-set-but-no-log-call';
+    else if(_hadLogCall&&!_wasConfirmed)_diagnosis='log-called-but-not-confirmed';
+    else if(_wasConfirmed)_diagnosis='ok';
+    _rec.diagnosis=_diagnosis;
+    _persistLifecycle();
+    // Cross-stamp the audit log if there's a gap
+    if(_diagnosis&&_diagnosis!=='ok'&&_diagnosis!=='no-commit-attempted'){
+      _auditLogEvent('v10_7_45_window_gap_detected',{
+        wid,asset,
+        diagnosis:_diagnosis,
+        snapshotSets:_rec.snapshotSets.length,
+        logCalls:_rec.logCalls.length,
+        logResult:_rec.logResult,
+        confirmedAt:_rec.logConfirmedAt,
+      });
+    }
+  }catch(_){}
+};
+try{if(typeof window!=='undefined'){window._tara_lifecycle=()=>_loadLifecycle();}}catch(_){}
+// ─────────────────────────────────────────────────────────────────────────────
+
+
 // V5.6.2: Real-time listener — fires once with current cloud value, then again on every
 //   change from any connected client. This is what makes cross-device sync actually work:
 //   Device A writes, Device B's listener fires within ~1s, B's UI updates without refresh.
@@ -3911,8 +4042,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.21-v10.7.44e-memory-modal-header-mobile';
-const TARA_VERSION_DISPLAY='Tara 10.7.44e';
+const BASELINE_VERSION='2026.05.21-v10.7.45-window-lifecycle-audit';
+const TARA_VERSION_DISPLAY='Tara 10.7.45';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -31505,6 +31636,19 @@ function TaraApp(){
         //   The Kalshi useEffect's own clear runs later in the same React tick, but
         //   setWindowOpenStrike below reads kalshiStrikeRef.current synchronously — the ref
         //   must be nulled BEFORE that read. The fast-retry effect will pull the new strike.
+        // V10.7.45: Record rollover into lifecycle audit for the just-closed window.
+        //   The just-closed window's id = lastWindowRef.current.
+        try{
+          const _justClosedWid=lastWindowRef.current;
+          const _rolloverAsset=currentAssetRef.current||currentAsset||'BTC';
+          if(_justClosedWid)_lifecycleRecordRollover(_justClosedWid,_rolloverAsset);
+        }catch(_){}
+        // V10.7.45: Open lifecycle record for the NEW window
+        try{
+          const _newWid=computeWindowId(windowType);
+          const _newAsset=currentAssetRef.current||currentAsset||'BTC';
+          _lifecycleRecordOpen(_newWid,windowType,_newAsset);
+        }catch(_){}
         kalshiStrikeRef.current=null;
         setKalshiStrike(null);
         setKalshiYesPrice(null);
@@ -37999,6 +38143,13 @@ function TaraApp(){
     //   memory + scorecards stopped updating for both BTC and ETH. Bug shipped in V7.8 and
     //   compounded each version since.
     const _logSnapshotEntry=(snapshot)=>{
+      // V10.7.45: Lifecycle telemetry — record EVERY call regardless of what happens next.
+      //   This lets us distinguish "log call never fired" from "log call fired but pushed nothing".
+      try{
+        const _lcWid=computeWindowId(windowType);
+        const _lcAsset=currentAssetRef.current||currentAsset||'BTC';
+        _lifecycleRecordLogCall(_lcWid,windowType,_lcAsset,snapshot,'_logSnapshotEntry-entry');
+      }catch(_){}
       try{
         // V10.4.1: clear the pending delay stamp ref after one snapshot fires
         //   so subsequent entries in the same window don't re-stamp it. The
@@ -38205,8 +38356,15 @@ function TaraApp(){
               newEntry:{dir:_entry.dir,tier:_entry.tier,confidence:_entry.confidence,result:_entry.result,time:_entry.time},
               existingEntry:{id:_existing.id,dir:_existing.dir,tier:_existing.tier,result:_existing.result,time:_existing.time},
             });
+            // V10.7.45: dedup-blocked is sometimes correct (true duplicate) and sometimes
+            //   a bug (overwrote richer entry). Mark lifecycle so we can audit later.
+            try{_lifecycleRecordLogResult(_wid,_logAsset,'dedup-blocked',{existingId:_existing.id,existingResult:_existing.result});}catch(_){}
+            // Also confirm — there IS an entry in the log for this window, even if not ours.
+            try{_lifecycleRecordConfirmed(_wid,_logAsset);}catch(_){}
             return prev;
           }
+          // V10.7.45: This is the success path. Mark lifecycle.
+          try{_lifecycleRecordLogResult(_wid,_logAsset,'pushed',null);_lifecycleRecordConfirmed(_wid,_logAsset);}catch(_){}
           return [...prev,_entry].slice(-TARA_CALL_LOG_CAP);
         });
         // V10.7.8 — DEFENSIVE RETRY for rollover race condition
@@ -38232,6 +38390,8 @@ function TaraApp(){
                 tier:_entry.tier,
                 msSinceOriginal:800,
               });
+              // V10.7.45: Mark lifecycle as rescued
+              try{_lifecycleRecordLogResult(_wid,_logAsset,'retry-rescued-800ms',null);_lifecycleRecordConfirmed(_wid,_logAsset);}catch(_){}
               return [...prev,_entry].slice(-TARA_CALL_LOG_CAP);
             });
           }catch(_){}
@@ -38254,6 +38414,8 @@ function TaraApp(){
                 tier:_entry.tier,
                 msSinceOriginal:2500,
               });
+              // V10.7.45: Mark lifecycle as rescued
+              try{_lifecycleRecordLogResult(_wid,_logAsset,'retry-rescued-2500ms',null);_lifecycleRecordConfirmed(_wid,_logAsset);}catch(_){}
               return [...prev,_entry].slice(-TARA_CALL_LOG_CAP);
             });
           }catch(_){}
@@ -40954,6 +41116,38 @@ function TaraApp(){
                       <button onClick={()=>{setShowSettings(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Feed Settings"><IC.Link className="w-3.5 h-3.5"/></button>
                       <button onClick={()=>{setShowAnalytics(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Training Engine"><IC.BarChart className="w-3.5 h-3.5"/></button>
                       <button onClick={()=>{setAnalyticsPageOpen(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-indigo-500/20 text-indigo-400/60 hover:text-indigo-400 transition-colors text-xs" title="Analytics Page">📊 Analytics</button>
+                      {/* V10.7.45: Window lifecycle audit export — diagnostic for missing-log bugs */}
+                      <button
+                        onClick={()=>{
+                          try{
+                            const _lifecycle=_loadLifecycle();
+                            const _audit=_loadAuditBuffer();
+                            const _payload={
+                              exportedAt:new Date().toISOString(),
+                              baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:'unknown',
+                              windowLifecycle:_lifecycle,
+                              auditEvents:_audit,
+                              note:'V10.7.45 diagnostic export — used to debug missing-log bugs. windowLifecycle tracks every window seen and whether its entry was logged. auditEvents has detailed timing/error info.',
+                            };
+                            const _json=JSON.stringify(_payload,null,2);
+                            const _blob=new Blob([_json],{type:'application/json'});
+                            const _url=URL.createObjectURL(_blob);
+                            const _a=document.createElement('a');
+                            const _ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+                            _a.href=_url;
+                            _a.download=`tara-window-audit-${_ts}.json`;
+                            document.body.appendChild(_a);
+                            _a.click();
+                            document.body.removeChild(_a);
+                            setTimeout(()=>URL.revokeObjectURL(_url),100);
+                            setShowHeaderOverflow(false);
+                          }catch(e){
+                            alert('Window audit export failed: '+(e.message||String(e)));
+                          }
+                        }}
+                        className="p-1.5 rounded-lg border border-amber-500/20 text-amber-400/70 hover:text-amber-400 transition-colors text-xs"
+                        title="Export window lifecycle audit (V10.7.45). Click after a missing-log incident — shows EXACTLY which window broke down where."
+                      >🔍 Window Audit</button>
                     </div>
                   </div>
                 </div>
