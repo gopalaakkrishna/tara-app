@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.21-v10.7.44c-clean-header';
-const TARA_VERSION_DISPLAY='Tara 10.7.44c';
+const BASELINE_VERSION='2026.05.21-v10.7.44d-chat-btn-memory-modal-mobile';
+const TARA_VERSION_DISPLAY='Tara 10.7.44d';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -18933,10 +18933,10 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
     return'$'+_n.toLocaleString(undefined,{minimumFractionDigits:_decimals,maximumFractionDigits:_decimals});
   };
   return React.createElement('div',{
-    className:'fixed inset-0 z-50 bg-[#0E100F]/95 backdrop-blur-md overflow-y-auto',
+    className:'fixed inset-0 z-50 bg-[#0E100F]/95 backdrop-blur-md overflow-y-auto overflow-x-hidden',
     onClick:(e)=>{if(e.target===e.currentTarget)onClose();},
   },
-    React.createElement('div',{className:'max-w-[900px] mx-auto px-2 sm:px-4 py-6 sm:py-8'},
+    React.createElement('div',{className:'max-w-[900px] mx-auto px-2 sm:px-4 py-3 sm:py-8 w-full min-w-0'},
       React.createElement('div',{className:'flex items-center justify-between mb-5'},
         React.createElement('div',null,
           React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-[0.18em]',style:{color:T2_GOLD}},'TARA · MEMORY'),
@@ -19505,7 +19505,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{onClick:onClose,className:'p-2 rounded-lg hover:bg-[#E8E9E4]/5 text-[#E8E9E4]/60 hover:text-white transition-colors text-xl'},'✕'),
         ),
       ),
-      React.createElement('div',{className:'grid grid-cols-2 sm:grid-cols-5 gap-2 mb-5'},
+      React.createElement('div',{className:'grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-2 mb-4'},
         React.createElement('div',{className:'bg-[#181A19] border border-[#E8E9E4]/8 rounded-xl p-3'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 font-bold mb-1'},'Total calls'),
           React.createElement('div',{className:'text-2xl font-bold text-white tabular-nums'},counts.total),
@@ -19922,7 +19922,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     ),
                   ),
                   // Hourly bar — 24 columns
-                  React.createElement('div',{className:'gap-px mb-1',style:{display:'grid',gridTemplateColumns:'repeat(24, minmax(0, 1fr))'}},
+                  React.createElement('div',{className:'gap-px mb-1 overflow-x-auto',style:{display:'grid',gridTemplateColumns:'repeat(24, minmax(8px, 1fr))',minWidth:'min(100%, 320px)'}},
                     hourBins.map((b,h)=>{
                       const _pct=b.total/_maxHourTotal;
                       const _hWr=(b.wins+b.losses)>0?b.wins/(b.wins+b.losses):null;
@@ -19944,7 +19944,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     }),
                   ),
                   // Hour labels (every 6h)
-                  React.createElement('div',{className:'gap-px text-[8px] text-[#E8E9E4]/30 tabular-nums mb-2',style:{display:'grid',gridTemplateColumns:'repeat(24, minmax(0, 1fr))'}},
+                  React.createElement('div',{className:'gap-px text-[8px] text-[#E8E9E4]/30 tabular-nums mb-2 overflow-x-auto',style:{display:'grid',gridTemplateColumns:'repeat(24, minmax(8px, 1fr))',minWidth:'min(100%, 320px)'}},
                     Array.from({length:24},(_,h)=>(
                       React.createElement('div',{key:h,className:'text-center'},h%6===0?h:'')
                     )),
@@ -20034,7 +20034,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                         const _phaseKey=e.phase||(typeof inferPhaseFromTimestamp==='function'?inferPhaseFromTimestamp(e.time):null);
                         const _phaseProfile=_phaseKey&&typeof PHASE_PROFILES!=='undefined'?PHASE_PROFILES[_phaseKey]:null;
                         return(
-                        React.createElement('div',{key:e.id,className:'px-3 sm:px-4 py-3 hover:bg-[#E8E9E4]/3 transition-colors overflow-hidden'},
+                        React.createElement('div',{key:e.id,className:'px-2 sm:px-4 py-2.5 sm:py-3 hover:bg-[#E8E9E4]/3 transition-colors overflow-hidden min-w-0 w-full'},
                           // Header row: time · windowType · period · session · result badge
                           React.createElement('div',{className:'flex items-center justify-between gap-3 mb-2'},
                             React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
@@ -42226,7 +42226,7 @@ function TaraApp(){
       )}
 
       {/* Chat */}
-      <div className={`fixed bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
+      <div className={`fixed bottom-[68px] lg:bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
           <div className={'bg-[#181A19] border border-[#E8E9E4]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
             <div className={'bg-[#111312] p-2.5 flex justify-between items-center border-b border-[#E8E9E4]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.1.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
