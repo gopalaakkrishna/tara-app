@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.41-history-100bars-indicator-integrity';
-const TARA_VERSION_DISPLAY='Tara 10.7.41';
+const BASELINE_VERSION='2026.05.20-v10.7.42-chop-flow-cap-delta-boost-symmetric';
+const TARA_VERSION_DISPLAY='Tara 10.7.42';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -9144,10 +9144,27 @@ const computeV99Posterior=(params)=>{
       }
     }
   }
-  const flowClamped=Math.max(-W.flow,Math.min(W.flow,flowScore));
+  // ── V10.7.42 — REGIME-GATED FLOW CLAMP (SYMMETRIC, BIAS-FREE) ───────────
+  // Data finding (7-day audit, n=447): Flow signal capped at ±35 dominates posterior
+  //   in RANGE-CHOP. DOWN calls had 5-15pp LOWER WR than UP calls across every
+  //   timeframe (7d, 3d, 1d, 8h). Flow's huge weight + chop noise = Tara fighting
+  //   the trend.
+  //
+  // Fix: in RANGE-CHOP only, clamp Flow to ±20 (was ±35). This is SYMMETRIC —
+  //   applies identically to UP and DOWN Flow signals. Reduces signal dominance
+  //   without introducing directional bias.
+  //
+  // Outside RANGE-CHOP (TRENDING, SHORT SQUEEZE, etc.) Flow keeps its full W.flow
+  //   cap because in those regimes Flow direction is more reliable.
+  const _v10742_flowRaw=flowScore;
+  const _v10742_isChop=regime==='RANGE-CHOP';
+  const _v10742_flowCap=_v10742_isChop?Math.min(W.flow,20):W.flow;
+  const flowClamped=Math.max(-_v10742_flowCap,Math.min(_v10742_flowCap,flowScore));
   rawSignalScores.flow=flowClamped;
+  rawSignalScores._flowRaw=Math.round(_v10742_flowRaw*10)/10; // pre-clamp for audit
+  rawSignalScores._flowCap=_v10742_flowCap; // applied cap for audit
   totalScore+=flowClamped;
-  reasoning.push(`[FLOW] Delta: ${globalFlow.deltaUSD>0?'+':''}${formatUSD(globalFlow.deltaUSD)} | Imbalance: ${aggrFlow.toFixed(2)} | W:${W.flow.toFixed(0)}`);
+  reasoning.push(`[FLOW] Delta: ${globalFlow.deltaUSD>0?'+':''}${formatUSD(globalFlow.deltaUSD)} | Imbalance: ${aggrFlow.toFixed(2)} | W:${_v10742_flowCap.toFixed(0)}${_v10742_isChop?' (V10.7.42 chop-cap)':''} | raw:${_v10742_flowRaw.toFixed(1)}`);
 
   // ── SIGNAL 5: TECHNICAL COMPOSITE ──
   let techScore=0;
@@ -9341,13 +9358,18 @@ const computeV99Posterior=(params)=>{
     }else if(Math.abs(tsdScore)>0){
       reasoning.push(`[DELTA] ${_tsd.direction} delta ${_tsd.delta1Pct.toFixed(1)}% | d1=${_tsd.delta1.toFixed(0)} d2=${_tsd.delta2.toFixed(0)}${_tsd.momentumFlip?' ← FLIP':_tsd.accelerating?' ↑ ACCEL':''}`);
     }
-    const tsdClamped=Math.max(-13,Math.min(13,tsdScore));
+    // V10.7.42 — REGIME-GATED CAP: Delta gets +5pts of headroom in RANGE-CHOP
+    //   to compensate for Flow's chop-cap reduction. SYMMETRIC: applies to both
+    //   UP delta (+13→+18) and DOWN delta (-13→-18). No directional bias.
+    const _v10742_deltaCap=regime==='RANGE-CHOP'?18:13;
+    const tsdClamped=Math.max(-_v10742_deltaCap,Math.min(_v10742_deltaCap,tsdScore));
     rawSignalScores.delta=tsdClamped;
     rawSignalScores._delta1Pct=_tsd.delta1Pct; // raw delta % for audit
     rawSignalScores._delta2Pct=_tsd.delta2!==0?Math.round((_tsd.delta2/Math.max(1,Math.abs(_tsd.delta1+_tsd.delta2+_tsd.delta3)))*100):0;
     rawSignalScores._isCoiling=_coil.isCoiling?1:0;
     rawSignalScores._coilBodyBps=_coil.avgBodyBps; // how tight the coil was
     rawSignalScores._coilRangeBps=_coil.avgRangeBps;
+    rawSignalScores._deltaCap=_v10742_deltaCap; // applied cap for audit
     totalScore+=tsdClamped;
   }
   const funding=bloomberg?.fundingRate||0;
