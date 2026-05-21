@@ -2135,11 +2135,37 @@ const _getEstHour=()=>{
 //   Returns: { dial: number, reasoning: string[], status: 'TRADE'|'OBSERVE'|'SKIP' }
 //   Reasoning is an array of human-readable strings explaining each adjustment,
 //   so the UI can show why the dial landed where it did.
-const computeAdaptiveDial=({analysis,streak,todaySessionWR,todaySessionN})=>{
+const computeAdaptiveDial=({analysis,streak,todaySessionWR,todaySessionN,convictionState})=>{
   const _hour=_getEstHour();
   const _slot=TARA_SCHEDULE_BY_EST_HOUR[_hour]||{status:'OBSERVE',dial:50,wr:60,note:''};
   const reasoning=[`Hour ${_hour}:00 EST → ${_slot.status} (historical ${_slot.wr}% WR)`];
   let dial=_slot.dial;
+  // V10.7.48: Conviction state — when Tara has no real edge yet, push toward patient.
+  //   When conviction is strong early in window, push toward fast (lock at good Kalshi odds).
+  if(convictionState){
+    const _conv=Number(convictionState.conviction)||0;
+    const _winLenSec=convictionState.winLenSec||900;
+    const _elapsedSec=convictionState.elapsedSec||0;
+    const _pctElapsed=_winLenSec>0?_elapsedSec/_winLenSec:0;
+    // Early window (first 30%) — if strong conviction, push fast
+    if(_pctElapsed<0.30&&_conv>=15){
+      dial-=8;
+      reasoning.push(`Strong conviction (${_conv.toFixed(0)}pt) early — dial -8 (lock fast at good Kalshi odds)`);
+    } else if(_pctElapsed<0.30&&_conv>=10){
+      dial-=4;
+      reasoning.push(`Moderate conviction (${_conv.toFixed(0)}pt) early — dial -4`);
+    }
+    // Mid window (30-70%) — if still in deadzone, push patient
+    if(_pctElapsed>=0.30&&_pctElapsed<0.70&&_conv<5){
+      dial+=10;
+      reasoning.push(`Deadzone at ${Math.round(_pctElapsed*100)}% of window — dial +10 (wait for conviction)`);
+    }
+    // Late window (70%+) — if still in deadzone, prepare for sit-out (max patient)
+    if(_pctElapsed>=0.70&&_conv<5){
+      dial+=15;
+      reasoning.push(`Deadzone late in window — dial +15 (sit-out likely)`);
+    }
+  }
   // Streak adjustments — apply on top of the scheduled base
   if(streak&&streak.type==='WIN'&&streak.count>=4){
     dial+=5;
@@ -4042,8 +4068,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.21-v10.7.47-dial-aware-sitout-honest-ui';
-const TARA_VERSION_DISPLAY='Tara 10.7.47';
+const BASELINE_VERSION='2026.05.21-v10.7.49-deadzone-guard-conviction-meter';
+const TARA_VERSION_DISPLAY='Tara 10.7.49';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13560,6 +13586,56 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 )
               :null  /* userPosition is set but doesn't match Tara — user chose differently, hide */
         )}
+        {/* V10.7.48: Conviction Meter — visualizes how strong Tara's directional signal is.
+             Conviction = |posterior - 50|. Deadzone (0-5) = no real edge → sit out at end.
+             Built off live tc.posterior so it updates every tick during scanning. */}
+        {(()=>{
+          // Use snap's frozen posterior if locked, else live tc posterior
+          const _livePost=snap?(snap.atPosterior??tc?.posterior??50):(tc?.posterior??50);
+          const _post=Number(_livePost);
+          if(!isFinite(_post))return null;
+          const _conv=Math.abs(_post-50);
+          const _dir=_post>=50?'UP':'DOWN';
+          const _zone=_conv<5?'deadzone':_conv<10?'weak':_conv<15?'moderate':'strong';
+          const _zoneLabel=_conv<5?'DEADZONE — no edge':_conv<10?'WEAK conviction':_conv<15?'MODERATE conviction':'STRONG conviction';
+          const _zoneColor=_conv<5?'rgb(244,114,182)':_conv<10?'#E5C870':_conv<15?'rgb(110,231,183)':'rgb(52,211,153)';
+          const _zoneBg=_conv<5?'rgba(244,114,182,0.06)':_conv<10?'rgba(229,200,112,0.06)':_conv<15?'rgba(110,231,183,0.06)':'rgba(52,211,153,0.08)';
+          const _zoneBorder=_conv<5?'rgba(244,114,182,0.30)':_conv<10?'rgba(229,200,112,0.30)':_conv<15?'rgba(110,231,183,0.30)':'rgba(52,211,153,0.40)';
+          const _dirColor=_dir==='UP'?'rgb(110,231,183)':'rgb(244,114,182)';
+          // Position on 0-30+ scale (clamp at 30 for visual)
+          const _maxScale=30;
+          const _convClamped=Math.min(_conv,_maxScale);
+          const _fillPct=(_convClamped/_maxScale)*100;
+          return(
+            <div className="mb-2 px-2.5 py-1.5 rounded-md" style={{background:_zoneBg,border:'1px solid '+_zoneBorder}}>
+              <div className="flex items-center justify-between mb-1 gap-2">
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-[9px] uppercase tracking-[0.18em] font-bold" style={{color:_zoneColor}}>Conviction</span>
+                  <span className="text-[10px] font-bold tabular-nums" style={{color:_dirColor}}>{_conv.toFixed(1)}pt {_dir==='UP'?'▲':'▼'}</span>
+                </div>
+                <span className="text-[9px] uppercase tracking-wider font-bold" style={{color:_zoneColor}}>{_zoneLabel}</span>
+              </div>
+              {/* Conviction bar with zone dividers */}
+              <div className="relative h-1.5 rounded-full overflow-hidden" style={{background:'rgba(232,233,228,0.06)'}}>
+                {/* Deadzone marker (0-5) at start */}
+                <div className="absolute inset-y-0 left-0" style={{width:'16.6%',background:'rgba(244,114,182,0.10)'}}/>
+                {/* Fill bar */}
+                <div className="absolute inset-y-0 left-0 transition-all" style={{width:`${_fillPct}%`,background:_zoneColor,opacity:0.85}}/>
+                {/* Zone divider lines at 5/10/15 (= 16.6%/33.3%/50%) */}
+                <div className="absolute inset-y-0" style={{left:'16.6%',width:'1px',background:'rgba(232,233,228,0.20)'}}/>
+                <div className="absolute inset-y-0" style={{left:'33.3%',width:'1px',background:'rgba(232,233,228,0.15)'}}/>
+                <div className="absolute inset-y-0" style={{left:'50%',width:'1px',background:'rgba(232,233,228,0.15)'}}/>
+              </div>
+              <div className="flex justify-between mt-0.5 text-[8px] tabular-nums text-[#E8E9E4]/30">
+                <span>0</span>
+                <span style={{marginLeft:'3%'}}>5</span>
+                <span style={{marginLeft:'5%'}}>10</span>
+                <span style={{marginLeft:'5%'}}>15</span>
+                <span>30+</span>
+              </div>
+            </div>
+          );
+        })()}
         {/* V7.8: CAUTION BADGE for low-confidence commits. When Tara had to commit (1-2min
              cap, no high-conviction signal) and confidence is below the firm threshold,
              surface a clear caution chip so user knows the call is provisional. */}
@@ -18318,11 +18394,17 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
   },[taraCallLog,currentAsset]);
   React.useEffect(()=>{
     if(!speedAutoMode||typeof setSpeedDial!=='function')return;
+    // V10.7.48: derive conviction state from analysis posterior + window elapsed
+    const _v1048post=Number(analysis?.rawProbAbove)||50;
+    const _v1048conv=Math.abs(_v1048post-50);
+    const _v1048winLen=ctx?.windowType==='15m'?900:300;
+    const _v1048elapsed=ctx?.elapsedSec||0;
     const _adaptive=computeAdaptiveDial({
       analysis,
       streak:currentStreak,
       todaySessionWR:_todaySessionWR?.wr,
       todaySessionN:_todaySessionWR?.n,
+      convictionState:{conviction:_v1048conv,winLenSec:_v1048winLen,elapsedSec:_v1048elapsed},
     });
     const _rec=_adaptive.dial;
     const _cur=Math.max(0,Math.min(100,speedDial||50));
@@ -18333,7 +18415,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
     if(Math.abs(_rec-_cur)<5)return;
     _lastAppliedRecRef.current=_rec;
     setSpeedDial(_rec);
-  },[speedAutoMode,analysis?.velocityRegime,analysis?.windowAmplitude?.label,analysis?.atrBps,currentStreak?.type,currentStreak?.count,_todaySessionWR?.wr,_todaySessionWR?.n,setSpeedDial,speedDial]);
+  },[speedAutoMode,analysis?.velocityRegime,analysis?.windowAmplitude?.label,analysis?.atrBps,analysis?.rawProbAbove,currentStreak?.type,currentStreak?.count,_todaySessionWR?.wr,_todaySessionWR?.n,ctx?.elapsedSec,setSpeedDial,speedDial]);
   if(!ctx||!ctx.phase)return null;
   // V8.7.2: Compute the user's actual win rate in the CURRENT session bucket.
   //   Sessions = ASIA / EU / US (matches the session field stamped on each call).
@@ -37694,7 +37776,7 @@ function TaraApp(){
       if(_expensiveEntry&&_marginalConv&&_hasTimeToWait){
         // Track delay duration per window
         if(!_v104_1_delayStateRef.current||_v104_1_delayStateRef.current.windowId!==computeWindowId(windowType)){
-          _v104_1_delayStateRef.current={windowId:computeWindowId(windowType),ticks:0,firstSeenAt:Date.now(),firstKForDir:_kForDir,firstConv:_convNow};
+          _v104_1_delayStateRef.current={windowId:computeWindowId(windowType),ticks:0,firstSeenAt:Date.now(),firstKForDir:_kForDir,firstConv:_convNow,firstDir:_dirNow};
         }
         _v104_1_delayStateRef.current.ticks++;
         // Don't lock this tick — let conditions evolve. Re-evaluated next tick.
@@ -37706,6 +37788,47 @@ function TaraApp(){
         if(!_hasTimeToWait)_trigger='deadline';
         else if(!_expensiveEntry)_trigger='price-improved';
         else if(!_marginalConv)_trigger='conv-strengthened';
+        // V10.7.48 — ADVERSE-KALSHI GUARD.
+        //   When trigger is 'price-improved', the "improvement" means kForDir has
+        //   FALLEN below the expensive threshold. If it fell because Kalshi YES
+        //   moved AGAINST our direction (i.e., market consensus turned opposite
+        //   while we waited), then this "improvement" is adverse selection — we're
+        //   locking into a position the market just priced as worse.
+        //
+        //   Audit data (May 21 5-loss streak):
+        //     19:16 DOWN: firstKForDir 54 → 52 (drop 2pts)  — borderline, allow
+        //     19:31 DOWN: firstKForDir 56 → 44 (drop 12pts) — ADVERSE — should abort
+        //     19:46 DOWN: firstKForDir 55 → 46 (drop 9pts)  — ADVERSE — should abort
+        //     20:01 DOWN: firstKForDir 60 → 38 (drop 22pts) — ADVERSE — should abort
+        //   All 3 adverse cases lost. The "cheap" DOWN entries happened because
+        //   market got more bullish during the wait. Locking DOWN at the exact
+        //   moment consensus turned UP = worst-case adverse selection.
+        //
+        //   Fix: if drop ≥ 8pts AND trigger is 'price-improved', skip the lock.
+        //   The window keeps developing. Either signals stabilize and re-trigger,
+        //   or window closes without trade.
+        const _v1074_8_firstKForDir=_v104_1_delayStateRef.current.firstKForDir;
+        const _v1074_8_drop=(typeof _v1074_8_firstKForDir==='number'&&typeof _kForDir==='number')
+          ?(_v1074_8_firstKForDir-_kForDir):0;
+        const _v1074_8_dirFlipped=_v104_1_delayStateRef.current.firstDir&&_v104_1_delayStateRef.current.firstDir!==_dirNow;
+        const _v1074_8_isAdverse=_trigger==='price-improved'&&_v1074_8_drop>=8;
+        if(_v1074_8_isAdverse||_v1074_8_dirFlipped){
+          // Audit log the abort, clear delay state, then return WITHOUT locking.
+          _auditLogEvent('v10_7_48_adverse_kalshi_abort',{
+            windowId:computeWindowId(windowType),
+            firstDir:_v104_1_delayStateRef.current.firstDir,
+            currentDir:_dirNow,
+            firstKForDir:_v1074_8_firstKForDir,
+            finalKForDir:_kForDir,
+            kalshiDrop:_v1074_8_drop,
+            dirFlipped:_v1074_8_dirFlipped,
+            delaySeconds:Math.round((Date.now()-_v104_1_delayStateRef.current.firstSeenAt)/1000),
+            reason:_v1074_8_dirFlipped?'direction-flipped-during-delay':'kalshi-moved-against-us',
+          });
+          try{console.warn('[V10.7.48] Adverse Kalshi abort:',{dropPts:_v1074_8_drop,dirFlipped:_v1074_8_dirFlipped,firstDir:_v104_1_delayStateRef.current.firstDir,currentDir:_dirNow});}catch(_){}
+          _v104_1_delayStateRef.current=null; // clear state — let window keep developing
+          return; // skip lock this tick
+        }
         _v104_1_pendingDelayStampRef.current={
           delayed:true,
           delayTicks:_v104_1_delayStateRef.current.ticks,
@@ -38727,10 +38850,16 @@ function TaraApp(){
           //   User rule: never sit out except when window is literally dead.
           //   Check windowAmplitude — if rangeBps<5 AND past opening phase, true dead.
           //   Otherwise: convert chop time-cap sitout to force-commit using posterior.
+          // V10.7.48 — DEADZONE GUARD: when posterior is in 45-55 ("coin flip"),
+          //   force-commit historical WR is 42% (12 calls, May 21 audit). Adding a
+          //   deadzone guard: only force-commit when posterior shows real conviction
+          //   (outside 45-55). True coin flips → sit out, even in non-dead windows.
+          //   This is the "if she genuinely has no conviction, sit out" rule.
           const _wa=analysis?.windowAmplitude;
           const _rangeBps=_wa?.rangeBps||0;
           const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
-          if(!_isDeadWindow){
+          const _isTrueDeadzone=_postKnown&&_post>=45&&_post<=55; // V10.7.48: posterior coin flip
+          if(!_isDeadWindow&&!_isTrueDeadzone){
             // Force-commit to posterior direction. Skip the sitout snapshot entirely.
             // V10.7.6 — check for reversal signals before committing
             const _v107_6=_v10_7_6_reversalCheck(_post,analysis);
@@ -38766,24 +38895,34 @@ function TaraApp(){
             _persistLock();
             return;
           }
-          // Genuine dead window — preserve sit out
+          // Genuine sit-out — either dead window OR true coin-flip posterior.
+          // V10.7.48: separate tier for posterior-deadzone vs dead-window so we can audit each path.
+          const _sitReason=_isTrueDeadzone
+            ?`Coin-flip posterior ${_commitConf}% at time-cap — no real conviction, sit out (V10.7.48 deadzone guard)`
+            :`V10.2.50 chop time-cap guard: RANGE-CHOP regime + ${_commitConf}% conv at ${Math.round(elapsedSec)}s — historically loses, sit out`;
+          const _sitTier=_isTrueDeadzone?'deadzone-sitout':'chop-time-cap-sitout';
+          const _sitCaution=_isTrueDeadzone
+            ?`Deadzone guard — posterior ${_commitConf}% in 45-55 coin-flip zone → sit out (V10.7.48)`
+            :`Chop guard — ${_commitConf}% in RANGE-CHOP at time-cap, sub-baseline conviction → sit out (V10.2.50)`;
           const _sitSnap={
             call:'SIT_OUT',direction:'SIT_OUT',
             confidence:_commitConf,
-            caution:`Chop guard — ${_commitConf}% in RANGE-CHOP at time-cap, sub-baseline conviction → sit out (V10.2.50)`,
-            reason:`V10.2.50 chop time-cap guard: RANGE-CHOP regime + ${_commitConf}% conv at ${Math.round(elapsedSec)}s — historically loses, sit out`,
+            caution:_sitCaution,
+            reason:_sitReason,
             atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
             atPosterior:_post,
             kalshiAtLock:_kPctNow,
             locked:true,earlyLock:false,
             isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
             samples:0,needSamples:0,
-            tier:'chop-time-cap-sitout', // new tier name so we can audit
+            tier:_sitTier,
             session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
             regime:analysis?.regime||'',
             qScore:Math.round(_qFast),
             fgt:analysis?.mtfAlignment,
             _committedAt:Date.now(),
+            _v10_7_48_isTrueDeadzone:_isTrueDeadzone,
+            _v10_7_48_postAtSitout:_post,
           };
           taraCallSnapshotRef.current=_sitSnap;
           _logSnapshotEntry(_sitSnap);
