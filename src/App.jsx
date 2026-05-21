@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.20-v10.7.43a-onDeleteEntry-prop-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.43a';
+const BASELINE_VERSION='2026.05.21-v10.7.44-indicator-bar-ordering-fixes';
+const TARA_VERSION_DISPLAY='Tara 10.7.44';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6700,7 +6700,9 @@ const computeWhipsawCount=(bars,emaPeriod=20,lookback=10)=>{
   if(!bars||bars.length<emaPeriod+lookback)return 0;
   const closes=bars.map(b=>b.c);
   const needed=Math.min(bars.length,emaPeriod+lookback+5);
-  const recentCloses=closes.slice(-needed);
+  // V10.7.44 FIX: closes is newest-first. slice(-needed) was the OLDEST bars.
+  // slice(0,needed).reverse() gives NEWEST bars in oldest-first order for EMA math.
+  const recentCloses=closes.slice(0,needed).reverse();
   const n=recentCloses.length;
   // Build EMA series
   let ema=recentCloses.slice(0,emaPeriod).reduce((a,b)=>a+b,0)/emaPeriod;
@@ -6824,7 +6826,9 @@ const computeRegimeV10736=(bars,drift1m,drift5m,drift15m,atrBps)=>{
   if(!bars||bars.length<30)return null;
   const closes=bars.map(b=>b.c);
   const n=closes.length;
-  const currentClose=closes[n-1];
+  // V10.7.44 FIX: closes is newest-first. closes[n-1] is the OLDEST bar.
+  // currentClose must be closes[0] (most recent bar).
+  const currentClose=closes[0];
   // 1. ADX
   const {adx,valid:adxValid}=computeADX(bars,14);
   // 2. BBW percentile
@@ -6877,7 +6881,9 @@ const computeStochRSI=(closes,rsiPeriod=14,stochPeriod=14,smoothK=3,smoothD=3)=>
   // V10.7.38a AUDIT FIX: liveHistory is newest-first. Reverse to oldest-first
   // so RSI/stochastic math works chronologically (older→newer = price going up).
   const needed=rsiPeriod+stochPeriod+smoothK+smoothD+10;
-  const slice=closes.slice(-needed).reverse(); // oldest-first now
+  // V10.7.44 FIX: closes is newest-first. slice(-needed) was taking the OLDEST needed
+  // bars (tail of array). Must use slice(0,needed) to get the NEWEST bars, then reverse.
+  const slice=closes.slice(0,needed).reverse(); // oldest-first now (newest bars)
   const n=slice.length;
   // RSI series
   const rsiSeries=[];
@@ -7090,36 +7096,41 @@ const computeAnchoredVWAP=(bars,swingLookback=20)=>{
   if(!bars||bars.length<swingLookback+2){
     return{anchoredHi:0,anchoredLo:0,anchoredMean:0,aboveHi:false,belowLo:false,aboveMean:false,valid:false};
   }
-  const n=bars.length;
+  // V10.7.44 FIX: bars is newest-first (liveHistory). Previous code searched bars[n-1]
+  // (oldest bar) as "current" and iterated toward the oldest end for the lookback window —
+  // completely backwards. Reverse to oldest-first so barsOF[n-1]=newest (current bar),
+  // and the most recent swingLookback bars are indices n-lb to n-1.
+  const barsOF=bars.slice().reverse(); // oldest-first: barsOF[n-1]=newest bar
+  const n=barsOF.length;
   const lb=Math.min(swingLookback,n);
-  // Find highest high within lookback (anchor for Hi VWAP)
-  let hiIdx=n-1,hiVal=bars[n-1].h;
+  // Find highest high within most recent lb bars (anchor for Hi VWAP)
+  let hiIdx=n-1,hiVal=barsOF[n-1].h;
   for(let i=n-2;i>=n-lb;i--){
-    if(bars[i].h>hiVal){hiVal=bars[i].h;hiIdx=i;}
+    if(barsOF[i].h>hiVal){hiVal=barsOF[i].h;hiIdx=i;}
   }
-  // Find lowest low within lookback (anchor for Lo VWAP)
-  let loIdx=n-1,loVal=bars[n-1].l;
+  // Find lowest low within most recent lb bars (anchor for Lo VWAP)
+  let loIdx=n-1,loVal=barsOF[n-1].l;
   for(let i=n-2;i>=n-lb;i--){
-    if(bars[i].l<loVal){loVal=bars[i].l;loIdx=i;}
+    if(barsOF[i].l<loVal){loVal=barsOF[i].l;loIdx=i;}
   }
-  // Compute VWAP from hi anchor → current (hl2 weighted by volume)
+  // Compute VWAP from hi anchor forward to current bar (oldest-first: anchor < current)
   let hiVwapSum=0,hiVolSum=0;
   for(let i=hiIdx;i<n;i++){
-    const hl2=(bars[i].h+bars[i].l)/2;
-    const vol=bars[i].v||1;
+    const hl2=(barsOF[i].h+barsOF[i].l)/2;
+    const vol=barsOF[i].v||1;
     hiVwapSum+=hl2*vol;hiVolSum+=vol;
   }
-  const anchoredHi=hiVolSum>0?hiVwapSum/hiVolSum:bars[n-1].c;
-  // Compute VWAP from lo anchor → current
+  const anchoredHi=hiVolSum>0?hiVwapSum/hiVolSum:barsOF[n-1].c;
+  // Compute VWAP from lo anchor forward to current bar
   let loVwapSum=0,loVolSum=0;
   for(let i=loIdx;i<n;i++){
-    const hl2=(bars[i].h+bars[i].l)/2;
-    const vol=bars[i].v||1;
+    const hl2=(barsOF[i].h+barsOF[i].l)/2;
+    const vol=barsOF[i].v||1;
     loVwapSum+=hl2*vol;loVolSum+=vol;
   }
-  const anchoredLo=loVolSum>0?loVwapSum/loVolSum:bars[n-1].c;
+  const anchoredLo=loVolSum>0?loVwapSum/loVolSum:barsOF[n-1].c;
   const anchoredMean=(anchoredHi+anchoredLo)/2;
-  const currentClose=bars[n-1].c;
+  const currentClose=barsOF[n-1].c; // newest bar's close (last in oldest-first)
   // Distance from mean (bps) — how far price is from fair value
   const distFromMeanBps=anchoredMean>0?((currentClose-anchoredMean)/anchoredMean)*10000:0;
   return{
