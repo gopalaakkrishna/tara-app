@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.21-v10.7.44-indicator-bar-ordering-fixes';
-const TARA_VERSION_DISPLAY='Tara 10.7.44';
+const BASELINE_VERSION='2026.05.21-v10.7.44a-layout-refactor';
+const TARA_VERSION_DISPLAY='Tara 10.7.44a';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26256,6 +26256,7 @@ function TaraApp(){
   useEffect(()=>{try{localStorage.setItem('taraTradingSettings_v1',JSON.stringify(tradingSettings));}catch(_){}},[tradingSettings]);
   const[showTradingSettings,setShowTradingSettings]=useState(false);
   const[showBestPractices,setShowBestPractices]=useState(false); // V8.5: best-practices modal
+  const[showDualFeed,setShowDualFeed]=useState(false); // V10.7.44 layout: dual feed collapsed to header toggle
   // ── V9.3.0: KALSHI AUTO-EXECUTION STATE ─────────────────────────────────
   // Credentials are localStorage-only and NEVER cloud-synced. Auto-exec defaults
   // OFF and dry-run defaults ON until you've verified your first sandbox order.
@@ -40836,16 +40837,29 @@ function TaraApp(){
             </button>
           </div>
 
-          {/* Live Price — shrinks gracefully, never truncates on sm+ */}
-          <div className={`flex items-center gap-0.5 font-serif font-bold shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
-            <IC.Zap className={`w-3 h-3 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#E8E9E4]/40'}`}/>
-            {/* Mobile: no decimals to save space. sm+: full price */}
-            <span className="text-sm sm:hidden">${currentPrice?Math.round(currentPrice).toLocaleString():'---'}</span>
-            <span className="hidden sm:inline text-xl">${currentPrice?currentPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'---'}</span>
-          </div>
-
-          {/* Market sessions — md+ only */}
-          <div className="hidden md:flex items-center gap-1 text-xs shrink-0">{marketSessions.sessions.map((s,i)=><span key={i} className={`${s.color} opacity-80`}>{s.flag}</span>)}</div>
+          {/* V10.7.44: Live price moved to Strike area for gap-check proximity. Sessions always visible. */}
+          <div className="flex items-center gap-1 text-xs shrink-0">{marketSessions.sessions.map((s,i)=><span key={i} className={`${s.color} opacity-80`}>{s.flag}</span>)}</div>
+          {/* V10.7.44: Dual feed toggle — compact header button, expands feed strip */}
+          {(()=>{
+            const _dfa=currentAsset==='BTC'?'ETH':'BTC';
+            const _dfs=shadowTaraByAssetRef.current?.[_dfa];
+            const _dff=_dfs&&(Date.now()-(_dfs.updatedAt||0))<8000;
+            const _dfl=_dff?_dfs.leanDir:null;
+            const _dfc=_dff?Math.round(_dfs.confidence||0):null;
+            const _dfcfg=ASSET_CONFIG[_dfa]||{};
+            const _dflc=_dfl==='UP'?'rgb(110,231,183)':_dfl==='DOWN'?'rgb(244,114,182)':'rgba(232,233,228,0.45)';
+            return(
+              <button onClick={()=>setShowDualFeed(v=>!v)}
+                className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 transition-colors select-none"
+                style={showDualFeed?{background:'rgba(232,233,228,0.08)',border:'1px solid rgba(232,233,228,0.25)',color:'rgba(232,233,228,0.80)'}:{background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.12)',color:'rgba(232,233,228,0.40)'}}
+                title={`${_dfa} shadow feed — click to ${showDualFeed?'hide':'show'}`}>
+                <span style={{color:_dfcfg.color||'rgba(232,233,228,0.55)'}}>{_dfcfg.icon||'?'}</span>
+                <span>{_dfa}</span>
+                {!_dff?<span className="text-rose-400/70">STALE</span>:<span style={{color:_dflc}}>{_dfl==='UP'?'▲':_dfl==='DOWN'?'▼':'–'}{_dfc!=null?_dfc+'%':''}</span>}
+                <span style={{opacity:0.5}}>{showDualFeed?'▲':'▼'}</span>
+              </button>
+            );
+          })()}
 
           {/* V8.0: Today's P&L + streak/tilt awareness pills — fits between sessions and asset selector */}
           <TodayPnLPill todayData={todayData} onClick={()=>setShowTradingSettings(true)}/>
@@ -41339,28 +41353,54 @@ function TaraApp(){
         className="flex-1 w-full max-w-[1600px] mx-auto px-2 sm:px-3 lg:px-4 py-2 sm:py-3 flex flex-col gap-3 min-h-0 min-w-0 overflow-x-hidden"
       >
         
+        {/* V7.10.6: Market context strip — current phase, cautions, next transition */}
+        {/* V8.7.2: Now also reads call log + currentAsset for session-WR advisory */}
+        <MarketContextStrip
+          useLocalTime={useLocalTime}
+          timeFormat={timeFormat}
+          taraLearnings={taraLearnings}
+          taraCallLog={taraCallLog}
+          currentAsset={currentAsset}
+          analysis={analysis}
+          currentStreak={currentStreak}
+          speedDial={speedDial}
+          setSpeedDial={setSpeedDial}
+          speedAutoMode={tradingSettings?.speedAutoMode}
+          setSpeedAutoMode={(v)=>setTradingSettings(prev=>({...prev,speedAutoMode:!!v}))}
+        />
+
+        {/* V9.10.2: Unified Today card — replaces DailyInsightCard + TodayCard +
+            PerformanceCard. Single component, three internal zones (header, body,
+            expandable detail). See L9707 for component definition. */}
+        <UnifiedTodayCard
+          todayData={todayData}
+          bestWindowsToday={bestWindowsToday}
+          tickHistoryRef={tickHistoryRef}
+          upcomingMacro={getUpcomingMacroEvents(new Date(),24)}
+          timeFormat={timeFormat}
+          settings={tradingSettings}
+        />
+
+
         {/* STATS BAR */}
         <div className={'bg-[#181A19] rounded-xl border border-[#E8E9E4]/10 shadow-md relative overflow-hidden shrink-0'}>
           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
-          <div className="p-2 sm:p-3 grid grid-cols-2 lg:grid-cols-none lg:flex lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-auto">
+          <div className="p-2 sm:p-3 flex flex-wrap lg:flex-nowrap lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-hidden">
             
             {/* Strike — auto or manual */}
             <div className="flex flex-col min-w-0 w-full lg:min-w-[160px] lg:w-auto col-span-1">
               <div className="flex items-center justify-between mb-1 gap-2 min-w-0">
                 <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide shrink-0'}>Strike</div>
-                {/* V10.4.1c — live BTC price chip next to strike for quick visual gap-check.
-                    Shows current spot vs strike at a glance. */}
+                {/* V10.7.44: Prominent live price display — moved from header to here for gap-check proximity */}
                 {currentPrice>0&&(
-                  <div className="text-[10px] text-[#E8E9E4]/60 tabular-nums truncate">
-                    <span className="text-[#E8E9E4]/40">spot </span>
-                    <span className={
-                      targetMargin>0
-                        ?(currentPrice>=targetMargin?'text-emerald-400 font-bold':'text-rose-400 font-bold')
-                        :'text-white font-bold'
-                    }>${currentPrice.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                  <div className="flex items-center gap-1.5 tabular-nums">
+                    <IC.Zap className={`w-3 h-3 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#E8E9E4]/30'}`}/>
+                    <span className={`text-sm sm:text-base font-serif font-bold ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
+                      ${currentPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+                    </span>
                     {targetMargin>0&&(
-                      <span className="text-[#E8E9E4]/45 ml-1">
-                        ({(((currentPrice-targetMargin)/targetMargin)*10000).toFixed(0)}bps)
+                      <span className={`text-[10px] font-bold px-1 py-0.5 rounded ${currentPrice>=targetMargin?'text-emerald-400 bg-emerald-500/10':'text-rose-400 bg-rose-500/10'}`}>
+                        {currentPrice>=targetMargin?'+':''}{(((currentPrice-targetMargin)/targetMargin)*10000).toFixed(0)}bps
                       </span>
                     )}
                   </div>
@@ -41632,21 +41672,6 @@ function TaraApp(){
             they wanted those calls shown in the advisor panel, not as a
             separate stacked card. No standalone render here. */}
 
-        {/* V7.10.6: Market context strip — current phase, cautions, next transition */}
-        {/* V8.7.2: Now also reads call log + currentAsset for session-WR advisory */}
-        <MarketContextStrip
-          useLocalTime={useLocalTime}
-          timeFormat={timeFormat}
-          taraLearnings={taraLearnings}
-          taraCallLog={taraCallLog}
-          currentAsset={currentAsset}
-          analysis={analysis}
-          currentStreak={currentStreak}
-          speedDial={speedDial}
-          setSpeedDial={setSpeedDial}
-          speedAutoMode={tradingSettings?.speedAutoMode}
-          setSpeedAutoMode={(v)=>setTradingSettings(prev=>({...prev,speedAutoMode:!!v}))}
-        />
 
         {/* V9.17.2: Scalper panel moved into PredictionContent (left column),
             replacing the engine prediction hero. No standalone render here. */}
@@ -41681,10 +41706,8 @@ function TaraApp(){
           compact={true}
         />
 
-        {/* V9.3.0: Dual-asset call strip — side-by-side BTC + ETH calls.
-            Active asset = live engine output. Inactive = shadow engine
-            (background analysis, 2s cadence, soft-lock at 2 consec samples). */}
-        <DualAssetCallStrip
+        {/* V10.7.44: Dual feed strip — only renders when header toggle is ON */}
+        {showDualFeed&&<DualAssetCallStrip
           currentAsset={currentAsset}
           onSwitch={setCurrentAsset}
           taraCall={taraCall}
@@ -41694,7 +41717,7 @@ function TaraApp(){
           shadowRef={shadowTaraByAssetRef}
           diagRef={shadowDiagRef}
           timeState={timeState}
-        />
+        />}
 
         {/* V8.7: Live Trade Coach — situational advisory while in a trade */}
         {/* V9.3.0: also shows Kalshi auto-order status + kill switch when active */}
@@ -41742,17 +41765,6 @@ function TaraApp(){
           currentAsset={currentAsset}
         />
 
-        {/* V9.10.2: Unified Today card — replaces DailyInsightCard + TodayCard +
-            PerformanceCard. Single component, three internal zones (header, body,
-            expandable detail). See L9707 for component definition. */}
-        <UnifiedTodayCard
-          todayData={todayData}
-          bestWindowsToday={bestWindowsToday}
-          tickHistoryRef={tickHistoryRef}
-          upcomingMacro={getUpcomingMacroEvents(new Date(),24)}
-          timeFormat={timeFormat}
-          settings={tradingSettings}
-        />
 
         {/* V8.4: PerformanceCard moved into the prediction column (bottom) — fills the
             blank space below PredictionContent and uses the lg:auto-rows-fr column height
