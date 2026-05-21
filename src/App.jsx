@@ -4042,8 +4042,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.21-v10.7.46-auto-speed-dial-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.46';
+const BASELINE_VERSION='2026.05.21-v10.7.47-dial-aware-sitout-honest-ui';
+const TARA_VERSION_DISPLAY='Tara 10.7.47';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13306,35 +13306,61 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     const isWatching=!snap&&!!_liveLeanDir;
     const isCall=isLockedSnap;
     const effDir=isLockedSnap?snap.call:isWatching?_liveLeanDir:null;
-    const callColor=isLockedSnap
+    // V10.7.47: detect the "promoted sit-out" state. V8.9.2 forced every SIT_OUT to
+    //   carry a direction (so user always has something to override/follow), but the
+    //   headline label was still saying LOCKED — confusing the user about what Tara
+    //   actually decided. We keep the lean direction visible (color + arrow) but make
+    //   the headline read SITTING OUT honestly.
+    const isOverrideSitOut=isLockedSnap&&(snap?.wasOverriddenSitOut===true);
+    const isOverrideNoTrade=isLockedSnap&&(snap?.wasOverriddenNoTrade===true);
+    const isOverrideAny=isOverrideSitOut||isOverrideNoTrade;
+    const callColor=isOverrideAny
+      ?(effDir==='UP'?'text-amber-300':'text-amber-300')
+      :isLockedSnap
       ?(effDir==='UP'?'text-emerald-300':'text-rose-300')
       :isWatching
         ?(effDir==='UP'?'text-emerald-400/75':'text-rose-400/75')
         :isNoGoSnap?'text-red-400'
         :isSatOutSnap?'text-amber-400/85':'text-amber-300/80';
-    const borderClr=isLockedSnap
+    const borderClr=isOverrideAny
+      ?'rgba(245,158,11,0.40)'
+      :isLockedSnap
       ?(effDir==='UP'?'rgba(52,211,153,0.45)':'rgba(244,114,182,0.45)')
       :isWatching
         ?(effDir==='UP'?'rgba(52,211,153,0.25)':'rgba(244,114,182,0.25)')
         :isNoGoSnap?'rgba(248,113,113,0.55)'
         :isSatOutSnap?'rgba(245,158,11,0.4)':T2_GOLD_BORDER;
-    const bgClr=isLockedSnap
+    const bgClr=isOverrideAny
+      ?'rgba(245,158,11,0.06)'
+      :isLockedSnap
       ?(effDir==='UP'?'rgba(52,211,153,0.08)':'rgba(244,114,182,0.08)')
       :isWatching
         ?(effDir==='UP'?'rgba(52,211,153,0.04)':'rgba(244,114,182,0.04)')
         :isNoGoSnap?'rgba(248,113,113,0.10)'
         :isSatOutSnap?'rgba(245,158,11,0.06)':'rgba(229,200,112,0.05)';
-    const callLabel=isLockedSnap
+    const callLabel=isOverrideSitOut
+      ?'SITTING OUT'
+      :isOverrideNoTrade
+      ?'NO TRADE'
+      :isLockedSnap
       ?(snap.call==='UP'?'LOCKED UP':'LOCKED DOWN')
       :isNoGoSnap?'NO TRADE'
       :isSatOutSnap?'SITTING OUT'
       :isWatching?(effDir==='UP'?'WATCHING UP':'WATCHING DOWN')
       :'SCANNING';
+    // V10.7.47: sublabel for override sit-out shows the "would have leaned" direction so user
+    //   has a hint to override on if they disagree with Tara's sit-out call.
+    const callSubLabel=isOverrideSitOut&&effDir
+      ?`would lean ${effDir} · ${dispConfidence}%`
+      :isOverrideNoTrade&&effDir
+      ?`would lean ${effDir} · ${dispConfidence}%`
+      :null;
     const arrow=isNoGoSnap?'⊘':effDir==='UP'?'▲':effDir==='DOWN'?'▼':isSatOutSnap?'·':'·';
     // V5.6.5: Phase mirrors the call states.
     // V6.0.5: WATCHING gets its own phase label so user can see formation state.
     // V7.9: NO_TRADE label.
-    const phaseLabel=snap?(isNoGoSnap?'NO TRADE':isSatOutSnap?'SITTING OUT':'LOCKED'):isWatching?'WATCHING':'SCANNING';
+    // V10.7.47: phase reflects override state honestly.
+    const phaseLabel=snap?(isOverrideSitOut?'SITTING OUT':isOverrideNoTrade?'NO TRADE':isNoGoSnap?'NO TRADE':isSatOutSnap?'SITTING OUT':'LOCKED'):isWatching?'WATCHING':'SCANNING';
     const samplesLeft=Math.max(0,(tc.needSamples||180)-(tc.samples||0));
     // Window timing
     const _totalSec=windowType==='15m'?900:300;
@@ -13455,6 +13481,10 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           <div className={`flex items-baseline gap-2 flex-wrap ${callColor}`}>
             <span className="text-2xl">{arrow}</span>
             <span className="text-3xl font-serif font-bold tracking-tight leading-none">{callLabel}</span>
+            {/* V10.7.47: lean sublabel for sit-out overrides — shows direction Tara would have leaned */}
+            {callSubLabel&&(
+              <span className="text-[11px] font-mono uppercase tracking-wider text-[#E8E9E4]/55 leading-none self-baseline">{callSubLabel}</span>
+            )}
             {/* V9.19.2 Phase 3: Tara WR pill — real numbers from taraCallLog.
                  Computes WR on last 30 resolved windows (WIN+LOSS only,
                  SITOUT excluded). This is Tara's directional accuracy
@@ -38159,12 +38189,14 @@ function TaraApp(){
         //   stamp gets included into the entry via the spread sites elsewhere.
         const _v104_1_clearDelayAfterLog=()=>{_v104_1_pendingDelayStampRef.current=null;};
         setTimeout(_v104_1_clearDelayAfterLog,0);
-        // V9.1.8: SITOUT logging gate. User feedback: only count SITOUT when site is
-        //   opened with ≤2-3 mins remaining. Otherwise let the window roll over without
-        //   an entry. Real directional calls (UP/DOWN) always log; NO_TRADE explicit
-        //   no-gos also still log (those are intentional skip decisions). The skip
-        //   target is the AMBIGUOUS engine-didn't-form case where snapshot.call is
-        //   SIT_OUT and there's no isNoGo flag — those used to log as SITOUT.
+        // V9.1.8 → V10.7.47: SITOUT logging gate REMOVED.
+        //   Was: skip ambiguous SIT_OUT entries unless user opened app late. Reasoning
+        //   was "not actionable, just a quiet rollover." But user audit showed 70+ silent
+        //   sitouts in 2 days — most firing at 30-70s into 15min windows. No visibility,
+        //   no chance to correct. V10.7.47 logs them all as `mixed-sitout` entries with
+        //   leanDir/leanPct stamps so the Memory shows the full picture.
+        //   The earlier `windowOpenTimeRef`/`_msSinceMount` audit context is preserved
+        //   inline below for diagnostic purposes; just no longer a skip gate.
         const _isAmbiguousSitOut=snapshot&&snapshot.call==='SIT_OUT'&&!snapshot.isNoGo;
         if(_isAmbiguousSitOut){
           const _now=Date.now();
@@ -38172,21 +38204,15 @@ function TaraApp(){
           const _winLenSec=(windowType==='15m'?900:300);
           const _elapsedSec=windowOpenTimeRef.current?Math.max(0,(_now-windowOpenTimeRef.current)/1000):0;
           const _secsLeft=Math.max(0,_winLenSec-_elapsedSec);
-          // "User opened the app late" = mounted within last 30s AND window has ≤3min left.
-          //   Any other ambiguous SIT_OUT (engine had time, didn't form a call) is no
-          //   longer logged — it's not an actionable result, just a quiet rollover.
-          const _userOpenedLate=_msSinceMount<=30000&&_secsLeft<=180;
-          if(!_userOpenedLate){
-            try{console.info('[V9.1.8] Skipping ambiguous SITOUT log — engine had time, no commit. Window left:',Math.round(_secsLeft),'s, mounted',Math.round(_msSinceMount/1000),'s ago');}catch(_){}
-            // V9.10.7: audit every V9.1.8 skip so we can count them and decide whether the rule still earns its keep
-            _auditLogEvent('logSnapshotEntry-V9.1.8-ambiguous-sitout-skip',{
-              source:'_logSnapshotEntry',
-              windowType,
-              msSinceMount:Math.round(_msSinceMount),
-              secsLeftInWindow:Math.round(_secsLeft),
-            });
-            return;
-          }
+          try{console.info('[V10.7.47] Mixed-sitout logging (V9.1.8 filter removed). Window left:',Math.round(_secsLeft),'s, mounted',Math.round(_msSinceMount/1000),'s ago, leanDir:',snapshot.leanDir||'(none)');}catch(_){}
+          _auditLogEvent('v10_7_47_mixed_sitout_logged',{
+            source:'_logSnapshotEntry',
+            windowType,
+            msSinceMount:Math.round(_msSinceMount),
+            secsLeftInWindow:Math.round(_secsLeft),
+            leanDir:snapshot.leanDir||null,
+            leanPct:snapshot.leanPct||null,
+          });
         }
         const _wid=computeWindowId(windowType);
         // Asset tag with strike-magnitude inference (mirrors V7.1 logic from main lock path).
@@ -38825,7 +38851,23 @@ function TaraApp(){
         return; // skip this tick; resolution will come from sample formation or 90s cap
       }
     }
-    if(elapsedSec>=30&&!_hasAnyConfluence&&_qFast<25&&taraCallSnapshotRef.current===null){
+    // V10.7.47: Dial-aware mixed-sitout threshold + lean stamp.
+    //   Was: bail at 30s flat regardless of dial. Result: Tara was giving up on 14m+
+    //   of window development to chase a "fast" decision that wasn't actually fast,
+    //   just early. Fix: dial controls patience before commit. Faster dial = bail sooner,
+    //   patient dial = wait longer for signals to clarify.
+    //   Formula: base 30s + (dial/100) * (winLen * 0.4)
+    //     15m window: 30s @ dial=0 → 6m30s @ dial=100
+    //     5m  window: 30s @ dial=0 → 2m30s @ dial=100
+    //   ALSO: stamp leanDir based on posterior so UI can show "would have leaned X".
+    //   Lock timing for clear signals is UNAFFECTED — this only delays the sit-out commitment.
+    const _v1074_dialNow=Math.max(0,Math.min(100,(typeof speedDialRef!=='undefined'&&speedDialRef.current!=null?speedDialRef.current:50)));
+    const _v1074_winLen=windowType==='15m'?900:300;
+    const _v1074_sitoutMinSec=30+(_v1074_dialNow/100)*(_v1074_winLen*0.4);
+    if(elapsedSec>=_v1074_sitoutMinSec&&!_hasAnyConfluence&&_qFast<25&&taraCallSnapshotRef.current===null){
+      const _v1074_post=Number(analysis?.rawProbAbove)||50;
+      const _v1074_lean=_v1074_post>=50?'UP':'DOWN';
+      const _v1074_leanPct=_v1074_lean==='UP'?Math.round(_v1074_post):Math.round(100-_v1074_post);
       const _mixSnap={
         call:'SIT_OUT',direction:null,confidence:0,
         reason:`Mixed signals at ${Math.round(elapsedSec)}s — sitting out`,
@@ -38840,6 +38882,11 @@ function TaraApp(){
         regime:analysis?.regime||'',
         qScore:Math.round(_qFast),
         fgt:analysis?.mtfAlignment,
+        // V10.7.47: directional lean stamps for UI hint + audit trail
+        leanDir:_v1074_lean,
+        leanPct:_v1074_leanPct,
+        _v10_7_47_sitoutThresholdSec:Math.round(_v1074_sitoutMinSec),
+        _v10_7_47_dialAtSitout:Math.round(_v1074_dialNow),
       };
       taraCallSnapshotRef.current=_mixSnap;
       _logSnapshotEntry(_mixSnap); // V7.10.1
