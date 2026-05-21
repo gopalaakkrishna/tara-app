@@ -4042,8 +4042,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.21-v10.7.45-window-lifecycle-audit';
-const TARA_VERSION_DISPLAY='Tara 10.7.45';
+const BASELINE_VERSION='2026.05.21-v10.7.46-auto-speed-dial-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.46';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -18296,7 +18296,10 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
     });
     const _rec=_adaptive.dial;
     const _cur=Math.max(0,Math.min(100,speedDial||50));
-    if(_rec===_lastAppliedRecRef.current)return;
+    // V10.7.46 FIX: removed `_rec===_lastAppliedRecRef.current` dedup. It prevented
+    //   re-correction when the dial drifted away from the applied value (e.g. user
+    //   dragged manually while auto was on). Now the only guard is the delta check
+    //   against the LIVE current value — if the dial drifts, auto re-snaps it.
     if(Math.abs(_rec-_cur)<5)return;
     _lastAppliedRecRef.current=_rec;
     setSpeedDial(_rec);
