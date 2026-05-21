@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.21-v10.7.44a-layout-refactor';
-const TARA_VERSION_DISPLAY='Tara 10.7.44a';
+const BASELINE_VERSION='2026.05.21-v10.7.44b-strike-layout-feed-simple-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.44b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -40816,25 +40816,7 @@ function TaraApp(){
                         Coinbase's $2-3B/day. OKX has $1-2B/day → candles look full like
                         Coinbase. USDT-vs-USD spread ($5-30) is well within Kalshi's $250
                         strike granularity + bid/ask noise. */}
-            <button
-              onClick={()=>{
-                const _i=PRICE_SOURCE_KEYS.indexOf(priceSource);
-                const _next=PRICE_SOURCE_KEYS[(_i+1)%PRICE_SOURCE_KEYS.length];
-                setPriceSource(_next);
-              }}
-              className="hidden sm:flex items-center gap-1 text-[9px] font-sans font-bold tracking-wider px-2 py-0.5 rounded-md border transition-colors"
-              style={{
-                background:feedFrozen?'rgba(244,63,94,0.12)':feedSlow?'rgba(229,200,112,0.12)':'rgba(255,255,255,0.04)',
-                borderColor:feedFrozen?'rgba(244,63,94,0.45)':feedSlow?'rgba(229,200,112,0.40)':'rgba(255,255,255,0.15)',
-                color:feedFrozen?'#fb7185':feedSlow?'#E5C870':'rgba(232,233,228,0.55)',
-              }}
-              title={`Live price source: ${PRICE_SOURCES[priceSource].name}. Click to cycle (Coinbase → Kraken → Bitfinex). ${feedFrozen?`FROZEN ${feedStaleSeconds}s — new locks paused.`:feedSlow?`Slow (${feedStaleSeconds}s since last change).`:'Live'}`}
-            >
-              <span>FEED</span>
-              <span className="opacity-60">·</span>
-              <span>{PRICE_SOURCES[priceSource].label}</span>
-              {feedFrozen&&<span className="opacity-90">·{feedStaleSeconds}s</span>}
-            </button>
+
           </div>
 
           {/* V10.7.44: Live price moved to Strike area for gap-check proximity. Sessions always visible. */}
@@ -40957,6 +40939,13 @@ function TaraApp(){
             <button onClick={()=>handleWindowToggle('5m')} className={`px-2.5 sm:px-5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='5m'?'bg-indigo-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>5m</button>
             <button onClick={()=>handleWindowToggle('15m')} className={`px-2.5 sm:px-5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='15m'?'bg-emerald-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>15m</button>
           </div>
+          {/* V10.7.44a: simple/advanced moved from fixed overlay into header — no more corner overlap */}
+          <button
+            onClick={()=>setSimpleMode(!simpleMode)}
+            className="text-[10px] uppercase tracking-[0.14em] px-2 py-1 rounded border border-[#E8E9E4]/12 hover:border-[#E8E9E4]/35 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/75 transition-colors shrink-0"
+            style={{background:'rgba(10,10,11,0.6)',fontFamily:'ui-monospace,monospace'}}
+            title={simpleMode?'Switch to advanced (legacy) layout':'Switch to simple layout'}
+          >{simpleMode?'advanced':'simple'}</button>
 
           {/* Right controls — on mobile show only 3 most critical: sound, ?, whale */}
           <div className="flex items-center gap-1 shrink-0">
@@ -41128,14 +41117,6 @@ function TaraApp(){
           (impossible to miss components when the JSX is the same) and lets us
           iterate visual polish without restructuring. */}
       <>
-      {/* V9.16.4: theme toggle pill — always visible top-right corner. Toggles
-          between 'simple' (cleaner CSS skin) and 'advanced' (legacy raw skin). */}
-      <button
-        onClick={()=>setSimpleMode(!simpleMode)}
-        className="fixed top-3 right-3 z-50 text-[10px] uppercase tracking-[0.14em] px-2.5 py-1 rounded border border-[#E8E9E4]/15 hover:border-[#E8E9E4]/40 text-[#E8E9E4]/55 hover:text-[#E8E9E4]/85 transition-colors"
-        style={{background:'rgba(10,10,11,0.92)',fontFamily:'ui-monospace,monospace'}}
-        title={simpleMode?'Switch to advanced (legacy) layout':'Switch to simple layout'}
-      >{simpleMode?'advanced':'simple'}</button>
       {/* V9.16.5: Aesthetic uplift. Same V9.15 layout, refined CSS theme:
            - Cards lose hard borders, separate by tone-shift backgrounds
            - Hero glow on Tara's Call card (subtle gold ambient pulse when locked)
@@ -41387,70 +41368,86 @@ function TaraApp(){
           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
           <div className="p-2 sm:p-3 flex flex-wrap lg:flex-nowrap lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-hidden">
             
-            {/* Strike — auto or manual */}
-            <div className="flex flex-col min-w-0 w-full lg:min-w-[160px] lg:w-auto col-span-1">
-              <div className="flex items-center justify-between mb-1 gap-2 min-w-0">
-                <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide shrink-0'}>Strike</div>
-                {/* V10.7.44: Prominent live price display — moved from header to here for gap-check proximity */}
+            {/* Strike — auto or manual + live price (V10.7.44a) */}
+            <div className="flex min-w-0 w-full lg:w-auto col-span-1 gap-2 items-start">
+              {/* LEFT: feed toggle + big live price */}
+              <div className="flex flex-col shrink-0 min-w-[80px]">
+                {/* Feed source button — moved here from header */}
+                <button
+                  onClick={()=>{const _i=PRICE_SOURCE_KEYS.indexOf(priceSource);const _next=PRICE_SOURCE_KEYS[(_i+1)%PRICE_SOURCE_KEYS.length];setPriceSource(_next);}}
+                  className="flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border transition-colors mb-1 self-start"
+                  style={{background:feedFrozen?'rgba(244,63,94,0.12)':feedSlow?'rgba(229,200,112,0.12)':'rgba(255,255,255,0.04)',borderColor:feedFrozen?'rgba(244,63,94,0.45)':feedSlow?'rgba(229,200,112,0.40)':'rgba(255,255,255,0.15)',color:feedFrozen?'#fb7185':feedSlow?'#E5C870':'rgba(232,233,228,0.55)'}}
+                  title={`Live price source: ${PRICE_SOURCES[priceSource].name}. Click to cycle. ${feedFrozen?`FROZEN ${feedStaleSeconds}s`:feedSlow?`Slow (${feedStaleSeconds}s)`:'Live'}`}
+                >
+                  <span>FEED</span>
+                  <span className="opacity-50">·</span>
+                  <span>{PRICE_SOURCES[priceSource].label}</span>
+                  {feedFrozen&&<span className="opacity-90">·{feedStaleSeconds}s</span>}
+                </button>
+                {/* Big live price */}
                 {currentPrice>0&&(
-                  <div className="flex items-center gap-1.5 tabular-nums">
-                    <IC.Zap className={`w-3 h-3 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#E8E9E4]/30'}`}/>
-                    <span className={`text-sm sm:text-base font-serif font-bold ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
-                      ${currentPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
-                    </span>
+                  <div className="flex flex-col">
+                    <div className={`flex items-center gap-1 font-serif font-bold tabular-nums ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-white'}`}>
+                      <IC.Zap className={`w-3 h-3 shrink-0 ${tickDirection==='up'?'text-emerald-400':tickDirection==='down'?'text-rose-400':'text-[#E8E9E4]/30'}`}/>
+                      <span className="text-lg sm:text-xl leading-tight">${currentPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+                    </div>
                     {targetMargin>0&&(
-                      <span className={`text-[10px] font-bold px-1 py-0.5 rounded ${currentPrice>=targetMargin?'text-emerald-400 bg-emerald-500/10':'text-rose-400 bg-rose-500/10'}`}>
+                      <span className={`text-[10px] font-bold px-1 py-0.5 rounded mt-0.5 self-start ${currentPrice>=targetMargin?'text-emerald-400 bg-emerald-500/10':'text-rose-400 bg-rose-500/10'}`}>
                         {currentPrice>=targetMargin?'+':''}{(((currentPrice-targetMargin)/targetMargin)*10000).toFixed(0)}bps
                       </span>
                     )}
                   </div>
                 )}
-                <span
-                  onClick={()=>{isManualStrikeRef.current=false;hasSetInitialMargin.current=false;setWindowOpenStrike(currentPriceRef.current||currentPrice);}}
-                  title={(()=>{
-                    const baseTooltip=strikeSource==='kalshi'?'Strike from Kalshi · click to re-capture':strikeMode==='auto'?'Live spot price at window open · click to re-capture':'Manual override · click to restore live';
-                    // V3.1.11: Always show Kalshi extraction status so user can diagnose
-                    const dbg=kalshiDebug;
-                    let dbgLine='';
-                    if(dbg.ok===null)dbgLine='\n\nKalshi: not yet polled';
-                    else if(dbg.ok===false)dbgLine=`\n\nKalshi extraction FAILED: ${dbg.reason}`;
-                    else if(dbg.bestStrike)dbgLine=`\n\nKalshi: ${dbg.reason}`;
-                    else dbgLine=`\n\nKalshi: ${dbg.totalMarkets} markets · ${dbg.matchingClose} matching close · NO STRIKE EXTRACTABLE\nFields: ${(dbg.sampleFields||[]).slice(0,5).join(', ')}`;
-                    return baseTooltip+dbgLine;
-                  })()}
-                  className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer select-none font-bold transition-colors ${strikeSource==='kalshi'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':strikeMode==='auto'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-emerald-500/15 hover:text-emerald-400'}`}
-                >{strikeSource==='kalshi'?'KLSH':strikeMode==='auto'?'LIVE':'MANUAL'}</span>
               </div>
-              <div className="flex items-center gap-1">
-                <IC.Crosshair className="w-4 h-4 text-indigo-400 hidden sm:block"/>
-                <input type="number"
-                  value={targetMargin===0?'':targetMargin}
-                  onChange={e=>{const v=Number(e.target.value);setTargetMargin(v);isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(false);}}
-                  onKeyDown={e=>{if(e.key==='Enter'&&targetMargin>0){isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);e.target.blur();}}}
-                  onBlur={()=>{/* do not auto-confirm on blur — user must press OK or Enter */}}
-                  className={'bg-transparent text-white font-serif text-base sm:text-lg w-full focus:outline-none border-b border-[#E8E9E4]/10 focus:border-indigo-400'}
-                  placeholder="Auto-set"
-                />
-                {targetMargin>0&&strikeMode==='manual'&&(
-                  <button
-                    onClick={()=>{isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);}}
-                    className="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500 hover:bg-indigo-400 text-white transition-colors">OK ✓</button>
-                )}
-              </div>
-              {/* V3.1.12: Visible Kalshi extraction diagnostic — shows status whenever
-                  strike is NOT from Kalshi, so user can see why and copy field names.
-                  Hidden when Kalshi is succeeding (KLSH pill speaks for itself). */}
-              {strikeSource!=='kalshi'&&kalshiDebug.ok!==null&&(
-                <div className="text-[9px] text-[#E8E9E4]/35 mt-1 font-mono">
-                  {kalshiDebug.ok===false?(
-                    <span className="text-rose-400/70">Kalshi: {kalshiDebug.reason}</span>
-                  ):kalshiDebug.bestStrike?(
-                    <span className="text-emerald-400/60">Kalshi {kalshiDebug.bestStrike} from {kalshiDebug.bestTicker?.slice(-20)||'?'}</span>
-                  ):(
-                    <span className="text-amber-400/60">Kalshi: {kalshiDebug.totalMarkets} mkts · {kalshiDebug.matchingClose} matching · no strike → fields: {(kalshiDebug.sampleFields||[]).slice(0,4).join(' ')}</span>
+              {/* Divider */}
+              <div className="w-px self-stretch bg-[#E8E9E4]/10 shrink-0"/>
+              {/* RIGHT: strike label + input */}
+              <div className="flex flex-col flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1 gap-2 min-w-0">
+                  <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide shrink-0'}>Strike</div>
+                  <span
+                    onClick={()=>{isManualStrikeRef.current=false;hasSetInitialMargin.current=false;setWindowOpenStrike(currentPriceRef.current||currentPrice);}}
+                    title={(()=>{
+                      const baseTooltip=strikeSource==='kalshi'?'Strike from Kalshi · click to re-capture':strikeMode==='auto'?'Live spot price at window open · click to re-capture':'Manual override · click to restore live';
+                      const dbg=kalshiDebug;
+                      let dbgLine='';
+                      if(dbg.ok===null)dbgLine='\n\nKalshi: not yet polled';
+                      else if(dbg.ok===false)dbgLine=`\n\nKalshi extraction FAILED: ${dbg.reason}`;
+                      else if(dbg.bestStrike)dbgLine=`\n\nKalshi: ${dbg.reason}`;
+                      else dbgLine=`\n\nKalshi: ${dbg.totalMarkets} markets · ${dbg.matchingClose} matching close · NO STRIKE EXTRACTABLE\nFields: ${(dbg.sampleFields||[]).slice(0,5).join(', ')}`;
+                      return baseTooltip+dbgLine;
+                    })()}
+                    className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer select-none font-bold transition-colors ${strikeSource==='kalshi'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':strikeMode==='auto'?'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30':'bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-emerald-500/15 hover:text-emerald-400'}`}
+                  >{strikeSource==='kalshi'?'KLSH':strikeMode==='auto'?'LIVE':'MANUAL'}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <IC.Crosshair className="w-4 h-4 text-indigo-400 hidden sm:block"/>
+                  <input type="number"
+                    value={targetMargin===0?'':targetMargin}
+                    onChange={e=>{const v=Number(e.target.value);setTargetMargin(v);isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(false);}}
+                    onKeyDown={e=>{if(e.key==='Enter'&&targetMargin>0){isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);e.target.blur();}}}
+                    onBlur={()=>{}}
+                    className={'bg-transparent text-white font-serif text-base sm:text-lg w-full focus:outline-none border-b border-[#E8E9E4]/10 focus:border-indigo-400'}
+                    placeholder="Auto-set"
+                  />
+                  {targetMargin>0&&strikeMode==='manual'&&(
+                    <button
+                      onClick={()=>{isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);}}
+                      className="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500 hover:bg-indigo-400 text-white transition-colors">OK ✓</button>
                   )}
                 </div>
-              )}
+                {strikeSource!=='kalshi'&&kalshiDebug.ok!==null&&(
+                  <div className="text-[9px] text-[#E8E9E4]/35 mt-1 font-mono">
+                    {kalshiDebug.ok===false?(
+                      <span className="text-rose-400/70">Kalshi: {kalshiDebug.reason}</span>
+                    ):kalshiDebug.bestStrike?(
+                      <span className="text-emerald-400/60">Kalshi {kalshiDebug.bestStrike} from {kalshiDebug.bestTicker?.slice(-20)||'?'}</span>
+                    ):(
+                      <span className="text-amber-400/60">Kalshi: {kalshiDebug.totalMarkets} mkts · {kalshiDebug.matchingClose} matching · no strike → fields: {(kalshiDebug.sampleFields||[]).slice(0,4).join(' ')}</span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <div className={'w-px h-8 bg-[#E8E9E4]/10 hidden lg:block'}></div>
 
