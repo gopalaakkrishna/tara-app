@@ -4068,8 +4068,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.21-v10.7.49-deadzone-guard-conviction-meter';
-const TARA_VERSION_DISPLAY='Tara 10.7.49';
+const BASELINE_VERSION='2026.05.21-v10.7.50-direction-bias-indicator';
+const TARA_VERSION_DISPLAY='Tara 10.7.50';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13527,6 +13527,42 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               const _bg=_wr>=70?'rgba(110,231,183,0.08)':_wr>=60?'rgba(229,200,112,0.08)':'rgba(244,114,182,0.06)';
               const _border=_wr>=70?'rgba(110,231,183,0.30)':_wr>=60?'rgba(229,200,112,0.30)':'rgba(244,114,182,0.22)';
               return <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded self-baseline tabular-nums" style={{color:_color,background:_bg,border:`1px solid ${_border}`}} title={`Tara's directional accuracy on last ${_n} resolved windows. Target: ≥70%. Excludes sit-outs.`}>WR · {_wr}% <span className="opacity-60 normal-case">(last {_n})</span></span>;
+            })()}
+            {/* V10.7.50: Direction Bias pill — surfaces UP/DOWN call distribution and per-dir WR
+                 over last 30 resolved windows. Highlights amber when one direction >60% AND that
+                 direction's WR <45% — visible warning that recent calls are skewing wrong way. */}
+            {(()=>{
+              const _log=Array.isArray(taraCallLog)?taraCallLog:[];
+              const _resolved=_log.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS'));
+              const _last30=_resolved.slice(-30);
+              if(_last30.length<10)return null;
+              const _up=_last30.filter(e=>e.dir==='UP');
+              const _dn=_last30.filter(e=>e.dir==='DOWN');
+              const _upW=_up.filter(e=>e.result==='WIN').length;
+              const _dnW=_dn.filter(e=>e.result==='WIN').length;
+              const _upWR=_up.length?_upW/_up.length:0;
+              const _dnWR=_dn.length?_dnW/_dn.length:0;
+              const _upPct=_last30.length?_up.length/_last30.length:0;
+              const _dnPct=_last30.length?_dn.length/_last30.length:0;
+              // Warn state: one direction >60% of calls AND its WR <45%
+              const _upWarn=_upPct>0.6&&_upWR<0.45;
+              const _dnWarn=_dnPct>0.6&&_dnWR<0.45;
+              const _warn=_upWarn||_dnWarn;
+              // Show dominant direction's stats
+              const _dominantDir=_upPct>_dnPct?'UP':'DOWN';
+              const _domWR=_dominantDir==='UP'?_upWR:_dnWR;
+              const _domPct=_dominantDir==='UP'?_upPct:_dnPct;
+              const _arrow=_dominantDir==='UP'?'▲':'▼';
+              // Only show when skewed (>55%) so we don't add noise when balanced
+              if(_domPct<0.55)return null;
+              const _color=_warn?'rgba(244,114,182,0.95)':_domPct>0.65?'#E5C870':'rgba(232,233,228,0.55)';
+              const _bg=_warn?'rgba(244,114,182,0.12)':_domPct>0.65?'rgba(229,200,112,0.08)':'rgba(232,233,228,0.04)';
+              const _border=_warn?'rgba(244,114,182,0.40)':_domPct>0.65?'rgba(229,200,112,0.30)':'rgba(232,233,228,0.15)';
+              return(
+                <span className="text-[9px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded self-baseline tabular-nums" style={{color:_color,background:_bg,border:`1px solid ${_border}`}} title={`Last ${_last30.length} resolved windows: UP=${_up.length} (${Math.round(_upWR*100)}% WR) · DOWN=${_dn.length} (${Math.round(_dnWR*100)}% WR).${_warn?' Warning: dominant direction losing more than winning.':''}`}>
+                  {_arrow}{Math.round(_domPct*100)}% · {Math.round(_domWR*100)}%WR
+                </span>
+              );
             })()}
             {isLockedSnap&&<span className="text-[11px] tabular-nums opacity-50 self-baseline" title="Raw posterior — not WR-calibrated. WR pill above is the calibrated signal.">{dispConfidence}% <span className="opacity-60">raw</span></span>}
             {/* V9.9.5: tier chip on the locked card. Reads from snap.tier (V9.9.5 added
@@ -38377,6 +38413,25 @@ function TaraApp(){
           rawPosteriorAtLock:analysis?.rawPosteriorUncalibrated??analysis?.rawProbAbove??null, /* V9.11.3: distinguish raw vs calibrated */
           calibratedPosteriorAtLock:analysis?.rawProbAbove??null, /* V9.11.2 fix: was reading analysis.posterior but useMemo exposes it as rawProbAbove */
           signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
+          // V10.7.50: Direction bias stamps — record recent UP/DOWN ratio and WR-per-direction
+          //   at lock time. Enables auditing whether bias correlates with losing streaks
+          //   and validates whether V10.7.49 deadzone guard is structurally fixing the bias.
+          ...(()=>{
+            const _resolved=taraCallLogRef.current.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS'));
+            const _last30=_resolved.slice(-30);
+            if(_last30.length<10)return{};
+            const _up=_last30.filter(e=>e.dir==='UP');
+            const _dn=_last30.filter(e=>e.dir==='DOWN');
+            const _upWR=_up.length?_up.filter(e=>e.result==='WIN').length/_up.length:null;
+            const _dnWR=_dn.length?_dn.filter(e=>e.result==='WIN').length/_dn.length:null;
+            return{
+              _v10_7_50_recentDirN:_last30.length,
+              _v10_7_50_recentUpPct:Math.round((_up.length/_last30.length)*100),
+              _v10_7_50_recentDnPct:Math.round((_dn.length/_last30.length)*100),
+              _v10_7_50_recentUpWR:_upWR!=null?Math.round(_upWR*1000)/10:null,
+              _v10_7_50_recentDnWR:_dnWR!=null?Math.round(_dnWR*1000)/10:null,
+            };
+          })(),
           tapeAtLock:analysis?.tapeWindows?{
             w15Buy:analysis.tapeWindows.w15?.buyPct??null,
             w30Buy:analysis.tapeWindows.w30?.buyPct??null,
