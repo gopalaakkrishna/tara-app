@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.21-v10.7.44d-chat-btn-memory-modal-mobile';
-const TARA_VERSION_DISPLAY='Tara 10.7.44d';
+const BASELINE_VERSION='2026.05.21-v10.7.44e-memory-modal-header-mobile';
+const TARA_VERSION_DISPLAY='Tara 10.7.44e';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -18937,12 +18937,12 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
     onClick:(e)=>{if(e.target===e.currentTarget)onClose();},
   },
     React.createElement('div',{className:'max-w-[900px] mx-auto px-2 sm:px-4 py-3 sm:py-8 w-full min-w-0'},
-      React.createElement('div',{className:'flex items-center justify-between mb-5'},
+      React.createElement('div',{className:'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4'},
         React.createElement('div',null,
           React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-[0.18em]',style:{color:T2_GOLD}},'TARA · MEMORY'),
-          React.createElement('h2',{className:'font-serif text-3xl text-white tracking-tight'},'Every call ',React.createElement('span',{style:{color:T2_GOLD}},'·'),' her record'),
+          React.createElement('h2',{className:'font-serif text-lg sm:text-3xl text-white tracking-tight leading-tight'},'Every call ',React.createElement('span',{style:{color:T2_GOLD}},'·'),' her record'),
         ),
-        React.createElement('div',{className:'flex items-center gap-2'},
+        React.createElement('div',{className:'flex flex-wrap items-center gap-1.5'},
           // V9.9.3: Verify storage — instant in-memory checks for inconsistencies.
           //   Cheap pass over every entry looking for: missing strike or closingPrice on
           //   resolved entries, direction-result contradiction (UP with closingGapBps<0
@@ -18990,7 +18990,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               }
               setReconcileResult({kind:'verify',issues:_issues,checkedAt:Date.now(),total:taraCallLog.length,byAsset:_byAsset});
             },
-            className:'px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
+            className:'px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[9px] sm:text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
             style:{
               background:'rgba(229,200,112,0.08)',
               color:'rgba(229,200,112,0.85)',
@@ -19304,7 +19304,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               }
             },
             disabled:reconcileBusy,
-            className:'px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
+            className:'px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[9px] sm:text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
             style:{
               background:reconcileBusy?'rgba(232,233,228,0.04)':'rgba(124,93,250,0.08)',
               color:reconcileBusy?'rgba(232,233,228,0.4)':'rgba(196,181,253,0.9)',
@@ -19341,7 +19341,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 alert('Export failed: '+(e.message||String(e)));
               }
             },
-            className:'px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
+            className:'px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[9px] sm:text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
             style:{
               background:'rgba(229,200,112,0.10)',
               color:T2_GOLD,
@@ -19493,7 +19493,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 alert('CSV export failed: '+(e.message||String(e)));
               }
             },
-            className:'px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
+            className:'px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[9px] sm:text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
             style:{
               background:'rgba(110,231,183,0.08)',
               color:'rgba(110,231,183,0.85)',
