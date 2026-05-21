@@ -3911,8 +3911,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.21-v10.7.44b-strike-layout-feed-simple-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.44b';
+const BASELINE_VERSION='2026.05.21-v10.7.44c-clean-header';
+const TARA_VERSION_DISPLAY='Tara 10.7.44c';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26257,6 +26257,7 @@ function TaraApp(){
   const[showTradingSettings,setShowTradingSettings]=useState(false);
   const[showBestPractices,setShowBestPractices]=useState(false); // V8.5: best-practices modal
   const[showDualFeed,setShowDualFeed]=useState(false); // V10.7.44 layout: dual feed collapsed to header toggle
+  const[showHeaderOverflow,setShowHeaderOverflow]=useState(false); // V10.7.44b: ··· overflow panel
   // ── V9.3.0: KALSHI AUTO-EXECUTION STATE ─────────────────────────────────
   // Credentials are localStorage-only and NEVER cloud-synced. Auto-exec defaults
   // OFF and dry-run defaults ON until you've verified your first sandbox order.
@@ -40782,243 +40783,183 @@ function TaraApp(){
       )}
 
       {/* V134: Learning toast removed — was crashing on minified prod build, will revisit */}
-      {/* ── STICKY HEADER ── */}
-      {/* V9.16.3: Legacy header now renders in BOTH modes. Simple mode previously
-          had its own minimal SimpleTopBar which dropped many features (feed pill,
-          tier-1 toggle, sound, calm/wild state, etc). Per user direction:
-          "in simple mode everything is there too" — so the legacy header,
-          which has every pill, runs in both modes. The visual "simple" difference
-          comes from the body layout below, not from removing header features. */}
-      {/* V8.4: flex-wrap so pills + buttons reflow on narrower screens instead of clipping */}
+      {/* ── STICKY HEADER — V10.7.44b CLEAN ── */}
       <header className={'sticky top-0 z-40 bg-[#111312]/95 backdrop-blur-md border-b border-[#E8E9E4]/10 px-2 sm:px-4 py-2 shrink-0'}>
-        <div className="max-w-[1600px] mx-auto flex flex-wrap items-center gap-1 gap-y-1.5 sm:gap-2">
-          
-          {/* Logo — text only on mobile, 2.0 badge on sm+ */}
-          {/* V2.0: redesigned badge — gold accent, deliberate weight. Matches the studio's
-                   restrained-luxury aesthetic. The pulse dot stays — it's the live-state indicator. */}
+        <div className="max-w-[1600px] mx-auto flex items-center gap-1.5 sm:gap-2">
+
+          {/* LEFT: Logo + version + balance */}
           <div className="flex items-center gap-1.5 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
-            <span className={'hidden sm:flex items-center gap-1.5 text-[10px] font-sans font-bold tracking-wider px-2 py-0.5 rounded-md border'} style={{
-              background:'linear-gradient(135deg, rgba(212,175,55,0.15), rgba(212,175,55,0.05))',
-              borderColor:'rgba(212,175,55,0.35)',
-              color:'#E5C870',
-              boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)',
-            }}>
+            <span className={'hidden sm:flex items-center gap-1.5 text-[10px] font-sans font-bold tracking-wider px-2 py-0.5 rounded-md border'} style={{background:'linear-gradient(135deg,rgba(212,175,55,0.15),rgba(212,175,55,0.05))',borderColor:'rgba(212,175,55,0.35)',color:'#E5C870',boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)'}}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
               {TARA_VERSION_DISPLAY.replace(/^Tara\s+/,'')}
             </span>
-            {/* V9.17.4: Kalshi balance pill — current balance + today's delta */}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
-            {/* V9.8.4: FEED source selector. Click to cycle Coinbase → Kraken → OKX.
-                        Color shifts: white-grey (live) → gold (slow >30s) → rose (frozen >60s).
-                        V9.8.11: Gemini (V9.8.10) reverted to OKX. Gemini's $30-50M/day spot
-                        volume produced thin candles unreadable for pattern detection vs
-                        Coinbase's $2-3B/day. OKX has $1-2B/day → candles look full like
-                        Coinbase. USDT-vs-USD spread ($5-30) is well within Kalshi's $250
-                        strike granularity + bid/ask noise. */}
-
           </div>
 
-          {/* V10.7.44: Live price moved to Strike area for gap-check proximity. Sessions always visible. */}
-          <div className="flex items-center gap-1 text-xs shrink-0">{marketSessions.sessions.map((s,i)=><span key={i} className={`${s.color} opacity-80`}>{s.flag}</span>)}</div>
-          {/* V10.7.44: Dual feed toggle — compact header button, expands feed strip */}
-          {(()=>{
-            const _dfa=currentAsset==='BTC'?'ETH':'BTC';
-            const _dfs=shadowTaraByAssetRef.current?.[_dfa];
-            const _dff=_dfs&&(Date.now()-(_dfs.updatedAt||0))<8000;
-            const _dfl=_dff?_dfs.leanDir:null;
-            const _dfc=_dff?Math.round(_dfs.confidence||0):null;
-            const _dfcfg=ASSET_CONFIG[_dfa]||{};
-            const _dflc=_dfl==='UP'?'rgb(110,231,183)':_dfl==='DOWN'?'rgb(244,114,182)':'rgba(232,233,228,0.45)';
-            return(
-              <button onClick={()=>setShowDualFeed(v=>!v)}
-                className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 transition-colors select-none"
-                style={showDualFeed?{background:'rgba(232,233,228,0.08)',border:'1px solid rgba(232,233,228,0.25)',color:'rgba(232,233,228,0.80)'}:{background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.12)',color:'rgba(232,233,228,0.40)'}}
-                title={`${_dfa} shadow feed — click to ${showDualFeed?'hide':'show'}`}>
-                <span style={{color:_dfcfg.color||'rgba(232,233,228,0.55)'}}>{_dfcfg.icon||'?'}</span>
-                <span>{_dfa}</span>
-                {!_dff?<span className="text-rose-400/70">STALE</span>:<span style={{color:_dflc}}>{_dfl==='UP'?'▲':_dfl==='DOWN'?'▼':'–'}{_dfc!=null?_dfc+'%':''}</span>}
-                <span style={{opacity:0.5}}>{showDualFeed?'▲':'▼'}</span>
-              </button>
-            );
-          })()}
-
-          {/* V8.0: Today's P&L + streak/tilt awareness pills — fits between sessions and asset selector */}
+          {/* TODAY P&L */}
           <TodayPnLPill todayData={todayData} onClick={()=>setShowTradingSettings(true)}/>
-          {/* V9.9.9: Tier-1 Only Mode pill — ALWAYS visible. When ON: filled green
-               ★ TIER-1. When OFF: subtle outlined TIERS · ALL. Single click toggles
-               the mode directly. Long-press opens trading settings for context. The
-               always-visible pattern surfaces the toggle without requiring users to
-               dig through settings; the icon/color tells them at a glance what mode
-               Tara is in. Drops the V9.9.8 "show only when ON" rule. */}
-          {(()=>{
-            const _on=!!tradingSettings?.tier1OnlyMode;
-            // Long-press timer to differentiate tap (toggle) from press (settings)
-            const _pressRef={current:null};
-            return (
-              <button
-                onPointerDown={()=>{_pressRef.current=setTimeout(()=>{_pressRef.current=null;setShowTradingSettings(true);},500);}}
-                onPointerUp={()=>{if(_pressRef.current){clearTimeout(_pressRef.current);_pressRef.current=null;setTradingSettings(prev=>({...prev,tier1OnlyMode:!prev?.tier1OnlyMode}));}}}
-                onPointerLeave={()=>{if(_pressRef.current){clearTimeout(_pressRef.current);_pressRef.current=null;}}}
-                className="px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider shrink-0 transition-colors select-none"
-                style={_on
-                  ?{color:'rgb(110,231,183)',background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.35)'}
-                  :{color:'rgba(232,233,228,0.55)',background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.15)'}
-                }
-                title={_on
-                  ?'Tier-1 Only ON — single / time-cap-commit / no-go-* locks auto-skip. Tap to allow all tiers. Long-press for settings.'
-                  :'All tiers allowed. Tap to enable Tier-1 Only Mode (auto-skip marginal locks). Long-press for settings.'
-                }
-              >
-                {_on?'★ TIER-1':'TIERS · ALL'}
-              </button>
-            );
-          })()}
-          {/* V9.3.0: Kalshi auto-exec status pill. Visible whenever auto-exec is enabled OR
-              kill switch is engaged. Click to open settings; long-press effect not needed —
-              the kill switch button on LiveTradeCoach is the always-instant kill. */}
-          {(autoExecSettings.enabled||killSwitchEngaged)&&(
-            <button
-              onClick={()=>setShowTradingSettings(true)}
-              className="px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider shrink-0 transition-colors"
-              style={killSwitchEngaged?{color:'#F87171',background:'rgba(248,113,113,0.15)',border:'1px solid rgba(248,113,113,0.40)'}:autoExecSettings.dryRun?{color:'#FBBF24',background:'rgba(251,191,36,0.10)',border:'1px solid rgba(251,191,36,0.30)'}:{color:'#6EE7B7',background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.30)'}}
-              title={killSwitchEngaged?'Kalshi auto-exec killed — tap to open settings':autoExecSettings.dryRun?'Auto-exec live in dry-run mode — tap to configure':'Auto-exec live — tap to configure'}
-            >
-              {killSwitchEngaged?'⛔ KILLED':autoExecSettings.dryRun?'DRY · AUTO':'⚡ AUTO'}
-            </button>
-          )}
-          {/* V8.3: Peer tab indicator — shows when multi-tab merging is active */}
-          <TabPresencePill peerTabs={peerTabs}/>
-          {/* V8.6: Cloud sync health indicator — click to open sync menu (force resync / baseline ops) */}
-          {/* V9.1.6: Click now opens a 3-option menu instead of a single force-resync confirm. */}
-          <SyncStatusPill onClick={()=>{
-            if(forceResyncing||baselineBusy)return;
-            setSyncMenuOpen(true);
-          }}/>
-          <StreakTiltPill todayData={todayData}/>
-          {/* V8.1: Movement risk pulse — vol/volume/tape/whale composite */}
-          <MovementRiskPill movementRisk={movementRisk}/>
 
-          {/* Spacer */}
+          {/* SPACER */}
           <div className="flex-1"/>
 
-          {/* V6.5.8: Asset selector — BTC/ETH. Click switches asset and resets state.
-              V7.7: Inactive asset shows shadow Tara's current lean so user sees Tara's
-              decision on the other asset BEFORE switching tabs. */}
-          <div className={'flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0'}>
-            {ASSET_KEYS.map(k=>{
-              const _c=ASSET_CONFIG[k];
-              const _active=currentAsset===k;
-              // V7.7: pull shadow lean for inactive assets
-              const _shadow=!_active?shadowTaraByAssetRef.current?.[k]:null;
-              const _shadowFresh=_shadow&&(Date.now()-(_shadow.updatedAt||0))<15000;
-              const _shadowLean=_shadowFresh&&_shadow.leanDir!=='NEUTRAL'?_shadow:null;
-              const _leanColor=_shadowLean?(_shadowLean.leanDir==='UP'?'rgb(110,231,183)':'rgb(244,114,182)'):null;
-              return(
-                <button
-                  key={k}
-                  onClick={()=>setCurrentAsset(k)}
-                  className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all flex items-center gap-1 ${_active?'shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
-                  style={_active?{background:_c.color+'22',color:_c.color,border:'1px solid '+_c.color+'66'}:{}}
-                  title={_active?_c.label:_shadowLean?`${_c.label} — Tara leans ${_shadowLean.leanDir} ${_shadowLean.confidence}% (background)`:_c.label}
-                >
-                  <span className="text-sm leading-none" style={{color:_active?_c.color:'inherit'}}>{_c.icon}</span>
-                  <span className="hidden sm:inline text-[10px]">{_c.label}</span>
-                  {_shadowLean&&(
-                    <span className="ml-0.5 text-[8px] font-bold tabular-nums leading-none" style={{color:_leanColor}}>
-                      {_shadowLean.leanDir==='UP'?'▲':'▼'}{_shadowLean.confidence}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          {/* RIGHT: asset selector + window toggle + sound + ··· */}
+          <div className="flex items-center gap-1.5 shrink-0">
 
-          {/* Window toggle */}
-          <div className={'flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0'}>
-            <button onClick={()=>handleWindowToggle('5m')} className={`px-2.5 sm:px-5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='5m'?'bg-indigo-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>5m</button>
-            <button onClick={()=>handleWindowToggle('15m')} className={`px-2.5 sm:px-5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='15m'?'bg-emerald-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>15m</button>
-          </div>
-          {/* V10.7.44a: simple/advanced moved from fixed overlay into header — no more corner overlap */}
-          <button
-            onClick={()=>setSimpleMode(!simpleMode)}
-            className="text-[10px] uppercase tracking-[0.14em] px-2 py-1 rounded border border-[#E8E9E4]/12 hover:border-[#E8E9E4]/35 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/75 transition-colors shrink-0"
-            style={{background:'rgba(10,10,11,0.6)',fontFamily:'ui-monospace,monospace'}}
-            title={simpleMode?'Switch to advanced (legacy) layout':'Switch to simple layout'}
-          >{simpleMode?'advanced':'simple'}</button>
-
-          {/* Right controls — on mobile show only 3 most critical: sound, ?, whale */}
-          <div className="flex items-center gap-1 shrink-0">
-            {/* V8.9.3: 3-way time format toggle. local → utc → est → local
-                V9.8.15: pill is now always visible (was hidden xl:flex — only on 1280px+ screens
-                meaning mobile/tablet users couldn't switch the timezone, so any time-display
-                inconsistency they saw was unfixable). On smaller screens shows just the
-                format abbreviation; xl+ also shows the live current time. */}
-            <div className="flex flex-col items-end cursor-pointer mr-1 px-1.5 py-0.5 rounded-md border border-[#E8E9E4]/8 hover:border-indigo-500/30 transition-colors" onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')} title={`Time format: ${timeFormat.toUpperCase()} · click to cycle (LOCAL → UTC → EST). Affects all timestamps across Tara — header, memory, CSV exports, Discord broadcasts, charts.`}>
-              <span className={'text-[10px] sm:text-xs text-[#E8E9E4]/55 uppercase tracking-wider font-bold'}>{timeFormat.toUpperCase()}</span>
-              <span className={'hidden xl:inline text-sm font-mono text-[#E8E9E4]/80'}>{timeState.currentTime||'--:--:--'}</span>
+            {/* BTC / ETH */}
+            <div className={'flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0'}>
+              {ASSET_KEYS.map(k=>{
+                const _c=ASSET_CONFIG[k];
+                const _active=currentAsset===k;
+                const _shadow=!_active?shadowTaraByAssetRef.current?.[k]:null;
+                const _shadowFresh=_shadow&&(Date.now()-(_shadow.updatedAt||0))<15000;
+                const _shadowLean=_shadowFresh&&_shadow.leanDir!=='NEUTRAL'?_shadow:null;
+                const _leanColor=_shadowLean?(_shadowLean.leanDir==='UP'?'rgb(110,231,183)':'rgb(244,114,182)'):null;
+                return(
+                  <button key={k} onClick={()=>setCurrentAsset(k)}
+                    className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all flex items-center gap-1 ${_active?'shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}
+                    style={_active?{background:_c.color+'22',color:_c.color,border:'1px solid '+_c.color+'66'}:{}}
+                    title={_active?_c.label:_shadowLean?`${_c.label} — Tara leans ${_shadowLean.leanDir} ${_shadowLean.confidence}%`:_c.label}
+                  >
+                    <span className="text-sm leading-none" style={{color:_active?_c.color:'inherit'}}>{_c.icon}</span>
+                    <span className="hidden sm:inline text-[10px]">{_c.label}</span>
+                    {_shadowLean&&<span className="ml-0.5 text-[8px] font-bold tabular-nums leading-none" style={{color:_leanColor}}>{_shadowLean.leanDir==='UP'?'▲':'▼'}{_shadowLean.confidence}</span>}
+                  </button>
+                );
+              })}
             </div>
-            {/* Always visible — sound is essential */}
-            <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`} title={soundEnabled?'Sound on — click to mute':'Sound off — click to enable'}>{soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}</button>
-            {/* V6.0: master volume slider — only shows when sound is on. Persists to localStorage. */}
-            {soundEnabled&&(
-              <div className="hidden sm:flex items-center gap-1 ml-0.5" title="Alert volume">
-                <input
-                  type="range" min="0" max="1" step="0.05"
-                  value={alertVolume}
-                  onChange={(e)=>setAlertVolume(parseFloat(e.target.value))}
-                  className="w-16 h-1 accent-indigo-400 cursor-pointer"
-                  style={{accentColor:'#818CF8'}}
-                />
-              </div>
-            )}
-            {/* V9.10.3: Session start check button removed per user request. The
-                pulsing 📋 button used to open a pre-trading checklist modal. State +
-                modal definition still exist in the file for now but are unreachable
-                from UI. Will fully clean up in a future ship if confirmed not needed. */}
-            {/* V2.7: Stats button — gold accent matches the analytics view.
-                V3.2.2: hidden on tiny screens (<sm) to free header space. */}
-            <button onClick={()=>setShowStats(true)} className={'hidden sm:flex p-1.5 rounded-lg transition-colors text-xs font-bold'} style={{
-              background:T2_GOLD_GLOW,
-              color:T2_GOLD,
-              border:'0.5px solid '+T2_GOLD_BORDER,
-            }} title="Performance Stats & Insights">📊</button>
-            {/* V3.1.12: Brain button — Tara's synthesized current reasoning.
-                V3.2.2: also hidden on tiny screens — accessible via mobile tab nav. */}
-            <button onClick={()=>setShowBrain(true)} className={'hidden sm:flex p-1.5 rounded-lg transition-colors text-xs font-bold'} style={{
-              background:T2_GOLD_GLOW,
-              color:T2_GOLD,
-              border:'0.5px solid '+T2_GOLD_BORDER,
-            }} title="Tara's Brain — what she's thinking right now">🧠</button>
-            <button onClick={()=>setShowGuide(true)} className={'p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors'} title="How Tara Works">?</button>
-            {/* V8.5: Best Practices guide — when/how to enter, exit, manage trades */}
-            <button onClick={()=>setShowBestPractices(true)} className={'hidden sm:flex p-1.5 rounded-lg transition-colors text-xs font-bold'} style={{
-              background:T2_GOLD_GLOW,
-              color:T2_GOLD,
-              border:'0.5px solid '+T2_GOLD_BORDER,
-            }} title="Best Practices — how to trade with Tara for max profit">📖</button>
-            {/* V138: Premium Mode toggle removed — see help modal V138 section */}
-            {/* Hidden on mobile — accessible via mobile tab nav or sm+ */}
-            <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="hidden sm:flex"/>
-            <button onClick={()=>setShowSettings(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors'}><IC.Link className="w-3.5 h-3.5"/></button>
-            <button onClick={()=>setShowAnalytics(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors'} title="Training Engine"><IC.BarChart className="w-3.5 h-3.5"/></button>
-            <button onClick={()=>setAnalyticsPageOpen(true)} className={'hidden sm:flex p-1.5 rounded-lg border border-indigo-500/20 text-indigo-400/60 hover:text-indigo-400 transition-colors'} title="Analytics Page">📊</button>
-            <button onClick={()=>{
-              // V9.2.3: WIDGET MODE — opens a tiny popup window showing Tara's call + price + timer.
-              //   Uses window.open with small dimensions. Updates via setInterval reading from
-              //   the opener's state via a shared ref.
-              const _w=320,_h=120;
-              const _left=window.screen.width-_w-20;
-              const _top=20;
-              const _popup=window.open('','tara-widget',`width=${_w},height=${_h},left=${_left},top=${_top},toolbar=no,menubar=no,scrollbars=no,resizable=yes,location=no,status=no`);
-              if(!_popup)return;
-              _popup.document.write(`<!DOCTYPE html><html><head><title>Tara Widget</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0E100F;color:#E8E9E4;font-family:Inter,system-ui,sans-serif;overflow:hidden;cursor:move;-webkit-app-region:drag}#w{padding:10px 14px;height:100vh;display:flex;flex-direction:column;justify-content:center;gap:4px}.r1{display:flex;align-items:center;justify-content:space-between;gap:8px}.dir{font-size:18px;font-weight:800;letter-spacing:0.04em}.up{color:#6ee7b7}.dn{color:#f472b6}.scan{color:#666;font-style:italic;font-size:12px}.price{font-size:14px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums}.r2{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#E8E9E466}.asset{font-weight:700;letter-spacing:0.08em}.streak-w{color:#6ee7b7;font-weight:700}.streak-l{color:#f472b6;font-weight:700}</style></head><body><div id="w"><div class="r1"><span id="call" class="scan">scanning</span><span id="price" class="price">---</span></div><div class="r2"><span id="asset" class="asset">BTC 15m</span><span id="timer">--:--</span><span id="streak"></span></div></div><script>setInterval(()=>{try{const o=window.opener;if(!o||o.closed){close();return;}const d=o.__taraWidgetData;if(!d)return;const c=document.getElementById('call');const p=document.getElementById('price');const a=document.getElementById('asset');const t=document.getElementById('timer');const s=document.getElementById('streak');if(d.dir==='UP'){c.className='dir up';c.textContent='▲ UP '+d.conf+'%';}else if(d.dir==='DOWN'){c.className='dir dn';c.textContent='▼ DN '+d.conf+'%';}else{c.className='scan';c.textContent='scanning...';}p.textContent='$'+Number(d.price||0).toLocaleString(undefined,{maximumFractionDigits:0});a.textContent=d.asset+' '+d.wt;t.textContent=d.timer;if(d.streakType&&d.streakCount>=3){s.className=d.streakType==='WIN'?'streak-w':'streak-l';s.textContent=(d.streakType==='WIN'?'🔥':'⚠')+d.streakCount+(d.streakType==='WIN'?'W':'L');}else{s.textContent='';}}catch(_){}},500);<\/script></body></html>`);
-              _popup.document.close();
-            }} className={'hidden sm:flex p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-emerald-400 transition-colors'} title="Widget Mode (mini popup)">⬡</button>
-            {/* V9.10.3: What's New button removed per user request. Modal at L27804
-                still exists but unreachable from UI. Modal definition can be cleaned
-                up in a follow-up. The "How Tara Works" guide button (showGuide) and
-                Best Practices remain. */}
+
+            {/* 5m / 15m */}
+            <div className={'flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0'}>
+              <button onClick={()=>handleWindowToggle('5m')} className={`px-2.5 sm:px-4 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='5m'?'bg-indigo-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>5m</button>
+              <button onClick={()=>handleWindowToggle('15m')} className={`px-2.5 sm:px-4 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='15m'?'bg-emerald-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>15m</button>
+            </div>
+
+            {/* Sound */}
+            <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`} title={soundEnabled?'Sound on':'Sound off'}>
+              {soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}
+            </button>
+
+            {/* ··· overflow toggle */}
+            <div className="relative">
+              <button
+                onClick={()=>setShowHeaderOverflow(v=>!v)}
+                className={`p-1.5 rounded-lg border transition-colors text-sm leading-none font-bold ${showHeaderOverflow?'bg-[#E8E9E4]/10 border-[#E8E9E4]/30 text-[#E8E9E4]/80':'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/70'}`}
+                title="More options"
+              >···</button>
+
+              {/* Overflow panel */}
+              {showHeaderOverflow&&(
+                <div
+                  className="absolute right-0 top-full mt-1.5 z-50 rounded-xl border border-[#E8E9E4]/12 shadow-2xl overflow-hidden"
+                  style={{background:'rgba(18,20,19,0.98)',backdropFilter:'blur(16px)',minWidth:'260px'}}
+                  onMouseLeave={()=>setShowHeaderOverflow(false)}
+                >
+                  {/* Section: Market */}
+                  <div className="px-3 pt-2.5 pb-1">
+                    <div className="text-[9px] uppercase tracking-[0.15em] text-[#E8E9E4]/30 mb-1.5">Market</div>
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      <div className="flex items-center gap-1 text-xs">{marketSessions.sessions.map((s,i)=><span key={i} className={`${s.color} opacity-80`}>{s.flag}</span>)}</div>
+                      <MovementRiskPill movementRisk={movementRisk}/>
+                      <StreakTiltPill todayData={todayData}/>
+                    </div>
+                  </div>
+                  <div className="h-px bg-[#E8E9E4]/8 mx-3"/>
+
+                  {/* Section: Trade */}
+                  <div className="px-3 py-2">
+                    <div className="text-[9px] uppercase tracking-[0.15em] text-[#E8E9E4]/30 mb-1.5">Trade</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {/* Tier-1 Only */}
+                      {(()=>{
+                        const _on=!!tradingSettings?.tier1OnlyMode;
+                        const _pr={current:null};
+                        return(
+                          <button
+                            onPointerDown={()=>{_pr.current=setTimeout(()=>{_pr.current=null;setShowTradingSettings(true);},500);}}
+                            onPointerUp={()=>{if(_pr.current){clearTimeout(_pr.current);_pr.current=null;setTradingSettings(prev=>({...prev,tier1OnlyMode:!prev?.tier1OnlyMode}));}}}
+                            onPointerLeave={()=>{if(_pr.current){clearTimeout(_pr.current);_pr.current=null;}}}
+                            className="px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider transition-colors select-none"
+                            style={_on?{color:'rgb(110,231,183)',background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.35)'}:{color:'rgba(232,233,228,0.55)',background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.15)'}}
+                            title={_on?'Tier-1 Only ON — tap to allow all. Long-press for settings.':'All tiers. Tap to enable Tier-1 Only. Long-press for settings.'}
+                          >{_on?'★ TIER-1':'TIERS · ALL'}</button>
+                        );
+                      })()}
+                      {/* Auto-exec */}
+                      <button onClick={()=>setShowTradingSettings(true)}
+                        className="px-2 py-1 rounded text-[10px] uppercase font-bold tracking-wider transition-colors"
+                        style={killSwitchEngaged?{color:'#F87171',background:'rgba(248,113,113,0.15)',border:'1px solid rgba(248,113,113,0.40)'}:autoExecSettings.dryRun?{color:'#FBBF24',background:'rgba(251,191,36,0.10)',border:'1px solid rgba(251,191,36,0.30)'}:autoExecSettings.enabled?{color:'#6EE7B7',background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.30)'}:{color:'rgba(232,233,228,0.35)',background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.10)'}}
+                        title="Auto-exec settings"
+                      >{killSwitchEngaged?'⛔ KILLED':autoExecSettings.dryRun?'DRY · AUTO':autoExecSettings.enabled?'⚡ AUTO':'AUTO · OFF'}</button>
+                      {/* ETH shadow feed */}
+                      {(()=>{
+                        const _dfa=currentAsset==='BTC'?'ETH':'BTC';
+                        const _dfs=shadowTaraByAssetRef.current?.[_dfa];
+                        const _dff=_dfs&&(Date.now()-(_dfs.updatedAt||0))<8000;
+                        const _dfl=_dff?_dfs.leanDir:null;
+                        const _dfc=_dff?Math.round(_dfs.confidence||0):null;
+                        const _dfcfg=ASSET_CONFIG[_dfa]||{};
+                        const _dflc=_dfl==='UP'?'rgb(110,231,183)':_dfl==='DOWN'?'rgb(244,114,182)':'rgba(232,233,228,0.45)';
+                        return(
+                          <button onClick={()=>setShowDualFeed(v=>!v)}
+                            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors select-none"
+                            style={showDualFeed?{background:'rgba(232,233,228,0.08)',border:'1px solid rgba(232,233,228,0.25)',color:'rgba(232,233,228,0.80)'}:{background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.12)',color:'rgba(232,233,228,0.40)'}}
+                          >
+                            <span style={{color:_dfcfg.color||'rgba(232,233,228,0.55)'}}>{_dfcfg.icon||'?'}</span>
+                            <span>{_dfa}</span>
+                            {!_dff?<span className="text-rose-400/70">STALE</span>:<span style={{color:_dflc}}>{_dfl==='UP'?'▲':_dfl==='DOWN'?'▼':'–'}{_dfc!=null?_dfc+'%':''}</span>}
+                            <span style={{opacity:0.4}}>{showDualFeed?'▲':'▼'}</span>
+                          </button>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  <div className="h-px bg-[#E8E9E4]/8 mx-3"/>
+
+                  {/* Section: System */}
+                  <div className="px-3 py-2">
+                    <div className="text-[9px] uppercase tracking-[0.15em] text-[#E8E9E4]/30 mb-1.5">System</div>
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      <SyncStatusPill onClick={()=>{if(forceResyncing||baselineBusy)return;setSyncMenuOpen(true);setShowHeaderOverflow(false);}}/>
+                      <TabPresencePill peerTabs={peerTabs}/>
+                      {/* Time format */}
+                      <div className="flex flex-col items-center cursor-pointer px-1.5 py-0.5 rounded-md border border-[#E8E9E4]/8 hover:border-indigo-500/30 transition-colors" onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')}>
+                        <span className="text-[10px] text-[#E8E9E4]/55 uppercase tracking-wider font-bold">{timeFormat.toUpperCase()}</span>
+                      </div>
+                      {/* Simple/Advanced */}
+                      <button onClick={()=>setSimpleMode(!simpleMode)}
+                        className="text-[10px] uppercase tracking-[0.14em] px-2 py-1 rounded border border-[#E8E9E4]/12 hover:border-[#E8E9E4]/35 text-[#E8E9E4]/40 hover:text-[#E8E9E4]/75 transition-colors"
+                        style={{fontFamily:'ui-monospace,monospace'}}
+                      >{simpleMode?'advanced':'simple'}</button>
+                      {/* Volume */}
+                      {soundEnabled&&(
+                        <div className="flex items-center gap-1" title="Alert volume">
+                          <IC.Vol2 className="w-3 h-3 text-[#E8E9E4]/40"/>
+                          <input type="range" min="0" max="1" step="0.05" value={alertVolume} onChange={e=>setAlertVolume(parseFloat(e.target.value))} className="w-16 h-1 cursor-pointer" style={{accentColor:'#818CF8'}}/>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="h-px bg-[#E8E9E4]/8 mx-3"/>
+
+                  {/* Section: Tools */}
+                  <div className="px-3 py-2 pb-2.5">
+                    <div className="text-[9px] uppercase tracking-[0.15em] text-[#E8E9E4]/30 mb-1.5">Tools</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button onClick={()=>{setShowStats(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Performance Stats">📊 Stats</button>
+                      <button onClick={()=>{setShowBrain(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Tara's Brain">🧠 Brain</button>
+                      <button onClick={()=>{setShowBestPractices(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Best Practices">📖 Guide</button>
+                      <button onClick={()=>{setShowGuide(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors text-xs" title="How Tara Works">? Help</button>
+                      <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>{setShowWhaleLog(!showWhaleLog);setShowHeaderOverflow(false);}} cls="flex"/>
+                      <button onClick={()=>{setShowSettings(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Feed Settings"><IC.Link className="w-3.5 h-3.5"/></button>
+                      <button onClick={()=>{setShowAnalytics(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Training Engine"><IC.BarChart className="w-3.5 h-3.5"/></button>
+                      <button onClick={()=>{setAnalyticsPageOpen(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-indigo-500/20 text-indigo-400/60 hover:text-indigo-400 transition-colors text-xs" title="Analytics Page">📊 Analytics</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
           </div>
         </div>
       </header>
