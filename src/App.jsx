@@ -4068,8 +4068,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.22-v10.7.51-adverse-abort-log-lifecycle';
-const TARA_VERSION_DISPLAY='Tara 10.7.51';
+const BASELINE_VERSION='2026.05.22-v10.7.52-anti-macd-guard';
+const TARA_VERSION_DISPLAY='Tara 10.7.52';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35203,6 +35203,88 @@ function TaraApp(){
             _v10_7_43_calBoosted:true,
             _v10_7_43_calOriginalConf:_currentConf,
           });
+        }
+      }
+    }
+  }catch(_){}
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // V10.7.52 — ANTI-MACD GUARD (BTC 15m only)
+  // ───────────────────────────────────────────────────────────────────────────
+  // Data: 7-day BTC 15m audit (n=437):
+  //   No extreme MACD:        413 trades, 55% WR
+  //   Anti-MACD (|MACD|>30):   18 trades, 39% WR  (-16pt drop)
+  //   Anti-MACD (|MACD|>50):    6 trades, 33% WR  (-22pt drop)
+  // When MACD is screaming bearish/bullish and Tara calls the opposite way,
+  // she gets whipsawed. Today's 5-loss streak (15:23-16:01) was this exact pattern:
+  // all DOWN/UP calls with MACD between -23 and -63.
+  //
+  // Rule (BTC 15m + RANGE-CHOP only — where the pattern is statistically real):
+  //   • |MACD| > 50 against direction → SIT OUT (33% WR, too poor to take)
+  //   • |MACD| > 30 against direction → dampen confidence by 8pt
+  //   • After dampening, if confidence drops below 55 → SIT OUT
+  //   • Otherwise: take the trade but with reduced conviction
+  //
+  // Telemetry stamps: _v10_7_52_antiMacdGuard, _v10_7_52_macdHist
+  try{
+    const _amCall=taraCall?.call;
+    const _amRegime=analysis?.regime||'';
+    const _amAsset=currentAssetRef.current||currentAsset||'BTC';
+    if((_amCall==='UP'||_amCall==='DOWN')
+       && _amAsset==='BTC'
+       && windowType==='15m'
+       && _amRegime==='RANGE-CHOP'){
+      const _macdHist=Number(analysis?.rawSignalScores?._macdHist)||0;
+      const _macdSign=_macdHist>0?'UP':_macdHist<0?'DOWN':null;
+      const _isAntiMacd=_macdSign && _macdSign!==_amCall && Math.abs(_macdHist)>30;
+      if(_isAntiMacd){
+        const _currentConf=Number(taraCall?.confidence)||50;
+        taraCall._v10_7_52_macdHist=Math.round(_macdHist*10)/10;
+        taraCall._v10_7_52_macdSign=_macdSign;
+        // |MACD| > 50: hard sit-out (33% WR, n=6 — too poor)
+        if(Math.abs(_macdHist)>50){
+          Object.assign(taraCall,{
+            call:'SIT_OUT',
+            direction:'SIT_OUT',
+            confidence:_currentConf,
+            conviction:0,
+            tier:'antimacd-sitout',
+            reason:`[V10.7.52] Anti-MACD sit-out: MACD ${_macdHist.toFixed(0)} (${_macdSign}) opposes ${_amCall} call in RANGE-CHOP — historical WR 33% (n=6), too poor to take`,
+            wasOverriddenSitOut:true,
+            wouldHaveBeen:_amCall,
+            wouldHaveBeenTier:taraCall?.tier||'directional-lock',
+            _v10_7_52_antiMacdSitout:true,
+            _v10_7_52_antiMacdOriginalDir:_amCall,
+            _v10_7_52_antiMacdOriginalConf:_currentConf,
+          });
+        }else{
+          // 30 < |MACD| ≤ 50: dampen 8pt
+          const _newConf=Math.max(40,_currentConf-8);
+          // If dampening drops conviction below 55, sit out
+          if(_newConf<55){
+            Object.assign(taraCall,{
+              call:'SIT_OUT',
+              direction:'SIT_OUT',
+              confidence:_newConf,
+              conviction:0,
+              tier:'antimacd-dampened-sitout',
+              reason:`[V10.7.52] Anti-MACD dampened sit-out: MACD ${_macdHist.toFixed(0)} (${_macdSign}) opposes ${_amCall}; conf ${_currentConf}→${_newConf} below 55 → sit out`,
+              wasOverriddenSitOut:true,
+              wouldHaveBeen:_amCall,
+              wouldHaveBeenTier:taraCall?.tier||'directional-lock',
+              _v10_7_52_antiMacdDampenedSitout:true,
+              _v10_7_52_antiMacdOriginalDir:_amCall,
+              _v10_7_52_antiMacdOriginalConf:_currentConf,
+            });
+          }else{
+            // Just dampen — keep the trade but lower the confidence
+            Object.assign(taraCall,{
+              confidence:_newConf,
+              conviction:_newConf-50,
+              _v10_7_52_antiMacdDampened:true,
+              _v10_7_52_antiMacdOriginalConf:_currentConf,
+            });
+          }
         }
       }
     }
