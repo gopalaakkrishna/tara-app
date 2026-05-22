@@ -4068,8 +4068,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.21-v10.7.50-direction-bias-indicator';
-const TARA_VERSION_DISPLAY='Tara 10.7.50';
+const BASELINE_VERSION='2026.05.22-v10.7.51-adverse-abort-log-lifecycle';
+const TARA_VERSION_DISPLAY='Tara 10.7.51';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -37813,6 +37813,14 @@ function TaraApp(){
         // Track delay duration per window
         if(!_v104_1_delayStateRef.current||_v104_1_delayStateRef.current.windowId!==computeWindowId(windowType)){
           _v104_1_delayStateRef.current={windowId:computeWindowId(windowType),ticks:0,firstSeenAt:Date.now(),firstKForDir:_kForDir,firstConv:_convNow,firstDir:_dirNow};
+          // V10.7.51: stamp lifecycle when delay state opens. Helps diagnose "Tara
+          //   computed but never logged" — if delay opens but never resolves to a
+          //   lock or abort log, we see exactly where things stalled.
+          try{
+            const _lcWid=computeWindowId(windowType);
+            const _lcAsset=currentAssetRef.current||currentAsset||'BTC';
+            _lifecycleRecordSnapshot(_lcWid,windowType,_lcAsset,{call:_dirNow,direction:_dirNow,tier:'v10.4.1-delay-opened',confidence:_convNow},'v10.4.1-delay-open');
+          }catch(_){}
         }
         _v104_1_delayStateRef.current.ticks++;
         // Don't lock this tick — let conditions evolve. Re-evaluated next tick.
@@ -37861,6 +37869,49 @@ function TaraApp(){
             delaySeconds:Math.round((Date.now()-_v104_1_delayStateRef.current.firstSeenAt)/1000),
             reason:_v1074_8_dirFlipped?'direction-flipped-during-delay':'kalshi-moved-against-us',
           });
+          // V10.7.51: lifecycle telemetry + Memory entry for transparency.
+          //   Was: abort returned silently, Memory had no record but Discord still
+          //   showed "LOCKED UP" from a later lock attempt in the same window. User
+          //   couldn't tell whether trade happened or didn't.
+          //   Now: abort writes a sit-out entry to Memory with the abort reasoning.
+          try{
+            const _lcWid=computeWindowId(windowType);
+            const _lcAsset=currentAssetRef.current||currentAsset||'BTC';
+            _lifecycleRecordSnapshot(_lcWid,windowType,_lcAsset,{call:'SIT_OUT',direction:_v104_1_delayStateRef.current.firstDir,tier:'adverse-kalshi-abort',confidence:_convNow},'v10.7.48-abort');
+          }catch(_){}
+          try{
+            const _abortSnap={
+              call:'SIT_OUT',direction:'SIT_OUT',
+              confidence:_convNow,
+              reason:_v1074_8_dirFlipped
+                ?`Adverse Kalshi: direction flipped ${_v104_1_delayStateRef.current.firstDir}→${_dirNow} during ${Math.round((Date.now()-_v104_1_delayStateRef.current.firstSeenAt)/1000)}s patient wait — abort (V10.7.48)`
+                :`Adverse Kalshi: kForDir dropped ${_v1074_8_drop}pts (${_v1074_8_firstKForDir}→${_kForDir}) during patient wait — abort (V10.7.48)`,
+              atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+              atPosterior:analysis?.rawProbAbove,
+              kalshiAtLock:_kNow,
+              locked:false,earlyLock:false,
+              isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+              samples:0,needSamples:0,
+              tier:'adverse-kalshi-abort',
+              session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+              regime:analysis?.regime||'',
+              qScore:Math.round(_qFast||0),
+              fgt:analysis?.mtfAlignment,
+              // V10.7.51: lean direction so UI can show what would have happened
+              leanDir:_v104_1_delayStateRef.current.firstDir,
+              leanPct:_convNow,
+              _v10_7_51_abortType:_v1074_8_dirFlipped?'direction-flipped':'kalshi-adverse',
+              _v10_7_51_firstDir:_v104_1_delayStateRef.current.firstDir,
+              _v10_7_51_currentDir:_dirNow,
+              _v10_7_51_firstKForDir:_v1074_8_firstKForDir,
+              _v10_7_51_finalKForDir:_kForDir,
+              _v10_7_51_kalshiDrop:_v1074_8_drop,
+              _v10_7_51_delaySeconds:Math.round((Date.now()-_v104_1_delayStateRef.current.firstSeenAt)/1000),
+            };
+            _logSnapshotEntry(_abortSnap);
+          }catch(e){
+            try{console.error('[V10.7.51] abort log failed:',e);}catch(_){}
+          }
           try{console.warn('[V10.7.48] Adverse Kalshi abort:',{dropPts:_v1074_8_drop,dirFlipped:_v1074_8_dirFlipped,firstDir:_v104_1_delayStateRef.current.firstDir,currentDir:_dirNow});}catch(_){}
           _v104_1_delayStateRef.current=null; // clear state — let window keep developing
           return; // skip lock this tick
