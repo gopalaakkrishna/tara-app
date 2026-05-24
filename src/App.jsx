@@ -30860,18 +30860,24 @@ function TaraApp(){
           ?`TARA · ${_assetTag} · ${_arrow} ${data.dir} · OVERRIDE (no-trade)`
           :`TARA · ${_assetTag} · ${_arrow} ${data.dir} LOCKED · ${data.confidence||0}%`;
         // Compose description: one-line essential
-        const _gapStr=data.gap!=null?` · gap ${(Number(data.gap)||0).toFixed(1)}bps`:'';
+        // V10.7.57b: Gap moved to its own field; description focuses on conviction + Kalshi + tier
         const _kalshiStr=data.kalshiAtLock!=null?` · Kalshi ${Math.round(Number(data.kalshiAtLock))}¢`:'';
         const _desc=_isOverrideCall
           ?`⚠ ${data.caution||data.reason||'No-edge call — Kalshi already priced this direction'}`
-          :`${data.confidence||0}% conviction${_gapStr}${_kalshiStr} · ${_tierLabel}${_streakLine}`;
+          :`${data.confidence||0}% conviction${_kalshiStr} · ${_tierLabel}${_streakLine}`;
         // Compact fields — 6 max, all inline
+        // V10.7.57b: GAP replaces FGT in field slot. Gap is the strongest predictor
+        //   in our data (+55 directional edge); FGT is informational at best. Gap
+        //   tells you "how committed is the price gap" which is the most actionable
+        //   number on the lock. FGT moved out — visible in dashboard for those who want it.
+        const _gapBps=Number(data.gap)||0;
+        const _gapDir=_gapBps>0?'▲':_gapBps<0?'▼':'·';
         const _fields=[
+          {name:'Gap',value:`${_gapDir}${Math.abs(_gapBps).toFixed(1)}bps`,inline:true},
           {name:'Strike',value:`$${(Number(data.strike)||0).toFixed(0)}`,inline:true},
           {name:'Price',value:`$${(Number(data.price)||0).toFixed(0)}`,inline:true},
           {name:'Regime',value:(data.regime||'—').replace('RANGE-CHOP','CHOP').replace('SHORT SQUEEZE','SQUEEZE').replace('TRENDING ','TR-'),inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-          {name:'FGT',value:`${(Number(data.fgtAbs)||0).toFixed(1)}/4 ${data.fgtDir||''}`,inline:true},
           {name:'Record',value:data.taraRecord||'—',inline:true},
         ];
         // Only add reversal risk row when EXPECTED or WATCH (worth the space)
