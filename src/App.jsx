@@ -2992,6 +2992,9 @@ const LEARNING_RATE=0.8;
 const loadWeights=()=>{
   // V10.7.55 RESET: same reasoning as loadRegimeWeights — adaptive weights tuned against
   //   pre-V10.7.44 signals are contaminated. Reset gated by same flag so it happens once.
+  // V10.7.57 FIX: also bump the cloud-sync updatedAt timestamp so the local reset wins
+  //   against any stale cloud-stored weights. Without this, cloud RMW merge would
+  //   restore the contaminated weights on next sync (defeating the reset entirely).
   const _RESET_FLAG_KEY='taraRegimeWeights_v10_7_55_reset';
   let _alreadyReset=false;
   try{_alreadyReset=localStorage.getItem(_RESET_FLAG_KEY)==='1';}catch(_){}
@@ -3000,6 +3003,10 @@ const loadWeights=()=>{
       localStorage.removeItem('taraWeightsV110');
       localStorage.removeItem('taraWeightsByAsset_BTC_v1');
       localStorage.removeItem('taraWeightsByAsset_ETH_v1');
+      // V10.7.57: bump timestamps so local reset wins vs cloud
+      const _now=Date.now();
+      localStorage.setItem('taraWeightsByAsset_BTC_v1_updatedAt',String(_now));
+      localStorage.setItem('taraWeightsByAsset_ETH_v1_updatedAt',String(_now));
       try{console.info('[V10.7.55] Adaptive weights reset — will re-learn from V10.7.44+ clean data.');}catch(_){}
     }catch(_){}
   }
@@ -4104,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.24-v10.7.56-weights-reset-fresh-learning';
-const TARA_VERSION_DISPLAY='Tara 10.7.56';
+const BASELINE_VERSION='2026.05.24-v10.7.57-discord-redesign-no-trade-fixes';
+const TARA_VERSION_DISPLAY='Tara 10.7.57';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5781,16 +5788,18 @@ const calibratePosterior=(raw,calibration)=>{
 // ── PER-SIGNAL ACCURACY TRACKER ──
 const buildSignalAccuracy=(tradeLog)=>{
   const signals={gap:{right:0,total:0},momentum:{right:0,total:0},structure:{right:0,total:0},flow:{right:0,total:0},technical:{right:0,total:0},regime:{right:0,total:0}};
-  tradeLog.filter(t=>t.result&&t.signals).forEach(t=>{
-    const won=t.result==='WIN';
-    const finalDir=t.posterior>50; // true=UP prediction
-    Object.keys(t.signals).forEach(k=>{
-      if(!signals[k])return;
-      const sigDir=t.signals[k]>0; // true=this signal voted UP
-      const aligned=sigDir===finalDir;
+  // V10.7.57 FIX: read from signalScoresAtLock (the actual field name on entries).
+  //   Prior code read t.signals which never exists, so samples always showed 0.
+  //   Now we properly inspect each signal score at lock time and check whether
+  //   its direction aligned with the actual outcome.
+  tradeLog.filter(t=>t.result&&(t.signalScoresAtLock||t.signals)).forEach(t=>{
+    const _signalsObj=t.signalScoresAtLock||t.signals||{};
+    const outcomeUp=t.dir==='UP'?t.result==='WIN':t.result==='LOSS';
+    Object.keys(signals).forEach(k=>{
+      const sigVal=_signalsObj[k];
+      if(sigVal==null||sigVal===0)return; // signal didn't fire — skip
+      const sigDir=sigVal>0;
       signals[k].total++;
-      // Signal was "right" if it voted same direction as outcome
-      const outcomeUp=t.dir==='UP';
       if(sigDir===outcomeUp)signals[k].right++;
     });
   });
@@ -13694,8 +13703,10 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
              exit triggers, target adjustments). When already following, shows a
              status badge that doubles as an exit toggle. Hidden when user has
              explicitly entered the OPPOSITE direction (they've made a different
-             choice). */}
-        {isLockedSnap&&typeof handleManualSync==='function'&&(
+             choice).
+             V10.7.57: also hide on no-trade override and sit-out override locks —
+             those aren't real trade opportunities, button was misleading. */}
+        {isLockedSnap&&!isOverrideNoTrade&&!isOverrideSitOut&&typeof handleManualSync==='function'&&(
           userPosition===null
             ?React.createElement('button',{
                 onClick:()=>handleManualSync(snap.call),
@@ -27988,6 +27999,12 @@ function TaraApp(){
       if(!e||!e.windowType||!e.result)return;
       const _entryAsset=e.asset||'BTC';
       if(_entryAsset!==currentAsset)return; // filter to current asset
+      // V10.7.57: exclude no-trade override calls from the scorecard.
+      //   wasOverriddenNoTrade=true means Tara herself flagged "no edge, would not
+      //   trade this." Counting these as wins/losses misled the record — the user
+      //   sees "Tara's Record 803W-497L" thinking those are real trades. They're
+      //   not. Now the scorecard reflects only trades Tara would actually take.
+      if(e.wasOverriddenNoTrade===true)return;
       const wt=e.windowType;
       if(!out[wt])out[wt]={wins:0,losses:0,sitouts:0};
       if(e.result==='WIN')out[wt].wins++;
@@ -30808,42 +30825,67 @@ function TaraApp(){
       };
 
       else if(type==='TARA_LOCK'){
-        // V9.9.0: Tint embed by reversal risk + add reversal risk field with top
-        //   signals so phone-only users see the same heads-up the dashboard chip
-        //   shows. EXPECTED → rose tint regardless of dir; WATCH → amber.
-        // V9.9.1: hardened null-safety on signals iteration so a malformed reversalRisk
-        //   object can't throw and silently kill the broadcast.
+        // V10.7.57 — DISCORD LOCK EMBED REDESIGN
+        //   User feedback: prior embed was too long with 14 fields per alert. Phone notifications
+        //   were noisy. Override/no-trade tiers were confusingly broadcast as if real trades.
+        //   New design:
+        //     • Title carries direction, conviction, and OVERRIDE flag (no-trade vs real trade)
+        //     • Single description line with the call essentials
+        //     • Compact 6-field grid (down from 14)
+        //     • Today's streak surfaced ("4W in a row" or "2L streak")
+        //     • Tier-3/override calls explicitly labeled so user can skip on phone
         const _rr=data.reversalRisk;
         const _baseColor=data.dir==='UP'?3404125:16478549;
         const _embedColor=_rr?.flag==='EXPECTED'?16478549:_rr?.flag==='WATCH'?16498744:_baseColor;
+        // V10.7.57: detect "is this really a trade" vs an override commit
+        const _isOverrideCall=data.wasOverriddenNoTrade===true||data.tier==='no-go-edge'||data.tier==='no-go-data'||data.tier==='single';
+        const _isTier3=_isOverrideCall||data.tier==='time-cap-commit'||data.tier==='timer-commit';
+        const _tierLabel=_isOverrideCall?'⚠ OVERRIDE':_isTier3?'⚠ TIER-3':data.tier?.includes('confluence')||data.tier==='super-confluent'?'★ TIER-1':'TIER-2';
+        // V10.7.57: derive streak from data.recentResults if provided
+        let _streakLine='';
+        if(Array.isArray(data.recentResults)&&data.recentResults.length>0){
+          let _streak=0, _kind=null;
+          for(let i=data.recentResults.length-1;i>=0;i--){
+            const _r=data.recentResults[i];
+            if(_r!=='WIN'&&_r!=='LOSS')continue;
+            if(_kind===null){_kind=_r;_streak=1;}
+            else if(_r===_kind)_streak++;
+            else break;
+          }
+          if(_streak>=2)_streakLine=` · ${_streak}${_kind==='WIN'?'W':'L'} streak`;
+        }
+        const _arrow=data.dir==='UP'?'▲':data.dir==='DOWN'?'▼':'·';
+        // Compose title: short, sharp
+        const _title=_isOverrideCall
+          ?`TARA · ${_assetTag} · ${_arrow} ${data.dir} · OVERRIDE (no-trade)`
+          :`TARA · ${_assetTag} · ${_arrow} ${data.dir} LOCKED · ${data.confidence||0}%`;
+        // Compose description: one-line essential
+        const _gapStr=data.gap!=null?` · gap ${(Number(data.gap)||0).toFixed(1)}bps`:'';
+        const _kalshiStr=data.kalshiAtLock!=null?` · Kalshi ${Math.round(Number(data.kalshiAtLock))}¢`:'';
+        const _desc=_isOverrideCall
+          ?`⚠ ${data.caution||data.reason||'No-edge call — Kalshi already priced this direction'}`
+          :`${data.confidence||0}% conviction${_gapStr}${_kalshiStr} · ${_tierLabel}${_streakLine}`;
+        // Compact fields — 6 max, all inline
         const _fields=[
-          {name:'Direction',value:data.dir||'—',inline:true},
-          {name:'Confidence',value:`${data.confidence||0}%`,inline:true},
-          // V9.9.5: tier shown alongside confidence so the user instantly knows whether
-          //   this is a Tier-1 (super, confluence, structural-led, tape-led, rising,
-          //   patient) lock vs Tier 3 (single, time-cap-commit, no-go-data). Critical
-          //   for the "skip Tier 3" rule the user is enforcing manually.
-          {name:'Tier',value:data.tier||'—',inline:true},
-          {name:'Posterior',value:`${(Number(data.posterior)||0).toFixed(0)}`,inline:true},
-          {name:'Strike',value:`$${(Number(data.strike)||0).toFixed(2)}`,inline:true},
-          {name:'Price',value:`$${(Number(data.price)||0).toFixed(2)}`,inline:true},
-          {name:'Gap',value:`${(Number(data.gap)||0).toFixed(1)} bps`,inline:true},
+          {name:'Strike',value:`$${(Number(data.strike)||0).toFixed(0)}`,inline:true},
+          {name:'Price',value:`$${(Number(data.price)||0).toFixed(0)}`,inline:true},
+          {name:'Regime',value:(data.regime||'—').replace('RANGE-CHOP','CHOP').replace('SHORT SQUEEZE','SQUEEZE').replace('TRENDING ','TR-'),inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           {name:'FGT',value:`${(Number(data.fgtAbs)||0).toFixed(1)}/4 ${data.fgtDir||''}`,inline:true},
-          {name:'Regime',value:data.regime||'—',inline:true},
-          {name:'Record',value:data.taraRecord||'—',inline:false},
+          {name:'Record',value:data.taraRecord||'—',inline:true},
         ];
+        // Only add reversal risk row when EXPECTED or WATCH (worth the space)
         if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
-          const _topSig=(_rr.signals||[]).filter(s=>s&&s.fired).sort((a,b)=>(b.weight||0)-(a.weight||0)).slice(0,3);
+          const _topSig=(_rr.signals||[]).filter(s=>s&&s.fired).sort((a,b)=>(b.weight||0)-(a.weight||0)).slice(0,2);
           const _signalLines=_topSig.map(s=>`• ${s.reason||s.key}`).join('\n')||'—';
-          _fields.push({name:`Reversal Risk: ${_rr.flag} (score ${_rr.score||0})`,value:_signalLines,inline:false});
+          _fields.push({name:`Reversal: ${_rr.flag}`,value:_signalLines,inline:false});
         }
         embed={
-          title:`TARA · ${_assetTag} · ${data.dir||'—'} LOCKED${_rr?.flag==='EXPECTED'?'  ⚠':''}`,
-          color:_embedColor,
-          description:data.reason||`Committed ${data.dir||'—'} for this round.`,
+          title:_title,
+          color:_isOverrideCall?13421772:_embedColor, // gray for override
+          description:_desc,
           fields:_fields,
-          footer:{text:`${TARA_VERSION_DISPLAY}  |  lock`},
+          footer:{text:`${TARA_VERSION_DISPLAY} · lock`},
           timestamp:new Date().toISOString(),
         };
       }
@@ -40135,7 +40177,27 @@ function TaraApp(){
       const _isTier1Skip=snap?.call==='SIT_OUT'&&snap?.wasOverriddenSitOut===true&&(_wouldHaveBeen==='UP'||_wouldHaveBeen==='DOWN');
       if(snap?.call==='UP'||snap?.call==='DOWN'){
         // Always broadcast directional locks. Override cautions surface in the embed.
-        broadcastToDiscord('TARA_LOCK',{..._lockBaseData,dir:snap.call,confidence:snap.confidence,reason:snap.reason,gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0,reversalRisk:lockedCallRef.current?.reversalRisk||null});
+        // V10.7.57: compute recent results array for streak detection in embed
+        const _recentResults=(()=>{
+          try{
+            const _log=taraCallLogRef.current||[];
+            return _log.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')).slice(-10).map(e=>e.result);
+          }catch(_){return[];}
+        })();
+        broadcastToDiscord('TARA_LOCK',{
+          ..._lockBaseData,
+          dir:snap.call,
+          confidence:snap.confidence,
+          reason:snap.reason,
+          gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0,
+          reversalRisk:lockedCallRef.current?.reversalRisk||null,
+          // V10.7.57: pass override + caution + streak so embed can render the truth
+          wasOverriddenNoTrade:snap?.wasOverriddenNoTrade===true,
+          wasOverriddenSitOut:snap?.wasOverriddenSitOut===true,
+          caution:snap?.caution||null,
+          recentResults:_recentResults,
+          kalshiAtLock:snap?.kalshiAtLock,
+        });
       }else if(_isTier1Skip){
         // Tier-1 Only Mode skipped this lock — tell Discord what was rejected.
         broadcastToDiscord('TARA_SKIP',{
