@@ -4068,8 +4068,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.22-v10.7.52-anti-macd-guard';
-const TARA_VERSION_DISPLAY='Tara 10.7.52';
+const BASELINE_VERSION='2026.05.24-v10.7.54-entry-pricing-data-capture';
+const TARA_VERSION_DISPLAY='Tara 10.7.54';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -29991,8 +29991,9 @@ function TaraApp(){
   //   into engine yet.
   useEffect(()=>{
     const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;
-    // Bitstamp ticker — public REST, CORS-enabled. asset 'BTC' → btcusd, 'ETH' → ethusd
-    const _bitstampUrl=`https://www.bitstamp.net/api/v2/ticker/${currentAsset==='BTC'?'btcusd':'ethusd'}/`;
+    // V10.7.53: Bitstamp removed from BRTI poll — was causing browser console fetch
+    //   noise (intermittent CORS / 4xx). 3 sources (Coinbase + Kraken + OKX) is plenty
+    //   for trimmed-mean BRTI and matches Kalshi's BRTI index closely enough.
     const _fetchOne=async(url,parsePrice,name)=>{
       try{
         const r=await fetch(url,{cache:'no-store'});
@@ -30010,7 +30011,6 @@ function TaraApp(){
         _fetchOne(_cb.url(_cfg,currentAsset),_cb.parsePrice,'CB'),
         _fetchOne(_kr.url(_cfg,currentAsset),_kr.parsePrice,'KR'),
         _fetchOne(_ox.url(_cfg,currentAsset),_ox.parsePrice,'OX'),
-        _fetchOne(_bitstampUrl,(d)=>d?.last?parseFloat(d.last):null,'BS'),
       ]);
       const _ok=_results.filter(x=>x&&x.price>0);
       if(_ok.length<2)return; // need at least 2 sources
@@ -31968,6 +31968,49 @@ function TaraApp(){
                   ..._capturedWindowCtx,
                   closingGapBps:_gap,
                   kalshiAtClose:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
+                  // V10.7.54: Capture actual entry pricing for profitability analysis.
+                  //   Priority order:
+                  //     1. auto-exec fill (autoOrderStateRef) — actual filled price
+                  //     2. manual entry (manualKalshiEntry) — user-logged actual fill
+                  //     3. estimate from kalshiAtLock — best-effort when nothing logged
+                  //   Without entryPrice we can't compute true EV per trade.
+                  ...(()=>{
+                    // 1. Auto-exec path
+                    const _aos=(typeof autoOrderStateRef!=='undefined')?autoOrderStateRef.current:null;
+                    const _matchAuto=_aos&&_aos.windowId===_capturedWindowId&&_aos.asset===_resolveAsset;
+                    if(_matchAuto&&(_aos.fillPrice!=null||_aos.limitCents!=null)){
+                      return{
+                        entryPrice:Number(_aos.fillPrice??_aos.limitCents)||null,
+                        entrySource:_aos.fillPrice!=null?'auto-exec-filled':'auto-exec-limit',
+                        entryAttempts:Number(_aos.attempts)||1,
+                        entryLadderPath:Array.isArray(_aos.ladderPath)?_aos.ladderPath.slice(0,10):null,
+                        entryFairValue:Number(_aos.fairValueCents)||null,
+                        entrySlippageBps:_aos.fillPrice!=null&&_aos.fairValueCents!=null?Math.round((Number(_aos.fillPrice)-Number(_aos.fairValueCents))*100)/100:null,
+                        kalshiAtFill:Number(_aos.kalshiAtFill)||null,
+                      };
+                    }
+                    // 2. Manual entry path
+                    const _mke=(typeof _manualKalshiEntryRef!=='undefined')?_manualKalshiEntryRef.current:null;
+                    if(_mke&&_mke.entryCents!=null){
+                      return{
+                        entryPrice:Number(_mke.entryCents)||null,
+                        entrySource:'manual-logged',
+                        entryContracts:Number(_mke.contracts)||null,
+                        entryTimeMs:Number(_mke.time)||null,
+                      };
+                    }
+                    // 3. Estimate from kalshiAtLock
+                    const _kalshiAtLock=idx.e.kalshiAtLock!=null?Number(idx.e.kalshiAtLock):null;
+                    const _dir=idx.e.dir;
+                    const _estEntry=_kalshiAtLock!=null
+                      ?(_dir==='UP'?_kalshiAtLock:(100-_kalshiAtLock))
+                      :null;
+                    return{
+                      entryPrice:null,
+                      entryPriceEstimate:_estEntry,
+                      entrySource:'manual-or-unknown',
+                    };
+                  })(),
                   // V9.10.5: prefer closure-captured timeSeries + releaseSignalsHistory
                   //   from before the rollover clear. lockedCallRef.current is null by now
                   //   in the typical case (rollover effect already cleared refs before this
@@ -35208,87 +35251,8 @@ function TaraApp(){
     }
   }catch(_){}
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // V10.7.52 — ANTI-MACD GUARD (BTC 15m only)
-  // ───────────────────────────────────────────────────────────────────────────
-  // Data: 7-day BTC 15m audit (n=437):
-  //   No extreme MACD:        413 trades, 55% WR
-  //   Anti-MACD (|MACD|>30):   18 trades, 39% WR  (-16pt drop)
-  //   Anti-MACD (|MACD|>50):    6 trades, 33% WR  (-22pt drop)
-  // When MACD is screaming bearish/bullish and Tara calls the opposite way,
-  // she gets whipsawed. Today's 5-loss streak (15:23-16:01) was this exact pattern:
-  // all DOWN/UP calls with MACD between -23 and -63.
-  //
-  // Rule (BTC 15m + RANGE-CHOP only — where the pattern is statistically real):
-  //   • |MACD| > 50 against direction → SIT OUT (33% WR, too poor to take)
-  //   • |MACD| > 30 against direction → dampen confidence by 8pt
-  //   • After dampening, if confidence drops below 55 → SIT OUT
-  //   • Otherwise: take the trade but with reduced conviction
-  //
-  // Telemetry stamps: _v10_7_52_antiMacdGuard, _v10_7_52_macdHist
-  try{
-    const _amCall=taraCall?.call;
-    const _amRegime=analysis?.regime||'';
-    const _amAsset=currentAssetRef.current||currentAsset||'BTC';
-    if((_amCall==='UP'||_amCall==='DOWN')
-       && _amAsset==='BTC'
-       && windowType==='15m'
-       && _amRegime==='RANGE-CHOP'){
-      const _macdHist=Number(analysis?.rawSignalScores?._macdHist)||0;
-      const _macdSign=_macdHist>0?'UP':_macdHist<0?'DOWN':null;
-      const _isAntiMacd=_macdSign && _macdSign!==_amCall && Math.abs(_macdHist)>30;
-      if(_isAntiMacd){
-        const _currentConf=Number(taraCall?.confidence)||50;
-        taraCall._v10_7_52_macdHist=Math.round(_macdHist*10)/10;
-        taraCall._v10_7_52_macdSign=_macdSign;
-        // |MACD| > 50: hard sit-out (33% WR, n=6 — too poor)
-        if(Math.abs(_macdHist)>50){
-          Object.assign(taraCall,{
-            call:'SIT_OUT',
-            direction:'SIT_OUT',
-            confidence:_currentConf,
-            conviction:0,
-            tier:'antimacd-sitout',
-            reason:`[V10.7.52] Anti-MACD sit-out: MACD ${_macdHist.toFixed(0)} (${_macdSign}) opposes ${_amCall} call in RANGE-CHOP — historical WR 33% (n=6), too poor to take`,
-            wasOverriddenSitOut:true,
-            wouldHaveBeen:_amCall,
-            wouldHaveBeenTier:taraCall?.tier||'directional-lock',
-            _v10_7_52_antiMacdSitout:true,
-            _v10_7_52_antiMacdOriginalDir:_amCall,
-            _v10_7_52_antiMacdOriginalConf:_currentConf,
-          });
-        }else{
-          // 30 < |MACD| ≤ 50: dampen 8pt
-          const _newConf=Math.max(40,_currentConf-8);
-          // If dampening drops conviction below 55, sit out
-          if(_newConf<55){
-            Object.assign(taraCall,{
-              call:'SIT_OUT',
-              direction:'SIT_OUT',
-              confidence:_newConf,
-              conviction:0,
-              tier:'antimacd-dampened-sitout',
-              reason:`[V10.7.52] Anti-MACD dampened sit-out: MACD ${_macdHist.toFixed(0)} (${_macdSign}) opposes ${_amCall}; conf ${_currentConf}→${_newConf} below 55 → sit out`,
-              wasOverriddenSitOut:true,
-              wouldHaveBeen:_amCall,
-              wouldHaveBeenTier:taraCall?.tier||'directional-lock',
-              _v10_7_52_antiMacdDampenedSitout:true,
-              _v10_7_52_antiMacdOriginalDir:_amCall,
-              _v10_7_52_antiMacdOriginalConf:_currentConf,
-            });
-          }else{
-            // Just dampen — keep the trade but lower the confidence
-            Object.assign(taraCall,{
-              confidence:_newConf,
-              conviction:_newConf-50,
-              _v10_7_52_antiMacdDampened:true,
-              _v10_7_52_antiMacdOriginalConf:_currentConf,
-            });
-          }
-        }
-      }
-    }
-  }catch(_){}
+  // V10.7.52 anti-MACD guard removed in V10.7.53 — never fired in production
+  //   (pattern was overfit to one loss streak; later data showed anti-MACD trades won 69-75%).
 
 
   // Three coordinated effects, all gated by the same enable + kill-switch checks:
@@ -38546,6 +38510,13 @@ function TaraApp(){
           rawPosteriorAtLock:analysis?.rawPosteriorUncalibrated??analysis?.rawProbAbove??null, /* V9.11.3: distinguish raw vs calibrated */
           calibratedPosteriorAtLock:analysis?.rawProbAbove??null, /* V9.11.2 fix: was reading analysis.posterior but useMemo exposes it as rawProbAbove */
           signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
+          // V10.7.53: capture critical missing fields. Was: strikeAtLock/baselineVersion/reasoning not persisted on most entries.
+          //   strikeAtLock — required for gap-at-lock vs gap-at-close audit; lets us understand losses.
+          //   baselineVersion — required to filter analyses by engine version cleanly.
+          //   reasoning — capture engine log so we can see WHY each call was made post-hoc.
+          strikeAtLock:Number(targetMargin)||0,
+          baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null,
+          reasoning:Array.isArray(analysis?.reasoning)?analysis.reasoning.slice(0,40):null,
           // V10.7.50: Direction bias stamps — record recent UP/DOWN ratio and WR-per-direction
           //   at lock time. Enables auditing whether bias correlates with losing streaks
           //   and validates whether V10.7.49 deadzone guard is structurally fixing the bias.
@@ -39551,6 +39522,27 @@ function TaraApp(){
         calSwingAtLock:analysis?.rawProbAbove!=null&&analysis?.posterior!=null?Math.round(analysis.posterior-analysis.rawProbAbove):null,
         // V6.3.5: full signal scores + tape consensus at lock for analysis exports
         signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
+        // V10.7.53: persist strike, version, and engine reasoning for full audit trail
+        strikeAtLock:Number(targetMargin)||0,
+        baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null,
+        reasoning:Array.isArray(analysis?.reasoning)?analysis.reasoning.slice(0,40):null,
+        // V10.7.54: bias stamps now on ALL entry paths (was 59% coverage in V10.7.50 — only on _logSnapshotEntry path)
+        ...(()=>{
+          const _resolved=taraCallLogRef.current.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS'));
+          const _last30=_resolved.slice(-30);
+          if(_last30.length<10)return{};
+          const _up=_last30.filter(e=>e.dir==='UP');
+          const _dn=_last30.filter(e=>e.dir==='DOWN');
+          const _upWR=_up.length?_up.filter(e=>e.result==='WIN').length/_up.length:null;
+          const _dnWR=_dn.length?_dn.filter(e=>e.result==='WIN').length/_dn.length:null;
+          return{
+            _v10_7_50_recentDirN:_last30.length,
+            _v10_7_50_recentUpPct:Math.round((_up.length/_last30.length)*100),
+            _v10_7_50_recentDnPct:Math.round((_dn.length/_last30.length)*100),
+            _v10_7_50_recentUpWR:_upWR!=null?Math.round(_upWR*1000)/10:null,
+            _v10_7_50_recentDnWR:_dnWR!=null?Math.round(_dnWR*1000)/10:null,
+          };
+        })(),
         tapeAtLock:analysis?.tapeWindows?{
           w15Buy:analysis.tapeWindows.w15?.buyPct??null,
           w30Buy:analysis.tapeWindows.w30?.buyPct??null,
@@ -39673,6 +39665,27 @@ function TaraApp(){
         calSwingAtLock:analysis?.rawProbAbove!=null&&analysis?.posterior!=null?Math.round(analysis.posterior-analysis.rawProbAbove):null,
         // V6.3.5: capture full signal scores + tape consensus at lock for analysis exports
         signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
+        // V10.7.53: persist strike, version, and engine reasoning for full audit trail
+        strikeAtLock:Number(targetMargin)||0,
+        baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null,
+        reasoning:Array.isArray(analysis?.reasoning)?analysis.reasoning.slice(0,40):null,
+        // V10.7.54: bias stamps now on ALL entry paths (was 59% coverage in V10.7.50 — only on _logSnapshotEntry path)
+        ...(()=>{
+          const _resolved=taraCallLogRef.current.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS'));
+          const _last30=_resolved.slice(-30);
+          if(_last30.length<10)return{};
+          const _up=_last30.filter(e=>e.dir==='UP');
+          const _dn=_last30.filter(e=>e.dir==='DOWN');
+          const _upWR=_up.length?_up.filter(e=>e.result==='WIN').length/_up.length:null;
+          const _dnWR=_dn.length?_dn.filter(e=>e.result==='WIN').length/_dn.length:null;
+          return{
+            _v10_7_50_recentDirN:_last30.length,
+            _v10_7_50_recentUpPct:Math.round((_up.length/_last30.length)*100),
+            _v10_7_50_recentDnPct:Math.round((_dn.length/_last30.length)*100),
+            _v10_7_50_recentUpWR:_upWR!=null?Math.round(_upWR*1000)/10:null,
+            _v10_7_50_recentDnWR:_dnWR!=null?Math.round(_dnWR*1000)/10:null,
+          };
+        })(),
         tapeAtLock:analysis?.tapeWindows?{
           w15Buy:analysis.tapeWindows.w15?.buyPct??null,
           w30Buy:analysis.tapeWindows.w30?.buyPct??null,
