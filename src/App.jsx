@@ -2934,10 +2934,31 @@ const DEFAULT_REGIME_WEIGHTS={
 const REGIME_WEIGHT_KEYS={'SHORT SQUEEZE':'taraV110RW_SS_V110','RANGE-CHOP':'taraV110RW_RC_V110','HIGH VOL CHOP':'taraV110RW_HVC_V110','TRENDING DOWN':'taraV110RW_TD_V110'};
 const loadRegimeWeights=()=>{
   const out={};
+  // V10.7.55 RESET: regime weights learned pre-V10.7.44 are contaminated.
+  //   The V10.7.44 fix changed StochRSI / AVWAP / Whipsaw computations — they now produce
+  //   different signal scores from the same market data. Weights learned BEFORE that fix
+  //   were tuned against the WRONG signal values; using them on correct signals is wrong.
+  //   One-time reset, gated by a flag so it only runs once per browser. After reset, the
+  //   self-learning loop in `updateRegimeWeights` will re-learn from V10.7.44+ clean data.
+  const _RESET_FLAG_KEY='taraRegimeWeights_v10_7_55_reset';
+  let _alreadyReset=false;
+  try{_alreadyReset=localStorage.getItem(_RESET_FLAG_KEY)==='1';}catch(_){}
   Object.entries(REGIME_WEIGHT_KEYS).forEach(([rg,key])=>{
+    if(!_alreadyReset){
+      try{localStorage.removeItem(key);}catch(_){}
+    }
     try{const s=localStorage.getItem(key);if(s){const w=JSON.parse(s);if(w&&typeof w.gap==='number'){out[rg]=w;return;}}}catch(e){}
     out[rg]={...DEFAULT_REGIME_WEIGHTS[rg]};
   });
+  if(!_alreadyReset){
+    // Also reset the per-asset bundles so they hydrate fresh
+    try{
+      localStorage.removeItem('taraRegimeWeightsByAsset_BTC_v1');
+      localStorage.removeItem('taraRegimeWeightsByAsset_ETH_v1');
+      localStorage.setItem(_RESET_FLAG_KEY,'1');
+      try{console.info('[V10.7.55] Regime weights reset to defaults — will re-learn from V10.7.44+ clean data.');}catch(_){}
+    }catch(_){}
+  }
   return out;
 };
 // V5.5b: User-trade persistence stubbed per user request:
@@ -2968,7 +2989,22 @@ const WEIGHT_BOUNDS={gap:[5,65],momentum:[5,58],structure:[2,38],flow:[2,55],tec
   calendarRisk:[0.50,1.50],tapeAccel:[0.00,2.50],spotPerpDiv:[0.00,2.50]};
 const LEARNING_RATE=0.8;
 
-const loadWeights=()=>{try{const s=localStorage.getItem('taraWeightsV110');if(s){const w=JSON.parse(s);if(w&&typeof w.gap==='number')return w;}return{...DEFAULT_WEIGHTS};}catch(e){return{...DEFAULT_WEIGHTS};}};
+const loadWeights=()=>{
+  // V10.7.55 RESET: same reasoning as loadRegimeWeights — adaptive weights tuned against
+  //   pre-V10.7.44 signals are contaminated. Reset gated by same flag so it happens once.
+  const _RESET_FLAG_KEY='taraRegimeWeights_v10_7_55_reset';
+  let _alreadyReset=false;
+  try{_alreadyReset=localStorage.getItem(_RESET_FLAG_KEY)==='1';}catch(_){}
+  if(!_alreadyReset){
+    try{
+      localStorage.removeItem('taraWeightsV110');
+      localStorage.removeItem('taraWeightsByAsset_BTC_v1');
+      localStorage.removeItem('taraWeightsByAsset_ETH_v1');
+      try{console.info('[V10.7.55] Adaptive weights reset — will re-learn from V10.7.44+ clean data.');}catch(_){}
+    }catch(_){}
+  }
+  try{const s=localStorage.getItem('taraWeightsV110');if(s){const w=JSON.parse(s);if(w&&typeof w.gap==='number')return w;}return{...DEFAULT_WEIGHTS};}catch(e){return{...DEFAULT_WEIGHTS};}
+};
 const saveWeights=(w)=>{
   try{localStorage.setItem('taraWeightsV110',JSON.stringify(w||{}));}catch(e){}
 };
@@ -4068,8 +4104,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.24-v10.7.55-signal-rebalance-offensive';
-const TARA_VERSION_DISPLAY='Tara 10.7.55';
+const BASELINE_VERSION='2026.05.24-v10.7.56-weights-reset-fresh-learning';
+const TARA_VERSION_DISPLAY='Tara 10.7.56';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
