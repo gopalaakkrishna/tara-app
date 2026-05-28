@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.25-v10.7.59b-brti-stale-closure-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.59b';
+const BASELINE_VERSION='2026.05.25-v10.7.59c-brti-candle-fallback-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.59c';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -7615,7 +7615,7 @@ const useMultiTFCandles=(asset,priceSource)=>{
     let mounted=true;
     const _cfg=ASSET_CONFIG[asset]||ASSET_CONFIG.BTC;
     // V9.8.5: resolve active source once per effect run
-    const _src=(priceSource&&PRICE_SOURCES[priceSource])||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];
+    const _src=PRICE_SOURCES[priceSource]?.virtual?PRICE_SOURCES.coinbase:((priceSource&&PRICE_SOURCES[priceSource])||PRICE_SOURCES[PRICE_SOURCE_DEFAULT]); // V10.7.59b: BRTI virtual fallback
     const fetchInterval=async(label,gran)=>{
       try{
         // V9.8.5: use active price source (was Coinbase only)
@@ -30134,7 +30134,11 @@ function TaraApp(){
   useEffect(()=>{
     const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;
     const _bnSym=_cfg.binance||'BTCUSDT';
-    const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];
+    // V10.7.59b: BRTI is virtual — no candleUrl. Fall back to Coinbase candles.
+    //   Without this fix: _src.candleUrl throws → liveHistory empty → engine stuck.
+    const _src=PRICE_SOURCES[priceSource]?.virtual
+      ?PRICE_SOURCES.coinbase
+      :(PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT]);
     const fetch_=async()=>{
       try{
         const cbMap={'1m':60,'3m':60,'5m':300,'15m':900,'30m':900,'1h':3600};
@@ -30409,7 +30413,7 @@ function TaraApp(){
         //   When user is on Kraken or Bitstamp, those sources don't share Coinbase's rate
         //   limit, so the corsproxy retry isn't needed. If active source fails, heartbeat
         //   and let the next poll (2s later) try again — same effective resilience.
-        const _shadowSrc=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];
+        const _shadowSrc=PRICE_SOURCES[priceSource]?.virtual?PRICE_SOURCES.coinbase:(PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT]); // V10.7.59b: BRTI virtual fallback
         const _candleUrl=_shadowSrc.candleUrl(_cfg,_shadowAsset,_gran);
         let _candleResp=await fetch(_candleUrl,{signal:AbortSignal.timeout(5000)}).catch(e=>{_logErr('candles fetch threw: '+(e?.message||String(e)));console.warn(`[shadow ${_shadowAsset}] ${_shadowSrc.label} candles failed:`,e?.message||e);return null;});
         if(!_candleResp){_diag.candleFails++;_logErr('candles null');_heartbeat();return;}
@@ -30566,7 +30570,7 @@ function TaraApp(){
   // Heavy data — V9.8.6: candles AND order book follow active source
   //   Both endpoints normalize to a common shape via parseCandles/parseBook so the
   //   downstream forEach + band math works identically across all 3 sources.
-  useEffect(()=>{const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const gran=windowType==='15m'?900:300;try{const r=await fetch(_src.candleUrl(_cfg,currentAsset,gran),{cache:'no-store'});if(r.ok){const d=await r.json();const _candles=_src.parseCandles(d);if(_candles.length>0)setHistory(_candles.slice(0,100));}}catch(_e){}const r2=await fetch(_src.bookUrl(_cfg,currentAsset),{cache:'no-store'});if(r2.ok){const d2raw=await r2.json();const d2=_src.parseBook(d2raw);if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});
+  useEffect(()=>{const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _bookRange=Math.max(150,(targetMargin||0)*0.002);const _src=PRICE_SOURCES[priceSource]?.virtual?PRICE_SOURCES.coinbase:(PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT]);const f=async()=>{try{const gran=windowType==='15m'?900:300;try{const r=await fetch(_src.candleUrl(_cfg,currentAsset,gran),{cache:'no-store'});if(r.ok){const d=await r.json();const _candles=_src.parseCandles(d);if(_candles.length>0)setHistory(_candles.slice(0,100));}}catch(_e){}const r2=await fetch(_src.bookUrl(_cfg,currentAsset),{cache:'no-store'});if(r2.ok){const d2raw=await r2.json();const d2=_src.parseBook(d2raw);if(d2?.bids&&d2?.asks){let lb=0,ls=0;d2.bids.forEach(([p,s])=>{if(p<=targetMargin&&p>=targetMargin-_bookRange)lb+=parseFloat(s);});d2.asks.forEach(([p,s])=>{if(p>=targetMargin&&p<=targetMargin+_bookRange)ls+=parseFloat(s);});
     // V9.1.4: multi-band depth — TIGHT (0.05%), CLOSE (0.1%), STANDARD (0.2%), WIDE (0.5%).
     //   Each band captures bid and ask sizes within that distance from strike. Fed to
     //   DepthStrip for the 4-column breakdown that mirrors TapeStrip's time windows.
