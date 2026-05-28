@@ -1,9 +1,7 @@
-// /api/brti.js — Vercel serverless function
-// V10.7.59 — Exact BRTI from CF Benchmarks
-// Runs server-side: no CORS issues, no browser restrictions.
-// CF Benchmarks publishes BRTI every second.
-// Free tier — no API key required for real-time index value.
-// Cache: 1s (matches CF publish cadence).
+// /api/brti.js — Vercel Edge Function
+// V10.7.61 — Exact BRTI from CF Benchmarks, server-side (no CORS)
+// Deploy: place this file in /api/brti.js in your Vercel project root
+// Usage: fetch('/api/brti') → { ok: true, price: 76432.50, source: 'cfbenchmarks' }
 
 export const config = { runtime: 'edge' };
 
@@ -16,108 +14,81 @@ export default async function handler(req) {
     'Content-Type': 'application/json',
   };
 
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers });
-  }
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
 
-  // Try CF Benchmarks official endpoint first
-  const ENDPOINTS = [
-    // CF Benchmarks official real-time BRTI
+  const UA = 'TaraApp/10.7.61';
+  let lastError = null;
+
+  // ── TIER 1: CF Benchmarks official endpoints ──────────────────────────────
+  const CF_ENDPOINTS = [
+    // Primary: CF Benchmarks real-time data API
     {
       url: 'https://benchmarks.cfbenchmarks.com/data/brti',
-      parse: (d) => ({
-        price: Number(d?.last ?? d?.value ?? d?.price),
-        source: 'cfbenchmarks',
-        ts: d?.time ?? d?.timestamp ?? Date.now(),
-      }),
+      parse: (d) => ({ price: Number(d?.last ?? d?.value ?? d?.price ?? d?.index_value), source: 'cfbenchmarks' }),
     },
-    // CF Benchmarks alternate endpoint format
+    // Alternate CF format
     {
-      url: 'https://cfbenchmarks.com/data/indices/BRTI/real-time',
+      url: 'https://benchmarks.cfbenchmarks.com/data/historical?id=BRTI&type=last',
       parse: (d) => ({
-        price: Number(d?.last ?? d?.value ?? d?.price ?? d?.index_value),
-        source: 'cfbenchmarks-alt',
-        ts: d?.time ?? Date.now(),
+        price: Number(Array.isArray(d) ? d[d.length-1]?.value : d?.last ?? d?.value),
+        source: 'cfbenchmarks-hist',
       }),
     },
-    // Kaiko CF reference rate (free tier)
+    // Kaiko publishes CF reference rates (free tier, no auth)
     {
       url: 'https://reference-data-api.kaiko.io/v1/data/index/pairs/btcusd/BRTI',
-      parse: (d) => ({
-        price: Number(d?.data?.[0]?.price ?? d?.price),
-        source: 'kaiko-cf',
-        ts: d?.data?.[0]?.timestamp ?? Date.now(),
-      }),
+      parse: (d) => ({ price: Number(d?.data?.[0]?.price ?? d?.price ?? d?.last), source: 'kaiko-brti' }),
     },
   ];
 
-  let result = null;
-  let lastError = null;
-
-  for (const endpoint of ENDPOINTS) {
+  for (const ep of CF_ENDPOINTS) {
     try {
-      const res = await fetch(endpoint.url, {
-        headers: { 'Accept': 'application/json', 'User-Agent': 'TaraApp/10.7.59' },
+      const res = await fetch(ep.url, {
+        headers: { Accept: 'application/json', 'User-Agent': UA },
         signal: AbortSignal.timeout(2000),
       });
-      if (!res.ok) continue;
+      if (!res.ok) { lastError = `${ep.url} → ${res.status}`; continue; }
       const data = await res.json();
-      const parsed = endpoint.parse(data);
-      if (parsed.price && Number.isFinite(parsed.price) && parsed.price > 10000) {
-        result = parsed;
-        break;
+      const { price, source } = ep.parse(data);
+      if (price && Number.isFinite(price) && price > 10000) {
+        return new Response(JSON.stringify({ ok: true, price: Math.round(price * 100) / 100, source, fetchedAt: Date.now() }), { status: 200, headers });
       }
-    } catch (e) {
-      lastError = e.message;
-    }
+    } catch (e) { lastError = e.message; }
   }
 
-  if (result) {
-    return new Response(JSON.stringify({
-      ok: true,
-      price: Math.round(result.price * 100) / 100,
-      source: result.source,
-      ts: result.ts,
-      fetchedAt: Date.now(),
-    }), { status: 200, headers });
-  }
-
-  // All CF endpoints failed — fall back to weighted trimmed mean
-  // of the 4 real BRTI constituent exchanges we can reach
+  // ── TIER 2: 4 actual CF Benchmarks constituent exchanges ─────────────────
+  // CB, Kraken, Gemini, Bitstamp — the 4 we can reach without auth
+  // Trimmed mean matches CF's partition methodology on this subset
   try {
     const [cb, kr, gem, bs] = await Promise.allSettled([
-      fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot').then(r => r.json()).then(d => parseFloat(d?.data?.amount)),
-      fetch('https://api.kraken.com/0/public/Ticker?pair=XXBTZUSD').then(r => r.json()).then(d => parseFloat(d?.result?.XXBTZUSD?.c?.[0])),
-      fetch('https://api.gemini.com/v1/pubticker/btcusd').then(r => r.json()).then(d => parseFloat(d?.last)),
-      fetch('https://www.bitstamp.net/api/v2/ticker/btcusd/').then(r => r.json()).then(d => parseFloat(d?.last)),
+      fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', { headers: { 'User-Agent': UA } })
+        .then(r => r.json()).then(d => parseFloat(d?.data?.amount)),
+      fetch('https://api.kraken.com/0/public/Ticker?pair=XXBTZUSD', { headers: { 'User-Agent': UA } })
+        .then(r => r.json()).then(d => parseFloat(d?.result?.XXBTZUSD?.c?.[0])),
+      fetch('https://api.gemini.com/v1/pubticker/btcusd', { headers: { 'User-Agent': UA } })
+        .then(r => r.json()).then(d => parseFloat(d?.last)),
+      fetch('https://www.bitstamp.net/api/v2/ticker/btcusd/', { headers: { 'User-Agent': UA } })
+        .then(r => r.json()).then(d => parseFloat(d?.last)),
     ]);
 
     const prices = [cb, kr, gem, bs]
       .filter(r => r.status === 'fulfilled' && Number.isFinite(r.value) && r.value > 10000)
-      .map(r => r.value);
+      .map(r => r.value)
+      .sort((a, b) => a - b);
 
     if (prices.length >= 2) {
-      prices.sort((a, b) => a - b);
-      // Trimmed mean — drop min+max if ≥3 sources
       const middle = prices.length >= 3 ? prices.slice(1, -1) : prices;
       const price = middle.reduce((s, p) => s + p, 0) / middle.length;
-
       return new Response(JSON.stringify({
         ok: true,
         price: Math.round(price * 100) / 100,
         source: 'constituent-fallback',
         sourceCount: prices.length,
+        sources: ['CB','KR','GEM','BS'].filter((_,i) => [cb,kr,gem,bs][i]?.status === 'fulfilled'),
         fetchedAt: Date.now(),
       }), { status: 200, headers });
     }
-  } catch (e) {
-    lastError = e.message;
-  }
+  } catch (e) { lastError = e.message; }
 
-  return new Response(JSON.stringify({
-    ok: false,
-    error: 'All BRTI sources failed',
-    lastError,
-    fetchedAt: Date.now(),
-  }), { status: 503, headers });
+  return new Response(JSON.stringify({ ok: false, error: 'All BRTI sources failed', lastError, fetchedAt: Date.now() }), { status: 503, headers });
 }
