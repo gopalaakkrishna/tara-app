@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.25-v10.7.61-rollover-fix-notifs-eth-brti';
-const TARA_VERSION_DISPLAY='Tara 10.7.61';
+const BASELINE_VERSION='2026.05.25-v10.7.62-rollover-discord-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.62';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32584,19 +32584,18 @@ function TaraApp(){
             setTimeout(_trySettle,8000);
           }
         }
-        // V10.7.60: Clear snapshot AFTER scoring completes (was clearing inline, before
-        //   the async _trySettle scoring ran). Discord broadcast + _logResult both read
-        //   taraCallSnapshotRef — clearing it too early caused "lock not in log" issues.
-        //   Now: clear after the 8s Kalshi settle + 60s max poll = safe at 70s.
-        const _snapToClear=taraCallSnapshotRef.current;
-        setTimeout(()=>{
-          if(taraCallSnapshotRef.current===_snapToClear){
-            taraCallSnapshotRef.current=null;
-          }
-        },70000);
+        // V10.7.62: Clear snapshot IMMEDIATELY at rollover (revert V10.7.61 deferred clear).
+        //   V10.7.61's 70s deferred clear caused Discord to re-broadcast the previous
+        //   window's lock at the start of every new window (snapshot still set + sentLock reset).
+        //   Scoring uses _capturedSnap local variable (captured before clear) — ref not needed.
+        taraCallSnapshotRef.current=null;
         taraCallSampleRef.current={dir:null,count:0};
         taraSampleRateRef.current=[]; // V5.7.2: clear rate history for new window
         taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;try{localStorage.removeItem('taraLockedTimeSeries_v1');}catch(_){} /* V9.11.2 */posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;
+        // V10.7.62: force re-render immediately after refs clear so UI flushes
+        //   stale lock display. lockedCallRef is a ref (not state) — without this,
+        //   old lock stays visible until next organic render.
+        setForceRender(p=>p+1);
         _clearLock(); // V5.6: wipe cloud lock — new window starts clean
         _hasRestoredLockRef.current=false; // allow restore on next window if user refreshes
         _cloudRestoreCompletedRef.current=false; // V7.10.3: re-arm cloud-restore gate for new window
@@ -40358,6 +40357,16 @@ function TaraApp(){
     //   Previously baseData read fresh values, so a DOWN-locked window could broadcast
     //   "DOWN · Posterior 89%" when 89% meant 89% UP (current engine view post-lock).
     if(!taraBroadcastRef.current.sentLock&&taraCallSnapshotRef.current&&taraCallSnapshotRef.current.call!=='SIT_OUT'){
+      // V10.7.62: windowId guard — snapshot must belong to THIS window, not a previous one.
+      //   V10.7.61 deferred snapshot clear (now reverted) caused the old window's snapshot
+      //   to still be set when the new window's broadcast effect fired → duplicate Discord lock.
+      //   This guard is a safety net: even if snapshot somehow stays set across rollover,
+      //   we won't fire Discord for a lock that belongs to a different window.
+      const _snapWindowId=taraCallSnapshotRef.current?.windowId||'';
+      const _currentWindowId=timeState.startWindow||timeState.nextWindow||'';
+      if(_snapWindowId&&_currentWindowId&&!_currentWindowId.includes(_snapWindowId.replace(/^15m-|^5m-/,'').slice(0,16))){
+        // Snapshot belongs to a different window — skip broadcast
+      } else {
       taraBroadcastRef.current.sentLock=true;
       const snap=taraCallSnapshotRef.current;
       const _lockBaseData={
@@ -40455,6 +40464,7 @@ function TaraApp(){
         // Engine sit-out — stay silent. Just mark broadcast as sent so we don't retry.
         taraBroadcastRef.current.sentLock=true;
       }
+      } // V10.7.62: close windowId guard
     }
     // SITOUT: V7.0.8 — DISABLED per user request. SITOUT means Tara decided NOT to trade,
     //   which is non-actionable noise in Discord. User wants lock + exit alerts only.
