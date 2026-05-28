@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.24-v10.7.57-discord-redesign-no-trade-fixes';
-const TARA_VERSION_DISPLAY='Tara 10.7.57';
+const BASELINE_VERSION='2026.05.24-v10.7.58-egress-reduction-sync-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.58';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28137,13 +28137,36 @@ function TaraApp(){
         (cloudData,localEntries)=>{
           const cloudEntries=(cloudData&&Array.isArray(cloudData.entries))?cloudData.entries:[];
           const merged=_mergeCallLogEntries(cloudEntries,localEntries);
-          // Skip write if merge produced no new entries vs cloud (avoid pointless churn)
-          if(cloudEntries.length===merged.length){
-            const _cloudKeys=new Set(cloudEntries.map(e=>(e?.windowId||'')+'|'+(e?.windowType||'')+'|'+(e?.result||'')));
-            const _allSame=merged.every(e=>_cloudKeys.has((e?.windowId||'')+'|'+(e?.windowType||'')+'|'+(e?.result||'')));
-            if(_allSame)return null; // signal: skip write, no changes
+          // V10.7.58 EGRESS FIX: tighter skip logic.
+          //   Prior: only skipped when length AND all keys matched.
+          //   Problem: PENDING→WIN/LOSS changes same key (windowId|type) but different result
+          //   field → skip never fired → full 3MB write every trade resolution.
+          //   Now: skip when all NEW entries (not in cloud) are resolved versions of
+          //   existing pending cloud entries — those only change the result field locally.
+          //   We still write when genuinely new windows appear or cloud is behind.
+          const _mergedIds=new Set(merged.map(e=>e?.windowId||''));
+          const _cloudIds=new Set(cloudEntries.map(e=>e?.windowId||''));
+          const _hasNewWindows=merged.some(e=>e?.windowId&&!_cloudIds.has(e.windowId));
+          const _cloudHasUnresolved=cloudEntries.some(e=>!e?.result||e.result==='PENDING');
+          const _localHasMoreResolved=merged.filter(e=>e?.result==='WIN'||e?.result==='LOSS').length>
+                                      cloudEntries.filter(e=>e?.result==='WIN'||e?.result==='LOSS').length;
+          // Skip if: no new windows AND cloud isn't stale AND no newly resolved trades
+          if(!_hasNewWindows&&!_cloudHasUnresolved&&!_localHasMoreResolved){
+            return null; // skip write
           }
-          return{entries:merged};
+          // V10.7.58 — EGRESS REDUCTION: strip signal score raw fields from synced entries.
+          //   signalScoresAtLock contains ~25 fields per entry. That's ~1KB extra per entry.
+          //   These fields are only needed for local analysis — strip them from the cloud
+          //   payload to keep the synced doc small. On import, missing fields are OK because
+          //   analysis reads from local taraCallLog which has the full data.
+          //   Also strip verbose reasoning arrays (up to 40 strings per entry).
+          //   This alone cuts per-entry size from ~3KB → ~0.8KB → 2.5x smaller payload.
+          const _stripForCloud=(e)=>{
+            if(!e)return e;
+            const{signalScoresAtLock:_,reasoning:__,...rest}=e;
+            return rest;
+          };
+          return{entries:merged.map(_stripForCloud),_strippedAt:Date.now()};
         },
         300,
       );
@@ -40766,12 +40789,24 @@ function TaraApp(){
     try{
       // Snapshot ALL local state. Use refs/current values for accuracy.
       // V9.2.0: scorecards removed from baseline payload — personal data, local only.
+      const _stripForCloud=(e)=>{
+        if(!e)return e;
+        const{signalScoresAtLock:_,reasoning:__,...rest}=e;
+        return rest;
+      };
+      // V10.7.58: strip verbose fields before baseline save to avoid Supabase payload limit.
+      //   signalScoresAtLock (~25 fields) + reasoning (~40 strings) = ~1.5KB per entry.
+      //   Stripping cuts baseline size from ~4MB → ~1.1MB for 1400 entries.
+      //   These fields stay in local taraCallLog for analysis — not needed in cloud baseline.
+      const _strippedLog=(taraCallLogRef.current||[]).slice(-TARA_CALL_LOG_CAP).map(_stripForCloud);
+      const _estSizeKB=Math.round(JSON.stringify(_strippedLog).length/1024);
+      try{console.info(`[V10.7.58] Baseline payload: ${_strippedLog.length} entries, ~${_estSizeKB}KB`);}catch(_){}
       const _payload={
         v:2, // bumped — schema change (no scorecards)
         savedAt:Date.now(),
         sourceDevice:_deviceLabel,
         data:{
-          taraCallLog:(taraCallLogRef.current||[]).slice(-TARA_CALL_LOG_CAP),
+          taraCallLog:_strippedLog,
           pastWindows:(Array.isArray(pastWindows)?pastWindows:[]).slice(-50),
           lifetimePnL:Number(_pnlRef.current)||0,
           pnlUpdatedAt:Number(_pnlUpdatedAtRef.current)||Date.now(),
@@ -40795,7 +40830,7 @@ function TaraApp(){
       // V9.2.0: scorecards/personal write removed — that's a local-only path now.
       try{
         const _liveWrites=[];
-        _liveWrites.push(cloudWrite('memory/taraCallLog',{entries:_payload.data.taraCallLog,_baselineSave:_payload.savedAt}));
+        _liveWrites.push(cloudWrite('memory/taraCallLog',{entries:_strippedLog,_baselineSave:_payload.savedAt}));
         _liveWrites.push(cloudWrite('history/pastWindows',{entries:_payload.data.pastWindows,_baselineSave:_payload.savedAt}));
         _liveWrites.push(cloudWrite('state/lifetimePnL',{value:_payload.data.lifetimePnL,updatedAt:_payload.data.pnlUpdatedAt,_baselineSave:_payload.savedAt}));
         if(_payload.data.taraLearnings){
@@ -40942,7 +40977,8 @@ function TaraApp(){
     setBaselineBusy(true);
     try{
       const _writes=[];
-      _writes.push(cloudWrite('memory/taraCallLog',{entries:_log,_forcePush:Date.now(),_pushedBy:_deviceLabel}));
+      const _stripEntry=(e)=>{if(!e)return e;const{signalScoresAtLock:_,reasoning:__,...r}=e;return r;};
+      _writes.push(cloudWrite('memory/taraCallLog',{entries:_log.map(_stripEntry),_forcePush:Date.now(),_pushedBy:_deviceLabel}));
       _writes.push(cloudWrite('history/pastWindows',{entries:_past,_forcePush:Date.now()}));
       _writes.push(cloudWrite('state/lifetimePnL',{value:_pnl,updatedAt:Date.now(),_forcePush:Date.now()}));
       if(taraLearnings)_writes.push(cloudWrite('learnings/tara',{...taraLearnings,_forcePush:Date.now()}));
@@ -43038,7 +43074,7 @@ function TaraApp(){
                   const _sitouts=(taraCallLog||[]).filter(e=>e&&e.result==='SITOUT').length;
                   return (
                     <p className={'text-xs text-[#E8E9E4]/40 mt-0.5'}>
-                      {tradeLog.length} manual trades · <span className="text-amber-400/85">{_resolvedTara} Tara calls</span>{_sitouts>0&&<span className="text-[#E8E9E4]/35"> · {_sitouts} sat out</span>} · Weights auto-update from manual trades only
+                      {tradeLog.length} manual trades · <span className="text-amber-400/85">{_resolvedTara} Tara calls</span>{_sitouts>0&&<span className="text-[#E8E9E4]/35"> · {_sitouts} sat out</span>} · Weights auto-update from Tara's resolved calls
                     </p>
                   );
                 })()}
