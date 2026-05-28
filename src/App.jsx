@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.24-v10.7.58b-brti-feed-memory-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.58b';
+const BASELINE_VERSION='2026.05.24-v10.7.58c-brti-correct-constituents';
+const TARA_VERSION_DISPLAY='Tara 10.7.58c';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30185,18 +30185,15 @@ function TaraApp(){
     }
     let last=0;let _lastTradeId=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();/* V9.8.12: stale CDN guard — Coinbase ticker has monotonic trade_id. If a fetch returns an older id than we've already seen, the edge cache is replaying a stale response (this happened post-CB-outage 2026-05-07: 1-2s flashes back to last night's frozen price). Discard. Sources without parseTradeId (Kraken, OKX) skip this check. */if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_newId&&_lastTradeId&&_newId<_lastTradeId)return;if(_newId)_lastTradeId=_newId;}const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);},[currentAsset,priceSource,brtiApprox?.instant]);
 
-  // V10.5.1 — CROSS-EXCHANGE BRTI APPROXIMATION (Phase 1: collect + telemeter only)
-  //   Poll 4 exchanges every 3s in parallel. Compute trimmed mean across
-  //   available sources (drop min + max, average the rest if ≥3 succeeded;
-  //   simple mean if only 2; null if <2). Keep 60-second rolling window of
-  //   per-poll trimmed means and expose the 60s-average as the BRTI approx
-  //   (matching Kalshi's actual settlement window). Read-only; not wired
-  //   into engine yet.
+  // V10.5.1 — CROSS-EXCHANGE BRTI APPROXIMATION
+  //   V10.7.53: Bitstamp removed due to CORS noise, OKX used as substitute.
+  //   V10.7.58c: CORRECTED constituent exchanges — OKX is NOT a CF Benchmarks BRTI
+  //   constituent. Actual CF constituents: Bitstamp, Coinbase, Gemini, Kraken, itBit,
+  //   LMAX Digital. We access 4 of 6: Coinbase, Kraken, Gemini, Bitstamp.
+  //   Bitstamp re-added with silent error handling. Gemini added. OKX removed.
+  //   4-source trimmed mean now much closer to CF Benchmarks methodology.
   useEffect(()=>{
     const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;
-    // V10.7.53: Bitstamp removed from BRTI poll — was causing browser console fetch
-    //   noise (intermittent CORS / 4xx). 3 sources (Coinbase + Kraken + OKX) is plenty
-    //   for trimmed-mean BRTI and matches Kalshi's BRTI index closely enough.
     const _fetchOne=async(url,parsePrice,name)=>{
       try{
         const r=await fetch(url,{cache:'no-store'});
@@ -30209,11 +30206,15 @@ function TaraApp(){
     const _poll=async()=>{
       const _cb=PRICE_SOURCES.coinbase;
       const _kr=PRICE_SOURCES.kraken;
-      const _ox=PRICE_SOURCES.okx;
+      const _geminiUrl=currentAsset==='BTC'
+        ?'https://api.gemini.com/v1/pubticker/btcusd'
+        :'https://api.gemini.com/v1/pubticker/ethusd';
+      const _bsUrl=`https://www.bitstamp.net/api/v2/ticker/${currentAsset==='BTC'?'btcusd':'ethusd'}/`;
       const _results=await Promise.all([
         _fetchOne(_cb.url(_cfg,currentAsset),_cb.parsePrice,'CB'),
         _fetchOne(_kr.url(_cfg,currentAsset),_kr.parsePrice,'KR'),
-        _fetchOne(_ox.url(_cfg,currentAsset),_ox.parsePrice,'OX'),
+        _fetchOne(_geminiUrl,(d)=>d?.last?parseFloat(d.last):null,'GEM'),
+        _fetchOne(_bsUrl,(d)=>d?.last?parseFloat(d.last):null,'BS'),
       ]);
       const _ok=_results.filter(x=>x&&x.price>0);
       if(_ok.length<2)return; // need at least 2 sources
