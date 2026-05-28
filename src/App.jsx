@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.24-v10.7.58-egress-reduction-sync-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.58';
+const BASELINE_VERSION='2026.05.24-v10.7.58b-brti-feed-memory-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.58b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4426,6 +4426,21 @@ const ASSET_DEFAULT='BTC';
 //   Each source defines: name (display), label (3-char tape ex code), url(cfg,asset),
 //   parsePrice (returns float or null), parseSize (best-effort tape size).
 const PRICE_SOURCES={
+  // V10.7.58: BRTI added as virtual source — uses the live trimmed mean
+  //   already computed from Coinbase + Kraken + OKX (brtiApprox.instant).
+  //   No extra network calls. Shows as "BRTI" in the feed pill.
+  //   When selected, currentPrice = brtiApprox.instant (the 3-exchange mean).
+  //   This is the closest approximation to how Kalshi actually settles.
+  brti:{
+    name:'BRTI (3-exch)',
+    label:'BRTI',
+    tvExch:'COINBASE', // TradingView chart still uses Coinbase candles
+    tvSymbol:(asset)=>asset==='BTC'?'BTCUSD':'ETHUSD',
+    url:()=>null,       // no direct URL — feed comes from brtiApprox
+    parsePrice:()=>null,// not used directly
+    parseSize:()=>0.1,
+    virtual:true,       // V10.7.58 flag — handled specially in the price effect
+  },
   coinbase:{
     name:'Coinbase',
     label:'CB',
@@ -5564,10 +5579,25 @@ const lookupCalibration=(table,context,minN=15)=>{
   if(!regime||!tier||!dir)return{wr:null,n:0,found:false};
   const _tier=_calTierCanon(tier);
   const _kBucket=_calBucketKalshi(kalshiAtLock);
-  const _key=`${regime}|${_tier}|${dir}|${_kBucket}`;
-  const _entry=table[_key];
-  if(!_entry||_entry.n<minN)return{wr:null,n:_entry?_entry.n:0,found:false,key:_key};
-  return{wr:_entry.wr,n:_entry.n,found:true,key:_key};
+  // V10.7.59 — CASCADING FALLBACK: try progressively coarser buckets.
+  //   Fine bucket (regime|tier|dir|kalshi) rarely hits n≥15.
+  //   Coarser fallbacks (drop kalshi, then drop tier) have enough samples.
+  //   Each fallback trusts the result less — use a reduced minN per level.
+  const _candidates=[
+    {key:`${regime}|${_tier}|${dir}|${_kBucket}`, minN:minN, label:'fine'},
+    {key:`${regime}|${_tier}|${dir}`, minN:Math.max(8,Math.floor(minN*0.6)), label:'no-kalshi'},
+    {key:`${regime}|${dir}`, minN:Math.max(5,Math.floor(minN*0.4)), label:'regime-dir'},
+  ];
+  for(const _c of _candidates){
+    const _entry=table[_c.key];
+    if(_entry&&_entry.n>=_c.minN){
+      // Trust dampening for coarser buckets — boost/flip require stronger signal
+      const _trustMult=_c.label==='fine'?1.0:_c.label==='no-kalshi'?0.85:0.65;
+      return{wr:_entry.wr,n:_entry.n,found:true,key:_c.key,trustMult:_trustMult,label:_c.label};
+    }
+  }
+  // Return the finest key for diagnostic purposes even if not found
+  return{wr:null,n:table[`${regime}|${_tier}|${dir}|${_kBucket}`]?.n||0,found:false,key:`${regime}|${_tier}|${dir}|${_kBucket}`};
 };
 // ═══════════════════════════════════════════════════════════════════════════
 // END V10.7.43 CALIBRATION FUNCTIONS
@@ -28292,6 +28322,19 @@ function TaraApp(){
         const _key=(e)=>(e.asset||'BTC')+'|'+e.windowId+'|'+e.windowType;
         const byKey=new Map();
         const _shouldReplace=(existing,incoming)=>{
+          // V10.7.58b: STALE CLOUD GUARD — when Supabase writes fail (e.g. grace period
+          //   egress limit), cloud has old data. On load, cloudWatch fires with that
+          //   old snapshot and the merge was clobbering fresher localStorage entries.
+          //   Rule: NEVER replace a locally resolved entry (WIN/LOSS) with a cloud
+          //   entry that has an older timestamp OR is still unresolved.
+          //   This makes localStorage the source of truth for recent data.
+          const _existingResolved=existing.result==='WIN'||existing.result==='LOSS';
+          const _incomingResolved=incoming.result==='WIN'||incoming.result==='LOSS';
+          // If local is resolved and cloud is not → keep local always
+          if(_existingResolved&&!_incomingResolved)return false;
+          // If local is resolved and cloud is older (lower id) → keep local
+          if(_existingResolved&&_incomingResolved&&(incoming.id||0)<(existing.id||0))return false;
+          // Original logic for other cases
           if(!existing.result&&incoming.result)return true;
           if(existing.result&&!incoming.result)return false;
           if((incoming.id||0)<(existing.id||0))return true;
@@ -30121,7 +30164,26 @@ function TaraApp(){
 
   // Live price — V9.8.4 source-aware (Coinbase / Kraken / Bitstamp via PRICE_SOURCES)
   //   Tracks lastPriceChangeRef so the stale-tick guard can detect frozen feeds.
-  useEffect(()=>{let last=0;let _lastTradeId=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();/* V9.8.12: stale CDN guard — Coinbase ticker has monotonic trade_id. If a fetch returns an older id than we've already seen, the edge cache is replaying a stale response (this happened post-CB-outage 2026-05-07: 1-2s flashes back to last night's frozen price). Discard. Sources without parseTradeId (Kraken, OKX) skip this check. */if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_newId&&_lastTradeId&&_newId<_lastTradeId)return;if(_newId)_lastTradeId=_newId;}const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);},[currentAsset,priceSource]);
+  useEffect(()=>{
+    // V10.7.58: BRTI virtual source — when user selects BRTI in feed pill, currentPrice
+    //   comes directly from brtiApprox.instant (the 3-exchange trimmed mean already
+    //   computed separately). No new network calls. Skip the REST poll entirely.
+    if(priceSource==='brti'){
+      // BRTI feed is updated by the brtiApprox effect — we just sync currentPrice
+      // from it every 1.5s to match normal feed cadence.
+      const _iv=setInterval(()=>{
+        const _p=brtiApprox?.instant;
+        if(_p&&Number.isFinite(_p)&&_p>0){
+          const now=Date.now();
+          if(_p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:_p,time:now};}
+          currentPriceRef.current=_p;
+          lastPriceSourceRef.current={source:'brti',time:now,exchange:'brti'};
+          setCurrentPrice(prev=>{if(prev!==null&&_p!==prev)setTickDirection(_p>prev?'up':'down');return _p;});
+        }
+      },1500);
+      return()=>clearInterval(_iv);
+    }
+    let last=0;let _lastTradeId=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();/* V9.8.12: stale CDN guard — Coinbase ticker has monotonic trade_id. If a fetch returns an older id than we've already seen, the edge cache is replaying a stale response (this happened post-CB-outage 2026-05-07: 1-2s flashes back to last night's frozen price). Discard. Sources without parseTradeId (Kraken, OKX) skip this check. */if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_newId&&_lastTradeId&&_newId<_lastTradeId)return;if(_newId)_lastTradeId=_newId;}const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);},[currentAsset,priceSource,brtiApprox?.instant]);
 
   // V10.5.1 — CROSS-EXCHANGE BRTI APPROXIMATION (Phase 1: collect + telemeter only)
   //   Poll 4 exchanges every 3s in parallel. Compute trimmed mean across
