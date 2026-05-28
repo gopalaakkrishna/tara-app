@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.25-v10.7.60-memory-localstorage-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.60';
+const BASELINE_VERSION='2026.05.25-v10.7.61-rollover-fix-notifs-eth-brti';
+const TARA_VERSION_DISPLAY='Tara 10.7.61';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32584,8 +32584,16 @@ function TaraApp(){
             setTimeout(_trySettle,8000);
           }
         }
-        // Clear snapshot for next window
-        taraCallSnapshotRef.current=null;
+        // V10.7.60: Clear snapshot AFTER scoring completes (was clearing inline, before
+        //   the async _trySettle scoring ran). Discord broadcast + _logResult both read
+        //   taraCallSnapshotRef — clearing it too early caused "lock not in log" issues.
+        //   Now: clear after the 8s Kalshi settle + 60s max poll = safe at 70s.
+        const _snapToClear=taraCallSnapshotRef.current;
+        setTimeout(()=>{
+          if(taraCallSnapshotRef.current===_snapToClear){
+            taraCallSnapshotRef.current=null;
+          }
+        },70000);
         taraCallSampleRef.current={dir:null,count:0};
         taraSampleRateRef.current=[]; // V5.7.2: clear rate history for new window
         taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;try{localStorage.removeItem('taraLockedTimeSeries_v1');}catch(_){} /* V9.11.2 */posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;setUserPosition(null);setPositionEntry(null);lastWindowRef.current=timeState.nextWindow;tickHistoryRef.current=[];setCurrentOffer('');setBetAmount(0);setMaxPayout(0);peakOfferRef.current=0;hasSetInitialMargin.current=true;
@@ -32596,7 +32604,13 @@ function TaraApp(){
         //   5 seconds after rollover — prevents stale analysis from instant-locking the
         //   new window before fresh price data arrives.
         _rolloverGraceRef.current=Date.now();
-        }},[timeState.nextWindow,currentPrice,windowType,targetMargin,adaptiveWeights,userPosition]);
+        }},[timeState.nextWindow,currentPrice,windowType,userPosition]);
+  // V10.7.60: removed targetMargin + adaptiveWeights from rollover deps.
+  //   targetMargin changes every Kalshi poll (every 1.5s) — was re-running the rollover
+  //   effect mid-window, causing scanning flashes and stale-lock glitches.
+  //   adaptiveWeights changes after every resolved trade — was re-running rollover
+  //   after each WIN/LOSS, causing intermittent double-scanning.
+  //   Neither needs to trigger rollover — only window transition does.
 
   useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
 
@@ -40403,6 +40417,30 @@ function TaraApp(){
           recentResults:_recentResults,
           kalshiAtLock:snap?.kalshiAtLock,
         });
+        // V10.7.60: Cross-tab system notification for lock alerts.
+        //   AudioContext is suspended when tab is hidden — beeps don't fire.
+        //   Notification API works even when tab is backgrounded or minimized.
+        //   This is the fix for "sound alerts don't work on other tabs."
+        try{
+          if(typeof Notification!=='undefined'&&Notification.permission==='granted'&&snap?.call&&snap.call!=='SIT_OUT'){
+            const _isOverride=snap?.wasOverriddenNoTrade===true;
+            const _dir=snap.call==='UP'?'▲ UP':'▼ DOWN';
+            const _conf=Math.round(Number(snap.confidence)||0);
+            const _gap=targetMargin>0?(((currentPrice-targetMargin)/targetMargin)*10000).toFixed(1):'—';
+            const _tag=`tara-lock-${snap.windowId||Date.now()}`;
+            const n=new Notification(
+              _isOverride?`⚠ Tara ${_dir} (override)`:`🔒 Tara ${_dir} · ${_conf}%`,
+              {
+                body:`Gap ${_gap}bps · ${snap.regime||'—'} · ${snap.tier||'—'}`,
+                tag:_tag,
+                renotify:true,
+                silent:false,
+                icon:'/favicon.ico',
+              }
+            );
+            setTimeout(()=>{try{n.close();}catch(_){}},8000);
+          }
+        }catch(_){}
       }else if(_isTier1Skip){
         // Tier-1 Only Mode skipped this lock — tell Discord what was rejected.
         broadcastToDiscord('TARA_SKIP',{
@@ -41441,6 +41479,8 @@ function TaraApp(){
     if(lastWhaleBroadcastRef.current)lastWhaleBroadcastRef.current={time:Date.now(),dir:null}; // 5min cooldown from now
     if(lastManualBroadcastRef.current)lastManualBroadcastRef.current={key:null,type:null};
     setCurrentAssetState(a);
+    // V10.7.60: BRTI is BTC-only — snap to coinbase if switching to ETH while on BRTI
+    if(a!=='BTC'&&priceSource==='brti')setPriceSource('coinbase');
     // Reset all window-bound state — fresh start on the new asset
     setPendingStrike(null);
     // V7.6: warm-switch using cached price from background feed. If the inactive asset
@@ -42280,7 +42320,16 @@ function TaraApp(){
               <div className="flex flex-col shrink-0 min-w-[80px]">
                 {/* Feed source button — moved here from header */}
                 <button
-                  onClick={()=>{const _i=PRICE_SOURCE_KEYS.indexOf(priceSource);const _next=PRICE_SOURCE_KEYS[(_i+1)%PRICE_SOURCE_KEYS.length];setPriceSource(_next);}}
+                  onClick={()=>{
+                    // V10.7.60: BRTI is BTC-only (CF Benchmarks doesn't publish an ETH equivalent).
+                    //   Filter it out of the cycle when on ETH tab.
+                    const _validKeys=PRICE_SOURCE_KEYS.filter(k=>k!=='brti'||currentAsset==='BTC');
+                    const _i=_validKeys.indexOf(priceSource);
+                    const _next=_validKeys[(_i+1)%_validKeys.length];
+                    // If currently on BRTI but switched to ETH tab, snap to coinbase
+                    if(priceSource==='brti'&&currentAsset!=='BTC')setPriceSource('coinbase');
+                    else setPriceSource(_next);
+                  }}
                   className="flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border transition-colors mb-1 self-start"
                   style={{background:feedFrozen?'rgba(244,63,94,0.12)':feedSlow?'rgba(229,200,112,0.12)':'rgba(255,255,255,0.04)',borderColor:feedFrozen?'rgba(244,63,94,0.45)':feedSlow?'rgba(229,200,112,0.40)':'rgba(255,255,255,0.15)',color:feedFrozen?'#fb7185':feedSlow?'#E5C870':'rgba(232,233,228,0.55)'}}
                   title={`Live price source: ${PRICE_SOURCES[priceSource].name}. Click to cycle. ${feedFrozen?`FROZEN ${feedStaleSeconds}s`:feedSlow?`Slow (${feedStaleSeconds}s)`:'Live'}`}
