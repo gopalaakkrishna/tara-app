@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.25-v10.7.62-rollover-discord-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.62';
+const BASELINE_VERSION='2026.05.25-v10.7.63-calibration-websocket-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.63';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4123,7 +4123,13 @@ const TARA_VERSION_DISPLAY='Tara 10.7.62';
 // per cell. Cells with n<CALIBRATION_TRUST_FLOOR fall back to seed values.
 // Feature-flagged so we can rollback instantly if anything goes sideways.
 const USE_V104_CALIBRATION_TABLES=true; // Set false for instant rollback
-const V104_CALIBRATION_TRUST_FLOOR=15; // V10.6.4: lowered from 20 — more cells active sooner
+// V10.7.63: Lowered trust floor from 15 → 8.
+//   With 1200+ BTC 15m trades, most cells have 8-15 trades.
+//   At n=15, only 3/12 cells were active. Key cell RANGE-CHOP UP 65-74 had
+//   8 trades at 75% WR but seed said 53% — Tara was overcautious on her best setups.
+//   At n=8, 5/12 cells active. All new cells are RANGE-CHOP (primary trading regime).
+//   Recency-weighting ensures old data doesn't dominate.
+const V104_CALIBRATION_TRUST_FLOOR=8; // was 15 (V10.6.4), was 20 before that
 const V104_ROLLING_WINDOW=200; // Per-cell rolling window for auto-recal
 
 // V10.4.1 — EV-AWARE DELAY GATE (Module A)
@@ -31687,6 +31693,7 @@ function TaraApp(){
     let _ws=null;
     let _reconnectTimer=null;
     let _reconnectDelay=1000;
+    let _wsAttempts=0; // V10.7.63: track attempts in closure (not on timer number)
     let _stopped=false;
     let _messageCount=0;
     const _connect=()=>{
@@ -31743,23 +31750,22 @@ function TaraApp(){
           //   we can't provide from a browser. Endless reconnects spam console
           //   and waste battery. After 5 failures, stop trying — user can
           //   re-enable explicitly if conditions change.
-          const _attempts=(_reconnectTimer?(_reconnectTimer._attempts||0):0)+1;
-          if(_attempts>=5){
-            try{console.warn(`[V10.2.30] Kalshi WS gave up after ${_attempts} attempts. Likely needs server-side proxy for auth. Disabling.`);}catch(_){}
-            setKalshiWsState(prev=>({...prev,status:'gave-up',reconnectAttempts:_attempts}));
+          // V10.7.63: fixed TypeError — setTimeout() returns a number in browsers,
+          //   not an object. Storing ._attempts on a number threw TypeError on every
+          //   reconnect. Now tracked in _wsAttempts closure variable instead.
+          _wsAttempts=(_wsAttempts||0)+1;
+          if(_wsAttempts>=5){
+            try{console.warn(`[V10.2.30] Kalshi WS gave up after ${_wsAttempts} attempts. Likely needs server-side proxy for auth. Disabling.`);}catch(_){}
+            setKalshiWsState(prev=>({...prev,status:'gave-up',reconnectAttempts:_wsAttempts}));
             try{localStorage.setItem('taraKalshiWsEnabled','0');}catch(_){}
-            // Don't schedule another retry — the state update will trigger
-            // the effect to clean up.
             return;
           }
-          try{console.info(`[V10.2.28] Kalshi WS closed (code=${e?.code}) — reconnecting in ${_reconnectDelay/1000}s (attempt ${_attempts}/5)`);}catch(_){}
-          setKalshiWsState(prev=>({...prev,status:'reconnecting',reconnectAttempts:_attempts}));
-          // Exponential backoff with 60s ceiling
+          try{console.info(`[V10.2.28] Kalshi WS closed (code=${e?.code}) — reconnecting in ${_reconnectDelay/1000}s (attempt ${_wsAttempts}/5)`);}catch(_){}
+          setKalshiWsState(prev=>({...prev,status:'reconnecting',reconnectAttempts:_wsAttempts}));
           _reconnectTimer=setTimeout(()=>{
             _reconnectDelay=Math.min(60000,_reconnectDelay*2);
             _connect();
           },_reconnectDelay);
-          _reconnectTimer._attempts=_attempts;
         };
       }catch(e){
         try{console.warn('[V10.2.28] Kalshi WS init failed:',e?.message);}catch(_){}
