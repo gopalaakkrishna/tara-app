@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.24-v10.7.58c-brti-correct-constituents';
-const TARA_VERSION_DISPLAY='Tara 10.7.58c';
+const BASELINE_VERSION='2026.05.24-v10.7.58d-brti-fix-no-scan-thrash';
+const TARA_VERSION_DISPLAY='Tara 10.7.58d';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30183,7 +30183,11 @@ function TaraApp(){
       },1500);
       return()=>clearInterval(_iv);
     }
-    let last=0;let _lastTradeId=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();/* V9.8.12: stale CDN guard — Coinbase ticker has monotonic trade_id. If a fetch returns an older id than we've already seen, the edge cache is replaying a stale response (this happened post-CB-outage 2026-05-07: 1-2s flashes back to last night's frozen price). Discard. Sources without parseTradeId (Kraken, OKX) skip this check. */if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_newId&&_lastTradeId&&_newId<_lastTradeId)return;if(_newId)_lastTradeId=_newId;}const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);},[currentAsset,priceSource,brtiApprox?.instant]);
+    let last=0;let _lastTradeId=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();/* V9.8.12: stale CDN guard — Coinbase ticker has monotonic trade_id. If a fetch returns an older id than we've already seen, the edge cache is replaying a stale response (this happened post-CB-outage 2026-05-07: 1-2s flashes back to last night's frozen price). Discard. Sources without parseTradeId (Kraken, OKX) skip this check. */if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_newId&&_lastTradeId&&_newId<_lastTradeId)return;if(_newId)_lastTradeId=_newId;}const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);
+  // V10.7.58d: removed brtiApprox?.instant from deps — was causing effect to
+  //   tear down + recreate every 3s when on BRTI feed, causing scanning/connecting
+  //   thrash. The BRTI interval reads brtiApprox via closure, no re-run needed.
+  },[currentAsset,priceSource]);
 
   // V10.5.1 — CROSS-EXCHANGE BRTI APPROXIMATION
   //   V10.7.53: Bitstamp removed due to CORS noise, OKX used as substitute.
@@ -30240,7 +30244,11 @@ function TaraApp(){
       const _divBps=(_singlePrice&&_avgPrice)?((_singlePrice-_avgPrice)/_avgPrice)*10000:null;
       setBrtiApprox({
         current:Math.round(_avgPrice*100)/100,
-        instant:Math.round(_trimmed*100)/100,
+        // V10.7.58d: instant uses 5-sample rolling mean instead of single trimmed mean.
+        //   CF BRTI publishes every 1s using a partition methodology — a single 3s-old
+        //   spot price was too noisy. 5 samples × 1.5s = ~7.5s smoothing, which
+        //   better represents the short-term price CF uses for settlement.
+        instant:Math.round((_samples.slice(-5).reduce((s,x)=>s+x.p,0)/Math.min(_samples.length,5))*100)/100,
         samples60s:_samples.length,
         sources:_ok.map(x=>x.name),
         sourceCount:_ok.length,
@@ -30249,7 +30257,9 @@ function TaraApp(){
       });
     };
     _poll(); // immediate
-    const iv=setInterval(_poll,3000); // every 3s = ~20 samples/min
+    // V10.7.58d: 1.5s poll (was 3s). CF publishes BRTI every second.
+    //   40 samples/min gives a much tighter 60s rolling mean.
+    const iv=setInterval(_poll,1500); // 40 samples/min
     return()=>{clearInterval(iv);};
   },[currentAsset]);
 
