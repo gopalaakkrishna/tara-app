@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.24-v10.7.59-exact-brti-proxy';
-const TARA_VERSION_DISPLAY='Tara 10.7.59';
+const BASELINE_VERSION='2026.05.25-v10.7.59b-brti-stale-closure-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.59b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27521,6 +27521,9 @@ function TaraApp(){
   //   Sample shape: { p: number, t: timestamp, sources: [{name, price}] }
   //   State holds: { current: trimmedMean, samples: [last 60s], lastUpdate, diverged }
   const[brtiApprox,setBrtiApprox]=useState(null);
+  // V10.7.59b: ref so BRTI price interval always reads latest value (stale closure fix)
+  const brtiApproxRef=useRef(null);
+  useEffect(()=>{brtiApproxRef.current=brtiApprox;},[brtiApprox]);
   const _brtiSamplesRef=useRef([]); // rolling 60s window of multi-exchange samples
   // ─── V9.8.18: TARA TOAST SYSTEM ─────────────────────────────────────────
   // Stack of active popup notifications. State is array-of-toasts; per-kind cooldowns
@@ -30169,10 +30172,12 @@ function TaraApp(){
     //   comes directly from brtiApprox.instant (the 3-exchange trimmed mean already
     //   computed separately). No new network calls. Skip the REST poll entirely.
     if(priceSource==='brti'){
-      // BRTI feed is updated by the brtiApprox effect — we just sync currentPrice
-      // from it every 1.5s to match normal feed cadence.
+      // V10.7.59b: use brtiApproxRef (not brtiApprox state) so the interval always
+      //   reads the latest BRTI value. Using state in a closure captures the value
+      //   at effect creation time (null) and never updates — that's why engine showed
+      //   all-zero signals and price showed stale strike value when on BRTI feed.
       const _iv=setInterval(()=>{
-        const _p=brtiApprox?.instant;
+        const _p=brtiApproxRef.current?.instant;
         if(_p&&Number.isFinite(_p)&&_p>0){
           const now=Date.now();
           if(_p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:_p,time:now};}
@@ -30180,7 +30185,7 @@ function TaraApp(){
           lastPriceSourceRef.current={source:'brti',time:now,exchange:'brti'};
           setCurrentPrice(prev=>{if(prev!==null&&_p!==prev)setTickDirection(_p>prev?'up':'down');return _p;});
         }
-      },1500);
+      },1000); // 1s cadence — matches CF publish rate
       return()=>clearInterval(_iv);
     }
     let last=0;let _lastTradeId=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();/* V9.8.12: stale CDN guard — Coinbase ticker has monotonic trade_id. If a fetch returns an older id than we've already seen, the edge cache is replaying a stale response (this happened post-CB-outage 2026-05-07: 1-2s flashes back to last night's frozen price). Discard. Sources without parseTradeId (Kraken, OKX) skip this check. */if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_newId&&_lastTradeId&&_newId<_lastTradeId)return;if(_newId)_lastTradeId=_newId;}const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);
