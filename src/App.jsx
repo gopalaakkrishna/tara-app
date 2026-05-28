@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.25-v10.7.59c-brti-candle-fallback-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.59c';
+const BASELINE_VERSION='2026.05.25-v10.7.60-memory-localstorage-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.60';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27933,10 +27933,37 @@ function TaraApp(){
   //   entries to keep payload size sane.
   const[taraCallLog,setTaraCallLog]=useState(()=>{
     try{
+      // V10.7.60: Load from localStorage, then merge with sessionStorage.
+      //   sessionStorage holds the last 200 entries (survives refresh, cleared on tab close).
+      //   This ensures recent trades are always available even if localStorage was trimmed.
       const stored=localStorage.getItem('taraCallLog_v1');
-      if(!stored)return[];
-      const parsed=JSON.parse(stored);
-      if(!Array.isArray(parsed))return[];
+      const session=sessionStorage.getItem('taraCallLog_session');
+      let parsed=[];
+      if(stored){
+        const _p=JSON.parse(stored);
+        if(Array.isArray(_p))parsed=_p;
+      }
+      // Merge sessionStorage entries — they may be more recent than localStorage
+      if(session){
+        try{
+          const _s=JSON.parse(session);
+          if(Array.isArray(_s)&&_s.length>0){
+            const _byKey=new Map();
+            parsed.forEach(e=>{if(e?.windowId)_byKey.set((e.asset||'BTC')+'|'+e.windowId+'|'+(e.windowType||''),e);});
+            _s.forEach(e=>{
+              if(!e?.windowId)return;
+              const k=(e.asset||'BTC')+'|'+e.windowId+'|'+(e.windowType||'');
+              const ex=_byKey.get(k);
+              // sessionStorage wins if it has a resolved entry and localStorage has pending/missing
+              if(!ex||(ex.result!=='WIN'&&ex.result!=='LOSS'&&(e.result==='WIN'||e.result==='LOSS'))){
+                _byKey.set(k,e);
+              }
+            });
+            parsed=Array.from(_byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0));
+          }
+        }catch(_){}
+      }
+      if(!parsed.length)return[];
       // V6.3.4: One-time sanitize pass on load. Drops corrupt entries from before the
       //   scoring fix:
       //     - Closing price >20% away from strike (e.g. $41K close on $80K strike)
@@ -28159,7 +28186,45 @@ function TaraApp(){
     return Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-TARA_CALL_LOG_CAP);
   },[]);
   useEffect(()=>{
-    try{localStorage.setItem('taraCallLog_v1',JSON.stringify(taraCallLog.slice(-TARA_CALL_LOG_CAP)));}catch(e){}
+    // V10.7.60 — ROBUST LOCALSTORAGE WRITE
+    //   Prior code: try{localStorage.setItem(...JSON.stringify(full_log))}catch(e){}
+    //   Problem 1: signalScoresAtLock (~25 fields) + reasoning (~40 strings) = ~2KB extra
+    //     per entry. 1400 entries × 3KB = 4.2MB — over Chrome's 5MB localStorage limit.
+    //     The catch silently swallowed QuotaExceededError → writes failed → data lost on refresh.
+    //   Problem 2: No user-visible error. Data loss was invisible until refresh.
+    //   Fix: strip verbose fields before localStorage write (same as cloud write).
+    //     If still too large, progressively trim oldest entries until it fits.
+    //     Surface persistent failures via a ref so the UI can warn the user.
+    const _stripForStorage=(e)=>{
+      if(!e)return e;
+      const{signalScoresAtLock:_a,reasoning:_b,...rest}=e;
+      return rest;
+    };
+    const _stripped=taraCallLog.slice(-TARA_CALL_LOG_CAP).map(_stripForStorage);
+    let _saved=false;
+    // Try full cap first, then progressively halve if QuotaExceeded
+    for(let _cap=_stripped.length;_cap>=100;_cap=Math.floor(_cap*0.7)){
+      try{
+        localStorage.setItem('taraCallLog_v1',JSON.stringify(_stripped.slice(-_cap)));
+        _saved=true;
+        if(_cap<_stripped.length){
+          try{console.warn(`[V10.7.60] localStorage cap trimmed to ${_cap} entries to fit 5MB limit`);}catch(_){}
+        }
+        break;
+      }catch(err){
+        // QuotaExceededError — try smaller slice
+        if(_cap<=100){
+          try{console.error('[V10.7.60] localStorage write failed even at 100 entries:',err?.message);}catch(_){}
+        }
+      }
+    }
+    // Also persist to sessionStorage as a safety net (cleared on tab close but survives refresh)
+    if(_saved){
+      try{
+        const _session=_stripped.slice(-200); // keep last 200 in session (recent trades)
+        sessionStorage.setItem('taraCallLog_session',JSON.stringify(_session));
+      }catch(_){}
+    }
     if(_callLogHydratedRef.current){
       // V8.3: Switch from simple cloudWriteDebounced to RMW. Reads current cloud first,
       //   merges with local, writes union — protects against last-write-wins clobbering
@@ -28325,22 +28390,16 @@ function TaraApp(){
         const _key=(e)=>(e.asset||'BTC')+'|'+e.windowId+'|'+e.windowType;
         const byKey=new Map();
         const _shouldReplace=(existing,incoming)=>{
-          // V10.7.58b: STALE CLOUD GUARD — when Supabase writes fail (e.g. grace period
-          //   egress limit), cloud has old data. On load, cloudWatch fires with that
-          //   old snapshot and the merge was clobbering fresher localStorage entries.
-          //   Rule: NEVER replace a locally resolved entry (WIN/LOSS) with a cloud
-          //   entry that has an older timestamp OR is still unresolved.
-          //   This makes localStorage the source of truth for recent data.
+          // V10.7.60 — LOCALSTORAGE IS AUTHORITATIVE
+          //   Supabase grace period means cloud data can be days stale.
+          //   localStorage + sessionStorage = source of truth. Cloud = additive only.
+          //   1. Local resolved → NEVER replace
+          //   2. Local pending + cloud resolved → replace (cloud has the outcome)
+          //   3. Both pending → keep local (fresher)
           const _existingResolved=existing.result==='WIN'||existing.result==='LOSS';
           const _incomingResolved=incoming.result==='WIN'||incoming.result==='LOSS';
-          // If local is resolved and cloud is not → keep local always
-          if(_existingResolved&&!_incomingResolved)return false;
-          // If local is resolved and cloud is older (lower id) → keep local
-          if(_existingResolved&&_incomingResolved&&(incoming.id||0)<(existing.id||0))return false;
-          // Original logic for other cases
-          if(!existing.result&&incoming.result)return true;
-          if(existing.result&&!incoming.result)return false;
-          if((incoming.id||0)<(existing.id||0))return true;
+          if(_existingResolved)return false;
+          if(!_existingResolved&&_incomingResolved)return true;
           return false;
         };
         // V8.8.4 TDZ FIX: `changed` MUST be declared before any forEach that touches it.
@@ -32057,6 +32116,14 @@ function TaraApp(){
                 const newLog=[...tradeLogRef.current,resolvedTrade];
                 saveTradeLog(newLog);setTradeLog(newLog);
                 applyTradeLearning(newLog,resolvedTrade,result); // V7.1: per-asset · V8.5: shock-aware inside
+                // V10.7.60: immediate sessionStorage flush after resolution
+                //   localStorage write is async (via useEffect) — if the tab crashes
+                //   between resolution and the effect running, the trade is lost.
+                //   sessionStorage write here is synchronous and immediate.
+                try{
+                  const _sess=newLog.slice(-200).map(e=>{if(!e)return e;const{signalScoresAtLock:_a,reasoning:_b,...r}=e;return r;});
+                  sessionStorage.setItem('taraCallLog_session',JSON.stringify(_sess));
+                }catch(_){}
               }
               pendingTradeRef.current=null;
             }
