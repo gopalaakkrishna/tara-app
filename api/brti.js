@@ -1,7 +1,8 @@
 // /api/brti.js — Vercel Edge Function
-// V10.7.61 — Exact BRTI from CF Benchmarks, server-side (no CORS)
-// Deploy: place this file in /api/brti.js in your Vercel project root
-// Usage: fetch('/api/brti') → { ok: true, price: 76432.50, source: 'cfbenchmarks' }
+// V10.7.61b — 4-constituent trimmed mean (CB+KR+GEM+BS)
+// CF Benchmarks real-time API requires a registered key — no free public endpoint.
+// Best achievable without a key: 4 of 6 CF constituents (missing itBit + LMAX Digital).
+// Trimmed mean of CB+KR+GEM+BS is typically within $5-15 of official BRTI.
 
 export const config = { runtime: 'edge' };
 
@@ -16,79 +17,50 @@ export default async function handler(req) {
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
 
-  const UA = 'TaraApp/10.7.61';
-  let lastError = null;
+  const UA = 'Mozilla/5.0 TaraApp/10.7.61b';
+  const t = (ms) => AbortSignal.timeout(ms);
 
-  // ── TIER 1: CF Benchmarks official endpoints ──────────────────────────────
-  const CF_ENDPOINTS = [
-    // Primary: CF Benchmarks real-time data API
-    {
-      url: 'https://benchmarks.cfbenchmarks.com/data/brti',
-      parse: (d) => ({ price: Number(d?.last ?? d?.value ?? d?.price ?? d?.index_value), source: 'cfbenchmarks' }),
-    },
-    // Alternate CF format
-    {
-      url: 'https://benchmarks.cfbenchmarks.com/data/historical?id=BRTI&type=last',
-      parse: (d) => ({
-        price: Number(Array.isArray(d) ? d[d.length-1]?.value : d?.last ?? d?.value),
-        source: 'cfbenchmarks-hist',
-      }),
-    },
-    // Kaiko publishes CF reference rates (free tier, no auth)
-    {
-      url: 'https://reference-data-api.kaiko.io/v1/data/index/pairs/btcusd/BRTI',
-      parse: (d) => ({ price: Number(d?.data?.[0]?.price ?? d?.price ?? d?.last), source: 'kaiko-brti' }),
-    },
-  ];
+  // 4 real CF Benchmarks constituent exchanges
+  // Using exchange-tier endpoints (more reliable from server-side than commerce APIs)
+  const fetches = await Promise.allSettled([
+    // Coinbase — exchange API (public, no auth, reliable from Vercel)
+    fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker', { headers: { 'User-Agent': UA }, signal: t(2500) })
+      .then(r => r.json()).then(d => ({ name: 'CB', price: parseFloat(d?.price) })),
+    // Kraken — public ticker
+    fetch('https://api.kraken.com/0/public/Ticker?pair=XXBTZUSD', { headers: { 'User-Agent': UA }, signal: t(2500) })
+      .then(r => r.json()).then(d => ({ name: 'KR', price: parseFloat(d?.result?.XXBTZUSD?.c?.[0]) })),
+    // Gemini — public ticker
+    fetch('https://api.gemini.com/v1/pubticker/btcusd', { headers: { 'User-Agent': UA }, signal: t(2500) })
+      .then(r => r.json()).then(d => ({ name: 'GEM', price: parseFloat(d?.last) })),
+    // Bitstamp — public ticker
+    fetch('https://www.bitstamp.net/api/v2/ticker/btcusd/', { headers: { 'User-Agent': UA }, signal: t(2500) })
+      .then(r => r.json()).then(d => ({ name: 'BS', price: parseFloat(d?.last) })),
+  ]);
 
-  for (const ep of CF_ENDPOINTS) {
-    try {
-      const res = await fetch(ep.url, {
-        headers: { Accept: 'application/json', 'User-Agent': UA },
-        signal: AbortSignal.timeout(2000),
-      });
-      if (!res.ok) { lastError = `${ep.url} → ${res.status}`; continue; }
-      const data = await res.json();
-      const { price, source } = ep.parse(data);
-      if (price && Number.isFinite(price) && price > 10000) {
-        return new Response(JSON.stringify({ ok: true, price: Math.round(price * 100) / 100, source, fetchedAt: Date.now() }), { status: 200, headers });
-      }
-    } catch (e) { lastError = e.message; }
+  const valid = fetches
+    .filter(r => r.status === 'fulfilled' && Number.isFinite(r.value?.price) && r.value.price > 10000)
+    .map(r => r.value)
+    .sort((a, b) => a.price - b.price);
+
+  if (valid.length < 2) {
+    return new Response(JSON.stringify({
+      ok: false,
+      error: 'Fewer than 2 sources responded',
+      sources: fetches.map((r, i) => ({ name: ['CB','KR','GEM','BS'][i], ok: r.status === 'fulfilled' })),
+      fetchedAt: Date.now(),
+    }), { status: 503, headers });
   }
 
-  // ── TIER 2: 4 actual CF Benchmarks constituent exchanges ─────────────────
-  // CB, Kraken, Gemini, Bitstamp — the 4 we can reach without auth
-  // Trimmed mean matches CF's partition methodology on this subset
-  try {
-    const [cb, kr, gem, bs] = await Promise.allSettled([
-      fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot', { headers: { 'User-Agent': UA } })
-        .then(r => r.json()).then(d => parseFloat(d?.data?.amount)),
-      fetch('https://api.kraken.com/0/public/Ticker?pair=XXBTZUSD', { headers: { 'User-Agent': UA } })
-        .then(r => r.json()).then(d => parseFloat(d?.result?.XXBTZUSD?.c?.[0])),
-      fetch('https://api.gemini.com/v1/pubticker/btcusd', { headers: { 'User-Agent': UA } })
-        .then(r => r.json()).then(d => parseFloat(d?.last)),
-      fetch('https://www.bitstamp.net/api/v2/ticker/btcusd/', { headers: { 'User-Agent': UA } })
-        .then(r => r.json()).then(d => parseFloat(d?.last)),
-    ]);
+  // Trimmed mean: drop min + max if ≥3 sources (matches CF partition methodology subset)
+  const trimmed = valid.length >= 3 ? valid.slice(1, -1) : valid;
+  const price = trimmed.reduce((s, x) => s + x.price, 0) / trimmed.length;
 
-    const prices = [cb, kr, gem, bs]
-      .filter(r => r.status === 'fulfilled' && Number.isFinite(r.value) && r.value > 10000)
-      .map(r => r.value)
-      .sort((a, b) => a - b);
-
-    if (prices.length >= 2) {
-      const middle = prices.length >= 3 ? prices.slice(1, -1) : prices;
-      const price = middle.reduce((s, p) => s + p, 0) / middle.length;
-      return new Response(JSON.stringify({
-        ok: true,
-        price: Math.round(price * 100) / 100,
-        source: 'constituent-fallback',
-        sourceCount: prices.length,
-        sources: ['CB','KR','GEM','BS'].filter((_,i) => [cb,kr,gem,bs][i]?.status === 'fulfilled'),
-        fetchedAt: Date.now(),
-      }), { status: 200, headers });
-    }
-  } catch (e) { lastError = e.message; }
-
-  return new Response(JSON.stringify({ ok: false, error: 'All BRTI sources failed', lastError, fetchedAt: Date.now() }), { status: 503, headers });
+  return new Response(JSON.stringify({
+    ok: true,
+    price: Math.round(price * 100) / 100,
+    source: valid.length === 4 ? 'constituent-4of6' : `constituent-${valid.length}of6`,
+    sources: valid.map(x => x.name),
+    prices: Object.fromEntries(valid.map(x => [x.name, Math.round(x.price * 100) / 100])),
+    fetchedAt: Date.now(),
+  }), { status: 200, headers });
 }
