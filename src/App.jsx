@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.24-v10.7.58d-brti-fix-no-scan-thrash';
-const TARA_VERSION_DISPLAY='Tara 10.7.58d';
+const BASELINE_VERSION='2026.05.24-v10.7.59-exact-brti-proxy';
+const TARA_VERSION_DISPLAY='Tara 10.7.59';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30190,12 +30190,10 @@ function TaraApp(){
   },[currentAsset,priceSource]);
 
   // V10.5.1 — CROSS-EXCHANGE BRTI APPROXIMATION
-  //   V10.7.53: Bitstamp removed due to CORS noise, OKX used as substitute.
-  //   V10.7.58c: CORRECTED constituent exchanges — OKX is NOT a CF Benchmarks BRTI
-  //   constituent. Actual CF constituents: Bitstamp, Coinbase, Gemini, Kraken, itBit,
-  //   LMAX Digital. We access 4 of 6: Coinbase, Kraken, Gemini, Bitstamp.
-  //   Bitstamp re-added with silent error handling. Gemini added. OKX removed.
-  //   4-source trimmed mean now much closer to CF Benchmarks methodology.
+  //   V10.7.59: Added /api/brti Vercel edge route as PRIMARY source.
+  //   Server-side proxy hits CF Benchmarks official endpoint directly (no CORS).
+  //   Falls back to 4-constituent trimmed mean if proxy unavailable.
+  //   Constituent exchanges (CB/KR/GEM/BS) remain as local browser fallback.
   useEffect(()=>{
     const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;
     const _fetchOne=async(url,parsePrice,name)=>{
@@ -30208,6 +30206,35 @@ function TaraApp(){
       }catch(_){return null;}
     };
     const _poll=async()=>{
+      // V10.7.59: Try Vercel proxy first — gets exact CF Benchmarks BRTI server-side
+      try{
+        const _proxyRes=await fetch('/api/brti',{cache:'no-store',signal:AbortSignal.timeout(2000)});
+        if(_proxyRes.ok){
+          const _proxyData=await _proxyRes.json();
+          if(_proxyData.ok&&_proxyData.price&&Number.isFinite(_proxyData.price)&&_proxyData.price>10000){
+            const _p=_proxyData.price;
+            const _now=Date.now();
+            _brtiSamplesRef.current.push({p:_p,t:_now,sources:[_proxyData.source||'cf-proxy']});
+            _brtiSamplesRef.current=_brtiSamplesRef.current.filter(s=>_now-s.t<60000);
+            const _samples=_brtiSamplesRef.current;
+            const _avgPrice=_samples.reduce((s,x)=>s+x.p,0)/_samples.length;
+            const _singlePrice=Number(currentPriceRef.current)||null;
+            const _divBps=(_singlePrice&&_avgPrice)?((_singlePrice-_avgPrice)/_avgPrice)*10000:null;
+            setBrtiApprox({
+              current:Math.round(_avgPrice*100)/100,
+              instant:Math.round((_samples.slice(-5).reduce((s,x)=>s+x.p,0)/Math.min(_samples.length,5))*100)/100,
+              samples60s:_samples.length,
+              sources:[_proxyData.source||'cf-proxy'],
+              sourceCount:1,
+              isExact:_proxyData.source==='cfbenchmarks',
+              divergenceBps:_divBps!=null?Math.round(_divBps*10)/10:null,
+              lastUpdate:_now,
+            });
+            return; // got exact BRTI — skip constituent fallback
+          }
+        }
+      }catch(_){} // proxy failed — fall through to constituent mean
+      // Constituent fallback: Coinbase + Kraken + Gemini + Bitstamp
       const _cb=PRICE_SOURCES.coinbase;
       const _kr=PRICE_SOURCES.kraken;
       const _geminiUrl=currentAsset==='BTC'
