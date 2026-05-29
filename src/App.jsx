@@ -4111,8 +4111,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.25-v10.7.63-calibration-websocket-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.63';
+const BASELINE_VERSION='2026.05.25-v10.7.64-dynamic-signal-coherence';
+const TARA_VERSION_DISPLAY='Tara 10.7.64';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -11041,6 +11041,46 @@ const computeV99Posterior=(params)=>{
     rawSignalScores.kalshiLead=_kAdj;
     reasoning.push(`[KALSHI-LEAD] Kalshi YES moved ${_kLead.kDelta>0?'+':''}${_kLead.kDelta}¢ vs spot ${_kLead.spotDeltaBps>0?'+':''}${_kLead.spotDeltaBps}bps over 60s → ${_kLead.dir} positioning ahead of move (${_kAdj>0?'+':''}${_kAdj})`);
   }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // V10.7.64 — SIGNAL COHERENCE TELEMETRY
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Computes signal alignment/coherence and stamps it for audit.
+  // Backtest showed coherence adjustment to totalScore did not reliably improve
+  //   WR — low-coherence trades (strong opposing signals) actually won at 64%
+  //   vs high-coherence (60%), suggesting opposition often = reversion setup.
+  // Decision: stamp coherence data for future analysis. Don't modify totalScore.
+  //   After 200+ labeled trades with _v10_7_64_coherenceAdj stamps, we'll know
+  //   which coherence thresholds actually predict wins vs losses and build
+  //   the weighting logic from data rather than theory.
+  try{
+    const _cohSignals={
+      gap:rawSignalScores.gap||0,momentum:rawSignalScores.momentum||0,
+      structure:rawSignalScores.structure||0,flow:rawSignalScores.flow||0,
+      technical:rawSignalScores.technical||0,macd:rawSignalScores.macd||0,
+      avwap:rawSignalScores.avwap||0,delta:rawSignalScores.delta||0,
+      bos:rawSignalScores.bos||0,stochRSI:rawSignalScores.stochRSI||0,
+    };
+    const _consensusScore=Object.values(_cohSignals).reduce((s,v)=>s+v,0);
+    const _consensusDir=_consensusScore>0?1:-1;
+    const _active=Object.entries(_cohSignals).filter(([,v])=>Math.abs(v)>=2);
+    const _aligned=_active.filter(([,v])=>(v>0?1:-1)===_consensusDir);
+    const _opposing=_active.filter(([,v])=>(v>0?1:-1)!==_consensusDir);
+    // Coherence ratio: 1.0=all agree, 0.5=split, 0.0=all oppose
+    const _cohRatio=_active.length>0?_aligned.length/_active.length:0.5;
+    // Strength-weighted coherence (strong aligned signals = higher)
+    const _alignedStrength=_aligned.reduce((s,[,v])=>s+Math.abs(v),0);
+    const _opposingStrength=_opposing.reduce((s,[,v])=>s+Math.abs(v),0);
+    rawSignalScores._v10_7_64_consensusScore=Math.round(_consensusScore*10)/10;
+    rawSignalScores._v10_7_64_cohRatio=Math.round(_cohRatio*100)/100;
+    rawSignalScores._v10_7_64_alignedN=_aligned.length;
+    rawSignalScores._v10_7_64_opposingN=_opposing.length;
+    rawSignalScores._v10_7_64_alignedStrength=Math.round(_alignedStrength*10)/10;
+    rawSignalScores._v10_7_64_opposingStrength=Math.round(_opposingStrength*10)/10;
+  }catch(e){
+    try{console.warn('[V10.7.64] Coherence stamp error:',e?.message);}catch(_){}
+  }
+  // ═══════════════════════════════════════════════════════════════════════════
+
   // Convert to posterior
   // ═══════════════════════════════════════════════════════════════════════════
   // V10.7.55 — SURGICAL SIGNAL ADJUSTMENTS (BACKTESTED, +5 wins/7d expected)
