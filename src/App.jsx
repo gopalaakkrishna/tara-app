@@ -4149,8 +4149,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.26-v10.7.66-rollover-cloud-restore-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.66';
+const BASELINE_VERSION='2026.05.29-v10.7.67-signal-data-preservation';
+const TARA_VERSION_DISPLAY='Tara 10.7.67';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28260,8 +28260,17 @@ function TaraApp(){
     //     Surface persistent failures via a ref so the UI can warn the user.
     const _stripForStorage=(e)=>{
       if(!e)return e;
-      const{signalScoresAtLock:_a,reasoning:_b,...rest}=e;
-      return rest;
+      // V10.7.67: Keep signalScoresAtLock but strip only the raw underlying fields
+      //   (prefixed with _) which are large/verbose. The scored signals (gap, macd, flow
+      //   etc.) are needed for calibration, signal audit, and coherence analysis.
+      //   Raw fields like _macdHist, _stochK, _atrp etc. can be dropped — they're
+      //   telemetry-only and not used in any analysis pipeline.
+      //   Size impact: scored signals ~300B per entry vs full signalScores ~2KB per entry.
+      const{reasoning:_b,signalScoresAtLock:_sss,...rest}=e;
+      const _scores=_sss?Object.fromEntries(
+        Object.entries(_sss).filter(([k])=>!k.startsWith('_'))
+      ):null;
+      return{...rest,...(_scores?{signalScoresAtLock:_scores}:{})};
     };
     const _stripped=taraCallLog.slice(-TARA_CALL_LOG_CAP).map(_stripForStorage);
     let _saved=false;
