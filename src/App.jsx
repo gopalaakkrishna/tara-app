@@ -2038,6 +2038,44 @@ const computeEconCalendarRisk=()=>{
 //   Returns: {divBps, perpAbove, spot, perp, lastUpdate, status}
 //     divBps: positive = perp premium (longs crowded), negative = perp discount (shorts crowded)
 //     perpAbove: bool — perp > spot
+// V10.7.65 — WHALE ALERT ON-CHAIN SIGNAL
+//   Tracks large BTC on-chain transactions (>$500K) via /api/whale proxy.
+//   Requires WHALE_ALERT_API_KEY set in Vercel environment variables.
+//   Inflow to exchange = sell pressure (bearish). Outflow from exchange = buy pressure (bullish).
+//   netScore: -10 (strong bearish) to +10 (strong bullish). Null when proxy unavailable.
+const useWhaleAlert=(currentAsset)=>{
+  const[whale,setWhale]=React.useState({netScore:0,direction:'neutral',transactionCount:0,available:false,lastUpdate:0});
+  React.useEffect(()=>{
+    if(currentAsset!=='BTC')return; // Whale Alert most reliable for BTC
+    let _stopped=false;
+    const _poll=async()=>{
+      try{
+        const r=await fetch('/api/whale',{cache:'no-store',signal:AbortSignal.timeout(3000)});
+        if(!r.ok)return;
+        const d=await r.json();
+        if(_stopped)return;
+        if(d?.ok){
+          setWhale({
+            netScore:Number(d.netScore)||0,
+            direction:d.direction||'neutral',
+            transactionCount:Number(d.transactionCount)||0,
+            transactions:d.transactions||[],
+            available:true,
+            lastUpdate:Date.now(),
+          });
+        }else{
+          // /api/whale returns ok:false when key not set — mark unavailable, don't spam
+          setWhale(prev=>({...prev,available:false}));
+        }
+      }catch(_){}
+    };
+    _poll();
+    const iv=setInterval(_poll,30000); // 30s — free tier allows 10 req/min, 2/min is safe
+    return()=>{_stopped=true;clearInterval(iv);};
+  },[currentAsset]);
+  return whale;
+};
+
 const useSpotPerpDivergence=(currentAsset,bloomberg)=>{
   const[data,setData]=React.useState({divBps:0,spot:0,perp:0,perpAbove:false,lastUpdate:0,status:'init'});
   React.useEffect(()=>{
@@ -4111,8 +4149,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.25-v10.7.64-dynamic-signal-coherence';
-const TARA_VERSION_DISPLAY='Tara 10.7.64';
+const BASELINE_VERSION='2026.05.25-v10.7.65-whale-news-proxy';
+const TARA_VERSION_DISPLAY='Tara 10.7.65';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -9794,6 +9832,27 @@ const computeV99Posterior=(params)=>{
     reasoning.push(`[LIQ-SPOOF] Ignored fresh short wall (<15s) — likely spoof`);
   }
   totalScore+=liqAdj;
+
+  // V10.7.65 — WHALE ALERT ON-CHAIN SIGNAL
+  //   Large BTC on-chain transactions (>$500K) via /api/whale proxy.
+  //   Exchange inflow = sell pressure (bearish). Exchange outflow = buy pressure (bullish).
+  //   Only active when Whale Alert API key is configured — silently skipped otherwise.
+  //   Max ±6pt contribution. Telemetry stamped regardless.
+  const _whaleData=params.whaleAlert;
+  if(_whaleData?.available&&Number.isFinite(_whaleData.netScore)&&Math.abs(_whaleData.netScore)>1.5){
+    const _whaleAdj=Math.max(-6,Math.min(6,_whaleData.netScore));
+    totalScore+=_whaleAdj;
+    rawSignalScores.whaleAlert=Math.round(_whaleAdj*10)/10;
+    rawSignalScores._whaleTxCount=_whaleData.transactionCount||0;
+    rawSignalScores._whaleDir=_whaleData.direction||'neutral';
+    if(Math.abs(_whaleAdj)>1.5){
+      reasoning.push(`[WHALE] on-chain ${_whaleData.direction} (${_whaleData.transactionCount} tx, score ${_whaleAdj>=0?'+':''}${_whaleAdj.toFixed(1)})`);
+    }
+  }else{
+    rawSignalScores.whaleAlert=null;
+    rawSignalScores._whaleTxCount=0;
+    rawSignalScores._whaleDir='unavailable';
+  }
   const fundingAccel=(funding-fundingPrev);
   // V114: Funding Extremes Contrarian Signal
   // Very crowded longs (funding >0.05%) often precede DOWN moves
@@ -23021,106 +23080,64 @@ const useNewsSentiment=()=>{
 
     let cancelled=false;
 
-    // ── SOURCE 1: CryptoCompare (BTC-focused) ──────────────────────────
-    const fetchCryptoCompare=async()=>{
-      try{
-        const r=await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=BTC,Trading,Regulation');
-        const d=await r.json();
-        if(!d?.Data)return [];
-        return d.Data.slice(0,20).map(n=>({
-          title:n.title||'',
-          time:(n.published_on||0)*1000,
-          source:'crypto',
-        }));
-      }catch(e){return [];}
-    };
-
-    // ── SOURCE 2: GDELT 2.0 (global news, geopolitics) ─────────────────
-    // Query: BTC OR (geopolitics + macro topics that move risk-on/risk-off)
-    // Last 60 minutes, max 25 records, ArtList mode, JSON output
-    const fetchGDELT=async()=>{
-      try{
-        const q=encodeURIComponent('(bitcoin OR btc OR crypto OR (federal reserve) OR (rate cut) OR (rate hike) OR cpi OR fomc OR sanctions OR (war risk) OR iran OR israel OR taiwan OR (banking crisis) OR (oil shock) OR (executive order)) sourcelang:eng');
-        const url=`https://api.gdeltproject.org/api/v2/doc/doc?query=${q}&mode=artlist&maxrecords=25&format=json&timespan=60min&sort=datedesc`;
-        const r=await fetch(url,{cache:'no-store'});
-        if(!r.ok)return [];
-        const d=await r.json();
-        if(!d?.articles)return [];
-        return d.articles.map(a=>({
-          title:a.title||'',
-          // GDELT seendate: YYYYMMDDHHMMSS
-          time:(()=>{
-            const sd=a.seendate||'';
-            if(sd.length<14)return Date.now()-3600000;
-            const yr=parseInt(sd.slice(0,4),10);
-            const mo=parseInt(sd.slice(4,6),10)-1;
-            const dy=parseInt(sd.slice(6,8),10);
-            const hr=parseInt(sd.slice(8,10),10);
-            const mn=parseInt(sd.slice(10,12),10);
-            const sc=parseInt(sd.slice(12,14),10);
-            return Date.UTC(yr,mo,dy,hr,mn,sc);
-          })(),
-          source:'gdelt',
-          tone:typeof a.tone==='number'?a.tone:null, // GDELT tone is -10..+10 typically
-        }));
-      }catch(e){return [];}
-    };
-
-    // ── COMBINE + SCORE ─────────────────────────────────────────────────
+    // V10.7.65: Replaced direct CryptoCompare + GDELT calls with /api/news proxy.
+    //   Direct GDELT was hitting 429 Too Many Requests from browser.
+    //   Proxy runs server-side (no CORS, 45s cache, all 3 sources in one call).
     const fetchAll=async()=>{
-      const[cc,gd]=await Promise.all([fetchCryptoCompare(),fetchGDELT()]);
-      if(cancelled)return;
-      const items=[...cc,...gd];
-      if(items.length===0)return;
+      try{
+        const r=await fetch('/api/news?asset=BTC',{cache:'no-store'});
+        if(!r.ok)return;
+        const d=await r.json();
+        if(cancelled)return;
+        const items=d?.items||[];
+        if(items.length===0)return;
 
-      // Recency-decayed keyword scoring across all sources
-      let bull=0,bear=0,extreme=0,topHeadline=null,topScore=0;
-      let geoRisk=0,geoTopic=null,geoSource=null,geoTopScore=0;
-      let hasBreaking=false;
+        let bull=0,bear=0,extreme=0,topHeadline=null,topScore=0;
+        let geoRisk=0,geoTopic=null,geoSource=null,geoTopScore=0;
+        let hasBreaking=false;
 
-      items.forEach(n=>{
-        const t=(n.title||'').toLowerCase();
-        if(!t)return;
-        const ageMin=(Date.now()-n.time)/60000;
-        if(ageMin>360||ageMin<0)return; // ignore >6h or future-dated
+        items.forEach(n=>{
+          const t=(n.title||'').toLowerCase();
+          if(!t)return;
+          const ageMin=(Date.now()-n.time)/60000;
+          if(ageMin>360||ageMin<0)return;
+          const decay=Math.max(0.3,1-(ageMin/360));
+          const geoDecay=ageMin<=30?Math.max(0.5,1-(ageMin/60)):Math.max(0.1,0.5-(ageMin-30)/300);
 
-        // Directional decay: 6h half-life-ish
-        const decay=Math.max(0.3,1-(ageMin/360));
-        // Geo/macro decay: tighter, last 30 min counts most
-        const geoDecay=ageMin<=30?Math.max(0.5,1-(ageMin/60)):Math.max(0.1,0.5-(ageMin-30)/300);
+          // CryptoPanic has pre-computed sentiment votes
+          if(n.source==='cryptopanic'){
+            if(n.sentiment==='bullish'){bull+=decay;if(decay>topScore){topScore=decay;topHeadline=n.title;}}
+            else if(n.sentiment==='bearish'){bear+=decay;if(decay>topScore){topScore=decay;topHeadline=n.title;}}
+            if(n.isImportant){extreme+=decay;hasBreaking=true;}
+            return;
+          }
 
-        let itemScore=0;
-        bullishKW.forEach(kw=>{if(t.includes(kw)){bull+=decay;itemScore+=decay;}});
-        bearishKW.forEach(kw=>{if(t.includes(kw)){bear+=decay;itemScore-=decay;}});
-        macroKW.forEach(kw=>{if(t.includes(kw))extreme+=decay*0.5;});
-        // Track top directional headline for display
-        if(Math.abs(itemScore)>topScore){topScore=Math.abs(itemScore);topHeadline=n.title;}
+          // Keyword scoring for GDELT + CryptoCompare
+          let itemScore=0;
+          bullishKW.forEach(kw=>{if(t.includes(kw)){bull+=decay;itemScore+=decay;}});
+          bearishKW.forEach(kw=>{if(t.includes(kw)){bear+=decay;itemScore-=decay;}});
+          macroKW.forEach(kw=>{if(t.includes(kw))extreme+=decay*0.5;});
+          if(Math.abs(itemScore)>topScore){topScore=Math.abs(itemScore);topHeadline=n.title;}
 
-        // V145: Geo/macro/banking/political — accumulate into geoRisk score
-        let geoItemScore=0;
-        geoKW.forEach(kw=>{if(t.includes(kw))geoItemScore+=geoDecay;});
-        bankingKW.forEach(kw=>{if(t.includes(kw))geoItemScore+=geoDecay*1.5;});
-        politicalKW.forEach(kw=>{if(t.includes(kw))geoItemScore+=geoDecay*0.7;});
-        // Breaking-tag multiplier
-        const isBreaking=breakingKW.some(kw=>t.includes(kw))||ageMin<=10;
-        if(isBreaking&&geoItemScore>0)geoItemScore*=1.5;
-        if(isBreaking&&ageMin<=10)hasBreaking=true;
+          let geoItemScore=0;
+          geoKW.forEach(kw=>{if(t.includes(kw))geoItemScore+=geoDecay;});
+          bankingKW.forEach(kw=>{if(t.includes(kw))geoItemScore+=geoDecay*1.5;});
+          politicalKW.forEach(kw=>{if(t.includes(kw))geoItemScore+=geoDecay*0.7;});
+          const isBreaking=breakingKW.some(kw=>t.includes(kw))||ageMin<=10;
+          if(isBreaking&&geoItemScore>0)geoItemScore*=1.5;
+          if(isBreaking&&ageMin<=10)hasBreaking=true;
+          if(geoItemScore>geoTopScore){
+            geoTopScore=geoItemScore;
+            geoTopic=n.title;
+            geoSource=n.source;
+            geoRisk=Math.min(1,geoItemScore/3);
+          }
+        });
 
-        if(geoItemScore>geoTopScore){
-          geoTopScore=geoItemScore;
-          geoTopic=n.title;
-          geoSource=n.source;
-          geoRisk=Math.min(1,geoItemScore/3); // clamp 0-1
-        }
-      });
-
-      setSentiment({
-        score:bull-bear,bullish:bull,bearish:bear,extreme,
-        topHeadline,hasBreaking,
-        geoRisk,geoTopic,geoSource,
-      });
+        setSentiment({score:bull-bear,bullish:bull,bearish:bear,extreme,
+          topHeadline,hasBreaking,geoRisk,geoTopic,geoSource});
+      }catch(e){}
     };
-
     fetchAll();
     // V145: Slightly slower than V134's 30s — GDELT can be sluggish, 45s is safer.
     //       CryptoCompare side still updates frequently enough for breaking news.
@@ -30013,6 +30030,8 @@ function TaraApp(){
   // V9.14: spot-vs-perp divergence. Polls Coinbase spot every 10s, compares
   //   against bloomberg perp mark price. Output feeds the spotPerpDiv signal.
   const spotPerpDiv=useSpotPerpDivergence(currentAsset,bloomberg);
+  // V10.7.65: Whale Alert on-chain signal
+  const whaleAlert=useWhaleAlert(currentAsset);
   const{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal,tapeWindows}=useGlobalTape(currentAsset);
   // V9.17.1: SCALPER ENGINE — always ticks (was gated by enabled in V9.17.0).
   //   The panel header "tara reads" needs live data even when scalper is OFF,
@@ -32845,7 +32864,7 @@ function TaraApp(){
         try{return buildDowHourCalibration(taraCallLogRef.current||[]);}
         catch(_){return null;}
       })();
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable});
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
