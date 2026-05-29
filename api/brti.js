@@ -1,9 +1,11 @@
-// /api/brti.js — Vercel serverless function (V10.7.65b)
+// /api/brti.js — Vercel serverless function (V10.7.65c)
 // Standard serverless (NOT Edge Runtime) — avoids burning Edge Request quota.
 // Server-side BRTI: 4 CF Benchmarks constituent exchanges, trimmed mean.
-// CF Benchmarks official API requires paid key — using 4 of 6 constituents instead.
+// V10.7.65c: Cache increased from 1.5s → 10s to reduce serverless invocations.
+//   Tara polls every 1.5s but doesn't need fresher than 10s for a 15m window signal.
+//   57,600 invocations/day → ~8,640/day — well within 100K/month free limit.
 
-const CACHE_TTL_MS = 1500; // 1.5s — matches Tara's poll cadence
+const CACHE_TTL_MS = 10000; // 10s cache — reduces invocations by 6.7x
 let _cache = null;
 
 const tryFetch = async (url, timeoutMs = 2500) => {
