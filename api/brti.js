@@ -1,66 +1,85 @@
-// /api/brti.js — Vercel Edge Function
-// V10.7.61b — 4-constituent trimmed mean (CB+KR+GEM+BS)
-// CF Benchmarks real-time API requires a registered key — no free public endpoint.
-// Best achievable without a key: 4 of 6 CF constituents (missing itBit + LMAX Digital).
-// Trimmed mean of CB+KR+GEM+BS is typically within $5-15 of official BRTI.
+// /api/brti.js — Vercel serverless function (V10.7.65b)
+// Standard serverless (NOT Edge Runtime) — avoids burning Edge Request quota.
+// Server-side BRTI: 4 CF Benchmarks constituent exchanges, trimmed mean.
+// CF Benchmarks official API requires paid key — using 4 of 6 constituents instead.
 
-export const config = { runtime: 'edge' };
+const CACHE_TTL_MS = 1500; // 1.5s — matches Tara's poll cadence
+let _cache = null;
 
-export default async function handler(req) {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Cache-Control': 'no-store, max-age=0',
-    'Content-Type': 'application/json',
-  };
+const tryFetch = async (url, timeoutMs = 2500) => {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, {
+      signal: ctrl.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 TaraApp/10.7.65b',
+        'Accept': 'application/json',
+      },
+    });
+    clearTimeout(t);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r;
+  } catch (e) { clearTimeout(t); throw e; }
+};
 
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+const respond = (res, payload, status = 200) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(status).json(payload);
+};
 
-  const UA = 'Mozilla/5.0 TaraApp/10.7.61b';
-  const t = (ms) => AbortSignal.timeout(ms);
+export default async function handler(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.status(204).end();
+  }
 
-  // 4 real CF Benchmarks constituent exchanges
-  // Using exchange-tier endpoints (more reliable from server-side than commerce APIs)
-  const fetches = await Promise.allSettled([
-    // Coinbase — exchange API (public, no auth, reliable from Vercel)
-    fetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker', { headers: { 'User-Agent': UA }, signal: t(2500) })
+  // Server-side cache — 1.5s TTL matches Tara's poll rate
+  // Prevents multiple simultaneous renders from each making their own requests
+  if (_cache && Date.now() - _cache.at < CACHE_TTL_MS) {
+    return respond(res, { ..._cache.data, cached: true });
+  }
+
+  // 4 of 6 CF Benchmarks constituent exchanges (all public, no auth)
+  const [cb, kr, gem, bs] = await Promise.allSettled([
+    tryFetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker')
       .then(r => r.json()).then(d => ({ name: 'CB', price: parseFloat(d?.price) })),
-    // Kraken — public ticker
-    fetch('https://api.kraken.com/0/public/Ticker?pair=XXBTZUSD', { headers: { 'User-Agent': UA }, signal: t(2500) })
+    tryFetch('https://api.kraken.com/0/public/Ticker?pair=XXBTZUSD')
       .then(r => r.json()).then(d => ({ name: 'KR', price: parseFloat(d?.result?.XXBTZUSD?.c?.[0]) })),
-    // Gemini — public ticker
-    fetch('https://api.gemini.com/v1/pubticker/btcusd', { headers: { 'User-Agent': UA }, signal: t(2500) })
+    tryFetch('https://api.gemini.com/v1/pubticker/btcusd')
       .then(r => r.json()).then(d => ({ name: 'GEM', price: parseFloat(d?.last) })),
-    // Bitstamp — public ticker
-    fetch('https://www.bitstamp.net/api/v2/ticker/btcusd/', { headers: { 'User-Agent': UA }, signal: t(2500) })
+    tryFetch('https://www.bitstamp.net/api/v2/ticker/btcusd/')
       .then(r => r.json()).then(d => ({ name: 'BS', price: parseFloat(d?.last) })),
   ]);
 
-  const valid = fetches
+  const valid = [cb, kr, gem, bs]
     .filter(r => r.status === 'fulfilled' && Number.isFinite(r.value?.price) && r.value.price > 10000)
     .map(r => r.value)
     .sort((a, b) => a.price - b.price);
 
   if (valid.length < 2) {
-    return new Response(JSON.stringify({
+    return respond(res, {
       ok: false,
       error: 'Fewer than 2 sources responded',
-      sources: fetches.map((r, i) => ({ name: ['CB','KR','GEM','BS'][i], ok: r.status === 'fulfilled' })),
       fetchedAt: Date.now(),
-    }), { status: 503, headers });
+    }, 503);
   }
 
-  // Trimmed mean: drop min + max if ≥3 sources (matches CF partition methodology subset)
+  // Trimmed mean: drop min+max if ≥3 sources
   const trimmed = valid.length >= 3 ? valid.slice(1, -1) : valid;
   const price = trimmed.reduce((s, x) => s + x.price, 0) / trimmed.length;
 
-  return new Response(JSON.stringify({
+  const result = {
     ok: true,
     price: Math.round(price * 100) / 100,
     source: valid.length === 4 ? 'constituent-4of6' : `constituent-${valid.length}of6`,
     sources: valid.map(x => x.name),
     prices: Object.fromEntries(valid.map(x => [x.name, Math.round(x.price * 100) / 100])),
     fetchedAt: Date.now(),
-  }), { status: 200, headers });
+  };
+
+  _cache = { at: Date.now(), data: result };
+  return respond(res, result);
 }
