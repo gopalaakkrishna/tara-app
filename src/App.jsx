@@ -4149,8 +4149,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.29-v10.7.67b-conviction-display-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.67b';
+const BASELINE_VERSION='2026.05.29-v10.7.68-abort-loop-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.68';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27966,6 +27966,11 @@ function TaraApp(){
   // V10.4.1 Module A — delay gate state. Tracks per-window delay duration
   // and the conditions when delay first triggered (for telemetry).
   const _v104_1_delayStateRef=useRef(null);
+  // V10.7.68: max-abort-per-window guard. Tracks {windowId, abortCount} so that
+  //   after MAX_ABORTS consecutive adverse aborts in the same window, we stop
+  //   retrying entirely (sit out the window). Without this, each abort clears the
+  //   delay state and the next tick immediately re-opens it → infinite abort loop.
+  const _v104_1_abortCountRef=useRef({windowId:null,count:0});
   const _v104_1_pendingDelayStampRef=useRef(null);
   // V6.2.7: KALSHI ENTRY WINDOW tracking. Replaces the time-based hard cap.
   //   kalshiWasBelowThreshUp: has Kalshi YES (UP price) ever been ≤65% this window?
@@ -38295,6 +38300,16 @@ function TaraApp(){
       const _kNow=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
       const _convNow=tc.confidence||0;
       const _dirNow=tc.call;
+      // V10.7.68: MAX ABORTS PER WINDOW — stop the abort loop.
+      //   Each adverse abort clears delay state → next tick re-opens → abort again → loop.
+      //   After 3 aborts in same window, sit out the rest. Don't retry.
+      const _curWid=computeWindowId(windowType);
+      if(_v104_1_abortCountRef.current.windowId!==_curWid){
+        _v104_1_abortCountRef.current={windowId:_curWid,count:0};
+      }
+      if(_v104_1_abortCountRef.current.count>=3){
+        return; // sat out max aborts this window — don't retry
+      }
       // Kalshi price FROM TARA'S DIRECTION — if Tara says DOWN and Kalshi YES is 35,
       //   then betting DOWN costs ~$0.65 (100-35). So "expensive entry" for DOWN
       //   means kalshiYesPrice is LOW. Flip per direction.
@@ -38412,6 +38427,8 @@ function TaraApp(){
             try{console.error('[V10.7.51] abort log failed:',e);}catch(_){}
           }
           try{console.warn('[V10.7.48] Adverse Kalshi abort:',{dropPts:_v1074_8_drop,dirFlipped:_v1074_8_dirFlipped,firstDir:_v104_1_delayStateRef.current.firstDir,currentDir:_dirNow});}catch(_){}
+          // V10.7.68: increment abort count for this window
+          _v104_1_abortCountRef.current.count=(_v104_1_abortCountRef.current.count||0)+1;
           _v104_1_delayStateRef.current=null; // clear state — let window keep developing
           return; // skip lock this tick
         }
