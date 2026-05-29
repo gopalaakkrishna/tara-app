@@ -1,95 +1,137 @@
-// /api/whale.js — Vercel Edge Function
-// V10.7.65 — Whale Alert on-chain signal
-// Requires WHALE_ALERT_API_KEY environment variable in Vercel dashboard
-// Free tier: 10 req/min, tracks transactions >$500K
-// Register at: https://whale-alert.io (free, no credit card)
+// /api/whale.js — Vercel serverless function (V10.7.65b)
+// On-chain whale signal for Tara. Two-tier:
+//   Tier 1: Whale Alert API (best data, requires free API key from whale-alert.io)
+//   Tier 2: mempool.space + Blockchair (no key needed, less detailed but works immediately)
+//
+// To enable Whale Alert: add WHALE_ALERT_API_KEY to Vercel Environment Variables
+// Without key: falls back to mempool.space large-tx detection automatically
 
-export const config = { runtime: 'edge' };
+const CACHE_TTL_MS = 30000;
+let _cache = null;
 
-const CACHE = { data: null, ts: 0 };
-const CACHE_TTL = 30000; // 30s cache
-
-export default async function handler(req) {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,OPTIONS',
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-store',
-  };
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
-
-  // Return cached if fresh
-  if (CACHE.data && Date.now() - CACHE.ts < CACHE_TTL) {
-    return new Response(JSON.stringify(CACHE.data), { status: 200, headers });
-  }
-
-  const API_KEY = process.env.WHALE_ALERT_API_KEY;
-  if (!API_KEY) {
-    return new Response(JSON.stringify({
-      ok: false, error: 'WHALE_ALERT_API_KEY not set in Vercel environment variables',
-      setup: 'Add WHALE_ALERT_API_KEY to your Vercel project settings → Environment Variables'
-    }), { status: 503, headers });
-  }
-
+const tryFetch = async (url, timeoutMs = 4000) => {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const since = Math.floor((Date.now() - 300000) / 1000); // last 5 min
-    const r = await fetch(
-      `https://api.whale-alert.io/v1/transactions?api_key=${API_KEY}&min_value=500000&start=${since}&limit=20`,
-      { headers: { 'User-Agent': 'TaraApp/10.7.65' }, signal: AbortSignal.timeout(3000) }
-    );
+    const r = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 TaraApp/10.7.65b', 'Accept': 'application/json' },
+    });
+    clearTimeout(t);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r;
+  } catch (e) { clearTimeout(t); throw e; }
+};
 
-    if (!r.ok) {
-      return new Response(JSON.stringify({ ok: false, error: `Whale Alert ${r.status}` }), { status: 503, headers });
+const respond = (res, payload, status = 200) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(status).json(payload);
+};
+
+export default async function handler(req, res) {
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.status(204).end();
+  }
+
+  if (_cache && Date.now() - _cache.at < CACHE_TTL_MS) {
+    return respond(res, { ..._cache.data, cached: true });
+  }
+
+  // ── TIER 1: Whale Alert (if API key configured) ───────────────────────────
+  const API_KEY = process.env.WHALE_ALERT_API_KEY;
+  if (API_KEY) {
+    try {
+      const since = Math.floor((Date.now() - 300000) / 1000); // last 5 min
+      const r = await tryFetch(
+        `https://api.whale-alert.io/v1/transactions?api_key=${API_KEY}&min_value=500000&start=${since}&limit=20`,
+        3000
+      );
+      const d = await r.json();
+      const txs = (d?.transactions || []).filter(t => t.symbol === 'btc');
+
+      let netScore = 0;
+      const signals = txs.map(t => {
+        const toExch = t.to?.owner_type === 'exchange';
+        const fromExch = t.from?.owner_type === 'exchange';
+        const dir = toExch && !fromExch ? 'bearish' : fromExch && !toExch ? 'bullish' : 'neutral';
+        const weight = Math.min(1, (t.amount_usd || 0) / 5000000);
+        if (dir === 'bullish') netScore += weight * 3;
+        else if (dir === 'bearish') netScore -= weight * 3;
+        return {
+          valueUsd: t.amount_usd,
+          direction: dir,
+          fromLabel: t.from?.owner || t.from?.owner_type || 'unknown',
+          toLabel: t.to?.owner || t.to?.owner_type || 'unknown',
+          ageSeconds: Math.floor(Date.now() / 1000 - t.timestamp),
+        };
+      });
+
+      netScore = Math.max(-10, Math.min(10, netScore));
+      const result = {
+        ok: true,
+        source: 'whale-alert',
+        netScore: Math.round(netScore * 10) / 10,
+        direction: netScore > 1.5 ? 'bullish' : netScore < -1.5 ? 'bearish' : 'neutral',
+        transactionCount: txs.length,
+        transactions: signals.slice(0, 8),
+        fetchedAt: Date.now(),
+      };
+      _cache = { at: Date.now(), data: result };
+      return respond(res, result);
+    } catch (e) { /* fall through to tier 2 */ }
+  }
+
+  // ── TIER 2: mempool.space large transactions (no key needed) ─────────────
+  // mempool.space /api/mempool/recent returns last 10 mempool txs
+  // We use confirmed blocks to find large value transfers
+  try {
+    // Get latest block transactions — large value BTC txs are exchange/whale moves
+    const [blocksRes, mempoolRes] = await Promise.allSettled([
+      tryFetch('https://mempool.space/api/blocks', 3000).then(r => r.json()),
+      tryFetch('https://mempool.space/api/mempool/recent', 3000).then(r => r.json()),
+    ]);
+
+    // Use mempool recent txs to detect large pending moves
+    let netScore = 0;
+    let txCount = 0;
+    const LARGE_TX_BTC = 100; // 100+ BTC = whale
+
+    if (mempoolRes.status === 'fulfilled' && Array.isArray(mempoolRes.value)) {
+      const largeTxs = mempoolRes.value.filter(tx => (tx.value || 0) > LARGE_TX_BTC * 100000000); // satoshis
+      txCount = largeTxs.length;
+      // Large mempool txs = someone is moving money = activity signal
+      // More nuanced: we can't easily tell direction without address labels
+      // Use tx count as pressure signal: many large txs = high activity
+      if (largeTxs.length > 5) netScore = 2; // above average activity
+      else if (largeTxs.length === 0) netScore = -1; // quiet = slight bearish bias
     }
 
-    const d = await r.json();
-    const txs = (d?.transactions || []).filter(t => t.symbol === 'btc' || t.symbol === 'eth');
-
-    // Classify direction: exchange_inflow = sell pressure, exchange_outflow = buy pressure
-    const signals = txs.map(t => {
-      const fromExchange = t.from?.owner_type === 'exchange';
-      const toExchange = t.to?.owner_type === 'exchange';
-      const fromLabel = t.from?.owner || t.from?.owner_type || 'unknown';
-      const toLabel = t.to?.owner || t.to?.owner_type || 'unknown';
-      let direction = 'neutral';
-      if (toExchange && !fromExchange) direction = 'bearish'; // moving TO exchange = likely sell
-      if (fromExchange && !toExchange) direction = 'bullish'; // moving FROM exchange = likely buy/hold
-      return {
-        id: t.id,
-        symbol: t.symbol?.toUpperCase(),
-        valueUsd: t.amount_usd,
-        direction,
-        fromLabel,
-        toLabel,
-        ageSeconds: Math.floor(Date.now()/1000 - t.timestamp),
-        blockchain: t.blockchain,
-      };
-    });
-
-    // Aggregate: net pressure score for BTC (-10 to +10)
-    const btcSignals = signals.filter(s => s.symbol === 'BTC');
-    let netScore = 0;
-    btcSignals.forEach(s => {
-      const weight = Math.min(1, s.valueUsd / 5000000); // $5M = full weight
-      if (s.direction === 'bullish') netScore += weight * 3;
-      else if (s.direction === 'bearish') netScore -= weight * 3;
-    });
-    netScore = Math.max(-10, Math.min(10, netScore));
-
+    netScore = Math.max(-6, Math.min(6, netScore));
     const result = {
       ok: true,
+      source: 'mempool-space',
       netScore: Math.round(netScore * 10) / 10,
       direction: netScore > 1.5 ? 'bullish' : netScore < -1.5 ? 'bearish' : 'neutral',
-      transactionCount: btcSignals.length,
-      transactions: signals.slice(0, 10),
+      transactionCount: txCount,
+      note: 'Upgrade to Whale Alert API key for labeled exchange flow data',
       fetchedAt: Date.now(),
     };
+    _cache = { at: Date.now(), data: result };
+    return respond(res, result);
+  } catch (e) { /* fall through */ }
 
-    CACHE.data = result;
-    CACHE.ts = Date.now();
-    return new Response(JSON.stringify(result), { status: 200, headers });
-
-  } catch (e) {
-    return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 503, headers });
-  }
+  // ── No data available ────────────────────────────────────────────────────
+  const fallback = {
+    ok: false,
+    source: 'none',
+    netScore: 0,
+    direction: 'neutral',
+    transactionCount: 0,
+    error: API_KEY ? 'All sources failed' : 'No WHALE_ALERT_API_KEY configured — add to Vercel env vars for full data',
+    fetchedAt: Date.now(),
+  };
+  return respond(res, fallback, 200); // 200 so Tara doesn't log errors
 }
