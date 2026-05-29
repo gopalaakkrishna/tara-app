@@ -4149,8 +4149,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.25-v10.7.65-whale-news-proxy';
-const TARA_VERSION_DISPLAY='Tara 10.7.65';
+const BASELINE_VERSION='2026.05.26-v10.7.66-rollover-cloud-restore-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.66';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32662,6 +32662,10 @@ function TaraApp(){
         //   old lock stays visible until next organic render.
         setForceRender(p=>p+1);
         _clearLock(); // V5.6: wipe cloud lock — new window starts clean
+        // V10.7.66: also explicitly null the cloud snapshot path so lock-watch
+        //   can't re-adopt stale cloud data before cloud clears propagate.
+        //   _clearLock handles the primary path but the snapshot doc may lag.
+        try{if(typeof cloudWrite==='function')cloudWrite('state/taraSnapshot',null);}catch(_){}
         _hasRestoredLockRef.current=false; // allow restore on next window if user refreshes
         _cloudRestoreCompletedRef.current=false; // V7.10.3: re-arm cloud-restore gate for new window
         // V9.2.0: Stamp rollover time. Engine IIFE checks this to force SEARCH mode for
@@ -32732,6 +32736,15 @@ function TaraApp(){
       //   - cloud's commit is meaningfully earlier than local's (>1s tolerance).
       const _shouldAdoptCloud=(cloudObj,localObj)=>{
         if(!cloudObj)return false;
+        // V10.7.66: Window ID guard — never adopt a cloud snapshot from a previous window.
+        //   This was the root cause of rollover lock sticking: local snapshot clears at
+        //   rollover, cloud lock-watch fires, cloud still has old window's lock,
+        //   _shouldAdoptCloud(cloud, null) returns true → re-adopts stale lock.
+        const _cloudWindowId=cloudObj.windowId||cloudObj.lockedWindowId||null;
+        const _currentWindowId=timeState?.nextWindow||timeState?.startWindow||lastWindowRef.current||null;
+        if(_cloudWindowId&&_currentWindowId&&_cloudWindowId!==_currentWindowId){
+          return false; // cloud is from a different window — never adopt
+        }
         if(!localObj)return true;
         const _cT=Number(cloudObj._committedAt)||0;
         const _lT=Number(localObj._committedAt)||0;
