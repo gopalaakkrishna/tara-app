@@ -4149,8 +4149,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.29-v10.7.67-signal-data-preservation';
-const TARA_VERSION_DISPLAY='Tara 10.7.67';
+const BASELINE_VERSION='2026.05.29-v10.7.67b-conviction-display-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.67b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13873,14 +13873,19 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
              Conviction = |posterior - 50|. Deadzone (0-5) = no real edge → sit out at end.
              Built off live tc.posterior so it updates every tick during scanning. */}
         {(()=>{
-          // Use snap's frozen posterior if locked, else live tc posterior
-          const _livePost=snap?(snap.atPosterior??tc?.posterior??50):(tc?.posterior??50);
+          // V10.7.67b: Always use live tc posterior for conviction display.
+          //   Prior: snap?.atPosterior was read first — snap in WATCHING state often
+          //   had atPosterior=null → fell through to tc?.posterior which could also
+          //   be stale → conviction showed 0.0pt despite engine saying 69%.
+          //   The snap's frozen posterior is used for the locked call display (below),
+          //   not for the live conviction meter which should always reflect current engine.
+          const _livePost=tc?.posterior??snap?.atPosterior??50;
           const _post=Number(_livePost);
           if(!isFinite(_post))return null;
           const _conv=Math.abs(_post-50);
           const _dir=_post>=50?'UP':'DOWN';
           const _zone=_conv<5?'deadzone':_conv<10?'weak':_conv<15?'moderate':'strong';
-          const _zoneLabel=_conv<5?'DEADZONE — no edge':_conv<10?'WEAK conviction':_conv<15?'MODERATE conviction':'STRONG conviction';
+          const _zoneLabel=_conv<5?'DEADZONE — coin flip':_conv<10?'WEAK conviction':_conv<15?'MODERATE conviction':'STRONG conviction';
           const _zoneColor=_conv<5?'rgb(244,114,182)':_conv<10?'#E5C870':_conv<15?'rgb(110,231,183)':'rgb(52,211,153)';
           const _zoneBg=_conv<5?'rgba(244,114,182,0.06)':_conv<10?'rgba(229,200,112,0.06)':_conv<15?'rgba(110,231,183,0.06)':'rgba(52,211,153,0.08)';
           const _zoneBorder=_conv<5?'rgba(244,114,182,0.30)':_conv<10?'rgba(229,200,112,0.30)':_conv<15?'rgba(110,231,183,0.30)':'rgba(52,211,153,0.40)';
@@ -14025,7 +14030,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               ):_pastThresh?(
                 <>
                   <span className="text-[10px] text-[#E8E9E4]/40 mr-1">{_activeDir} {Math.round(_kalshiForDir)}%</span>
-                  <span className="text-[9px] text-rose-400/80">past entry · waiting for reset</span>
+                  <span className="text-[9px] text-rose-400/80">Kalshi overpriced — no edge ({Math.round(_kalshiForDir-70)}pt over threshold)</span>
                 </>
               ):(
                 <>
