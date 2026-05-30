@@ -34446,12 +34446,12 @@ function TaraApp(){
     const _softHintActive=softHintRef.current>0&&(Date.now()-softHintRef.current)<10000;
     const _qBase=_softHintActive?20:(30+_safety);
     const Q_FLOOR=Math.max(10,Math.round(_qBase*_speedMultEng));
-    // V6.5.1: CONV_FLOOR 10 → 5. V6.5.7: also dial-aware. V7.2: base 5 → 7 for tighter
-    //   selection. V10.7.69: raised from 7 → 12. Fresh data (n=32 V10.7.68) shows
-    //   trades at conv<7 (posterior<57%) winning at 33-38% WR — worse than random.
-    //   At conv≥7 (posterior≥57%), WR jumps to 67%. Raising floor reduces volume
-    //   but BOS+delta neutralization in chop will push more scores above threshold.
-    const _convBase=_softHintActive?3:(12+_safety);
+    // V6.5.1: CONV_FLOOR 10 → 5. V6.5.7: also dial-aware. V7.2: base 5 → 7.
+    //   V10.7.69: raised to 8 (minimal bump). Analysis showed losses/wins have
+    //   similar confidence distributions — a high floor costs volume without
+    //   cleanly separating wins from losses. The real fix is BOS+delta neutralization
+    //   above, not a higher floor. Keep floor at 8 to filter only absolute coin-flips.
+    const _convBase=_softHintActive?3:(8+_safety);
     // V9.7.6: ADAPTIVE LOCK URGENCY — when Kalshi is moving fast in Tara's predicted
     //   direction, drop the conviction floor by 30%. Logic: if Kalshi YES moved ≥4¢ in
     //   the last 30s and the move agrees with Tara's lean, we're being told the market
