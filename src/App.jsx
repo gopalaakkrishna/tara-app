@@ -4149,8 +4149,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.30-v10.7.69-signal-tune-conv-floor-entry';
-const TARA_VERSION_DISPLAY='Tara 10.7.69';
+const BASELINE_VERSION='2026.05.30-v10.7.70-abort-cooldown-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.70';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28002,11 +28002,14 @@ function TaraApp(){
   // V10.4.1 Module A — delay gate state. Tracks per-window delay duration
   // and the conditions when delay first triggered (for telemetry).
   const _v104_1_delayStateRef=useRef(null);
-  // V10.7.68: max-abort-per-window guard. Tracks {windowId, abortCount} so that
-  //   after MAX_ABORTS consecutive adverse aborts in the same window, we stop
-  //   retrying entirely (sit out the window). Without this, each abort clears the
-  //   delay state and the next tick immediately re-opens it → infinite abort loop.
-  const _v104_1_abortCountRef=useRef({windowId:null,count:0});
+  // V10.7.70: Revised abort guard. V10.7.68 used max-3-aborts-per-window which
+  //   caused windows like [31,69,31,69] to lock out after 3 aborts even when
+  //   a high-confidence signal appeared later. The window was scanned the whole time.
+  //   New approach: track {windowId, abortCount, lastAbortAt}.
+  //   Reset abortCount when: (a) new window, OR (b) 5+ minutes since last abort.
+  //   This allows re-engagement after Kalshi settles, while still preventing
+  //   rapid consecutive loops (3 aborts within <5min = still locked out).
+  const _v104_1_abortCountRef=useRef({windowId:null,count:0,lastAbortAt:0});
   const _v104_1_pendingDelayStampRef=useRef(null);
   // V6.2.7: KALSHI ENTRY WINDOW tracking. Replaces the time-based hard cap.
   //   kalshiWasBelowThreshUp: has Kalshi YES (UP price) ever been ≤65% this window?
@@ -38344,15 +38347,20 @@ function TaraApp(){
       const _kNow=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
       const _convNow=tc.confidence||0;
       const _dirNow=tc.call;
-      // V10.7.68: MAX ABORTS PER WINDOW — stop the abort loop.
-      //   Each adverse abort clears delay state → next tick re-opens → abort again → loop.
-      //   After 3 aborts in same window, sit out the rest. Don't retry.
+      // V10.7.70: Time-aware abort guard (replaces V10.7.68 hard window cap).
+      //   Reset abort count if: new window OR 5+ minutes since last abort.
+      //   This allows re-engagement after Kalshi settles mid-window.
+      //   Still prevents rapid consecutive loops (3 aborts in <5min = locked out).
       const _curWid=computeWindowId(windowType);
-      if(_v104_1_abortCountRef.current.windowId!==_curWid){
-        _v104_1_abortCountRef.current={windowId:_curWid,count:0};
+      const _now5=Date.now();
+      const _isNewWindow=_v104_1_abortCountRef.current.windowId!==_curWid;
+      const _cooldownElapsed=(_now5-(_v104_1_abortCountRef.current.lastAbortAt||0))>300000; // 5min
+      if(_isNewWindow||_cooldownElapsed){
+        _v104_1_abortCountRef.current={windowId:_curWid,count:0,lastAbortAt:0};
       }
-      if(_v104_1_abortCountRef.current.count>=3){
-        return; // sat out max aborts this window — don't retry
+      const MAX_ABORTS_PER_BURST=3; // 3 rapid aborts = sit out until cooldown
+      if(_v104_1_abortCountRef.current.count>=MAX_ABORTS_PER_BURST){
+        return; // in cooldown — don't retry until 5min passes or new window
       }
       // Kalshi price FROM TARA'S DIRECTION — if Tara says DOWN and Kalshi YES is 35,
       //   then betting DOWN costs ~$0.65 (100-35). So "expensive entry" for DOWN
@@ -38471,8 +38479,9 @@ function TaraApp(){
             try{console.error('[V10.7.51] abort log failed:',e);}catch(_){}
           }
           try{console.warn('[V10.7.48] Adverse Kalshi abort:',{dropPts:_v1074_8_drop,dirFlipped:_v1074_8_dirFlipped,firstDir:_v104_1_delayStateRef.current.firstDir,currentDir:_dirNow});}catch(_){}
-          // V10.7.68: increment abort count for this window
+          // V10.7.70: increment abort count + timestamp for cooldown logic
           _v104_1_abortCountRef.current.count=(_v104_1_abortCountRef.current.count||0)+1;
+          _v104_1_abortCountRef.current.lastAbortAt=Date.now();
           _v104_1_delayStateRef.current=null; // clear state — let window keep developing
           return; // skip lock this tick
         }
