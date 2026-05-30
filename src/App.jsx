@@ -4149,8 +4149,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.29-v10.7.68-abort-loop-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.68';
+const BASELINE_VERSION='2026.05.30-v10.7.69-signal-tune-conv-floor-entry';
+const TARA_VERSION_DISPLAY='Tara 10.7.69';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -11184,7 +11184,43 @@ const computeV99Posterior=(params)=>{
       rawSignalScores.macd=_cut;
     }
 
-    // RULE 3: Boost gap 30% when |gap|>=8 (+2 wins/7d, amplify strongest signal)
+    // RULE 4: Neutralize BOS in RANGE-CHOP (V10.7.69 — fresh data shows -25pt edge)
+    //   BOS detects breakouts. In RANGE-CHOP, breakouts are fake 63% of the time.
+    //   When BOS fires aligned with direction in chop → 37% WR (worse than random).
+    //   Old backtest (n=451) showed -1 win. New data (n=32 V10.7.68) shows -25pt edge.
+    //   Regime shifted. Neutralize in chop.
+    if(_v1055IsChop&&typeof rawSignalScores.bos==='number'&&rawSignalScores.bos!==0){
+      const _orig=rawSignalScores.bos;
+      _v1055TotalAdj-=_orig;
+      _v1055Adjustments.bosNeutralizedChop=Math.round(_orig*10)/10;
+      rawSignalScores.bos=0;
+    }
+
+    // RULE 5: Neutralize Delta in RANGE-CHOP (V10.7.69 — -17pt edge in fresh data)
+    //   Three-step delta detects momentum. In RANGE-CHOP, momentum fades.
+    //   Aligned delta = 33% WR, opposing delta = 50% WR → delta is inverted in chop.
+    //   Old backtest showed -1 win. New data shows clearly anti-predictive.
+    if(_v1055IsChop&&typeof rawSignalScores.delta==='number'&&rawSignalScores.delta!==0){
+      const _orig=rawSignalScores.delta;
+      _v1055TotalAdj-=_orig;
+      _v1055Adjustments.deltaNeutralizedChop=Math.round(_orig*10)/10;
+      rawSignalScores.delta=0;
+    }
+
+    // RULE 6: Dampen MACD in RANGE-CHOP entirely (not just gap guard)
+    //   V10.7.69: MACD aligned = 44% WR in chop, opposing = 58%. Anti-predictive.
+    //   Cut to 30% of original in chop (was already halved when |gap|<5 by rule 2,
+    //   but rule 2 only fires without gap. In chop with gap, MACD still fires full.)
+    if(_v1055IsChop&&typeof rawSignalScores.macd==='number'&&rawSignalScores.macd!==0){
+      // Only apply if rule 2 didn't already cut it (rule 2 fires when !_v1055HasGap)
+      if(_v1055HasGap){
+        const _orig=rawSignalScores.macd;
+        const _cut=_orig*0.30;
+        _v1055TotalAdj+=(_cut-_orig);
+        _v1055Adjustments.macdChopCut=Math.round((_orig-_cut)*10)/10;
+        rawSignalScores.macd=_cut;
+      }
+    }
     if(Math.abs(_v1055Gap)>=8){
       const _boost=_v1055Gap*0.30;
       _v1055TotalAdj+=_boost;
@@ -32431,16 +32467,22 @@ function TaraApp(){
                         entryTimeMs:Number(_mke.time)||null,
                       };
                     }
-                    // 3. Estimate from kalshiAtLock
+                    // 3. Auto-capture from kalshiAtLock (V10.7.69)
+                    //   kalshiAtLock is captured on every lock — it's the Kalshi YES price
+                    //   at the moment Tara locked. This IS the entry price (pre-slippage).
+                    //   No manual input needed. Using it as entryPrice directly (not estimate).
+                    //   For UP bets: entry cost = kalshiAtLock cents
+                    //   For DOWN bets: entry cost = (100 - kalshiAtLock) cents
+                    //   Breakeven WR = (entryPrice + 6) / 100 (6¢ Kalshi fee)
                     const _kalshiAtLock=idx.e.kalshiAtLock!=null?Number(idx.e.kalshiAtLock):null;
                     const _dir=idx.e.dir;
-                    const _estEntry=_kalshiAtLock!=null
+                    const _autoEntry=_kalshiAtLock!=null
                       ?(_dir==='UP'?_kalshiAtLock:(100-_kalshiAtLock))
                       :null;
                     return{
-                      entryPrice:null,
-                      entryPriceEstimate:_estEntry,
-                      entrySource:'manual-or-unknown',
+                      entryPrice:_autoEntry,        // use as real entry price
+                      entryPriceEstimate:_autoEntry, // keep for backwards compat
+                      entrySource:_autoEntry!=null?'kalshi-at-lock':'unknown',
                     };
                   })(),
                   // V9.10.5: prefer closure-captured timeSeries + releaseSignalsHistory
@@ -34405,9 +34447,11 @@ function TaraApp(){
     const _qBase=_softHintActive?20:(30+_safety);
     const Q_FLOOR=Math.max(10,Math.round(_qBase*_speedMultEng));
     // V6.5.1: CONV_FLOOR 10 → 5. V6.5.7: also dial-aware. V7.2: base 5 → 7 for tighter
-    //   selection. With tape-led also tightened (extreme guard, gap-not-marginal), expect
-    //   slightly more sit-outs but with higher per-trade WR.
-    const _convBase=_softHintActive?3:(7+_safety);
+    //   selection. V10.7.69: raised from 7 → 12. Fresh data (n=32 V10.7.68) shows
+    //   trades at conv<7 (posterior<57%) winning at 33-38% WR — worse than random.
+    //   At conv≥7 (posterior≥57%), WR jumps to 67%. Raising floor reduces volume
+    //   but BOS+delta neutralization in chop will push more scores above threshold.
+    const _convBase=_softHintActive?3:(12+_safety);
     // V9.7.6: ADAPTIVE LOCK URGENCY — when Kalshi is moving fast in Tara's predicted
     //   direction, drop the conviction floor by 30%. Logic: if Kalshi YES moved ≥4¢ in
     //   the last 30s and the move agrees with Tara's lean, we're being told the market
