@@ -4149,8 +4149,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.30-v10.7.71-conviction-entry-gate';
-const TARA_VERSION_DISPLAY='Tara 10.7.71';
+const BASELINE_VERSION='2026.05.31-v10.7.72-structure-stochrsi-chop-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.72';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -11220,6 +11220,34 @@ const computeV99Posterior=(params)=>{
         _v1055Adjustments.macdChopCut=Math.round((_orig-_cut)*10)/10;
         rawSignalScores.macd=_cut;
       }
+    }
+
+    // RULE 7: Neutralize STRUCTURE in RANGE-CHOP (V10.7.72 — n=32, -20pt edge)
+    //   Structure detects candle exhaustion patterns (CC·Yata counts 3-9).
+    //   In RANGE-CHOP: aligned structure = 47% WR, opposed = 67% WR → -20pt edge.
+    //   Candle exhaustion signals continuation of the current move — in chop,
+    //   that move fades. Structure is detecting the WRONG direction in chop.
+    //   BOS and delta had the same pattern (V10.7.69). Now confirmed for structure too.
+    //   Sample is n=32 (17 aligned + 15 opposed) — large enough to trust.
+    if(_v1055IsChop&&typeof rawSignalScores.structure==='number'&&rawSignalScores.structure!==0){
+      const _orig=rawSignalScores.structure;
+      _v1055TotalAdj-=_orig;
+      _v1055Adjustments.structureNeutralizedChop=Math.round(_orig*10)/10;
+      rawSignalScores.structure=0;
+    }
+
+    // RULE 8: Neutralize StochRSI in RANGE-CHOP (V10.7.72 — n=11, -46pt edge)
+    //   StochRSI: overbought/oversold fade signal.
+    //   In RANGE-CHOP: aligned = 25% WR, opposed = 71% WR → -46pt edge.
+    //   StochRSI is detecting overbought conditions and calling continuation —
+    //   but in chop, overbought → fades back. Signal is inverted.
+    //   n=11 is borderline but -46pt edge is extreme and consistent with
+    //   the broader pattern of all momentum/continuation signals inverting in chop.
+    if(_v1055IsChop&&typeof rawSignalScores.stochRSI==='number'&&rawSignalScores.stochRSI!==0){
+      const _orig=rawSignalScores.stochRSI;
+      _v1055TotalAdj-=_orig;
+      _v1055Adjustments.stochRSINeutralizedChop=Math.round(_orig*10)/10;
+      rawSignalScores.stochRSI=0;
     }
     if(Math.abs(_v1055Gap)>=8){
       const _boost=_v1055Gap*0.30;
@@ -28309,15 +28337,17 @@ function TaraApp(){
     //     Surface persistent failures via a ref so the UI can warn the user.
     const _stripForStorage=(e)=>{
       if(!e)return e;
-      // V10.7.67: Keep signalScoresAtLock but strip only the raw underlying fields
-      //   (prefixed with _) which are large/verbose. The scored signals (gap, macd, flow
-      //   etc.) are needed for calibration, signal audit, and coherence analysis.
-      //   Raw fields like _macdHist, _stochK, _atrp etc. can be dropped — they're
-      //   telemetry-only and not used in any analysis pipeline.
-      //   Size impact: scored signals ~300B per entry vs full signalScores ~2KB per entry.
+      // V10.7.67: Keep scored signals, strip raw underlying fields (prefixed _).
+      // V10.7.72: Keep version-prefixed analytics (_v10_7_*) — these are stamped
+      //   telemetry fields (coherence ratio, calibration bucket, signal adjustments)
+      //   needed for analysis. Only strip truly raw single-underscore fields.
       const{reasoning:_b,signalScoresAtLock:_sss,...rest}=e;
       const _scores=_sss?Object.fromEntries(
-        Object.entries(_sss).filter(([k])=>!k.startsWith('_'))
+        Object.entries(_sss).filter(([k])=>{
+          if(!k.startsWith('_'))return true;           // keep scored signals
+          if(/^_v\d+_\d+_/.test(k))return true;        // keep _v10_7_64_* analytics
+          return false;                                  // strip raw _macdHist etc
+        })
       ):null;
       return{...rest,...(_scores?{signalScoresAtLock:_scores}:{})};
     };
