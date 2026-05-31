@@ -4198,8 +4198,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.31-v10.7.73b-no-go-data-discord-stale-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.73b';
+const BASELINE_VERSION='2026.05.31-v10.7.73c-stale-guard-root-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.73c';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30497,7 +30497,23 @@ function TaraApp(){
       },1000); // 1s cadence — matches CF publish rate
       return()=>clearInterval(_iv);
     }
-    let last=0;let _lastTradeId=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();/* V9.8.12: stale CDN guard — Coinbase ticker has monotonic trade_id. If a fetch returns an older id than we've already seen, the edge cache is replaying a stale response (this happened post-CB-outage 2026-05-07: 1-2s flashes back to last night's frozen price). Discard. Sources without parseTradeId (Kraken, OKX) skip this check. */if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_newId&&_lastTradeId&&_newId<_lastTradeId)return;if(_newId)_lastTradeId=_newId;}const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);
+    let last=0;let _lastTradeId=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();/* V9.8.12: stale CDN guard — Coinbase ticker has monotonic trade_id. If a fetch returns
+   an OLDER id than we've already seen, the edge cache is replaying a stale response.
+   V10.7.73b FIX: was rejecting SAME id too (=== check). If CDN serves same id but price
+   is identical, that's valid (BTC not moving). Only reject strictly OLDER ids.
+   Also: always update lastPriceSourceRef even if we reject the price value — this
+   prevents the stale guard from firing just because BTC price hasn't changed. */
+if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_newId&&_lastTradeId&&_newId<_lastTradeId){
+  // Strictly older — CDN is replaying. Update source ref to show we're still connected.
+  const now=Date.now();lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};
+  return; // discard the stale price value
+}if(_newId)_lastTradeId=_newId;}const p=_src.parsePrice(d);if(p&&Number.isFinite(p)){const now=Date.now();
+              // V10.7.73b: Update lastPriceSourceRef on EVERY successful fetch.
+              //   Previously only updated when price changed — but if BTC is flat
+              //   for 60s, price doesn't change, sourceRef doesn't update, stale
+              //   guard fires even though feed is perfectly healthy.
+              lastPriceSourceRef.current={source:'rest',time:now,exchange:priceSource};
+              if(p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:p,time:now};}currentPriceRef.current=p;if(now-last>300){setCurrentPrice(prev=>{if(prev!==null&&p!==prev)setTickDirection(p>prev?'up':'down');return p;});last=now;}const _sz=_src.parseSize(d)||0.1;tickHistoryRef.current.push({p,s:_sz,t:'B',time:now,ex:_src.label});}}catch(e){}};f();const iv=setInterval(f,1500);return()=>clearInterval(iv);
   // V10.7.58d: removed brtiApprox?.instant from deps — was causing effect to
   //   tear down + recreate every 3s when on BRTI feed, causing scanning/connecting
   //   thrash. The BRTI interval reads brtiApprox via closure, no re-run needed.
