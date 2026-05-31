@@ -2043,6 +2043,55 @@ const computeEconCalendarRisk=()=>{
 //   Requires WHALE_ALERT_API_KEY set in Vercel environment variables.
 //   Inflow to exchange = sell pressure (bearish). Outflow from exchange = buy pressure (bullish).
 //   netScore: -10 (strong bearish) to +10 (strong bullish). Null when proxy unavailable.
+// V10.7.73 — DERIBIT OPTIONS SENTIMENT HOOK
+//   Polls /api/deribit every 30s for IV skew + put/call ratio.
+//   Positive skew = puts expensive = bears buying protection = bearish.
+//   Negative skew = calls expensive = bulls loading = bullish.
+const useDeribitOptions=()=>{
+  const[deribit,setDeribit]=React.useState({ok:false,signal:0,direction:'neutral',skew:null,putCallRatio:null});
+  React.useEffect(()=>{
+    let _stopped=false;
+    const _poll=async()=>{
+      try{
+        const r=await fetch('/api/deribit',{cache:'no-store',signal:AbortSignal.timeout(4000)});
+        if(!r.ok)return;
+        const d=await r.json();
+        if(_stopped)return;
+        setDeribit(d);
+      }catch(_){}
+    };
+    _poll();
+    const iv=setInterval(_poll,30000);
+    return()=>{_stopped=true;clearInterval(iv);};
+  },[]);
+  return deribit;
+};
+
+// V10.7.73 — LIQUIDATION + CB PREMIUM SIGNAL HOOK
+//   Polls /api/liq every 15s for:
+//   - Bybit large liquidation cascades (capitulation signal)
+//   - Binance funding rate extreme (overleveraged signal)
+//   - Coinbase premium vs Kraken (US retail directional)
+const useLiqSignal=()=>{
+  const[liqSignal,setLiqSignal]=React.useState({ok:false,signal:0,direction:'neutral',reasons:[]});
+  React.useEffect(()=>{
+    let _stopped=false;
+    const _poll=async()=>{
+      try{
+        const r=await fetch('/api/liq',{cache:'no-store',signal:AbortSignal.timeout(4000)});
+        if(!r.ok)return;
+        const d=await r.json();
+        if(_stopped)return;
+        setLiqSignal(d);
+      }catch(_){}
+    };
+    _poll();
+    const iv=setInterval(_poll,15000);
+    return()=>{_stopped=true;clearInterval(iv);};
+  },[]);
+  return liqSignal;
+};
+
 const useWhaleAlert=(currentAsset)=>{
   const[whale,setWhale]=React.useState({netScore:0,direction:'neutral',transactionCount:0,available:false,lastUpdate:0});
   React.useEffect(()=>{
@@ -4149,8 +4198,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.31-v10.7.72-structure-stochrsi-chop-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.72';
+const BASELINE_VERSION='2026.05.31-v10.7.73-deribit-liq-cbpremium-signals';
+const TARA_VERSION_DISPLAY='Tara 10.7.73';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -9852,6 +9901,44 @@ const computeV99Posterior=(params)=>{
     rawSignalScores.whaleAlert=null;
     rawSignalScores._whaleTxCount=0;
     rawSignalScores._whaleDir='unavailable';
+  }
+
+  // V10.7.73 — DERIBIT OPTIONS SIGNAL
+  //   IV skew (put IV - call IV): positive = puts expensive = bears loading = bearish
+  //   Put/Call ratio: >1.2 = bearish, <0.8 = bullish
+  //   Smart money expresses BTC views in options 30-60min before spot moves.
+  //   Max ±6pt. Fires when signal magnitude > 0.5.
+  const _deribitData=params.deribitOptions;
+  if(_deribitData?.ok&&Number.isFinite(_deribitData.signal)&&Math.abs(_deribitData.signal)>0.5){
+    const _dAdj=Math.max(-6,Math.min(6,_deribitData.signal));
+    totalScore+=_dAdj;
+    rawSignalScores.deribitOptions=Math.round(_dAdj*10)/10;
+    rawSignalScores._deribitSkew=_deribitData.skew;
+    rawSignalScores._deribitPCR=_deribitData.putCallRatio;
+    if(Math.abs(_dAdj)>1){
+      reasoning.push(`[DERIBIT] ${_deribitData.direction} options: skew=${_deribitData.skew?.toFixed(1)} PCR=${_deribitData.putCallRatio?.toFixed(2)} (${_dAdj>=0?'+':''}${_dAdj.toFixed(1)})`);
+    }
+  }else{
+    rawSignalScores.deribitOptions=null;
+  }
+
+  // V10.7.73 — LIQUIDATION + CB PREMIUM SIGNAL
+  //   Combines: Bybit large liquidation cascades, Binance funding extreme, CB/KR premium
+  //   Long liquidation cascade → capitulation → bullish reversal
+  //   Short squeeze completing → mean reversion down → bearish
+  //   CB premium vs Kraken → US retail direction
+  //   Max ±8pt. Fires when signal magnitude > 1.
+  const _liqData=params.liqSignal;
+  if(_liqData?.ok&&Number.isFinite(_liqData.signal)&&Math.abs(_liqData.signal)>1){
+    const _lAdj=Math.max(-8,Math.min(8,_liqData.signal));
+    totalScore+=_lAdj;
+    rawSignalScores.liqSignal=Math.round(_lAdj*10)/10;
+    rawSignalScores._liqReasons=(_liqData.reasons||[]).join(';');
+    if(Math.abs(_lAdj)>1.5){
+      reasoning.push(`[LIQ] ${_liqData.direction}: ${(_liqData.reasons||[]).slice(0,2).join(', ')} (${_lAdj>=0?'+':''}${_lAdj.toFixed(1)})`);
+    }
+  }else{
+    rawSignalScores.liqSignal=null;
   }
   const fundingAccel=(funding-fundingPrev);
   // V114: Funding Extremes Contrarian Signal
@@ -30120,6 +30207,9 @@ function TaraApp(){
   const spotPerpDiv=useSpotPerpDivergence(currentAsset,bloomberg);
   // V10.7.65: Whale Alert on-chain signal
   const whaleAlert=useWhaleAlert(currentAsset);
+  // V10.7.73: New high-signal data sources
+  const deribitOptions=useDeribitOptions();   // IV skew — smart money positioning
+  const liqSignal=useLiqSignal();             // liquidations + CB premium + funding
   const{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal,tapeWindows}=useGlobalTape(currentAsset);
   // V9.17.1: SCALPER ENGINE — always ticks (was gated by enabled in V9.17.0).
   //   The panel header "tara reads" needs live data even when scalper is OFF,
@@ -32971,7 +33061,7 @@ function TaraApp(){
         try{return buildDowHourCalibration(taraCallLogRef.current||[]);}
         catch(_){return null;}
       })();
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable});
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert,deribitOptions,liqSignal,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
