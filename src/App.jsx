@@ -4198,8 +4198,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.31-v10.7.73-deribit-liq-cbpremium-signals';
-const TARA_VERSION_DISPLAY='Tara 10.7.73';
+const BASELINE_VERSION='2026.05.31-v10.7.73b-no-go-data-discord-stale-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.73b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30488,6 +30488,9 @@ function TaraApp(){
           const now=Date.now();
           if(_p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:_p,time:now};}
           currentPriceRef.current=_p;
+          // V10.7.73b: update lastPriceSourceRef on BRTI updates so stale guard
+          //   doesn't fire. Previously only the REST effect updated this ref,
+          //   so BRTI feed triggered "price feed 60s stale" after 30s.
           lastPriceSourceRef.current={source:'brti',time:now,exchange:'brti'};
           setCurrentPrice(prev=>{if(prev!==null&&_p!==prev)setTickDirection(_p>prev?'up':'down');return _p;});
         }
@@ -39493,7 +39496,11 @@ function TaraApp(){
       // (b) DATA UNAVAILABLE — price feed stale (>30s) or Kalshi missing
       if(!_noGoReason){
         const _priceStaleness=lastPriceSourceRef.current?.time?(Date.now()-lastPriceSourceRef.current.time):Infinity;
-        const _priceStale=_priceStaleness>30000;
+        // V10.7.73b: Raised stale threshold from 30s → 60s.
+        //   30s was too aggressive — brief API hiccups or BRTI proxy latency spikes
+        //   were falsely triggering no-go-data on BRTI feed, creating phantom
+        //   "OVERRIDE (no-trade)" Discord messages the user never initiated.
+        const _priceStale=_priceStaleness>60000;
         const _kalshiMissing=_kPctNow==null;
         if(_priceStale||_kalshiMissing){
           const _which=[];
@@ -40643,6 +40650,15 @@ function TaraApp(){
     //   Previously baseData read fresh values, so a DOWN-locked window could broadcast
     //   "DOWN · Posterior 89%" when 89% meant 89% UP (current engine view post-lock).
     if(!taraBroadcastRef.current.sentLock&&taraCallSnapshotRef.current&&taraCallSnapshotRef.current.call!=='SIT_OUT'){
+      // V10.7.73b: Also block no-go-data and no-go-edge from Discord.
+      //   These are automatic system overrides (stale price, data integrity, no edge)
+      //   not Tara's trading calls. User doesn't override them — system does.
+      //   Sending them to Discord confused users into thinking they manually overrode.
+      const _snapTier=taraCallSnapshotRef.current?.tier||'';
+      if(_snapTier==='no-go-data'||_snapTier==='no-go-edge'||_snapTier==='no-go-coinflip-late'){
+        taraBroadcastRef.current.sentLock=true; // mark as sent so we don't retry
+        // skip — don't broadcast system overrides to Discord
+      } else {
       // V10.7.62: windowId guard — snapshot must belong to THIS window, not a previous one.
       //   V10.7.61 deferred snapshot clear (now reverted) caused the old window's snapshot
       //   to still be set when the new window's broadcast effect fired → duplicate Discord lock.
@@ -40751,6 +40767,7 @@ function TaraApp(){
         taraBroadcastRef.current.sentLock=true;
       }
       } // V10.7.62: close windowId guard
+      } // V10.7.73b: close no-go tier guard
     }
     // SITOUT: V7.0.8 — DISABLED per user request. SITOUT means Tara decided NOT to trade,
     //   which is non-actionable noise in Discord. User wants lock + exit alerts only.
