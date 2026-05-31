@@ -4149,8 +4149,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.30-v10.7.70-abort-cooldown-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.70';
+const BASELINE_VERSION='2026.05.30-v10.7.71-conviction-entry-gate';
+const TARA_VERSION_DISPLAY='Tara 10.7.71';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14066,7 +14066,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               ):_pastThresh?(
                 <>
                   <span className="text-[10px] text-[#E8E9E4]/40 mr-1">{_activeDir} {Math.round(_kalshiForDir)}%</span>
-                  <span className="text-[9px] text-rose-400/80">Kalshi overpriced — no edge ({Math.round(_kalshiForDir-70)}pt over threshold)</span>
+                  <span className="text-[9px] text-rose-400/80">Kalshi overpriced — no edge ({Math.round(_kalshiForDir-(_livePost-8))}pt over fair value)</span>
                 </>
               ):(
                 <>
@@ -38915,11 +38915,15 @@ function TaraApp(){
     }
     // V6.2.7 / V6.5.1 / V7.7: KALSHI ENTRY WINDOW. Tara can take any amount of time to form
     //   a call as long as Kalshi for the chosen direction stays at or below
-    //   KALSHI_ENTRY_THRESH. V7.7 raised 70 → 75 per user: "dont force a sitout from Tara
-    //   unless the odds go above 75% for the side she chooses". Plus grace window extended
-    //   30s → 45s — Kalshi naturally bounces around the threshold and we shouldn't lock her
-    //   out aggressively.
-    const KALSHI_ENTRY_THRESH=75;
+    //   KALSHI_ENTRY_THRESH. V7.7 raised 70 → 75. V10.7.71: conviction-scaled threshold.
+    //   Formula: maxEntry = posterior - 8 (8pt covers 6¢ fee + 2¢ safety margin)
+    //   Hard cap 85¢ (need 91%+ WR to profit above this — not achievable).
+    //   Floor 55¢ (always allow entries below 55¢ even at low conviction).
+    //   Examples: post=65% → 57¢ max | post=70% → 62¢ | post=75% → 67¢ | post=80% → 72¢
+    //   User: "lock if she's very sure" — high conviction = higher allowed price. Never
+    //   blocks profitable entries; only blocks clearly negative-EV ones.
+    const _convictionNow=Math.max(50,Math.min(95,Number(analysis?.posterior||tc?.posterior||50)));
+    const KALSHI_ENTRY_THRESH=Math.min(85,Math.max(55,Math.round(_convictionNow-8)));
     const KALSHI_DIP_GRACE_MS=45000;
     const _kPctNow=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
     // Track timestamp of most-recent Kalshi-below-threshold per direction
