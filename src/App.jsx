@@ -14066,7 +14066,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               ):_pastThresh?(
                 <>
                   <span className="text-[10px] text-[#E8E9E4]/40 mr-1">{_activeDir} {Math.round(_kalshiForDir)}%</span>
-                  <span className="text-[9px] text-rose-400/80">Kalshi overpriced — no edge ({Math.round(_kalshiForDir-(_livePost-8))}pt over fair value)</span>
+                  <span className="text-[9px] text-rose-400/80">Kalshi overpriced — no edge ({Math.round(_kalshiForDir-70)}pt over fair value)</span>
                 </>
               ):(
                 <>
