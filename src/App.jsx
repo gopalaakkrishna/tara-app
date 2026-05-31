@@ -4198,7 +4198,7 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.31-v10.7.73c-stale-guard-root-fix';
+const BASELINE_VERSION='2026.05.31-v10.7.73c-brti-removed-stale-fix';
 const TARA_VERSION_DISPLAY='Tara 10.7.73c';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -4524,16 +4524,7 @@ const PRICE_SOURCES={
   //   No extra network calls. Shows as "BRTI" in the feed pill.
   //   When selected, currentPrice = brtiApprox.instant (the 3-exchange mean).
   //   This is the closest approximation to how Kalshi actually settles.
-  brti:{
-    name:'BRTI (3-exch)',
-    label:'BRTI',
-    tvExch:'COINBASE', // TradingView chart still uses Coinbase candles
-    tvSymbol:(asset)=>asset==='BTC'?'BTCUSD':'ETHUSD',
-    url:()=>null,       // no direct URL — feed comes from brtiApprox
-    parsePrice:()=>null,// not used directly
-    parseSize:()=>0.1,
-    virtual:true,       // V10.7.58 flag — handled specially in the price effect
-  },
+
   coinbase:{
     name:'Coinbase',
     label:'CB',
@@ -26835,7 +26826,7 @@ function TaraApp(){
   //   or Bitstamp via the FEED pill in the header. See PRICE_SOURCES registry.
   //   Persists per-device. Switching doesn't affect candle history (still Coinbase).
   const[priceSource,setPriceSourceState]=useState(()=>{
-    try{const v=localStorage.getItem('tara_price_source')||PRICE_SOURCE_DEFAULT;return PRICE_SOURCES[v]?v:PRICE_SOURCE_DEFAULT;}catch(e){return PRICE_SOURCE_DEFAULT;}
+    try{const v=localStorage.getItem('tara_price_source')||PRICE_SOURCE_DEFAULT;return (v&&PRICE_SOURCES[v]&&v!=='brti')?v:PRICE_SOURCE_DEFAULT;}catch(e){return PRICE_SOURCE_DEFAULT;}
   });
   const setPriceSource=(s)=>{
     if(!PRICE_SOURCES[s])return;
@@ -30477,26 +30468,7 @@ function TaraApp(){
     // V10.7.58: BRTI virtual source — when user selects BRTI in feed pill, currentPrice
     //   comes directly from brtiApprox.instant (the 3-exchange trimmed mean already
     //   computed separately). No new network calls. Skip the REST poll entirely.
-    if(priceSource==='brti'){
-      // V10.7.59b: use brtiApproxRef (not brtiApprox state) so the interval always
-      //   reads the latest BRTI value. Using state in a closure captures the value
-      //   at effect creation time (null) and never updates — that's why engine showed
-      //   all-zero signals and price showed stale strike value when on BRTI feed.
-      const _iv=setInterval(()=>{
-        const _p=brtiApproxRef.current?.instant;
-        if(_p&&Number.isFinite(_p)&&_p>0){
-          const now=Date.now();
-          if(_p!==lastPriceChangeRef.current.price){lastPriceChangeRef.current={price:_p,time:now};}
-          currentPriceRef.current=_p;
-          // V10.7.73b: update lastPriceSourceRef on BRTI updates so stale guard
-          //   doesn't fire. Previously only the REST effect updated this ref,
-          //   so BRTI feed triggered "price feed 60s stale" after 30s.
-          lastPriceSourceRef.current={source:'brti',time:now,exchange:'brti'};
-          setCurrentPrice(prev=>{if(prev!==null&&_p!==prev)setTickDirection(_p>prev?'up':'down');return _p;});
-        }
-      },1000); // 1s cadence — matches CF publish rate
-      return()=>clearInterval(_iv);
-    }
+    // V10.7.73c: BRTI feed removed — no longer in PRICE_SOURCES
     let last=0;let _lastTradeId=0;const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];const f=async()=>{try{const _url=_src.url(_cfg,currentAsset);const r=await fetch(_url,{cache:'no-store'});if(!r.ok)return;const d=await r.json();/* V9.8.12: stale CDN guard — Coinbase ticker has monotonic trade_id. If a fetch returns
    an OLDER id than we've already seen, the edge cache is replaying a stale response.
    V10.7.73b FIX: was rejecting SAME id too (=== check). If CDN serves same id but price
@@ -41808,8 +41780,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(lastWhaleBroadcastRef.current)lastWhaleBroadcastRef.current={time:Date.now(),dir:null}; // 5min cooldown from now
     if(lastManualBroadcastRef.current)lastManualBroadcastRef.current={key:null,type:null};
     setCurrentAssetState(a);
-    // V10.7.60: BRTI is BTC-only — snap to coinbase if switching to ETH while on BRTI
-    if(a!=='BTC'&&priceSource==='brti')setPriceSource('coinbase');
+
     // Reset all window-bound state — fresh start on the new asset
     setPendingStrike(null);
     // V7.6: warm-switch using cached price from background feed. If the inactive asset
@@ -42650,14 +42621,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 {/* Feed source button — moved here from header */}
                 <button
                   onClick={()=>{
-                    // V10.7.60: BRTI is BTC-only (CF Benchmarks doesn't publish an ETH equivalent).
-                    //   Filter it out of the cycle when on ETH tab.
-                    const _validKeys=PRICE_SOURCE_KEYS.filter(k=>k!=='brti'||currentAsset==='BTC');
-                    const _i=_validKeys.indexOf(priceSource);
-                    const _next=_validKeys[(_i+1)%_validKeys.length];
-                    // If currently on BRTI but switched to ETH tab, snap to coinbase
-                    if(priceSource==='brti'&&currentAsset!=='BTC')setPriceSource('coinbase');
-                    else setPriceSource(_next);
+                    const _i=PRICE_SOURCE_KEYS.indexOf(priceSource);
+                    const _next=PRICE_SOURCE_KEYS[(_i+1)%PRICE_SOURCE_KEYS.length];
+                    setPriceSource(_next);
                   }}
                   className="flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border transition-colors mb-1 self-start"
                   style={{background:feedFrozen?'rgba(244,63,94,0.12)':feedSlow?'rgba(229,200,112,0.12)':'rgba(255,255,255,0.04)',borderColor:feedFrozen?'rgba(244,63,94,0.45)':feedSlow?'rgba(229,200,112,0.40)':'rgba(255,255,255,0.15)',color:feedFrozen?'#fb7185':feedSlow?'#E5C870':'rgba(232,233,228,0.55)'}}
