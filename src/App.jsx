@@ -2047,6 +2047,32 @@ const computeEconCalendarRisk=()=>{
 //   Polls /api/deribit every 30s for IV skew + put/call ratio.
 //   Positive skew = puts expensive = bears buying protection = bearish.
 //   Negative skew = calls expensive = bulls loading = bullish.
+// V10.7.76 — LIQUIDATION HEATMAP + OI SIGNAL
+//   Polls /api/coinglass every 20s for:
+//   1. Liquidation gravity: large order walls near current price create magnetic pull
+//      toward them. Price hunts the clusters mechanically.
+//   2. OI change: rising OI = real accumulation (move holds). Falling OI = liq noise (fades).
+//   Combined: up to ±10pt. Strongest new signal since gap.
+const useLiqHeatmap=()=>{
+  const[liqHeatmap,setLiqHeatmap]=React.useState({ok:false,combinedSignal:0,combinedDirection:'neutral',liquidationGravity:0,oiSignal:0,nearestWallSide:null,nearestWallDistBps:null,nearestWallSize:null});
+  React.useEffect(()=>{
+    let _stopped=false;
+    const _poll=async()=>{
+      try{
+        const r=await fetch('/api/coinglass',{cache:'no-store',signal:AbortSignal.timeout(4000)});
+        if(!r.ok)return;
+        const d=await r.json();
+        if(_stopped)return;
+        if(d?.ok)setLiqHeatmap(d);
+      }catch(_){}
+    };
+    _poll();
+    const iv=setInterval(_poll,20000);
+    return()=>{_stopped=true;clearInterval(iv);};
+  },[]);
+  return liqHeatmap;
+};
+
 const useDeribitOptions=()=>{
   const[deribit,setDeribit]=React.useState({ok:false,signal:0,direction:'neutral',skew:null,putCallRatio:null});
   React.useEffect(()=>{
@@ -4198,8 +4224,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.01-v10.7.75b-long-squeeze-compressing-regimes';
-const TARA_VERSION_DISPLAY='Tara 10.7.75b';
+const BASELINE_VERSION='2026.06.01-v10.7.76-liq-heatmap-oi-signal';
+const TARA_VERSION_DISPLAY='Tara 10.7.76';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -9942,6 +9968,31 @@ const computeV99Posterior=(params)=>{
     }
   }else{
     rawSignalScores.liqSignal=null;
+  }
+
+  // V10.7.76 — LIQUIDATION HEATMAP + OI SIGNAL
+  //   Two sub-signals combined:
+  //   1. Liquidation gravity: large order walls near price create magnetic pull.
+  //      Market makers hunt liquidation clusters — price moves toward them reliably.
+  //      Wall above = price pulled UP. Wall below = price pulled DOWN.
+  //   2. OI change: rising OI = real accumulation (move holds).
+  //      Falling OI = liquidation-driven noise (move fades).
+  //   Combined max ±10pt. This is the most mechanically reliable signal —
+  //   liquidation hunts are not probabilistic, they're structural.
+  const _heatmapData=params.liqHeatmap;
+  if(_heatmapData?.ok&&Number.isFinite(_heatmapData.combinedSignal)&&Math.abs(_heatmapData.combinedSignal)>1){
+    const _hmAdj=Math.max(-10,Math.min(10,_heatmapData.combinedSignal));
+    totalScore+=_hmAdj;
+    rawSignalScores.liqHeatmap=Math.round(_hmAdj*10)/10;
+    rawSignalScores._liqGravity=_heatmapData.liquidationGravity;
+    rawSignalScores._oiSignal=_heatmapData.oiSignal;
+    rawSignalScores._nearestWall=_heatmapData.nearestWallSide?`${_heatmapData.nearestWallSide}@${_heatmapData.nearestWallDistBps}bps($${_heatmapData.nearestWallSize}M)`:null;
+    if(Math.abs(_hmAdj)>2){
+      const _wallNote=_heatmapData.nearestWallSide?` wall ${_heatmapData.nearestWallSide} ${_heatmapData.nearestWallDistBps}bps $${_heatmapData.nearestWallSize}M`:'';
+      reasoning.push(`[LIQ-HEATMAP] ${_heatmapData.combinedDirection} gravity=${_heatmapData.liquidationGravity} OI=${_heatmapData.oiSignal}${_wallNote} (${_hmAdj>=0?'+':''}${_hmAdj.toFixed(1)})`);
+    }
+  }else{
+    rawSignalScores.liqHeatmap=null;
   }
   const fundingAccel=(funding-fundingPrev);
   // V114: Funding Extremes Contrarian Signal
@@ -30306,6 +30357,8 @@ function TaraApp(){
   // V10.7.73: New high-signal data sources
   const deribitOptions=useDeribitOptions();   // IV skew — smart money positioning
   const liqSignal=useLiqSignal();             // liquidations + CB premium + funding
+  // V10.7.76: Liquidation heatmap + OI (highest-impact new signal)
+  const liqHeatmap=useLiqHeatmap();
   const{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal,tapeWindows}=useGlobalTape(currentAsset);
   // V9.17.1: SCALPER ENGINE — always ticks (was gated by enabled in V9.17.0).
   //   The panel header "tara reads" needs live data even when scalper is OFF,
@@ -33157,7 +33210,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         try{return buildDowHourCalibration(taraCallLogRef.current||[]);}
         catch(_){return null;}
       })();
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert,deribitOptions,liqSignal,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable});
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert,deribitOptions,liqSignal,liqHeatmap,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
@@ -44700,6 +44753,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <span className="text-[#E8E9E4]/15 hidden sm:inline">·</span>
                 <span className="text-[#E8E9E4]/35 uppercase hidden sm:inline">Geo</span>
                 <span className="hidden sm:inline" style={{color:geoColor}}>{geoLabel}{geoRisk>=0.3?` ${(geoRisk*100).toFixed(0)}%`:''}</span>
+                {(()=>{
+                  // V10.7.76: Show nearest liquidation wall in status bar
+                  const _wall=liqHeatmap?.nearestWallSide;
+                  if(!_wall||!liqHeatmap?.nearestWallDistBps)return null;
+                  const _wDist=liqHeatmap.nearestWallDistBps;
+                  const _wSize=liqHeatmap.nearestWallSize;
+                  const _wColor=_wall==='above'?'rgba(110,231,183,0.7)':'rgba(248,113,113,0.7)';
+                  const _wArrow=_wall==='above'?'↑':'↓';
+                  if(_wDist>150)return null; // only show if within 150bps
+                  return(
+                    <>
+                      <span className="text-[#E8E9E4]/15 hidden sm:inline">·</span>
+                      <span className="text-[#E8E9E4]/35 uppercase hidden sm:inline">Wall</span>
+                      <span className="hidden sm:inline font-medium" style={{color:_wColor}}>{_wArrow}{_wDist}bps ${_wSize}M</span>
+                    </>
+                  );
+                })()}
                 <span className="ml-auto text-[#E8E9E4]/45" style={T2_MONO_STYLE}>{windowType.toUpperCase()} · {wins}W-{losses}L · {wr}%</span>
               </>
             );
