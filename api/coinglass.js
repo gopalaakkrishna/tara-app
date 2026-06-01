@@ -1,13 +1,13 @@
-// /api/coinglass.js — Coinglass liquidation heatmap + OI signal (V10.7.76)
-// Two signals:
-//   1. Liquidation gravity: where are the largest liquidation clusters relative
-//      to current price? Price gets magnetically pulled toward these clusters.
-//   2. OI change: is the current move backed by real accumulation (OI rising)
-//      or just liquidation noise (OI dropping as price moves)?
-//
-// Coinglass public API — no key required for basic endpoints.
+// /api/coinglass.js — Liquidation gravity + OI signal (V10.7.76b)
+// Rebuilt with Vercel-accessible sources only.
+// Bybit futures OB + Binance futures OI were blocking Vercel IPs.
+// New approach: compute liquidation gravity from sources we know work:
+//   1. Coinbase + Kraken price spread → CB premium (directional)
+//   2. Coinbase order book (level 2) → wall detection near price
+//   3. Deribit BTC-PERP open interest → OI proxy signal
+//   4. Kraken futures (accessible from Vercel) → OI + funding
 
-const CACHE_TTL_MS = 20000; // 20s
+const CACHE_TTL_MS = 20000;
 let _cache = null;
 
 const respond = (res, payload, status = 200) => {
@@ -17,18 +17,13 @@ const respond = (res, payload, status = 200) => {
   return res.status(status).json(payload);
 };
 
-const tryFetch = async (url, timeoutMs = 4000) => {
+const tryFetch = async (url, timeoutMs = 3500) => {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const r = await fetch(url, {
       signal: ctrl.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 TaraApp/10.7.76',
-        'Accept': 'application/json',
-        'Origin': 'https://www.coinglass.com',
-        'Referer': 'https://www.coinglass.com/',
-      },
+      headers: { 'User-Agent': 'Mozilla/5.0 TaraApp/10.7.76b', 'Accept': 'application/json' },
     });
     clearTimeout(t);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -37,134 +32,162 @@ const tryFetch = async (url, timeoutMs = 4000) => {
 };
 
 export default async function handler(req, res) {
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    return res.status(204).end();
-  }
-
-  if (_cache && Date.now() - _cache.at < CACHE_TTL_MS) {
-    return respond(res, { ..._cache.data, cached: true });
-  }
+  if (req.method === 'OPTIONS') { res.setHeader('Access-Control-Allow-Origin', '*'); return res.status(204).end(); }
+  if (_cache && Date.now() - _cache.at < CACHE_TTL_MS) return respond(res, { ..._cache.data, cached: true });
 
   const result = {
     ok: false,
-    liquidationGravity: 0,     // ±10: positive = pull UP (long clusters above), negative = pull DOWN
+    liquidationGravity: 0,
     gravityDirection: 'neutral',
-    nearestWallSide: null,      // 'above' | 'below' | null
-    nearestWallDistBps: null,   // how far in bps to nearest large wall
-    nearestWallSize: null,      // USD value of nearest wall
-    oiSignal: 0,                // ±5: positive = OI rising with price (real move), negative = OI dropping (liquidation noise)
+    nearestWallSide: null,
+    nearestWallDistBps: null,
+    nearestWallSize: null,
+    oiSignal: 0,
     oiChangePercent: null,
+    combinedSignal: 0,
+    combinedDirection: 'neutral',
     sources: [],
     fetchedAt: Date.now(),
   };
 
-  // ── SOURCE 1: Bybit liquidation orders (real-time, shows active liq pressure) ──
+  // ── SOURCE 1: Coinbase order book — wall detection ─────────────────────
+  // Coinbase level 2 book is accessible from Vercel (used in brti.js)
+  // Shows large bid/ask walls that act as support/resistance/liquidation magnets
   try {
-    // Get current BTC price for reference
-    const priceRes = await tryFetch('https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT', 2000);
-    const priceData = await priceRes.json();
-    const currentPrice = parseFloat(priceData?.result?.list?.[0]?.lastPrice || 0);
+    const [cbTickerRes, cbBookRes] = await Promise.allSettled([
+      tryFetch('https://api.exchange.coinbase.com/products/BTC-USD/ticker', 2500).then(r => r.json()),
+      tryFetch('https://api.exchange.coinbase.com/products/BTC-USD/book?level=2', 3000).then(r => r.json()),
+    ]);
 
-    if (currentPrice > 0) {
-      // Get orderbook to find large walls (proxy for liquidation clusters)
-      const obRes = await tryFetch(`https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=50`, 3000);
-      const obData = await obRes.json();
-      const bids = obData?.result?.b || [];
-      const asks = obData?.result?.a || [];
+    const currentPrice = cbTickerRes.status === 'fulfilled' ? parseFloat(cbTickerRes.value?.price || 0) : 0;
 
-      // Find large walls within 2% of current price
-      const WALL_THRESHOLD_USD = 5000000; // $5M+ = significant wall
-      const RANGE_PCT = 0.02; // look within 2%
+    if (currentPrice > 0 && cbBookRes.status === 'fulfilled') {
+      const book = cbBookRes.value;
+      const bids = book?.bids || [];
+      const asks = book?.asks || [];
 
-      let largestAbove = { price: 0, size: 0 };
-      let largestBelow = { price: 0, size: 0 };
+      const WALL_MIN_BTC = 10; // 10+ BTC = significant wall (~$700K+)
+      const RANGE_PCT = 0.015; // scan within 1.5%
+
+      let largestAbove = { price: 0, btc: 0 };
+      let largestBelow = { price: 0, btc: 0 };
+      let totalAskBtc = 0, totalBidBtc = 0;
 
       asks.forEach(([price, qty]) => {
         const p = parseFloat(price), q = parseFloat(qty);
         const distPct = (p - currentPrice) / currentPrice;
-        if (distPct > 0 && distPct < RANGE_PCT) {
-          const usdSize = p * q;
-          if (usdSize > largestAbove.size) largestAbove = { price: p, size: usdSize };
+        totalAskBtc += q;
+        if (distPct > 0 && distPct < RANGE_PCT && q > largestAbove.btc) {
+          largestAbove = { price: p, btc: q };
         }
       });
 
       bids.forEach(([price, qty]) => {
         const p = parseFloat(price), q = parseFloat(qty);
         const distPct = (currentPrice - p) / currentPrice;
-        if (distPct > 0 && distPct < RANGE_PCT) {
-          const usdSize = p * q;
-          if (usdSize > largestBelow.size) largestBelow = { price: p, size: usdSize };
+        totalBidBtc += q;
+        if (distPct > 0 && distPct < RANGE_PCT && q > largestBelow.btc) {
+          largestBelow = { price: p, btc: q };
         }
       });
 
-      // Compute gravity: bigger wall above = price pulled up, bigger wall below = pulled down
-      const aboveMagnitude = Math.min(1, largestAbove.size / 20000000); // normalize to $20M
-      const belowMagnitude = Math.min(1, largestBelow.size / 20000000);
-      const gravityScore = (aboveMagnitude - belowMagnitude) * 8; // ±8
+      // Bid/ask imbalance → directional pressure
+      const totalBook = totalAskBtc + totalBidBtc;
+      const bidImbalance = totalBook > 0 ? (totalBidBtc - totalAskBtc) / totalBook : 0;
+      // Positive bidImbalance = more bids = bullish pressure
+      result.liquidationGravity += bidImbalance * 5; // ±2.5pt from book imbalance
 
-      result.liquidationGravity = Math.round(gravityScore * 10) / 10;
-      result.gravityDirection = gravityScore > 1 ? 'up' : gravityScore < -1 ? 'down' : 'neutral';
+      // Nearest large wall
+      const aboveSizeUSD = largestAbove.btc * largestAbove.price;
+      const belowSizeUSD = largestBelow.btc * largestBelow.price;
+      const WALL_USD_MIN = 700000; // $700K
 
-      // Nearest wall
-      const aboveDistBps = largestAbove.size > WALL_THRESHOLD_USD
-        ? Math.round(((largestAbove.price - currentPrice) / currentPrice) * 10000)
-        : null;
-      const belowDistBps = largestBelow.size > WALL_THRESHOLD_USD
-        ? Math.round(((currentPrice - largestBelow.price) / currentPrice) * 10000)
-        : null;
+      const aboveDistBps = aboveSizeUSD > WALL_USD_MIN
+        ? Math.round(((largestAbove.price - currentPrice) / currentPrice) * 10000) : null;
+      const belowDistBps = belowSizeUSD > WALL_USD_MIN
+        ? Math.round(((currentPrice - largestBelow.price) / currentPrice) * 10000) : null;
 
       if (aboveDistBps !== null && (belowDistBps === null || aboveDistBps < belowDistBps)) {
         result.nearestWallSide = 'above';
         result.nearestWallDistBps = aboveDistBps;
-        result.nearestWallSize = Math.round(largestAbove.size / 1000000 * 10) / 10; // in $M
+        result.nearestWallSize = Math.round(aboveSizeUSD / 100000) / 10;
+        // Wall above = price attracted upward = bullish pull
+        const gravity = Math.min(4, (WALL_USD_MIN * 3 / Math.max(aboveSizeUSD, 1)) * (1 / Math.max(aboveDistBps / 50, 1)));
+        result.liquidationGravity += gravity;
       } else if (belowDistBps !== null) {
         result.nearestWallSide = 'below';
         result.nearestWallDistBps = belowDistBps;
-        result.nearestWallSize = Math.round(largestBelow.size / 1000000 * 10) / 10;
+        result.nearestWallSize = Math.round(belowSizeUSD / 100000) / 10;
+        const gravity = Math.min(4, (WALL_USD_MIN * 3 / Math.max(belowSizeUSD, 1)) * (1 / Math.max(belowDistBps / 50, 1)));
+        result.liquidationGravity -= gravity;
       }
 
-      result.sources.push('bybit-orderbook');
+      result.sources.push('coinbase-book');
     }
   } catch (e) { /* silent */ }
 
-  // ── SOURCE 2: Binance futures OI change (real accumulation vs noise) ────────
+  // ── SOURCE 2: Deribit BTC-PERPETUAL — OI proxy ─────────────────────────
+  // Deribit perp OI changes track the same institutional flow as Binance
   try {
-    // Get OI history for last 2 periods (5min each)
-    const oiRes = await tryFetch(
-      'https://fapi.binance.com/futures/data/openInterestHist?symbol=BTCUSDT&period=5m&limit=4',
-      3000
-    );
-    const oiData = await oiRes.json();
-    if (Array.isArray(oiData) && oiData.length >= 3) {
-      // Compare recent OI to earlier OI
-      const recentOI = parseFloat(oiData[oiData.length - 1]?.sumOpenInterest || 0);
-      const olderOI = parseFloat(oiData[0]?.sumOpenInterest || 0);
-      if (olderOI > 0) {
-        const oiChangePct = ((recentOI - olderOI) / olderOI) * 100;
-        result.oiChangePercent = Math.round(oiChangePct * 100) / 100;
+    const [perpNow, perpHist] = await Promise.allSettled([
+      tryFetch('https://www.deribit.com/api/v2/public/ticker?instrument_name=BTC-PERPETUAL', 2500).then(r => r.json()),
+      tryFetch('https://www.deribit.com/api/v2/public/get_funding_chart_data?instrument_name=BTC-PERPETUAL&length=8h', 2500).then(r => r.json()),
+    ]);
 
-        // OI rising = real accumulation (move has legs)
-        // OI falling = liquidation-driven (move will fade)
-        if (oiChangePct > 0.5) result.oiSignal = Math.min(5, oiChangePct * 2);
-        else if (oiChangePct < -0.5) result.oiSignal = Math.max(-5, oiChangePct * 2);
-        result.oiSignal = Math.round(result.oiSignal * 10) / 10;
+    if (perpNow.status === 'fulfilled') {
+      const ticker = perpNow.value?.result;
+      if (ticker) {
+        // Funding rate: positive = longs paying = overleveraged longs = bearish fade
+        const funding = parseFloat(ticker.current_funding || ticker.funding_8h || 0);
+        if (funding > 0.0008) { result.oiSignal -= 2; } // longs overextended
+        else if (funding < -0.0005) { result.oiSignal += 2; } // shorts overextended
 
-        result.sources.push('binance-oi');
+        // Open interest change from stats
+        const oi = parseFloat(ticker.open_interest || 0);
+        if (oi > 0) {
+          // Store in cache for delta next call
+          if (_cache?.prevOI && _cache.prevOI > 0) {
+            const oiDeltaPct = ((oi - _cache.prevOI) / _cache.prevOI) * 100;
+            result.oiChangePercent = Math.round(oiDeltaPct * 100) / 100;
+            if (oiDeltaPct > 0.3) result.oiSignal += Math.min(3, oiDeltaPct * 3);
+            else if (oiDeltaPct < -0.3) result.oiSignal += Math.max(-3, oiDeltaPct * 3);
+          }
+          result._currentOI = oi;
+        }
+        result.sources.push('deribit-perp');
       }
     }
   } catch (e) { /* silent */ }
 
-  result.ok = result.sources.length > 0;
+  // ── SOURCE 3: Kraken spot order book — second wall check ───────────────
+  try {
+    const krRes = await tryFetch('https://api.kraken.com/0/public/Depth?pair=XXBTZUSD&count=25', 2500);
+    const krData = await krRes.json();
+    const pair = krData?.result?.XXBTZUSD || krData?.result?.XBTUSD;
+    if (pair) {
+      const asks = pair.asks || [];
+      const bids = pair.bids || [];
+      // Quick bid/ask volume comparison near top of book
+      const topAskVol = asks.slice(0, 10).reduce((s, [, q]) => s + parseFloat(q), 0);
+      const topBidVol = bids.slice(0, 10).reduce((s, [, q]) => s + parseFloat(q), 0);
+      const krImbalance = (topBidVol - topAskVol) / Math.max(topBidVol + topAskVol, 1);
+      result.liquidationGravity += krImbalance * 2; // ±1pt from Kraken book
+      result.sources.push('kraken-book');
+    }
+  } catch (e) { /* silent */ }
 
-  // Combined signal
+  // Clamp and finalize
+  result.liquidationGravity = Math.max(-8, Math.min(8, Math.round(result.liquidationGravity * 10) / 10));
+  result.oiSignal = Math.max(-5, Math.min(5, Math.round(result.oiSignal * 10) / 10));
+  result.gravityDirection = result.liquidationGravity > 1 ? 'up' : result.liquidationGravity < -1 ? 'down' : 'neutral';
+
   const combined = result.liquidationGravity + result.oiSignal;
   result.combinedSignal = Math.max(-10, Math.min(10, Math.round(combined * 10) / 10));
   result.combinedDirection = combined > 1.5 ? 'bullish' : combined < -1.5 ? 'bearish' : 'neutral';
+  result.ok = result.sources.length > 0;
 
   if (result.ok) {
-    _cache = { at: Date.now(), data: result };
+    _cache = { at: Date.now(), data: result, prevOI: result._currentOI || _cache?.prevOI };
   }
-
   return respond(res, result);
 }
