@@ -7165,9 +7165,8 @@ const computeRegimeV10736=(bars,drift1m,drift5m,drift15m,atrBps)=>{
   // V10.7.75b — COMPRESSING regime detection
   //   Pattern: BBW percentile is LOW (tight range) AND has been FALLING (contracting).
   //   This is the pre-breakout coil — direction unknown, explosive move imminent.
-  //   Do NOT lock aggressively during compression; wait for the break to confirm direction.
   //   Detection: current BBW rank < 30th pct AND falling from prior 5 readings.
-  const _bbwRecent=historyRef.slice(-5);
+  const _bbwRecent=_bbwHistory.slice(-6);
   const _bbwFalling=_bbwRecent.length>=5&&_bbwRecent[_bbwRecent.length-1]<_bbwRecent[0]*0.85;
   const isCompressing=isChop&&bbwRank<30&&_bbwFalling&&!isWhipsawing;
 
