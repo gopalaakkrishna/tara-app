@@ -4198,8 +4198,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.01-v10.7.74b-gate-fix-patient-gap';
-const TARA_VERSION_DISPLAY='Tara 10.7.74b';
+const BASELINE_VERSION='2026.06.01-v10.7.75-full-regime-adaptation';
+const TARA_VERSION_DISPLAY='Tara 10.7.75';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -11327,11 +11327,65 @@ const computeV99Posterior=(params)=>{
       _v1055Adjustments.stochRSINeutralizedChop=Math.round(_orig*10)/10;
       rawSignalScores.stochRSI=0;
     }
+    // REGIME FLAGS for adaptive logic below
+    const _v1055IsTrending=_v1055Regime==='TRENDING UP'||_v1055Regime==='TRENDING DOWN'||_v1055Regime==='STRONG TREND';
+    const _v1055IsSqueeze=_v1055Regime==='SHORT SQUEEZE';
+    const _v1055IsHighVolChop=_v1055Regime==='HIGH VOL CHOP';
+
+    // GAP BOOST — regime-aware (V10.7.75)
+    //   RANGE-CHOP: +30% when |gap|≥8 (original)
+    //   TRENDING: +40% — momentum is with you, gap signal is more reliable
+    //   SHORT SQUEEZE: +20% — gap less reliable during explosive squeeze moves
+    //   HIGH VOL CHOP: +50% — high vol makes gap the dominant predictor (84% WR regime)
     if(Math.abs(_v1055Gap)>=8){
-      const _boost=_v1055Gap*0.30;
+      const _gapBoostPct=_v1055IsHighVolChop?0.50:_v1055IsTrending?0.40:_v1055IsSqueeze?0.20:0.30;
+      const _boost=_v1055Gap*_gapBoostPct;
       _v1055TotalAdj+=_boost;
       _v1055Adjustments.gapBoost=Math.round(_boost*10)/10;
       rawSignalScores.gap=_v1055Gap+_boost;
+    }
+
+    // V10.7.75 — TRENDING REGIME: boost momentum + dampen avwap
+    //   In trending markets momentum/MACD work correctly (continuation signals).
+    //   BOS/delta/structure are already NOT neutralized in trending (isChop=false).
+    //   Additional: boost momentum 40% — it's your second-best signal in trend.
+    //   Dampen avwap 30% — AVWAP is a reversion signal, less useful in trend.
+    if(_v1055IsTrending){
+      if(typeof rawSignalScores.momentum==='number'&&rawSignalScores.momentum!==0){
+        const _orig=rawSignalScores.momentum;
+        const _boost=_orig*0.40;
+        _v1055TotalAdj+=_boost;
+        _v1055Adjustments.momentumTrendBoost=Math.round(_boost*10)/10;
+        rawSignalScores.momentum=_orig+_boost;
+      }
+      if(typeof rawSignalScores.avwap==='number'&&rawSignalScores.avwap!==0){
+        const _orig=rawSignalScores.avwap;
+        const _cut=_orig*0.30; // keep 30%
+        _v1055TotalAdj+=(_cut-_orig);
+        _v1055Adjustments.avwapTrendDampen=Math.round((_orig-_cut)*10)/10;
+        rawSignalScores.avwap=_cut;
+      }
+    }
+
+    // V10.7.75 — SHORT SQUEEZE: dampen momentum, dampen flow
+    //   Squeeze momentum is misleading — explosive move often near exhaustion.
+    //   Flow imbalance during squeeze is one-sided and doesn't predict resolution.
+    //   Both cut to 40% in squeeze regime.
+    if(_v1055IsSqueeze){
+      if(typeof rawSignalScores.momentum==='number'&&rawSignalScores.momentum!==0){
+        const _orig=rawSignalScores.momentum;
+        const _cut=_orig*0.40;
+        _v1055TotalAdj+=(_cut-_orig);
+        _v1055Adjustments.momentumSqueezeDampen=Math.round((_orig-_cut)*10)/10;
+        rawSignalScores.momentum=_cut;
+      }
+      if(typeof rawSignalScores.flow==='number'&&rawSignalScores.flow!==0){
+        const _orig=rawSignalScores.flow;
+        const _cut=_orig*0.40;
+        _v1055TotalAdj+=(_cut-_orig);
+        _v1055Adjustments.flowSqueezeDampen=Math.round((_orig-_cut)*10)/10;
+        rawSignalScores.flow=_cut;
+      }
     }
 
     if(_v1055TotalAdj!==0){
@@ -34561,11 +34615,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _qBase=_softHintActive?20:(30+_safety);
     const Q_FLOOR=Math.max(10,Math.round(_qBase*_speedMultEng));
     // V6.5.1: CONV_FLOOR 10 → 5. V6.5.7: also dial-aware. V7.2: base 5 → 7.
-    //   V10.7.69: raised to 8 (minimal bump). Analysis showed losses/wins have
-    //   similar confidence distributions — a high floor costs volume without
-    //   cleanly separating wins from losses. The real fix is BOS+delta neutralization
-    //   above, not a higher floor. Keep floor at 8 to filter only absolute coin-flips.
-    const _convBase=_softHintActive?3:(8+_safety);
+    //   V10.7.69: raised to 8. V10.7.75: regime-adaptive conviction floor.
+    //   RANGE-CHOP: 8 (default, already tuned)
+    //   TRENDING: 6 — trend is your friend, lower bar to lock with momentum
+    //   SHORT SQUEEZE: 10 — explosive/risky, need stronger conviction
+    //   HIGH VOL CHOP: 6 — your 84% WR regime, trust it more
+    const _regimeForFloor=_softHintActive?'':(analysis?.regime||'RANGE-CHOP');
+    const _regimeConvBase=_regimeForFloor==='TRENDING UP'||_regimeForFloor==='TRENDING DOWN'||_regimeForFloor==='STRONG TREND'?6
+      :_regimeForFloor==='SHORT SQUEEZE'?10
+      :_regimeForFloor==='HIGH VOL CHOP'?6
+      :8; // RANGE-CHOP default
+    const _convBase=_softHintActive?3:(_regimeConvBase+_safety);
     // V9.7.6: ADAPTIVE LOCK URGENCY — when Kalshi is moving fast in Tara's predicted
     //   direction, drop the conviction floor by 30%. Logic: if Kalshi YES moved ≥4¢ in
     //   the last 30s and the move agrees with Tara's lean, we're being told the market
@@ -38458,20 +38518,26 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _kNow=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
       const _convNow=tc.confidence||0;
       const _dirNow=tc.call;
-      // V10.7.70: Time-aware abort guard (replaces V10.7.68 hard window cap).
-      //   Reset abort count if: new window OR 5+ minutes since last abort.
-      //   This allows re-engagement after Kalshi settles mid-window.
-      //   Still prevents rapid consecutive loops (3 aborts in <5min = locked out).
+      // V10.7.70: Time-aware abort guard. V10.7.75: regime-specific cooldown.
+      //   RANGE-CHOP: 5min (Kalshi oscillates, need time to settle)
+      //   TRENDING: 8min (trend holds → wait longer before re-engaging)
+      //   SHORT SQUEEZE: 2min (squeeze resolves fast → re-engage sooner)
+      //   HIGH VOL CHOP: 3min (volatile but directional clears faster)
       const _curWid=computeWindowId(windowType);
       const _now5=Date.now();
+      const _abortRegime=analysis?.regime||'RANGE-CHOP';
+      const _cooldownMs=_abortRegime==='TRENDING UP'||_abortRegime==='TRENDING DOWN'||_abortRegime==='STRONG TREND'?480000
+        :_abortRegime==='SHORT SQUEEZE'?120000
+        :_abortRegime==='HIGH VOL CHOP'?180000
+        :300000; // RANGE-CHOP: 5min default
       const _isNewWindow=_v104_1_abortCountRef.current.windowId!==_curWid;
-      const _cooldownElapsed=(_now5-(_v104_1_abortCountRef.current.lastAbortAt||0))>300000; // 5min
+      const _cooldownElapsed=(_now5-(_v104_1_abortCountRef.current.lastAbortAt||0))>_cooldownMs;
       if(_isNewWindow||_cooldownElapsed){
         _v104_1_abortCountRef.current={windowId:_curWid,count:0,lastAbortAt:0};
       }
-      const MAX_ABORTS_PER_BURST=3; // 3 rapid aborts = sit out until cooldown
+      const MAX_ABORTS_PER_BURST=3;
       if(_v104_1_abortCountRef.current.count>=MAX_ABORTS_PER_BURST){
-        return; // in cooldown — don't retry until 5min passes or new window
+        return; // in cooldown — don't retry until cooldown passes or new window
       }
       // Kalshi price FROM TARA'S DIRECTION — if Tara says DOWN and Kalshi YES is 35,
       //   then betting DOWN costs ~$0.65 (100-35). So "expensive entry" for DOWN
@@ -39034,8 +39100,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   User: "lock if she's very sure" — high conviction = higher allowed price. Never
     //   blocks profitable entries; only blocks clearly negative-EV ones.
     const _convictionNow=Math.max(50,Math.min(95,Number(analysis?.posterior||tc?.posterior||50)));
-    // V10.7.74: floor 55→45. Cheap entries (<45¢) lose at 47% WR. 60-70¢ wins at 90%. Block the cheap uncertainty.
-    const KALSHI_ENTRY_THRESH=Math.min(85,Math.max(45,Math.round(_convictionNow-8)));
+    //   V10.7.71: conviction-scaled threshold. V10.7.74: floor raised 55¢ → 45¢.
+    //   V10.7.75: regime-adaptive thresholds.
+    //   RANGE-CHOP:   max(45, posterior-8)  — current, well-tuned
+    //   TRENDING:     max(45, posterior-6)  — trend locks more reliable, allow higher price
+    //   SHORT SQUEEZE: max(50, posterior-10) — riskier entries, tighter threshold
+    //   HIGH VOL CHOP: max(45, posterior-5)  — best regime (84% WR), most room
+    const _regimeNow=analysis?.regime||'RANGE-CHOP';
+    const _entryBuffer=_regimeNow==='HIGH VOL CHOP'?5
+      :_regimeNow==='TRENDING UP'||_regimeNow==='TRENDING DOWN'||_regimeNow==='STRONG TREND'?6
+      :_regimeNow==='SHORT SQUEEZE'?10
+      :8; // RANGE-CHOP default
+    const _entryFloor=_regimeNow==='SHORT SQUEEZE'?50:45;
+    const KALSHI_ENTRY_THRESH=Math.min(85,Math.max(_entryFloor,Math.round(_convictionNow-_entryBuffer)));
     const KALSHI_DIP_GRACE_MS=45000;
     const _kPctNow=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
     // Track timestamp of most-recent Kalshi-below-threshold per direction
@@ -44543,6 +44620,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <>
                 <span className="text-[#E8E9E4]/35 uppercase">Regime</span>
                 <span className="text-[#E8E9E4]/70">{regimeLabel}</span>
+                {(()=>{
+                  // V10.7.75: show which regime strategy is active
+                  const _r=analysis?.regime||'';
+                  const _mode=_r==='HIGH VOL CHOP'?{label:'HIGH VOL MODE',cls:'text-emerald-400'}
+                    :_r==='TRENDING UP'||_r==='TRENDING DOWN'||_r==='STRONG TREND'?{label:'TREND MODE',cls:'text-sky-400'}
+                    :_r==='SHORT SQUEEZE'?{label:'SQUEEZE MODE',cls:'text-amber-400'}
+                    :null;
+                  if(!_mode)return null;
+                  return <span className={`${_mode.cls} font-medium ml-0.5`}>({_mode.label})</span>;
+                })()}
                 <span className="text-[#E8E9E4]/15">·</span>
                 <span className="text-[#E8E9E4]/35 uppercase">Session</span>
                 <span className="text-[#E8E9E4]/70">{sessionLabel}</span>
