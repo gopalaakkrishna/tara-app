@@ -4198,8 +4198,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.01-v10.7.75-full-regime-adaptation';
-const TARA_VERSION_DISPLAY='Tara 10.7.75';
+const BASELINE_VERSION='2026.06.01-v10.7.75b-long-squeeze-compressing-regimes';
+const TARA_VERSION_DISPLAY='Tara 10.7.75b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -7161,15 +7161,28 @@ const computeRegimeV10736=(bars,drift1m,drift5m,drift15m,atrBps)=>{
   const isHighVol=bbwRank>=80||atrpRegime==='Extreme'||(atrBps&&atrBps>40);
   const isTrend=!isHighVol&&adxValid&&adx>=20&&!isWhipsawing;
   const isChop=!isHighVol&&!isTrend;
+
+  // V10.7.75b — COMPRESSING regime detection
+  //   Pattern: BBW percentile is LOW (tight range) AND has been FALLING (contracting).
+  //   This is the pre-breakout coil — direction unknown, explosive move imminent.
+  //   Do NOT lock aggressively during compression; wait for the break to confirm direction.
+  //   Detection: current BBW rank < 30th pct AND falling from prior 5 readings.
+  const _bbwRecent=historyRef.slice(-5);
+  const _bbwFalling=_bbwRecent.length>=5&&_bbwRecent[_bbwRecent.length-1]<_bbwRecent[0]*0.85;
+  const isCompressing=isChop&&bbwRank<30&&_bbwFalling&&!isWhipsawing;
+
   // Determine direction within TREND
   const driftUp=drift1m>3&&drift5m>5;
   const driftDn=drift1m<-3&&drift5m<-5;
-  let regimeV2=isHighVol?'HIGH VOL CHOP':isTrend?(driftUp?'TRENDING UP':driftDn?'TRENDING DOWN':'RANGE-CHOP'):'RANGE-CHOP';
+  let regimeV2=isHighVol?'HIGH VOL CHOP'
+    :isCompressing?'COMPRESSING'
+    :isTrend?(driftUp?'TRENDING UP':driftDn?'TRENDING DOWN':'RANGE-CHOP')
+    :'RANGE-CHOP';
   return{
     regime:regimeV2,
     adx,bbwRank,bbw,isWhipsawing,whipsawCount,
     atrp,atrpRegime,priceAboveMedian,medianPrice,
-    isHighVol,isTrend,isChop,
+    isHighVol,isTrend,isChop,isCompressing,
     _v10_7_36:true,
   };
 };
@@ -11330,7 +11343,9 @@ const computeV99Posterior=(params)=>{
     // REGIME FLAGS for adaptive logic below
     const _v1055IsTrending=_v1055Regime==='TRENDING UP'||_v1055Regime==='TRENDING DOWN'||_v1055Regime==='STRONG TREND';
     const _v1055IsSqueeze=_v1055Regime==='SHORT SQUEEZE';
+    const _v1055IsLongSqueeze=_v1055Regime==='LONG SQUEEZE';
     const _v1055IsHighVolChop=_v1055Regime==='HIGH VOL CHOP';
+    const _v1055IsCompressing=_v1055Regime==='COMPRESSING';
 
     // GAP BOOST — regime-aware (V10.7.75)
     //   RANGE-CHOP: +30% when |gap|≥8 (original)
@@ -11345,7 +11360,44 @@ const computeV99Posterior=(params)=>{
       rawSignalScores.gap=_v1055Gap+_boost;
     }
 
-    // V10.7.75 — TRENDING REGIME: boost momentum + dampen avwap
+    // V10.7.75b — LONG SQUEEZE: same structure as SHORT SQUEEZE but inverted
+    //   Retail longs piling in while whales are selling = price gets crushed DOWN fast.
+    //   Momentum/flow are misleading (retail is wrong). Dampen both.
+    //   Gap signal still valid — trust where price is vs strike.
+    if(_v1055IsLongSqueeze){
+      if(typeof rawSignalScores.momentum==='number'&&rawSignalScores.momentum!==0){
+        const _orig=rawSignalScores.momentum;
+        const _cut=_orig*0.40;
+        _v1055TotalAdj+=(_cut-_orig);
+        _v1055Adjustments.momentumLongSqueezeDampen=Math.round((_orig-_cut)*10)/10;
+        rawSignalScores.momentum=_cut;
+      }
+      if(typeof rawSignalScores.flow==='number'&&rawSignalScores.flow!==0){
+        const _orig=rawSignalScores.flow;
+        const _cut=_orig*0.40;
+        _v1055TotalAdj+=(_cut-_orig);
+        _v1055Adjustments.flowLongSqueezeDampen=Math.round((_orig-_cut)*10)/10;
+        rawSignalScores.flow=_cut;
+      }
+    }
+
+    // V10.7.75b — COMPRESSING: pre-breakout coil, direction unknown
+    //   BBW contracting below 30th pct = Bollinger squeeze.
+    //   All directional signals are unreliable — no trend, no momentum.
+    //   Dampen everything except gap (gap = where price already IS vs strike).
+    //   Conviction will be lower naturally, but add extra dampen on trend signals.
+    if(_v1055IsCompressing){
+      ['momentum','macd','bos','structure','stochRSI','delta','avwap','technical'].forEach(sig=>{
+        if(typeof rawSignalScores[sig]==='number'&&rawSignalScores[sig]!==0){
+          const _orig=rawSignalScores[sig];
+          const _cut=_orig*0.30; // keep only 30% of all directional signals
+          _v1055TotalAdj+=(_cut-_orig);
+          _v1055Adjustments[`${sig}CompressDampen`]=Math.round((_orig-_cut)*10)/10;
+          rawSignalScores[sig]=_cut;
+        }
+      });
+      rawSignalScores._v1075_isCompressing=true;
+    }
     //   In trending markets momentum/MACD work correctly (continuation signals).
     //   BOS/delta/structure are already NOT neutralized in trending (isChop=false).
     //   Additional: boost momentum 40% — it's your second-best signal in trend.
@@ -34623,6 +34675,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _regimeForFloor=_softHintActive?'':(analysis?.regime||'RANGE-CHOP');
     const _regimeConvBase=_regimeForFloor==='TRENDING UP'||_regimeForFloor==='TRENDING DOWN'||_regimeForFloor==='STRONG TREND'?6
       :_regimeForFloor==='SHORT SQUEEZE'?10
+      :_regimeForFloor==='LONG SQUEEZE'?10    // same as short squeeze
+      :_regimeForFloor==='COMPRESSING'?12     // highest floor — direction unconfirmed
       :_regimeForFloor==='HIGH VOL CHOP'?6
       :8; // RANGE-CHOP default
     const _convBase=_softHintActive?3:(_regimeConvBase+_safety);
@@ -38527,7 +38581,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _now5=Date.now();
       const _abortRegime=analysis?.regime||'RANGE-CHOP';
       const _cooldownMs=_abortRegime==='TRENDING UP'||_abortRegime==='TRENDING DOWN'||_abortRegime==='STRONG TREND'?480000
-        :_abortRegime==='SHORT SQUEEZE'?120000
+        :_abortRegime==='SHORT SQUEEZE'||_abortRegime==='LONG SQUEEZE'?120000
+        :_abortRegime==='COMPRESSING'?240000
         :_abortRegime==='HIGH VOL CHOP'?180000
         :300000; // RANGE-CHOP: 5min default
       const _isNewWindow=_v104_1_abortCountRef.current.windowId!==_curWid;
@@ -39110,8 +39165,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _entryBuffer=_regimeNow==='HIGH VOL CHOP'?5
       :_regimeNow==='TRENDING UP'||_regimeNow==='TRENDING DOWN'||_regimeNow==='STRONG TREND'?6
       :_regimeNow==='SHORT SQUEEZE'?10
+      :_regimeNow==='LONG SQUEEZE'?10   // same as short squeeze — fast explosive move
+      :_regimeNow==='COMPRESSING'?12    // very tight threshold — direction unconfirmed
       :8; // RANGE-CHOP default
-    const _entryFloor=_regimeNow==='SHORT SQUEEZE'?50:45;
+    const _entryFloor=(_regimeNow==='SHORT SQUEEZE'||_regimeNow==='LONG SQUEEZE'||_regimeNow==='COMPRESSING')?50:45;
     const KALSHI_ENTRY_THRESH=Math.min(85,Math.max(_entryFloor,Math.round(_convictionNow-_entryBuffer)));
     const KALSHI_DIP_GRACE_MS=45000;
     const _kPctNow=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
@@ -44626,6 +44683,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   const _mode=_r==='HIGH VOL CHOP'?{label:'HIGH VOL MODE',cls:'text-emerald-400'}
                     :_r==='TRENDING UP'||_r==='TRENDING DOWN'||_r==='STRONG TREND'?{label:'TREND MODE',cls:'text-sky-400'}
                     :_r==='SHORT SQUEEZE'?{label:'SQUEEZE MODE',cls:'text-amber-400'}
+                    :_r==='LONG SQUEEZE'?{label:'LONG SQUEEZE',cls:'text-orange-400'}
+                    :_r==='COMPRESSING'?{label:'COILING ⚡',cls:'text-violet-400'}
                     :null;
                   if(!_mode)return null;
                   return <span className={`${_mode.cls} font-medium ml-0.5`}>({_mode.label})</span>;
