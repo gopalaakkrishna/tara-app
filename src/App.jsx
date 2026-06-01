@@ -4224,8 +4224,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.01-v10.7.76-liq-heatmap-oi-signal';
-const TARA_VERSION_DISPLAY='Tara 10.7.76';
+const BASELINE_VERSION='2026.06.01-v10.7.77-coherence-guard-no-gap-gate';
+const TARA_VERSION_DISPLAY='Tara 10.7.77';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -11242,16 +11242,22 @@ const computeV99Posterior=(params)=>{
     reasoning.push(`[KALSHI-LEAD] Kalshi YES moved ${_kLead.kDelta>0?'+':''}${_kLead.kDelta}¢ vs spot ${_kLead.spotDeltaBps>0?'+':''}${_kLead.spotDeltaBps}bps over 60s → ${_kLead.dir} positioning ahead of move (${_kAdj>0?'+':''}${_kAdj})`);
   }
   // ═══════════════════════════════════════════════════════════════════════════
-  // V10.7.64 — SIGNAL COHERENCE TELEMETRY
+  // V10.7.64 — SIGNAL COHERENCE TELEMETRY + V10.7.77 COHERENCE GUARD
   // ═══════════════════════════════════════════════════════════════════════════
-  // Computes signal alignment/coherence and stamps it for audit.
-  // Backtest showed coherence adjustment to totalScore did not reliably improve
-  //   WR — low-coherence trades (strong opposing signals) actually won at 64%
-  //   vs high-coherence (60%), suggesting opposition often = reversion setup.
-  // Decision: stamp coherence data for future analysis. Don't modify totalScore.
-  //   After 200+ labeled trades with _v10_7_64_coherenceAdj stamps, we'll know
-  //   which coherence thresholds actually predict wins vs losses and build
-  //   the weighting logic from data rather than theory.
+  // V10.7.64: Stamps cohRatio for audit (telemetry only — no totalScore change).
+  // V10.7.77: ACTIVATES coherence guard based on real loss data.
+  //   Analysis of losses on V10.7.76 showed:
+  //   14:15 loss: cohRatio=1.0, ALL 7 signals agreed DOWN, Tara called UP (conf=65%)
+  //   18:16 loss: cohRatio=0.71, 5/7 signals agreed DOWN, Tara called DOWN (conf=31%)
+  //   In both cases: Kalshi lead + trajectory overrode a clear signal consensus.
+  //   Kalshi was leading price the wrong way — Tara followed Kalshi into bad trades.
+  //
+  //   Guard: when ≥75% of active signals agree in OPPOSITE direction to current
+  //   totalScore direction AND at least 4 active signals, apply a strong correction.
+  //   This is not a sit-out gate — it pulls totalScore toward the consensus.
+  //   The old backtest that said "low coherence wins 64%" was on mixed setups.
+  //   HIGH coherence opposing (all signals agree against direction) is different —
+  //   that's Kalshi/trajectory dragging Tara the wrong direction.
   try{
     const _cohSignals={
       gap:rawSignalScores.gap||0,momentum:rawSignalScores.momentum||0,
@@ -11262,14 +11268,30 @@ const computeV99Posterior=(params)=>{
     };
     const _consensusScore=Object.values(_cohSignals).reduce((s,v)=>s+v,0);
     const _consensusDir=_consensusScore>0?1:-1;
+    const _currentDir=totalScore>0?1:-1;
     const _active=Object.entries(_cohSignals).filter(([,v])=>Math.abs(v)>=2);
     const _aligned=_active.filter(([,v])=>(v>0?1:-1)===_consensusDir);
     const _opposing=_active.filter(([,v])=>(v>0?1:-1)!==_consensusDir);
-    // Coherence ratio: 1.0=all agree, 0.5=split, 0.0=all oppose
     const _cohRatio=_active.length>0?_aligned.length/_active.length:0.5;
-    // Strength-weighted coherence (strong aligned signals = higher)
     const _alignedStrength=_aligned.reduce((s,[,v])=>s+Math.abs(v),0);
     const _opposingStrength=_opposing.reduce((s,[,v])=>s+Math.abs(v),0);
+
+    // V10.7.77: Coherence override — pull toward signal consensus when strongly opposed
+    //   Fires when: ≥4 active signals, ≥80% agree in one direction, AND
+    //   totalScore is pointing the OTHER direction (Kalshi/trajectory overriding signals)
+    const _consensusOpposesCurrent=_consensusDir!==_currentDir;
+    if(_active.length>=4&&_cohRatio>=0.80&&_consensusOpposesCurrent&&Math.abs(_consensusScore)>15){
+      // Strong consensus opposes current direction — apply correction toward consensus
+      // Magnitude: proportional to how strongly consensus disagrees
+      const _correction=_consensusScore*0.40; // pull 40% toward consensus
+      totalScore+=_correction;
+      rawSignalScores._v10_7_77_cohAdj=Math.round(_correction*10)/10;
+      reasoning.push(`[V10.7.77] Coherence override: ${_aligned.length}/${_active.length} signals say ${_consensusDir>0?'UP':'DOWN'} (consensus=${_consensusScore.toFixed(0)}) but totalScore said ${_currentDir>0?'UP':'DOWN'} → correction ${_correction>=0?'+':''}${_correction.toFixed(1)}`);
+    }else{
+      rawSignalScores._v10_7_77_cohAdj=0;
+    }
+
+    // Stamps (unchanged from V10.7.64)
     rawSignalScores._v10_7_64_consensusScore=Math.round(_consensusScore*10)/10;
     rawSignalScores._v10_7_64_cohRatio=Math.round(_cohRatio*100)/100;
     rawSignalScores._v10_7_64_alignedN=_aligned.length;
@@ -11277,7 +11299,7 @@ const computeV99Posterior=(params)=>{
     rawSignalScores._v10_7_64_alignedStrength=Math.round(_alignedStrength*10)/10;
     rawSignalScores._v10_7_64_opposingStrength=Math.round(_opposingStrength*10)/10;
   }catch(e){
-    try{console.warn('[V10.7.64] Coherence stamp error:',e?.message);}catch(_){}
+    try{console.warn('[V10.7.77] Coherence error:',e?.message);}catch(_){}
   }
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -39220,7 +39242,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       :_regimeNow==='LONG SQUEEZE'?10   // same as short squeeze — fast explosive move
       :_regimeNow==='COMPRESSING'?12    // very tight threshold — direction unconfirmed
       :8; // RANGE-CHOP default
-    const _entryFloor=(_regimeNow==='SHORT SQUEEZE'||_regimeNow==='LONG SQUEEZE'||_regimeNow==='COMPRESSING')?50:45;
+    // V10.7.77: raise floor 45→52. 45-52¢ entries win at 55% WR, -1.2¢/trade EV.
+    //   Not worth taking. 52-65¢ wins at 73% WR, +14¢/trade.
+    const _entryFloor=(_regimeNow==='SHORT SQUEEZE'||_regimeNow==='LONG SQUEEZE'||_regimeNow==='COMPRESSING')?55:52;
     const KALSHI_ENTRY_THRESH=Math.min(85,Math.max(_entryFloor,Math.round(_convictionNow-_entryBuffer)));
     const KALSHI_DIP_GRACE_MS=45000;
     const _kPctNow=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
@@ -39699,7 +39723,25 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _noGoTier='no-go-coinflip-late';
         }
       }
-      // Snapshot the no-go if any fired
+      // (d) FLAT GAP in RANGE-CHOP — no directional edge (V10.7.77)
+      //   When gap<5pt AND regime is RANGE-CHOP AND no strong external signal:
+      //   This window has no edge. 17:45 loss: gap=0, conf=54% → lost.
+      //   Crazylion: "not every window is tradeable." This is the implementation.
+      //   Exception: if liqHeatmap, deribitOptions, or liqSignal are firing
+      //   strongly (|signal|>3), those external signals provide edge even without gap.
+      if(!_noGoReason){
+        const _gapScore=Math.abs(Number(analysis?.rawSignalScores?.gap)||0);
+        const _isChopRegime=analysis?.regime==='RANGE-CHOP'||analysis?.regime==='COMPRESSING';
+        const _extSignal=Math.max(
+          Math.abs(Number(analysis?.rawSignalScores?.liqHeatmap)||0),
+          Math.abs(Number(analysis?.rawSignalScores?.deribitOptions)||0),
+          Math.abs(Number(analysis?.rawSignalScores?.liqSignal)||0)
+        );
+        if(_isChopRegime&&_gapScore<5&&_extSignal<3){
+          _noGoReason=`Flat gap (${_gapScore.toFixed(0)}pt) in ${analysis?.regime} — no directional edge`;
+          _noGoTier='no-go-edge';
+        }
+      }
       if(_noGoReason){
         // V8.9.3: TRUE COIN FLIP exception. When the no-go reason is the late-window
         //   coin-flip case (posterior 47-53, ≤20s left, gap ≤2bps from strike), DON'T
