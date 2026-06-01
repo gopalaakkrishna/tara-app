@@ -4224,8 +4224,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.01-v10.7.77-coherence-guard-no-gap-gate';
-const TARA_VERSION_DISPLAY='Tara 10.7.77';
+const BASELINE_VERSION='2026.06.01-v10.7.78-dst-fix-override-audit';
+const TARA_VERSION_DISPLAY='Tara 10.7.78';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6037,16 +6037,15 @@ const getMarketSessions=()=>{
 // move BTC 1-3% in seconds. Times are UTC. Tara enters BLACKOUT (no new locks)
 // 30 min before, OBSERVE-ONLY during, ENHANCED for 15 min after.
 const MACRO_EVENTS=[
-  // ── US CPI & PPI ── 8:30 AM EST = 13:30 UTC (winter), 12:30 UTC (summer DST)
-  // Released 2nd Tuesday/Wednesday of month, ~10am ET. Use 13:30 UTC as proxy.
-  {name:'CPI/PPI',dayOfMonth:[10,11,12,13,14,15],hourUTC:13,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
-  // ── NFP ── First Friday of month, 8:30 AM EST = 13:30 UTC
-  {name:'NFP',dayOfWeek:5,weekOfMonth:1,hourUTC:13,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
-  // ── FOMC Rate Decision ── 8 times/year, 2:00 PM EST = 19:00 UTC, Wed
-  // Treat 1st-3rd Wed as a window — actual FOMC Wed is highlighted
-  {name:'FOMC',dayOfWeek:3,hourUTC:19,minUTC:0,impact:'EXTREME',preMin:45,postMin:30,monthsOnly:[1,3,5,6,7,9,11,12]},
-  // ── PCE ── Last Friday of month, 8:30 AM EST = 13:30 UTC
-  {name:'PCE',dayOfWeek:5,weekOfMonth:-1,hourUTC:13,minUTC:30,impact:'HIGH',preMin:30,postMin:15},
+  // ── US CPI & PPI ── 8:30 AM ET = 13:30 UTC (EST) or 12:30 UTC (EDT)
+  // V10.7.78: use dynamic hour based on DST. _isUSDST() checked at runtime in getMacroEventState.
+  {name:'CPI/PPI',dayOfMonth:[10,11,12,13,14,15],hourUTC:'8:30ET',minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
+  // ── NFP ── First Friday of month, 8:30 AM ET
+  {name:'NFP',dayOfWeek:5,weekOfMonth:1,hourUTC:'8:30ET',minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
+  // ── FOMC Rate Decision ── 2:00 PM ET = 19:00 UTC (EST) or 18:00 UTC (EDT)
+  {name:'FOMC',dayOfWeek:3,hourUTC:'14:00ET',minUTC:0,impact:'EXTREME',preMin:45,postMin:30,monthsOnly:[1,3,5,6,7,9,11,12]},
+  // ── PCE ── Last Friday of month, 8:30 AM ET
+  {name:'PCE',dayOfWeek:5,weekOfMonth:-1,hourUTC:'8:30ET',minUTC:30,impact:'HIGH',preMin:30,postMin:15},
   // ── Powell speeches ── irregular but Wed 19:30 UTC during FOMC weeks
   // (covered by FOMC entry above)
   // ── Retail Sales ── Mid-month, 8:30 AM EST = 13:30 UTC
@@ -6082,7 +6081,16 @@ const getMacroEventState=(now=new Date())=>{
     if(ev.dayOfMonth&&!ev.dayOfMonth.includes(dateUTC))continue;
     // Filter by months
     if(ev.monthsOnly&&!ev.monthsOnly.includes(monthUTC))continue;
-    const evMins=ev.hourUTC*60+ev.minUTC;
+    // V10.7.78: resolve ET time strings dynamically based on DST
+    const _etOffset=_isUSDST(now)?4:5; // EDT=UTC-4, EST=UTC-5
+    const _resolveHour=(h)=>{
+      if(typeof h==='string'&&h.includes('ET')){
+        const _parts=h.replace('ET','').split(':');
+        return parseInt(_parts[0])+_etOffset; // convert ET to UTC
+      }
+      return h;
+    };
+    const evMins=_resolveHour(ev.hourUTC)*60+ev.minUTC;
     const diffMins=evMins-nowMins;
     if(diffMins>0&&diffMins<=ev.preMin)return{state:'BLACKOUT',event:ev,minutesUntil:diffMins};
     if(diffMins<=0&&Math.abs(diffMins)<=2)return{state:'OBSERVE',event:ev,minutesUntil:diffMins};
@@ -6233,35 +6241,59 @@ const PHASE_PROFILES={
 };
 
 // Returns the phase key for a given UTC hour:minute
+// V10.7.78 — DST-AWARE PHASE KEY
+//   Problem: Phase boundaries were hardcoded for EST (UTC-5).
+//   During EDT (UTC-4, Mar-Nov), all NY session labels are 1 hour late.
+//   US trading sessions were mislabeled → sessionWeights/DoW calibration mislabeled.
+//
+//   Fix: compute US DST offset dynamically.
+//   US DST: second Sunday of March (clocks spring forward) → first Sunday of November (fall back)
+//   When DST active: NY sessions start 1 hour earlier in UTC.
+//   EDT = UTC-4 → NY Open = 12:30 UTC (not 13:30)
+//   EST = UTC-5 → NY Open = 13:30 UTC
+const _isUSDST=(now=new Date())=>{
+  // DST is active when local time is ahead of standard time
+  // Simple check: compare Jan offset (EST) vs current offset
+  const jan=new Date(now.getFullYear(),0,1);
+  const jul=new Date(now.getFullYear(),6,1);
+  const stdOffset=Math.max(jan.getTimezoneOffset(),jul.getTimezoneOffset());
+  return now.getTimezoneOffset()<stdOffset;
+};
+
 const getPhaseKey=(hUTC,mUTC)=>{
   const minOfDay=hUTC*60+mUTC;
+  // V10.7.78: shift NY boundaries 60min earlier during EDT (DST active)
+  const _dst=_isUSDST();
+  const _nyShift=_dst?60:0; // EDT shifts NY sessions 60min earlier in UTC
   if(minOfDay>=22*60||minOfDay<4*60)return'ASIA_OPEN';
   if(minOfDay<7*60)return'ASIA_LATE';
   if(minOfDay<8*60)return'EU_PREOPEN';
-  if(minOfDay<12*60)return'EU_OPEN';
-  if(minOfDay<13*60+30)return'NY_PREMARKET';
-  if(minOfDay<14*60+30)return'NY_OPEN';
-  if(minOfDay<16*60)return'NY_MORNING';
-  if(minOfDay<17*60)return'NY_LUNCH';
-  if(minOfDay<20*60)return'NY_AFTERNOON';
-  if(minOfDay<21*60)return'NY_CLOSE';
+  if(minOfDay<(12*60-_nyShift))return'EU_OPEN';
+  if(minOfDay<(13*60+30-_nyShift))return'NY_PREMARKET';
+  if(minOfDay<(14*60+30-_nyShift))return'NY_OPEN';
+  if(minOfDay<(16*60-_nyShift))return'NY_MORNING';
+  if(minOfDay<(17*60-_nyShift))return'NY_LUNCH';
+  if(minOfDay<(20*60-_nyShift))return'NY_AFTERNOON';
+  if(minOfDay<(21*60-_nyShift))return'NY_CLOSE';
   return'AFTERHOURS';
 };
 
 // Returns minutes until next phase transition + the next phase key.
 const getNextPhaseTransition=(hUTC,mUTC)=>{
   const minOfDay=hUTC*60+mUTC;
+  const _dst=_isUSDST();
+  const _s=_dst?60:0; // DST shift
   const boundaries=[
     {at:4*60,phase:'ASIA_LATE'},
     {at:7*60,phase:'EU_PREOPEN'},
     {at:8*60,phase:'EU_OPEN'},
-    {at:12*60,phase:'NY_PREMARKET'},
-    {at:13*60+30,phase:'NY_OPEN'},
-    {at:14*60+30,phase:'NY_MORNING'},
-    {at:16*60,phase:'NY_LUNCH'},
-    {at:17*60,phase:'NY_AFTERNOON'},
-    {at:20*60,phase:'NY_CLOSE'},
-    {at:21*60,phase:'AFTERHOURS'},
+    {at:12*60-_s,phase:'NY_PREMARKET'},
+    {at:13*60+30-_s,phase:'NY_OPEN'},
+    {at:14*60+30-_s,phase:'NY_MORNING'},
+    {at:16*60-_s,phase:'NY_LUNCH'},
+    {at:17*60-_s,phase:'NY_AFTERNOON'},
+    {at:20*60-_s,phase:'NY_CLOSE'},
+    {at:21*60-_s,phase:'AFTERHOURS'},
     {at:22*60,phase:'ASIA_OPEN'},
   ];
   for(const b of boundaries){
