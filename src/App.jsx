@@ -4198,8 +4198,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.31-v10.7.73c-brti-removed-stale-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.73c';
+const BASELINE_VERSION='2026.05.31-v10.7.74-entry-floor-fix-brti-removed';
+const TARA_VERSION_DISPLAY='Tara 10.7.74';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -39034,7 +39034,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   User: "lock if she's very sure" — high conviction = higher allowed price. Never
     //   blocks profitable entries; only blocks clearly negative-EV ones.
     const _convictionNow=Math.max(50,Math.min(95,Number(analysis?.posterior||tc?.posterior||50)));
-    const KALSHI_ENTRY_THRESH=Math.min(85,Math.max(55,Math.round(_convictionNow-8)));
+    // V10.7.74: floor 55→45. Cheap entries (<45¢) lose at 47% WR. 60-70¢ wins at 90%. Block the cheap uncertainty.
+    const KALSHI_ENTRY_THRESH=Math.min(85,Math.max(45,Math.round(_convictionNow-8)));
     const KALSHI_DIP_GRACE_MS=45000;
     const _kPctNow=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
     // Track timestamp of most-recent Kalshi-below-threshold per direction
