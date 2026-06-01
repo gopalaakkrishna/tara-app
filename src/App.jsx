@@ -4198,8 +4198,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.05.31-v10.7.74-entry-floor-fix-brti-removed';
-const TARA_VERSION_DISPLAY='Tara 10.7.74';
+const BASELINE_VERSION='2026.06.01-v10.7.74b-gate-fix-patient-gap';
+const TARA_VERSION_DISPLAY='Tara 10.7.74b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -39042,6 +39042,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(_kPctNow!=null){
       if(_kPctNow<=KALSHI_ENTRY_THRESH){kalshiWasBelowThreshUpRef.current=true;kalshiLastBelowThreshUpRef.current=Date.now();}
       if((100-_kPctNow)<=KALSHI_ENTRY_THRESH){kalshiWasBelowThreshDownRef.current=true;kalshiLastBelowThreshDownRef.current=Date.now();}
+      // V10.7.74b: hard absolute block if either direction costs >85¢
+      // was-below logic misses DOWN trades where YES=2-4¢ (DOWN cost=96-98¢)
+      // because that cost was NEVER ≤threshold so _wasBelow stays false
+      if(_kPctNow>85){kalshiWasBelowThreshUpRef.current=false;kalshiLastBelowThreshUpRef.current=0;}
+      if((100-_kPctNow)>85){kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshDownRef.current=0;}
     }
     // V6.1.2: EARLY SIT-OUT FOR MIXED CONDITIONS — kept as a separate guard. Time-based fast
     //   sit-out for cases where signals genuinely never align. This is NOT a cap, just an
