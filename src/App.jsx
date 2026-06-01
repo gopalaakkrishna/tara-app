@@ -6038,14 +6038,14 @@ const getMarketSessions=()=>{
 // 30 min before, OBSERVE-ONLY during, ENHANCED for 15 min after.
 const MACRO_EVENTS=[
   // ── US CPI & PPI ── 8:30 AM ET = 13:30 UTC (EST) or 12:30 UTC (EDT)
-  // V10.7.78: use dynamic hour based on DST. _isUSDST() checked at runtime in getMacroEventState.
-  {name:'CPI/PPI',dayOfMonth:[10,11,12,13,14,15],hourUTC:'8:30ET',minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
+  // V10.7.78: hourUTC stored as ET hour (8), resolved to UTC at runtime in getMacroEventState
+  {name:'CPI/PPI',dayOfMonth:[10,11,12,13,14,15],hourET:8,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
   // ── NFP ── First Friday of month, 8:30 AM ET
-  {name:'NFP',dayOfWeek:5,weekOfMonth:1,hourUTC:'8:30ET',minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
-  // ── FOMC Rate Decision ── 2:00 PM ET = 19:00 UTC (EST) or 18:00 UTC (EDT)
-  {name:'FOMC',dayOfWeek:3,hourUTC:'14:00ET',minUTC:0,impact:'EXTREME',preMin:45,postMin:30,monthsOnly:[1,3,5,6,7,9,11,12]},
+  {name:'NFP',dayOfWeek:5,weekOfMonth:1,hourET:8,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
+  // ── FOMC Rate Decision ── 2:00 PM ET
+  {name:'FOMC',dayOfWeek:3,hourET:14,minUTC:0,impact:'EXTREME',preMin:45,postMin:30,monthsOnly:[1,3,5,6,7,9,11,12]},
   // ── PCE ── Last Friday of month, 8:30 AM ET
-  {name:'PCE',dayOfWeek:5,weekOfMonth:-1,hourUTC:'8:30ET',minUTC:30,impact:'HIGH',preMin:30,postMin:15},
+  {name:'PCE',dayOfWeek:5,weekOfMonth:-1,hourET:8,minUTC:30,impact:'HIGH',preMin:30,postMin:15},
   // ── Powell speeches ── irregular but Wed 19:30 UTC during FOMC weeks
   // (covered by FOMC entry above)
   // ── Retail Sales ── Mid-month, 8:30 AM EST = 13:30 UTC
@@ -6081,16 +6081,10 @@ const getMacroEventState=(now=new Date())=>{
     if(ev.dayOfMonth&&!ev.dayOfMonth.includes(dateUTC))continue;
     // Filter by months
     if(ev.monthsOnly&&!ev.monthsOnly.includes(monthUTC))continue;
-    // V10.7.78: resolve ET time strings dynamically based on DST
+    // V10.7.78: resolve ET hour to UTC at runtime using DST state
     const _etOffset=_isUSDST(now)?4:5; // EDT=UTC-4, EST=UTC-5
-    const _resolveHour=(h)=>{
-      if(typeof h==='string'&&h.includes('ET')){
-        const _parts=h.replace('ET','').split(':');
-        return parseInt(_parts[0])+_etOffset; // convert ET to UTC
-      }
-      return h;
-    };
-    const evMins=_resolveHour(ev.hourUTC)*60+ev.minUTC;
+    const _eventHourUTC=ev.hourET!=null?ev.hourET+_etOffset:(ev.hourUTC||0);
+    const evMins=_eventHourUTC*60+ev.minUTC;
     const diffMins=evMins-nowMins;
     if(diffMins>0&&diffMins<=ev.preMin)return{state:'BLACKOUT',event:ev,minutesUntil:diffMins};
     if(diffMins<=0&&Math.abs(diffMins)<=2)return{state:'OBSERVE',event:ev,minutesUntil:diffMins};
