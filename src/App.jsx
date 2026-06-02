@@ -39793,8 +39793,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }
           const _watchAge=(Date.now()-(_flatGapWatchRef.current?.startedAt||Date.now()))/1000;
           const _gapDeveloped=_gapScore>=8;
+          // Compute _activeDir and _kalshiForDir locally (not yet in scope here)
+          const _activeDirWatch=tc?.call==='UP'||tc?.call==='DOWN'?tc.call:(tc?.direction||null);
           const _kNowWatch=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
-          const _kalshiForDirWatch=_kNowWatch!=null?(_activeDir==='UP'?_kNowWatch:(100-_kNowWatch)):null;
+          const _kalshiForDirWatch=(_kNowWatch!=null&&_activeDirWatch)?(_activeDirWatch==='UP'?_kNowWatch:(100-_kNowWatch)):null;
           const _entryOK=_kalshiForDirWatch!=null&&_kalshiForDirWatch<=68;
           const _timeOK=_secsLeft>=300;
           if(_gapDeveloped&&_entryOK&&_timeOK){
