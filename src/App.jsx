@@ -4224,8 +4224,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.02-v10.7.81-flat-gap-watch';
-const TARA_VERSION_DISPLAY='Tara 10.7.81';
+const BASELINE_VERSION='2026.06.02-v10.7.82-nogo-data-fix-ml-entry-gates';
+const TARA_VERSION_DISPLAY='Tara 10.7.82';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28494,7 +28494,9 @@ function TaraApp(){
       //   trade this." Counting these as wins/losses misled the record — the user
       //   sees "Tara's Record 803W-497L" thinking those are real trades. They're
       //   not. Now the scorecard reflects only trades Tara would actually take.
+      // V10.7.57: exclude no-trade overrides. V10.7.82: also exclude no-go-data (stale price).
       if(e.wasOverriddenNoTrade===true)return;
+      if(e.tier==='no-go-data')return;
       const wt=e.windowType;
       if(!out[wt])out[wt]={wins:0,losses:0,sitouts:0};
       if(e.result==='WIN')out[wt].wins++;
@@ -39320,15 +39322,31 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   memory + scorecards stopped updating for both BTC and ETH. Bug shipped in V7.8 and
     //   compounded each version since.
     const _logSnapshotEntry=(snapshot)=>{
-      // V10.7.79: Stamp ML training fields onto every snapshot at log time.
+      // V10.7.82: Universal entry cost guard — block entries outside valid range
+      //   regardless of which code path created the snapshot.
+      //   Data showed 5 entries >85¢ and 2 entries <35¢ slipping through.
+      //   These were on no-go-edge/time-cap-commit paths that bypass the main gate.
+      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&snapshot.wasOverriddenNoTrade!==true&&snapshot.tier!=='no-go-data'){
+        const _snapKal=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock):null;
+        const _snapDir=snapshot.call||snapshot.direction;
+        if(_snapKal!=null&&_snapDir){
+          const _snapCost=_snapDir==='UP'?_snapKal:(100-_snapKal);
+          if(_snapCost<35||_snapCost>85){
+            // Entry cost out of range — convert to sit-out
+            snapshot.call='SIT_OUT';
+            snapshot.wasOverriddenNoTrade=true;
+            snapshot.caution=`Entry cost ${_snapCost.toFixed(0)}¢ outside valid range (35-85¢) — sitting out`;
+          }
+        }
+      }
       //   These capture context the engine doesn't use as signals — needed for
       //   XGBoost to learn something new beyond what the posterior already encodes.
       //   Fields: abortCount, bbwRank, timeFraction, kalshiVelocity, windowsSinceReset
-      if(snapshot&&snapshot.locked){
+      if(snapshot&&snapshot.locked&&snapshot.wasOverriddenNoTrade!==true&&snapshot.tier!=='no-go-data'){
         try{
           snapshot._ml_abortCount=_v104_1_abortCountRef.current?.count||0;
           snapshot._ml_bbwRank=analysis?.rawSignalScores?._bbwRank??null;
-          snapshot._ml_timeFraction=Math.round((1-(( timeState.minsRemaining*60+timeState.secsRemaining)/(windowType==='15m'?900:300)))*100)/100;
+          snapshot._ml_timeFraction=Math.round((1-((timeState.minsRemaining*60+timeState.secsRemaining)/(windowType==='15m'?900:300)))*100)/100;
           snapshot._ml_kalshiVelocity=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null
             ?Number(kalshiYesPrice)-Number(snapshot.kalshiAtLock||kalshiYesPrice)
             :null;
