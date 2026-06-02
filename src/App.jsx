@@ -39992,7 +39992,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _flowAligned=_callDir==='UP'?_flowVal>=15:_flowVal<=-15;
           const _momAligned=_callDir==='UP'?_momVal>=10:_momVal<=-10;
           const _hasStrongTape=_flowAligned&&_momAligned;
-          const _effectiveDeadzone=_effectiveDeadzone&&!_hasStrongTape;
+          const _hasStrongGap=Math.abs(Number((analysis?.rawSignalScores||{}).gap||0))>=15;
+          const _effectiveDeadzone=_isTrueDeadzone&&!_hasStrongTape&&!_hasStrongGap;
           if(!_isDeadWindow&&!_effectiveDeadzone){
             // Force-commit to posterior direction. Skip the sitout snapshot entirely.
             // V10.7.6 — check for reversal signals before committing
