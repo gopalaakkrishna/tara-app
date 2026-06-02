@@ -39793,7 +39793,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }
           const _watchAge=(Date.now()-(_flatGapWatchRef.current?.startedAt||Date.now()))/1000;
           const _gapDeveloped=_gapScore>=8;
-          const _entryOK=_kalshiForDir!=null&&_kalshiForDir<=68;
+          const _kNowWatch=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
+          const _kalshiForDirWatch=_kNowWatch!=null?(_activeDir==='UP'?_kNowWatch:(100-_kNowWatch)):null;
+          const _entryOK=_kalshiForDirWatch!=null&&_kalshiForDirWatch<=68;
           const _timeOK=_secsLeft>=300;
           if(_gapDeveloped&&_entryOK&&_timeOK){
             // Gap developed with good odds — allow lock, fall through
