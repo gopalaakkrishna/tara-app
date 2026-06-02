@@ -39773,9 +39773,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
       }
       // (d) FLAT GAP WATCH — V10.7.81
-      //   Instead of immediately sitting out flat-gap windows, Tara watches for gap
-      //   to develop. When gap≥8pt AND entry≤68¢ AND ≥5min left → lock.
-      //   When window ends with flat gap → sit out. Best of both worlds.
+      //   Instead of sitting out flat-gap windows immediately, Tara watches for gap
+      //   to develop. Lock when: gap≥8pt AND entry≤68¢ AND ≥5min left.
+      //   Sit out when: time runs out (<5min) with gap still flat.
       if(!_noGoReason){
         const _gapScore=Math.abs(Number(analysis?.rawSignalScores?.gap)||0);
         const _isChopRegime=analysis?.regime==='RANGE-CHOP'||analysis?.regime==='COMPRESSING';
@@ -39787,34 +39787,28 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _secsLeft=timeState.minsRemaining*60+timeState.secsRemaining;
         const _curWid=computeWindowId(windowType);
         if(_isChopRegime&&_gapScore<5&&_extSignal<6){
-          // Reset watch on new window
           if(_flatGapWatchRef.current?.windowId!==_curWid){
             _flatGapWatchRef.current={windowId:_curWid,startedAt:Date.now()};
           }
-          const _watchAge=(Date.now()-(_flatGapWatchRef.current?.startedAt||Date.now()))/1000;
           const _gapDeveloped=_gapScore>=8;
-          // Compute _activeDir and _kalshiForDir locally (not yet in scope here)
           const _activeDirWatch=tc?.call==='UP'||tc?.call==='DOWN'?tc.call:(tc?.direction||null);
           const _kNowWatch=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
           const _kalshiForDirWatch=(_kNowWatch!=null&&_activeDirWatch)?(_activeDirWatch==='UP'?_kNowWatch:(100-_kNowWatch)):null;
           const _entryOK=_kalshiForDirWatch!=null&&_kalshiForDirWatch<=68;
-          const _timeOK=_secsLeft>=300;
-          if(_gapDeveloped&&_entryOK&&_timeOK){
-            // Gap developed with good odds — allow lock, fall through
-            rawSignalScores._flatGapWatchLocked=true;
-            rawSignalScores._flatGapWatchAge=Math.round(_watchAge);
+          if(_gapDeveloped&&_entryOK&&_secsLeft>=300){
+            // Gap developed with good odds — allow lock, fall through normally
+            _flatGapWatchRef.current=null;
           } else if(_secsLeft<300){
-            // Time ran out, gap never developed
-            _noGoReason=`Flat gap watched ${Math.round(_watchAge)}s — gap never developed (${_gapScore.toFixed(0)}pt at close)`;
+            // Time ran out flat — sit out
+            const _watchAge=Math.round((Date.now()-(_flatGapWatchRef.current?.startedAt||Date.now()))/1000);
+            _noGoReason=`Flat gap watched ${_watchAge}s — never developed (${_gapScore.toFixed(0)}pt at close)`;
             _noGoTier='no-go-edge';
           } else {
-            // Still watching — keep returning without locking
-            rawSignalScores._flatGapWatching=true;
-            rawSignalScores._flatGapWatchAge=Math.round(_watchAge);
-            return; // check next tick
+            // Still watching — return without locking, check next tick
+            return;
           }
         } else if(_flatGapWatchRef.current?.windowId===_curWid){
-          _flatGapWatchRef.current=null; // gap appeared, clear watch
+          _flatGapWatchRef.current=null;
         }
       }
       if(_noGoReason){
