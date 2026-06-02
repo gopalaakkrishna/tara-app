@@ -4224,7 +4224,7 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.02-v10.7.82b-discord-stability-fix';
+const BASELINE_VERSION='2026.06.02-v10.7.82b-unified-record-supabase';
 const TARA_VERSION_DISPLAY='Tara 10.7.82b';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -4322,6 +4322,47 @@ function _v104ConvBand(c){
 
 // Build a rolling-window calibration table from the live call log.
 // Merges with seed when cell sample is thin (<TRUST_FLOOR).
+// V10.7.82b — CANONICAL TRADE FILTER
+// ════════════════════════════════════════════════════════════════════════════
+// Single source of truth for what counts as a real scored trade.
+// Used by ALL displays: dashboard record, stats, analytics, training engine.
+// Rules (in priority order):
+//   1. Must have a WIN or LOSS result (not SITOUT/null)
+//   2. Exclude wasOverriddenNoTrade=true (no-trade overrides, Tara chose not to trade)
+//   3. Exclude tier='no-go-data' (stale price during wifi/feed issues)
+//   4. Deduplicate by windowId — keep only the LAST snapshot per window
+//      (aborts + re-locks create multiple entries; only the final one counts)
+const _isRealTrade=(e)=>{
+  if(!e)return false;
+  if(e.result!=='WIN'&&e.result!=='LOSS')return false;
+  if(e.wasOverriddenNoTrade===true)return false;
+  if(e.tier==='no-go-data')return false;
+  return true;
+};
+
+// Deduplicate entries by windowId, keeping the last committed snapshot per window.
+// When no windowId: use id (timestamp) as unique key.
+const _deduplicateByWindow=(entries)=>{
+  const map=new Map();
+  for(const e of entries){
+    if(!_isRealTrade(e))continue;
+    const key=e.windowId||e.wid||String(e.id||Math.random());
+    // Keep the later entry (higher id = more recent commit)
+    const existing=map.get(key);
+    if(!existing||(e.id||0)>(existing.id||0)){
+      map.set(key,e);
+    }
+  }
+  return Array.from(map.values());
+};
+
+// The single canonical scored trade list from a call log array
+const _canonicalTrades=(callLog)=>{
+  if(!Array.isArray(callLog)||callLog.length===0)return[];
+  return _deduplicateByWindow(callLog);
+};
+// ════════════════════════════════════════════════════════════════════════════
+
 // Returns table in the same shape as V104_SEED_CALIBRATION.
 function buildV104Table(callLog){
   if(!USE_V104_CALIBRATION_TABLES||!Array.isArray(callLog)||callLog.length===0){
@@ -12566,7 +12607,7 @@ class ErrorBoundary extends React.Component{
             </div>
           </details>
           <p className="text-xs text-[#E8E9E4]/60 mb-4 max-w-2xl leading-relaxed">
-            Tara hit an error during render. Service workers and browser caches have been cleared in the background. Your trade history, weights, and learning are safe in Firestore.
+            Tara hit an error during render. Service workers and browser caches have been cleared in the background. Your trade history, weights, and learning are safe in Supabase.
           </p>
           <div className="flex gap-3 flex-wrap">
             <button onClick={_copyDiag} className={'px-4 py-2 rounded font-bold border transition-colors '+(this.state.copied?'bg-[#E5C870]/15 border-[#E5C870] text-[#E5C870]':'bg-[#E8E9E4]/5 border-[#E8E9E4]/20 text-[#E8E9E4]/85 hover:bg-[#E8E9E4]/10')}>{this.state.copied?'Copied — paste to me':'Copy diagnostic'}</button>
@@ -21532,10 +21573,8 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
   //   don't contribute to win rate). Tagged with `source` so we can show the split.
   const allResolved=React.useMemo(()=>{
     const manual=(tradeLog||[]).filter(t=>t.result==='WIN'||t.result==='LOSS').map(t=>({...t,source:'manual'}));
-    // V5.7.5: Plumb strike/closingPrice/windowId/posterior/qScore through so the drill
-    //   rows can render market context. Previously only id/time/result/regime/dir/etc were
-    //   passed — drill rows for Tara-source trades had blank %, FGT, Q, bps cells.
-    const taraCalls=(taraCallLog||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.dir==='UP'||e.dir==='DOWN')).map(e=>({
+    // V10.7.82b: Use canonical filter (excludes no-go-data, wasOverriddenNoTrade, deduplicates by windowId)
+    const taraCalls=_canonicalTrades((taraCallLog||[]).filter(e=>e&&(e.dir==='UP'||e.dir==='DOWN'))).map(e=>({
       id:e.id,time:e.time,result:e.result,
       regime:e.regime,
       direction:e.dir,
@@ -22780,9 +22819,9 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
               React.createElement('span',{className:healthData.kalshiOk?'text-emerald-400':healthData.kalshiCached?'text-amber-400':'text-rose-400'},
                 healthData.kalshiOk?'● live':healthData.kalshiCached?'● cached':'○ offline')
             ),
-            // Firestore sync
+            // Supabase sync
             React.createElement('div',{className:'flex items-center justify-between'},
-              React.createElement('span',{className:'text-[#E8E9E4]/60'},'Firestore sync'),
+              React.createElement('span',{className:'text-[#E8E9E4]/60'},'Supabase sync'),
               React.createElement('span',{className:healthData.firestoreOk?'text-emerald-400':'text-amber-400'},
                 healthData.firestoreOk?'● connected':'○ unknown')
             ),
@@ -22820,7 +22859,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
     window.addEventListener('keydown',onKey);
     return()=>window.removeEventListener('keydown',onKey);
   },[onClose]);
-  const resolved=React.useMemo(()=>(taraCallLog||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')),[taraCallLog]);
+  const resolved=React.useMemo(()=>_canonicalTrades(taraCallLog||[]),[taraCallLog]);
   // ── WR Heatmap by UTC hour × day of week ──
   const heatmap=React.useMemo(()=>{
     const grid={};
@@ -28549,7 +28588,7 @@ function TaraApp(){
   useEffect(()=>{
     if(_mlTrainDebounceRef.current)clearTimeout(_mlTrainDebounceRef.current);
     _mlTrainDebounceRef.current=setTimeout(()=>{
-      const resolved=(taraCallLog||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&e.signalScoresAtLock);
+      const resolved=_canonicalTrades((taraCallLog||[]).filter(e=>e&&e.signalScoresAtLock));
       if(resolved.length<TARA_ML_MIN_TRADES){
         try{console.info(`[ML] ${resolved.length}/${TARA_ML_MIN_TRADES} resolved trades with signals — need more data`);}catch(_){}
         return;
@@ -29873,8 +29912,10 @@ function TaraApp(){
         hourlyBuckets[h][e.result==='WIN'?'wins':'losses']+=1;
       }catch(_){}
     });
-    // ── V8.2: Walk-forward WR by recency window ──
-    const _allResolved=(taraCallLog||[]).filter(e=>e&&(e.asset||'BTC')===currentAsset&&(e.result==='WIN'||e.result==='LOSS'));
+    // V10.7.82b: Use canonical filter for all WR computations.
+    //   Previously: raw WIN/LOSS filter → included no-go-data (wifi losses) + wasOverriddenNoTrade
+    //   Now: _isRealTrade() + deduplicated by windowId = single source of truth
+    const _allResolved=_canonicalTrades((taraCallLog||[]).filter(e=>e&&(e.asset||'BTC')===currentAsset));
     const _windowWR=(daysBack)=>{
       const cutoff=_now.getTime()-daysBack*24*60*60*1000;
       const inWindow=_allResolved.filter(e=>e.time>=cutoff);
@@ -44606,8 +44647,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <div className="space-y-3 text-xs leading-relaxed text-[#E8E9E4]/75">
                   <p><strong className="text-white">What Tara does:</strong> Reads BTC + ETH price action, tape flow, regime, FGT alignment, and a 7-signal fusion to predict whether the price will close above or below strike at the end of each 15m or 5m window. She makes a call when she has high enough conviction; otherwise she sits out. She learns from every result and adapts her weights over time.</p>
                   <p><strong className="text-white">Per-asset everything:</strong> BTC and ETH have separate weights, regime memories, scorecards, and learning histories. Switching assets shows that asset's data — they don't blend.</p>
-                  <p><strong className="text-white">Cloud-synced across all your devices:</strong> Trades, scorecards, weights, and learning all sync to Firestore. Open Tara on any browser, on any device, and you see the same data. The SyncStatusPill in the header shows sync health (green = synced, amber = writing, rose = error). Click it to force a fresh resync.</p>
-                  <p><strong className="text-white">Multi-tab safe:</strong> Open Tara in 5 tabs at once — they all share state via BroadcastChannel + atomic Firestore transactions. The TabPresencePill shows when peer tabs are active. No more lost trades from concurrent writes.</p>
+                  <p><strong className="text-white">Cloud-synced across all your devices:</strong> Trades, scorecards, weights, and learning all sync to Supabase. Open Tara on any browser, on any device, and you see the same data. The SyncStatusPill in the header shows sync health (green = synced, amber = writing, rose = error). Click it to force a fresh resync.</p>
+                  <p><strong className="text-white">Multi-tab safe:</strong> Open Tara in 5 tabs at once — they all share state via BroadcastChannel + atomic Supabase transactions. The TabPresencePill shows when peer tabs are active. No more lost trades from concurrent writes.</p>
                 </div>
               </section>
 
