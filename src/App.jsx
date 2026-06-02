@@ -4224,8 +4224,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.01-v10.7.79-liq-fix-ml-fields';
-const TARA_VERSION_DISPLAY='Tara 10.7.79';
+const BASELINE_VERSION='2026.06.02-v10.7.80-no-gap-gate-fix-min-entry';
+const TARA_VERSION_DISPLAY='Tara 10.7.80';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -39764,12 +39764,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _noGoTier='no-go-coinflip-late';
         }
       }
-      // (d) FLAT GAP in RANGE-CHOP — no directional edge (V10.7.77)
-      //   When gap<5pt AND regime is RANGE-CHOP AND no strong external signal:
-      //   This window has no edge. 17:45 loss: gap=0, conf=54% → lost.
-      //   Crazylion: "not every window is tradeable." This is the implementation.
-      //   Exception: if liqHeatmap, deribitOptions, or liqSignal are firing
-      //   strongly (|signal|>3), those external signals provide edge even without gap.
+      // (d) FLAT GAP in RANGE-CHOP — no directional edge (V10.7.77, tuned V10.7.80)
+      //   When gap<5pt AND regime is RANGE-CHOP AND no STRONG external signal:
+      //   V10.7.80: Raised exception threshold from 3→6. Analysis showed liqHeatmap
+      //   was consistently 3.4-7.1 on flat-gap LOSSES, overriding the gate every time.
+      //   liqHeatmap at 3-5pt is wall book imbalance — not strong enough to override
+      //   the absence of a real gap signal. Need ≥6pt (very strong directional signal)
+      //   to override the no-gap gate.
       if(!_noGoReason){
         const _gapScore=Math.abs(Number(analysis?.rawSignalScores?.gap)||0);
         const _isChopRegime=analysis?.regime==='RANGE-CHOP'||analysis?.regime==='COMPRESSING';
@@ -39778,7 +39779,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           Math.abs(Number(analysis?.rawSignalScores?.deribitOptions)||0),
           Math.abs(Number(analysis?.rawSignalScores?.liqSignal)||0)
         );
-        if(_isChopRegime&&_gapScore<5&&_extSignal<3){
+        if(_isChopRegime&&_gapScore<5&&_extSignal<6){
           _noGoReason=`Flat gap (${_gapScore.toFixed(0)}pt) in ${analysis?.regime} — no directional edge`;
           _noGoTier='no-go-edge';
         }
@@ -40119,6 +40120,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   Kalshi dipped briefly to 60, climbed back to 68 — Tara should still lock.
       const _lastBelowTs=_activeDir==='UP'?kalshiLastBelowThreshUpRef.current:kalshiLastBelowThreshDownRef.current;
       const _withinGrace=_lastBelowTs>0&&(Date.now()-_lastBelowTs)<=KALSHI_DIP_GRACE_MS;
+
+      // V10.7.80: MINIMUM ENTRY COST — block suspiciously cheap entries.
+      //   The entry floor (52¢) is a MAX gate (blocks expensive entries).
+      //   But cheap entries also lose money: 37¢ entry at 62% WR → -11¢/trade EV.
+      //   When Kalshi prices our direction at <35¢, the market says it's unlikely.
+      //   Going against market consensus at extreme cheap prices is adverse selection.
+      //   Data showed 7 entries <52¢ got through including several losses.
+      //   Note: this is the COST to us (kalshiForDir), not the YES price.
+      //   UP at 38¢ = YES costs 38¢ = market says 38% chance UP.
+      //   DOWN at 38¢ = YES is 62¢, NO costs 38¢ = market says 38% chance DOWN.
+      const _MIN_ENTRY_COST=35; // block if our side costs less than 35¢
+      if(_kalshiForDir!=null&&_kalshiForDir<_MIN_ENTRY_COST&&samples>0){
+        // Market strongly disagrees with our direction — sit out
+        return;
+      }
       // Currently above threshold AND has been above all window so far AND not in grace → window closed.
       if(_kalshiForDir>KALSHI_ENTRY_THRESH&&_wasBelow&&!_withinGrace&&samples>0){
         // Was previously actionable, now isn't — entry window closed mid-flight
