@@ -4224,8 +4224,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.02-v10.7.80-no-gap-gate-fix-min-entry';
-const TARA_VERSION_DISPLAY='Tara 10.7.80';
+const BASELINE_VERSION='2026.06.02-v10.7.81-flat-gap-watch';
+const TARA_VERSION_DISPLAY='Tara 10.7.81';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28312,6 +28312,14 @@ function TaraApp(){
   // V10.4.1 Module A — delay gate state. Tracks per-window delay duration
   // and the conditions when delay first triggered (for telemetry).
   const _v104_1_delayStateRef=useRef(null);
+  // V10.7.81: Flat-gap watch state. When gap=0 at lock time, instead of sitting out
+  //   immediately, Tara enters WATCHING mode. She checks every 30s whether:
+  //   (a) gap has developed to ≥8pt (real directional signal formed), AND
+  //   (b) entry price is still ≤68¢ (good odds remaining), AND
+  //   (c) ≥5 min left in window.
+  //   If all three: lock. If gap never develops or price too expensive: sit out.
+  //   {windowId, startedAt, direction (which way gap was leaning when watch started)}
+  const _flatGapWatchRef=useRef(null);
   // V10.7.70: Revised abort guard. V10.7.68 used max-3-aborts-per-window which
   //   caused windows like [31,69,31,69] to lock out after 3 aborts even when
   //   a high-confidence signal appeared later. The window was scanned the whole time.
@@ -39764,13 +39772,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _noGoTier='no-go-coinflip-late';
         }
       }
-      // (d) FLAT GAP in RANGE-CHOP — no directional edge (V10.7.77, tuned V10.7.80)
-      //   When gap<5pt AND regime is RANGE-CHOP AND no STRONG external signal:
-      //   V10.7.80: Raised exception threshold from 3→6. Analysis showed liqHeatmap
-      //   was consistently 3.4-7.1 on flat-gap LOSSES, overriding the gate every time.
-      //   liqHeatmap at 3-5pt is wall book imbalance — not strong enough to override
-      //   the absence of a real gap signal. Need ≥6pt (very strong directional signal)
-      //   to override the no-gap gate.
+      // (d) FLAT GAP WATCH — V10.7.81
+      //   Instead of immediately sitting out flat-gap windows, Tara watches for gap
+      //   to develop. When gap≥8pt AND entry≤68¢ AND ≥5min left → lock.
+      //   When window ends with flat gap → sit out. Best of both worlds.
       if(!_noGoReason){
         const _gapScore=Math.abs(Number(analysis?.rawSignalScores?.gap)||0);
         const _isChopRegime=analysis?.regime==='RANGE-CHOP'||analysis?.regime==='COMPRESSING';
@@ -39779,9 +39784,33 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           Math.abs(Number(analysis?.rawSignalScores?.deribitOptions)||0),
           Math.abs(Number(analysis?.rawSignalScores?.liqSignal)||0)
         );
+        const _secsLeft=timeState.minsRemaining*60+timeState.secsRemaining;
+        const _curWid=computeWindowId(windowType);
         if(_isChopRegime&&_gapScore<5&&_extSignal<6){
-          _noGoReason=`Flat gap (${_gapScore.toFixed(0)}pt) in ${analysis?.regime} — no directional edge`;
-          _noGoTier='no-go-edge';
+          // Reset watch on new window
+          if(_flatGapWatchRef.current?.windowId!==_curWid){
+            _flatGapWatchRef.current={windowId:_curWid,startedAt:Date.now()};
+          }
+          const _watchAge=(Date.now()-(_flatGapWatchRef.current?.startedAt||Date.now()))/1000;
+          const _gapDeveloped=_gapScore>=8;
+          const _entryOK=_kalshiForDir!=null&&_kalshiForDir<=68;
+          const _timeOK=_secsLeft>=300;
+          if(_gapDeveloped&&_entryOK&&_timeOK){
+            // Gap developed with good odds — allow lock, fall through
+            rawSignalScores._flatGapWatchLocked=true;
+            rawSignalScores._flatGapWatchAge=Math.round(_watchAge);
+          } else if(_secsLeft<300){
+            // Time ran out, gap never developed
+            _noGoReason=`Flat gap watched ${Math.round(_watchAge)}s — gap never developed (${_gapScore.toFixed(0)}pt at close)`;
+            _noGoTier='no-go-edge';
+          } else {
+            // Still watching — keep returning without locking
+            rawSignalScores._flatGapWatching=true;
+            rawSignalScores._flatGapWatchAge=Math.round(_watchAge);
+            return; // check next tick
+          }
+        } else if(_flatGapWatchRef.current?.windowId===_curWid){
+          _flatGapWatchRef.current=null; // gap appeared, clear watch
         }
       }
       if(_noGoReason){
