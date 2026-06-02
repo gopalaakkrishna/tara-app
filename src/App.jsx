@@ -4224,8 +4224,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.02-v10.7.82-nogo-data-fix-ml-entry-gates';
-const TARA_VERSION_DISPLAY='Tara 10.7.82';
+const BASELINE_VERSION='2026.06.02-v10.7.82b-discord-stability-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.82b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -39981,7 +39981,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _rangeBps=_wa?.rangeBps||0;
           const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
           const _isTrueDeadzone=_postKnown&&_post>=45&&_post<=55; // V10.7.48: posterior coin flip
-          if(!_isDeadWindow&&!_isTrueDeadzone){
+          // V10.7.82b: Flow + momentum override — if posterior is borderline coin-flip
+          //   (45-55%) BUT flow AND momentum both strongly agree with direction,
+          //   it's not actually a coin flip. Strong directional tape overrides deadzone.
+          //   This prevents sitting out on "UP 53% with flow=+20, momentum=+18" setups.
+          const _rss=analysis?.rawSignalScores||{};
+          const _callDir=taraCall?.call;
+          const _flowVal=Number(_rss.flow||0);
+          const _momVal=Number(_rss.momentum||0);
+          const _flowAligned=_callDir==='UP'?_flowVal>=15:_flowVal<=-15;
+          const _momAligned=_callDir==='UP'?_momVal>=10:_momVal<=-10;
+          const _hasStrongTape=_flowAligned&&_momAligned;
+          const _effectiveDeadzone=_effectiveDeadzone&&!_hasStrongTape;
+          if(!_isDeadWindow&&!_effectiveDeadzone){
             // Force-commit to posterior direction. Skip the sitout snapshot entirely.
             // V10.7.6 — check for reversal signals before committing
             const _v107_6=_v10_7_6_reversalCheck(_post,analysis);
@@ -40019,11 +40031,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }
           // Genuine sit-out — either dead window OR true coin-flip posterior.
           // V10.7.48: separate tier for posterior-deadzone vs dead-window so we can audit each path.
-          const _sitReason=_isTrueDeadzone
+          const _sitReason=_effectiveDeadzone
             ?`Coin-flip posterior ${_commitConf}% at time-cap — no real conviction, sit out (V10.7.48 deadzone guard)`
             :`V10.2.50 chop time-cap guard: RANGE-CHOP regime + ${_commitConf}% conv at ${Math.round(elapsedSec)}s — historically loses, sit out`;
-          const _sitTier=_isTrueDeadzone?'deadzone-sitout':'chop-time-cap-sitout';
-          const _sitCaution=_isTrueDeadzone
+          const _sitTier=_effectiveDeadzone?'deadzone-sitout':'chop-time-cap-sitout';
+          const _sitCaution=_effectiveDeadzone
             ?`Deadzone guard — posterior ${_commitConf}% in 45-55 coin-flip zone → sit out (V10.7.48)`
             :`Chop guard — ${_commitConf}% in RANGE-CHOP at time-cap, sub-baseline conviction → sit out (V10.2.50)`;
           const _sitSnap={
@@ -40043,7 +40055,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             qScore:Math.round(_qFast),
             fgt:analysis?.mtfAlignment,
             _committedAt:Date.now(),
-            _v10_7_48_isTrueDeadzone:_isTrueDeadzone,
+            _v10_7_48_effectiveDeadzone:_effectiveDeadzone,
             _v10_7_48_postAtSitout:_post,
           };
           taraCallSnapshotRef.current=_sitSnap;
@@ -40974,6 +40986,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   Previously baseData read fresh values, so a DOWN-locked window could broadcast
     //   "DOWN · Posterior 89%" when 89% meant 89% UP (current engine view post-lock).
     if(!taraBroadcastRef.current.sentLock&&taraCallSnapshotRef.current&&taraCallSnapshotRef.current.call!=='SIT_OUT'){
+      // V10.7.82b: Stability check — wait 2s after commit before broadcasting.
+      //   Prevents "locked then immediately overridden" false Discord messages.
+      //   When deadzone guard or coherence override fires after initial lock,
+      //   the snapshot changes within 1-2 renders. Wait 2s to ensure it's stable.
+      const _commitAge=taraCallSnapshotRef.current?._committedAt
+        ?Date.now()-taraCallSnapshotRef.current._committedAt:9999;
+      if(_commitAge<2000)return; // too fresh — might still be overridden, check next render
       // V10.7.73b: Also block no-go-data and no-go-edge from Discord.
       //   These are automatic system overrides (stale price, data integrity, no edge)
       //   not Tara's trading calls. User doesn't override them — system does.
