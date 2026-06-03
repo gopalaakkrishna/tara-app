@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.86-warm-state-audit-fixes';
-const TARA_VERSION_DISPLAY='Tara 10.7.86';
+const BASELINE_VERSION='2026.06.03-v10.7.86b-tzdfix';
+const TARA_VERSION_DISPLAY='Tara 10.7.86b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28166,19 +28166,18 @@ function TaraApp(){
   //   which is fine — data >5min old is discarded anyway.
   const _warmSaveRef=useRef(null);
   useEffect(()=>{
-    if(history.length<5)return; // don't save partial/empty state
+    if(history.length<5)return;
     if(_warmSaveRef.current)clearTimeout(_warmSaveRef.current);
     _warmSaveRef.current=setTimeout(()=>{
       try{
         sessionStorage.setItem(_WARM_STATE_KEY,JSON.stringify({
           savedAt:Date.now(),
           asset:currentAsset,
-          windowType,
-          history:history.slice(0,100), // last 100 candles
+          history:history.slice(0,100),
         }));
       }catch(_){}
     },2000);
-  },[history,currentAsset,windowType]);
+  },[history,currentAsset]);
   const[liquidations,setLiquidations]=useState([]);
   const[targetMargin,setTargetMargin]=useState(0);
   // V5.7.5: Mirror targetMargin in a ref so deferred rollover scoring (~8s after rollover)
