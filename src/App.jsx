@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.86c-per-asset-recal';
-const TARA_VERSION_DISPLAY='Tara 10.7.86c';
+const BASELINE_VERSION='2026.06.03-v10.7.86d-cross-tab-merge-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.86d';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28817,10 +28817,14 @@ function TaraApp(){
     // V8.8.6: asset in dedup key so BTC + ETH coexist for the same windowId
     const _key=(e)=>(e?.asset||'BTC')+'|'+(e?.windowId||'')+'|'+(e?.windowType||'');
     const _shouldReplace=(prev,inc)=>{
+      // Rule 1: resolved beats unresolved always
       if(!prev.result&&inc.result)return true;
       if(prev.result&&!inc.result)return false;
-      if((inc.id||0)<(prev.id||0))return true;
-      return false;
+      // Rule 2: between two resolved entries, keep the newer one (higher id)
+      // V10.7.86c fix: was (inc.id < prev.id) which is BACKWARDS — was keeping older entries
+      if(prev.result&&inc.result)return(inc.id||0)>(prev.id||0);
+      // Rule 3: between two unresolved entries, keep the newer one
+      return(inc.id||0)>(prev.id||0);
     };
     const byKey=new Map();
     (existing||[]).forEach(e=>{
@@ -28940,42 +28944,40 @@ function TaraApp(){
     }
   },[taraCallLog]);
   // ── V8.3: CROSS-TAB BROADCAST ─────────────────────────────────────────────
-  // Emit new/updated entries to other tabs in the same browser for instant UI sync.
-  // Tracks broadcasted keys to prevent re-broadcast loops (entries received via
-  // broadcast also trigger this useEffect, but we skip them since they're already known).
+  // V10.7.86c: key now uses id (timestamp) instead of result so every state change
+  //   broadcasts. Old key (windowId|windowType|result) meant a resolved entry and its
+  //   pending version had different keys — the pending version would re-broadcast even
+  //   after the resolved version was already synced, causing stale overwrites.
+  //   New key: windowId|windowType|id — unique per snapshot, no stale replay.
   const _broadcastInitRef=useRef(false);
   const _broadcastedKeysRef=useRef(new Set());
   const _receivedFromBroadcastRef=useRef(new Set());
   useEffect(()=>{
     if(!_broadcastInitRef.current){
-      // First hydrate — record keys without broadcasting
       taraCallLog.forEach(e=>{
-        const k=(e?.windowId||'')+'|'+(e?.windowType||'')+'|'+(e?.result||'');
+        const k=(e?.windowId||'')+'|'+(e?.windowType||'')+'|'+(e?.id||'');
         _broadcastedKeysRef.current.add(k);
       });
       _broadcastInitRef.current=true;
       return;
     }
     taraCallLog.forEach(e=>{
-      const k=(e?.windowId||'')+'|'+(e?.windowType||'')+'|'+(e?.result||'');
+      const k=(e?.windowId||'')+'|'+(e?.windowType||'')+'|'+(e?.id||'');
       if(_broadcastedKeysRef.current.has(k))return;
       _broadcastedKeysRef.current.add(k);
-      // If this entry came from another tab via broadcast, don't re-emit it
       if(_receivedFromBroadcastRef.current.has(k))return;
       try{broadcastToOtherTabs('callLogEntry',{entry:e});}catch(_){}
     });
   },[taraCallLog]);
-  // Subscribe to broadcasts from peer tabs and merge their entries into local state.
   useEffect(()=>{
     const unsub=subscribeToOtherTabs((msg)=>{
       if(!msg||msg.type!=='callLogEntry')return;
       const incoming=msg.payload?.entry;
       if(!incoming||!incoming.windowId)return;
-      const k=(incoming.windowId||'')+'|'+(incoming.windowType||'')+'|'+(incoming.result||'');
+      const k=(incoming.windowId||'')+'|'+(incoming.windowType||'')+'|'+(incoming.id||'');
       _receivedFromBroadcastRef.current.add(k);
       setTaraCallLog(prev=>{
         const merged=_mergeCallLogEntries(prev,[incoming]);
-        // No-op if already present
         if(merged.length===prev.length){
           const _samePos=merged.every((e,i)=>e===prev[i]);
           if(_samePos)return prev;
