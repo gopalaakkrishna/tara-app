@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.87b-cross-tab-resolve-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.87b';
+const BASELINE_VERSION='2026.06.03-v10.7.88-flat-gap-timecap-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.88';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -40105,7 +40105,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         );
         const _secsLeft=timeState.minsRemaining*60+timeState.secsRemaining;
         const _curWid=computeWindowId(windowType);
-        if(_isChopRegime&&_gapScore<5&&_extSignal<6){
+        if(_isChopRegime&&_gapScore<5&&_extSignal<8){ // V10.7.88: raised ext bypass 6→8
           if(_flatGapWatchRef.current?.windowId!==_curWid){
             _flatGapWatchRef.current={windowId:_curWid,startedAt:Date.now()};
           }
@@ -40275,7 +40275,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _hasStrongTape=_flowAligned&&_momAligned;
           const _hasStrongGap=Math.abs(Number((analysis?.rawSignalScores||{}).gap||0))>=15;
           const _effectiveDeadzone=_isTrueDeadzone&&!_hasStrongTape&&!_hasStrongGap;
-          if(!_isDeadWindow&&!_effectiveDeadzone){
+          // V10.7.88: FLAT-GAP TIME-CAP GATE.
+          //   If gap is still flat at time-cap, this is the same situation as the
+          //   flat-gap watch sitting out at <5min left. The time-cap bypasses the
+          //   flat-gap watch entirely, allowing flat-gap directional locks to sneak
+          //   through. Audit 2026-06-03: 7/12 BTC losses were flat-gap time-cap
+          //   commits. All-time flat-gap WR=51%, avg EV=+0.8¢ — barely above 0.
+          //   When gap is flat AND no external signal AND cost in the 44-65¢ zone:
+          //   sit out. Same threshold as flat-gap watch (gap<5, extSignal<8).
+          const _gapAtCap=Math.abs(Number(analysis?.rawSignalScores?.gap||0));
+          const _extAtCap=Math.max(
+            Math.abs(Number(analysis?.rawSignalScores?.liqHeatmap||0)),
+            Math.abs(Number(analysis?.rawSignalScores?.deribitOptions||0)),
+            Math.abs(Number(analysis?.rawSignalScores?.liqSignal||0))
+          );
+          const _kForDir=_commitDir==='UP'?_kPctNow:(100-(_kPctNow||50));
+          const _isFlatGapTimeCap=_gapAtCap<5&&_extAtCap<8&&_kForDir!=null&&_kForDir>=44&&_kForDir<=65&&(_isChopRegime||analysis?.regime==='RANGE-CHOP');
+          if(!_isDeadWindow&&!_effectiveDeadzone&&!_isFlatGapTimeCap){
             // Force-commit to posterior direction. Skip the sitout snapshot entirely.
             // V10.7.6 — check for reversal signals before committing
             const _v107_6=_v10_7_6_reversalCheck(_post,analysis);
@@ -40311,14 +40327,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _persistLock();
             return;
           }
-          // Genuine sit-out — either dead window OR true coin-flip posterior.
-          // V10.7.48: separate tier for posterior-deadzone vs dead-window so we can audit each path.
+          // Genuine sit-out — dead window, true coin-flip, OR flat-gap at time-cap.
           const _sitReason=_effectiveDeadzone
             ?`Coin-flip posterior ${_commitConf}% at time-cap — no real conviction, sit out (V10.7.48 deadzone guard)`
+            :_isFlatGapTimeCap
+            ?`Flat gap at time-cap — gap ${_gapAtCap.toFixed(1)}pt, ext ${_extAtCap.toFixed(1)}pt, entry ${_kForDir?.toFixed(0)}¢ — 51% WR historically, sit out (V10.7.88)`
             :`V10.2.50 chop time-cap guard: RANGE-CHOP regime + ${_commitConf}% conv at ${Math.round(elapsedSec)}s — historically loses, sit out`;
-          const _sitTier=_effectiveDeadzone?'deadzone-sitout':'chop-time-cap-sitout';
+          const _sitTier=_effectiveDeadzone?'deadzone-sitout':_isFlatGapTimeCap?'flat-gap-timecap-sitout':'chop-time-cap-sitout';
           const _sitCaution=_effectiveDeadzone
             ?`Deadzone guard — posterior ${_commitConf}% in 45-55 coin-flip zone → sit out (V10.7.48)`
+            :_isFlatGapTimeCap
+            ?`Flat gap — price at strike, no directional signal → sit out (V10.7.88)`
             :`Chop guard — ${_commitConf}% in RANGE-CHOP at time-cap, sub-baseline conviction → sit out (V10.2.50)`;
           const _sitSnap={
             call:'SIT_OUT',direction:'SIT_OUT',
