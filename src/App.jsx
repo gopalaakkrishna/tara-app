@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.88h-import-callcard-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.88h';
+const BASELINE_VERSION='2026.06.03-v10.7.88i-import-window-callback';
+const TARA_VERSION_DISPLAY='Tara 10.7.88i';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14865,7 +14865,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             survives refresh + spans devices. Click "all" to see the full history. */}
         {/* V5.6.4: Always render. Empty-state placeholder ensures users know where to find it
             even before Tara has committed to any windows. */}
-        <TaraMemoryStrip taraCallLog={taraCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} onDeleteEntry={onDeleteEntry} setTaraCallLog={setTaraCallLog} mergeCallLog={_mergeCallLogEntries}/>
+        <TaraMemoryStrip taraCallLog={taraCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} onDeleteEntry={onDeleteEntry}/>
       </div>
     );
 
@@ -19606,7 +19606,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
 // V5.6.1: Tara's Memory — compact strip showing the most recent calls inline in the
 //   Tara card. Click "all" to open a fuller paged view. The strip + modal both source
 //   from taraCallLog (cloud-synced array of every call she's made).
-function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,setTaraCallLog,mergeCallLog}){
+function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,timeFormat,onEditEntry,onDeleteEntry}){
   const[open,setOpen]=React.useState(false);
   const[learnOpen,setLearnOpen]=React.useState(false);
   const recent=React.useMemo(()=>{
@@ -19654,7 +19654,7 @@ function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,time
             })
           ),
     ),
-    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,timeFormat:timeFormat,onEditEntry:onEditEntry,onDeleteEntry:onDeleteEntry,initialFilter:windowType,setTaraCallLog:setTaraCallLog,mergeCallLog:mergeCallLog}),
+    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,timeFormat:timeFormat,onEditEntry:onEditEntry,onDeleteEntry:onDeleteEntry,initialFilter:windowType}),
     learnOpen&&React.createElement(TaraLearningsModal,{learnings:taraLearnings,onClose:()=>setLearnOpen(false)}),
   );
 }
@@ -19843,7 +19843,7 @@ function TaraLearningsModal({learnings,onClose}){
 }
 
 // V5.6.1: Full memory history modal. Filter by window type, sort newest first.
-function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,initialFilter,setTaraCallLog,mergeCallLog}){
+function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,initialFilter}){
   const[editingId,setEditingId]=React.useState(null);
   // V7.0.6: default filter to current windowType (passed from card) so modal opens
   //   already aligned. User can click ALL to broaden.
@@ -20343,12 +20343,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     const importedEntries=Array.isArray(parsed)?parsed:(parsed?.entries||[]);
                     if(!importedEntries.length){alert('No entries found in file.');return;}
                     const btcEntries=importedEntries.filter(e=>e&&(e.asset||'BTC')==='BTC');
-                    if(!setTaraCallLog||!mergeCallLog){alert('Import not available.');return;}
-                    setTaraCallLog(prev=>{
-                      const merged=mergeCallLog(prev,btcEntries);
-                      setTimeout(()=>alert(`Done. Imported ${btcEntries.length} entries. Log now has ${merged.length} entries.`),100);
-                      return merged;
-                    });
+                    if(typeof window._taraImportCallLog!=='function'){alert('Import not available — please refresh and try again.');return;}
+                    const count=window._taraImportCallLog(importedEntries);
+                    setTimeout(()=>alert(`Done. Imported ${count} entries.`),100);
                   }catch(err){alert('Failed: '+(err?.message||String(err)));}
                 };
                 reader.readAsText(file);
@@ -28717,6 +28714,29 @@ function TaraApp(){
       return cleaned;
     }catch(e){return[];}
   });
+  // V10.7.88h: Register a window-level import callback so TaraMemoryModal can
+  //   call setTaraCallLog without needing it passed through props.
+  //   Avoids prop-drilling through TaraCallCard -> TaraMemoryStrip -> TaraMemoryModal.
+  React.useEffect(()=>{
+    window._taraImportCallLog=(importedEntries)=>{
+      if(!Array.isArray(importedEntries))return;
+      const btcEntries=importedEntries.filter(e=>e&&(e.asset||'BTC')==='BTC');
+      setTaraCallLog(prev=>{
+        const map=new Map();
+        [...prev,...btcEntries].forEach(e=>{
+          if(!e)return;
+          const key=(e.asset||'BTC')+'|'+(e.windowId||'')+'|'+(e.windowType||'');
+          const existing=map.get(key);
+          if(!existing)map.set(key,e);
+          else if(!existing.result&&e.result)map.set(key,e);
+          else if(existing.result&&e.result&&(e.id||0)>(existing.id||0))map.set(key,e);
+        });
+        return Array.from(map.values()).sort((a,b)=>(a.id||0)-(b.id||0));
+      });
+      return btcEntries.length;
+    };
+    return()=>{try{delete window._taraImportCallLog;}catch(_){}};
+  },[setTaraCallLog]);
   // V5.7.1: taraScorecards is DERIVED from taraCallLog instead of incrementally tracked.
   //   Eliminates multi-device double-counting: a sync race could otherwise turn one LOSS
   //   into 2 (PC bumped 3→4 + synced, tab synced to 4 + bumped its copy to 5, both end at 5).
