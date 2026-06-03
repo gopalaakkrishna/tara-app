@@ -1872,7 +1872,7 @@ const taraCleanupLog=(log)=>{
     let changed=false;
     // Asset from strike
     if(!e.asset&&e.strike){
-      e.asset=e.strike>=10000?'BTC':'ETH';
+      e.asset='BTC';
       changed=true;
     }
     if(!e.asset)e.asset='BTC';
@@ -2161,7 +2161,7 @@ const useSpotPerpDivergence=(currentAsset,bloomberg)=>{
   const[data,setData]=React.useState({divBps:0,spot:0,perp:0,perpAbove:false,lastUpdate:0,status:'init'});
   React.useEffect(()=>{
     if(!currentAsset)return;
-    const _symbol=currentAsset==='BTC'?'BTC-USD':'ETH-USD';
+    const _symbol='BTC-USD';
     const f=async()=>{
       try{
         // Coinbase public ticker — no auth needed, no rate limit issues
@@ -3073,7 +3073,7 @@ const loadRegimeWeights=()=>{
     // Also reset the per-asset bundles so they hydrate fresh
     try{
       localStorage.removeItem('taraRegimeWeightsByAsset_BTC_v1');
-      localStorage.removeItem('taraRegimeWeightsByAsset_ETH_v1');
+
       localStorage.setItem(_RESET_FLAG_KEY,'1');
       try{console.info('[V10.7.55] Regime weights reset to defaults — will re-learn from V10.7.44+ clean data.');}catch(_){}
     }catch(_){}
@@ -3121,11 +3121,11 @@ const loadWeights=()=>{
     try{
       localStorage.removeItem('taraWeightsV110');
       localStorage.removeItem('taraWeightsByAsset_BTC_v1');
-      localStorage.removeItem('taraWeightsByAsset_ETH_v1');
+
       // V10.7.57: bump timestamps so local reset wins vs cloud
       const _now=Date.now();
       localStorage.setItem('taraWeightsByAsset_BTC_v1_updatedAt',String(_now));
-      localStorage.setItem('taraWeightsByAsset_ETH_v1_updatedAt',String(_now));
+
       try{console.info('[V10.7.55] Adaptive weights reset — will re-learn from V10.7.44+ clean data.');}catch(_){}
     }catch(_){}
   }
@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.88b-asset-broadcast-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.88b';
+const BASELINE_VERSION='2026.06.03-v10.7.88d-btc-only';
+const TARA_VERSION_DISPLAY='Tara 10.7.88d';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4603,9 +4603,8 @@ const TARA_DEVICE_LABEL=(()=>{
 //   per-asset calibration to be tight rather than spread across four uncalibrated assets.
 const ASSET_CONFIG={
   BTC:{kalshiPrefix:'KXBTC',kalshiSeriesTicker:'KXBTC',cb:'BTC-USD',bybit:'BTCUSDT',binance:'BTCUSDT',whaleFloor:100000,priceDecimals:2,tickStep:1,label:'BTC',icon:'₿',color:'#F7931A'},
-  ETH:{kalshiPrefix:'KXETH',kalshiSeriesTicker:'KXETH',cb:'ETH-USD',bybit:'ETHUSDT',binance:'ETHUSDT',whaleFloor:50000,priceDecimals:2,tickStep:0.5,label:'ETH',icon:'Ξ',color:'#627EEA'},
 };
-const ASSET_KEYS=Object.keys(ASSET_CONFIG);
+const ASSET_KEYS=['BTC'];
 const ASSET_DEFAULT='BTC';
 
 // V9.8.4: PRICE_SOURCES — multi-exchange live tick registry. Coinbase is default
@@ -4631,7 +4630,7 @@ const PRICE_SOURCES={
     name:'Coinbase',
     label:'CB',
     tvExch:'COINBASE',
-    tvSymbol:(asset)=>asset==='BTC'?'BTCUSD':'ETHUSD',
+    tvSymbol:()=>'BTCUSD',
     url:(cfg,asset)=>`https://api.exchange.coinbase.com/products/${cfg.cb||(asset==='BTC'?'BTC-USD':'ETH-USD')}/ticker`,
     parsePrice:(d)=>d?.price?parseFloat(d.price):null,
     parseSize:(d)=>d?.size?parseFloat(d.size):0.1,
@@ -4660,7 +4659,7 @@ const PRICE_SOURCES={
     name:'Kraken',
     label:'KR',
     tvExch:'KRAKEN',
-    tvSymbol:(asset)=>asset==='BTC'?'BTCUSD':'ETHUSD',
+    tvSymbol:()=>'BTCUSD',
     url:(_cfg,asset)=>`https://api.kraken.com/0/public/Ticker?pair=${asset==='BTC'?'XBTUSD':'ETHUSD'}`,
     parsePrice:(d)=>{
       const _r=d?.result||{};const _k=Object.keys(_r)[0];
@@ -4718,7 +4717,7 @@ const PRICE_SOURCES={
     tvSymbol:(asset)=>asset==='BTC'?'BTCUSDT':'ETHUSDT',
     // OKX SPOT ticker: /market/ticker?instId=BTC-USDT
     //   Response: {code:"0", data:[{last, lastSz, askPx, bidPx, ts, ...}]}
-    url:(_cfg,asset)=>`/api/okx/market/ticker?instId=${asset==='BTC'?'BTC-USDT':'ETH-USDT'}`,
+    url:(_cfg,asset)=>'/api/okx/market/ticker?instId=BTC-USDT',
     parsePrice:(d)=>d?.data?.[0]?.last?parseFloat(d.data[0].last):null,
     parseSize:(d)=>d?.data?.[0]?.lastSz?parseFloat(d.data[0].lastSz):0.1,
     // OKX candles: bar = '1m', '3m', '5m', '15m', '30m', '1H', '4H', '1D'
@@ -4728,7 +4727,7 @@ const PRICE_SOURCES={
     candleUrl:(_cfg,asset,granSec)=>{
       const _granToBar={60:'1m',180:'3m',300:'5m',900:'15m',1800:'30m',3600:'1H',14400:'4H',86400:'1D'};
       const _bar=_granToBar[granSec]||'1m';
-      return `/api/okx/market/candles?instId=${asset==='BTC'?'BTC-USDT':'ETH-USDT'}&bar=${_bar}&limit=300`;
+      return `/api/okx/market/candles?instId=BTC-USDT&bar=${_bar}&limit=300`;
     },
     parseCandles:(d)=>{
       if(!d?.data||!Array.isArray(d.data))return[];
@@ -4745,7 +4744,7 @@ const PRICE_SOURCES={
     //   Response: {code:"0", data:[{asks:[[price, size, "0", count], ...], bids:[...], ts}]}
     //   IMPORTANT: SPOT sizes are in BTC (base currency), unlike SWAP which uses contracts.
     //   No CT_VAL multiplier needed. Matches Coinbase + Kraken spot book semantics.
-    bookUrl:(_cfg,asset)=>`/api/okx/market/books?instId=${asset==='BTC'?'BTC-USDT':'ETH-USDT'}&sz=50`,
+    bookUrl:(_cfg,asset)=>'/api/okx/market/books?instId=BTC-USDT&sz=50',
     parseBook:(d)=>{
       const _b=d?.data?.[0];
       if(!_b?.bids||!_b?.asks)return null;
@@ -16590,10 +16589,10 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
             React.createElement('div',null,
               React.createElement('div',{className:'text-[10px] uppercase font-bold tracking-wider text-[#E8E9E4]/60 mb-1.5'},'Trade these assets'),
               React.createElement('div',{className:'flex gap-2'},
-                ['BTC','ETH'].map(a=>
+                ['BTC'].map(a=>
                   React.createElement('label',{key:a,className:'flex-1 flex items-baseline justify-between cursor-pointer px-2 py-1.5 rounded',style:{background:autoExecSettings?.enabledAssets?.[a]!==false?'rgba(196,181,253,0.08)':'rgba(232,233,228,0.04)',border:autoExecSettings?.enabledAssets?.[a]!==false?'1px solid rgba(196,181,253,0.30)':'1px solid rgba(232,233,228,0.10)'}},
                     React.createElement('span',{className:'text-[11px] font-bold text-white'},a),
-                    React.createElement('input',{type:'checkbox',checked:autoExecSettings?.enabledAssets?.[a]!==false,onChange:(e)=>setAutoExecSettings(prev=>({...prev,enabledAssets:{...(prev.enabledAssets||{BTC:true,ETH:true}),[a]:e.target.checked}}))}),
+                    React.createElement('input',{type:'checkbox',checked:autoExecSettings?.enabledAssets?.[a]!==false,onChange:(e)=>setAutoExecSettings(prev=>({...prev,enabledAssets:{...(prev.enabledAssets||{BTC:true}),[a]:e.target.checked}}))}),
                   )
                 ),
               ),
@@ -17935,7 +17934,7 @@ function DualAssetCallStrip({currentAsset,onSwitch,taraCall,kalshiYesPrice,curre
   React.useEffect(()=>{const iv=setInterval(()=>_t(x=>x+1),1000);return()=>clearInterval(iv);},[]);
   // V9.6.1: tap-to-show diagnostic when shadow is stale. Expanded state per card.
   const[diagOpen,setDiagOpen]=React.useState(null);
-  const _otherAsset=currentAsset==='BTC'?'ETH':'BTC';
+  const _otherAsset='BTC';
   const _shadow=shadowRef?.current?.[_otherAsset];
   const _shadowFresh=_shadow&&(Date.now()-(_shadow.updatedAt||0))<8000;
   const _shadowDiag=diagRef?.current?.[_otherAsset];
@@ -19851,7 +19850,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
   const[filter,setFilter]=React.useState(initialFilter||'all');
   // V9.2.0: per-asset filter — separate BTC vs ETH views since they trade independently.
   //   "all" shows both. Default is 'all' so the user immediately sees the full picture.
-  const[assetFilter,setAssetFilter]=React.useState('all');
+  const[assetFilter,setAssetFilter]=React.useState('BTC');
   // V9.9.3: storage integrity audit + Kalshi reconciliation. Both produce a result
   //   panel that lists discrepancies. Verify is instant (in-memory checks). Reconcile
   //   is async (fetches Kalshi settled markets for the past 24-72h) and slower.
@@ -19861,7 +19860,6 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
   const filtered=React.useMemo(()=>{
     let arr=[...taraCallLog].reverse();
     if(assetFilter==='BTC')arr=arr.filter(e=>(e.asset||'BTC')==='BTC');
-    else if(assetFilter==='ETH')arr=arr.filter(e=>e.asset==='ETH');
     if(filter==='15m'||filter==='5m')arr=arr.filter(e=>e.windowType===filter);
     else if(filter==='wins')arr=arr.filter(e=>e.result==='WIN');
     else if(filter==='losses')arr=arr.filter(e=>e.result==='LOSS');
@@ -19874,7 +19872,6 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
     //   that taraScorecards excludes — causing BTC/ETH mismatch between Memory and lock card.
     let arr=taraCallLog;
     if(assetFilter==='BTC')arr=arr.filter(e=>(e.asset||'BTC')==='BTC');
-    else if(assetFilter==='ETH')arr=arr.filter(e=>e.asset==='ETH');
     if(filter==='15m'||filter==='5m')arr=arr.filter(e=>e.windowType===filter);
     return {
       total:arr.length,
@@ -19883,7 +19880,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
       sitouts:arr.filter(e=>e.result==='SITOUT').length,
       pending:arr.filter(e=>!e.result).length,
       btcN:taraCallLog.filter(e=>(e.asset||'BTC')==='BTC').length,
-      ethN:taraCallLog.filter(e=>e.asset==='ETH').length,
+      ethN:0,
     };
   },[taraCallLog,filter,assetFilter]);
   const _wr=counts.wins+counts.losses>0?Math.round((counts.wins/(counts.wins+counts.losses))*100):null;
@@ -22681,7 +22678,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
       const _entries=Array.isArray(_log?.entries)?_log.entries:[];
       // V9.2.0: split counts BY ASSET so concurrent BTC/ETH trading is visible.
       const _btcEntries=_entries.filter(e=>e&&(e.asset||'BTC')==='BTC');
-      const _ethEntries=_entries.filter(e=>e&&e.asset==='ETH');
+      const _ethEntries=[];
       const _winsBtc=_btcEntries.filter(e=>e.result==='WIN').length;
       const _lossesBtc=_btcEntries.filter(e=>e.result==='LOSS').length;
       const _sitoutsBtc=_btcEntries.filter(e=>e.result==='SITOUT').length;
@@ -23006,7 +23003,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
   },[resolved]);
   // ── P&L by asset ──
   const pnlByAsset=React.useMemo(()=>{
-    const out={BTC:{trades:0,pnl:0,curve:[]},ETH:{trades:0,pnl:0,curve:[]}};
+    const out={BTC:{trades:0,pnl:0,curve:[]}};
     const sorted=[...resolved].filter(e=>e.betAmt>0).sort((a,b)=>(a.id||0)-(b.id||0));
     sorted.forEach(e=>{
       const a=e.asset||'BTC';
@@ -23084,7 +23081,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
         ),
         // ═══ P&L BY ASSET ═══
         React.createElement('div',{className:'grid grid-cols-1 sm:grid-cols-2 gap-4'},
-          ['BTC','ETH'].map(asset=>{
+          ['BTC'].map(asset=>{
             const d=pnlByAsset[asset];
             if(!d||d.trades===0)return React.createElement('div',{key:asset,className:'p-3 rounded-lg bg-[#111312] border border-[#E8E9E4]/5'},
               React.createElement('div',{className:'text-[10px] uppercase tracking-wider font-bold',style:{color:asset==='BTC'?'rgb(247,147,26)':'rgb(98,126,234)'}},`${asset} P&L`),
@@ -26969,7 +26966,7 @@ function TaraApp(){
   //   Empty webhook = no broadcast for that asset (silently skipped).
   //   Migration: V6.5.8's single `taraV110Hook` is loaded into BTC's slot on first run.
   //   V7.1: BTC + ETH only. Existing SOL/DOGE webhook values are dropped on hydrate.
-  const[discordWebhooks,setDiscordWebhooks]=useState({BTC:'',ETH:''});
+  const[discordWebhooks,setDiscordWebhooks]=useState({BTC:''});
   // Legacy alias kept so existing UI bindings work — reads BTC's webhook.
   const discordWebhook=discordWebhooks.BTC||'';
   const setDiscordWebhook=(v)=>setDiscordWebhooks(prev=>({...prev,BTC:v}));
@@ -27144,7 +27141,7 @@ function TaraApp(){
   //   reuse the previous response if it's recent enough (≤90s old). 503s are usually
   //   transient — rate limiting or maintenance — and the strike doesn't change second-to-second.
   //   When the cache is older than 90s we let it expire so we don't show truly stale data.
-  const lastKalshiSuccessRef=useRef({BTC:{at:0,strike:null,yesPrice:null,activeMarket:null,debug:null},ETH:{at:0,strike:null,yesPrice:null,activeMarket:null,debug:null}});
+  const lastKalshiSuccessRef=useRef({BTC:{at:0,strike:null,yesPrice:null,activeMarket:null,debug:null}});
   // V3.0: The actual market ticker so we can re-find the same market at settlement time.
   const[kalshiActiveMarket,setKalshiActiveMarket]=useState(null);
   // V3.1.11: surface Kalshi extraction status in UI so user can diagnose without DevTools
@@ -27757,7 +27754,7 @@ function TaraApp(){
         // even if the master toggle is on. Useful for "auto-trade BTC only".
         enabledAssets:{
           BTC:v.enabledAssets?.BTC!==false,
-          ETH:v.enabledAssets?.ETH!==false,
+
         },
         // Per-window-type enable. Default both ON.
         enabledWindowTypes:{
@@ -27889,7 +27886,7 @@ function TaraApp(){
         tradeTimingMode:'advisory',
         // Universal
         slippageCents:2,
-        enabledAssets:{BTC:true,ETH:true},
+        enabledAssets:{BTC:true},
         enabledWindowTypes:{'15m':true,'5m':true},
         sizingMode:'fixed',
         confidenceLowBet:5,confidenceHighBet:25,kellyBlend:50,
@@ -28647,7 +28644,7 @@ function TaraApp(){
           }
           let _inferred=null;
           if(s>=10000)_inferred='BTC';
-          else if(s>=100)_inferred='ETH';
+          // ETH removed
           if(_inferred&&e.asset!==_inferred){
             try{console.info('[V7.1] Migrating entry asset',e.asset||'(none)','→',_inferred,'(strike',s,')');}catch(_){}
             e.asset=_inferred;
@@ -28682,7 +28679,7 @@ function TaraApp(){
         // Both resolved or both unresolved: keep earlier (lower id)
         if((e.id||0)<(existing.id||0))seen.set(k,e);
       });
-      const cleaned=Array.from(seen.values()).sort((a,b)=>(a.time||0)-(b.time||0));
+      const cleaned=Array.from(seen.values()).filter(e=>!e||(e.asset||'BTC')==='BTC').sort((a,b)=>(a.time||0)-(b.time||0));
       if(dropped>0){
         try{console.warn('[V6.5.3 cleanup] Dropped',dropped,'corrupt log entries');}catch(_){}
       }
@@ -28752,11 +28749,7 @@ function TaraApp(){
   // V7.0.2: per-asset call log shown in Memory modal + cards. Engine still reads full log
   //   for learnings — filtering only happens at display layer.
   const displayedCallLog=React.useMemo(()=>{
-    return(taraCallLog||[]).filter(e=>{
-      if(!e)return false;
-      const _entryAsset=e.asset||'BTC';
-      return _entryAsset===currentAsset;
-    });
+    return(taraCallLog||[]).filter(e=>!!e&&(e.asset||'BTC')==='BTC');
   },[taraCallLog,currentAsset]);
   // V5.7.1: scorecards/tara cloud doc is legacy. Local-only — no setTaraScorecards exists.
   //   localStorage cached for fast paint on next mount.
@@ -28865,12 +28858,30 @@ function TaraApp(){
       ):null;
       return{...rest,...(_scores?{signalScoresAtLock:_scores}:{})};
     };
+    // V10.7.88b: RMW (Read-Modify-Write) for localStorage.
+    //   Previously: direct overwrite. Problem: with BTC + ETH tabs both open, ETH tab's
+    //   localStorage write would overwrite BTC's freshly-resolved entries with its own
+    //   stale unresolved copies of those BTC entries. Resolution: WIN/LOSS disappeared
+    //   from BTC tab on reload. Same race existed in reverse.
+    //   Fix: read current localStorage, merge with local state using _mergeCallLogEntries
+    //   (which always prefers resolved over unresolved), then write the merged result.
+    //   This is the same RMW pattern used for Supabase cloud writes.
     const _stripped=taraCallLog.slice(-TARA_CALL_LOG_CAP).map(_stripForStorage);
+    let _mergedForStorage=_stripped;
+    try{
+      const _currentRaw=localStorage.getItem('taraCallLog_v1');
+      if(_currentRaw){
+        const _current=JSON.parse(_currentRaw);
+        if(Array.isArray(_current)&&_current.length>0){
+          _mergedForStorage=_mergeCallLogEntries(_current,_stripped).filter(e=>!e||(e.asset||'BTC')==='BTC').slice(-TARA_CALL_LOG_CAP).map(_stripForStorage);
+        }
+      }
+    }catch(_){_mergedForStorage=_stripped;}
     let _saved=false;
     // Try full cap first, then progressively halve if QuotaExceeded
-    for(let _cap=_stripped.length;_cap>=100;_cap=Math.floor(_cap*0.7)){
+    for(let _cap=_mergedForStorage.length;_cap>=100;_cap=Math.floor(_cap*0.7)){
       try{
-        localStorage.setItem('taraCallLog_v1',JSON.stringify(_stripped.slice(-_cap)));
+        localStorage.setItem('taraCallLog_v1',JSON.stringify(_mergedForStorage.slice(-_cap)));
         _saved=true;
         if(_cap<_stripped.length){
           try{console.warn(`[V10.7.60] localStorage cap trimmed to ${_cap} entries to fit 5MB limit`);}catch(_){}
@@ -28886,7 +28897,7 @@ function TaraApp(){
     // Also persist to sessionStorage as a safety net (cleared on tab close but survives refresh)
     if(_saved){
       try{
-        const _session=_stripped.slice(-200); // keep last 200 in session (recent trades)
+        const _session=_mergedForStorage.slice(-200);
         sessionStorage.setItem('taraCallLog_session',JSON.stringify(_session));
       }catch(_){}
     }
@@ -28961,10 +28972,6 @@ function TaraApp(){
       return;
     }
     taraCallLog.forEach(e=>{
-      // V10.7.88: only broadcast entries for THIS tab's asset.
-      //   ETH tab must never broadcast BTC entries to the BTC tab — it holds
-      //   stale copies that can overwrite the BTC tab's freshly-resolved entries.
-      if((e?.asset||'BTC')!==currentAsset)return;
       const k=(e?.windowId||'')+'|'+(e?.windowType||'')+'|'+(e?.id||'');
       if(_broadcastedKeysRef.current.has(k))return;
       _broadcastedKeysRef.current.add(k);
@@ -28977,8 +28984,6 @@ function TaraApp(){
       if(!msg||msg.type!=='callLogEntry')return;
       const incoming=msg.payload?.entry;
       if(!incoming||!incoming.windowId)return;
-      // V10.7.88: only merge entries for THIS tab's asset
-      if((incoming.asset||'BTC')!==currentAsset)return;
       const k=(incoming.windowId||'')+'|'+(incoming.windowType||'')+'|'+(incoming.id||'');
       _receivedFromBroadcastRef.current.add(k);
       setTaraCallLog(prev=>{
@@ -29040,7 +29045,7 @@ function TaraApp(){
           if(!strike||!Number.isFinite(Number(strike)))return null;
           const s=Number(strike);
           if(s>=10000)return'BTC';
-          if(s>=100)return'ETH';
+          return'BTC';
           return null; // strikes <$100 are legacy SOL/DOGE — caller drops them
         };
         const _fixAsset=(e)=>{
@@ -29513,7 +29518,7 @@ function TaraApp(){
       'RANGE-CHOP':    {wins:562,losses:385},  // 59% WR (n=947)
       'COMPRESSING':   {wins:0,losses:0},      // rare
     };
-    const _assetKey=`taraRegimeMemory_${currentAsset}_v1`;
+    const _assetKey='taraRegimeMemory_BTC_v1';
     try{
       const stored=localStorage.getItem(_assetKey);
       if(stored){
@@ -29553,7 +29558,7 @@ function TaraApp(){
       //   which caused cross-device increment loss — Device A's regime training would
       //   overwrite Device B's regime training when both updated the same regime keys.
       cloudWriteDebouncedRMW(
-        `learnings/regimeMemory_${currentAsset}`,
+        'learnings/regimeMemory_BTC',
         ()=>_regimeMemoryRef.current,
         (cloudData,localData)=>{
           const _allKeys=new Set([...Object.keys(cloudData||{}),...Object.keys(localData||{})]);
@@ -29575,7 +29580,7 @@ function TaraApp(){
     }
   },[regimeMemory]);
   useEffect(()=>{
-    const unsub=cloudWatch(`learnings/regimeMemory_${currentAsset}`,(d)=>{
+    const unsub=cloudWatch('learnings/regimeMemory_BTC',(d)=>{
       _regimeMemoryHydratedRef.current=true;
       if(!d||typeof d!=='object')return;
       setRegimeMemory(prev=>{
@@ -29613,7 +29618,7 @@ function TaraApp(){
     };
     return{
       BTC:_loadAsset('taraWeightsByAsset_BTC_v1',_seed),
-      ETH:_loadAsset('taraWeightsByAsset_ETH_v1',_seed),
+
     };
   });
   const[regimeWeightsByAsset,setRegimeWeightsByAsset]=useState(()=>{
@@ -29624,7 +29629,7 @@ function TaraApp(){
     };
     return{
       BTC:_loadRegAsset('taraRegimeWeightsByAsset_BTC_v1',_seed),
-      ETH:_loadRegAsset('taraRegimeWeightsByAsset_ETH_v1',_seed),
+
     };
   });
   // ── V9.11.0 LAYER 3: SESSION-OF-DAY ADAPTIVE WEIGHTS ─────────────────────
@@ -29657,13 +29662,13 @@ function TaraApp(){
     };
     return{
       BTC:_loadSessAsset('taraSessionWeightsByAsset_BTC_v1'),
-      ETH:_loadSessAsset('taraSessionWeightsByAsset_ETH_v1'),
+
     };
   });
   useEffect(()=>{
     try{
       localStorage.setItem('taraSessionWeightsByAsset_BTC_v1',JSON.stringify(sessionWeightsByAsset.BTC||{}));
-      localStorage.setItem('taraSessionWeightsByAsset_ETH_v1',JSON.stringify(sessionWeightsByAsset.ETH||{}));
+
     }catch(e){}
   },[sessionWeightsByAsset]);
   const sessionWeightsByAssetRef=useRef(sessionWeightsByAsset);
@@ -29673,13 +29678,13 @@ function TaraApp(){
   useEffect(()=>{
     try{
       localStorage.setItem('taraWeightsByAsset_BTC_v1',JSON.stringify(adaptiveWeightsByAsset.BTC||{}));
-      localStorage.setItem('taraWeightsByAsset_ETH_v1',JSON.stringify(adaptiveWeightsByAsset.ETH||{}));
+
     }catch(e){}
   },[adaptiveWeightsByAsset]);
   useEffect(()=>{
     try{
       localStorage.setItem('taraRegimeWeightsByAsset_BTC_v1',JSON.stringify(regimeWeightsByAsset.BTC||{}));
-      localStorage.setItem('taraRegimeWeightsByAsset_ETH_v1',JSON.stringify(regimeWeightsByAsset.ETH||{}));
+
     }catch(e){}
   },[regimeWeightsByAsset]);
   // V7.8: Cloud sync at learnings/taraWeights — separate doc from learnings/tara (which
@@ -29690,7 +29695,7 @@ function TaraApp(){
   //   cross-device clobbering bug where Browser A's BTC training would erase Browser B's
   //   ETH training (and vice versa).
   const _weightsCloudHydratedRef=useRef(false);
-  const _weightsByAssetUpdatedAtRef=useRef({BTC:{adaptive:0,regime:0},ETH:{adaptive:0,regime:0}});
+  const _weightsByAssetUpdatedAtRef=useRef({BTC:{adaptive:0,regime:0}});
   // Bump local timestamps whenever weights change (we set the timestamp before write fires,
   //   so the RMW merge sees a fresh local timestamp). updatedAt is set per-asset based on
   //   which asset was active at the time of the change.
@@ -29700,7 +29705,7 @@ function TaraApp(){
     //   (doesn't perfectly track which asset's weights changed), but in practice
     //   updateWeights only ever modifies the active asset's slice anyway.
     const _a=currentAssetRef.current||'BTC';
-    if(_a==='BTC'||_a==='ETH'){
+    {
       _weightsByAssetUpdatedAtRef.current[_a].adaptive=Date.now();
       _weightsByAssetUpdatedAtRef.current[_a].regime=Date.now();
     }
@@ -29710,7 +29715,7 @@ function TaraApp(){
         adaptive:adaptiveWeightsByAssetRef.current,
         regime:regimeWeightsByAssetRef.current,
         updatedAtBTC:_weightsByAssetUpdatedAtRef.current.BTC,
-        updatedAtETH:_weightsByAssetUpdatedAtRef.current.ETH,
+
       }),
       (cloudData,localData)=>{
         // Per-asset, per-slice timestamp merge. For each (asset, slice), pick whichever
@@ -29723,32 +29728,28 @@ function TaraApp(){
           if(!localT||localT===0)return cloudSlice;
           return cloudT>localT?cloudSlice:localSlice;
         };
-        const cBTC=cloudData?.adaptive?.BTC,cETH=cloudData?.adaptive?.ETH;
-        const cBTCr=cloudData?.regime?.BTC,cETHr=cloudData?.regime?.ETH;
+        const cBTC=cloudData?.adaptive?.BTC;
+        const cBTCr=cloudData?.regime?.BTC;
         const cBTCt=cloudData?.updatedAtBTC?.adaptive||0;
-        const cETHt=cloudData?.updatedAtETH?.adaptive||0;
+        
         const cBTCrt=cloudData?.updatedAtBTC?.regime||0;
-        const cETHrt=cloudData?.updatedAtETH?.regime||0;
+        
         const lBTCt=localData.updatedAtBTC.adaptive||0;
-        const lETHt=localData.updatedAtETH.adaptive||0;
+        
         const lBTCrt=localData.updatedAtBTC.regime||0;
-        const lETHrt=localData.updatedAtETH.regime||0;
+        
         const merged={
           adaptive:{
             BTC:_pickSlice(localData.adaptive?.BTC,cBTC,lBTCt,cBTCt),
-            ETH:_pickSlice(localData.adaptive?.ETH,cETH,lETHt,cETHt),
+
           },
           regime:{
             BTC:_pickSlice(localData.regime?.BTC,cBTCr,lBTCrt,cBTCrt),
-            ETH:_pickSlice(localData.regime?.ETH,cETHr,lETHrt,cETHrt),
+
           },
           updatedAtBTC:{
             adaptive:Math.max(lBTCt,cBTCt),
             regime:Math.max(lBTCrt,cBTCrt),
-          },
-          updatedAtETH:{
-            adaptive:Math.max(lETHt,cETHt),
-            regime:Math.max(lETHrt,cETHrt),
           },
         };
         return merged;
@@ -29764,9 +29765,7 @@ function TaraApp(){
       // V8.6: Merge cloud → local based on per-slice timestamps. Cloud slice adopted only
       //   if its updatedAt is newer than local's (or local hasn't been touched yet).
       const cBTCt=d.updatedAtBTC?.adaptive||0;
-      const cETHt=d.updatedAtETH?.adaptive||0;
       const cBTCrt=d.updatedAtBTC?.regime||0;
-      const cETHrt=d.updatedAtETH?.regime||0;
       if(d.adaptive&&typeof d.adaptive==='object'){
         setAdaptiveWeightsByAsset(prev=>{
           const _next={...prev};
@@ -29774,9 +29773,8 @@ function TaraApp(){
             const lT=_weightsByAssetUpdatedAtRef.current.BTC.adaptive||0;
             if(cBTCt>=lT){_next.BTC=d.adaptive.BTC;_weightsByAssetUpdatedAtRef.current.BTC.adaptive=cBTCt;}
           }
-          if(d.adaptive.ETH&&typeof d.adaptive.ETH.gap==='number'){
-            const lT=_weightsByAssetUpdatedAtRef.current.ETH.adaptive||0;
-            if(cETHt>=lT){_next.ETH=d.adaptive.ETH;_weightsByAssetUpdatedAtRef.current.ETH.adaptive=cETHt;}
+          if(false){ // ETH removed
+
           }
           return _next;
         });
@@ -29788,9 +29786,8 @@ function TaraApp(){
             const lT=_weightsByAssetUpdatedAtRef.current.BTC.regime||0;
             if(cBTCrt>=lT){_next.BTC=d.regime.BTC;_weightsByAssetUpdatedAtRef.current.BTC.regime=cBTCrt;}
           }
-          if(d.regime.ETH){
-            const lT=_weightsByAssetUpdatedAtRef.current.ETH.regime||0;
-            if(cETHrt>=lT){_next.ETH=d.regime.ETH;_weightsByAssetUpdatedAtRef.current.ETH.regime=cETHrt;}
+          if(false){ // ETH removed
+
           }
           return _next;
         });
@@ -29811,7 +29808,7 @@ function TaraApp(){
   //   user switched assets between lock and resolution.
   const setAdaptiveWeights=(updaterOrValue,explicitAsset)=>{
     setAdaptiveWeightsByAsset(prev=>{
-      const _asset=(explicitAsset==='BTC'||explicitAsset==='ETH')?explicitAsset:currentAsset;
+      const _asset='BTC';
       const _curSlice=prev[_asset]||prev.BTC;
       const _newSlice=typeof updaterOrValue==='function'?updaterOrValue(_curSlice):updaterOrValue;
       return{...prev,[_asset]:_newSlice};
@@ -29819,7 +29816,7 @@ function TaraApp(){
   };
   const setRegimeWeights=(updaterOrValue,explicitAsset)=>{
     setRegimeWeightsByAsset(prev=>{
-      const _asset=(explicitAsset==='BTC'||explicitAsset==='ETH')?explicitAsset:currentAsset;
+      const _asset='BTC';
       const _curSlice=prev[_asset]||prev.BTC;
       const _newSlice=typeof updaterOrValue==='function'?updaterOrValue(_curSlice):updaterOrValue;
       return{...prev,[_asset]:_newSlice};
@@ -29835,7 +29832,7 @@ function TaraApp(){
   const applyTradeLearning=(newLog,resolvedTrade,finalResult)=>{
     if(!resolvedTrade||(finalResult!=='WIN'&&finalResult!=='LOSS'))return;
     const _ta=resolvedTrade.asset||'BTC';
-    const _safe=(_ta==='BTC'||_ta==='ETH')?_ta:'BTC';
+    const _safe='BTC';
     const _curW=(adaptiveWeightsByAssetRef.current||{})[_safe]||(adaptiveWeightsByAssetRef.current||{}).BTC;
     const _curRW=(regimeWeightsByAssetRef.current||{})[_safe]||(regimeWeightsByAssetRef.current||{}).BTC;
     const _assetLog=(newLog||[]).filter(t=>t&&(t.asset||'BTC')===_safe);
@@ -30154,7 +30151,7 @@ function TaraApp(){
       edgeBuckets[_bkt][e.result==='WIN'?'wins':'losses']+=1;
     });
     // ── V8.2: Per-asset recent-WR for asset-rotation hint ──
-    const _otherAsset=currentAsset==='BTC'?'ETH':'BTC';
+    const _otherAsset='BTC';
     const _recent24h=(taraCallLog||[]).filter(e=>e&&e.time&&(_now.getTime()-e.time)<24*60*60*1000&&(e.result==='WIN'||e.result==='LOSS'));
     const _curRecent=_recent24h.filter(e=>(e.asset||'BTC')===currentAsset);
     const _otherRecent=_recent24h.filter(e=>(e.asset||'BTC')===_otherAsset);
@@ -30320,7 +30317,7 @@ function TaraApp(){
   //   Fix: source from `taraCallLog` (which has been accumulating Tara's resolved
   //   calls all along). Filter by asset for cross-asset isolation.
   const _tradeLogForCurrentAsset=useMemo(()=>{
-    return(taraCallLog||[]).filter(t=>(t&&(t.asset||'BTC')===currentAsset));
+    return(taraCallLog||[]).filter(t=>!!t&&(t.asset||'BTC')==='BTC');
   },[taraCallLog,currentAsset]);
   const calibration=useMemo(()=>buildCalibration(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]);
   const regimeDirWR=useMemo(()=>buildRegimeDirWR(_tradeLogForCurrentAsset),[_tradeLogForCurrentAsset]); // V134
@@ -30829,11 +30826,11 @@ function TaraApp(){
         const _newHooks=localStorage.getItem('taraV70Hooks');
         if(_newHooks){
           const _parsed=JSON.parse(_newHooks);
-          if(_parsed&&typeof _parsed==='object')setDiscordWebhooks({BTC:_parsed.BTC||'',ETH:_parsed.ETH||''});
+          if(_parsed&&typeof _parsed==='object')setDiscordWebhooks({BTC:_parsed.BTC||''});
         } else {
           // Legacy migration: copy single webhook into BTC slot
           const _old=localStorage.getItem('taraV110Hook');
-          if(_old)setDiscordWebhooks({BTC:_old,ETH:''});
+          if(_old)setDiscordWebhooks({BTC:_old});
         }
       }catch(e){}
       const tz=localStorage.getItem('taraV110TZ');if(tz!=null)setUseLocalTime(tz==='true');
@@ -31076,7 +31073,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   asset feed effect above takes over.
   //   V9.8.4: Source-aware — uses same priceSource as primary feed.
   useEffect(()=>{
-    const _otherAsset=currentAsset==='BTC'?'ETH':'BTC';
+    const _otherAsset='BTC';
     const _otherCfg=ASSET_CONFIG[_otherAsset]||ASSET_CONFIG.BTC;
     const _src=PRICE_SOURCES[priceSource]||PRICE_SOURCES[PRICE_SOURCE_DEFAULT];
     let _lastTradeId=0; // V9.8.12: stale CDN guard, see live-ticker effect comment above
@@ -31119,7 +31116,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   eventually shadow auto-execution. Adds simple 2-sample directional commitment so
   //   the shadow has a "soft lock" view distinct from raw lean.
   useEffect(()=>{
-    const _shadowAsset=currentAsset==='BTC'?'ETH':'BTC';
+    const _shadowAsset='BTC';
     const _cfg=ASSET_CONFIG[_shadowAsset]||ASSET_CONFIG.BTC;
     let _cancelled=false;
     // V9.6.1: shadow diagnostics — tracks last successful update, last error,
@@ -32883,7 +32880,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   (e.g. "15m-2026-06-03T08:00:00.000Z"). Without asset filter, the BTC tab
         //   could find the ETH entry and use its strike (~$2500) to score a BTC trade.
         const _logSnap=taraCallLogRef.current||[];
-        const _tabAsset=currentAssetRef.current||currentAsset||'BTC';
+        const _tabAsset='BTC';
         const _pendingEntry=_logSnap.find(e=>e&&e.windowId===_wid&&e.result===null&&(e.asset||'BTC')===_tabAsset);
         const _entryAsset=_pendingEntry?.asset||_tabAsset;
         const _entryStrike=Number(_pendingEntry?.strike)||0;
@@ -32896,7 +32893,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         // V7.5: only use spot if it matches asset magnitude (BTC≥10K, ETH 100-10K). Cross-
         //   asset spot would fail sanity and stall resolution.
         const _spotNow=currentPriceRef.current||currentPrice;
-        const _spotMatchesAsset=_spotNow>0&&((_entryAsset==='BTC'&&_spotNow>=10000)||(_entryAsset==='ETH'&&_spotNow>=100&&_spotNow<10000));
+        const _spotMatchesAsset=_spotNow>0&&_spotNow>=10000;
         const _closeAtRolloverSpot=_spotMatchesAsset?_spotNow:0;
         const _capturedSnap=taraCallSnapshotRef.current;
         const _capturedWindowType=windowType;
@@ -32989,7 +32986,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               //   asset, when BTC and ETH both have unresolved entries for the same
               //   windowId (now possible after V8.8.6 dedup-key fix), the find() could
               //   pick either one and write the wrong asset's outcome onto it.
-              const _resolveAsset=currentAssetRef.current||currentAsset||'BTC';
+              const _resolveAsset='BTC';
               setTaraCallLog(prev=>{
                 let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_resolveAsset&&e.windowId===_capturedWindowId&&e.result===null);
                 if(!idx){
@@ -39667,9 +39664,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         // Asset tag with strike-magnitude inference (mirrors V7.1 logic from main lock path).
         const _refAsset=currentAssetRef.current||currentAsset||'BTC';
         const _strike=Number(targetMargin||targetMarginRef.current||0);
-        let _assetTag=_refAsset==='BTC'||_refAsset==='ETH'?_refAsset:'BTC';
+        let _assetTag='BTC';
         if(_strike>=100){
-          const _inferred=_strike>=10000?'BTC':'ETH';
+          const _inferred='BTC';
           if(_inferred!==_assetTag){
             try{console.warn('[V7.10.1] Asset tag override at snapshot log:',_assetTag,'→',_inferred,'(strike',_strike,')');}catch(_){}
             _assetTag=_inferred;
@@ -41064,14 +41061,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _refAsset=currentAssetRef.current||currentAsset||'BTC';
           const _strike=Number(targetMargin||targetMarginRef.current||0);
           if(_strike>=100){
-            const _inferred=_strike>=10000?'BTC':'ETH';
+            const _inferred='BTC';
             if(_inferred!==_refAsset){
               try{console.warn('[V7.1] Asset tag override at entry creation: ref says',_refAsset,'but strike',_strike,'inferred',_inferred);}catch(_){}
               return _inferred;
             }
           }
           // Coerce SOL/DOGE refs to BTC (shouldn't happen in V7.1 but defensive)
-          if(_refAsset!=='BTC'&&_refAsset!=='ETH')return'BTC';
+          if(_refAsset!=='BTC')return'BTC';
           return _refAsset;
         })(),
         // V9.10.9: stamp device label so personal scorecard filters to this device only.
@@ -41766,8 +41763,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   immediately rather than waiting for cloudWatch to settle.
         'state/currentLock_BTC_15m',
         'state/currentLock_BTC_5m',
-        'state/currentLock_ETH_15m',
-        'state/currentLock_ETH_5m',
+
       ];
       const _results=await Promise.all(_paths.map(p=>cloudRead(p).then(d=>({path:p,data:d})).catch(e=>({path:p,error:e?.message}))));
       let _applied=0;
@@ -41820,18 +41816,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             if(data.adaptive){
               setAdaptiveWeightsByAsset(prev=>({
                 BTC:data.adaptive.BTC&&typeof data.adaptive.BTC.gap==='number'?data.adaptive.BTC:prev.BTC,
-                ETH:data.adaptive.ETH&&typeof data.adaptive.ETH.gap==='number'?data.adaptive.ETH:prev.ETH,
+
               }));
             }
             if(data.regime){
               setRegimeWeightsByAsset(prev=>({
                 BTC:data.regime.BTC||prev.BTC,
-                ETH:data.regime.ETH||prev.ETH,
+
               }));
             }
             // Update timestamp tracking
             if(data.updatedAtBTC)_weightsByAssetUpdatedAtRef.current.BTC=data.updatedAtBTC;
-            if(data.updatedAtETH)_weightsByAssetUpdatedAtRef.current.ETH=data.updatedAtETH;
+
             _applied++;
           } else if(path.startsWith('state/currentLock_')){
             // V8.6.1: Lock paths — only adopt if it matches the user's currently-viewed
@@ -42443,7 +42439,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   clears price history (since BTC ticks are useless for ETH). Triggers re-fetch
   //   of Kalshi market for the new asset on next poll.
   const setCurrentAsset=(a)=>{
-    if(a===currentAsset||!ASSET_KEYS.includes(a))return;
+    if(a===currentAsset||a!=='BTC')return;
     // V7.0.7: stamp the switch time + reset broadcast flags + clear whale broadcast cooldown.
     //   Discord broadcasts within 2.5s after this fire-suppress (see broadcastToDiscord).
     //   This stops cross-asset stale-data messages: previously switching ETH→BTC could
@@ -42778,7 +42774,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {/* RIGHT: asset selector + window toggle + sound + ··· */}
           <div className="flex items-center gap-1.5 shrink-0">
 
-            {/* BTC / ETH */}
+            {/* BTC */}
             <div className={'flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0'}>
               {ASSET_KEYS.map(k=>{
                 const _c=ASSET_CONFIG[k];
@@ -42863,9 +42859,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         style={killSwitchEngaged?{color:'#F87171',background:'rgba(248,113,113,0.15)',border:'1px solid rgba(248,113,113,0.40)'}:autoExecSettings.dryRun?{color:'#FBBF24',background:'rgba(251,191,36,0.10)',border:'1px solid rgba(251,191,36,0.30)'}:autoExecSettings.enabled?{color:'#6EE7B7',background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.30)'}:{color:'rgba(232,233,228,0.35)',background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.10)'}}
                         title="Auto-exec settings"
                       >{killSwitchEngaged?'⛔ KILLED':autoExecSettings.dryRun?'DRY · AUTO':autoExecSettings.enabled?'⚡ AUTO':'AUTO · OFF'}</button>
-                      {/* ETH shadow feed */}
+                      {/* shadow feed */}
                       {(()=>{
-                        const _dfa=currentAsset==='BTC'?'ETH':'BTC';
+                        const _dfa='BTC';
                         const _dfs=shadowTaraByAssetRef.current?.[_dfa];
                         const _dff=_dfs&&(Date.now()-(_dfs.updatedAt||0))<8000;
                         const _dfl=_dff?_dfs.leanDir:null;
@@ -44260,7 +44256,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {/* Asset + Window */}
           <div className="flex items-center gap-1.5">
             <button onClick={()=>setCurrentAsset(currentAsset==='BTC'?'ETH':'BTC')} className="px-2 py-1.5 rounded-md text-xs font-bold min-h-[36px]" style={{background:currentAsset==='BTC'?'rgba(247,147,26,0.15)':'rgba(98,126,234,0.15)',color:currentAsset==='BTC'?'rgb(247,147,26)':'rgb(98,126,234)',border:`1px solid ${currentAsset==='BTC'?'rgba(247,147,26,0.3)':'rgba(98,126,234,0.3)'}`}}>
-              {currentAsset==='BTC'?'₿ BTC':'Ξ ETH'}
+              {'₿ BTC'}
             </button>
             <button onClick={()=>handleWindowToggle(windowType==='15m'?'5m':'15m')} className="px-2 py-1.5 rounded-md text-xs font-bold min-h-[36px]" style={{background:windowType==='15m'?'rgba(16,185,129,0.15)':'rgba(99,102,241,0.15)',color:windowType==='15m'?'rgb(16,185,129)':'rgb(99,102,241)',border:`1px solid ${windowType==='15m'?'rgba(16,185,129,0.3)':'rgba(99,102,241,0.3)'}`}}>
               {windowType}
@@ -44947,7 +44943,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <section className={'bg-[#181A19] border-2 rounded-lg p-4'} style={{borderColor:'rgba(229,200,112,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:T2_GOLD}}>★ Current Tara — V8.7 Overview</h3>
                 <div className="space-y-3 text-xs leading-relaxed text-[#E8E9E4]/75">
-                  <p><strong className="text-white">What Tara does:</strong> Reads BTC + ETH price action, tape flow, regime, FGT alignment, and a 7-signal fusion to predict whether the price will close above or below strike at the end of each 15m or 5m window. She makes a call when she has high enough conviction; otherwise she sits out. She learns from every result and adapts her weights over time.</p>
+                  <p><strong className="text-white">What Tara does:</strong> Reads BTC price action, tape flow, regime, FGT alignment, and a 7-signal fusion to predict whether the price will close above or below strike at the end of each 15m or 5m window. She makes a call when she has high enough conviction; otherwise she sits out. She learns from every result and adapts her weights over time.</p>
                   <p><strong className="text-white">Per-asset everything:</strong> BTC and ETH have separate weights, regime memories, scorecards, and learning histories. Switching assets shows that asset's data — they don't blend.</p>
                   <p><strong className="text-white">Cloud-synced across all your devices:</strong> Trades, scorecards, weights, and learning all sync to Supabase. Open Tara on any browser, on any device, and you see the same data. The SyncStatusPill in the header shows sync health (green = synced, amber = writing, rose = error). Click it to force a fresh resync.</p>
                   <p><strong className="text-white">Multi-tab safe:</strong> Open Tara in 5 tabs at once — they all share state via BroadcastChannel + atomic Supabase transactions. The TabPresencePill shows when peer tabs are active. No more lost trades from concurrent writes.</p>
