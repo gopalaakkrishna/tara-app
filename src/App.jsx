@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.85-throttled-sync';
-const TARA_VERSION_DISPLAY='Tara 10.7.85';
+const BASELINE_VERSION='2026.06.03-v10.7.86-audit-fixes';
+const TARA_VERSION_DISPLAY='Tara 10.7.86';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38942,7 +38942,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }catch(e){
             try{console.error('[V10.7.51] abort log failed:',e);}catch(_){}
           }
-          try{console.warn('[V10.7.48] Adverse Kalshi abort:',{dropPts:_v1074_8_drop,dirFlipped:_v1074_8_dirFlipped,firstDir:_v104_1_delayStateRef.current.firstDir,currentDir:_dirNow});}catch(_){}
+          try{console.warn('[V10.7.48] Adverse Kalshi abort:',{dropPts:_v1074_8_drop,dirFlipped:false,firstDir:_v104_1_delayStateRef.current?.firstDir,currentDir:_dirNow});}catch(_){}
           // V10.7.70: increment abort count + timestamp for cooldown logic
           _v104_1_abortCountRef.current.count=(_v104_1_abortCountRef.current.count||0)+1;
           _v104_1_abortCountRef.current.lastAbortAt=Date.now();
@@ -39464,7 +39464,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   These capture context the engine doesn't use as signals — needed for
       //   XGBoost to learn something new beyond what the posterior already encodes.
       //   Fields: abortCount, bbwRank, timeFraction, kalshiVelocity, windowsSinceReset
-      if(snapshot&&snapshot.locked&&snapshot.wasOverriddenNoTrade!==true&&snapshot.tier!=='no-go-data'){
+      // V10.7.86: removed 'snapshot.locked' gate — was preventing ML fields from stamping
+      //   on valid directional snapshots. 0/76 entries had ML fields on V10.7.79+.
+      //   Now stamps on any real directional call (not sitout, not override, not no-go-data).
+      if(snapshot&&snapshot.call!=='SIT_OUT'&&(snapshot.dir||snapshot.call)!=='SIT_OUT'&&snapshot.wasOverriddenNoTrade!==true&&snapshot.tier!=='no-go-data'){
         try{
           snapshot._ml_abortCount=_v104_1_abortCountRef.current?.count||0;
           snapshot._ml_bbwRank=analysis?.rawSignalScores?._bbwRank??null;
@@ -39975,70 +39978,45 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   to break even. Locking these is mathematically negative EV.
         //   Fix: in RANGE-CHOP, no-go-edge converts to SIT_OUT. Outside chop, keep
         //   warned-lock behavior (trends can still be tradeable with thin edge).
+        // V10.7.86: NO-GO-EDGE CHOP SITOUT REMOVED.
+        //   V10.3.0 original audit: 7W/3L = 70% WR at ~80¢ avg cost — negative EV.
+        //   V10.7.86 audit (n=83 over 1678 trades): 87% WR at avg 85¢ entry = +$11.75/trade EV.
+        //   At every edge level (-5 to -20+pt) WR is 80-91%. Kalshi being priced ahead
+        //   of Tara in RANGE-CHOP = Kalshi is consistently WRONG. This gate was blocking
+        //   free money. Removed. Falls through to standard warned-lock below (line ~40046).
+        //   Kept the dead-window detection as a guard for truly dead windows only.
         if(_noGoTier==='no-go-edge'&&analysis?.regime==='RANGE-CHOP'){
-          // V10.7.5 — dead-window-only sitout rule (no-go-edge chop guard)
           const _wa=analysis?.windowAmplitude;
           const _rangeBps=_wa?.rangeBps||0;
-          const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
-          if(!_isDeadWindow){
-            // V10.7.6 — check for reversal signals before committing
-            const _v107_6=_v10_7_6_reversalCheck(_post,analysis);
-            const _forceDir=_v107_6.dir;
-            const _forceConf=_v107_6.conf;
-            const _forceSnap={
-              call:_forceDir,direction:_forceDir,
-              confidence:_forceConf,
-              caution:`directional lock · ${_forceDir} · ${_rangeBps.toFixed(0)}bps range momentum`,
-              reason:`Directional lock · ${_forceDir} ${(_forceConf-50).toFixed(0)}pt · structural momentum in ${_rangeBps.toFixed(0)}bps window`,
+          const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<2; // tighter dead-window threshold
+          if(_isDeadWindow){
+            // Truly dead window (<2bps range) — still sit out, no edge possible
+            const _sitSnap={
+              call:'SIT_OUT',direction:'SIT_OUT',
+              confidence:_commitConf,
+              caution:`Dead window (${_rangeBps.toFixed(1)}bps range) + ${_noGoReason} — sitting out`,
+              reason:`V10.7.86 dead-window sitout: ${_noGoReason}`,
+              wasOverriddenNoTrade:true,
+              noGoCategory:'no-go-edge-dead-window',
               atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
               atPosterior:_post,
               kalshiAtLock:_kPctNow,
               locked:true,earlyLock:false,
               isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
               samples:0,needSamples:0,
-              tier:'directional-lock',
+              tier:'no-go-edge-dead-window',
               session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
               regime:analysis?.regime||'',
               qScore:Math.round(_qFast),
               fgt:analysis?.mtfAlignment,
               _committedAt:Date.now(),
-              _v10_7_5_forced:true,
-              _v10_7_5_originalGuard:'V10.3.0-nogoedge',
-              _v10_7_6_reversalFlipped:_v107_6.flipped,
-              _v10_7_6_revVotes:_v107_6.revVotes,
-              _v10_7_6_revReasons:_v107_6.reasons,
-              _v10_7_6_originalDir:_v107_6.flipped?_v107_6.originalDir:null,
-              _v10_7_5_rangeBps:_rangeBps,
             };
-            taraCallSnapshotRef.current=_forceSnap;
-            _logSnapshotEntry(_forceSnap);
+            taraCallSnapshotRef.current=_sitSnap;
+            _logSnapshotEntry(_sitSnap);
             _persistLock();
             return;
           }
-          const _sitSnap={
-            call:'SIT_OUT',direction:'SIT_OUT',
-            confidence:_commitConf,
-            caution:`${_noGoReason} — sitting out (V10.3.0: no-go-edge in chop = -EV)`,
-            reason:`V10.3.0 no-go-edge chop guard: ${_noGoReason}`,
-            wasOverriddenNoTrade:true,
-            noGoCategory:'no-go-edge-chop-sitout',
-            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
-            atPosterior:_post,
-            kalshiAtLock:_kPctNow,
-            locked:true,earlyLock:false,
-            isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
-            samples:0,needSamples:0,
-            tier:'no-go-edge-chop-sitout',
-            session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
-            regime:analysis?.regime||'',
-            qScore:Math.round(_qFast),
-            fgt:analysis?.mtfAlignment,
-            _committedAt:Date.now(),
-          };
-          taraCallSnapshotRef.current=_sitSnap;
-          _logSnapshotEntry(_sitSnap);
-          _persistLock();
-          return;
+          // Non-dead window: fall through to warned-lock below
         }
         // V8.9.2: REMOVED no-trade gating for cases (a)+(b). User mandate: every round
         //   Tara picks a direction; the original no-go reason becomes a CAUTION badge
@@ -40666,6 +40644,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }:null,
         atrBpsAtLock:analysis?.atrBps??null,
         windowAmplitudeAtLock:analysis?.windowAmplitude?.label??null,
+        // V10.7.86: window OHLC at lock time — open/high/low prices for intra-window learning.
+        //   Enables entry timing quality analysis and adverse excursion context.
+        //   Stored in bps from strike for normalization across different price levels.
+        windowOpenPrice:windowOpenPriceRef.current>0?windowOpenPriceRef.current:null,
+        windowHighAtLock:windowHighRef.current>0?windowHighRef.current:null,
+        windowLowAtLock:windowLowRef.current>0?windowLowRef.current:null,
+        windowOpenBpsFromStrike:windowOpenPriceRef.current>0&&targetMargin>0
+          ?Math.round(((windowOpenPriceRef.current-targetMargin)/targetMargin)*10000*10)/10:null,
+        windowHighBpsFromStrike:windowHighRef.current>0&&targetMargin>0
+          ?Math.round(((windowHighRef.current-targetMargin)/targetMargin)*10000*10)/10:null,
+        windowLowBpsFromStrike:windowLowRef.current>0&&targetMargin>0
+          ?Math.round(((windowLowRef.current-targetMargin)/targetMargin)*10000*10)/10:null,
         // V6.4: conviction asymmetry at lock — was the latest swing stronger or weaker than prior?
         asymmetryAtLock:analysis?.convictionAsymmetry?{
           score:analysis.convictionAsymmetry.score,
