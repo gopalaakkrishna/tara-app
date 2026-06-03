@@ -4224,8 +4224,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.01-v10.7.77-coherence-guard-no-gap-gate';
-const TARA_VERSION_DISPLAY='Tara 10.7.77';
+const BASELINE_VERSION='2026.06.03-v10.7.84-adverse-kalshi-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.84';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4322,6 +4322,47 @@ function _v104ConvBand(c){
 
 // Build a rolling-window calibration table from the live call log.
 // Merges with seed when cell sample is thin (<TRUST_FLOOR).
+// V10.7.82b — CANONICAL TRADE FILTER
+// ════════════════════════════════════════════════════════════════════════════
+// Single source of truth for what counts as a real scored trade.
+// Used by ALL displays: dashboard record, stats, analytics, training engine.
+// Rules (in priority order):
+//   1. Must have a WIN or LOSS result (not SITOUT/null)
+//   2. Exclude wasOverriddenNoTrade=true (no-trade overrides, Tara chose not to trade)
+//   3. Exclude tier='no-go-data' (stale price during wifi/feed issues)
+//   4. Deduplicate by windowId — keep only the LAST snapshot per window
+//      (aborts + re-locks create multiple entries; only the final one counts)
+const _isRealTrade=(e)=>{
+  if(!e)return false;
+  if(e.result!=='WIN'&&e.result!=='LOSS')return false;
+  if(e.wasOverriddenNoTrade===true)return false;
+  if(e.tier==='no-go-data')return false;
+  return true;
+};
+
+// Deduplicate entries by windowId, keeping the last committed snapshot per window.
+// When no windowId: use id (timestamp) as unique key.
+const _deduplicateByWindow=(entries)=>{
+  const map=new Map();
+  for(const e of entries){
+    if(!_isRealTrade(e))continue;
+    const key=e.windowId||e.wid||String(e.id||Math.random());
+    // Keep the later entry (higher id = more recent commit)
+    const existing=map.get(key);
+    if(!existing||(e.id||0)>(existing.id||0)){
+      map.set(key,e);
+    }
+  }
+  return Array.from(map.values());
+};
+
+// The single canonical scored trade list from a call log array
+const _canonicalTrades=(callLog)=>{
+  if(!Array.isArray(callLog)||callLog.length===0)return[];
+  return _deduplicateByWindow(callLog);
+};
+// ════════════════════════════════════════════════════════════════════════════
+
 // Returns table in the same shape as V104_SEED_CALIBRATION.
 function buildV104Table(callLog){
   if(!USE_V104_CALIBRATION_TABLES||!Array.isArray(callLog)||callLog.length===0){
@@ -6037,16 +6078,15 @@ const getMarketSessions=()=>{
 // move BTC 1-3% in seconds. Times are UTC. Tara enters BLACKOUT (no new locks)
 // 30 min before, OBSERVE-ONLY during, ENHANCED for 15 min after.
 const MACRO_EVENTS=[
-  // ── US CPI & PPI ── 8:30 AM EST = 13:30 UTC (winter), 12:30 UTC (summer DST)
-  // Released 2nd Tuesday/Wednesday of month, ~10am ET. Use 13:30 UTC as proxy.
-  {name:'CPI/PPI',dayOfMonth:[10,11,12,13,14,15],hourUTC:13,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
-  // ── NFP ── First Friday of month, 8:30 AM EST = 13:30 UTC
-  {name:'NFP',dayOfWeek:5,weekOfMonth:1,hourUTC:13,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
-  // ── FOMC Rate Decision ── 8 times/year, 2:00 PM EST = 19:00 UTC, Wed
-  // Treat 1st-3rd Wed as a window — actual FOMC Wed is highlighted
-  {name:'FOMC',dayOfWeek:3,hourUTC:19,minUTC:0,impact:'EXTREME',preMin:45,postMin:30,monthsOnly:[1,3,5,6,7,9,11,12]},
-  // ── PCE ── Last Friday of month, 8:30 AM EST = 13:30 UTC
-  {name:'PCE',dayOfWeek:5,weekOfMonth:-1,hourUTC:13,minUTC:30,impact:'HIGH',preMin:30,postMin:15},
+  // ── US CPI & PPI ── 8:30 AM ET = 13:30 UTC (EST) or 12:30 UTC (EDT)
+  // V10.7.78: hourUTC stored as ET hour (8), resolved to UTC at runtime in getMacroEventState
+  {name:'CPI/PPI',dayOfMonth:[10,11,12,13,14,15],hourET:8,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
+  // ── NFP ── First Friday of month, 8:30 AM ET
+  {name:'NFP',dayOfWeek:5,weekOfMonth:1,hourET:8,minUTC:30,impact:'EXTREME',preMin:30,postMin:15},
+  // ── FOMC Rate Decision ── 2:00 PM ET
+  {name:'FOMC',dayOfWeek:3,hourET:14,minUTC:0,impact:'EXTREME',preMin:45,postMin:30,monthsOnly:[1,3,5,6,7,9,11,12]},
+  // ── PCE ── Last Friday of month, 8:30 AM ET
+  {name:'PCE',dayOfWeek:5,weekOfMonth:-1,hourET:8,minUTC:30,impact:'HIGH',preMin:30,postMin:15},
   // ── Powell speeches ── irregular but Wed 19:30 UTC during FOMC weeks
   // (covered by FOMC entry above)
   // ── Retail Sales ── Mid-month, 8:30 AM EST = 13:30 UTC
@@ -6082,7 +6122,10 @@ const getMacroEventState=(now=new Date())=>{
     if(ev.dayOfMonth&&!ev.dayOfMonth.includes(dateUTC))continue;
     // Filter by months
     if(ev.monthsOnly&&!ev.monthsOnly.includes(monthUTC))continue;
-    const evMins=ev.hourUTC*60+ev.minUTC;
+    // V10.7.78: resolve ET hour to UTC at runtime using DST state
+    const _etOffset=_isUSDST(now)?4:5; // EDT=UTC-4, EST=UTC-5
+    const _eventHourUTC=ev.hourET!=null?ev.hourET+_etOffset:(ev.hourUTC||0);
+    const evMins=_eventHourUTC*60+ev.minUTC;
     const diffMins=evMins-nowMins;
     if(diffMins>0&&diffMins<=ev.preMin)return{state:'BLACKOUT',event:ev,minutesUntil:diffMins};
     if(diffMins<=0&&Math.abs(diffMins)<=2)return{state:'OBSERVE',event:ev,minutesUntil:diffMins};
@@ -6233,35 +6276,59 @@ const PHASE_PROFILES={
 };
 
 // Returns the phase key for a given UTC hour:minute
+// V10.7.78 — DST-AWARE PHASE KEY
+//   Problem: Phase boundaries were hardcoded for EST (UTC-5).
+//   During EDT (UTC-4, Mar-Nov), all NY session labels are 1 hour late.
+//   US trading sessions were mislabeled → sessionWeights/DoW calibration mislabeled.
+//
+//   Fix: compute US DST offset dynamically.
+//   US DST: second Sunday of March (clocks spring forward) → first Sunday of November (fall back)
+//   When DST active: NY sessions start 1 hour earlier in UTC.
+//   EDT = UTC-4 → NY Open = 12:30 UTC (not 13:30)
+//   EST = UTC-5 → NY Open = 13:30 UTC
+const _isUSDST=(now=new Date())=>{
+  // DST is active when local time is ahead of standard time
+  // Simple check: compare Jan offset (EST) vs current offset
+  const jan=new Date(now.getFullYear(),0,1);
+  const jul=new Date(now.getFullYear(),6,1);
+  const stdOffset=Math.max(jan.getTimezoneOffset(),jul.getTimezoneOffset());
+  return now.getTimezoneOffset()<stdOffset;
+};
+
 const getPhaseKey=(hUTC,mUTC)=>{
   const minOfDay=hUTC*60+mUTC;
+  // V10.7.78: shift NY boundaries 60min earlier during EDT (DST active)
+  const _dst=_isUSDST();
+  const _nyShift=_dst?60:0; // EDT shifts NY sessions 60min earlier in UTC
   if(minOfDay>=22*60||minOfDay<4*60)return'ASIA_OPEN';
   if(minOfDay<7*60)return'ASIA_LATE';
   if(minOfDay<8*60)return'EU_PREOPEN';
-  if(minOfDay<12*60)return'EU_OPEN';
-  if(minOfDay<13*60+30)return'NY_PREMARKET';
-  if(minOfDay<14*60+30)return'NY_OPEN';
-  if(minOfDay<16*60)return'NY_MORNING';
-  if(minOfDay<17*60)return'NY_LUNCH';
-  if(minOfDay<20*60)return'NY_AFTERNOON';
-  if(minOfDay<21*60)return'NY_CLOSE';
+  if(minOfDay<(12*60-_nyShift))return'EU_OPEN';
+  if(minOfDay<(13*60+30-_nyShift))return'NY_PREMARKET';
+  if(minOfDay<(14*60+30-_nyShift))return'NY_OPEN';
+  if(minOfDay<(16*60-_nyShift))return'NY_MORNING';
+  if(minOfDay<(17*60-_nyShift))return'NY_LUNCH';
+  if(minOfDay<(20*60-_nyShift))return'NY_AFTERNOON';
+  if(minOfDay<(21*60-_nyShift))return'NY_CLOSE';
   return'AFTERHOURS';
 };
 
 // Returns minutes until next phase transition + the next phase key.
 const getNextPhaseTransition=(hUTC,mUTC)=>{
   const minOfDay=hUTC*60+mUTC;
+  const _dst=_isUSDST();
+  const _s=_dst?60:0; // DST shift
   const boundaries=[
     {at:4*60,phase:'ASIA_LATE'},
     {at:7*60,phase:'EU_PREOPEN'},
     {at:8*60,phase:'EU_OPEN'},
-    {at:12*60,phase:'NY_PREMARKET'},
-    {at:13*60+30,phase:'NY_OPEN'},
-    {at:14*60+30,phase:'NY_MORNING'},
-    {at:16*60,phase:'NY_LUNCH'},
-    {at:17*60,phase:'NY_AFTERNOON'},
-    {at:20*60,phase:'NY_CLOSE'},
-    {at:21*60,phase:'AFTERHOURS'},
+    {at:12*60-_s,phase:'NY_PREMARKET'},
+    {at:13*60+30-_s,phase:'NY_OPEN'},
+    {at:14*60+30-_s,phase:'NY_MORNING'},
+    {at:16*60-_s,phase:'NY_LUNCH'},
+    {at:17*60-_s,phase:'NY_AFTERNOON'},
+    {at:20*60-_s,phase:'NY_CLOSE'},
+    {at:21*60-_s,phase:'AFTERHOURS'},
     {at:22*60,phase:'ASIA_OPEN'},
   ];
   for(const b of boundaries){
@@ -12540,7 +12607,7 @@ class ErrorBoundary extends React.Component{
             </div>
           </details>
           <p className="text-xs text-[#E8E9E4]/60 mb-4 max-w-2xl leading-relaxed">
-            Tara hit an error during render. Service workers and browser caches have been cleared in the background. Your trade history, weights, and learning are safe in Firestore.
+            Tara hit an error during render. Service workers and browser caches have been cleared in the background. Your trade history, weights, and learning are safe in Supabase.
           </p>
           <div className="flex gap-3 flex-wrap">
             <button onClick={_copyDiag} className={'px-4 py-2 rounded font-bold border transition-colors '+(this.state.copied?'bg-[#E5C870]/15 border-[#E5C870] text-[#E5C870]':'bg-[#E8E9E4]/5 border-[#E8E9E4]/20 text-[#E8E9E4]/85 hover:bg-[#E8E9E4]/10')}>{this.state.copied?'Copied — paste to me':'Copy diagnostic'}</button>
@@ -21506,10 +21573,8 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
   //   don't contribute to win rate). Tagged with `source` so we can show the split.
   const allResolved=React.useMemo(()=>{
     const manual=(tradeLog||[]).filter(t=>t.result==='WIN'||t.result==='LOSS').map(t=>({...t,source:'manual'}));
-    // V5.7.5: Plumb strike/closingPrice/windowId/posterior/qScore through so the drill
-    //   rows can render market context. Previously only id/time/result/regime/dir/etc were
-    //   passed — drill rows for Tara-source trades had blank %, FGT, Q, bps cells.
-    const taraCalls=(taraCallLog||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.dir==='UP'||e.dir==='DOWN')).map(e=>({
+    // V10.7.82b: Use canonical filter (excludes no-go-data, wasOverriddenNoTrade, deduplicates by windowId)
+    const taraCalls=_canonicalTrades((taraCallLog||[]).filter(e=>e&&(e.dir==='UP'||e.dir==='DOWN'))).map(e=>({
       id:e.id,time:e.time,result:e.result,
       regime:e.regime,
       direction:e.dir,
@@ -22754,9 +22819,9 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
               React.createElement('span',{className:healthData.kalshiOk?'text-emerald-400':healthData.kalshiCached?'text-amber-400':'text-rose-400'},
                 healthData.kalshiOk?'● live':healthData.kalshiCached?'● cached':'○ offline')
             ),
-            // Firestore sync
+            // Supabase sync
             React.createElement('div',{className:'flex items-center justify-between'},
-              React.createElement('span',{className:'text-[#E8E9E4]/60'},'Firestore sync'),
+              React.createElement('span',{className:'text-[#E8E9E4]/60'},'Supabase sync'),
               React.createElement('span',{className:healthData.firestoreOk?'text-emerald-400':'text-amber-400'},
                 healthData.firestoreOk?'● connected':'○ unknown')
             ),
@@ -22794,7 +22859,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
     window.addEventListener('keydown',onKey);
     return()=>window.removeEventListener('keydown',onKey);
   },[onClose]);
-  const resolved=React.useMemo(()=>(taraCallLog||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')),[taraCallLog]);
+  const resolved=React.useMemo(()=>_canonicalTrades(taraCallLog||[]),[taraCallLog]);
   // ── WR Heatmap by UTC hour × day of week ──
   const heatmap=React.useMemo(()=>{
     const grid={};
@@ -28286,6 +28351,14 @@ function TaraApp(){
   // V10.4.1 Module A — delay gate state. Tracks per-window delay duration
   // and the conditions when delay first triggered (for telemetry).
   const _v104_1_delayStateRef=useRef(null);
+  // V10.7.81: Flat-gap watch state. When gap=0 at lock time, instead of sitting out
+  //   immediately, Tara enters WATCHING mode. She checks every 30s whether:
+  //   (a) gap has developed to ≥8pt (real directional signal formed), AND
+  //   (b) entry price is still ≤68¢ (good odds remaining), AND
+  //   (c) ≥5 min left in window.
+  //   If all three: lock. If gap never develops or price too expensive: sit out.
+  //   {windowId, startedAt, direction (which way gap was leaning when watch started)}
+  const _flatGapWatchRef=useRef(null);
   // V10.7.70: Revised abort guard. V10.7.68 used max-3-aborts-per-window which
   //   caused windows like [31,69,31,69] to lock out after 3 aborts even when
   //   a high-confidence signal appeared later. The window was scanned the whole time.
@@ -28460,7 +28533,9 @@ function TaraApp(){
       //   trade this." Counting these as wins/losses misled the record — the user
       //   sees "Tara's Record 803W-497L" thinking those are real trades. They're
       //   not. Now the scorecard reflects only trades Tara would actually take.
+      // V10.7.57: exclude no-trade overrides. V10.7.82: also exclude no-go-data (stale price).
       if(e.wasOverriddenNoTrade===true)return;
+      if(e.tier==='no-go-data')return;
       const wt=e.windowType;
       if(!out[wt])out[wt]={wins:0,losses:0,sitouts:0};
       if(e.result==='WIN')out[wt].wins++;
@@ -28513,7 +28588,7 @@ function TaraApp(){
   useEffect(()=>{
     if(_mlTrainDebounceRef.current)clearTimeout(_mlTrainDebounceRef.current);
     _mlTrainDebounceRef.current=setTimeout(()=>{
-      const resolved=(taraCallLog||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&e.signalScoresAtLock);
+      const resolved=_canonicalTrades((taraCallLog||[]).filter(e=>e&&e.signalScoresAtLock));
       if(resolved.length<TARA_ML_MIN_TRADES){
         try{console.info(`[ML] ${resolved.length}/${TARA_ML_MIN_TRADES} resolved trades with signals — need more data`);}catch(_){}
         return;
@@ -29837,8 +29912,10 @@ function TaraApp(){
         hourlyBuckets[h][e.result==='WIN'?'wins':'losses']+=1;
       }catch(_){}
     });
-    // ── V8.2: Walk-forward WR by recency window ──
-    const _allResolved=(taraCallLog||[]).filter(e=>e&&(e.asset||'BTC')===currentAsset&&(e.result==='WIN'||e.result==='LOSS'));
+    // V10.7.82b: Use canonical filter for all WR computations.
+    //   Previously: raw WIN/LOSS filter → included no-go-data (wifi losses) + wasOverriddenNoTrade
+    //   Now: _isRealTrade() + deduplicated by windowId = single source of truth
+    const _allResolved=_canonicalTrades((taraCallLog||[]).filter(e=>e&&(e.asset||'BTC')===currentAsset));
     const _windowWR=(daysBack)=>{
       const cutoff=_now.getTime()-daysBack*24*60*60*1000;
       const inWindow=_allResolved.filter(e=>e.time>=cutoff);
@@ -38726,9 +38803,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _v1074_8_firstKForDir=_v104_1_delayStateRef.current.firstKForDir;
         const _v1074_8_drop=(typeof _v1074_8_firstKForDir==='number'&&typeof _kForDir==='number')
           ?(_v1074_8_firstKForDir-_kForDir):0;
-        const _v1074_8_dirFlipped=_v104_1_delayStateRef.current.firstDir&&_v104_1_delayStateRef.current.firstDir!==_dirNow;
-        const _v1074_8_isAdverse=_trigger==='price-improved'&&_v1074_8_drop>=8;
-        if(_v1074_8_isAdverse||_v1074_8_dirFlipped){
+        // V10.7.84: Direction-flip abort REMOVED.
+        //   Audit 2026-06-03: 157/166 adverse aborts were direction-flip events, all caused
+        //   by Kalshi bouncing 8-20pts during the patient-wait delay — normal spread noise in
+        //   a 50/50 market. Tara was right on direction but the flip abort chased the noise,
+        //   locked the OPPOSITE direction, and that reversed. Every window was looping 3-8x.
+        //   Direction flips during delay = Kalshi noise. Only abort on a SUSTAINED large drop.
+        // V10.7.84: Raise drop threshold 8 -> 20pts and require >=30s in delay state.
+        //   8-12pt drops are normal Kalshi spread movement. 20+ pts sustained = real signal
+        //   that market consensus moved hard against us. 30s minimum prevents opening-tick
+        //   noise from aborting before we've had time to observe real movement.
+        const _v1074_8_delayMs=Date.now()-_v104_1_delayStateRef.current.firstSeenAt;
+        const _v1074_8_isAdverse=_trigger==='price-improved'&&_v1074_8_drop>=20&&_v1074_8_delayMs>=30000;
+        if(_v1074_8_isAdverse){
           // Audit log the abort, clear delay state, then return WITHOUT locking.
           _auditLogEvent('v10_7_48_adverse_kalshi_abort',{
             windowId:computeWindowId(windowType),
@@ -38737,9 +38824,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             firstKForDir:_v1074_8_firstKForDir,
             finalKForDir:_kForDir,
             kalshiDrop:_v1074_8_drop,
-            dirFlipped:_v1074_8_dirFlipped,
-            delaySeconds:Math.round((Date.now()-_v104_1_delayStateRef.current.firstSeenAt)/1000),
-            reason:_v1074_8_dirFlipped?'direction-flipped-during-delay':'kalshi-moved-against-us',
+            dirFlipped:false,
+            delaySeconds:Math.round(_v1074_8_delayMs/1000),
+            reason:'kalshi-moved-against-us',
           });
           // V10.7.51: lifecycle telemetry + Memory entry for transparency.
           //   Was: abort returned silently, Memory had no record but Discord still
@@ -38755,9 +38842,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             const _abortSnap={
               call:'SIT_OUT',direction:'SIT_OUT',
               confidence:_convNow,
-              reason:_v1074_8_dirFlipped
-                ?`Adverse Kalshi: direction flipped ${_v104_1_delayStateRef.current.firstDir}→${_dirNow} during ${Math.round((Date.now()-_v104_1_delayStateRef.current.firstSeenAt)/1000)}s patient wait — abort (V10.7.48)`
-                :`Adverse Kalshi: kForDir dropped ${_v1074_8_drop}pts (${_v1074_8_firstKForDir}→${_kForDir}) during patient wait — abort (V10.7.48)`,
+              reason:`Adverse Kalshi: kForDir dropped ${_v1074_8_drop}pts (${_v1074_8_firstKForDir}->${_kForDir}) sustained >=20pts after >=30s patient wait — abort (V10.7.84)`,
               atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
               atPosterior:analysis?.rawProbAbove,
               kalshiAtLock:_kNow,
@@ -38772,13 +38857,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               // V10.7.51: lean direction so UI can show what would have happened
               leanDir:_v104_1_delayStateRef.current.firstDir,
               leanPct:_convNow,
-              _v10_7_51_abortType:_v1074_8_dirFlipped?'direction-flipped':'kalshi-adverse',
+              _v10_7_51_abortType:'kalshi-adverse',
               _v10_7_51_firstDir:_v104_1_delayStateRef.current.firstDir,
               _v10_7_51_currentDir:_dirNow,
               _v10_7_51_firstKForDir:_v1074_8_firstKForDir,
               _v10_7_51_finalKForDir:_kForDir,
               _v10_7_51_kalshiDrop:_v1074_8_drop,
-              _v10_7_51_delaySeconds:Math.round((Date.now()-_v104_1_delayStateRef.current.firstSeenAt)/1000),
+              _v10_7_51_delaySeconds:Math.round(_v1074_8_delayMs/1000),
             };
             _logSnapshotEntry(_abortSnap);
           }catch(e){
@@ -39286,6 +39371,37 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   memory + scorecards stopped updating for both BTC and ETH. Bug shipped in V7.8 and
     //   compounded each version since.
     const _logSnapshotEntry=(snapshot)=>{
+      // V10.7.82: Universal entry cost guard — block entries outside valid range
+      //   regardless of which code path created the snapshot.
+      //   Data showed 5 entries >85¢ and 2 entries <35¢ slipping through.
+      //   These were on no-go-edge/time-cap-commit paths that bypass the main gate.
+      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&snapshot.wasOverriddenNoTrade!==true&&snapshot.tier!=='no-go-data'){
+        const _snapKal=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock):null;
+        const _snapDir=snapshot.call||snapshot.direction;
+        if(_snapKal!=null&&_snapDir){
+          const _snapCost=_snapDir==='UP'?_snapKal:(100-_snapKal);
+          if(_snapCost<35||_snapCost>85){
+            // Entry cost out of range — convert to sit-out
+            snapshot.call='SIT_OUT';
+            snapshot.wasOverriddenNoTrade=true;
+            snapshot.caution=`Entry cost ${_snapCost.toFixed(0)}¢ outside valid range (35-85¢) — sitting out`;
+          }
+        }
+      }
+      //   These capture context the engine doesn't use as signals — needed for
+      //   XGBoost to learn something new beyond what the posterior already encodes.
+      //   Fields: abortCount, bbwRank, timeFraction, kalshiVelocity, windowsSinceReset
+      if(snapshot&&snapshot.locked&&snapshot.wasOverriddenNoTrade!==true&&snapshot.tier!=='no-go-data'){
+        try{
+          snapshot._ml_abortCount=_v104_1_abortCountRef.current?.count||0;
+          snapshot._ml_bbwRank=analysis?.rawSignalScores?._bbwRank??null;
+          snapshot._ml_timeFraction=Math.round((1-((timeState.minsRemaining*60+timeState.secsRemaining)/(windowType==='15m'?900:300)))*100)/100;
+          snapshot._ml_kalshiVelocity=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null
+            ?Number(kalshiYesPrice)-Number(snapshot.kalshiAtLock||kalshiYesPrice)
+            :null;
+          snapshot._ml_cohRatio=(analysis?.rawSignalScores?._v10_7_64_cohRatio)??null;
+        }catch(_){}
+      }
       // V10.7.45: Lifecycle telemetry — record EVERY call regardless of what happens next.
       //   This lets us distinguish "log call never fired" from "log call fired but pushed nothing".
       try{
@@ -39723,12 +39839,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _noGoTier='no-go-coinflip-late';
         }
       }
-      // (d) FLAT GAP in RANGE-CHOP — no directional edge (V10.7.77)
-      //   When gap<5pt AND regime is RANGE-CHOP AND no strong external signal:
-      //   This window has no edge. 17:45 loss: gap=0, conf=54% → lost.
-      //   Crazylion: "not every window is tradeable." This is the implementation.
-      //   Exception: if liqHeatmap, deribitOptions, or liqSignal are firing
-      //   strongly (|signal|>3), those external signals provide edge even without gap.
+      // (d) FLAT GAP WATCH — V10.7.81
+      //   Instead of sitting out flat-gap windows immediately, Tara watches for gap
+      //   to develop. Lock when: gap≥8pt AND entry≤68¢ AND ≥5min left.
+      //   Sit out when: time runs out (<5min) with gap still flat.
       if(!_noGoReason){
         const _gapScore=Math.abs(Number(analysis?.rawSignalScores?.gap)||0);
         const _isChopRegime=analysis?.regime==='RANGE-CHOP'||analysis?.regime==='COMPRESSING';
@@ -39737,9 +39851,31 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           Math.abs(Number(analysis?.rawSignalScores?.deribitOptions)||0),
           Math.abs(Number(analysis?.rawSignalScores?.liqSignal)||0)
         );
-        if(_isChopRegime&&_gapScore<5&&_extSignal<3){
-          _noGoReason=`Flat gap (${_gapScore.toFixed(0)}pt) in ${analysis?.regime} — no directional edge`;
-          _noGoTier='no-go-edge';
+        const _secsLeft=timeState.minsRemaining*60+timeState.secsRemaining;
+        const _curWid=computeWindowId(windowType);
+        if(_isChopRegime&&_gapScore<5&&_extSignal<6){
+          if(_flatGapWatchRef.current?.windowId!==_curWid){
+            _flatGapWatchRef.current={windowId:_curWid,startedAt:Date.now()};
+          }
+          const _gapDeveloped=_gapScore>=8;
+          const _activeDirWatch=tc?.call==='UP'||tc?.call==='DOWN'?tc.call:(tc?.direction||null);
+          const _kNowWatch=typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null;
+          const _kalshiForDirWatch=(_kNowWatch!=null&&_activeDirWatch)?(_activeDirWatch==='UP'?_kNowWatch:(100-_kNowWatch)):null;
+          const _entryOK=_kalshiForDirWatch!=null&&_kalshiForDirWatch<=68;
+          if(_gapDeveloped&&_entryOK&&_secsLeft>=300){
+            // Gap developed with good odds — allow lock, fall through normally
+            _flatGapWatchRef.current=null;
+          } else if(_secsLeft<300){
+            // Time ran out flat — sit out
+            const _watchAge=Math.round((Date.now()-(_flatGapWatchRef.current?.startedAt||Date.now()))/1000);
+            _noGoReason=`Flat gap watched ${_watchAge}s — never developed (${_gapScore.toFixed(0)}pt at close)`;
+            _noGoTier='no-go-edge';
+          } else {
+            // Still watching — return without locking, check next tick
+            return;
+          }
+        } else if(_flatGapWatchRef.current?.windowId===_curWid){
+          _flatGapWatchRef.current=null;
         }
       }
       if(_noGoReason){
@@ -39894,7 +40030,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _rangeBps=_wa?.rangeBps||0;
           const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
           const _isTrueDeadzone=_postKnown&&_post>=45&&_post<=55; // V10.7.48: posterior coin flip
-          if(!_isDeadWindow&&!_isTrueDeadzone){
+          // V10.7.82b: Flow + momentum override — if posterior is borderline coin-flip
+          //   (45-55%) BUT flow AND momentum both strongly agree with direction,
+          //   it's not actually a coin flip. Strong directional tape overrides deadzone.
+          //   This prevents sitting out on "UP 53% with flow=+20, momentum=+18" setups.
+          const _rss=analysis?.rawSignalScores||{};
+          const _callDir=taraCall?.call;
+          const _flowVal=Number(_rss.flow||0);
+          const _momVal=Number(_rss.momentum||0);
+          const _flowAligned=_callDir==='UP'?_flowVal>=15:_flowVal<=-15;
+          const _momAligned=_callDir==='UP'?_momVal>=10:_momVal<=-10;
+          const _hasStrongTape=_flowAligned&&_momAligned;
+          const _hasStrongGap=Math.abs(Number((analysis?.rawSignalScores||{}).gap||0))>=15;
+          const _effectiveDeadzone=_isTrueDeadzone&&!_hasStrongTape&&!_hasStrongGap;
+          if(!_isDeadWindow&&!_effectiveDeadzone){
             // Force-commit to posterior direction. Skip the sitout snapshot entirely.
             // V10.7.6 — check for reversal signals before committing
             const _v107_6=_v10_7_6_reversalCheck(_post,analysis);
@@ -39932,11 +40081,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }
           // Genuine sit-out — either dead window OR true coin-flip posterior.
           // V10.7.48: separate tier for posterior-deadzone vs dead-window so we can audit each path.
-          const _sitReason=_isTrueDeadzone
+          const _sitReason=_effectiveDeadzone
             ?`Coin-flip posterior ${_commitConf}% at time-cap — no real conviction, sit out (V10.7.48 deadzone guard)`
             :`V10.2.50 chop time-cap guard: RANGE-CHOP regime + ${_commitConf}% conv at ${Math.round(elapsedSec)}s — historically loses, sit out`;
-          const _sitTier=_isTrueDeadzone?'deadzone-sitout':'chop-time-cap-sitout';
-          const _sitCaution=_isTrueDeadzone
+          const _sitTier=_effectiveDeadzone?'deadzone-sitout':'chop-time-cap-sitout';
+          const _sitCaution=_effectiveDeadzone
             ?`Deadzone guard — posterior ${_commitConf}% in 45-55 coin-flip zone → sit out (V10.7.48)`
             :`Chop guard — ${_commitConf}% in RANGE-CHOP at time-cap, sub-baseline conviction → sit out (V10.2.50)`;
           const _sitSnap={
@@ -39956,7 +40105,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             qScore:Math.round(_qFast),
             fgt:analysis?.mtfAlignment,
             _committedAt:Date.now(),
-            _v10_7_48_isTrueDeadzone:_isTrueDeadzone,
+            _v10_7_48_effectiveDeadzone:_effectiveDeadzone,
             _v10_7_48_postAtSitout:_post,
           };
           taraCallSnapshotRef.current=_sitSnap;
@@ -40078,6 +40227,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   Kalshi dipped briefly to 60, climbed back to 68 — Tara should still lock.
       const _lastBelowTs=_activeDir==='UP'?kalshiLastBelowThreshUpRef.current:kalshiLastBelowThreshDownRef.current;
       const _withinGrace=_lastBelowTs>0&&(Date.now()-_lastBelowTs)<=KALSHI_DIP_GRACE_MS;
+
+      // V10.7.80: MINIMUM ENTRY COST — block suspiciously cheap entries.
+      //   The entry floor (52¢) is a MAX gate (blocks expensive entries).
+      //   But cheap entries also lose money: 37¢ entry at 62% WR → -11¢/trade EV.
+      //   When Kalshi prices our direction at <35¢, the market says it's unlikely.
+      //   Going against market consensus at extreme cheap prices is adverse selection.
+      //   Data showed 7 entries <52¢ got through including several losses.
+      //   Note: this is the COST to us (kalshiForDir), not the YES price.
+      //   UP at 38¢ = YES costs 38¢ = market says 38% chance UP.
+      //   DOWN at 38¢ = YES is 62¢, NO costs 38¢ = market says 38% chance DOWN.
+      const _MIN_ENTRY_COST=35; // block if our side costs less than 35¢
+      if(_kalshiForDir!=null&&_kalshiForDir<_MIN_ENTRY_COST&&samples>0){
+        // Market strongly disagrees with our direction — sit out
+        return;
+      }
       // Currently above threshold AND has been above all window so far AND not in grace → window closed.
       if(_kalshiForDir>KALSHI_ENTRY_THRESH&&_wasBelow&&!_withinGrace&&samples>0){
         // Was previously actionable, now isn't — entry window closed mid-flight
@@ -40872,6 +41036,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   Previously baseData read fresh values, so a DOWN-locked window could broadcast
     //   "DOWN · Posterior 89%" when 89% meant 89% UP (current engine view post-lock).
     if(!taraBroadcastRef.current.sentLock&&taraCallSnapshotRef.current&&taraCallSnapshotRef.current.call!=='SIT_OUT'){
+      // V10.7.82b: Stability check — wait 2s after commit before broadcasting.
+      //   Prevents "locked then immediately overridden" false Discord messages.
+      //   When deadzone guard or coherence override fires after initial lock,
+      //   the snapshot changes within 1-2 renders. Wait 2s to ensure it's stable.
+      const _commitAge=taraCallSnapshotRef.current?._committedAt
+        ?Date.now()-taraCallSnapshotRef.current._committedAt:9999;
+      if(_commitAge<2000)return; // too fresh — might still be overridden, check next render
       // V10.7.73b: Also block no-go-data and no-go-edge from Discord.
       //   These are automatic system overrides (stale price, data integrity, no edge)
       //   not Tara's trading calls. User doesn't override them — system does.
@@ -44484,8 +44655,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <div className="space-y-3 text-xs leading-relaxed text-[#E8E9E4]/75">
                   <p><strong className="text-white">What Tara does:</strong> Reads BTC + ETH price action, tape flow, regime, FGT alignment, and a 7-signal fusion to predict whether the price will close above or below strike at the end of each 15m or 5m window. She makes a call when she has high enough conviction; otherwise she sits out. She learns from every result and adapts her weights over time.</p>
                   <p><strong className="text-white">Per-asset everything:</strong> BTC and ETH have separate weights, regime memories, scorecards, and learning histories. Switching assets shows that asset's data — they don't blend.</p>
-                  <p><strong className="text-white">Cloud-synced across all your devices:</strong> Trades, scorecards, weights, and learning all sync to Firestore. Open Tara on any browser, on any device, and you see the same data. The SyncStatusPill in the header shows sync health (green = synced, amber = writing, rose = error). Click it to force a fresh resync.</p>
-                  <p><strong className="text-white">Multi-tab safe:</strong> Open Tara in 5 tabs at once — they all share state via BroadcastChannel + atomic Firestore transactions. The TabPresencePill shows when peer tabs are active. No more lost trades from concurrent writes.</p>
+                  <p><strong className="text-white">Cloud-synced across all your devices:</strong> Trades, scorecards, weights, and learning all sync to Supabase. Open Tara on any browser, on any device, and you see the same data. The SyncStatusPill in the header shows sync health (green = synced, amber = writing, rose = error). Click it to force a fresh resync.</p>
+                  <p><strong className="text-white">Multi-tab safe:</strong> Open Tara in 5 tabs at once — they all share state via BroadcastChannel + atomic Supabase transactions. The TabPresencePill shows when peer tabs are active. No more lost trades from concurrent writes.</p>
                 </div>
               </section>
 
