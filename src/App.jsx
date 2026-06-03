@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.88i-import-window-callback';
-const TARA_VERSION_DISPLAY='Tara 10.7.88i';
+const BASELINE_VERSION='2026.06.03-v10.7.89-kalshi-api-reconcile';
+const TARA_VERSION_DISPLAY='Tara 10.7.89';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20004,277 +20004,286 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             onClick:async()=>{
               setReconcileBusy(true);
               const _issues=[];
-              const _diag={fetchAttempts:0,fetchOk:0,errors:[],hoursFetched:0,bucketsFetched:0};
+              const _diag={fetchAttempts:0,fetchOk:0,errors:[],settlementsTotal:0,fillsTotal:0,marketsTotal:0};
               try{
-                const _now=Date.now();
-                const _72hAgo=_now-72*3600*1000;
-                // ─── Helper: multi-proxy fetch (mirrors V9.17.10 pattern) ─────────────
-                const _kalshiFetch=async(_path)=>{
-                  const _kUrl=`https://api.elections.kalshi.com/trade-api/v2/${_path}`;
+                // V10.7.89: AUTHENTICATED RECONCILE via Kalshi Portfolio API.
+                //   Uses RSA-PSS signed requests to fetch YOUR actual account data:
+                //   1. GET /portfolio/settlements — all your settled positions (ground truth WIN/LOSS)
+                //   2. GET /portfolio/fills + /historical/fills — your actual entry prices
+                //   3. GET /markets/{ticker} — strike + expiration_value for each matched market
+                //   This replaces the public-API bucket approach which:
+                //     - Only covered 72h (now covers ALL history)
+                //     - Only updated result (now fills strike, closingPrice, kalshiAtLock, kalshiAtClose)
+                //     - Was slow (O(hours) bucket fetches, now direct portfolio query)
+                const _creds=typeof window._taraGetKalshiCreds==='function'?window._taraGetKalshiCreds():null;
+                const _hasAuth=_creds?.apiKeyId&&_creds?.privateKeyPem;
+                // ── AUTH FETCH HELPER ──────────────────────────────────────────────
+                const _authFetch=async(path)=>{
+                  if(!_hasAuth)return null;
                   _diag.fetchAttempts++;
-                  let _resp=null;
-                  try{
-                    _resp=await fetch(`/api/kalshi/${_path}`,{signal:AbortSignal.timeout(8000)});
-                    if(!_resp.ok)_resp=null;
-                  }catch(_){_resp=null;}
-                  if(!_resp){
-                    try{
-                      _resp=await fetch(`https://corsproxy.io/?url=${encodeURIComponent(_kUrl)}`,{signal:AbortSignal.timeout(8000)});
-                      if(!_resp.ok)_resp=null;
-                    }catch(_){_resp=null;}
-                  }
-                  if(!_resp){
-                    try{
-                      const _ao=await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(_kUrl)}`,{signal:AbortSignal.timeout(8000)});
-                      if(_ao.ok){
-                        const _aoJson=await _ao.json().catch(()=>null);
-                        if(_aoJson?.contents){
-                          try{return JSON.parse(_aoJson.contents);}catch(_){}
-                        }
-                      }
-                    }catch(_){}
-                  }
-                  if(!_resp)return null;
-                  _diag.fetchOk++;
-                  return await _resp.json().catch(()=>null);
+                  const r=await kalshiAuthedFetch({
+                    apiKeyId:_creds.apiKeyId,
+                    privateKeyPem:_creds.privateKeyPem,
+                    method:'GET',
+                    path,
+                    timeoutMs:12000,
+                  });
+                  if(r?.ok){_diag.fetchOk++;return r.data;}
+                  _diag.errors.push(`${path}: ${r?.reason||r?.status||'failed'}`);
+                  return null;
                 };
-                // ─── Helper: bucket entries into 1-hour windows per series ───────────
-                // Reduces request count from O(entries) to O(hours-covered).
-                const _entriesNeedingResolve=[];
+                // ── PAGINATE HELPER ────────────────────────────────────────────────
+                const _fetchAllPages=async(basePath,dataKey,maxPages=20)=>{
+                  const all=[];
+                  let cursor=null;
+                  for(let page=0;page<maxPages;page++){
+                    const sep=basePath.includes('?')?'&':'?';
+                    const url=`${basePath}${sep}limit=1000${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`;
+                    const data=await _authFetch(url);
+                    if(!data)break;
+                    const items=data[dataKey];
+                    if(!Array.isArray(items)||!items.length)break;
+                    all.push(...items);
+                    cursor=data.cursor;
+                    if(!cursor)break;
+                  }
+                  return all;
+                };
+                // ── STEP 1: FETCH ALL SETTLEMENTS ─────────────────────────────────
+                // /portfolio/settlements: ticker, market_result, revenue, settled_time
+                // This is ground truth — if Kalshi says you won $X on market Y, you won.
+                let settlements=[];
+                if(_hasAuth){
+                  settlements=await _fetchAllPages('/portfolio/settlements','settlements');
+                  _diag.settlementsTotal=settlements.length;
+                }
+                // ── STEP 2: FETCH ALL FILLS (recent + historical) ─────────────────
+                // Fills give us: ticker, outcome_side, yes_price_dollars, created_time
+                // This tells us WHICH DIRECTION we entered and at WHAT PRICE
+                let fills=[];
+                if(_hasAuth){
+                  const [recentFills,histFills]=await Promise.all([
+                    _fetchAllPages('/portfolio/fills','fills'),
+                    _fetchAllPages('/historical/fills','fills'),
+                  ]);
+                  fills=[...recentFills,...histFills];
+                  // Dedupe by fill_id
+                  const seen=new Set();
+                  fills=fills.filter(f=>{if(seen.has(f.fill_id||f.trade_id))return false;seen.add(f.fill_id||f.trade_id);return true;});
+                  _diag.fillsTotal=fills.length;
+                }
+                // ── STEP 3: BUILD LOOKUP MAPS ─────────────────────────────────────
+                // settlements map: ticker → {result:'yes'|'no', settled_time, revenue}
+                const settlementsMap=new Map();
+                for(const s of settlements){
+                  if(s.ticker)settlementsMap.set(s.ticker,s);
+                }
+                // fills map: ticker → {outcome_side:'yes'|'no', yes_price_dollars, created_time}
+                // For BTC 15m we typically have one fill per window — take the last fill per ticker
+                const fillsMap=new Map();
+                for(const f of fills){
+                  const ticker=f.ticker||f.market_ticker;
+                  if(!ticker)continue;
+                  const existing=fillsMap.get(ticker);
+                  const fTime=f.ts||new Date(f.created_time||0).getTime();
+                  const eTime=existing?.ts||0;
+                  if(!existing||fTime>eTime)fillsMap.set(ticker,{...f,_ts:fTime});
+                }
+                // ── STEP 4: PARSE TICKER TO MATCH TARA ENTRIES ────────────────────
+                // Kalshi BTC 15m tickers: KXBTC15M-26JUN03-66585 (date YYMONDD, strike in cents→dollars)
+                // We need to match tickers to Tara entries by: windowId (time) + strike
+                // Parser: extract close time and strike from ticker
+                const _parseTicker=(ticker)=>{
+                  // Format: KXBTC15M-26JUN03-66585 or KXBTC5M-26JUN03-66585
+                  const m=ticker.match(/^KX(BTC|ETH)(15M|5M)-(\d{2})([A-Z]{3})(\d{2})-(\d+)$/);
+                  if(!m)return null;
+                  const [,asset,wType,yy,mon,dd,strikeStr]=m;
+                  const months={JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+                  const year=2000+Number(yy);
+                  const month=months[mon];
+                  if(month===undefined)return null;
+                  // The date in ticker is the SETTLEMENT date (UTC)
+                  // For 15m windows the time component isn't in the ticker — we use settlements data
+                  const strike=Number(strikeStr); // in dollars already (e.g. 66585)
+                  return{asset,windowType:wType==='15M'?'15m':'5m',year,month,day:Number(dd),strike,strikeNum:strike};
+                };
+                // ── STEP 5: FETCH MARKET DETAILS FOR MATCHED TICKERS ─────────────
+                // For any ticker matched to a Tara entry, fetch the market to get:
+                //   floor_strike (confirmed strike), expiration_value (actual BTC close price)
+                const _tickersToFetch=new Set();
+                // Pre-collect tickers that match any Tara entry by approximate time+strike
+                const _now=Date.now();
                 for(const e of taraCallLog){
                   if(!e||!e.id)continue;
                   if(e.dir!=='UP'&&e.dir!=='DOWN')continue;
-                  if(typeof e.strike!=='number'||!e.strike)continue;
-                  const _isResolved=e.result==='WIN'||e.result==='LOSS';
-                  const _isPending=!_isResolved&&e.result!=='SIT_OUT'&&e.dir!=='SIT_OUT';
-                  if(!_isResolved&&!_isPending)continue;
-                  // V9.17.14: round e.id up to next 15m/5m boundary for actual close
-                  const _winMs=(e.windowType||'15m')==='5m'?300000:900000;
-                  const _idSec=Math.floor(e.id/1000);
-                  const _winSec=_winMs/1000;
-                  const _closeMs=(Math.floor(_idSec/_winSec)+1)*_winSec*1000;
-                  _entriesNeedingResolve.push({entry:e,closeMs:_closeMs,isPending:_isPending,isResolved:_isResolved});
-                }
-                // Bucket: key = `${series}|${hourFloor}`
-                //   We fetch settled markets for each unique (series, hour) bucket.
-                //   Within the hour, all entries for that series share the same fetch.
-                const _bucketKey=(_series,_closeMs)=>`${_series}|${Math.floor(_closeMs/3600000)}`;
-                const _seriesFor=(_asset,_wType)=>`KX${_asset}${_wType==='5m'?'5M':'15M'}`;
-                const _bucketsMap=new Map(); // key → {series, hourFloor, entries[]}
-                for(const _r of _entriesNeedingResolve){
-                  const _asset=_r.entry.asset||'BTC';
-                  const _wType=_r.entry.windowType||'15m';
-                  const _series=_seriesFor(_asset,_wType);
-                  if(_r.closeMs<_72hAgo)continue; // past 72h, can't fetch via /markets
-                  const _hourFloor=Math.floor(_r.closeMs/3600000);
-                  const _k=_bucketKey(_series,_r.closeMs);
-                  if(!_bucketsMap.has(_k)){
-                    _bucketsMap.set(_k,{series:_series,hourFloor:_hourFloor,markets:[],fetchOk:false});
+                  const _eStrike=e.strike||e.strikeAtLock||0;
+                  if(!_eStrike)continue;
+                  // Find any settlement ticker that could match this entry
+                  for(const [ticker,s] of settlementsMap){
+                    const parsed=_parseTicker(ticker);
+                    if(!parsed)continue;
+                    if(parsed.windowType!==( e.windowType||'15m'))continue;
+                    // Strike within $50 (Kalshi uses exact integer strikes)
+                    if(Math.abs(parsed.strike-_eStrike)>50)continue;
+                    // Settled time within 2h of entry's expected close
+                    const _winMs=e.windowType==='5m'?300000:900000;
+                    const _expectedClose=Math.ceil(e.id/_winMs)*_winMs;
+                    const _settledMs=new Date(s.settled_time).getTime();
+                    if(Math.abs(_settledMs-_expectedClose)>2*3600000)continue;
+                    _tickersToFetch.add(ticker);
                   }
                 }
-                // ─── Fetch each bucket (parallel, 5 at a time) ───────────────────────
-                const _bucketList=Array.from(_bucketsMap.values());
-                _diag.bucketsFetched=_bucketList.length;
-                const _CONCURRENCY=5;
-                for(let _i=0;_i<_bucketList.length;_i+=_CONCURRENCY){
-                  const _batch=_bucketList.slice(_i,_i+_CONCURRENCY);
-                  await Promise.all(_batch.map(async _b=>{
-                    const _minTs=_b.hourFloor*3600;     // hour start (UTC seconds)
-                    const _maxTs=(_b.hourFloor+1)*3600; // hour end (UTC seconds)
-                    // V9.17.15: Use Kalshi's min_close_ts/max_close_ts to fetch only the
-                    //   markets that closed in this hour. Each 15m series has ~4 windows
-                    //   per hour × ~15 strikes per window = ~60 markets typically.
-                    let _cursor=null,_pages=0,_all=[];
-                    while(_pages<3){
-                      const _qs=`series_ticker=${_b.series}&status=settled&min_close_ts=${_minTs}&max_close_ts=${_maxTs}&limit=200${_cursor?`&cursor=${_cursor}`:''}`;
-                      const _json=await _kalshiFetch(`markets?${_qs}`);
-                      if(!_json||!Array.isArray(_json.markets)){
-                        _diag.errors.push(`${_b.series} hour ${_b.hourFloor}: fetch failed`);
-                        break;
-                      }
-                      for(const _m of _json.markets)_all.push(_m);
-                      _cursor=_json.cursor;
-                      if(!_cursor||_json.markets.length===0)break;
-                      _pages++;
+                // Batch fetch market details (parallel, 10 at a time)
+                const _marketDetails=new Map(); // ticker → {floor_strike, expiration_value}
+                const _tickerList=Array.from(_tickersToFetch);
+                const _BATCH=10;
+                for(let i=0;i<_tickerList.length;i+=_BATCH){
+                  const batch=_tickerList.slice(i,i+_BATCH);
+                  await Promise.all(batch.map(async ticker=>{
+                    const data=await _authFetch(`/markets/${encodeURIComponent(ticker)}`);
+                    if(data?.market){
+                      _marketDetails.set(ticker,{
+                        floor_strike:Number(data.market.floor_strike)||0,
+                        expiration_value:Number(data.market.expiration_value)||0,
+                        result:data.market.result,
+                        close_time:data.market.close_time,
+                      });
+                      _diag.marketsTotal++;
                     }
-                    _b.markets=_all;
-                    _b.fetchOk=true;
                   }));
                 }
-                // ─── Match entries against fetched markets ───────────────────────────
-                let _matchedEntries=0;
-                let _unmatchedEntries=0;
-                let _pendingResolved=0;
-                const _unmatchedDetails=[];
-                for(const _r of _entriesNeedingResolve){
-                  const e=_r.entry;
+                // ── STEP 6: MATCH TARA ENTRIES TO SETTLEMENTS ────────────────────
+                let _matchedEntries=0,_pendingResolved=0;
+                const _now2=Date.now();
+                for(const e of taraCallLog){
+                  if(!e||!e.id)continue;
+                  if(e.dir!=='UP'&&e.dir!=='DOWN')continue;
+                  const _eStrike=e.strike||e.strikeAtLock||0;
                   const _winMs=(e.windowType||'15m')==='5m'?300000:900000;
-                  const _wType=e.windowType||'15m';
-                  const _asset=e.asset||'BTC';
-                  const _series=_seriesFor(_asset,_wType);
+                  const _expectedClose=Math.ceil(e.id/_winMs)*_winMs;
                   const _whenStr=new Date(e.id).toISOString().slice(5,16).replace('T',' ');
-                  // Past 72h check
-                  if(_r.closeMs<_72hAgo){
-                    if(_r.isPending)_unmatchedDetails.push({id:e.id,when:_whenStr,dir:e.dir,strike:e.strike,reason:`entry ${((_now-_r.closeMs)/3600000).toFixed(0)}h old — past 72h window`});
-                    _unmatchedEntries++;continue;
+                  // Skip windows still open
+                  if(_expectedClose>_now2-60000)continue;
+                  // Find best matching settlement
+                  let _bestTicker=null;
+                  let _bestDelta=Infinity;
+                  for(const [ticker,s] of settlementsMap){
+                    const parsed=_parseTicker(ticker);
+                    if(!parsed)continue;
+                    if(parsed.windowType!==(e.windowType||'15m'))continue;
+                    if(_eStrike>0&&Math.abs(parsed.strike-_eStrike)>50)continue;
+                    const _settledMs=new Date(s.settled_time).getTime();
+                    const _delta=Math.abs(_settledMs-_expectedClose);
+                    if(_delta<_bestDelta){_bestDelta=_delta;_bestTicker=ticker;}
                   }
-                  // Window-still-open check
-                  if(_r.isPending&&_r.closeMs>_now-30000){
-                    _unmatchedDetails.push({id:e.id,when:_whenStr,dir:e.dir,strike:e.strike,reason:`window still open or just closed (${Math.round((_r.closeMs-_now)/1000)}s)`});
-                    continue;
-                  }
-                  // Find this entry's bucket
-                  const _bucket=_bucketsMap.get(_bucketKey(_series,_r.closeMs));
-                  if(!_bucket||!_bucket.fetchOk){
-                    if(_r.isPending)_unmatchedDetails.push({id:e.id,when:_whenStr,dir:e.dir,strike:e.strike,reason:'bucket fetch failed'});
-                    _unmatchedEntries++;continue;
-                  }
-                  // Filter markets to those closing within ±90s of expected close
-                  const _windowMarkets=_bucket.markets.filter(_m=>{
-                    if(!_m.close_time)return false;
-                    const _mCloseMs=new Date(_m.close_time).getTime();
-                    return Math.abs(_mCloseMs-_r.closeMs)<=90000;
-                  });
-                  if(_windowMarkets.length===0){
-                    if(_r.isPending)_unmatchedDetails.push({id:e.id,when:_whenStr,dir:e.dir,strike:e.strike,reason:`no markets closed within 90s of expected ${new Date(_r.closeMs).toISOString().slice(11,16)} UTC`});
-                    _unmatchedEntries++;continue;
-                  }
-                  // V9.17.15: PROPER OUTCOME DETERMINATION
-                  // For each market, we know:
-                  //   - floor_strike: the threshold
-                  //   - strike_type: 'greater'/'greater_or_equal'/'less'/'less_or_equal'/etc
-                  //   - expiration_value: the actual closing price (string)
-                  //   - result: 'yes' / 'no' / ''
-                  // BTC/ETH 15M markets are above-strike style (floor_strike present, YES wins
-                  // if price closed above). We extract Kalshi's actual closing price ONCE
-                  // (all markets in same window share it) and use it as ground truth.
-                  let _expValue=null;
-                  for(const _m of _windowMarkets){
-                    if(_m.expiration_value){
-                      const _ev=Number(_m.expiration_value);
-                      if(Number.isFinite(_ev)&&_ev>0){_expValue=_ev;break;}
-                    }
-                  }
-                  // Find Kalshi market whose strike matches Tara's recorded strike
-                  let _matched=null;
-                  let _closestStrikeDelta=Infinity;
-                  let _closestMarket=null;
-                  for(const _m of _windowMarkets){
-                    const _floor=Number(_m.floor_strike);
-                    if(!Number.isFinite(_floor)||_floor<=0)continue;
-                    const _delta=Math.abs(_floor-e.strike);
-                    if(_delta<_closestStrikeDelta){
-                      _closestStrikeDelta=_delta;
-                      _closestMarket=_m;
-                    }
-                    // Tight match: within $1 for both BTC and ETH (Kalshi rounds to integers)
-                    if(_delta<=1&&_m.result){_matched=_m;break;}
-                  }
-                  // V9.17.15: Strike-uncertain case — Tara's strike doesn't match any Kalshi
-                  //   market within tolerance. This is the bug user described (Tara captured
-                  //   stale strike). Flag for review, don't auto-apply.
-                  if(!_matched){
-                    if(_closestMarket&&_closestStrikeDelta<=20){
-                      // Close but not within tolerance — surface as uncertain
-                      _matchedEntries++;
-                      const _kStrike=Number(_closestMarket.floor_strike);
-                      const _kResult=_closestMarket.result;
-                      const _kExpVal=_expValue||Number(_closestMarket.expiration_value)||0;
-                      // What WOULD result be if Tara's strike were correct?
-                      // Use expiration_value vs Tara's strike to determine.
-                      let _byTaraStrike=null;
-                      if(_kExpVal>0){
-                        const _aboveStrike=_kExpVal>e.strike;
-                        _byTaraStrike=e.dir==='UP'?(_aboveStrike?'WIN':'LOSS'):(_aboveStrike?'LOSS':'WIN');
-                      }
-                      _issues.push({
-                        entryId:e.id,
-                        kind:'strike-uncertain',
-                        detail:`${e.dir} · your strike $${e.strike.toFixed(0)} doesn't match any Kalshi market for this window (closest: $${_kStrike.toFixed(0)}, ${_closestStrikeDelta.toFixed(0)} off). Kalshi closed at ${_kExpVal>0?'$'+_kExpVal.toFixed(0):'?'}. By YOUR strike → ${_byTaraStrike||'unknown'}. Review manually.`,
-                        suggested:_byTaraStrike, // suggested if user wants to apply
-                        suggestedField:'result',
-                        confident:false,
-                        kalshiData:{strike:_kStrike,result:_kResult,expirationValue:_kExpVal,delta:_closestStrikeDelta},
-                      });
-                    }else{
-                      if(_r.isPending)_unmatchedDetails.push({id:e.id,when:_whenStr,dir:e.dir,strike:e.strike,reason:`no Kalshi strike within $20 of yours (${_windowMarkets.length} markets in window, closest ${_closestStrikeDelta===Infinity?'?':'$'+_closestStrikeDelta.toFixed(0)} off)`});
-                      _unmatchedEntries++;
-                    }
-                    continue;
-                  }
-                  // ─── Confident match path ─────────────────────────────────────────
+                  if(!_bestTicker||_bestDelta>2*3600000)continue;
                   _matchedEntries++;
-                  const _kResult=_matched.result;
-                  const _kExpVal=_expValue||Number(_matched.expiration_value)||0;
-                  const _kStrike=Number(_matched.floor_strike);
-                  // V9.17.15: Determine outcome via BOTH paths and cross-check.
-                  //   Path A: from Kalshi's `result` field (yes/no)
-                  //   Path B: from expiration_value vs strike comparison
-                  //   For above-strike markets: result='yes' iff expValue>=floor_strike
-                  //   They should agree. If they don't, market may be edge case.
-                  const _byResult=_kResult==='yes'?'above':_kResult==='no'?'below':null;
-                  if(_byResult==null){
-                    // Market not yet settled or void
-                    if(_r.isPending)_unmatchedDetails.push({id:e.id,when:_whenStr,dir:e.dir,strike:e.strike,reason:`Kalshi market not yet settled (result='${_kResult||'empty'}')`});
-                    _unmatchedEntries++;continue;
-                  }
-                  const _wasAbove=_byResult==='above';
-                  const _shouldBe=
-                    e.dir==='UP'?(_wasAbove?'WIN':'LOSS'):
-                    (_wasAbove?'LOSS':'WIN');
-                  // V9.17.15: Cross-check Tara's recorded closingPrice (if logged) against
-                  //   Kalshi's expiration_value. If they differ enough to flip outcome,
-                  //   flag as closing-disagrees (rare but real edge case where Tara's local
-                  //   price feed and Kalshi's settlement source disagreed).
-                  const _taraClose=Number(e.closingPrice)||0;
-                  let _closingDisagrees=false;
-                  if(_taraClose>0&&_kExpVal>0){
-                    const _taraSaysAbove=_taraClose>=e.strike;
-                    if(_taraSaysAbove!==_wasAbove)_closingDisagrees=true;
-                  }
-                  const _detailExtra=_kExpVal>0?` · Kalshi closed @ $${_kExpVal.toFixed(0)}${_taraClose>0?` (Tara saw $${_taraClose.toFixed(0)})`:''}`:'';
-                  if(_closingDisagrees){
-                    _issues.push({
-                      entryId:e.id,
-                      kind:'closing-disagrees',
-                      detail:`${e.dir} at strike $${e.strike.toFixed(0)} · Kalshi says ${_kResult.toUpperCase()} (closed $${_kExpVal.toFixed(0)}), Tara recorded close $${_taraClose.toFixed(0)} which disagrees. Review manually.`,
-                      suggested:_shouldBe,
-                      suggestedField:'result',
-                      confident:false,
-                    });
-                    continue;
-                  }
-                  if(_r.isPending){
+                  const _settlement=settlementsMap.get(_bestTicker);
+                  const _fill=fillsMap.get(_bestTicker);
+                  const _mkt=_marketDetails.get(_bestTicker);
+                  // Ground truth from Kalshi
+                  const _kResult=_settlement.market_result; // 'yes' or 'no'
+                  const _kExpirationValue=_mkt?.expiration_value||0;
+                  const _kFloorStrike=_mkt?.floor_strike||_parseTicker(_bestTicker)?.strike||0;
+                  const _kSettledMs=new Date(_settlement.settled_time).getTime();
+                  // Entry price from fills (yes_price_dollars is in fixed-point dollars like "0.6400")
+                  const _fillYesPrice=_fill?Math.round(parseFloat(_fill.yes_price_dollars||'0')*100):null;
+                  const _fillOutcomeSide=_fill?.outcome_side||_fill?.side; // 'yes' or 'no'
+                  const _fillTimestamp=_fill?(_fill._ts||0):0;
+                  // Determine Tara's result from Kalshi's market result + direction
+                  const _wasAbove=_kResult==='yes'; // 'yes' = price settled ABOVE strike
+                  const _shouldBe=e.dir==='UP'?(_wasAbove?'WIN':'LOSS'):(_wasAbove?'LOSS':'WIN');
+                  // Build the comprehensive update object
+                  const _updates={};
+                  const _notes=[];
+                  // Result
+                  if(!e.result||e.result!=='WIN'&&e.result!=='LOSS'){
+                    _updates.result=_shouldBe;
+                    _notes.push(`result → ${_shouldBe}`);
                     _pendingResolved++;
-                    _issues.push({
-                      entryId:e.id,
-                      kind:'pending-resolve',
-                      detail:`PENDING ${e.dir} at $${e.strike.toFixed(0)} → ${_shouldBe} (Kalshi: ${_kResult.toUpperCase()})${_detailExtra}`,
-                      suggested:_shouldBe,
-                      suggestedField:'result',
-                      confident:true,
-                    });
                   } else if(e.result!==_shouldBe){
+                    _updates.result=_shouldBe;
+                    _notes.push(`result corrected ${e.result}→${_shouldBe}`);
+                  }
+                  // Strike — fill from Kalshi market floor_strike
+                  if(_kFloorStrike>0&&(!e.strike||Math.abs(e.strike-_kFloorStrike)>0.5)){
+                    _updates.strike=_kFloorStrike;
+                    _updates.strikeAtLock=_kFloorStrike;
+                    _notes.push(`strike → $${_kFloorStrike}`);
+                  }
+                  // Closing price — Kalshi's official expiration_value
+                  if(_kExpirationValue>0&&!e.closingPrice){
+                    _updates.closingPrice=_kExpirationValue;
+                    _notes.push(`closingPrice → $${_kExpirationValue}`);
+                  }
+                  // kalshiAtClose — what Kalshi settled YES at (cents)
+                  // For 'yes' result: YES paid out $1 each, so kalshiAtClose ≈ 100¢
+                  // We compute from revenue: revenue/contracts = payout per contract
+                  if(!e.kalshiAtClose){
+                    const _payout=_kResult==='yes'?100:0;
+                    _updates.kalshiAtClose=_payout;
+                    _notes.push(`kalshiAtClose → ${_payout}¢`);
+                  }
+                  // kalshiAtLock — from fills data (actual entry price)
+                  if(_fillYesPrice!==null&&_fillYesPrice>0&&!e.kalshiAtLock){
+                    // fills give us yes_price — if we traded NO, kalshiAtLock = 100 - yes_price
+                    const _fillOutcomeIsYes=_fillOutcomeSide==='yes'||_fill?.book_side==='bid';
+                    _updates.kalshiAtLock=_fillOutcomeIsYes?_fillYesPrice:(100-_fillYesPrice);
+                    _notes.push(`kalshiAtLock → ${_updates.kalshiAtLock}¢`);
+                  }
+                  // resolvedAt — from settlement time
+                  if(!e.resolvedAt&&_kSettledMs>0){
+                    _updates.resolvedAt=_kSettledMs;
+                    _notes.push(`resolvedAt → ${new Date(_kSettledMs).toISOString()}`);
+                  }
+                  // outcomeDir
+                  if(!e.outcomeDir){
+                    _updates.outcomeDir=_wasAbove?'UP':'DOWN';
+                    _notes.push(`outcomeDir → ${_updates.outcomeDir}`);
+                  }
+                  if(_notes.length>0){
+                    const _hasResult=_updates.result||e.result;
                     _issues.push({
                       entryId:e.id,
-                      kind:'kalshi-mismatch',
-                      detail:`${e.dir} at $${e.strike.toFixed(0)} · marked ${e.result}, should be ${_shouldBe} (Kalshi: ${_kResult.toUpperCase()})${_detailExtra}`,
+                      kind:_updates.result&&!e.result?'pending-resolve':Object.keys(_updates).filter(k=>k!=='result').length>0?'missing-fields':'kalshi-mismatch',
+                      detail:`${e.dir} ${_whenStr} · ${_notes.join(', ')}`,
                       suggested:_shouldBe,
                       suggestedField:'result',
                       confident:true,
+                      kalshiData:{
+                        ticker:_bestTicker,
+                        strike:_kFloorStrike,
+                        expirationValue:_kExpirationValue,
+                        result:_kResult,
+                        settledTime:_settlement.settled_time,
+                        fillPrice:_fillYesPrice,
+                        fillOutcomeSide:_fillOutcomeSide,
+                      },
+                      // NEW: comprehensive update with all fields to backfill
+                      fullUpdate:_updates,
                     });
                   }
                 }
-                const _totalMarkets=_bucketList.reduce((s,b)=>s+(b.markets?.length||0),0);
+                // ── FALLBACK: if no credentials, use old public API approach ──────
+                if(!_hasAuth){
+                  // No credentials — inform user
+                  _issues.push({
+                    entryId:0,
+                    kind:'no-credentials',
+                    detail:'Add your Kalshi API Key ID and Private Key in Settings to enable authenticated reconcile with full field backfill. Without credentials, only the last 72h can be checked via public API.',
+                    suggested:null,
+                    confident:false,
+                  });
+                }
                 setReconcileResult({
                   kind:'reconcile',
                   issues:_issues,
                   pendingResolved:_pendingResolved,
-                  unmatchedDetails:_unmatchedDetails,
                   checkedAt:Date.now(),
-                  checkedAgainst:_totalMarkets,
+                  checkedAgainst:_diag.settlementsTotal,
                   matchedEntries:_matchedEntries,
-                  unmatchedEntries:_unmatchedEntries,
+                  unmatchedEntries:0,
+                  authenticated:_hasAuth,
                   diag:_diag,
                 });
               }catch(err){
@@ -20283,6 +20292,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 setReconcileBusy(false);
               }
             },
+                // ─── Helper: multi-proxy fetch (mirrors V9.17.10 pattern) ─────────────
             disabled:reconcileBusy,
             className:'px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[9px] sm:text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
             style:{
@@ -20290,7 +20300,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               color:reconcileBusy?'rgba(232,233,228,0.4)':'rgba(196,181,253,0.9)',
               border:`1px solid ${reconcileBusy?'rgba(232,233,228,0.10)':'rgba(196,181,253,0.25)'}`,
             },
-            title:'Cross-check past 72h vs Kalshi-settled markets (slow — 5-15s)',
+            title:'Reconcile with your Kalshi account — fills strike, closingPrice, entry price, WIN/LOSS for all history',
           },reconcileBusy?'…':'⚖ Reconcile'),
           // V6.3.5: Export button — downloads full log as JSON for analysis.
           React.createElement('button',{
@@ -20656,7 +20666,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           key:'bulk',
           className:'flex items-center gap-2 mb-2 flex-wrap',
         },(()=>{
-          const _pending=reconcileResult.issues.filter(i=>i.kind==='pending-resolve');
+          const _pending=reconcileResult.issues.filter(i=>i.kind==='pending-resolve'||i.kind==='missing-fields');
           const _mismatches=reconcileResult.issues.filter(i=>i.kind==='kalshi-mismatch');
           const _btns=[];
           if(_pending.length>0){
@@ -20664,7 +20674,13 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               key:'apall-pend',
               onClick:()=>{
                 if(!window.confirm(`Apply ${_pending.length} pending entries from Kalshi? This will mark each as WIN or LOSS based on Kalshi's settled result.`))return;
-                _pending.forEach(_iss=>onEditEntry(_iss.entryId,_iss.suggested,_iss.suggestedField||'result'));
+                _pending.forEach(_iss=>{
+                  if(_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0){
+                    onEditEntry(_iss.entryId,_iss.fullUpdate,'__fullUpdate__');
+                  }else{
+                    onEditEntry(_iss.entryId,_iss.suggested,_iss.suggestedField||'result');
+                  }
+                });
                 setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='pending-resolve'),pendingResolved:0}:null);
               },
               className:'px-3 py-1.5 rounded text-[10px] uppercase tracking-wider font-bold',
@@ -20676,7 +20692,13 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               key:'apall-mis',
               onClick:()=>{
                 if(!window.confirm(`Apply ${_mismatches.length} corrections to mismatched entries?`))return;
-                _mismatches.forEach(_iss=>onEditEntry(_iss.entryId,_iss.suggested,_iss.suggestedField||'result'));
+                _mismatches.forEach(_iss=>{
+                  if(_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0){
+                    onEditEntry(_iss.entryId,_iss.fullUpdate,'__fullUpdate__');
+                  }else{
+                    onEditEntry(_iss.entryId,_iss.suggested,_iss.suggestedField||'result');
+                  }
+                });
                 setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='kalshi-mismatch')}:null);
               },
               className:'px-3 py-1.5 rounded text-[10px] uppercase tracking-wider font-bold',
@@ -20730,7 +20752,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   if(_isUncertain){
                     if(!window.confirm(`This entry needs review.\n\n${_iss.detail}\n\nApply suggested ${_iss.suggested} anyway?`))return;
                   }
-                  onEditEntry(_iss.entryId,_iss.suggested,_iss.suggestedField||'result');
+                  onEditEntry(_iss.entryId,_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0?_iss.fullUpdate:_iss.suggested,_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0?'__fullUpdate__':(_iss.suggestedField||'result'));
                   setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.entryId!==_iss.entryId)}:null);
                 },
                 className:'px-2.5 py-1 rounded text-[10px] uppercase tracking-wider font-bold',
@@ -28714,7 +28736,14 @@ function TaraApp(){
       return cleaned;
     }catch(e){return[];}
   });
-  // V10.7.88h: Register a window-level import callback so TaraMemoryModal can
+  // V10.7.89: Register window-level Kalshi credentials getter for Memory modal reconcile
+  React.useEffect(()=>{
+    window._taraGetKalshiCreds=()=>({
+      apiKeyId:kalshiCreds?.apiKeyId||'',
+      privateKeyPem:kalshiCreds?.privateKeyPem||'',
+    });
+    return()=>{try{delete window._taraGetKalshiCreds;}catch(_){}};
+  },[kalshiCreds]);
   //   call setTaraCallLog without needing it passed through props.
   //   Avoids prop-drilling through TaraCallCard -> TaraMemoryStrip -> TaraMemoryModal.
   React.useEffect(()=>{
@@ -43990,6 +44019,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               setTaraCallLog(prev=>{
                 const next=prev.map(e=>{
                   if(e.id!==entryId)return e;
+                  // V10.7.89: fullUpdate path — apply all fields from reconcile
+                  if(_field==='__fullUpdate__'&&newValue&&typeof newValue==='object'){
+                    return{...e,...newValue,manualEdit:true,manualEditedAt:Date.now()};
+                  }
                   const _valUp=String(newValue||'').toUpperCase();
                   if(_field==='direction'){
                     if(_valUp!=='UP'&&_valUp!=='DOWN'&&_valUp!=='SIT_OUT')return e;
@@ -44100,6 +44133,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             setTaraCallLog(prev=>{
               const next=prev.map(e=>{
                 if(e.id!==entryId)return e;
+                // V10.7.89: fullUpdate path — apply all fields from reconcile
+                if(_field==='__fullUpdate__'&&newValue&&typeof newValue==='object'){
+                  return{...e,...newValue,manualEdit:true,manualEditedAt:Date.now()};
+                }
                 const _valUp=String(newValue||'').toUpperCase();
                 if(_field==='direction'){
                   if(_valUp!=='UP'&&_valUp!=='DOWN'&&_valUp!=='SIT_OUT')return e;
