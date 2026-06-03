@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.88e-btc-only-import';
-const TARA_VERSION_DISPLAY='Tara 10.7.88e';
+const BASELINE_VERSION='2026.06.03-v10.7.88f-import-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.88f';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19654,7 +19654,7 @@ function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,time
             })
           ),
     ),
-    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,timeFormat:timeFormat,onEditEntry:onEditEntry,onDeleteEntry:onDeleteEntry,initialFilter:windowType}),
+    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,timeFormat:timeFormat,onEditEntry:onEditEntry,onDeleteEntry:onDeleteEntry,initialFilter:windowType,setTaraCallLog:setTaraCallLog,mergeCallLog:_mergeCallLogEntries}),
     learnOpen&&React.createElement(TaraLearningsModal,{learnings:taraLearnings,onClose:()=>setLearnOpen(false)}),
   );
 }
@@ -19843,7 +19843,7 @@ function TaraLearningsModal({learnings,onClose}){
 }
 
 // V5.6.1: Full memory history modal. Filter by window type, sort newest first.
-function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,initialFilter}){
+function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,initialFilter,setTaraCallLog,mergeCallLog}){
   const[editingId,setEditingId]=React.useState(null);
   // V7.0.6: default filter to current windowType (passed from card) so modal opens
   //   already aligned. User can click ALL to broaden.
@@ -20343,8 +20343,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     const importedEntries=Array.isArray(parsed)?parsed:(parsed?.entries||[]);
                     if(!importedEntries.length){alert('No entries found in file.');return;}
                     const btcEntries=importedEntries.filter(e=>e&&(e.asset||'BTC')==='BTC');
+                    if(!setTaraCallLog||!mergeCallLog){alert('Import not available.');return;}
                     setTaraCallLog(prev=>{
-                      const merged=_mergeCallLogEntries(prev,btcEntries);
+                      const merged=mergeCallLog(prev,btcEntries);
                       setTimeout(()=>alert(`Done. Imported ${btcEntries.length} entries. Log now has ${merged.length} entries.`),100);
                       return merged;
                     });
