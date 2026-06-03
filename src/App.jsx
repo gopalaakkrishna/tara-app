@@ -3255,8 +3255,12 @@ const kalshiAuthedFetch=async({apiKeyId,privateKeyPem,method,path,body,timeoutMs
   const m=String(method||'GET').toUpperCase();
   const ts=String(Date.now());
   const fullPath=`/trade-api/v2${path}`;
+  // V10.7.89: Strip query params before signing — Kalshi docs explicitly require
+  //   signing the path WITHOUT query parameters. Including them causes 401.
+  //   e.g. sign /trade-api/v2/portfolio/settlements not /trade-api/v2/portfolio/settlements?limit=1000
+  const fullPathForSigning=fullPath.split('?')[0];
   let sig;
-  try{sig=await _kSign({pem:privateKeyPem,method:m,path:fullPath,ts});}
+  try{sig=await _kSign({pem:privateKeyPem,method:m,path:fullPathForSigning,ts});}
   catch(e){return{ok:false,status:0,reason:'sign-failed: '+(e?.message||String(e))};}
   // V9.18.0: Railway-hosted proxy. Vercel IPs get 403'd by Kalshi (verified
   //   via empty-body 403 on POST /portfolio/orders while GET works). Direct
@@ -4230,8 +4234,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.89-kalshi-api-reconcile';
-const TARA_VERSION_DISPLAY='Tara 10.7.89';
+const BASELINE_VERSION='2026.06.03-v10.7.89b-reconcile-auth-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.89b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28748,7 +28752,7 @@ function TaraApp(){
   //   Avoids prop-drilling through TaraCallCard -> TaraMemoryStrip -> TaraMemoryModal.
   React.useEffect(()=>{
     window._taraImportCallLog=(importedEntries)=>{
-      if(!Array.isArray(importedEntries))return;
+      if(!Array.isArray(importedEntries))return 0;
       const btcEntries=importedEntries.filter(e=>e&&(e.asset||'BTC')==='BTC');
       setTaraCallLog(prev=>{
         const map=new Map();
@@ -28760,7 +28764,16 @@ function TaraApp(){
           else if(!existing.result&&e.result)map.set(key,e);
           else if(existing.result&&e.result&&(e.id||0)>(existing.id||0))map.set(key,e);
         });
-        return Array.from(map.values()).sort((a,b)=>(a.id||0)-(b.id||0));
+        const merged=Array.from(map.values()).sort((a,b)=>(a.id||0)-(b.id||0));
+        // V10.7.89: Force immediate localStorage save — don't rely on debounced useEffect.
+        //   Without this, a page close before the debounce fires loses the imported data.
+        try{
+          const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:2000;
+          const _save=merged.slice(-_cap);
+          localStorage.setItem('taraCallLog_v1',JSON.stringify(_save));
+          sessionStorage.setItem('taraCallLog_session',JSON.stringify(_save.slice(-200)));
+        }catch(_){}
+        return merged;
       });
       return btcEntries.length;
     };
