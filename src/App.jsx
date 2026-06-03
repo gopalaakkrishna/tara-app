@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.88d-btc-only';
-const TARA_VERSION_DISPLAY='Tara 10.7.88d';
+const BASELINE_VERSION='2026.06.03-v10.7.88e-btc-only-import';
+const TARA_VERSION_DISPLAY='Tara 10.7.88e';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20329,7 +20329,35 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             },
             title:'Download call log as JSON for analysis',
           },'↓ Export JSON'),
-          // V9.2.1: CSV export — spreadsheet-friendly format
+          // V10.7.88d: Import JSON — restore data from a previous export
+          React.createElement('button',{
+            onClick:()=>{
+              const _inp=document.createElement('input');
+              _inp.type='file';_inp.accept='.json';
+              _inp.onchange=(ev)=>{
+                const file=ev.target.files?.[0];if(!file)return;
+                const reader=new FileReader();
+                reader.onload=(e)=>{
+                  try{
+                    const parsed=JSON.parse(e.target.result);
+                    const importedEntries=Array.isArray(parsed)?parsed:(parsed?.entries||[]);
+                    if(!importedEntries.length){alert('No entries found in file.');return;}
+                    const btcEntries=importedEntries.filter(e=>e&&(e.asset||'BTC')==='BTC');
+                    setTaraCallLog(prev=>{
+                      const merged=_mergeCallLogEntries(prev,btcEntries);
+                      setTimeout(()=>alert(`Done. Imported ${btcEntries.length} entries. Log now has ${merged.length} entries.`),100);
+                      return merged;
+                    });
+                  }catch(err){alert('Failed: '+(err?.message||String(err)));}
+                };
+                reader.readAsText(file);
+              };
+              _inp.click();
+            },
+            className:'px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-[0.1em] transition-colors',
+            style:{background:'rgba(110,231,183,0.1)',color:'rgba(110,231,183,0.9)',border:'1px solid rgba(110,231,183,0.25)'},
+            title:'Restore call log from a previously exported JSON file',
+          },'↑ Import JSON'),
           React.createElement('button',{
             onClick:()=>{
               try{
@@ -20871,9 +20899,8 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
       // V9.2.0: Asset filter — separate BTC vs ETH views
       React.createElement('div',{className:'flex flex-wrap gap-1 mb-2'},
         [
-          {k:'all',label:`All assets (${counts.btcN+counts.ethN})`,color:'rgba(232,233,228,0.7)'},
+          {k:'all',label:`All (${counts.btcN})`,color:'rgba(232,233,228,0.7)'},
           {k:'BTC',label:`₿ BTC (${counts.btcN})`,color:'rgb(245,158,11)'},
-          {k:'ETH',label:`Ξ ETH (${counts.ethN})`,color:'rgb(96,165,250)'},
         ].map(({k,label,color})=>(
           React.createElement('button',{
             key:k,
