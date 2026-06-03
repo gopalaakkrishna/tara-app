@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.86b-tzdfix';
-const TARA_VERSION_DISPLAY='Tara 10.7.86b';
+const BASELINE_VERSION='2026.06.03-v10.7.86c-per-asset-recal';
+const TARA_VERSION_DISPLAY='Tara 10.7.86c';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4282,38 +4282,58 @@ const V106_3_AVG_SLIPPAGE_CENTS=1.0;
 
 // Seed table from full 885-trade resolved log. Format: WR (0-1), EV (cents/trade), n (sample size)
 // Cells with n=0 are unobserved — engine falls back to legacy logic for those.
+// V10.7.86c: V104_SEED_CALIBRATION rebuilt from 1,678 empirical BTC trades.
+// Replaces old small-sample seeds (most cells had n<30). Now every cell with
+// n>=8 uses observed WR directly. Cells with n<8 use conservative defaults.
+// Key findings baked in:
+//   - High conviction (75-84%) is OVERCONFIDENT: actual WR 56-65%, not 77%+
+//   - RANGE-CHOP|DOWN|<45 wins 64% despite low conviction (Kalshi leads down)
+//   - TRENDING DOWN|DOWN|55-64 wins 88% (strongest cell in dataset)
+//   - HIGH VOL CHOP|DOWN|65-74+ wins 84-86% (excellent regime for DOWN calls)
+//   - SHORT SQUEEZE|UP|85+ only 64% WR (market already priced the squeeze)
 const V104_SEED_CALIBRATION={
-  'HIGH VOL CHOP':{
-    'UP':{'<45':{wr:1.0000,ev:41.00,n:1},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:1.0000,ev:27.00,n:1},'65-74':{wr:0.5000,ev:0.00,n:0},'75-84':{wr:1.0000,ev:50.00,n:1},'85+':{wr:1.0000,ev:5.00,n:1}},
-    'DOWN':{'<45':{wr:0.5000,ev:0.00,n:0},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:0.5000,ev:0.00,n:0},'65-74':{wr:0.5000,ev:0.00,n:0},'75-84':{wr:1.0000,ev:88.00,n:2},'85+':{wr:0.6667,ev:23.00,n:3}}
-  },
   'RANGE-CHOP':{
-    'UP':{'<45':{wr:1.0000,ev:50.00,n:2},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:0.7000,ev:15.00,n:10},'65-74':{wr:0.5294,ev:-15.82,n:17},'75-84':{wr:0.6129,ev:1.10,n:31},'85+':{wr:0.8000,ev:15.60,n:10}},
-    'DOWN':{'<45':{wr:0.6667,ev:31.33,n:3},'45-54':{wr:1.0000,ev:50.00,n:2},'55-64':{wr:0.6667,ev:23.00,n:9},'65-74':{wr:0.7143,ev:25.60,n:35},'75-84':{wr:0.6053,ev:11.66,n:76},'85+':{wr:0.8571,ev:53.86,n:7}}
-  },
-  'SHORT SQUEEZE':{
-    'UP':{'<45':{wr:1.0000,ev:52.00,n:1},'45-54':{wr:1.0000,ev:31.00,n:1},'55-64':{wr:0.6000,ev:-1.04,n:25},'65-74':{wr:0.6818,ev:10.57,n:44},'75-84':{wr:0.6372,ev:2.94,n:113},'85+':{wr:0.6364,ev:0.68,n:22}},
-    'DOWN':{'<45':{wr:0.5000,ev:0.00,n:0},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:1.0000,ev:47.00,n:1},'65-74':{wr:0.4286,ev:-8.43,n:7},'75-84':{wr:0.5000,ev:3.83,n:6},'85+':{wr:0.0000,ev:-100.00,n:1}}
+    'UP':{'<45':{wr:0.450,ev:0,n:5},'45-54':{wr:0.667,ev:0,n:12},'55-64':{wr:0.576,ev:0,n:191},'65-74':{wr:0.516,ev:0,n:62},'75-84':{wr:0.640,ev:0,n:86},'85+':{wr:0.800,ev:0,n:10}},
+    'DOWN':{'<45':{wr:0.642,ev:0,n:299},'45-54':{wr:0.486,ev:0,n:74},'55-64':{wr:0.452,ev:0,n:31},'65-74':{wr:0.597,ev:0,n:67},'75-84':{wr:0.558,ev:0,n:95},'85+':{wr:0.750,ev:0,n:7}}
   },
   'TRENDING DOWN':{
-    'UP':{'<45':{wr:0.5000,ev:0.00,n:0},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:0.5000,ev:0.00,n:0},'65-74':{wr:0.5000,ev:-21.75,n:4},'75-84':{wr:1.0000,ev:26.00,n:1},'85+':{wr:0.5000,ev:0.00,n:0}},
-    'DOWN':{'<45':{wr:0.5000,ev:3.25,n:4},'45-54':{wr:0.5556,ev:14.00,n:9},'55-64':{wr:0.8824,ev:47.94,n:17},'65-74':{wr:0.7313,ev:32.28,n:67},'75-84':{wr:0.6000,ev:16.79,n:185},'85+':{wr:0.7167,ev:32.08,n:60}}
+    'UP':{'<45':{wr:0.450,ev:0,n:0},'45-54':{wr:0.500,ev:0,n:0},'55-64':{wr:0.500,ev:0,n:0},'65-74':{wr:0.500,ev:0,n:4},'75-84':{wr:0.700,ev:0,n:1},'85+':{wr:0.500,ev:0,n:0}},
+    'DOWN':{'<45':{wr:0.450,ev:0,n:4},'45-54':{wr:0.556,ev:0,n:9},'55-64':{wr:0.882,ev:0,n:17},'65-74':{wr:0.725,ev:0,n:69},'75-84':{wr:0.602,ev:0,n:186},'85+':{wr:0.717,ev:0,n:60}}
+  },
+  'SHORT SQUEEZE':{
+    'UP':{'<45':{wr:0.450,ev:0,n:1},'45-54':{wr:0.500,ev:0,n:1},'55-64':{wr:0.636,ev:0,n:33},'65-74':{wr:0.688,ev:0,n:48},'75-84':{wr:0.650,ev:0,n:117},'85+':{wr:0.636,ev:0,n:22}},
+    'DOWN':{'<45':{wr:0.450,ev:0,n:0},'45-54':{wr:0.500,ev:0,n:0},'55-64':{wr:0.580,ev:0,n:2},'65-74':{wr:0.670,ev:0,n:7},'75-84':{wr:0.700,ev:0,n:6},'85+':{wr:0.750,ev:0,n:1}}
   },
   'TRENDING UP':{
-    'UP':{'<45':{wr:0.0000,ev:-44.00,n:2},'45-54':{wr:0.2500,ev:-36.00,n:4},'55-64':{wr:0.4615,ev:-11.38,n:13},'65-74':{wr:0.6667,ev:-0.17,n:18},'75-84':{wr:0.6800,ev:5.84,n:50},'85+':{wr:0.7143,ev:5.29,n:7}},
-    'DOWN':{'<45':{wr:0.5000,ev:0.00,n:0},'45-54':{wr:0.5000,ev:0.00,n:0},'55-64':{wr:0.5000,ev:0.00,n:0},'65-74':{wr:0.5000,ev:0.00,n:0},'75-84':{wr:0.5000,ev:0.00,n:0},'85+':{wr:0.0000,ev:-83.00,n:1}}
+    'UP':{'<45':{wr:0.450,ev:0,n:2},'45-54':{wr:0.500,ev:0,n:4},'55-64':{wr:0.462,ev:0,n:13},'65-74':{wr:0.667,ev:0,n:18},'75-84':{wr:0.680,ev:0,n:50},'85+':{wr:0.750,ev:0,n:7}},
+    'DOWN':{'<45':{wr:0.450,ev:0,n:0},'45-54':{wr:0.500,ev:0,n:0},'55-64':{wr:0.500,ev:0,n:0},'65-74':{wr:0.500,ev:0,n:0},'75-84':{wr:0.500,ev:0,n:0},'85+':{wr:0.500,ev:0,n:1}}
+  },
+  'HIGH VOL CHOP':{
+    'UP':{'<45':{wr:0.450,ev:0,n:1},'45-54':{wr:0.500,ev:0,n:0},'55-64':{wr:0.580,ev:0,n:2},'65-74':{wr:0.670,ev:0,n:2},'75-84':{wr:0.700,ev:0,n:3},'85+':{wr:0.750,ev:0,n:1}},
+    'DOWN':{'<45':{wr:0.450,ev:0,n:0},'45-54':{wr:0.500,ev:0,n:1},'55-64':{wr:0.580,ev:0,n:3},'65-74':{wr:0.846,ev:0,n:13},'75-84':{wr:0.857,ev:0,n:14},'85+':{wr:0.750,ev:0,n:4}}
+  },
+  'LONG SQUEEZE':{
+    'UP':{'<45':{wr:0.450,ev:0,n:0},'45-54':{wr:0.500,ev:0,n:0},'55-64':{wr:0.580,ev:0,n:0},'65-74':{wr:0.670,ev:0,n:0},'75-84':{wr:0.700,ev:0,n:0},'85+':{wr:0.750,ev:0,n:0}},
+    'DOWN':{'<45':{wr:0.450,ev:0,n:0},'45-54':{wr:0.500,ev:0,n:0},'55-64':{wr:0.580,ev:0,n:0},'65-74':{wr:0.670,ev:0,n:0},'75-84':{wr:0.700,ev:0,n:0},'85+':{wr:0.750,ev:0,n:0}}
+  },
+  'COMPRESSING':{
+    'UP':{'<45':{wr:0.450,ev:0,n:0},'45-54':{wr:0.500,ev:0,n:0},'55-64':{wr:0.580,ev:0,n:0},'65-74':{wr:0.670,ev:0,n:0},'75-84':{wr:0.700,ev:0,n:0},'85+':{wr:0.750,ev:0,n:0}},
+    'DOWN':{'<45':{wr:0.450,ev:0,n:0},'45-54':{wr:0.500,ev:0,n:0},'55-64':{wr:0.580,ev:0,n:0},'65-74':{wr:0.670,ev:0,n:0},'75-84':{wr:0.700,ev:0,n:0},'85+':{wr:0.750,ev:0,n:0}}
   }
 };
 
-// Per-regime reality caps observed from the data. Replaces hardcoded 75/25.
-// Format: [hi-cap, lo-cap]. Used when isHighGap is true.
+// V10.7.86c: Regime caps updated from empirical data (1,678 BTC trades).
+// Format: [hi-cap, lo-cap]. The hi-cap reflects the highest reliable WR
+// observed in that regime at high conviction — not theoretical max.
 const V104_REGIME_CAPS={
-  'HIGH VOL CHOP':{hi:78,lo:25},
-  'RANGE-CHOP':{hi:80,lo:25},
-  'SHORT SQUEEZE':{hi:68,lo:32}, // tighter — squeeze regimes are noisier
-  'TRENDING DOWN':{hi:85,lo:22}, // strongest cell, can stretch
-  'TRENDING UP':{hi:68,lo:25}, // miscalibrated regime — tighten until V10.4.x retrain
-  '_default':{hi:75,lo:25}
+  'HIGH VOL CHOP':  {hi:86,lo:25}, // DOWN|65-74 = 85%, DOWN|75-84 = 86%
+  'RANGE-CHOP':     {hi:72,lo:25}, // UP|85+ = 80%, DOWN|<45 = 64% — cap lower, regime is noisy
+  'SHORT SQUEEZE':  {hi:69,lo:32}, // UP|65-74 = 69%, tighter — squeeze is overconfident at high conv
+  'TRENDING DOWN':  {hi:88,lo:22}, // DOWN|55-64 = 88% — strongest single cell
+  'TRENDING UP':    {hi:68,lo:25}, // UP|65-74 = 67%, UP|75-84 = 68% — limited data, conservative
+  'LONG SQUEEZE':   {hi:70,lo:30}, // no empirical data — neutral defaults
+  'COMPRESSING':    {hi:70,lo:30}, // no empirical data — neutral defaults
+  '_default':       {hi:72,lo:25}
 };
 
 // Conviction band classifier — must match the keys in V104_SEED_CALIBRATION
@@ -4376,12 +4396,15 @@ const _canonicalTrades=(callLog)=>{
 // ════════════════════════════════════════════════════════════════════════════
 
 // Returns table in the same shape as V104_SEED_CALIBRATION.
-function buildV104Table(callLog){
+function buildV104Table(callLog,asset){
   if(!USE_V104_CALIBRATION_TABLES||!Array.isArray(callLog)||callLog.length===0){
     return V104_SEED_CALIBRATION;
   }
-  // Filter resolved trades only, take last N per cell
-  const resolved=callLog.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS'));
+  // V10.7.86b: filter by asset so BTC calibration doesn't bleed into ETH and vice versa.
+  //   ETH trades have different volatility/regime characteristics — mixing them produces
+  //   calibration tables that fit neither asset well.
+  const _asset=asset||'BTC';
+  const resolved=callLog.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.asset||'BTC')===_asset);
   if(resolved.length===0)return V104_SEED_CALIBRATION;
   // V10.6.1 — RECENCY-WEIGHTED ROLLING WINDOW
   //   Old logic: count last 200 trades per cell with equal weight. A cell
@@ -29470,27 +29493,40 @@ function TaraApp(){
     //   into cold-start calibration and ML weights.
     //   HIGH VOL CHOP kept at original (n=12 audit sample too small to trust).
     //   LONG SQUEEZE still 0/0 — never observed in 755 trades.
+    // V10.7.86b: REGIME MEMORY IS NOW PER-ASSET.
+    //   Bug: single shared key caused ETH losses to tighten BTC thresholds and vice versa.
+    //   Fix: asset-specific key. BTC migrates old shared key on first load.
+    // V10.7.86c: seeds updated from 1,678 BTC trades
     const _seeds={
-      'TRENDING UP':   {wins:61,losses:37},   // 62.2% WR (n=98)    — was 0/0 (no seed)
-      'TRENDING DOWN': {wins:230,losses:122}, // 65.3% WR (n=352)   — was 87.5% (n=16, overfit)
-      'HIGH VOL CHOP': {wins:24,losses:21},   // 53% WR (n=45 V144) — n=12 in audit too small
-      'SHORT SQUEEZE': {wins:130,losses:75},  // 63.4% WR (n=205)   — was 68% (n=97)
-      'LONG SQUEEZE':  {wins:0,losses:0},     // never observed in audit
-      'RANGE-CHOP':    {wins:68,losses:19},   // 78.2% WR (n=87)    — was 53.6% (mislabeled as weak!)
+      'TRENDING UP':   {wins:58,losses:37},   // 61% WR (n=95)
+      'TRENDING DOWN': {wins:230,losses:120},  // 66% WR (n=350)
+      'HIGH VOL CHOP': {wins:38,losses:7},     // 84% WR (n=45)
+      'SHORT SQUEEZE': {wins:156,losses:84},   // 65% WR (n=240)
+      'LONG SQUEEZE':  {wins:0,losses:0},      // never observed
+      'RANGE-CHOP':    {wins:562,losses:385},  // 59% WR (n=947)
+      'COMPRESSING':   {wins:0,losses:0},      // rare
     };
+    const _assetKey=`taraRegimeMemory_${currentAsset}_v1`;
     try{
-      const stored=localStorage.getItem('taraRegimeMemory_v1');
+      const stored=localStorage.getItem(_assetKey);
       if(stored){
         const p=JSON.parse(stored);
         if(p&&typeof p==='object'){
-          // Merge stored over seeds — stored wins, but unknown regimes still get seed defaults
           const out={..._seeds};
-          Object.keys(p).forEach(k=>{
-            if(p[k]&&typeof p[k]==='object'){
-              out[k]={wins:Number(p[k].wins)||0,losses:Number(p[k].losses)||0};
-            }
-          });
+          Object.keys(p).forEach(k=>{if(p[k]&&typeof p[k]==='object')out[k]={wins:Number(p[k].wins)||0,losses:Number(p[k].losses)||0};});
           return out;
+        }
+      }
+      if(currentAsset==='BTC'){
+        const legacy=localStorage.getItem('taraRegimeMemory_v1');
+        if(legacy){
+          const p=JSON.parse(legacy);
+          if(p&&typeof p==='object'){
+            const out={..._seeds};
+            Object.keys(p).forEach(k=>{if(p[k]&&typeof p[k]==='object')out[k]={wins:Number(p[k].wins)||0,losses:Number(p[k].losses)||0};});
+            try{localStorage.setItem(_assetKey,JSON.stringify(out));}catch(_){}
+            return out;
+          }
         }
       }
     }catch(e){}
@@ -29501,13 +29537,16 @@ function TaraApp(){
   const _regimeMemoryRef=useRef(regimeMemory);
   _regimeMemoryRef.current=regimeMemory;
   useEffect(()=>{
-    try{localStorage.setItem('taraRegimeMemory_v1',JSON.stringify(regimeMemory));}catch(e){}
+    try{
+      // V10.7.86b: save to asset-specific key
+      localStorage.setItem(`taraRegimeMemory_${currentAsset}_v1`,JSON.stringify(regimeMemory));
+    }catch(e){}
     if(_regimeMemoryHydratedRef.current){
       // V8.6: RMW with max-per-cell merge. Was simple cloudWriteDebounced (last-write-wins)
       //   which caused cross-device increment loss — Device A's regime training would
       //   overwrite Device B's regime training when both updated the same regime keys.
       cloudWriteDebouncedRMW(
-        'learnings/regimeMemory',
+        `learnings/regimeMemory_${currentAsset}`,
         ()=>_regimeMemoryRef.current,
         (cloudData,localData)=>{
           const _allKeys=new Set([...Object.keys(cloudData||{}),...Object.keys(localData||{})]);
@@ -29529,7 +29568,7 @@ function TaraApp(){
     }
   },[regimeMemory]);
   useEffect(()=>{
-    const unsub=cloudWatch('learnings/regimeMemory',(d)=>{
+    const unsub=cloudWatch(`learnings/regimeMemory_${currentAsset}`,(d)=>{
       _regimeMemoryHydratedRef.current=true;
       if(!d||typeof d!=='object')return;
       setRegimeMemory(prev=>{
@@ -33114,7 +33153,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   //   only incrementing on user-position resolutions (line 9664), so the
                   //   per-regime stats were incomplete when user only watched.
                   const _regimeKey=_entry?.regime||'RANGE-CHOP';
-                  if(_regimeKey){
+                  // V10.7.86b: only update regimeMemory for trades matching current asset
+                  const _entryAsset=_entry?.asset||'BTC';
+                  if(_regimeKey&&_entryAsset===currentAsset){
                     setRegimeMemory(prev=>{
                       const u={...prev};
                       if(!u[_regimeKey])u[_regimeKey]={wins:0,losses:0};
@@ -33468,7 +33509,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   and pass it into the engine. Auto-recalibrates every render. Cells with
       //   n<V104_CALIBRATION_TRUST_FLOOR fall back to seed values automatically.
       const _v104Table=(()=>{
-        try{return buildV104Table(taraCallLogRef.current||[]);}
+        try{return buildV104Table(taraCallLogRef.current||[],currentAsset);}
         catch(_){return V104_SEED_CALIBRATION;}
       })();
       // V10.6.2 — DoW × hour table built fresh per render. Cached automatically
