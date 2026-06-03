@@ -4230,7 +4230,7 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.86-audit-fixes';
+const BASELINE_VERSION='2026.06.03-v10.7.86-warm-state-audit-fixes';
 const TARA_VERSION_DISPLAY='Tara 10.7.86';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -7810,7 +7810,24 @@ const computeVolumeProfile=(history)=>{
 // Returns { c1m: [...], c3m: [...], c5m: [...], c15m: [...] }
 // V9.8.5: priceSource arg (Coinbase / Kraken / Bitstamp). Re-runs effect on switch.
 const useMultiTFCandles=(asset,priceSource)=>{
-  const[tfCandles,setTfCandles]=useState({c1m:[],c3m:[],c5m:[],c15m:[]});
+  const _TF_WARM_KEY='taraTFCandles_v1';
+  const _tfWarm=(()=>{
+    try{
+      const raw=sessionStorage.getItem(_TF_WARM_KEY);
+      if(!raw)return null;
+      const ws=JSON.parse(raw);
+      if(!ws||!ws.savedAt||Date.now()-ws.savedAt>5*60*1000)return null;
+      if(ws.asset!==asset)return null;
+      return ws;
+    }catch(_){return null;}
+  })();
+  const[tfCandles,setTfCandles]=useState(()=>{
+    if(_tfWarm?.c1m?.length>=20&&_tfWarm?.c5m?.length>=10){
+      try{console.info(`[V10.7.86] TF candles warm restore: 1m=${_tfWarm.c1m.length} 5m=${_tfWarm.c5m.length} 15m=${(_tfWarm.c15m||[]).length}`);}catch(_){}
+      return{c1m:_tfWarm.c1m,c3m:_tfWarm.c3m||[],c5m:_tfWarm.c5m,c15m:_tfWarm.c15m||[]};
+    }
+    return{c1m:[],c3m:[],c5m:[],c15m:[]};
+  });
   useEffect(()=>{
     if(typeof window==='undefined')return;
     let mounted=true;
@@ -7866,6 +7883,17 @@ const useMultiTFCandles=(asset,priceSource)=>{
         }
       }
       if(mounted)setTfCandles({c1m,c3m,c5m,c15m});
+      // V10.7.86: save to sessionStorage for warm restore on next mount
+      try{
+        sessionStorage.setItem(_TF_WARM_KEY,JSON.stringify({
+          savedAt:Date.now(),
+          asset,
+          c1m:c1m.slice(0,200),
+          c3m:c3m.slice(0,100),
+          c5m:c5m.slice(0,100),
+          c15m:c15m.slice(0,50),
+        }));
+      }catch(_){}
     };
     fetchAll();
     const iv=setInterval(fetchAll,30000);
@@ -28081,8 +28109,76 @@ function TaraApp(){
   const tickHistoryRef=useRef([]);
   const priceMemoryRef=useRef([]);
   const lastPriceSourceRef=useRef({source:'none',time:0});
-  const[history,setHistory]=useState([]);
+  // V10.7.86: Seed tickHistoryRef with synthetic ticks from warm state candles.
+  //   Real ticks accumulate from WebSocket from now, but pre-seeding with candle
+  //   close prices gives tape flow and velocity calculations something to work with
+  //   immediately rather than waiting 30-60 seconds for real ticks to accumulate.
+  useEffect(()=>{
+    if(_warmState?.history?.length>=5&&tickHistoryRef.current.length===0){
+      try{
+        const syntheticTicks=[];
+        const now=Date.now();
+        // Create 2 synthetic ticks per candle (open + close) going back through history
+        // Mark as synthetic so they don't count toward whale detection
+        _warmState.history.slice(0,20).forEach((candle,i)=>{
+          const age=(i+1)*60000; // space them 1 min apart, oldest furthest back
+          syntheticTicks.push({p:candle.o,s:0.1,t:'B',time:now-age-30000,ex:'warm',synthetic:true});
+          syntheticTicks.push({p:candle.c,s:0.1,t:'B',time:now-age,ex:'warm',synthetic:true});
+        });
+        tickHistoryRef.current=syntheticTicks.sort((a,b)=>a.time-b.time);
+        try{console.info(`[V10.7.86] Seeded ${syntheticTicks.length} synthetic ticks from warm candles`);}catch(_){}
+      }catch(_){}
+    }
+  },[]);
+  // V10.7.86: WARM STATE RESTORE — seed candle history from sessionStorage on mount.
+  //   Previously every tab open started with empty history: 0 candles, blank tape, no ADX/BBW.
+  //   The engine needs ~20 candles for stable ADX, ~50 ticks for tape flow, ~5 min for VWAP.
+  //   Without warm state, first 3-5 windows have partial signals and worse calls.
+  //   Fix: save candles + tfCandles to sessionStorage on every update (fast, in-tab memory).
+  //   On mount, seed history instantly from the saved state so signals are warm immediately.
+  //   sessionStorage survives refresh but not tab close — that's fine, candles are fresh enough.
+  //   Age gate: discard warm state older than 5 minutes (candles would be stale anyway).
+  const _WARM_STATE_KEY='taraWarmState_v1';
+  const _WARM_STATE_MAX_AGE_MS=5*60*1000; // 5 minutes
+  const _loadWarmState=()=>{
+    try{
+      const raw=sessionStorage.getItem(_WARM_STATE_KEY);
+      if(!raw)return null;
+      const ws=JSON.parse(raw);
+      if(!ws||!ws.savedAt)return null;
+      if(Date.now()-ws.savedAt>_WARM_STATE_MAX_AGE_MS)return null;
+      return ws;
+    }catch(_){return null;}
+  };
+  const _warmState=_loadWarmState();
+  const[history,setHistory]=useState(()=>{
+    // Seed from warm state if available and fresh
+    if(_warmState?.history?.length>=10){
+      try{console.info(`[V10.7.86] Warm state restore: ${_warmState.history.length} candles from ${Math.round((Date.now()-_warmState.savedAt)/1000)}s ago`);}catch(_){}
+      return _warmState.history;
+    }
+    return [];
+  });
   const[orderBook,setOrderBook]=useState({localBuy:0,localSell:0,imbalance:1,bands:null});
+  // V10.7.86: Save candle history to sessionStorage on every update (debounced 2s).
+  //   Restored on next mount via the warm state init above. Keeps signals warm across
+  //   refreshes and short tab reopens. sessionStorage is cleared when browser tab closes,
+  //   which is fine — data >5min old is discarded anyway.
+  const _warmSaveRef=useRef(null);
+  useEffect(()=>{
+    if(history.length<5)return; // don't save partial/empty state
+    if(_warmSaveRef.current)clearTimeout(_warmSaveRef.current);
+    _warmSaveRef.current=setTimeout(()=>{
+      try{
+        sessionStorage.setItem(_WARM_STATE_KEY,JSON.stringify({
+          savedAt:Date.now(),
+          asset:currentAsset,
+          windowType,
+          history:history.slice(0,100), // last 100 candles
+        }));
+      }catch(_){}
+    },2000);
+  },[history,currentAsset,windowType]);
   const[liquidations,setLiquidations]=useState([]);
   const[targetMargin,setTargetMargin]=useState(0);
   // V5.7.5: Mirror targetMargin in a ref so deferred rollover scoring (~8s after rollover)
@@ -42247,6 +42343,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(taraBroadcastRef.current)taraBroadcastRef.current={key:null,sentScan:false,sentSignal:false,sentLock:false,sentSitout:false};
     if(lastWhaleBroadcastRef.current)lastWhaleBroadcastRef.current={time:Date.now(),dir:null}; // 5min cooldown from now
     if(lastManualBroadcastRef.current)lastManualBroadcastRef.current={key:null,type:null};
+    // V10.7.86: clear warm state on asset switch
+    try{sessionStorage.removeItem('taraWarmState_v1');sessionStorage.removeItem('taraTFCandles_v1');}catch(_){}
     setCurrentAssetState(a);
 
     // Reset all window-bound state — fresh start on the new asset
@@ -42540,6 +42638,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               style:{background:'rgba(251,191,36,0.1)',border:'1px solid rgba(251,191,36,0.3)',color:'rgba(251,191,36,0.8)'},
               title:'Cloud sync paused until ~Jun 18 — data saving to this browser only. Open Memory to backup.',
             },'💾 LOCAL')}
+            {(()=>{
+              // V10.7.86: show warm/cold state indicator
+              try{
+                const _ws=sessionStorage.getItem('taraWarmState_v1');
+                if(_ws){
+                  const _wsp=JSON.parse(_ws);
+                  const _ageSec=Math.round((Date.now()-(_wsp.savedAt||0))/1000);
+                  if(_ageSec<300&&(_wsp.history||[]).length>=10){
+                    return React.createElement('span',{
+                      className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.14em] px-1.5 py-0.5 rounded-md uppercase cursor-default',
+                      style:{background:'rgba(110,231,183,0.1)',border:'1px solid rgba(110,231,183,0.3)',color:'rgba(110,231,183,0.7)'},
+                      title:`Warm state active — ${(_wsp.history||[]).length} candles restored from ${_ageSec}s ago. Signals start immediately.`,
+                    },'⚡ WARM');
+                  }
+                }
+              }catch(_){}
+              return null;
+            })()}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
           </div>
 
