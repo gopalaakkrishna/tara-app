@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.87-session-liquidity-edge';
-const TARA_VERSION_DISPLAY='Tara 10.7.87';
+const BASELINE_VERSION='2026.06.03-v10.7.87b-cross-tab-resolve-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.87b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19869,18 +19869,17 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
     return arr;
   },[taraCallLog,filter,assetFilter]);
   const counts=React.useMemo(()=>{
-    // V7.0.6: Counts respect active filter. Previously always counted the full log,
-    //   which caused the "modal says 91 / card says 90" mismatch — modal counted both
-    //   5m + 15m, card counted only the active window type. Now filter alignment.
-    // V9.2.0: also respects asset filter.
+    // V10.7.87: use _isRealTrade filter to match taraScorecards exactly.
+    //   Previously counted raw result=WIN/LOSS which included wasOverriddenNoTrade entries
+    //   that taraScorecards excludes — causing BTC/ETH mismatch between Memory and lock card.
     let arr=taraCallLog;
     if(assetFilter==='BTC')arr=arr.filter(e=>(e.asset||'BTC')==='BTC');
     else if(assetFilter==='ETH')arr=arr.filter(e=>e.asset==='ETH');
     if(filter==='15m'||filter==='5m')arr=arr.filter(e=>e.windowType===filter);
     return {
       total:arr.length,
-      wins:arr.filter(e=>e.result==='WIN').length,
-      losses:arr.filter(e=>e.result==='LOSS').length,
+      wins:arr.filter(e=>_isRealTrade(e)&&e.result==='WIN').length,
+      losses:arr.filter(e=>_isRealTrade(e)&&e.result==='LOSS').length,
       sitouts:arr.filter(e=>e.result==='SITOUT').length,
       pending:arr.filter(e=>!e.result).length,
       btcN:taraCallLog.filter(e=>(e.asset||'BTC')==='BTC').length,
@@ -32874,9 +32873,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _wid=`${windowType}-${new Date(_justClosedBucket).toISOString()}`;
         // Look up the entry that was logged for this exact window. It already has the strike.
         // Use ref to avoid stale closure — taraCallLog is not in this effect's dep array.
+        // V10.7.87: filter by asset — both BTC and ETH share the same windowId format
+        //   (e.g. "15m-2026-06-03T08:00:00.000Z"). Without asset filter, the BTC tab
+        //   could find the ETH entry and use its strike (~$2500) to score a BTC trade.
         const _logSnap=taraCallLogRef.current||[];
-        const _pendingEntry=_logSnap.find(e=>e&&e.windowId===_wid&&e.result===null);
-        const _entryAsset=_pendingEntry?.asset||currentAssetRef.current||'BTC';
+        const _tabAsset=currentAssetRef.current||currentAsset||'BTC';
+        const _pendingEntry=_logSnap.find(e=>e&&e.windowId===_wid&&e.result===null&&(e.asset||'BTC')===_tabAsset);
+        const _entryAsset=_pendingEntry?.asset||_tabAsset;
         const _entryStrike=Number(_pendingEntry?.strike)||0;
         // Prefer entry's strike (asset-correct, locked-in), else current targetMargin if it
         //   matches asset, else windowOpenPriceRef. _entryStrike covers the cross-asset case.
@@ -33238,9 +33241,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               return `5m-${new Date(_justClosedBucket).toISOString()}`;
             })();
             setTaraCallLog(prev=>{
-              let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&e.windowId===_capturedWindowId&&e.result===null);
+              let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.windowId===_capturedWindowId&&e.result===null);
               if(!idx){
-                idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&e.result===null&&e.windowType===_capturedWindowType);
+                idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.result===null&&e.windowType===_capturedWindowType);
               }
               if(!idx)return prev;
               if(idx.e.result!==null)return prev;
