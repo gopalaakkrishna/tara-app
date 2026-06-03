@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.88f-import-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.88f';
+const BASELINE_VERSION='2026.06.03-v10.7.88g-import-scope-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.88g';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14865,7 +14865,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             survives refresh + spans devices. Click "all" to see the full history. */}
         {/* V5.6.4: Always render. Empty-state placeholder ensures users know where to find it
             even before Tara has committed to any windows. */}
-        <TaraMemoryStrip taraCallLog={taraCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} onDeleteEntry={onDeleteEntry}/>
+        <TaraMemoryStrip taraCallLog={taraCallLog||[]} windowType={windowType} taraLearnings={taraLearnings} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} onDeleteEntry={onDeleteEntry} setTaraCallLog={setTaraCallLog} mergeCallLog={_mergeCallLogEntries}/>
       </div>
     );
 
@@ -19606,7 +19606,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
 // V5.6.1: Tara's Memory — compact strip showing the most recent calls inline in the
 //   Tara card. Click "all" to open a fuller paged view. The strip + modal both source
 //   from taraCallLog (cloud-synced array of every call she's made).
-function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,timeFormat,onEditEntry,onDeleteEntry}){
+function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,setTaraCallLog,mergeCallLog}){
   const[open,setOpen]=React.useState(false);
   const[learnOpen,setLearnOpen]=React.useState(false);
   const recent=React.useMemo(()=>{
@@ -19654,7 +19654,7 @@ function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,time
             })
           ),
     ),
-    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,timeFormat:timeFormat,onEditEntry:onEditEntry,onDeleteEntry:onDeleteEntry,initialFilter:windowType,setTaraCallLog:setTaraCallLog,mergeCallLog:_mergeCallLogEntries}),
+    open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,timeFormat:timeFormat,onEditEntry:onEditEntry,onDeleteEntry:onDeleteEntry,initialFilter:windowType,setTaraCallLog:setTaraCallLog,mergeCallLog:mergeCallLog}),
     learnOpen&&React.createElement(TaraLearningsModal,{learnings:taraLearnings,onClose:()=>setLearnOpen(false)}),
   );
 }
