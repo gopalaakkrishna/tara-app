@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.88-flat-gap-timecap-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.88';
+const BASELINE_VERSION='2026.06.03-v10.7.88b-asset-broadcast-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.88b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28961,6 +28961,10 @@ function TaraApp(){
       return;
     }
     taraCallLog.forEach(e=>{
+      // V10.7.88: only broadcast entries for THIS tab's asset.
+      //   ETH tab must never broadcast BTC entries to the BTC tab — it holds
+      //   stale copies that can overwrite the BTC tab's freshly-resolved entries.
+      if((e?.asset||'BTC')!==currentAsset)return;
       const k=(e?.windowId||'')+'|'+(e?.windowType||'')+'|'+(e?.id||'');
       if(_broadcastedKeysRef.current.has(k))return;
       _broadcastedKeysRef.current.add(k);
@@ -28973,6 +28977,8 @@ function TaraApp(){
       if(!msg||msg.type!=='callLogEntry')return;
       const incoming=msg.payload?.entry;
       if(!incoming||!incoming.windowId)return;
+      // V10.7.88: only merge entries for THIS tab's asset
+      if((incoming.asset||'BTC')!==currentAsset)return;
       const k=(incoming.windowId||'')+'|'+(incoming.windowType||'')+'|'+(incoming.id||'');
       _receivedFromBroadcastRef.current.add(k);
       setTaraCallLog(prev=>{
