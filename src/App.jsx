@@ -4224,8 +4224,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.84-adverse-kalshi-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.84';
+const BASELINE_VERSION='2026.06.03-v10.7.84b-adverse-fix-nogo-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.84b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4336,7 +4336,13 @@ const _isRealTrade=(e)=>{
   if(!e)return false;
   if(e.result!=='WIN'&&e.result!=='LOSS')return false;
   if(e.wasOverriddenNoTrade===true)return false;
-  if(e.tier==='no-go-data')return false;
+  // V10.7.83: only exclude no-go-data entries that never actually resolved
+  // (no closingPrice = feed was stale AND trade never settled = not a real trade).
+  // Entries with closingPrice + resolvedAt settled on Kalshi regardless of the
+  // stale-feed flag at lock time — they are real trades and must count.
+  // Audit 2026-06-02: 76 no-go-data entries had real outcomes (48W/28L) but were
+  // excluded, causing dashboard to show 983W/599L vs Memory's correct 1030W/627L.
+  if(e.tier==='no-go-data'&&!e.closingPrice)return false;
   return true;
 };
 
