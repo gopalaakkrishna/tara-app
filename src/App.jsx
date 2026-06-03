@@ -168,6 +168,9 @@ let _fbApp=null,_fbDb=null; // V10.2.0: permanently null. All cloud ops now rout
 //   what the anon role can actually do (read/write the tara_state table).
 const SUPABASE_URL='https://vhbbkqmyyzddhezdgszm.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoYmJrcW15eXpkZGhlemRnc3ptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODMzNjUsImV4cCI6MjA5NDM1OTM2NX0.30zC6hbGEcCNSuOQNRfh81_3B0nwVDuUJeeqUydZCoM';
+// V10.7.85: Supabase sync paused — row limit hit, renews approx 2026-06-18.
+//   All trade data saves to localStorage as always. Set false to re-enable cloud sync.
+const _SB_PAUSED=false;
 // Supabase client is initialized lazily below after the helper module loads.
 // During the parallel-write phase, _sbClient may be null if init fails — code
 // must check before calling. Failed Supabase init is non-fatal (Firestore
@@ -182,7 +185,10 @@ let _sbInitError=null;
 //   doesn't break the app.
 try{
   _sbInitAttempted=true;
-  if(typeof createSupabaseClient==='function'&&SUPABASE_URL&&SUPABASE_ANON_KEY){
+  if(_SB_PAUSED){
+    _sbInitError='sync-paused';
+    console.info('[Supabase] sync paused — local-only mode active until ~2026-06-18');
+  } else if(typeof createSupabaseClient==='function'&&SUPABASE_URL&&SUPABASE_ANON_KEY){
     _sbClient=createSupabaseClient(SUPABASE_URL,SUPABASE_ANON_KEY,{
       auth:{
         // No sign-in flow — Shared Tara model. Disable session persistence and
@@ -413,7 +419,7 @@ const _fbDoc=(_path)=>null;
 //   but Firestore is initialized, something's wrong (rules, network, etc.).
 const _cloudSyncListeners=new Set();
 // V10.2.0: tracks Supabase health (was Firestore). State terminology unchanged so UI components don't need updating.
-let _cloudSyncStatus={state:_sbClient?'idle':'disabled',lastOk:null,lastError:null,writes:0,reads:0,listeners:0};
+let _cloudSyncStatus={state:_SB_PAUSED?'paused':(_sbClient?'idle':'disabled'),lastOk:null,lastError:null,writes:0,reads:0,listeners:0};
 const _setCloudStatus=(patch)=>{_cloudSyncStatus={..._cloudSyncStatus,...patch};_cloudSyncListeners.forEach(l=>l(_cloudSyncStatus));};
 const subscribeCloudStatus=(fn)=>{_cloudSyncListeners.add(fn);fn(_cloudSyncStatus);return()=>_cloudSyncListeners.delete(fn);};
 // V8.8.7: Active-write counter. Each cloudWrite / cloudWriteDebouncedRMW transaction
@@ -4224,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.84b-adverse-fix-nogo-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.84b';
+const BASELINE_VERSION='2026.06.03-v10.7.85-throttled-sync';
+const TARA_VERSION_DISPLAY='Tara 10.7.85';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20454,6 +20460,53 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:T2_GOLD}},counts.sitouts),
         ),
       ),
+      // V10.7.85: Local-only mode banner — shown when Supabase sync is paused.
+      //   Prompts user to export JSON backup periodically to avoid data loss from
+      //   localStorage being cleared.
+      _SB_PAUSED&&React.createElement('div',{
+        className:'mb-4 rounded-xl px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap',
+        style:{background:'rgba(229,200,112,0.07)',border:'1px solid rgba(229,200,112,0.25)'},
+      },
+        React.createElement('div',{className:'flex items-center gap-2 min-w-0'},
+          React.createElement('span',{className:'text-base shrink-0'},'💾'),
+          React.createElement('div',{className:'min-w-0'},
+            React.createElement('div',{className:'text-[10px] font-bold uppercase tracking-[0.14em]',style:{color:'rgba(229,200,112,0.95)'}},'LOCAL MODE — Cloud sync paused until ~Jun 18'),
+            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55 mt-0.5'},'Data lives in this browser only. Export JSON daily to avoid data loss.'),
+          ),
+        ),
+        React.createElement('button',{
+          onClick:()=>{
+            try{
+              const _payload={
+                exportedAt:new Date().toISOString(),
+                baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:'unknown',
+                totalEntries:taraCallLog.length,
+                note:'LOCAL MODE backup — Supabase sync paused',
+                summary:{
+                  wins:taraCallLog.filter(e=>e&&e.result==='WIN').length,
+                  losses:taraCallLog.filter(e=>e&&e.result==='LOSS').length,
+                  sitouts:taraCallLog.filter(e=>e&&e.result==='SITOUT').length,
+                },
+                entries:taraCallLog,
+              };
+              const _json=JSON.stringify(_payload,null,2);
+              const _blob=new Blob([_json],{type:'application/json'});
+              const _url=URL.createObjectURL(_blob);
+              const _a=document.createElement('a');
+              const _ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,16);
+              _a.href=_url;
+              _a.download=`tara-backup-${_ts}.json`;
+              document.body.appendChild(_a);
+              _a.click();
+              document.body.removeChild(_a);
+              setTimeout(()=>URL.revokeObjectURL(_url),100);
+            }catch(e){alert('Backup failed: '+(e.message||String(e)));}
+          },
+          className:'shrink-0 px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
+          style:{background:'rgba(229,200,112,0.15)',color:'rgba(229,200,112,0.95)',border:'1px solid rgba(229,200,112,0.35)'},
+          title:`Backup all ${taraCallLog.length} entries to JSON file`,
+        },'💾 Backup Now'),
+      ),
       // V9.9.3: Reconcile / Verify result panel. Renders when either action has been run.
       //   Each issue shows: timestamp, kind, detail, "apply suggestion" button (if a fix
       //   is suggested), "edit manually" button. User reviews + accepts each individually
@@ -26904,7 +26957,8 @@ function TaraApp(){
           if(cloudData&&Number(cloudData.value)===Number(localData.value)&&cT===lT)return null;
           return{value:localData.value,updatedAt:localData.updatedAt};
         },
-        1500,
+        // V10.7.85: throttle to 30s
+        30000,
       );
       // V10.1.0 Session 2 — parallel Supabase write is now handled internally by
       //   cloudWriteDebouncedRMW (see helper definition). The explicit
@@ -28541,7 +28595,9 @@ function TaraApp(){
       //   not. Now the scorecard reflects only trades Tara would actually take.
       // V10.7.57: exclude no-trade overrides. V10.7.82: also exclude no-go-data (stale price).
       if(e.wasOverriddenNoTrade===true)return;
-      if(e.tier==='no-go-data')return;
+      // V10.7.84b: mirror _isRealTrade fix — only exclude no-go-data entries that never
+      // resolved (no closingPrice). Entries with closingPrice settled on Kalshi and count.
+      if(e.tier==='no-go-data'&&!e.closingPrice)return;
       const wt=e.windowType;
       if(!out[wt])out[wt]={wins:0,losses:0,sitouts:0};
       if(e.result==='WIN')out[wt].wins++;
@@ -28754,7 +28810,11 @@ function TaraApp(){
           };
           return{entries:merged.map(_stripForCloud),_strippedAt:Date.now()};
         },
-        300,
+        // V10.7.85: throttle callLog cloud writes from 300ms to 60s.
+        //   callLog is large (3MB) and changes on every trade. At 300ms debounce it
+        //   fires constantly, burning through Supabase realtime messages. 60s is plenty
+        //   for cross-device sync — lock state (small, fast) handles real-time awareness.
+        60000,
       );
     } else if(taraCallLog.length>0){
       // Pre-hydration but we have data → mark pending. Once cloudWatch fires we'll flush.
@@ -29057,7 +29117,8 @@ function TaraApp(){
           }
           return{entries:merged};
         },
-        1500,
+        // V10.7.85: throttle to 30s to reduce realtime message usage
+        30000,
       );
     }
   },[pastWindows]);
@@ -29134,7 +29195,8 @@ function TaraApp(){
           if(lN>cN)return localData;
           return null;
         },
-        1500,
+        // V10.7.85: throttle to 120s
+        120000,
       );
     }
   },[taraLearnings]);
@@ -29366,7 +29428,8 @@ function TaraApp(){
           // Skip write if no change vs cloud
           return changed?merged:null;
         },
-        1500,
+        // V10.7.85: throttle to 120s
+        120000,
       );
     }
   },[regimeMemory]);
@@ -29549,7 +29612,8 @@ function TaraApp(){
         };
         return merged;
       },
-      2000,
+      // V10.7.85: throttle to 120s
+      120000,
     );
   },[adaptiveWeightsByAsset,regimeWeightsByAsset]);
   useEffect(()=>{
@@ -33144,7 +33208,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   the same earlier commit in its mirror and defers. This converges both browsers to the
   //   FIRST commit, not the last (which last-write-wins would do).
   useEffect(()=>{
-    if(!currentPrice||!_sbClient||!currentAsset||!windowType)return; // V10.2.0: was _fbDb
+    // V10.7.85: when Supabase is paused, mark restore complete immediately so
+    //   lifecycle commit paths don't wait forever for a cloud read that won't come.
+    if(_SB_PAUSED||!_sbClient){_cloudRestoreCompletedRef.current=true;return;}
+    if(!currentPrice||!currentAsset||!windowType)return; // V10.2.0: was _fbDb
     let cancelled=false;
     const expectedWid=computeWindowId(windowType);
     const _expectedAsset=currentAssetRef.current||currentAsset||'BTC';
@@ -42478,6 +42545,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
               {TARA_VERSION_DISPLAY.replace(/^Tara\s+/,'')}
             </span>
+            {_SB_PAUSED&&React.createElement('span',{
+              className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.14em] px-1.5 py-0.5 rounded-md uppercase cursor-default',
+              style:{background:'rgba(251,191,36,0.1)',border:'1px solid rgba(251,191,36,0.3)',color:'rgba(251,191,36,0.8)'},
+              title:'Cloud sync paused until ~Jun 18 — data saving to this browser only. Open Memory to backup.',
+            },'💾 LOCAL')}
             <KalshiBalancePill kalshiBalance={kalshiBalance}/>
           </div>
 
