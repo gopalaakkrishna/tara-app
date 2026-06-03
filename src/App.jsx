@@ -4234,8 +4234,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.89b-reconcile-auth-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.89b';
+const BASELINE_VERSION='2026.06.03-v10.7.89c-reconcile-cloud-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.89c';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20289,6 +20289,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   unmatchedEntries:0,
                   authenticated:_hasAuth,
                   diag:_diag,
+                  summary:_hasAuth
+                    ?`Fetched ${_diag.settlementsTotal} settlements, ${_diag.fillsTotal} fills, ${_diag.marketsTotal} markets. Matched ${_matchedEntries} entries. ${_issues.length} updates found.`
+                    :'No Kalshi API credentials — add your Key ID and Private Key in Settings to enable full reconcile.',
                 });
               }catch(err){
                 setReconcileResult({kind:'reconcile',issues:[],error:err.message||String(err),diag:_diag});
@@ -20620,6 +20623,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               reconcileResult.kind==='verify'?'STORAGE AUDIT':'KALSHI RECONCILE'),
             React.createElement('div',{key:'s',className:'text-[12px] mt-0.5',style:{color:'#E8E9E4'}},(()=>{
               if(reconcileResult.error)return `Error: ${reconcileResult.error}`;
+              if(reconcileResult.summary&&reconcileResult.kind==='reconcile')return reconcileResult.summary;
               if(reconcileResult.kind==='verify'){
                 const _ba=reconcileResult.byAsset||{};
                 const _assetList=Object.keys(_ba).sort();
@@ -28765,14 +28769,38 @@ function TaraApp(){
           else if(existing.result&&e.result&&(e.id||0)>(existing.id||0))map.set(key,e);
         });
         const merged=Array.from(map.values()).sort((a,b)=>(a.id||0)-(b.id||0));
-        // V10.7.89: Force immediate localStorage save — don't rely on debounced useEffect.
-        //   Without this, a page close before the debounce fires loses the imported data.
+        // V10.7.89b: Force immediate localStorage save and cloud sync after import
+        // Don't wait for the 60s debounce — user might close tab before it fires
         try{
           const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:2000;
           const _save=merged.slice(-_cap);
           localStorage.setItem('taraCallLog_v1',JSON.stringify(_save));
           sessionStorage.setItem('taraCallLog_session',JSON.stringify(_save.slice(-200)));
         }catch(_){}
+        // Trigger cloud sync after state commits
+        setTimeout(()=>{
+          try{
+            if(typeof cloudWriteDebouncedRMW==='function'){
+              cloudWriteDebouncedRMW(
+                'memory/taraCallLog',
+                ()=>(typeof taraCallLogRef!=='undefined'?taraCallLogRef.current||[]:merged),
+                (cloudData,localEntries)=>{
+                  const cloudEntries=(cloudData&&Array.isArray(cloudData.entries))?cloudData.entries:[];
+                  const cMap=new Map();
+                  [...cloudEntries,...localEntries].forEach(e=>{
+                    if(!e)return;
+                    const k=(e.asset||'BTC')+'|'+(e.windowId||'')+'|'+(e.windowType||'');
+                    const ex=cMap.get(k);
+                    if(!ex)cMap.set(k,e);
+                    else if(!ex.result&&e.result)cMap.set(k,e);
+                  });
+                  return{entries:Array.from(cMap.values()).sort((a,b)=>(a.id||0)-(b.id||0))};
+                },
+                500, // very short debounce — this is the import flush
+              );
+            }
+          }catch(_){}
+        },200);
         return merged;
       });
       return btcEntries.length;
