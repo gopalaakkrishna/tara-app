@@ -4230,8 +4230,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.86d-cross-tab-merge-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.86d';
+const BASELINE_VERSION='2026.06.03-v10.7.87-session-liquidity-edge';
+const TARA_VERSION_DISPLAY='Tara 10.7.87';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -39939,6 +39939,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   Distinguished from V7.8 caution commits which still let user enter at their discretion.
     let _noGoReason=null;
     let _noGoTier=null;
+    let _noGoEdgeThreshold=null; // V10.7.87: hoisted so snapshot can stamp it
     // V7.10.3: gated on _cloudRestoreCompletedRef.current to prevent commit-before-cloud-restore.
     if(taraCallSnapshotRef.current===null&&_postKnown&&_commitDir&&_cloudRestoreCompletedRef.current){
       // V10.3.0 — MID-RANGE SIT-OUT: in healthy RANGE-CHOP, if price is mid-range
@@ -40022,8 +40023,42 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       if(_kPctNow!=null&&_commitConf!=null){
         const _kalshiForCommit=_commitDir==='UP'?_kPctNow:(100-_kPctNow);
         const _edgeAtCommit=_commitConf-_kalshiForCommit;
-        if(_edgeAtCommit<=-7){
-          _noGoReason=`Edge ${Math.round(_edgeAtCommit)}pt vs Kalshi — market priced ${_commitDir} at ${Math.round(_kalshiForCommit)}%, no money in the trade`;
+        // V10.7.87: SESSION-AWARE + ILLIQUIDITY-AWARE NO-GO-EDGE THRESHOLD.
+        //   Flat -7pt was too aggressive in illiquid sessions. During Asia deep
+        //   session (midnight-4am ET / 22:00-04:00 UTC), thin Kalshi order books
+        //   mean a single market maker can push odds 10-15pt with no real signal.
+        //   The data confirmed this: 87% WR on no-go-edge trades — Kalshi being
+        //   "ahead" of Tara at 3am is almost always noise, not information.
+        //
+        //   Threshold by phase:
+        //     ASIA_OPEN (22:00-04:00 UTC): -15pt — deep illiquid session
+        //     ASIA_LATE (04:00-07:00 UTC): -12pt — Asia winding down
+        //     EU_PREOPEN (07:00-08:00 UTC): -9pt  — EU not yet liquid
+        //     EU_OPEN/NY sessions:          -7pt  — liquid hours, keep default
+        //     AFTERHOURS/OFF-HOURS:         -15pt — same as deep Asia
+        //
+        //   Illiquidity boost: if OB depth is below $500K total on both sides,
+        //     the book is genuinely thin regardless of session — widen by 4pt more.
+        const _nowUtcH=new Date().getUTCHours();
+        const _nowUtcM=new Date().getUTCMinutes();
+        const _phaseNow=getPhaseKey(_nowUtcH,_nowUtcM);
+        const _baseThreshold=(()=>{
+          switch(_phaseNow){
+            case'ASIA_OPEN':   return -15;
+            case'ASIA_LATE':   return -12;
+            case'EU_PREOPEN':  return -9;
+            case'AFTERHOURS':  return -15;
+            default:           return -7;
+          }
+        })();
+        const _obDepthUSD=(depthFlash?.liqLongUSDLive||0)+(depthFlash?.liqShortUSDLive||0);
+        const _isThinBook=_obDepthUSD>0&&_obDepthUSD<500000;
+        const _illiqBoost=_isThinBook?4:0;
+        const _thresh=_baseThreshold-_illiqBoost;
+        if(_edgeAtCommit<=_thresh){
+          _noGoEdgeThreshold=_thresh; // hoist to outer scope for snapshot stamp
+          _noGoReason=`Edge ${Math.round(_edgeAtCommit)}pt vs Kalshi — market priced ${_commitDir} at ${Math.round(_kalshiForCommit)}%`
+            +(_isThinBook?` (thin book $${Math.round(_obDepthUSD/1000)}K depth)`:` (${_phaseNow})`)+`, threshold ${_thresh}pt`;
           _noGoTier='no-go-edge';
         }
       }
@@ -40162,22 +40197,27 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _ngSnap={
           call:_commitDir,direction:_commitDir,
           confidence:_commitConf,
-          caution:_noGoReason,           // V8.9.2: surfaced as caution badge in TaraCallCard
-          wasOverriddenNoTrade:true,     // V8.9.2: flag for analytics — would have been NO_TRADE
-          noGoCategory:_noGoTier,        // preserved for stats/analysis
+          caution:_noGoReason,
+          wasOverriddenNoTrade:true,
+          noGoCategory:_noGoTier,
           reason:`${_commitDir} ${_commitConf}% — ⚠ ${_noGoReason}`,
           atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
           atPosterior:_post,
           kalshiAtLock:_kPctNow,
-          locked:true,earlyLock:false,   // V8.9.2: locked=true now (was false), since we commit
+          locked:true,earlyLock:false,
           isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
           samples:0,needSamples:0,
-          tier:_noGoTier,                // tier still tags the override category
+          tier:_noGoTier,
           session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
           regime:analysis?.regime||'',
           qScore:Math.round(_qFast),
           fgt:analysis?.mtfAlignment,
-          _committedAt:Date.now(), // V9.1.3: stamp at creation
+          _committedAt:Date.now(),
+          // V10.7.87: audit fields — phase + liquidity context at time of no-go-edge
+          _v10787_phase:(()=>{try{return getPhaseKey(new Date().getUTCHours(),new Date().getUTCMinutes());}catch(_){return null;}})(),
+          _v10787_obDepthUSD:(depthFlash?.liqLongUSDLive||0)+(depthFlash?.liqShortUSDLive||0),
+          _v10787_isThinBook:((depthFlash?.liqLongUSDLive||0)+(depthFlash?.liqShortUSDLive||0))>0&&((depthFlash?.liqLongUSDLive||0)+(depthFlash?.liqShortUSDLive||0))<500000,
+          _v10787_edgeThreshold:_noGoEdgeThreshold||null,
         };
         taraCallSnapshotRef.current=_ngSnap;
         _logSnapshotEntry(_ngSnap); // V7.10.1: write to call log
