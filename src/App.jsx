@@ -170,7 +170,12 @@ const SUPABASE_URL='https://vhbbkqmyyzddhezdgszm.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoYmJrcW15eXpkZGhlemRnc3ptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODMzNjUsImV4cCI6MjA5NDM1OTM2NX0.30zC6hbGEcCNSuOQNRfh81_3B0nwVDuUJeeqUydZCoM';
 // V10.7.85: Supabase sync paused — row limit hit, renews approx 2026-06-18.
 //   All trade data saves to localStorage as always. Set false to re-enable cloud sync.
-const _SB_PAUSED=false;
+// V10.7.89d: _SB_PAUSED=true — Supabase row limit hit, resets ~Jun 18.
+//   With false: cloud reads on load were overwriting local data with stale 640-entry
+//   version even though localStorage had the correct 1867-entry import.
+//   With true: localStorage is the sole source of truth. All reads/writes disabled.
+//   To re-enable: flip to false and deploy. First write after reset pushes full local log.
+const _SB_PAUSED=true;
 // Supabase client is initialized lazily below after the helper module loads.
 // During the parallel-write phase, _sbClient may be null if init fails — code
 // must check before calling. Failed Supabase init is non-fatal (Firestore
@@ -4234,8 +4239,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.89d-reconcile-timematch';
-const TARA_VERSION_DISPLAY='Tara 10.7.89d';
+const BASELINE_VERSION='2026.06.03-v10.7.89e-local-only-paused';
+const TARA_VERSION_DISPLAY='Tara 10.7.89e';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
