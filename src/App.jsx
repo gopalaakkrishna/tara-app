@@ -4239,8 +4239,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.03-v10.7.89e-local-only-paused';
-const TARA_VERSION_DISPLAY='Tara 10.7.89e';
+const BASELINE_VERSION='2026.06.05-v10.7.90-loss-driver-gates';
+const TARA_VERSION_DISPLAY='Tara 10.7.90';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -40041,8 +40041,43 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _wa=analysis?.windowAmplitude;
         const _rangeBps=_wa?.rangeBps||0;
         const _isDeadWindow=_wa?.label!=='OPENING'&&_rangeBps<5;
+        // V10.7.90: WEAK-GAP GATE on directional-lock.
+        //   Audit (last 150 trades): directional-lock tier = 49% WR (38W/39L) — a coin
+        //   flip that bleeds EV after entry cost. Root cause: it fires in RANGE-CHOP
+        //   with no real gap signal. Breakdown by gap strength: flat gap (-5..3) = 44%,
+        //   gap mid (10-20) = 59%, gap strong (20+) = 65%. The directional-lock only
+        //   wins when gap confirms. So: if gap is weak (<10 aligned), sit out.
+        const _gapAligned=Number(analysis?.rawSignalScores?.gap||0)*(_post>=50?1:-1);
+        const _gapTooWeakForLock=Math.abs(_gapAligned)<10;
+        if(!_isDeadWindow&&_gapTooWeakForLock){
+          // Weak gap — directional-lock would be ~44-49% WR. Sit out.
+          const _sitSnap={
+            call:'SIT_OUT',direction:'SIT_OUT',
+            confidence:_commitConf,
+            caution:`Weak gap (${_gapAligned.toFixed(0)}pt) in range-chop — directional-lock is 44% WR here, sit out (V10.7.90)`,
+            reason:`V10.7.90 weak-gap guard: directional-lock needs |gap|>=10, got ${_gapAligned.toFixed(0)}pt`,
+            wasOverriddenNoTrade:true,
+            noGoCategory:'weak-gap-directional-sitout',
+            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+            atPosterior:_post,kalshiAtLock:_kPctNow,
+            locked:true,earlyLock:false,
+            isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+            samples:0,needSamples:0,
+            tier:'weak-gap-sitout',
+            session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+            regime:analysis?.regime||'',
+            qScore:Math.round(_qFast),
+            fgt:analysis?.mtfAlignment,
+            _committedAt:Date.now(),
+            _v10790_gapAligned:_gapAligned,
+          };
+          taraCallSnapshotRef.current=_sitSnap;
+          _logSnapshotEntry(_sitSnap);
+          _persistLock();
+          return;
+        }
         if(!_isDeadWindow){
-          // V10.7.6 — check for reversal signals before committing
+          // Strong-enough gap (|gap|>=10) — keep the original directional lock.
           const _v107_6=_v10_7_6_reversalCheck(_post,analysis);
           const _forceDir=_v107_6.dir;
           const _forceConf=_v107_6.conf;
@@ -40070,6 +40105,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _v10_7_6_revReasons:_v107_6.reasons,
             _v10_7_6_originalDir:_v107_6.flipped?_v107_6.originalDir:null,
             _v10_7_5_rangeBps:_rangeBps,
+            _v10790_gapAligned:_gapAligned,
           };
           taraCallSnapshotRef.current=_forceSnap;
           _logSnapshotEntry(_forceSnap);
@@ -40145,6 +40181,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _noGoTier='no-go-edge';
         }
       }
+      // (a2) V10.7.90 — NY PRE-OPEN DEAD ZONE (12:00-13:00 UTC).
+      //   Audit (last 300 trades): 12:00 UTC = 25% WR (2W/6L), 13:00 UTC = 30% (3W/7L).
+      //   That's 8-9am ET, NY pre-open — thin, choppy, news-driven whipsaws. Worst
+      //   two hours of the day. Only lock here with very strong gap (>=20pt).
+      if(!_noGoReason&&_commitConf!=null){
+        const _deadH=new Date().getUTCHours();
+        if(_deadH===12||_deadH===13){
+          const _gapDead=Math.abs(Number(analysis?.rawSignalScores?.gap||0));
+          if(_gapDead<20){
+            _noGoReason=`NY pre-open dead zone (${_deadH}:00 UTC) — 25-30% WR historically, gap only ${_gapDead.toFixed(0)}pt, sit out (V10.7.90)`;
+            _noGoTier='deadzone-hour-sitout';
+          }
+        }
+      }
       // (b) DATA UNAVAILABLE — price feed stale (>30s) or Kalshi missing
       if(!_noGoReason){
         const _priceStaleness=lastPriceSourceRef.current?.time?(Date.now()-lastPriceSourceRef.current.time):Infinity;
@@ -40185,7 +40235,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         );
         const _secsLeft=timeState.minsRemaining*60+timeState.secsRemaining;
         const _curWid=computeWindowId(windowType);
-        if(_isChopRegime&&_gapScore<5&&_extSignal<8){ // V10.7.88: raised ext bypass 6→8
+        // V10.7.90: raised flat-gap watch trigger from gap<5 to gap<8.
+        //   Audit: gap weak (3-10) band = 33% WR. Old <5 threshold let 5-8 through
+        //   to directional-lock where it lost. Now the watch covers it.
+        if(_isChopRegime&&_gapScore<8&&_extSignal<8){
           if(_flatGapWatchRef.current?.windowId!==_curWid){
             _flatGapWatchRef.current={windowId:_curWid,startedAt:Date.now()};
           }
