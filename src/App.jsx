@@ -3020,14 +3020,21 @@ const calcMomentumAlignment=(d1,d5,d15)=>{const signs=[Math.sign(d1),Math.sign(d
 // V4.6 FRESH START: Default weights reset to neutral midpoint. Per user request — full
 //   training reset, no carryover from the 57-trade seed CSV. Each signal starts at the
 //   same weight so gradient descent learns purely from the user's live trades.
-const DEFAULT_WEIGHTS={gap:35.00,momentum:35.00,structure:35.00,flow:35.00,technical:35.00,regime:35.00,rangePosition:35.00,
-  // V9.11.0: htfPatterns and futures are MULTIPLIERS, not raw weights. The underlying
-  //   signal values are already pre-weighted inside their detector logic (chart patterns
-  //   contribute ±20 internally, etc.). The learning loop adjusts these multipliers up
-  //   or down based on observed win/loss attribution. Default 1.0 = neutral.
-  //   Bounds [0.0, 2.5] mean a signal can be fully muted by learning if it consistently
-  //   leads to losses, or buffed up to 2.5x if it's reliably right.
-  htfPatterns:1.00,futures:1.00,
+// V10.7.91: DEFAULT_WEIGHTS updated from empirical analysis of 1,819 BTC trades.
+//   Signal effectiveness (win avg - loss avg aligned delta):
+//     gap:        +10.1  → RAISE weight, it's the primary predictor
+//     flow:       +4.4   → keep, secondary predictor
+//     momentum:   +2.5   → lower, borderline noise
+//     htfPatterns: +1.7  → near-mute multiplier, pure noise in RANGE-CHOP
+//     liqHeatmap: -0.1   → anti-predictive, mute
+//     macd:       +0.3   → noise, lower
+//     avwap:      +0.3   → noise, lower
+//   All others unchanged. Learning loop will continue refining from here.
+const DEFAULT_WEIGHTS={gap:55.00,momentum:28.00,structure:35.00,flow:40.00,technical:35.00,regime:35.00,rangePosition:35.00,
+  // V10.7.91: htfPatterns multiplier: 1.0→0.15. Data shows delta +1.7 (pure noise).
+  //   In RANGE-CHOP (70% of trades) it actively competes with gap signal. Muting it.
+  //   futures unchanged — still has some value in trending regimes.
+  htfPatterns:0.15,futures:1.00,
   // V9.12: macroShock is also a multiplier — raw signal already produces ±10. The
   //   weight learning loop tunes how much that ±10 nudge influences the final score.
   //   Starts neutral; if 4-asset shocks reliably predict outcome direction, it'll buff
@@ -3101,7 +3108,10 @@ const loadRegimeWeights=()=>{
 const saveRegimeWeights=(rwObj)=>{
   try{localStorage.setItem('taraRegimeWeights_v1',JSON.stringify(rwObj||{}));}catch(e){}
 };
-const WEIGHT_BOUNDS={gap:[5,65],momentum:[5,58],structure:[2,38],flow:[2,55],technical:[5,48],regime:[2,45],rangePosition:[5,55],
+// V10.7.91: WEIGHT_BOUNDS updated. Gap upper raised 65→75 (strongest predictor,
+//   give learning room to go higher). Momentum upper lowered 58→40 (noise signal,
+//   cap it so learning can't over-rely on it).
+const WEIGHT_BOUNDS={gap:[5,75],momentum:[5,40],structure:[2,38],flow:[2,55],technical:[5,48],regime:[2,45],rangePosition:[5,55],
   // V9.11.0: multiplier bounds. 0 means signal is fully muted; 2.5 means 250% amplified.
   htfPatterns:[0.00,2.50],futures:[0.00,2.50],
   // V9.12: macroShock multiplier bounds match htfPatterns/futures.
@@ -3114,23 +3124,37 @@ const WEIGHT_BOUNDS={gap:[5,65],momentum:[5,58],structure:[2,38],flow:[2,55],tec
 const LEARNING_RATE=0.8;
 
 const loadWeights=()=>{
-  // V10.7.55 RESET: same reasoning as loadRegimeWeights — adaptive weights tuned against
-  //   pre-V10.7.44 signals are contaminated. Reset gated by same flag so it happens once.
-  // V10.7.57 FIX: also bump the cloud-sync updatedAt timestamp so the local reset wins
-  //   against any stale cloud-stored weights. Without this, cloud RMW merge would
-  //   restore the contaminated weights on next sync (defeating the reset entirely).
-  const _RESET_FLAG_KEY='taraRegimeWeights_v10_7_55_reset';
+  // V10.7.91 RESET: DEFAULT_WEIGHTS updated from 1,819-trade empirical analysis.
+  //   Old defaults had all signals equal (gap=35, flow=35, htfPatterns=1.0).
+  //   New defaults reflect actual signal effectiveness (gap=55, flow=40, htfPatterns=0.15).
+  //   Must reset so users don't continue with old contaminated gradient descent state.
+  const _RESET_FLAG_KEY='taraWeights_v10_7_91_reset';
   let _alreadyReset=false;
   try{_alreadyReset=localStorage.getItem(_RESET_FLAG_KEY)==='1';}catch(_){}
   if(!_alreadyReset){
     try{
       localStorage.removeItem('taraWeightsV110');
       localStorage.removeItem('taraWeightsByAsset_BTC_v1');
-
-      // V10.7.57: bump timestamps so local reset wins vs cloud
       const _now=Date.now();
       localStorage.setItem('taraWeightsByAsset_BTC_v1_updatedAt',String(_now));
-
+      localStorage.setItem(_RESET_FLAG_KEY,'1');
+      try{console.info('[V10.7.91] Adaptive weights reset — new empirically-calibrated defaults: gap=55, flow=40, htfPatterns=0.15');}catch(_){}
+    }catch(_){}
+  }
+  // V10.7.55 RESET: same reasoning as loadRegimeWeights — adaptive weights tuned against
+  //   pre-V10.7.44 signals are contaminated. Reset gated by same flag so it happens once.
+  // V10.7.57 FIX: also bump the cloud-sync updatedAt timestamp so the local reset wins
+  //   against any stale cloud-stored weights. Without this, cloud RMW merge would
+  //   restore the contaminated weights on next sync (defeating the reset entirely).
+  const _RESET_FLAG_KEY_55='taraRegimeWeights_v10_7_55_reset';
+  let _alreadyReset55=false;
+  try{_alreadyReset55=localStorage.getItem(_RESET_FLAG_KEY_55)==='1';}catch(_){}
+  if(!_alreadyReset55){
+    try{
+      localStorage.removeItem('taraWeightsV110');
+      localStorage.removeItem('taraWeightsByAsset_BTC_v1');
+      const _now=Date.now();
+      localStorage.setItem('taraWeightsByAsset_BTC_v1_updatedAt',String(_now));
       try{console.info('[V10.7.55] Adaptive weights reset — will re-learn from V10.7.44+ clean data.');}catch(_){}
     }catch(_){}
   }
@@ -4239,8 +4263,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.05-v10.7.90-loss-driver-gates';
-const TARA_VERSION_DISPLAY='Tara 10.7.90';
+const BASELINE_VERSION='2026.06.05-v10.7.91-signal-recal';
+const TARA_VERSION_DISPLAY='Tara 10.7.91';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10119,7 +10143,11 @@ const computeV99Posterior=(params)=>{
   //   liquidation hunts are not probabilistic, they're structural.
   const _heatmapData=params.liqHeatmap;
   if(_heatmapData?.ok&&Number.isFinite(_heatmapData.combinedSignal)&&Math.abs(_heatmapData.combinedSignal)>1){
-    const _hmAdj=Math.max(-10,Math.min(10,_heatmapData.combinedSignal));
+    // V10.7.91: liqHeatmap dampened to 20% of original.
+    //   Empirical data (1,819 trades): win avg liqHeatmap +4.6 vs loss avg +4.7 — delta -0.1.
+    //   The signal is slightly anti-predictive and adding noise. Keeping it at 20% for
+    //   the rare case it's genuinely useful (strong OI walls) while removing its noise impact.
+    const _hmAdj=Math.max(-10,Math.min(10,_heatmapData.combinedSignal*0.20));
     totalScore+=_hmAdj;
     rawSignalScores.liqHeatmap=Math.round(_hmAdj*10)/10;
     rawSignalScores._liqGravity=_heatmapData.liquidationGravity;
@@ -10127,7 +10155,7 @@ const computeV99Posterior=(params)=>{
     rawSignalScores._nearestWall=_heatmapData.nearestWallSide?`${_heatmapData.nearestWallSide}@${_heatmapData.nearestWallDistBps}bps($${_heatmapData.nearestWallSize}M)`:null;
     if(Math.abs(_hmAdj)>2){
       const _wallNote=_heatmapData.nearestWallSide?` wall ${_heatmapData.nearestWallSide} ${_heatmapData.nearestWallDistBps}bps $${_heatmapData.nearestWallSize}M`:'';
-      reasoning.push(`[LIQ-HEATMAP] ${_heatmapData.combinedDirection} gravity=${_heatmapData.liquidationGravity} OI=${_heatmapData.oiSignal}${_wallNote} (${_hmAdj>=0?'+':''}${_hmAdj.toFixed(1)})`);
+      reasoning.push(`[LIQ-HEATMAP] ${_heatmapData.combinedDirection} gravity=${_heatmapData.liquidationGravity} OI=${_heatmapData.oiSignal}${_wallNote} (${_hmAdj>=0?'+':''}${_hmAdj.toFixed(1)}) [×0.20 V10.7.91]`);
     }
   }else{
     rawSignalScores.liqHeatmap=null;
@@ -11556,6 +11584,44 @@ const computeV99Posterior=(params)=>{
     const _v1055IsLongSqueeze=_v1055Regime==='LONG SQUEEZE';
     const _v1055IsHighVolChop=_v1055Regime==='HIGH VOL CHOP';
     const _v1055IsCompressing=_v1055Regime==='COMPRESSING';
+
+    // V10.7.91: RANGE-CHOP GAP AMPLIFIER.
+    //   Empirical data: in RANGE-CHOP, gap is the ONLY reliable signal (delta +10.1).
+    //   Flow works secondarily (delta +4.4) but only when gap agrees.
+    //   Flow-without-gap in RANGE-CHOP = 55% WR (barely above coin flip).
+    //   Fix: in RANGE-CHOP, boost gap signal an additional 40%.
+    //   This makes gap the clear dominator and reduces noise signal interference.
+    if(_v1055IsChop&&Math.abs(_v1055Gap)>=5){
+      const _chopGapBoost=_v1055Gap*0.40;
+      _v1055TotalAdj+=_chopGapBoost;
+      _v1055Adjustments.chopGapAmp=Math.round(_chopGapBoost*10)/10;
+      rawSignalScores.gap=(_v1055Gap+_chopGapBoost);
+    }
+
+    // V10.7.91: GAP-DIRECTION CORRECTOR.
+    //   When gap strongly opposes the current posterior lean AND flow also opposes
+    //   (or is neutral), the trade is a near-certain loss. Instead of sitting out,
+    //   apply a strong corrective pull toward the gap direction. This converts
+    //   "gap=-27, flow=-20, posterior calls UP" from a 25% WR lock into a proper
+    //   DOWN call.
+    //   Fires when: |gap| >= 15 AND gap opposes current totalScore sign
+    //   Magnitude: 1.5x the gap magnitude (enough to flip a marginal call)
+    //   Gate: flow must not be strongly OPPOSING the gap (i.e. we need at least
+    //         neutral tape for the correction to apply cleanly)
+    const _corrGap=rawSignalScores.gap||0;
+    const _corrFlow=rawSignalScores.flow||0;
+    const _currentLean=totalScore>0?1:-1;
+    const _gapDir=_corrGap>0?1:-1;
+    const _gapOpposesCurrent=_gapDir!==_currentLean&&Math.abs(_corrGap)>=15;
+    // Flow gate: flow shouldn't be strongly against the gap direction (|flow opposing gap| > 25)
+    const _flowAgainstGap=(_corrFlow>0?1:-1)!==_gapDir&&Math.abs(_corrFlow)>25;
+    if(_gapOpposesCurrent&&!_flowAgainstGap){
+      // Corrective pull toward gap direction
+      const _correction=_corrGap*1.5;
+      _v1055TotalAdj+=_correction;
+      _v1055Adjustments.gapCorrection=Math.round(_correction*10)/10;
+      rawSignalScores.gap=rawSignalScores.gap+(_correction*0.5); // blend into gap display
+    }
 
     // GAP BOOST — regime-aware (V10.7.75)
     //   RANGE-CHOP: +30% when |gap|≥8 (original)
@@ -28930,10 +28996,15 @@ function TaraApp(){
         Object.entries(_sss).filter(([k])=>{
           if(!k.startsWith('_'))return true;           // keep scored signals
           if(/^_v\d+_\d+_/.test(k))return true;        // keep _v10_7_64_* analytics
+          if(/^_ml_/.test(k))return true;               // V10.7.91: keep _ml_* for ML training
           return false;                                  // strip raw _macdHist etc
         })
       ):null;
-      return{...rest,...(_scores?{signalScoresAtLock:_scores}:{})};
+      // V10.7.91: also keep top-level _ml_* fields (they're on the entry, not inside signals)
+      const _mlKeys=Object.keys(rest).filter(k=>/^_ml_/.test(k));
+      const _mlData=Object.fromEntries(_mlKeys.map(k=>[k,rest[k]]));
+      const _restClean=Object.fromEntries(Object.entries(rest).filter(([k])=>!k.startsWith('_')||/^_v\d+_\d+_/.test(k)||/^_ml_/.test(k)));
+      return{..._restClean,...(_scores?{signalScoresAtLock:_scores}:{})};
     };
     // V10.7.88b: RMW (Read-Modify-Write) for localStorage.
     //   Previously: direct overwrite. Problem: with BTC + ETH tabs both open, ETH tab's
