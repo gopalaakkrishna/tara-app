@@ -4263,8 +4263,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.05-v10.7.91-signal-recal';
-const TARA_VERSION_DISPLAY='Tara 10.7.91';
+const BASELINE_VERSION='2026.06.05-v10.7.93-reconcile-apply-fix';
+const TARA_VERSION_DISPLAY='Tara 10.7.93';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20182,26 +20182,40 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   const st=new Date(s.settled_time||0).getTime();
                   return st>=_minLogTime&&st<=_maxLogTime;
                 });
-                // Fetch market details for each relevant settlement ticker (batched, 8 parallel)
-                const _marketByTicker=new Map(); // ticker → {close_time, floor_strike, expiration_value, result, settlement_value}
-                const _relevantTickers=_relevantSettlements.map(s=>s.ticker);
-                const _BATCH=8;
-                for(let i=0;i<_relevantTickers.length;i+=_BATCH){
-                  const batch=_relevantTickers.slice(i,i+_BATCH);
-                  await Promise.all(batch.map(async ticker=>{
-                    const data=await _authFetch(`/markets/${encodeURIComponent(ticker)}`);
-                    const mk=data?.market;
-                    if(mk){
-                      _marketByTicker.set(ticker,{
-                        close_time:mk.close_time?new Date(mk.close_time).getTime():0,
-                        floor_strike:Number(mk.floor_strike)||0,
-                        expiration_value:mk.expiration_value!=null?Number(mk.expiration_value):(mk.settlement_value!=null?Number(mk.settlement_value):0),
-                        result:mk.result,
-                        strike_type:mk.strike_type,
-                      });
-                      _diag.marketsTotal++;
+                // ── STEP 4: BULK FETCH ALL BTC SETTLED MARKETS ────────────────────
+                // OLD: 555 individual /markets/{ticker} calls → ~6 minutes
+                // NEW: /markets?series_ticker=KXBTC15M&status=settled bulk query → ~5 seconds
+                // Kalshi returns all markets for a series in pages of 1000.
+                // We get close_time, floor_strike, expiration_value, result for every window at once.
+                const _marketByTicker=new Map();
+                if(_hasAuth&&_relevantSettlements.length>0){
+                  // Fetch bulk markets for both 15m and 5m series
+                  const _seriesList=['KXBTC15M','KXBTC5M'];
+                  for(const _series of _seriesList){
+                    let _marketPage=0;
+                    let _marketCursor=null;
+                    while(_marketPage<20){
+                      const _sep=_marketCursor?'&':'?';
+                      const _mktPath=`/markets?series_ticker=${_series}&status=settled&limit=1000${_marketCursor?`&cursor=${encodeURIComponent(_marketCursor)}`:''}`;
+                      const _mktData=await _authFetch(_mktPath);
+                      if(!_mktData)break;
+                      const _mkts=_mktData.markets||[];
+                      for(const mk of _mkts){
+                        if(!mk.ticker)continue;
+                        _marketByTicker.set(mk.ticker,{
+                          close_time:mk.close_time?new Date(mk.close_time).getTime():0,
+                          floor_strike:Number(mk.floor_strike)||0,
+                          expiration_value:mk.result_value!=null?Number(mk.result_value):(mk.expiration_value!=null?Number(mk.expiration_value):(mk.settlement_value!=null?Number(mk.settlement_value):0)),
+                          result:mk.result,
+                          strike_type:mk.strike_type,
+                        });
+                        _diag.marketsTotal++;
+                      }
+                      _marketCursor=_mktData.cursor;
+                      if(!_marketCursor||!_mkts.length)break;
+                      _marketPage++;
                     }
-                  }));
+                  }
                 }
                 // Build a time-sorted list of settled markets for fast close_time matching
                 const _settledMarkets=[];
@@ -20702,19 +20716,32 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           const _pending=reconcileResult.issues.filter(i=>i.kind==='pending-resolve'||i.kind==='missing-fields');
           const _mismatches=reconcileResult.issues.filter(i=>i.kind==='kalshi-mismatch');
           const _btns=[];
+          // Shared apply function — reads current localStorage, patches all updates,
+          // writes back via _taraImportCallLog (proven reliable, immediate save).
+          const _applyUpdates=(issues)=>{
+            const _updMap=new Map();
+            issues.forEach(_iss=>{
+              if(!_iss.fullUpdate||!Object.keys(_iss.fullUpdate).length)return;
+              _updMap.set(_iss.entryId,_iss.fullUpdate);
+            });
+            if(!_updMap.size)return;
+            let _currentLog=[];
+            try{const _raw=localStorage.getItem('taraCallLog_v1');if(_raw)_currentLog=JSON.parse(_raw);}catch(_){}
+            if(!_currentLog.length&&typeof taraCallLog!=='undefined')_currentLog=[...taraCallLog];
+            const _patched=_currentLog.map(e=>{
+              if(!e||!e.id)return e;
+              const _upd=_updMap.get(e.id);
+              return _upd?{...e,..._upd,manualEdit:true,manualEditedAt:Date.now()}:e;
+            });
+            if(typeof window._taraImportCallLog==='function')window._taraImportCallLog(_patched);
+          };
           if(_pending.length>0){
             _btns.push(React.createElement('button',{
               key:'apall-pend',
               onClick:()=>{
                 if(!window.confirm(`Apply ${_pending.length} pending entries from Kalshi? This will mark each as WIN or LOSS based on Kalshi's settled result.`))return;
-                _pending.forEach(_iss=>{
-                  if(_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0){
-                    onEditEntry(_iss.entryId,_iss.fullUpdate,'__fullUpdate__');
-                  }else{
-                    onEditEntry(_iss.entryId,_iss.suggested,_iss.suggestedField||'result');
-                  }
-                });
-                setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='pending-resolve'),pendingResolved:0}:null);
+                _applyUpdates(_pending);
+                setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='pending-resolve'&&i.kind!=='missing-fields'),pendingResolved:0}:null);
               },
               className:'px-3 py-1.5 rounded text-[10px] uppercase tracking-wider font-bold',
               style:{background:'rgba(229,200,112,0.15)',color:'#E5C870',border:'1px solid rgba(229,200,112,0.40)'},
@@ -20725,13 +20752,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               key:'apall-mis',
               onClick:()=>{
                 if(!window.confirm(`Apply ${_mismatches.length} corrections to mismatched entries?`))return;
-                _mismatches.forEach(_iss=>{
-                  if(_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0){
-                    onEditEntry(_iss.entryId,_iss.fullUpdate,'__fullUpdate__');
-                  }else{
-                    onEditEntry(_iss.entryId,_iss.suggested,_iss.suggestedField||'result');
-                  }
-                });
+                _applyUpdates(_mismatches);
+                setTimeout(()=>{if(typeof window._taraForceSave==='function')window._taraForceSave();},500);
+                setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='kalshi-mismatch')}:null);
                 setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='kalshi-mismatch')}:null);
               },
               className:'px-3 py-1.5 rounded text-[10px] uppercase tracking-wider font-bold',
@@ -20781,11 +20804,19 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               _iss.suggested&&onEditEntry?React.createElement('button',{
                 key:'apply',
                 onClick:()=>{
-                  // V9.17.15: extra confirm step for uncertain kinds
                   if(_isUncertain){
                     if(!window.confirm(`This entry needs review.\n\n${_iss.detail}\n\nApply suggested ${_iss.suggested} anyway?`))return;
                   }
-                  onEditEntry(_iss.entryId,_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0?_iss.fullUpdate:_iss.suggested,_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0?'__fullUpdate__':(_iss.suggestedField||'result'));
+                  // Apply directly to localStorage via import callback for reliability
+                  if(_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0){
+                    let _currentLog=[];
+                    try{const _r=localStorage.getItem('taraCallLog_v1');if(_r)_currentLog=JSON.parse(_r);}catch(_){}
+                    if(!_currentLog.length&&taraCallLog)_currentLog=[...taraCallLog];
+                    const _patched=_currentLog.map(e=>e&&e.id===_iss.entryId?{...e,..._iss.fullUpdate,manualEdit:true,manualEditedAt:Date.now()}:e);
+                    if(typeof window._taraImportCallLog==='function')window._taraImportCallLog(_patched);
+                  }else if(onEditEntry){
+                    onEditEntry(_iss.entryId,_iss.suggested,_iss.suggestedField||'result');
+                  }
                   setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.entryId!==_iss.entryId)}:null);
                 },
                 className:'px-2.5 py-1 rounded text-[10px] uppercase tracking-wider font-bold',
@@ -28756,10 +28787,11 @@ function TaraApp(){
         // Resolved beats unresolved
         if(existing.result&&!e.result)return;
         if(!existing.result&&e.result){seen.set(k,e);return;}
-        // Both resolved or both unresolved: keep earlier (lower id)
-        if((e.id||0)<(existing.id||0))seen.set(k,e);
+        // Both resolved: keep newer (higher id). Both unresolved: keep newer.
+        // V10.7.91 fix: was keeping OLDER entry (lower id) — backwards.
+        if((e.id||0)>(existing.id||0))seen.set(k,e);
       });
-      const cleaned=Array.from(seen.values()).filter(e=>!e||(e.asset||'BTC')==='BTC').sort((a,b)=>(a.time||0)-(b.time||0));
+      const cleaned=Array.from(seen.values()).filter(e=>!e||(e.asset||'BTC')==='BTC').sort((a,b)=>(a.id||0)-(b.id||0));
       if(dropped>0){
         try{console.warn('[V6.5.3 cleanup] Dropped',dropped,'corrupt log entries');}catch(_){}
       }
@@ -28780,8 +28812,7 @@ function TaraApp(){
   //   call setTaraCallLog without needing it passed through props.
   //   Avoids prop-drilling through TaraCallCard -> TaraMemoryStrip -> TaraMemoryModal.
   React.useEffect(()=>{
-    window._taraImportCallLog=(importedEntries)=>{
-      if(!Array.isArray(importedEntries))return 0;
+    window._taraImportCallLog=(importedEntries)=>{      if(!Array.isArray(importedEntries))return 0;
       const btcEntries=importedEntries.filter(e=>e&&(e.asset||'BTC')==='BTC');
       setTaraCallLog(prev=>{
         const map=new Map();
@@ -28794,12 +28825,16 @@ function TaraApp(){
           else if(existing.result&&e.result&&(e.id||0)>(existing.id||0))map.set(key,e);
         });
         const merged=Array.from(map.values()).sort((a,b)=>(a.id||0)-(b.id||0));
-        // V10.7.89b: Force immediate localStorage save and cloud sync after import
-        // Don't wait for the 60s debounce — user might close tab before it fires
+        // V10.7.91: Force immediate localStorage save — don't rely on debounced useEffect.
+        //   Also write a backup key so if taraCallLog_v1 gets clobbered, we can recover.
         try{
           const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:2000;
           const _save=merged.slice(-_cap);
-          localStorage.setItem('taraCallLog_v1',JSON.stringify(_save));
+          const _json=JSON.stringify(_save);
+          localStorage.setItem('taraCallLog_v1',_json);
+          localStorage.setItem('taraCallLog_backup',_json); // permanent backup
+          localStorage.setItem('taraCallLog_importedAt',String(Date.now()));
+          localStorage.setItem('taraCallLog_importedCount',String(_save.length));
           sessionStorage.setItem('taraCallLog_session',JSON.stringify(_save.slice(-200)));
         }catch(_){}
         // Trigger cloud sync after state commits
@@ -28830,7 +28865,21 @@ function TaraApp(){
       });
       return btcEntries.length;
     };
-    return()=>{try{delete window._taraImportCallLog;}catch(_){}};
+    // _taraForceSave: called after reconcile apply to immediately persist state to localStorage
+    window._taraForceSave=()=>{
+      try{
+        const _cur=taraCallLogRef.current||[];
+        if(!_cur.length)return;
+        const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:2000;
+        const _save=_cur.slice(-_cap);
+        localStorage.setItem('taraCallLog_v1',JSON.stringify(_save));
+        sessionStorage.setItem('taraCallLog_session',JSON.stringify(_save.slice(-200)));
+      }catch(_){}
+    };
+    return()=>{
+      try{delete window._taraImportCallLog;}catch(_){}
+      try{delete window._taraForceSave;}catch(_){}
+    };
   },[setTaraCallLog]);
   // V5.7.1: taraScorecards is DERIVED from taraCallLog instead of incrementally tracked.
   //   Eliminates multi-device double-counting: a sync race could otherwise turn one LOSS
