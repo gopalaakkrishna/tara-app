@@ -4263,8 +4263,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.05-v10.7.93-reconcile-apply-fix';
-const TARA_VERSION_DISPLAY='Tara 10.7.93';
+const BASELINE_VERSION='2026.06.05-v10.7.94-reconcile-atomic-write';
+const TARA_VERSION_DISPLAY='Tara 10.7.94';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20716,24 +20716,23 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           const _pending=reconcileResult.issues.filter(i=>i.kind==='pending-resolve'||i.kind==='missing-fields');
           const _mismatches=reconcileResult.issues.filter(i=>i.kind==='kalshi-mismatch');
           const _btns=[];
-          // Shared apply function — reads current localStorage, patches all updates,
-          // writes back via _taraImportCallLog (proven reliable, immediate save).
+          // Shared apply function — patches entries directly by id, no merge logic.
+          // Uses _taraApplyReconcile which writes atomically to localStorage + React state.
           const _applyUpdates=(issues)=>{
             const _updMap=new Map();
             issues.forEach(_iss=>{
-              if(!_iss.fullUpdate||!Object.keys(_iss.fullUpdate).length)return;
-              _updMap.set(_iss.entryId,_iss.fullUpdate);
+              if(_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0){
+                _updMap.set(_iss.entryId,_iss.fullUpdate);
+              } else if(_iss.suggested){
+                // Fallback: just set result
+                _updMap.set(_iss.entryId,{result:_iss.suggested});
+              }
             });
             if(!_updMap.size)return;
-            let _currentLog=[];
-            try{const _raw=localStorage.getItem('taraCallLog_v1');if(_raw)_currentLog=JSON.parse(_raw);}catch(_){}
-            if(!_currentLog.length&&typeof taraCallLog!=='undefined')_currentLog=[...taraCallLog];
-            const _patched=_currentLog.map(e=>{
-              if(!e||!e.id)return e;
-              const _upd=_updMap.get(e.id);
-              return _upd?{...e,..._upd,manualEdit:true,manualEditedAt:Date.now()}:e;
-            });
-            if(typeof window._taraImportCallLog==='function')window._taraImportCallLog(_patched);
+            if(typeof window._taraApplyReconcile==='function'){
+              const applied=window._taraApplyReconcile(_updMap);
+              try{console.info(`[Reconcile] Applied ${applied} updates directly to localStorage`);}catch(_){}
+            }
           };
           if(_pending.length>0){
             _btns.push(React.createElement('button',{
@@ -20753,7 +20752,6 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               onClick:()=>{
                 if(!window.confirm(`Apply ${_mismatches.length} corrections to mismatched entries?`))return;
                 _applyUpdates(_mismatches);
-                setTimeout(()=>{if(typeof window._taraForceSave==='function')window._taraForceSave();},500);
                 setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='kalshi-mismatch')}:null);
                 setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='kalshi-mismatch')}:null);
               },
@@ -20807,15 +20805,16 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   if(_isUncertain){
                     if(!window.confirm(`This entry needs review.\n\n${_iss.detail}\n\nApply suggested ${_iss.suggested} anyway?`))return;
                   }
-                  // Apply directly to localStorage via import callback for reliability
-                  if(_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0){
-                    let _currentLog=[];
-                    try{const _r=localStorage.getItem('taraCallLog_v1');if(_r)_currentLog=JSON.parse(_r);}catch(_){}
-                    if(!_currentLog.length&&taraCallLog)_currentLog=[...taraCallLog];
-                    const _patched=_currentLog.map(e=>e&&e.id===_iss.entryId?{...e,..._iss.fullUpdate,manualEdit:true,manualEditedAt:Date.now()}:e);
-                    if(typeof window._taraImportCallLog==='function')window._taraImportCallLog(_patched);
+                  if(typeof window._taraApplyReconcile==='function'){
+                    const _upd=_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0
+                      ?_iss.fullUpdate
+                      :(_iss.suggested?{result:_iss.suggested}:null);
+                    if(_upd){
+                      const _m=new Map();_m.set(_iss.entryId,_upd);
+                      window._taraApplyReconcile(_m);
+                    }
                   }else if(onEditEntry){
-                    onEditEntry(_iss.entryId,_iss.suggested,_iss.suggestedField||'result');
+                    onEditEntry(_iss.entryId,_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0?_iss.fullUpdate:_iss.suggested,_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0?'__fullUpdate__':(_iss.suggestedField||'result'));
                   }
                   setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.entryId!==_iss.entryId)}:null);
                 },
@@ -28865,7 +28864,42 @@ function TaraApp(){
       });
       return btcEntries.length;
     };
-    // _taraForceSave: called after reconcile apply to immediately persist state to localStorage
+    // _taraApplyReconcile: used by reconcile apply buttons.
+    //   Problem with the old approach: _taraImportCallLog merges via _shouldReplace.
+    //   When an entry already exists with the same id and is already resolved,
+    //   _shouldReplace returns false and the reconcile patch is silently ignored.
+    //   Fix: read localStorage directly, apply patches by id (no merge logic),
+    //   write back, then set React state directly with the result.
+    //   This is atomic, no timing issues, no merge collisions.
+    window._taraApplyReconcile=(updateMap)=>{
+      // updateMap: Map of entryId → {result, strike, closingPrice, ...}
+      if(!updateMap||!updateMap.size)return 0;
+      let _log=[];
+      try{
+        const _raw=localStorage.getItem('taraCallLog_v1');
+        if(_raw)_log=JSON.parse(_raw);
+      }catch(_){}
+      if(!_log.length)_log=[...(taraCallLogRef.current||[])];
+      let applied=0;
+      const _patched=_log.map(e=>{
+        if(!e||!e.id)return e;
+        const upd=updateMap.get(e.id);
+        if(!upd)return e;
+        applied++;
+        return{...e,...upd,manualEdit:true,manualEditedAt:Date.now()};
+      });
+      // Write to localStorage immediately — no debounce, no merge
+      try{
+        const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:2000;
+        const _save=_patched.slice(-_cap);
+        localStorage.setItem('taraCallLog_v1',JSON.stringify(_save));
+        sessionStorage.setItem('taraCallLog_session',JSON.stringify(_save.slice(-200)));
+      }catch(_){}
+      // Set React state directly — no merge, exactly what we wrote to localStorage
+      setTaraCallLog(_patched);
+      return applied;
+    };
+    // _taraForceSave: flush current state to localStorage immediately
     window._taraForceSave=()=>{
       try{
         const _cur=taraCallLogRef.current||[];
@@ -28878,6 +28912,7 @@ function TaraApp(){
     };
     return()=>{
       try{delete window._taraImportCallLog;}catch(_){}
+      try{delete window._taraApplyReconcile;}catch(_){}
       try{delete window._taraForceSave;}catch(_){}
     };
   },[setTaraCallLog]);
