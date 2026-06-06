@@ -4328,8 +4328,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.06-v10.7.98-confluence-sizing';
-const TARA_VERSION_DISPLAY='Tara 10.7.98';
+const BASELINE_VERSION='2026.06.06-v10.8.0-conviction-timing';
+const TARA_VERSION_DISPLAY='Tara 10.8.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10142,6 +10142,44 @@ const computeV99Posterior=(params)=>{
     reasoning.push(`[LIQ-SPOOF] Ignored fresh short wall (<15s) — likely spoof`);
   }
   totalScore+=liqAdj;
+
+  // V10.7.99: STRIKE CUSHION SIGNAL.
+  //   The most direct predictor of binary outcome available: how far is the current
+  //   spot price from the Kalshi floor strike, right now?
+  //   Audit (1886 trades): 55% of RANGE-CHOP losses landed within 10bps of the strike.
+  //   That's not a signal failure — that's trading when price sits ON the line.
+  //   The cushion signal tells Tara: price is Xbps above/below the strike.
+  //   A positive cushion means price has already moved into your territory.
+  //   A near-zero cushion means it's a coin flip regardless of momentum.
+  //   Signal contribution: up to ±15pt in RANGE-CHOP, ±8pt in other regimes.
+  //   Cushion > 20bps → strong positive contribution (price needs to reverse a lot to lose)
+  //   Cushion 10-20bps → moderate positive
+  //   Cushion 0-10bps → slight positive (still uncertain)
+  //   Cushion negative → negative contribution (price on wrong side of strike already)
+  const _kStrike=Number(params.kalshiStrike||0);
+  const _spotNow=Number(params.currentPrice||0);
+  const _isRange=regime==='RANGE-CHOP';
+  if(_kStrike>0&&_spotNow>0){
+    // Cushion in bps from spot to strike (positive = spot above strike)
+    const _cushionBps=(_spotNow-_kStrike)/_kStrike*10000;
+    // The cushion score: 10bps cushion → +5pt, 20bps → +10pt, 30bps → +15pt
+    // Raw is directional: positive cushion = price above strike = bullish for UP calls
+    // The scoring engine will align this with direction automatically via totalScore
+    const _cushionMult=_isRange?0.55:0.30; // more weight in range where it matters most
+    const _cushionRaw=Math.max(-18,Math.min(18,_cushionBps*_cushionMult));
+    totalScore+=_cushionRaw;
+    rawSignalScores.strikeCushion=Math.round(_cushionRaw*10)/10;
+    rawSignalScores._cushionBps=Math.round(_cushionBps*10)/10;
+    rawSignalScores._kStrikeLive=_kStrike;
+    if(Math.abs(_cushionBps)>5){
+      const _label=_cushionBps>0?'above':'below';
+      reasoning.push(`[CUSHION] spot ${Math.abs(_cushionBps).toFixed(0)}bps ${_label} strike=${_kStrike} (${_cushionRaw>=0?'+':''}${_cushionRaw.toFixed(1)}pt)`);
+    }
+  }else{
+    rawSignalScores.strikeCushion=null;
+    rawSignalScores._cushionBps=null;
+    rawSignalScores._kStrikeLive=null;
+  }
 
   // V10.7.65 — WHALE ALERT ON-CHAIN SIGNAL
   //   Large BTC on-chain transactions (>$500K) via /api/whale proxy.
@@ -33964,7 +34002,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         try{return buildDowHourCalibration(taraCallLogRef.current||[]);}
         catch(_){return null;}
       })();
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert,deribitOptions,liqSignal,liqHeatmap,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable});
+      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert,deribitOptions,liqSignal,liqHeatmap,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable,kalshiStrike:kalshiStrikeRef.current});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
@@ -37217,7 +37255,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   :(_sigTier==='structural'||_ctx.isStructuralLed||taraCall?.isStructuralLed)?3
                   :(_sigTier==='tape'||_ctx.isTapeLed||taraCall?.isTapeLed)?2
                   :1; // 'single' / 'time-cap-commit' / 'forced' / etc → bedrock 'single' rank
-    const _minTierRank={any:1,tape:2,structural:3,confluence:4,super:5}[autoExecSettings.minTier||'any']||1;
+    const _minTierRank={any:1,tape:2,structural:3,confluence:4,super:5}[autoExecSettings.minTier||'confluence']||4;
     if(!_bypassSoftFilters&&_tierRank<_minTierRank){_autoExecLastFiredKeyRef.current=_key;return;}
     // V9.6.0: QUALITY GATE filter
     if(!_bypassSoftFilters&&autoExecSettings.minQualityScore>0&&(qualityGate?.score||0)<autoExecSettings.minQualityScore){_autoExecLastFiredKeyRef.current=_key;return;}
@@ -41078,6 +41116,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _isLcTapeLed=tc?._ctx?.isTapeLed||false;
     const _isLcRising=tc?._ctx?.isRisingConfluence||false;
     const _isLcStructural=tc?._ctx?.isStructuralLed||false;
+    // V10.7.99 NOTE: cushion patience multiplier removed.
+    // Waiting for cushion = chasing the move = locking at worse Kalshi prices.
+    // One reversal at 72¢ wipes multiple wins at 55¢. The cushion SIGNAL
+    // in the posterior already adjusts probability correctly. Timing stays normal.
     let needSamples,tierLabel;
     if(_isLcStructural){
       // V9.11.3: needSamples 3 → 12. Audit of 46 structural-led trades showed 57% WR
@@ -41212,7 +41254,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       return;
     }
     if(samples>=needSamples||analysis?.isSystemLocked||_instantForceReady){
-      // V5.5d: Snapshot uses CLAIMED direction (the first formed direction this window),
+      // V10.8.0: MINIMUM CONVICTION TIME FLOOR.
+      //   User trades later in windows anyway — signals at second 3 are noise.
+      //   No lock fires in the first 60 seconds regardless of tier.
+      //   RANGE-CHOP: 90 second minimum — direction takes longer to establish.
+      //   This is not a sitout. It just ensures signals have settled before committing.
+      //   User said "fine as long as Tara locks within first 5 minutes" — 90s is 1.5min.
+      //   Hard-force bypasses this (manual override always works).
+      if(!_instantForceReady&&!analysis?.isSystemLocked){
+        const _isRangeNow=(analysis?.regime||'')===('RANGE-CHOP');
+        const _minElapsedSec=_isRangeNow?90:60;
+        if(elapsedSec<_minElapsedSec){
+          // Too early — don't log, just return. Tara will lock once time floor passes.
+          return;
+        }
+      }
       //   not current tc.call. If tc.call has flipped temporarily, we still commit to
       //   the original direction Tara was building toward.
       const _committedCall=claimedDir||tc.call;  // claimed wins; tc.call as fallback for safety
