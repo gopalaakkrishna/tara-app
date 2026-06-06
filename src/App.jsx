@@ -4328,8 +4328,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.05-v10.7.96-reconcile-robust';
-const TARA_VERSION_DISPLAY='Tara 10.7.96';
+const BASELINE_VERSION='2026.06.06-v10.7.97-gap-opposed-gate';
+const TARA_VERSION_DISPLAY='Tara 10.7.97';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -40385,15 +40385,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   with no real gap signal. Breakdown by gap strength: flat gap (-5..3) = 44%,
         //   gap mid (10-20) = 59%, gap strong (20+) = 65%. The directional-lock only
         //   wins when gap confirms. So: if gap is weak (<10 aligned), sit out.
+        // V10.7.97 FIX: was Math.abs(_gapAligned)<10 which only caught FLAT gap.
+        //   Opposed gap (gap aligned = -27) has abs 27 so it PASSED the gate and locked.
+        //   Audit (1865 trades): directional-lock gap opposed (<-10) = 29% WR, -12¢ EV.
+        //   directional-lock gap flat (-10..10) = 52% WR. gap mid (10-25) = 66%. strong = 71%.
+        //   The lock only earns its keep at gap >= 10 ALIGNED. Drop Math.abs so anything
+        //   below +10 aligned (flat OR opposed) sits out. Keeps the 66-71% buckets.
         const _gapAligned=Number(analysis?.rawSignalScores?.gap||0)*(_post>=50?1:-1);
-        const _gapTooWeakForLock=Math.abs(_gapAligned)<10;
+        const _gapTooWeakForLock=_gapAligned<10;
         if(!_isDeadWindow&&_gapTooWeakForLock){
-          // Weak gap — directional-lock would be ~44-49% WR. Sit out.
+          // Gap flat or opposed — directional-lock is 29-52% WR here. Sit out.
+          const _gapDesc=_gapAligned<-10?'opposed':'flat';
           const _sitSnap={
             call:'SIT_OUT',direction:'SIT_OUT',
             confidence:_commitConf,
-            caution:`Weak gap (${_gapAligned.toFixed(0)}pt) in range-chop — directional-lock is 44% WR here, sit out (V10.7.90)`,
-            reason:`V10.7.90 weak-gap guard: directional-lock needs |gap|>=10, got ${_gapAligned.toFixed(0)}pt`,
+            caution:`Gap ${_gapDesc} (${_gapAligned.toFixed(0)}pt) in range-chop — directional-lock is ${_gapAligned<-10?'29':'52'}% WR here, sit out (V10.7.97)`,
+            reason:`V10.7.97 gap guard: directional-lock needs gap>=10 aligned, got ${_gapAligned.toFixed(0)}pt (${_gapDesc})`,
             wasOverriddenNoTrade:true,
             noGoCategory:'weak-gap-directional-sitout',
             atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
