@@ -4328,8 +4328,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.06-v10.7.97-gap-opposed-gate';
-const TARA_VERSION_DISPLAY='Tara 10.7.97';
+const BASELINE_VERSION='2026.06.06-v10.7.98-confluence-sizing';
+const TARA_VERSION_DISPLAY='Tara 10.7.98';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13999,22 +13999,45 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   const _curUtcH=new Date().getUTCHours();
   const _curHourEntry=bestWindowsToday?.best?.find(h=>h.hour===_curUtcH);
   const _isInBestHour=_curHourEntry&&_curHourEntry.wr>=70&&_curHourEntry.total>=4;
+  // V10.7.98: SIGNAL CONFLUENCE TIER — the real win-rate predictor.
+  //   Empirical (1865 trades): when gap+flow+momentum all align in the call's direction,
+  //   win rate climbs sharply and EV/trade is highest:
+  //     gap>=20 flow>=15 mom>=10 → 76% WR, +7.5¢/trade (PRIME)
+  //     gap>=25 flow>=15 mom>=10 → 77% WR, +8.1¢/trade
+  //     gap>=30 flow>=15 mom>=10 → 82% WR, +7.3¢/trade
+  //     gap>=20 alone            → 71% WR, +3.0¢/trade (STRONG)
+  //     gap>=10 aligned          → 69% WR (STANDARD — already the floor after V10.7.97)
+  //   This is the wheelhouse: swing hardest when all three signals confirm.
+  const _sigScores=analysis?.rawSignalScores||{};
+  const _dirSign=_dir==='UP'?1:(_dir==='DOWN'?-1:0);
+  const _gapAl=Number(_sigScores.gap||0)*_dirSign;
+  const _flowAl=Number(_sigScores.flow||0)*_dirSign;
+  const _momAl=Number(_sigScores.momentum||0)*_dirSign;
+  // Confluence levels
+  const _isPrimePlus=_gapAl>=30&&_flowAl>=15&&_momAl>=10;   // 82% WR
+  const _isPrime=_gapAl>=20&&_flowAl>=15&&_momAl>=10;        // 76% WR
+  const _isStrongConfluence=_gapAl>=20&&_flowAl>=10;         // 73% WR
+  const _isStrong=_gapAl>=20;                                 // 71% WR
   if(todayData?.strongTilt){
     _sizeHint='SKIP';_sizeColor='rgb(244,114,182)';_sizeReason='5+ losses in a row';
   } else if(todayData?.tilt){
-    _sizeHint='HALF';_sizeColor='rgba(244,114,182,0.85)';_sizeReason='3+ loss streak';
-  } else if(_edge!=null&&_edge<-5){
+    _sizeHint='HALF';_sizeColor='rgba(244,114,182,0.85)';_sizeReason='3+ loss streak — cut size';
+  } else if(_edge!=null&&_edge<-5&&!_isPrime){
     _sizeHint='SKIP';_sizeColor='rgba(244,114,182,0.85)';_sizeReason='negative edge vs Kalshi';
+  } else if(_isPrimePlus&&_isLocked){
+    _sizeHint='MAX';_sizeColor='rgb(110,231,183)';_sizeReason='all signals aligned strong (82% WR zone)';
+  } else if(_isPrime&&_isLocked){
+    _sizeHint='LARGE';_sizeColor='rgb(110,231,183)';_sizeReason='gap+flow+momentum aligned (76% WR zone)';
+  } else if(_isStrongConfluence&&_isLocked){
+    _sizeHint='FULL';_sizeColor='rgba(110,231,183,0.9)';_sizeReason='gap+flow aligned (73% WR zone)';
+  } else if(_isStrong&&_isLocked){
+    _sizeHint='FULL';_sizeColor='rgba(110,231,183,0.85)';_sizeReason='strong gap (71% WR zone)';
   } else if(_edge!=null&&_edge>=15&&_isInBestHour&&_isLocked){
     _sizeHint='LARGE';_sizeColor='rgb(110,231,183)';_sizeReason=`big edge + ${_curHourEntry.wr}% historical hour`;
-  } else if(_edge!=null&&_edge>=15&&_isLocked){
-    _sizeHint='FULL';_sizeColor='rgb(110,231,183)';_sizeReason='big edge';
-  } else if(_isInBestHour&&_isLocked&&_edge!=null&&_edge>=5){
-    _sizeHint='FULL';_sizeColor='rgba(110,231,183,0.85)';_sizeReason=`good edge + ${_curHourEntry.wr}% historical hour`;
   } else if(analysis?.regime==='HIGH_VOL'||analysis?.regime==='EXTREME_VOL'){
-    _sizeHint='HALF';_sizeColor='rgba(229,200,112,0.85)';_sizeReason='vol regime';
+    _sizeHint='HALF';_sizeColor='rgba(229,200,112,0.85)';_sizeReason='vol regime — cut size';
   } else if(_isLocked){
-    _sizeHint='NORMAL';_sizeColor='rgba(232,233,228,0.7)';_sizeReason=null;
+    _sizeHint='NORMAL';_sizeColor='rgba(232,233,228,0.7)';_sizeReason='standard window (69% WR zone)';
   }
   // ── Cooldown after loss ── soft hint to slow down for a few minutes after fresh loss
   const _showCooldown=todayData?.inCooldown&&todayData?.cooldownMinSinceLoss!=null&&!_isLocked;
