@@ -3096,10 +3096,11 @@ const calcMomentumAlignment=(d1,d5,d15)=>{const signs=[Math.sign(d1),Math.sign(d
 //     avwap:      +0.3   → noise, lower
 //   All others unchanged. Learning loop will continue refining from here.
 const DEFAULT_WEIGHTS={gap:55.00,momentum:28.00,structure:35.00,flow:40.00,technical:35.00,regime:35.00,rangePosition:35.00,
-  // V10.7.91: htfPatterns multiplier: 1.0→0.15. Data shows delta +1.7 (pure noise).
-  //   In RANGE-CHOP (70% of trades) it actively competes with gap signal. Muting it.
-  //   futures unchanged — still has some value in trending regimes.
-  htfPatterns:0.15,futures:1.00,
+  // V10.8.1: htfPatterns zeroed out.
+  //   All-time delta was +1.7 (noise). Recent 50 trades: delta -9.0 (actively inverted).
+  //   Losses have MORE htfPatterns signal than wins. Dampening to 0.15× wasn't enough.
+  //   Zero it entirely. It can be re-enabled if future data shows it recovers.
+  htfPatterns:0.00,futures:1.00,
   // V9.12: macroShock is also a multiplier — raw signal already produces ±10. The
   //   weight learning loop tunes how much that ±10 nudge influences the final score.
   //   Starts neutral; if 4-asset shocks reliably predict outcome direction, it'll buff
@@ -4328,8 +4329,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.06-v10.8.0-conviction-timing';
-const TARA_VERSION_DISPLAY='Tara 10.8.0';
+const BASELINE_VERSION='2026.06.07-v10.8.2-midwindow-cushion';
+const TARA_VERSION_DISPLAY='Tara 10.8.2';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -28525,6 +28526,11 @@ function TaraApp(){
   const needsCapturedPriceRef=useRef(false);
   // Auto-strike: tracks the window's opening price, fetched at each new window
   const windowOpenPriceRef=useRef(0);
+  // V10.8.2: Mid-window cushion history — tracks price vs Kalshi strike every 30s.
+  //   Answers: has price been consistently above/below the strike, or oscillating?
+  //   {t: elapsed_ms, cushionBps: (spot-strike)/strike*10000, spotPrice}
+  const _windowCushionHistoryRef=useRef([]);
+  const _cushionLastPushedRef=useRef(0);
   // V3.1.7+: Window amplitude tracking — high/low since window open. Reset on rollover.
   //         Powers the "is this a wild window or a dead window" classification.
   // V3.1.9: Also track WHEN high/low were first reached (windowHighTime / windowLowTime)
@@ -31841,6 +31847,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     windowWhaleStatsRef.current={count:0,contraryUsd:0,contraryClockSec:null,contrarySide:null};
     windowMaxGeoRiskRef.current=0;
     windowHadMacroEventRef.current=false;
+    // V10.8.2: Reset cushion history for new window
+    _windowCushionHistoryRef.current=[];
+    _cushionLastPushedRef.current=0;
     setStrikeMode('manual');
     setPendingStrike(null);
     // Try Kalshi cache first (best source — preset strike from market)
@@ -34002,6 +34011,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         try{return buildDowHourCalibration(taraCallLogRef.current||[]);}
         catch(_){return null;}
       })();
+      // V10.8.2: MID-WINDOW CUSHION TRACKER.
+      //   Every 30 seconds, push a snapshot of how far price is from the Kalshi strike.
+      //   This builds a history of whether price has been consistently on one side
+      //   of the strike — which is far more predictive than a single snapshot at lock time.
+      const _kStrikeNow=kalshiStrikeRef.current;
+      const _cushionNow=Date.now();
+      if(_kStrikeNow>0&&currentPrice>0&&_cushionNow-(_cushionLastPushedRef.current||0)>=30000){
+        _cushionLastPushedRef.current=_cushionNow;
+        const _elapsed=_cushionNow-(windowOpenTimeRef.current||_cushionNow);
+        const _cushBps=(currentPrice-_kStrikeNow)/_kStrikeNow*10000;
+        _windowCushionHistoryRef.current.push({t:_elapsed,cushionBps:_cushBps,spot:currentPrice});
+        // Keep max 30 snapshots (15 minutes / 30s)
+        if(_windowCushionHistoryRef.current.length>30)_windowCushionHistoryRef.current.shift();
+      }
+
       const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert,deribitOptions,liqSignal,liqHeatmap,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable,kalshiStrike:kalshiStrikeRef.current});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
@@ -40853,7 +40877,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           );
           const _kForDir=_commitDir==='UP'?_kPctNow:(100-(_kPctNow||50));
           const _isFlatGapTimeCap=_gapAtCap<5&&_extAtCap<8&&_kForDir!=null&&_kForDir>=44&&_kForDir<=65&&(_isChopRegime||analysis?.regime==='RANGE-CHOP');
-          if(!_isDeadWindow&&!_effectiveDeadzone&&!_isFlatGapTimeCap){
+          // V10.8.1: GAP-OPPOSED GATE on time-cap-commit path.
+          //   The directional-lock gate (V10.7.97) catches gap<10 aligned early.
+          //   But the time-cap path bypasses it entirely — gap-opposed trades
+          //   were slipping through at 17% WR. Apply the same rule here.
+          const _gapAlignedCap=Number(analysis?.rawSignalScores?.gap||0)*(_commitDir==='UP'?1:-1);
+          const _gapOpposedAtCap=_gapAlignedCap<10;
+          if(!_isDeadWindow&&!_effectiveDeadzone&&!_isFlatGapTimeCap&&!_gapOpposedAtCap){
             // Force-commit to posterior direction. Skip the sitout snapshot entirely.
             // V10.7.6 — check for reversal signals before committing
             const _v107_6=_v10_7_6_reversalCheck(_post,analysis);
@@ -40889,17 +40919,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _persistLock();
             return;
           }
-          // Genuine sit-out — dead window, true coin-flip, OR flat-gap at time-cap.
+          // Genuine sit-out — dead window, true coin-flip, flat-gap, OR gap-opposed at time-cap.
           const _sitReason=_effectiveDeadzone
             ?`Coin-flip posterior ${_commitConf}% at time-cap — no real conviction, sit out (V10.7.48 deadzone guard)`
             :_isFlatGapTimeCap
             ?`Flat gap at time-cap — gap ${_gapAtCap.toFixed(1)}pt, ext ${_extAtCap.toFixed(1)}pt, entry ${_kForDir?.toFixed(0)}¢ — 51% WR historically, sit out (V10.7.88)`
+            :_gapOpposedAtCap
+            ?`Gap opposed at time-cap — gap aligned ${_gapAlignedCap.toFixed(0)}pt < 10, 17% WR, sit out (V10.8.1)`
             :`V10.2.50 chop time-cap guard: RANGE-CHOP regime + ${_commitConf}% conv at ${Math.round(elapsedSec)}s — historically loses, sit out`;
-          const _sitTier=_effectiveDeadzone?'deadzone-sitout':_isFlatGapTimeCap?'flat-gap-timecap-sitout':'chop-time-cap-sitout';
+          const _sitTier=_effectiveDeadzone?'deadzone-sitout':_isFlatGapTimeCap?'flat-gap-timecap-sitout':_gapOpposedAtCap?'gap-opposed-timecap-sitout':'chop-time-cap-sitout';
           const _sitCaution=_effectiveDeadzone
             ?`Deadzone guard — posterior ${_commitConf}% in 45-55 coin-flip zone → sit out (V10.7.48)`
             :_isFlatGapTimeCap
             ?`Flat gap — price at strike, no directional signal → sit out (V10.7.88)`
+            :_gapOpposedAtCap
+            ?`Gap opposed (${_gapAlignedCap.toFixed(0)}pt) at time-cap — 17% WR, sit out (V10.8.1)`
             :`Chop guard — ${_commitConf}% in RANGE-CHOP at time-cap, sub-baseline conviction → sit out (V10.2.50)`;
           const _sitSnap={
             call:'SIT_OUT',direction:'SIT_OUT',
@@ -41116,10 +41150,57 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _isLcTapeLed=tc?._ctx?.isTapeLed||false;
     const _isLcRising=tc?._ctx?.isRisingConfluence||false;
     const _isLcStructural=tc?._ctx?.isStructuralLed||false;
-    // V10.7.99 NOTE: cushion patience multiplier removed.
-    // Waiting for cushion = chasing the move = locking at worse Kalshi prices.
-    // One reversal at 72¢ wipes multiple wins at 55¢. The cushion SIGNAL
-    // in the posterior already adjusts probability correctly. Timing stays normal.
+    // V10.8.2: CUSHION HISTORY INTELLIGENCE.
+    //   Use the mid-window price history to understand whether price has been
+    //   consistently on the right side of the strike, or oscillating near it.
+    //   This is the "timing" signal — not just where price IS now, but where it's
+    //   BEEN throughout the window.
+    //
+    //   pctTimeCorrectSide: fraction of snapshots where price was on the winning side
+    //     e.g. for an UP call, fraction where spot > kalshi_strike
+    //     >= 0.80 = price has been above strike 80%+ of window time → high conviction
+    //     <= 0.40 = price has been below strike most of the time → wrong direction
+    //
+    //   cushionTrend: is the gap between price and strike growing or shrinking?
+    //     positive = cushion is growing (moving away from strike = safer)
+    //     negative = cushion is shrinking (converging on strike = danger)
+    //
+    //   This modifies needSamples:
+    //     Consistent + growing → 0.6× (lock 40% faster — evidence is clear)
+    //     Consistent + flat    → 0.8× (lock 20% faster)
+    //     Oscillating near line → 1.5× (wait longer — no clear side)
+    const _hist=_windowCushionHistoryRef.current;
+    let _cushionMult=1.0;
+    let _cushionIntel=null;
+    const _callDirSign=tc?.call==='UP'?1:(tc?.call==='DOWN'?-1:0);
+    if(_hist.length>=3&&_callDirSign!==0&&kalshiStrikeRef.current>0){
+      // pctTimeCorrectSide
+      const _correctTicks=_hist.filter(h=>h.cushionBps*_callDirSign>0).length;
+      const _pctCorrect=_correctTicks/_hist.length;
+      // cushionTrend — compare last 2 snapshots to first 2
+      const _recentAvg=_hist.slice(-2).reduce((s,h)=>s+h.cushionBps*_callDirSign,0)/2;
+      const _earlyAvg=_hist.slice(0,2).reduce((s,h)=>s+h.cushionBps*_callDirSign,0)/2;
+      const _trend=_recentAvg-_earlyAvg; // positive = cushion growing toward direction
+      // Current cushion in bps (aligned with call direction)
+      const _cushionNowBps=(currentPrice-kalshiStrikeRef.current)/kalshiStrikeRef.current*10000*_callDirSign;
+      _cushionIntel={pctCorrect:_pctCorrect,trend:_trend,cushionNow:_cushionNowBps,snapshots:_hist.length};
+      if(_pctCorrect>=0.80&&_trend>0&&_cushionNowBps>15){
+        // Price has been consistently on the right side AND moving away from strike
+        // This is the clearest possible signal — lock faster
+        _cushionMult=0.60;
+      } else if(_pctCorrect>=0.70&&_cushionNowBps>10){
+        // Price consistently right side, decent cushion
+        _cushionMult=0.80;
+      } else if(_pctCorrect<=0.45){
+        // Price has been on the WRONG side more than half the time
+        // Don't lock until direction clarifies
+        _cushionMult=1.80;
+      } else if(_pctCorrect<=0.60&&Math.abs(_cushionNowBps)<8){
+        // Price is oscillating near the line — wait for it to commit
+        _cushionMult=1.40;
+      }
+    }
+
     let needSamples,tierLabel;
     if(_isLcStructural){
       // V9.11.3: needSamples 3 → 12. Audit of 46 structural-led trades showed 57% WR
@@ -41161,7 +41242,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   (but never sit out — that was the V5.6.7 mistake the user rejected).
     const _regDirKey=(analysis?.regime||'UNKNOWN')+'|'+claimedDir;
     const _regDirSpeedAdj=_learnings?.multipliers?.regimeDirSpeedAdj?.[_regDirKey]||0;
-    needSamples=Math.round(needSamples*(1+_tierAdjustFrac)*(1+_regDirSpeedAdj));
+    needSamples=Math.round(needSamples*(1+_tierAdjustFrac)*(1+_regDirSpeedAdj)*_cushionMult);
     // V6.2.6: Soft hint trims sample requirement by 40% on lifecycle side too. Floor of 2.
     const _lcHintActive=softHintRef.current>0&&(Date.now()-softHintRef.current)<10000;
     if(_lcHintActive)needSamples=Math.max(2,Math.round(needSamples*0.6));
@@ -41424,6 +41505,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }:null,
         atrBpsAtLock:analysis?.atrBps??null,
         windowAmplitudeAtLock:analysis?.windowAmplitude?.label??null,
+        // V10.8.2: Cushion history at lock — was price consistently on the right side?
+        _cushionPctCorrect:_cushionIntel?.pctCorrect??null,
+        _cushionTrend:_cushionIntel?.trend!=null?Math.round(_cushionIntel.trend*10)/10:null,
+        _cushionNowBps:_cushionIntel?.cushionNow!=null?Math.round(_cushionIntel.cushionNow*10)/10:null,
+        _cushionSnapshots:_cushionIntel?.snapshots??null,
+        _cushionMult:_cushionMult!==1.0?_cushionMult:null,
         // V10.7.86: window OHLC at lock time — open/high/low prices for intra-window learning.
         //   Enables entry timing quality analysis and adverse excursion context.
         //   Stored in bps from strike for normalization across different price levels.
