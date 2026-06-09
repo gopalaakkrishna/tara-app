@@ -4329,8 +4329,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.07-v10.8.2-midwindow-cushion';
-const TARA_VERSION_DISPLAY='Tara 10.8.2';
+const BASELINE_VERSION='2026.06.09-v10.8.5-no-deadzones';
+const TARA_VERSION_DISPLAY='Tara 10.8.5';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -40077,7 +40077,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   dial-tier blocks producing sit-out. Tara takes a call every window.
     const _post=Number(analysis?.rawProbAbove);
     const _postKnown=Number.isFinite(_post);
-    const _commitDir=_postKnown?(_post>=50?'UP':'DOWN'):null;
+    // V10.8.2 FIX: _commitDir was null when _postKnown=false. call=null on snapshots
+    //   blocked ML field stamping and cushion history (both require non-null call).
+    //   Fallback to claimedDir so the direction is always set on the snapshot.
+    const _commitDir=_postKnown?(_post>=50?'UP':'DOWN'):(claimedDir||null);
     const _commitConf=_postKnown?Math.round(_commitDir==='UP'?_post:(100-_post)):50;
     const _isCoinFlip=_postKnown&&_post>=45&&_post<=55;
     const _hardCapElapsed=elapsedSec>=90; // 90s = 1.5min, in the 1-2min range user wants
@@ -40509,8 +40512,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         if(!_isDeadWindow){
           // Strong-enough gap (|gap|>=10) — keep the original directional lock.
           const _v107_6=_v10_7_6_reversalCheck(_post,analysis);
-          const _forceDir=_v107_6.dir;
-          const _forceConf=_v107_6.conf;
+          // V10.8.2 FIX: _v10_7_6_reversalCheck returns dir=null when posterior=50.
+          //   This caused call=null on the snapshot, which blocked ML field stamping
+          //   and cushion history (both gate on call!=='SIT_OUT' and non-null call).
+          //   Fallback to claimedDir (the direction the engine settled on) when null.
+          const _forceDir=_v107_6.dir||claimedDir||(_post>=50?'UP':'DOWN');
+          const _forceConf=_v107_6.conf||_commitConf||50;
           const _forceSnap={
             call:_forceDir,direction:_forceDir,
             confidence:_forceConf,
@@ -40572,82 +40579,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       if(_kPctNow!=null&&_commitConf!=null){
         const _kalshiForCommit=_commitDir==='UP'?_kPctNow:(100-_kPctNow);
         const _edgeAtCommit=_commitConf-_kalshiForCommit;
-        // V10.7.87: SESSION-AWARE + ILLIQUIDITY-AWARE NO-GO-EDGE THRESHOLD.
-        //   Flat -7pt was too aggressive in illiquid sessions. During Asia deep
-        //   session (midnight-4am ET / 22:00-04:00 UTC), thin Kalshi order books
-        //   mean a single market maker can push odds 10-15pt with no real signal.
-        //   The data confirmed this: 87% WR on no-go-edge trades — Kalshi being
-        //   "ahead" of Tara at 3am is almost always noise, not information.
-        //
-        //   Threshold by phase:
-        //     ASIA_OPEN (22:00-04:00 UTC): -15pt — deep illiquid session
-        //     ASIA_LATE (04:00-07:00 UTC): -12pt — Asia winding down
-        //     EU_PREOPEN (07:00-08:00 UTC): -9pt  — EU not yet liquid
-        //     EU_OPEN/NY sessions:          -7pt  — liquid hours, keep default
-        //     AFTERHOURS/OFF-HOURS:         -15pt — same as deep Asia
-        //
-        //   Illiquidity boost: if OB depth is below $500K total on both sides,
-        //     the book is genuinely thin regardless of session — widen by 4pt more.
-        const _nowUtcH=new Date().getUTCHours();
-        const _nowUtcM=new Date().getUTCMinutes();
-        const _phaseNow=getPhaseKey(_nowUtcH,_nowUtcM);
-        const _baseThreshold=(()=>{
-          switch(_phaseNow){
-            case'ASIA_OPEN':   return -15;
-            case'ASIA_LATE':   return -12;
-            case'EU_PREOPEN':  return -9;
-            case'AFTERHOURS':  return -15;
-            default:           return -7;
-          }
-        })();
+        // V10.8.4: FLAT NO-GO-EDGE THRESHOLD — removed session-based adjustments.
+        //   Session-aware thresholds (-15pt Asia, -12pt Asia late, -9pt EU preopen)
+        //   were added to handle thin order books in off-hours. But they had a side
+        //   effect: in liquid NY sessions, the flat -7pt allowed trades where Kalshi
+        //   had correctly priced the edge away.
+        //   User guidance: judge every window on its own merit, not what time it is.
+        //   Threshold: -7pt flat. Thin OB (<$500K): -3pt (was -7pt-4pt = -11pt). 
         const _obDepthUSD=(depthFlash?.liqLongUSDLive||0)+(depthFlash?.liqShortUSDLive||0);
         const _isThinBook=_obDepthUSD>0&&_obDepthUSD<500000;
-        const _illiqBoost=_isThinBook?4:0;
-        const _thresh=_baseThreshold-_illiqBoost;
+        const _thresh=_isThinBook?-3:-7; // thin book: wider sitout, liquid: standard
         if(_edgeAtCommit<=_thresh){
-          _noGoEdgeThreshold=_thresh; // hoist to outer scope for snapshot stamp
+          _noGoEdgeThreshold=_thresh;
           _noGoReason=`Edge ${Math.round(_edgeAtCommit)}pt vs Kalshi — market priced ${_commitDir} at ${Math.round(_kalshiForCommit)}%`
-            +(_isThinBook?` (thin book $${Math.round(_obDepthUSD/1000)}K depth)`:` (${_phaseNow})`)+`, threshold ${_thresh}pt`;
+            +(_isThinBook?` (thin book $${Math.round(_obDepthUSD/1000)}K depth)`:'')+`, threshold ${_thresh}pt`;
           _noGoTier='no-go-edge';
         }
       }
       // (a2) V10.7.90 — NY PRE-OPEN DEAD ZONE (12:00-13:00 UTC).
-      //   Audit (last 300 trades): 12:00 UTC = 25% WR (2W/6L), 13:00 UTC = 30% (3W/7L).
-      //   V10.7.95 FIX: emit a true SITOUT (not a warned directional lock).
-      //   Previous behavior: set _noGoTier then fall through to _ngSnap which still
-      //   commits a directional call and resolves as WIN/LOSS. That's not a sitout.
-      //   New behavior: emit the sitout snap directly and return, same as dead-window.
-      if(!_noGoReason&&_commitConf!=null){
-        const _deadH=new Date().getUTCHours();
-        if(_deadH===12||_deadH===13){
-          const _gapDead=Math.abs(Number(analysis?.rawSignalScores?.gap||0));
-          if(_gapDead<20){
-            const _dzSnap={
-              call:'SIT_OUT',direction:'SIT_OUT',
-              confidence:_commitConf,
-              caution:`NY pre-open dead zone (${_deadH}:00 UTC) — 25-30% WR historically, gap only ${_gapDead.toFixed(0)}pt`,
-              reason:`V10.7.90 dead-zone sitout: ${_deadH}:00 UTC, gap ${_gapDead.toFixed(0)}pt < 20pt threshold`,
-              wasOverriddenNoTrade:true,
-              noGoCategory:'deadzone-hour-sitout',
-              atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
-              atPosterior:_post,kalshiAtLock:_kPctNow,
-              locked:true,earlyLock:false,
-              isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
-              samples:0,needSamples:0,
-              tier:'deadzone-hour-sitout',
-              session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
-              regime:analysis?.regime||'',
-              qScore:Math.round(_qFast),
-              fgt:analysis?.mtfAlignment,
-              _committedAt:Date.now(),
-            };
-            taraCallSnapshotRef.current=_dzSnap;
-            _logSnapshotEntry(_dzSnap);
-            _persistLock();
-            return;
-          }
-        }
-      }
       // (b) DATA UNAVAILABLE — price feed stale (>30s) or Kalshi missing
       if(!_noGoReason){
         const _priceStaleness=lastPriceSourceRef.current?.time?(Date.now()-lastPriceSourceRef.current.time):Infinity;
@@ -41031,9 +40980,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //     5m  window: 30s @ dial=0 → 2m30s @ dial=100
     //   ALSO: stamp leanDir based on posterior so UI can show "would have leaned X".
     //   Lock timing for clear signals is UNAFFECTED — this only delays the sit-out commitment.
-    const _v1074_dialNow=Math.max(0,Math.min(100,(typeof speedDialRef!=='undefined'&&speedDialRef.current!=null?speedDialRef.current:50)));
+    // V10.8.4: FIXED SITOUT FLOOR — removed speed dial dependency.
+    //   Speed dial at 50 was setting sitout at 3.5min. User guidance:
+    //   "lock within 3-5 minutes when tradeable." Hardcode to 5 minutes
+    //   for truly unresolvable windows (no confluence AND quality < 25).
+    //   This is the last resort — confluence windows lock much earlier via tiers.
     const _v1074_winLen=windowType==='15m'?900:300;
-    const _v1074_sitoutMinSec=30+(_v1074_dialNow/100)*(_v1074_winLen*0.4);
+    const _v1074_sitoutMinSec=_v1074_winLen*0.33; // 5min for 15m, 1.65min for 5m
     if(elapsedSec>=_v1074_sitoutMinSec&&!_hasAnyConfluence&&_qFast<25&&taraCallSnapshotRef.current===null){
       const _v1074_post=Number(analysis?.rawProbAbove)||50;
       const _v1074_lean=_v1074_post>=50?'UP':'DOWN';
@@ -41056,7 +41009,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         leanDir:_v1074_lean,
         leanPct:_v1074_leanPct,
         _v10_7_47_sitoutThresholdSec:Math.round(_v1074_sitoutMinSec),
-        _v10_7_47_dialAtSitout:Math.round(_v1074_dialNow),
+        _v10_7_47_dialAtSitout:50, // dial removed V10.8.4
       };
       taraCallSnapshotRef.current=_mixSnap;
       _logSnapshotEntry(_mixSnap); // V7.10.1
@@ -41342,14 +41295,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   This is not a sitout. It just ensures signals have settled before committing.
       //   User said "fine as long as Tara locks within first 5 minutes" — 90s is 1.5min.
       //   Hard-force bypasses this (manual override always works).
-      if(!_instantForceReady&&!analysis?.isSystemLocked){
-        const _isRangeNow=(analysis?.regime||'')===('RANGE-CHOP');
-        const _minElapsedSec=_isRangeNow?90:60;
-        if(elapsedSec<_minElapsedSec){
-          // Too early — don't log, just return. Tara will lock once time floor passes.
-          return;
-        }
-      }
+      // V10.8.2: Cushion history handles intelligent timing.
+      //   V10.8.0's hard 60s minimum floor removed — it blocked fast confluence locks
+      //   (super-confluence should fire in 3s, not 60s) and cost 12% WR on 48 trades.
+      //   The cushion multiplier (0.6× to 1.8×) handles timing intelligence without
+      //   a blunt override that ignores tier quality.
       //   not current tc.call. If tc.call has flipped temporarily, we still commit to
       //   the original direction Tara was building toward.
       const _committedCall=claimedDir||tc.call;  // claimed wins; tc.call as fallback for safety
