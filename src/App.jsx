@@ -4329,8 +4329,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.09-v10.8.5-no-deadzones';
-const TARA_VERSION_DISPLAY='Tara 10.8.5';
+const BASELINE_VERSION='2026.06.09-v10.8.6-ml-cushion-entry-fix';
+const TARA_VERSION_DISPLAY='Tara 10.8.6';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -29299,6 +29299,7 @@ function TaraApp(){
       const _restClean=Object.fromEntries(Object.entries(rest).filter(([k])=>{
         if(!k.startsWith('_'))return true;   // keep all normal fields
         if(/^_ml_/.test(k))return true;      // keep ML training fields
+        if(/^_cushion/.test(k))return true;  // V10.8.6: keep cushion history fields
         return false;                         // drop all _v10_* telemetry from entry
       }));
       return{..._restClean,...(_scores?{signalScoresAtLock:_scores}:{})};
@@ -40340,6 +40341,26 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //   resolution: WIN = maxPay - betAmt, LOSS = -betAmt.
           betAmt:Number(betAmount)||0,
           maxPay:Number(maxPayout)||0,
+          // V10.8.6 FIX: copy ML + cushion fields from snapshot into the entry.
+          //   These were stamped on `snapshot` (lines ~40119) but the entry was built
+          //   field-by-field and never copied them, so they died on the snapshot object.
+          //   This is why ML fields + cushion history showed 0/N across all exports
+          //   despite the stamping code running correctly. Root cause of the persistent
+          //   "ML fields empty" bug across V10.7.86 → V10.8.5.
+          _ml_abortCount:snapshot._ml_abortCount??null,
+          _ml_bbwRank:snapshot._ml_bbwRank??null,
+          _ml_timeFraction:snapshot._ml_timeFraction??null,
+          _ml_kalshiVelocity:snapshot._ml_kalshiVelocity??null,
+          _ml_cohRatio:snapshot._ml_cohRatio??null,
+          _cushionPctCorrect:snapshot._cushionPctCorrect??null,
+          _cushionTrend:snapshot._cushionTrend??null,
+          _cushionNowBps:snapshot._cushionNowBps??null,
+          _cushionSnapshots:snapshot._cushionSnapshots??null,
+          _cushionMult:snapshot._cushionMult??null,
+          // V10.8.6: also carry the canonical call field (UP/DOWN/SIT_OUT) explicitly.
+          //   `dir` was set but `call` was missing from entries, breaking downstream
+          //   analysis that reads `call`.
+          call:snapshot.call||snapshot.direction||null,
         };
         setTaraCallLog(prev=>{
           // V9.10.4: per-asset dedup so BTC + ETH snapshots for the same window slot
