@@ -66,8 +66,8 @@ export default async function handler(req, res) {
       const bids = book?.bids || [];
       const asks = book?.asks || [];
 
-      const WALL_MIN_BTC = 10; // 10+ BTC = significant wall (~$700K+)
-      const RANGE_PCT = 0.015; // scan within 1.5%
+      const WALL_MIN_BTC = 5; // V10.8.6: 10→5 BTC (~$350K). Was too strict, gravity populated 1/100.
+      const RANGE_PCT = 0.025; // V10.8.6: 1.5%→2.5% scan range — catch walls a 15m window can reach
 
       let largestAbove = { price: 0, btc: 0 };
       let largestBelow = { price: 0, btc: 0 };
@@ -100,7 +100,7 @@ export default async function handler(req, res) {
       // Nearest large wall
       const aboveSizeUSD = largestAbove.btc * largestAbove.price;
       const belowSizeUSD = largestBelow.btc * largestBelow.price;
-      const WALL_USD_MIN = 700000; // $700K
+      const WALL_USD_MIN = 350000; // V10.8.6: $700K→$350K to match WALL_MIN_BTC=5
 
       const aboveDistBps = aboveSizeUSD > WALL_USD_MIN
         ? Math.round(((largestAbove.price - currentPrice) / currentPrice) * 10000) : null;
@@ -111,14 +111,14 @@ export default async function handler(req, res) {
         result.nearestWallSide = 'above';
         result.nearestWallDistBps = aboveDistBps;
         result.nearestWallSize = Math.round(aboveSizeUSD / 100000) / 10;
-        // Wall above = price attracted upward = bullish pull
-        const gravity = Math.min(4, (WALL_USD_MIN * 3 / Math.max(aboveSizeUSD, 1)) * (1 / Math.max(aboveDistBps / 50, 1)));
+        // Wall above = price attracted upward = bullish pull. V10.8.6: scale to $350K base.
+        const gravity = Math.min(4, (aboveSizeUSD / WALL_USD_MIN) * (1 / Math.max(aboveDistBps / 60, 1)));
         result.liquidationGravity += gravity;
       } else if (belowDistBps !== null) {
         result.nearestWallSide = 'below';
         result.nearestWallDistBps = belowDistBps;
         result.nearestWallSize = Math.round(belowSizeUSD / 100000) / 10;
-        const gravity = Math.min(4, (WALL_USD_MIN * 3 / Math.max(belowSizeUSD, 1)) * (1 / Math.max(belowDistBps / 50, 1)));
+        const gravity = Math.min(4, (belowSizeUSD / WALL_USD_MIN) * (1 / Math.max(belowDistBps / 60, 1)));
         result.liquidationGravity -= gravity;
       }
 
