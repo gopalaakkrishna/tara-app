@@ -30,14 +30,36 @@ export default async function handler(req, res) {
     const d = await r.json();
     const items = d?.result || [];
 
-    // Find options expiring within next 24 hours (most relevant for 15m trading)
+    // V10.8.6 FIX: properly isolate the NEAREST expiry, not all options.
+    //   Old filter matched ~everything (includes('C')), averaging IV across
+    //   months of expiries that barely move → 3 stuck signal values.
+    //   New: parse expiry date from instrument_name (BTC-31MAY26-70000-C),
+    //   find the soonest expiry, and use only those options.
+    const MONTHS = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+    const parseExpiry = (name) => {
+      // BTC-31MAY26-70000-C → Date
+      const m = name.match(/^BTC-(\d{1,2})([A-Z]{3})(\d{2})-/);
+      if (!m) return null;
+      const [, dd, mon, yy] = m;
+      if (MONTHS[mon] === undefined) return null;
+      return Date.UTC(2000 + Number(yy), MONTHS[mon], Number(dd), 8, 0, 0); // Deribit expires 08:00 UTC
+    };
     const now = Date.now();
-    const in24h = now + 86400000;
+    // Find the soonest future expiry timestamp
+    let soonestExp = null;
+    for (const o of items) {
+      if (!o.instrument_name) continue;
+      const exp = parseExpiry(o.instrument_name);
+      if (exp && exp > now && (soonestExp === null || exp < soonestExp)) soonestExp = exp;
+    }
+    // Keep options at the soonest expiry (plus the next one if soonest is <12h away,
+    //   since same-day expiries can be thin)
     const nearTerm = items.filter(o => {
-      const exp = o.underlying_index || '';
-      // instrument_name: BTC-31MAY26-70000-C format
-      // use creation_timestamp + 86400000 as proxy or filter by instrument_name
-      return o.instrument_name && (o.instrument_name.includes('C') || o.instrument_name.includes('P'));
+      if (!o.instrument_name) return false;
+      const exp = parseExpiry(o.instrument_name);
+      if (!exp || exp <= now) return false;
+      // within 3 days of soonest expiry captures the front 1-2 expiries
+      return soonestExp && exp <= soonestExp + 3 * 86400000;
     });
 
     // Separate calls and puts, filter to reasonable strikes (within 5% of spot)
@@ -73,14 +95,15 @@ export default async function handler(req, res) {
     const pcRatio = totalCallOI > 0 ? totalPutOI / totalCallOI : null;
 
     // Signal: skew > 3 = bearish (puts expensive), skew < -3 = bullish (calls expensive)
-    // PCR > 1.2 = bearish, PCR < 0.8 = bullish
+    // V10.8.6: front-expiry IV skew is more sensitive — recalibrated thresholds.
+    //   Near-term skew swings harder than the all-expiry average did.
     let signal = 0;
     let reason = 'neutral';
     if (skew != null) {
-      if (skew > 5) { signal -= 3; reason = `put skew +${skew.toFixed(1)} (bears buying protection)`; }
-      else if (skew > 3) { signal -= 1.5; reason = `mild put skew +${skew.toFixed(1)}`; }
-      else if (skew < -5) { signal += 3; reason = `call skew ${skew.toFixed(1)} (bulls loading calls)`; }
-      else if (skew < -3) { signal += 1.5; reason = `mild call skew ${skew.toFixed(1)}`; }
+      if (skew > 4) { signal -= 3; reason = `put skew +${skew.toFixed(1)} (bears buying protection)`; }
+      else if (skew > 1.5) { signal -= 1.5; reason = `mild put skew +${skew.toFixed(1)}`; }
+      else if (skew < -4) { signal += 3; reason = `call skew ${skew.toFixed(1)} (bulls loading calls)`; }
+      else if (skew < -1.5) { signal += 1.5; reason = `mild call skew ${skew.toFixed(1)}`; }
     }
     if (pcRatio != null) {
       if (pcRatio > 1.3) signal -= 2;
@@ -100,6 +123,8 @@ export default async function handler(req, res) {
       spotApprox: Math.round(spotApprox),
       atmCallsN: atmCalls.length,
       atmPutsN: atmPuts.length,
+      nearestExpiry: soonestExp ? new Date(soonestExp).toISOString().slice(0,10) : null,
+      nearTermN: nearTerm.length,
       fetchedAt: Date.now(),
     };
 
