@@ -4329,8 +4329,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.09-v10.8.6-ml-cushion-entry-fix';
-const TARA_VERSION_DISPLAY='Tara 10.8.6';
+const BASELINE_VERSION='2026.06.10-v10.8.7-ws-reconnect-flow-gate';
+const TARA_VERSION_DISPLAY='Tara 10.8.7';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6640,71 +6640,97 @@ const useGlobalTape=(asset)=>{
   useEffect(()=>{
     if(typeof window==='undefined')return;
     let wsBN=null,wsBY=null,feedCount=0;
+    let _destroyed=false;
+    let _bnRetryMs=1000,_byRetryMs=1000;
+    let _bnRetryTimer=null,_byRetryTimer=null;
 
     const processWhalePrint=(alert)=>{
       const sk=streakRef.current;
       const now=Date.now();
-      const streakWindow=120000; // 2 min streak window
+      const streakWindow=120000;
       if(sk.dir===alert.side&&(now-sk.startTime)<streakWindow){
-        // Same direction — extend streak
         sk.count++;sk.totalUSD+=alert.usd;sk.trades.push(alert);
       } else {
-        // Direction changed or streak expired — reset
         sk.dir=alert.side;sk.count=1;sk.startTime=now;sk.totalUSD=alert.usd;sk.trades=[alert];
       }
       streakRef.current=sk;
     };
 
-    try{
-      const _cfg=ASSET_CONFIG[asset]||ASSET_CONFIG.BTC;
-      const _bnSym=String(_cfg.binance||'BTCUSDT').toLowerCase();
-      const _whaleFloor=Number(_cfg.whaleFloor)||100000;
-      wsBN=new WebSocket(`wss://fstream.binance.com/ws/${_bnSym}@aggTrade`);
-      wsBN.onopen=()=>{feedCount++;};
-      wsBN.onmessage=(e)=>{
-        try{
-          const d=JSON.parse(e.data);
-          const price=parseFloat(d.p),qty=parseFloat(d.q),usd=price*qty,isBuy=!d.m,now=Date.now();
-          ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'bn',time:now});
-          tapeRef.current.binancePrice=price;
-          if(usd>_whaleFloor){
-            const alert={src:'Binance',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};
-            tapeRef.current.whaleAlerts.push(alert);
-            tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);
-            processWhalePrint(alert);
-            setWhaleLog(prev=>[alert,...prev].slice(0,30));
-          }
-        }catch(er){}
-      };
-    }catch(e){}
+    // V10.8.6: reconnect helpers with exponential backoff.
+    //   Binance and Bybit close connections every 24h or on network hiccup.
+    //   Without reconnect, tape goes silent until page refresh. User reported this.
+    const connectBN=()=>{
+      if(_destroyed)return;
+      try{
+        const _cfg=ASSET_CONFIG[asset]||ASSET_CONFIG.BTC;
+        const _bnSym=String(_cfg.binance||'BTCUSDT').toLowerCase();
+        const _whaleFloor=Number(_cfg.whaleFloor)||100000;
+        wsBN=new WebSocket(`wss://fstream.binance.com/ws/${_bnSym}@aggTrade`);
+        wsBN.onopen=()=>{feedCount=Math.max(feedCount,1);_bnRetryMs=1000;};
+        wsBN.onmessage=(e)=>{
+          try{
+            const d=JSON.parse(e.data);
+            const price=parseFloat(d.p),qty=parseFloat(d.q),usd=price*qty,isBuy=!d.m,now=Date.now();
+            ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'bn',time:now});
+            tapeRef.current.binancePrice=price;
+            if(usd>_whaleFloor){
+              const alert={src:'Binance',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};
+              tapeRef.current.whaleAlerts.push(alert);
+              tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);
+              processWhalePrint(alert);
+              setWhaleLog(prev=>[alert,...prev].slice(0,30));
+            }
+          }catch(er){}
+        };
+        wsBN.onerror=()=>{};
+        wsBN.onclose=()=>{
+          if(_destroyed)return;
+          // Reconnect with backoff: 1s → 2s → 4s → 8s → max 30s
+          _bnRetryMs=Math.min(30000,_bnRetryMs*2);
+          _bnRetryTimer=setTimeout(connectBN,_bnRetryMs);
+        };
+      }catch(e){}
+    };
 
-    try{
-      const _cfg2=ASSET_CONFIG[asset]||ASSET_CONFIG.BTC;
-      const _bySym=_cfg2.bybit||'BTCUSDT';
-      const _whaleFloor2=Number(_cfg2.whaleFloor)||100000;
-      const _topic=`publicTrade.${_bySym}`;
-      wsBY=new WebSocket('wss://stream.bybit.com/v5/public/linear');
-      wsBY.onopen=()=>{feedCount++;wsBY.send(JSON.stringify({op:'subscribe',args:[_topic]}));};
-      wsBY.onmessage=(e)=>{
-        try{
-          const msg=JSON.parse(e.data);
-          if(msg.topic===_topic&&msg.data){
-            msg.data.forEach(trade=>{
-              const price=parseFloat(trade.p),qty=parseFloat(trade.v),usd=price*qty,isBuy=trade.S==='Buy',now=Date.now();
-              ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'by',time:now});
-              tapeRef.current.bybitPrice=price;
-              if(usd>_whaleFloor2){
-                const alert={src:'Bybit',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};
-                tapeRef.current.whaleAlerts.push(alert);
-                tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);
-                processWhalePrint(alert);
-                setWhaleLog(prev=>[alert,...prev].slice(0,30));
-              }
-            });
-          }
-        }catch(er){}
-      };
-    }catch(e){}
+    const connectBY=()=>{
+      if(_destroyed)return;
+      try{
+        const _cfg2=ASSET_CONFIG[asset]||ASSET_CONFIG.BTC;
+        const _bySym=_cfg2.bybit||'BTCUSDT';
+        const _whaleFloor2=Number(_cfg2.whaleFloor)||100000;
+        const _topic=`publicTrade.${_bySym}`;
+        wsBY=new WebSocket('wss://stream.bybit.com/v5/public/linear');
+        wsBY.onopen=()=>{feedCount=Math.max(feedCount,2);_byRetryMs=1000;wsBY.send(JSON.stringify({op:'subscribe',args:[_topic]}));};
+        wsBY.onmessage=(e)=>{
+          try{
+            const msg=JSON.parse(e.data);
+            if(msg.topic===_topic&&msg.data){
+              msg.data.forEach(trade=>{
+                const price=parseFloat(trade.p),qty=parseFloat(trade.v),usd=price*qty,isBuy=trade.S==='Buy',now=Date.now();
+                ticksRef.current.push({p:price,s:qty,usd,t:isBuy?'B':'S',src:'by',time:now});
+                tapeRef.current.bybitPrice=price;
+                if(usd>_whaleFloor2){
+                  const alert={src:'Bybit',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};
+                  tapeRef.current.whaleAlerts.push(alert);
+                  tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);
+                  processWhalePrint(alert);
+                  setWhaleLog(prev=>[alert,...prev].slice(0,30));
+                }
+              });
+            }
+          }catch(er){}
+        };
+        wsBY.onerror=()=>{};
+        wsBY.onclose=()=>{
+          if(_destroyed)return;
+          _byRetryMs=Math.min(30000,_byRetryMs*2);
+          _byRetryTimer=setTimeout(connectBY,_byRetryMs);
+        };
+      }catch(e){}
+    };
+
+    connectBN();
+    connectBY();
 
     const aggIv=setInterval(()=>{
       const now=Date.now();
@@ -6797,9 +6823,12 @@ const useGlobalTape=(asset)=>{
     },1000);
 
     return()=>{
+      _destroyed=true;
       clearInterval(aggIv);
-      if(wsBN?.readyState===1)wsBN.close();
-      if(wsBY?.readyState===1)wsBY.close();
+      if(_bnRetryTimer)clearTimeout(_bnRetryTimer);
+      if(_byRetryTimer)clearTimeout(_byRetryTimer);
+      if(wsBN)try{wsBN.onclose=null;wsBN.close();}catch(_){}
+      if(wsBY)try{wsBY.onclose=null;wsBY.close();}catch(_){}
     };
   },[asset]);
 
@@ -41175,6 +41204,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       }
     }
 
+    // V10.8.6: FLOW CONFIRMATION GATE for mid-gap zone.
+    //   Data: gap 10-20 WITH flow>=10 = 64% WR. gap 10-20 WITH flow<5 = 51% WR.
+    //   When tape flow disappears (WebSocket drop) or is genuinely absent,
+    //   mid-gap trades become coin flips. Require more confirmation in that case.
+    //   Also: user reported tape flow disappearing — we now auto-reconnect (WebSocket fix),
+    //   but this gate catches the windows where flow is genuinely absent anyway.
+    const _gapAlignedForGate=Number(analysis?.rawSignalScores?.gap||0)*(_post>=50?1:-1);
+    const _flowAlignedForGate=Number(analysis?.rawSignalScores?.flow||0)*(_post>=50?1:-1);
+    const _isMidGap=_gapAlignedForGate>=10&&_gapAlignedForGate<20;
+    const _flowAbsent=Math.abs(_flowAlignedForGate)<5; // tape effectively silent
+    // Mid-gap + no flow = require 2x samples before locking
+    const _flowConfMult=(_isMidGap&&_flowAbsent)?2.0:1.0;
+
     let needSamples,tierLabel;
     if(_isLcStructural){
       // V9.11.3: needSamples 3 → 12. Audit of 46 structural-led trades showed 57% WR
@@ -41216,7 +41258,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   (but never sit out — that was the V5.6.7 mistake the user rejected).
     const _regDirKey=(analysis?.regime||'UNKNOWN')+'|'+claimedDir;
     const _regDirSpeedAdj=_learnings?.multipliers?.regimeDirSpeedAdj?.[_regDirKey]||0;
-    needSamples=Math.round(needSamples*(1+_tierAdjustFrac)*(1+_regDirSpeedAdj)*_cushionMult);
+    needSamples=Math.round(needSamples*(1+_tierAdjustFrac)*(1+_regDirSpeedAdj)*_cushionMult*_flowConfMult);
     // V6.2.6: Soft hint trims sample requirement by 40% on lifecycle side too. Floor of 2.
     const _lcHintActive=softHintRef.current>0&&(Date.now()-softHintRef.current)<10000;
     if(_lcHintActive)needSamples=Math.max(2,Math.round(needSamples*0.6));
