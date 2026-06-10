@@ -2195,34 +2195,57 @@ const useLiqSignal=()=>{
 };
 
 const useWhaleAlert=(currentAsset)=>{
+  // V10.8.7: Replaced /api/whale (needs paid API key, returns ok:false) with
+  //   tape-based detection from the Binance futures stream already running in
+  //   useGlobalTape. No external API needed — large prints >$1M already come
+  //   through tapeRef.whaleAlerts. We compute the same signal shape from that.
+  //   Reads tapeRef via a shared ref — same object populated by useGlobalTape.
   const[whale,setWhale]=React.useState({netScore:0,direction:'neutral',transactionCount:0,available:false,lastUpdate:0});
+  // tapeRef is passed via window._taraGlobalTapeRef so we can read it here
   React.useEffect(()=>{
-    if(currentAsset!=='BTC')return; // Whale Alert most reliable for BTC
-    let _stopped=false;
-    const _poll=async()=>{
+    if(currentAsset!=='BTC')return;
+    const iv=setInterval(()=>{
       try{
-        const r=await fetch('/api/whale',{cache:'no-store',signal:AbortSignal.timeout(3000)});
-        if(!r.ok)return;
-        const d=await r.json();
-        if(_stopped)return;
-        if(d?.ok){
-          setWhale({
-            netScore:Number(d.netScore)||0,
-            direction:d.direction||'neutral',
-            transactionCount:Number(d.transactionCount)||0,
-            transactions:d.transactions||[],
-            available:true,
-            lastUpdate:Date.now(),
-          });
-        }else{
-          // /api/whale returns ok:false when key not set — mark unavailable, don't spam
-          setWhale(prev=>({...prev,available:false}));
+        const tapeRef=window._taraGlobalTapeRef;
+        if(!tapeRef?.current)return;
+        const alerts=tapeRef.current.whaleAlerts||[];
+        if(!alerts.length)return;
+        const now=Date.now();
+        // Consider prints from last 3 minutes only
+        const recent=alerts.filter(a=>now-a.time<180000);
+        if(!recent.length){
+          setWhale(prev=>({...prev,available:true,netScore:0,direction:'neutral',transactionCount:0}));
+          return;
         }
+        // Net score: buy prints vs sell prints, weighted by size
+        let buyUSD=0,sellUSD=0;
+        recent.forEach(a=>{
+          if(a.side==='BUY')buyUSD+=a.usd;
+          else sellUSD+=a.usd;
+        });
+        const total=buyUSD+sellUSD;
+        if(total<100000){
+          setWhale(prev=>({...prev,available:true,netScore:0,direction:'neutral',transactionCount:recent.length}));
+          return;
+        }
+        // Normalize to [-6, +6] signal range
+        // Strong imbalance: 80%+ one side = full score
+        const buyRatio=buyUSD/total;
+        const rawScore=(buyRatio-0.5)*12; // 0.5=0, 1.0=+6, 0.0=-6
+        const netScore=Math.max(-6,Math.min(6,rawScore));
+        const direction=netScore>1?'bullish':netScore<-1?'bearish':'neutral';
+        setWhale({
+          netScore:Math.round(netScore*10)/10,
+          direction,
+          transactionCount:recent.length,
+          available:true,
+          lastUpdate:now,
+          buyUSD:Math.round(buyUSD/1000),
+          sellUSD:Math.round(sellUSD/1000),
+        });
       }catch(_){}
-    };
-    _poll();
-    const iv=setInterval(_poll,30000); // 30s — free tier allows 10 req/min, 2/min is safe
-    return()=>{_stopped=true;clearInterval(iv);};
+    },5000); // update every 5s — prints arrive in real time via WebSocket
+    return()=>clearInterval(iv);
   },[currentAsset]);
   return whale;
 };
@@ -4329,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.10-v10.8.7-ws-reconnect-flow-gate';
-const TARA_VERSION_DISPLAY='Tara 10.8.7';
+const BASELINE_VERSION='2026.06.10-v10.8.8-whale-tape-signal';
+const TARA_VERSION_DISPLAY='Tara 10.8.8';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6834,6 +6857,10 @@ const useGlobalTape=(asset)=>{
 
   return{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal,tapeWindows};
 };
+
+// V10.8.7: expose tapeRef globally so useWhaleAlert can read whale prints
+// without prop drilling. Set in TaraApp after useGlobalTape mounts.
+// window._taraGlobalTapeRef is read by useWhaleAlert every 5s.
 
 // ── V8.1: useMovementRisk — REAL-TIME RISK PULSE ─────────────────────────────
 // Combines vol acceleration, volume spikes, tape imbalance, whale density into a 0-100
@@ -31179,6 +31206,11 @@ function TaraApp(){
   // V10.7.76: Liquidation heatmap + OI (highest-impact new signal)
   const liqHeatmap=useLiqHeatmap();
   const{tapeRef,globalFlow,ticksRef,whaleLog,flowSignal,tapeWindows}=useGlobalTape(currentAsset);
+  // V10.8.7: expose tapeRef globally for useWhaleAlert tape-based whale detection
+  React.useEffect(()=>{
+    window._taraGlobalTapeRef=tapeRef;
+    return()=>{try{delete window._taraGlobalTapeRef;}catch(_){}};
+  },[tapeRef]);
   // V9.17.1: SCALPER ENGINE — always ticks (was gated by enabled in V9.17.0).
   //   The panel header "tara reads" needs live data even when scalper is OFF,
   //   so users see what the engine sees as a contextual signal. Suggestions
