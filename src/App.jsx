@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.10-v10.8.9-cushion-allpaths-callfix';
-const TARA_VERSION_DISPLAY='Tara 10.8.9';
+const BASELINE_VERSION='2026.06.11-v10.9.0-signal-agreement-gate';
+const TARA_VERSION_DISPLAY='Tara 10.9.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -41261,18 +41261,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       }
     }
 
-    // V10.8.6: FLOW CONFIRMATION GATE for mid-gap zone.
-    //   Data: gap 10-20 WITH flow>=10 = 64% WR. gap 10-20 WITH flow<5 = 51% WR.
-    //   When tape flow disappears (WebSocket drop) or is genuinely absent,
-    //   mid-gap trades become coin flips. Require more confirmation in that case.
-    //   Also: user reported tape flow disappearing — we now auto-reconnect (WebSocket fix),
-    //   but this gate catches the windows where flow is genuinely absent anyway.
+    // V10.8.9: SIGNAL-AGREEMENT GATE (replaces V10.8.6 flow-only gate).
+    //   All-time data (772 trades w/ signals):
+    //     2+ of {gap,flow,mom} aligned = 66% WR, +3.9¢ EV  (n=587)
+    //     only 1 of 3 aligned          = 46% WR, -5.4¢ EV  (n=185)  ← the bleed
+    //   Lone-vote breakdown: gap-alone 40%, mom-alone 20%, flow-alone 75% (rare).
+    //   Rule: when fewer than 2 of the 3 core signals confirm the direction,
+    //   require 2× confirmation samples before locking. Window can still develop
+    //   agreement and lock, or reach time-cap. NOT a sitout — patient entry.
+    //   Exception: very strong gap (>=25 aligned) carries alone — locks normally.
     const _gapAlignedForGate=Number(analysis?.rawSignalScores?.gap||0)*(_post>=50?1:-1);
     const _flowAlignedForGate=Number(analysis?.rawSignalScores?.flow||0)*(_post>=50?1:-1);
-    const _isMidGap=_gapAlignedForGate>=10&&_gapAlignedForGate<20;
-    const _flowAbsent=Math.abs(_flowAlignedForGate)<5; // tape effectively silent
-    // Mid-gap + no flow = require 2x samples before locking
-    const _flowConfMult=(_isMidGap&&_flowAbsent)?2.0:1.0;
+    const _momAlignedForGate=Number(analysis?.rawSignalScores?.momentum||0)*(_post>=50?1:-1);
+    const _nAligned=(_gapAlignedForGate>3?1:0)+(_flowAlignedForGate>3?1:0)+(_momAlignedForGate>3?1:0);
+    const _veryStrongGapAlone=_gapAlignedForGate>=25;
+    const _flowConfMult=(_nAligned<2&&!_veryStrongGapAlone)?2.0:1.0;
 
     let needSamples,tierLabel;
     if(_isLcStructural){
