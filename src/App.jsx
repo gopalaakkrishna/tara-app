@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.10-v10.8.8-whale-tape-signal';
-const TARA_VERSION_DISPLAY='Tara 10.8.8';
+const BASELINE_VERSION='2026.06.10-v10.8.9-cushion-allpaths-callfix';
+const TARA_VERSION_DISPLAY='Tara 10.8.9';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -40178,6 +40178,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   Now stamps on any real directional call (not sitout, not override, not no-go-data).
       if(snapshot&&snapshot.call!=='SIT_OUT'&&(snapshot.dir||snapshot.call)!=='SIT_OUT'&&snapshot.wasOverriddenNoTrade!==true&&snapshot.tier!=='no-go-data'){
         try{
+          // V10.8.9: normalize null call. 10/32 V10.8.8 entries still had call=null —
+          //   a path sets direction but not call. Fix at the convergence point.
+          if(snapshot.call!=='UP'&&snapshot.call!=='DOWN'){
+            const _normDir=snapshot.direction==='UP'||snapshot.direction==='DOWN'?snapshot.direction:null;
+            if(_normDir)snapshot.call=_normDir;
+            else if(Number.isFinite(snapshot.atPosterior))snapshot.call=snapshot.atPosterior>=50?'UP':'DOWN';
+          }
           snapshot._ml_abortCount=_v104_1_abortCountRef.current?.count||0;
           snapshot._ml_bbwRank=analysis?.rawSignalScores?._bbwRank??null;
           snapshot._ml_timeFraction=Math.round((1-((timeState.minsRemaining*60+timeState.secsRemaining)/(windowType==='15m'?900:300)))*100)/100;
@@ -40185,6 +40192,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             ?Number(kalshiYesPrice)-Number(snapshot.kalshiAtLock||kalshiYesPrice)
             :null;
           snapshot._ml_cohRatio=(analysis?.rawSignalScores?._v10_7_64_cohRatio)??null;
+          // V10.8.9: CUSHION INTEL FOR ALL PATHS.
+          //   Was only stamped on the main confluence-path lock snap — but most trades
+          //   (directional-lock, patient, time-cap, no-go-edge) take alternate paths
+          //   and never got it. 0/32 cushion coverage on V10.8.8. Compute here at the
+          //   convergence point from _windowCushionHistoryRef directly.
+          const _lgHist=_windowCushionHistoryRef.current||[];
+          const _lgDirSign=snapshot.call==='UP'?1:(snapshot.call==='DOWN'?-1:0);
+          const _lgStrike=kalshiStrikeRef.current||0;
+          if(_lgHist.length>=3&&_lgDirSign!==0&&_lgStrike>0&&currentPrice>0){
+            const _lgCorrect=_lgHist.filter(h=>h.cushionBps*_lgDirSign>0).length;
+            const _lgPct=_lgCorrect/_lgHist.length;
+            const _lgRecent=_lgHist.slice(-2).reduce((s,h)=>s+h.cushionBps*_lgDirSign,0)/2;
+            const _lgEarly=_lgHist.slice(0,2).reduce((s,h)=>s+h.cushionBps*_lgDirSign,0)/2;
+            snapshot._cushionPctCorrect=Math.round(_lgPct*100)/100;
+            snapshot._cushionTrend=Math.round((_lgRecent-_lgEarly)*10)/10;
+            snapshot._cushionNowBps=Math.round(((currentPrice-_lgStrike)/_lgStrike*10000*_lgDirSign)*10)/10;
+            snapshot._cushionSnapshots=_lgHist.length;
+          }
         }catch(_){}
       }
       // V10.7.45: Lifecycle telemetry — record EVERY call regardless of what happens next.
