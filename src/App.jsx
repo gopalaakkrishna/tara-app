@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.11-v10.9.2-whale-fresh-netscore';
-const TARA_VERSION_DISPLAY='Tara 10.9.2';
+const BASELINE_VERSION='2026.06.11-v10.9.3-theory-lab';
+const TARA_VERSION_DISPLAY='Tara 10.9.3';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13078,6 +13078,71 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
   );
 }
 
+// V10.9.3: AUTONOMOUS THEORY LAB — compact scoreboard. Read-only, zero inputs.
+//   Shows per-theory n / win rate / confidence note, plus the most recent
+//   round's computed calls for transparency. Weight=0 always — promotion is
+//   informational only (toast elsewhere), never automatic.
+function TheoryLabPanel({show,setShow,theoryStats,theoryLog}){
+  if(!show)return null;
+  const _labels={range:'Range Call',momentum:'Momentum Call',firstMoveFade:'First-Move-Fade',crowdFade:'Crowd-Fade'};
+  const _last=theoryLog&&theoryLog.length?theoryLog[theoryLog.length-1]:null;
+  const _rowColor=(wr,n)=>{
+    if(n<10)return 'text-[#E8E9E4]/40';
+    if(wr>=0.60)return 'text-emerald-400';
+    if(wr>=0.50)return 'text-[#E8E9E4]/70';
+    return 'text-rose-400/80';
+  };
+  return(
+    <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0E100F] border border-l border-b border-[#E8E9E4]/15 rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
+      <div className={'p-3 bg-[#181A19] border-b border-[#E8E9E4]/10 flex justify-between items-center shrink-0'}>
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></div>
+          <span className={'text-xs font-bold uppercase tracking-widest text-[#E8E9E4]/70'}>Theory Lab</span>
+          <span className={'text-[10px] text-[#E8E9E4]/25 font-mono'}>shadow · weight 0</span>
+        </div>
+        <button onClick={()=>setShow(false)} className="opacity-70 hover:opacity-100 transition-opacity p-1 rounded hover:bg-[#E8E9E4]/5"><span className={'text-[#E8E9E4]/90 text-base font-bold'}>✕</span></button>
+      </div>
+      <div className="overflow-y-auto flex-1 p-3 space-y-3">
+        <div className="text-[10px] text-[#E8E9E4]/40 leading-relaxed">
+          Four candidate signals scored automatically every window against the actual outcome.
+          None of these affect live calls — they exist purely to find out if they would help.
+        </div>
+        <div className="space-y-1.5">
+          {Object.entries(theoryStats||{}).map(([key,v])=>{
+            const n=v?.n||0,correct=v?.correct||0;
+            const wr=n>0?correct/n:0;
+            return(
+              <div key={key} className="flex items-center justify-between bg-[#181A19] rounded-lg px-2.5 py-2 border border-[#E8E9E4]/5">
+                <span className={'text-xs text-[#E8E9E4]/70'}>{_labels[key]||key}</span>
+                <div className="flex items-center gap-2">
+                  {n<30&&n>0&&<span className={'text-[9px] text-[#E8E9E4]/30 italic'}>low-n</span>}
+                  <span className={'text-xs font-mono font-bold '+_rowColor(wr,n)}>{n>0?Math.round(wr*100)+'%':'—'}</span>
+                  <span className={'text-[10px] text-[#E8E9E4]/30 font-mono'}>n={n}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {_last&&(
+          <div className="pt-2 border-t border-[#E8E9E4]/5">
+            <div className={'text-[10px] uppercase tracking-wider text-[#E8E9E4]/30 mb-1.5'}>Last scored window</div>
+            <div className="text-[10px] text-[#E8E9E4]/50 font-mono leading-relaxed space-y-0.5">
+              <div>outcome: <span className={_last.outcomeDir==='UP'?'text-emerald-400':'text-rose-400'}>{_last.outcomeDir}</span>{_last.round_number_flag?<span className="ml-2 text-amber-400/70">● round#</span>:null}</div>
+              <div>range: {_last.range_call??'—'} {_last.range_correct===true?'✓':_last.range_correct===false?'✗':''}</div>
+              <div>momentum: {_last.momentum_call??'—'} {_last.momentum_correct===true?'✓':_last.momentum_correct===false?'✗':''}</div>
+              <div>1st-move-fade: {_last.first_move_fade_call??'—'} {_last.first_move_fade_correct===true?'✓':_last.first_move_fade_correct===false?'✗':''}</div>
+              <div>crowd-fade: {_last.crowd_fade_call??'—'} {_last.crowd_pct!=null?'('+Math.round(_last.crowd_pct)+'% yes)':''} {_last.crowd_fade_correct===true?'✓':_last.crowd_fade_correct===false?'✗':''}</div>
+            </div>
+          </div>
+        )}
+        {(!theoryLog||theoryLog.length===0)&&(
+          <div className={'text-xs text-[#E8E9E4]/30 italic'}>No rounds scored yet — results appear after the first full window completes.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Flow button component — extracted to avoid nested template literals in JSX (esbuild safe)
 const FlowBtn=({flowSignal,active,onClick,cls})=>{
   const isStrong=flowSignal.score>=75;
@@ -13098,6 +13163,21 @@ const FlowBtn=({flowSignal,active,onClick,cls})=>{
       FLOW
       {isStrong&&<span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse ml-0.5"/>}
       {!isStrong&&isEmerging&&<span className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-0.5"/>}
+    </button>
+  );
+};
+
+// V10.9.3: Theory Lab toggle button — mirrors FlowBtn's compact style.
+const TheoryLabBtn=({active,onClick,cls})=>{
+  const colorCls=active
+    ?'bg-violet-500/20 border-violet-500/40 text-violet-400'
+    :'border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-violet-400';
+  const baseCls=cls==='hidden sm:flex'
+    ?'hidden sm:flex items-center gap-1 p-1.5 rounded-lg border text-xs transition-all '
+    :'flex items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all ';
+  return(
+    <button onClick={onClick} className={baseCls+colorCls} title="Theory Lab — shadow signals, weight 0">
+      THEORY
     </button>
   );
 };
@@ -28611,6 +28691,25 @@ function TaraApp(){
   const windowHighTimeRef=useRef(0);
   const windowLowTimeRef=useRef(0);
   const windowOpenTimeRef=useRef(0);
+  // V10.9.3: AUTONOMOUS THEORY LAB — fully additive, dormant, zero-input.
+  //   _theoryPendingRef holds the four theory calls computed for the CURRENT
+  //   window (set at window open), keyed by windowId. When that window settles
+  //   (detected via `pastWindows`), the calls are scored against the actual
+  //   outcome and pushed into _theoryLog. Weight=0 always — these never touch
+  //   totalScore, posterior, or any lock decision. Pure shadow tracking.
+  const _theoryPendingRef=useRef(null); // {windowId, range_call, momentum_call, first_move_fade_call, crowd_fade_call, prev_high, prev_low, first_move_dir, crowd_pct, round_number_flag, strike, openTime}
+  const _theoryLastWindowRef=useRef(''); // separate from lastWindowRef — own rollover detection
+  const _theoryFirstMoveRef=useRef(null); // {wid, openPrice, openTime, sampled:boolean}
+  const _theoryScoredWidsRef=useRef(new Set()); // dedup — don't double-score a window
+  const[theoryLog,setTheoryLog]=useState([]); // {windowId,time,...calls,...correct flags}
+  const theoryLogRef=useRef([]);
+  useEffect(()=>{theoryLogRef.current=theoryLog;},[theoryLog]);
+  const[theoryStats,setTheoryStats]=useState({
+    range:{n:0,correct:0},momentum:{n:0,correct:0},
+    firstMoveFade:{n:0,correct:0},crowdFade:{n:0,correct:0},
+  });
+  const[theoryPromoNotified,setTheoryPromoNotified]=useState({}); // {theoryKey:true} — one-time promotion suggestion
+
   // V9.1.8: Track when the user opened the app this session. If they open mid-window
   //   with little time left, that's a real "I missed this window" SITOUT and should
   //   count. If the engine simply didn't form a call during a normal window, we no
@@ -29530,6 +29629,249 @@ function TaraApp(){
       });
     }).catch(()=>{});
   },[]);
+  // ──────────────────────────────────────────────────────────────────────────────────
+  // V10.9.3: AUTONOMOUS THEORY LAB — load persisted log on mount, derive stats.
+  //   Fully additive/dormant. Loads from its own IDB key 'taraTheoryLog' —
+  //   never touches taraCallLog or any live-trading storage.
+  // ──────────────────────────────────────────────────────────────────────────────────
+  const _theoryIdbLoadedRef=useRef(false);
+  useEffect(()=>{
+    if(_theoryIdbLoadedRef.current)return;
+    _theoryIdbLoadedRef.current=true;
+    _idbRead('taraTheoryLog').then(entries=>{
+      if(!Array.isArray(entries)||!entries.length)return;
+      setTheoryLog(entries);
+      entries.forEach(e=>{if(e&&e.windowId)_theoryScoredWidsRef.current.add(e.windowId);});
+      const stats={
+        range:{n:0,correct:0},momentum:{n:0,correct:0},
+        firstMoveFade:{n:0,correct:0},crowdFade:{n:0,correct:0},
+      };
+      entries.forEach(e=>{
+        if(!e)return;
+        const bump=(key,correct)=>{if(correct===null||correct===undefined)return;stats[key].n++;if(correct)stats[key].correct++;};
+        bump('range',e.range_correct);
+        bump('momentum',e.momentum_correct);
+        bump('firstMoveFade',e.first_move_fade_correct);
+        bump('crowdFade',e.crowd_fade_correct);
+      });
+      setTheoryStats(stats);
+    }).catch(()=>{});
+  },[]);
+
+  // ──────────────────────────────────────────────────────────────────────────────────
+  // V10.9.3 THEORY LAB — EFFECT 1: per-tick tracking (own high/low, first-move
+  //   sample at open+90s, crowd_pct capture). Runs every currentPrice tick.
+  //   Fully isolated from windowHighRef/windowLowRef/kalshiYesPrice consumers —
+  //   reads them but never writes to shared refs/state.
+  // ──────────────────────────────────────────────────────────────────────────────────
+  const _theoryHighLowRef=useRef({high:0,low:0});
+  useEffect(()=>{
+    if(currentAsset!=='BTC')return;
+    if(!currentPrice||!Number.isFinite(currentPrice)||currentPrice<=0)return;
+    try{
+      // Track this window's high/low independently (used as prev_high/prev_low
+      //   for the NEXT window's RANGE CALL once this window closes).
+      const hl=_theoryHighLowRef.current;
+      if(hl.high===0||currentPrice>hl.high)hl.high=currentPrice;
+      if(hl.low===0||currentPrice<hl.low)hl.low=currentPrice;
+
+      // FIRST-MOVE-FADE: sample at open+90s.
+      const fm=_theoryFirstMoveRef.current;
+      if(fm&&!fm.sampled&&Date.now()-fm.openTime>=90000){
+        fm.sampled=true;
+        const _moveBps=fm.openPrice>0?((currentPrice-fm.openPrice)/fm.openPrice)*10000:0;
+        const _dir=Math.abs(_moveBps)<3?'FLAT':(_moveBps>0?'UP':'DOWN');
+        const _fade=_dir==='FLAT'?'FLAT':(_dir==='UP'?'DOWN':'UP');
+        const _p=_theoryPendingRef.current;
+        if(_p&&_p.windowId===fm.wid){
+          _p.first_move_dir=_dir;
+          _p.first_move_fade_call=_fade;
+        }
+      }
+
+      // CROWD-FADE: capture first available kalshiYesPrice for this window.
+      const _p2=_theoryPendingRef.current;
+      if(_p2&&_p2.crowd_pct===undefined&&kalshiYesPrice!=null&&Number.isFinite(kalshiYesPrice)){
+        const _cp=Number(kalshiYesPrice);
+        _p2.crowd_pct=_cp;
+        // minority side = fade the crowd. Near-50/50 → SKIP (no edge either way).
+        _p2.crowd_fade_call=_cp>52?'DOWN':(_cp<48?'UP':'SKIP');
+      }
+    }catch(_){}
+  },[currentPrice,kalshiYesPrice,currentAsset]);
+
+  // ──────────────────────────────────────────────────────────────────────────────────
+  // V10.9.3 THEORY LAB — EFFECT 2: ROLLOVER. Own rollover detection (separate
+  //   from lastWindowRef used by the main resolution effect, to stay fully
+  //   isolated). On each window boundary:
+  //     Phase A — score the PREVIOUS window's 4 theory calls against its
+  //       approximate close (spot price at the rollover instant — a shadow
+  //       system doesn't need Kalshi-perfect settlement precision).
+  //     Phase B — seed the NEW window's pending record with prev_high/prev_low
+  //       (from _theoryHighLowRef, the window that just closed) and the just-
+  //       closed window's outcome (for MOMENTUM CALL, filled once the new
+  //       strike is known — see Effect 3).
+  // ──────────────────────────────────────────────────────────────────────────────────
+  useEffect(()=>{
+    if(currentAsset!=='BTC')return;
+    if(!timeState.nextWindow)return;
+    if(timeState.nextWindow===_theoryLastWindowRef.current)return;
+    const _firstRun=_theoryLastWindowRef.current==='';
+    _theoryLastWindowRef.current=timeState.nextWindow;
+    if(_firstRun){
+      // Initialize tracking for the currently-open window without scoring
+      //   anything (no prior pending record exists yet).
+      _theoryHighLowRef.current={high:0,low:0};
+      return;
+    }
+    try{
+      const _closePrice=Number(currentPriceRef.current||currentPrice)||0;
+      const _prevPending=_theoryPendingRef.current;
+
+      // ── Phase A: score the window that just closed ──
+      if(_prevPending&&_closePrice>0&&_prevPending.strike>0&&!_theoryScoredWidsRef.current.has(_prevPending.windowId)){
+        const _outcomeDir=_closePrice>_prevPending.strike?'UP':(_closePrice<_prevPending.strike?'DOWN':null);
+        if(_outcomeDir){
+          _theoryScoredWidsRef.current.add(_prevPending.windowId);
+          const _correctOf=(call)=>(call==null||call==='SKIP'||call==='FLAT')?null:(call===_outcomeDir);
+          const _entry={
+            id:Date.now(),
+            windowId:_prevPending.windowId,
+            time:Date.now(),
+            asset:'BTC',
+            windowType:_prevPending.windowType||windowType,
+            strike:_prevPending.strike,
+            closingPrice:_closePrice,
+            closeSource:'spot-at-rollover', // approximation — shadow system, not used for live trading
+            outcomeDir:_outcomeDir,
+            prev_high:_prevPending.prev_high??null,
+            prev_low:_prevPending.prev_low??null,
+            first_move_dir:_prevPending.first_move_dir??null,
+            crowd_pct:_prevPending.crowd_pct??null,
+            round_number_flag:!!_prevPending.round_number_flag,
+            range_call:_prevPending.range_call??null,
+            momentum_call:_prevPending.momentum_call??null,
+            first_move_fade_call:_prevPending.first_move_fade_call??null,
+            crowd_fade_call:_prevPending.crowd_fade_call??null,
+            range_correct:_correctOf(_prevPending.range_call),
+            momentum_correct:_correctOf(_prevPending.momentum_call),
+            first_move_fade_correct:_correctOf(_prevPending.first_move_fade_call),
+            crowd_fade_correct:_correctOf(_prevPending.crowd_fade_call),
+          };
+          setTheoryLog(prev=>{
+            const next=[...prev,_entry].slice(-2000);
+            _idbWrite('taraTheoryLog',next).catch(()=>{});
+            return next;
+          });
+          setTheoryStats(prev=>{
+            const np={range:{...prev.range},momentum:{...prev.momentum},firstMoveFade:{...prev.firstMoveFade},crowdFade:{...prev.crowdFade}};
+            const _bump=(key,correct)=>{if(correct===null)return;np[key]={n:np[key].n+1,correct:np[key].correct+(correct?1:0)};};
+            _bump('range',_entry.range_correct);
+            _bump('momentum',_entry.momentum_correct);
+            _bump('firstMoveFade',_entry.first_move_fade_correct);
+            _bump('crowdFade',_entry.crowd_fade_correct);
+            return np;
+          });
+        }
+      }
+
+      // ── Phase B: seed the new window's pending record ──
+      const _newWid=computeWindowId(windowType);
+      const _justClosedHL=_theoryHighLowRef.current;
+      let _justClosedOutcome=null;
+      if(_prevPending&&_closePrice>0&&_prevPending.strike>0){
+        _justClosedOutcome=_closePrice>_prevPending.strike?'UP':(_closePrice<_prevPending.strike?'DOWN':null);
+      }
+      _theoryPendingRef.current={
+        windowId:_newWid,
+        windowType,
+        strike:0, // filled by Effect 3 once the new strike is known
+        prev_high:_justClosedHL.high||null,
+        prev_low:_justClosedHL.low||null,
+        prevOutcomeDir:_justClosedOutcome,
+        range_call:null,
+        momentum_call:null,
+        first_move_dir:undefined,
+        first_move_fade_call:undefined,
+        crowd_pct:undefined,
+        crowd_fade_call:undefined,
+        round_number_flag:false,
+      };
+      // Reset trackers for the new window
+      _theoryHighLowRef.current={high:0,low:0};
+      _theoryFirstMoveRef.current=null;
+    }catch(_){}
+  },[timeState.nextWindow,currentAsset,windowType,currentPrice]);
+
+  // ──────────────────────────────────────────────────────────────────────────────────
+  // V10.9.3 THEORY LAB — EFFECT 3: fill strike-dependent fields once the new
+  //   window's Kalshi strike (targetMargin) becomes known. Computes RANGE CALL
+  //   (prev window's high/low vs new strike), MOMENTUM CALL (prev window's
+  //   settled direction), ROUND NUMBER FLAG, and sets up the first-move timer
+  //   + opportunistic crowd_pct capture (in case kalshiYesPrice is already
+  //   available the instant the strike lands).
+  // ──────────────────────────────────────────────────────────────────────────────────
+  useEffect(()=>{
+    if(currentAsset!=='BTC')return;
+    const _p=_theoryPendingRef.current;
+    if(!_p||_p.strike>0)return; // already filled, or no pending record yet
+    if(!targetMargin||!Number.isFinite(targetMargin)||targetMargin<=0)return;
+    if(_p.windowId!==computeWindowId(windowType))return; // stale (window already rolled again)
+    try{
+      _p.strike=targetMargin;
+
+      // RANGE CALL: where does the new strike sit within the previous window's range?
+      if(_p.prev_high!=null&&_p.prev_low!=null&&_p.prev_high>_p.prev_low){
+        const _range=_p.prev_high-_p.prev_low;
+        const _pos=(targetMargin-_p.prev_low)/_range; // 0=at prev low, 1=at prev high
+        if(_pos<=(1/3))_p.range_call='UP';
+        else if(_pos>=(2/3))_p.range_call='DOWN';
+        else _p.range_call='SKIP';
+      } else {
+        _p.range_call=null; // no previous-window range yet (first window of session)
+      }
+
+      // MOMENTUM CALL: same direction as the previous window's settled outcome
+      _p.momentum_call=_p.prevOutcomeDir||null;
+
+      // ROUND NUMBER FLAG (display only, not scored): within $75 of nearest $X,000 or $X,500
+      const _mod500=((targetMargin%500)+500)%500;
+      const _distTo500=Math.min(_mod500,500-_mod500);
+      _p.round_number_flag=_distTo500<=75;
+
+      // FIRST-MOVE-FADE: start the open/open+90s sampler
+      _theoryFirstMoveRef.current={wid:_p.windowId,openPrice:targetMargin,openTime:Date.now(),sampled:false};
+
+      // CROWD-FADE: opportunistic immediate capture if Kalshi yes-price already cached
+      if(_p.crowd_pct===undefined&&kalshiYesPrice!=null&&Number.isFinite(kalshiYesPrice)){
+        const _cp=Number(kalshiYesPrice);
+        _p.crowd_pct=_cp;
+        _p.crowd_fade_call=_cp>52?'DOWN':(_cp<48?'UP':'SKIP');
+      }
+    }catch(_){}
+  },[targetMargin,windowType,currentAsset,kalshiYesPrice]);
+
+  // ──────────────────────────────────────────────────────────────────────────────────
+  // V10.9.3 THEORY LAB — PROMOTION NOTIFICATION. One-time toast when any theory
+  //   crosses 60%+ WR over 50+ scored rounds. Never auto-promotes — promotion
+  //   (setting a live signal weight) requires the user's explicit action
+  //   elsewhere; this is informational only.
+  // ──────────────────────────────────────────────────────────────────────────────────
+  useEffect(()=>{
+    try{
+      const _labels={range:'Range Call',momentum:'Momentum Call',firstMoveFade:'First-Move-Fade Call',crowdFade:'Crowd-Fade Call'};
+      Object.entries(theoryStats).forEach(([key,v])=>{
+        if(theoryPromoNotified[key])return;
+        if(v.n>=50&&(v.correct/v.n)>=0.60){
+          setTheoryPromoNotified(prev=>({...prev,[key]:true}));
+          const _wr=Math.round((v.correct/v.n)*100);
+          try{
+            pushToast?.('theory-promo',`Theory Lab: ${_labels[key]}`,`Hitting ${_wr}% over ${v.n} rounds — consider promoting to a live signal weight.`,{durationMs:8000,cooldown:0});
+          }catch(_){}
+        }
+      });
+    }catch(_){}
+  },[theoryStats,theoryPromoNotified]);
   // V10.7.86c: key now uses id (timestamp) instead of result so every state change
   //   broadcasts. Old key (windowId|windowType|result) meant a resolved entry and its
   //   pending version had different keys — the pending version would re-broadcast even
@@ -31221,6 +31563,7 @@ function TaraApp(){
     }catch(e){}
   };
   const[showWhaleLog,setShowWhaleLog]=useState(false);
+  const[showTheoryLab,setShowTheoryLab]=useState(false); // V10.9.3 Theory Lab panel toggle
   const velocityRef=useVelocity(tickHistoryRef,currentPrice,targetMargin);
   const bloomberg=useBloomberg();
   const depthFlash=useDepthFlash(); // V134: 2.5s order book polling
@@ -43769,6 +44112,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       <button onClick={()=>{setShowBestPractices(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Best Practices">📖 Guide</button>
                       <button onClick={()=>{setShowGuide(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors text-xs" title="How Tara Works">? Help</button>
                       <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>{setShowWhaleLog(!showWhaleLog);setShowHeaderOverflow(false);}} cls="flex"/>
+                      <TheoryLabBtn active={showTheoryLab} onClick={()=>{setShowTheoryLab(!showTheoryLab);setShowHeaderOverflow(false);}} cls="flex"/>
                       <button onClick={()=>{setShowSettings(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Feed Settings"><IC.Link className="w-3.5 h-3.5"/></button>
                       <button onClick={()=>{setShowAnalytics(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#E8E9E4]/10 text-[#E8E9E4]/40 hover:text-indigo-400 transition-colors" title="Training Engine"><IC.BarChart className="w-3.5 h-3.5"/></button>
                       <button onClick={()=>{setAnalyticsPageOpen(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-indigo-500/20 text-indigo-400/60 hover:text-indigo-400 transition-colors text-xs" title="Analytics Page">📊 Analytics</button>
@@ -44602,6 +44946,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           ))}
           {/* Mobile-only quick access row for hidden header buttons */}
           <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>setShowWhaleLog(!showWhaleLog)} cls="flex"/>
+          <TheoryLabBtn active={showTheoryLab} onClick={()=>setShowTheoryLab(!showTheoryLab)} cls="flex"/>
           <button onClick={()=>setShowSettings(true)} className={'flex items-center justify-center px-2 py-1.5 rounded-lg text-xs text-[#E8E9E4]/30 hover:text-indigo-400 transition-all'} title="Discord"><IC.Link className="w-3.5 h-3.5"/></button>
         </div>
 
@@ -44949,6 +45294,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
       {/* ── FLOW INTELLIGENCE PANEL ── */}
       <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState} timeFormat={timeFormat}/>
+      <TheoryLabPanel show={showTheoryLab} setShow={setShowTheoryLab} theoryStats={theoryStats} theoryLog={theoryLog}/>
 
       {/* Settings */}
       {showSettings&&(
