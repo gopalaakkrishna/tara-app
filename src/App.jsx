@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.11-v10.9.3-theory-lab';
-const TARA_VERSION_DISPLAY='Tara 10.9.3';
+const BASELINE_VERSION='2026.06.11-v10.9.4-weak-agreement-downsize';
+const TARA_VERSION_DISPLAY='Tara 10.9.4';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14223,6 +14223,16 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
     _sizeHint='LARGE';_sizeColor='rgb(110,231,183)';_sizeReason=`big edge + ${_curHourEntry.wr}% historical hour`;
   } else if(analysis?.regime==='HIGH_VOL'||analysis?.regime==='EXTREME_VOL'){
     _sizeHint='HALF';_sizeColor='rgba(229,200,112,0.85)';_sizeReason='vol regime — cut size';
+  } else if(_isLocked&&(((_gapAl>3?1:0)+(_flowAl>3?1:0)+(_momAl>3?1:0))<=1)){
+    // V10.9.4: WEAK-AGREEMENT DOWNSIZE.
+    //   Same n_aligned definition as the V10.9.0 signal-agreement gate (each of
+    //   gap/flow/momentum > 3 counts as aligned). When 2+ signals agree, the
+    //   trade is in the 65-67% WR / +2.6-4.1¢ zone — NORMAL sizing is right.
+    //   When only 1 (or 0) of 3 agree, the data shows 48% WR, -4.4¢/trade
+    //   (n=189) — the worst bucket measured, currently betting full NORMAL
+    //   size on a near-coin-flip with negative EV. V10.9.0 already makes these
+    //   wait longer before locking; if one DOES lock, cut the size too.
+    _sizeHint='HALF';_sizeColor='rgba(244,114,182,0.7)';_sizeReason='only 1 signal aligned (48% WR zone) — cut size';
   } else if(_isLocked){
     _sizeHint='NORMAL';_sizeColor='rgba(232,233,228,0.7)';_sizeReason='standard window (69% WR zone)';
   }
