@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.11-v10.9.6-deep-cache-5000';
-const TARA_VERSION_DISPLAY='Tara 10.9.6';
+const BASELINE_VERSION='2026.06.11-v10.9.7-dial-removed';
+const TARA_VERSION_DISPLAY='Tara 10.9.7';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14315,7 +14315,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   );
 }
 
-function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,reversalRisk}){
+function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,analysis,className,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,reversalRisk}){
   if(!taraCall)return null;
     const tc=taraCall;
     const sc=taraScorecards?.[windowType]||{wins:0,losses:0,sitouts:0};
@@ -14960,13 +14960,16 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
         {/* V6.5.7: Speed dial with live ETA. Shows expected lock time at current dial position.
             ETA is computed inline from window timing + dial setting so it's always available
             even when engine hasn't run yet (early scan, search phase, etc). */}
-        {!isCommittedSnap&&typeof setSpeedDial==='function'&&(()=>{
-          const _d=Math.max(0,Math.min(100,speedDial||50));
-          const _label=_d<=20?'⚡ FAST':_d<=40?'fast':_d<=60?'balanced':_d<=80?'patient':'🛡 PATIENT';
-          const _color=_d<=30?'rgb(244,114,182)':_d<=70?T2_GOLD:'rgb(110,231,183)';
-          // Inline ETA computation — no engine dependency. Defends against null/undefined inputs.
-          const _smult=_d<=50?(0.1+(_d/50)*0.9):(1.0+((_d-50)/50)*1.0);
-          // V7.5: search-phase floor 3 → 2 to match engine
+        {/* V10.9.7: SPEED DIAL REMOVED. The dial was a global 0.1x-2.0x timing
+              multiplier sitting on top of the tier ladder, V10.9.0 signal-agreement
+              gate, V10.8.2 cushion history, and V9.8.0 urgency protocol — all of
+              which already drive timing from actual signal/confidence. 50 ("balanced")
+              was the mathematical neutral point (multiplier=1.0). Removing the dial
+              = locking permanently at that neutral point, so the signal-based systems
+              run at their tuned baseline. This panel keeps the informative Lock ETA
+              readout (computed at the neutral multiplier) without the manual control. */}
+        {!isCommittedSnap&&(()=>{
+          const _smult=1.0; // neutral (was dial-controlled 0.1-2.0; dial removed V10.9.7)
           const _searchPhase=Math.max(2,Math.round(10*_smult));
           const _totalSec=windowType==='15m'?900:300;
           const _minsR=Number(timeState&&timeState.minsRemaining)||0;
@@ -14977,30 +14980,19 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _engNeed=taraCall&&taraCall._ctx&&typeof taraCall._ctx.needSamples==='number'?taraCall._ctx.needSamples:null;
           let _samplesRem;
           let _tierLabel;
-          // V7.2: stalled — engine forming but samples not advancing (conviction not firm).
-          //   Don't pretend there's an ETA. Show "—" with "stalled" label.
           const _isStalled=taraCall&&taraCall._ctx&&taraCall._ctx.lockEtaStalled===true;
-          // V7.2: scanning — engine has no direction yet. Same — don't lie about ETA.
           const _isScanningNoDir=taraCall&&taraCall.call==='SIT_OUT'&&_engSamples==null;
           if(_isStalled||_isScanningNoDir){
             _samplesRem=null;
             _tierLabel=_isStalled?'stalled':'scanning';
           } else if(_engSamples!=null&&_engNeed!=null){
-            // Engine is actively forming — use real samples count
             _samplesRem=Math.max(0,_engNeed-_engSamples);
             _tierLabel=(taraCall&&taraCall._ctx&&taraCall._ctx.tierLabel)||'';
           } else {
-            // V7.0.1: SCANNING — virtually tick samplesRem down based on elapsed-since-search.
-            //   Otherwise the ETA freezes at 30s once we pass the search phase. By assuming
-            //   the engine will start forming after search phase, samples virtually accumulate
-            //   at ~1/sec. So the user sees the ETA count down second by second.
-            //   When engine actually starts forming, this switches to real samples (above branch).
-            // V7.2: floor changed from 1 → 0 so we don't glue at "~1s" forever.
             const _baseSamples=Math.max(1,Math.round(30*_smult));
             const _virtualElapsedInForming=Math.max(0,_elapsed-_searchPhase);
             const _vRem=_baseSamples-_virtualElapsedInForming;
             if(_vRem<=0){
-              // Past virtual lock time but engine still hasn't committed → stalled
               _samplesRem=null;
               _tierLabel='stalled';
             } else {
@@ -15009,18 +15001,15 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             }
           }
           const _etaNum=_samplesRem==null?null:Math.max(0,_searchRem+_samplesRem);
-          // V7.2: when ETA can't be computed (stalled or pure scanning), show "—" instead of fake "~1s".
-          // V7.4: when ETA is "—", show the actual blocker so user knows WHY there's no ETA.
           let _etaStr;
           let _blockerLine=null;
           if(_etaNum==null){
-            // Stalled or pure scanning — surface the blocker.
             const _engQ=taraCall&&taraCall._ctx&&typeof taraCall._ctx.q==='number'?taraCall._ctx.q:null;
             const _engConv=taraCall&&taraCall._ctx&&typeof taraCall._ctx.conviction==='number'?taraCall._ctx.conviction:null;
             const _qBaseUI=Math.round(30*_smult);
             const _convBaseUI=Math.max(1,Math.round(7*_smult));
             if(_isStalled){
-              _etaStr='—';
+              _etaStr='\u2014';
               if(_engConv!=null&&_engConv<_convBaseUI){
                 _blockerLine=`conviction ${_engConv.toFixed(0)} / need ${_convBaseUI}`;
               } else if(_engQ!=null&&_engQ<_qBaseUI){
@@ -15029,111 +15018,16 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 _blockerLine='conviction not firm';
               }
             } else {
-              _etaStr='—';
+              _etaStr='\u2014';
               _blockerLine='no direction yet';
             }
           } else {
             _etaStr=_etaNum<=0?'now':_etaNum<60?`~${Math.round(_etaNum)}s`:`~${Math.floor(_etaNum/60)}m ${Math.round(_etaNum%60)}s`;
           }
-          // V7.4: Effective gates from current dial position.
-          const _qFloor=Math.max(10,Math.round(30*_smult));
-          const _cFloor=Math.max(1,Math.round(7*_smult));
-          // V7.4: Allowed tiers — what does this dial position permit?
-          const _allowedTiers=_d>=80?'super-confluence + structural-led only':_d>=50?'confluence and higher':_d>=30?'any tier (no single-signal)':'all setups';
-          // V9.7.1: RECOMMENDED DIAL — derives from current market state.
-          //   Volume swing logic:
-          //     • EXTREME/WILD volatility → recommend FASTER (lower dial). When
-          //       moves are big and fast, slow patient locks miss them.
-          //     • SLOW/DEAD volatility → recommend MORE PATIENT (higher dial).
-          //       When moves are small, single-signal locks at low dial fire on
-          //       noise. Wait for stronger confluence.
-          //     • WHIPSAW → push patient. Whipsaw windows punish fast dials.
-          //   Output: integer 0-100, snapped to nearest 5.
-          const _rec=(()=>{
-            const _vr=analysis?.velocityRegime||'NORMAL';
-            const _wa=analysis?.windowAmplitude?.label||'NORMAL';
-            const _atr=Number(analysis?.atrBps)||0;
-            let _r=50;
-            if(_vr==='EXTREME')_r-=20;
-            else if(_vr==='FAST')_r-=10;
-            else if(_vr==='SLOW')_r+=15;
-            if(_wa==='WILD')_r-=10;
-            else if(_wa==='DEAD'||_wa==='OPENING')_r+=15;
-            else if(_wa==='WHIPSAW')_r+=20;
-            if(_atr>0&&_atr<6)_r=Math.max(_r,55);
-            if(_atr>30)_r=Math.min(_r,40);
-            return Math.max(0,Math.min(100,Math.round(_r/5)*5));
-          })();
-          const _recDelta=Math.abs(_rec-_d);
-          const _recLabel=_rec<=20?'⚡ FAST':_rec<=40?'fast':_rec<=60?'balanced':_rec<=80?'patient':'🛡 PATIENT';
-          const _recReason=(()=>{
-            const _vr=analysis?.velocityRegime||'NORMAL';
-            const _wa=analysis?.windowAmplitude?.label||'NORMAL';
-            if(_vr==='EXTREME')return 'extreme velocity — slow locks miss';
-            if(_wa==='WHIPSAW')return 'whipsaw — patience pays';
-            if(_wa==='DEAD'||_vr==='SLOW')return 'low movement — wait for confluence';
-            if(_wa==='WILD')return 'wild swings — go fast';
-            if(_vr==='FAST')return 'fast tape — slight speed bias';
-            return 'normal conditions';
-          })();
+          const _color='rgb(110,231,183)';
           return(
             <div className="border-t border-[#E8E9E4]/8 pt-2.5 mt-2.5">
-              <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/45 font-bold">Speed vs Confidence</span>
-                <div className="flex items-baseline gap-1.5">
-                  <span className="tabular-nums text-[10px] font-bold" style={{color:_color}}>{_d}</span>
-                  <span className="text-[9px] uppercase tracking-wider" style={{color:_color,opacity:0.85}}>{_label}</span>
-                </div>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="5"
-                value={_d}
-                onChange={(e)=>setSpeedDial(parseInt(e.target.value,10))}
-                className="w-full"
-                style={{accentColor:_color,height:6}}
-              />
-              <div className="flex items-center justify-between gap-2 mt-1 text-[9px] tabular-nums">
-                <span className="text-[#E8E9E4]/35">0 · faster</span>
-                <span className="text-[#E8E9E4]/35">100 · patient</span>
-              </div>
-              {/* V9.7.1: Recommended dial pill — surfaces only when current dial differs by ≥10 from rec. */}
-              {_recDelta>=10&&(
-                <button
-                  onClick={()=>setSpeedDial(_rec)}
-                  className="mt-1.5 w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded text-[10px] hover:bg-[#E8E9E4]/5 transition-colors"
-                  style={{background:'rgba(229,200,112,0.06)',border:'1px solid rgba(229,200,112,0.20)'}}
-                  title={`Recommended for current ${analysis?.velocityRegime?.toLowerCase?.()||'normal'} ${analysis?.windowAmplitude?.label?.toLowerCase?.()||''} conditions`}
-                >
-                  <span className="text-[#E8E9E4]/55">recommended for now</span>
-                  <span className="flex items-baseline gap-1.5">
-                    <span className="tabular-nums font-bold" style={{color:T2_GOLD}}>{_rec}</span>
-                    <span className="uppercase tracking-wider text-[9px]" style={{color:T2_GOLD,opacity:0.85}}>{_recLabel}</span>
-                    <span className="text-[#E8E9E4]/35">tap →</span>
-                  </span>
-                </button>
-              )}
-              {_recDelta>=10&&(
-                <div className="text-[9px] text-[#E8E9E4]/45 mt-0.5 text-right italic">{_recReason}</div>
-              )}
-              {/* V7.4: Effective gates from current dial — live, no need to lock to see */}
-              <div className="mt-2 px-2.5 py-2 rounded-md" style={{background:'rgba(232,233,228,0.04)',border:'1px solid rgba(232,233,228,0.08)'}}>
-                <div className="text-[8px] uppercase tracking-[0.18em] text-[#E8E9E4]/45 font-bold mb-1">Effective gates</div>
-                <div className="flex items-center justify-between gap-2 tabular-nums text-[10px] mb-1">
-                  <span className="text-[#E8E9E4]/65">Quality floor</span>
-                  <span className="text-white font-bold">≥ {_qFloor}</span>
-                </div>
-                <div className="flex items-center justify-between gap-2 tabular-nums text-[10px] mb-1.5">
-                  <span className="text-[#E8E9E4]/65">Conviction floor</span>
-                  <span className="text-white font-bold">≥ {_cFloor}</span>
-                </div>
-                <div className="text-[9px] text-[#E8E9E4]/55 leading-snug border-t border-[#E8E9E4]/8 pt-1.5">
-                  Allowed: <span style={{color:_color}}>{_allowedTiers}</span>
-                </div>
-              </div>
-              <div className="mt-2 px-2.5 py-2 rounded-md" style={{background:'rgba(232,233,228,0.05)',border:'1px solid rgba(232,233,228,0.10)'}}>
+              <div className="px-2.5 py-2 rounded-md" style={{background:'rgba(232,233,228,0.05)',border:'1px solid rgba(232,233,228,0.10)'}}>
                 <div className="flex items-baseline justify-between gap-2 mb-0.5">
                   <span className="text-[9px] uppercase tracking-[0.18em] text-[#E8E9E4]/55 font-bold">Lock ETA</span>
                   {_tierLabel&&<span className="text-[9px] uppercase text-[#E8E9E4]/35 tabular-nums">{_tierLabel}</span>}
@@ -15141,9 +15035,6 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 <div className="text-[18px] font-bold tabular-nums tracking-tight leading-tight" style={{color:_color}}>{_etaStr}</div>
                 {_blockerLine&&<div className="text-[9px] text-[#E8E9E4]/45 italic mt-0.5 tabular-nums">{_blockerLine}</div>}
               </div>
-              <span className="text-[9px] text-[#E8E9E4]/35 italic block mt-1.5 leading-snug">
-                {_d<=30?'Fast — fewer samples, lower thresholds':_d<=70?'Balanced cadence':'Patient — wait for high confidence'}
-              </span>
             </div>
           );
         })()}
@@ -16094,19 +15985,10 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
           'When ON, Tara only commits on confluence / super-confluence / structural-led / tape-led / rising-confluence / patient / exceptional / strong+ tiers. All other locks convert to SIT_OUT.',
         ),
       ),
-      // V9.9.8: SPEED-DIAL AUTO MODE — Tara auto-applies the conditions-driven recommended dial value
-      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0E100F]/60 border border-[#E8E9E4]/8'},
-        React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer gap-2'},
-          React.createElement('div',{className:'min-w-0 flex-1'},
-            React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#E8E9E4]/50 mb-0.5'},'Speed dial · auto mode'),
-            React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/55'},'Auto-apply Tara\u2019s recommended speed based on velocity, ATR, and amplitude'),
-          ),
-          React.createElement('input',{type:'checkbox',checked:settings.speedAutoMode,onChange:(e)=>_update('speedAutoMode',e.target.checked),className:'ml-2 shrink-0'}),
-        ),
-        settings.speedAutoMode&&React.createElement('div',{className:'mt-2 text-[10px] text-[#E8E9E4]/55 leading-snug'},
-          'Tara picks the dial: ⚡FAST in extreme velocity, 🛡PATIENT in whipsaw / dead phases, balanced otherwise. Header shows "auto · NN" instead of "speed: NN rec." Toggle off to set manually.',
-        ),
-      ),
+      // V10.9.7: Speed dial + auto-mode settings block REMOVED. The dial was a
+      //   global timing multiplier; removing it means Tara always runs at the
+      //   neutral baseline, letting the tier ladder / V10.9.0 agreement gate /
+      //   V10.8.2 cushion history / V9.8.0 ULP drive timing from actual signals.
       // Anti-tilt cooldown — V10.4.1a: REMOVED, merged into auto-exec cooldown
       //   below to eliminate duplicate cooldown systems. The auto-exec
       //   cooldownLossStreak / cooldownMinutes fields (Risk Guardrails section)
@@ -19450,7 +19332,7 @@ const regimeToShortPlain=(regime)=>{
   return map[regime]||regime;
 };
 
-function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,currentAsset,analysis,currentStreak,speedDial,setSpeedDial,speedAutoMode,setSpeedAutoMode}){
+function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,currentAsset,analysis,currentStreak}){
   const[ctx,setCtx]=React.useState(()=>getMarketContext(new Date()));
   const[expanded,setExpanded]=React.useState(false);
   React.useEffect(()=>{
@@ -19461,9 +19343,9 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
     const iv=setInterval(tick,30000);
     return()=>clearInterval(iv);
   },[]);
-  // V9.9.8: Auto-mode — when speedAutoMode is ON, the dial automatically follows the
-  //   conditions-driven recommendation. Computes the rec from analysis (mirrors the
-  // V9.13: SCHEDULE-AWARE ADAPTIVE DIAL. Replaces the volatility-only auto-dial
+  // V9.13: SCHEDULE-AWARE ADAPTIVE indicator (display-only "Adaptive Schedule Strip"
+  //   in the expanded panel below — a 24h TRADE/OBSERVE/AVOID advisory, NOT the
+  //   removed timing-multiplier dial). Replaces the volatility-only auto-dial
   //   (V8.x) with one that blends: hourly schedule → streak → live volatility →
   //   today's session WR. The four-factor blend is in computeAdaptiveDial.
   //
@@ -19474,7 +19356,6 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
   //
   //   Same ping-pong guard as before: only writes when rec changed AND meaningful
   //   delta (≥5 steps) AND not at the current dial already.
-  const _lastAppliedRecRef=React.useRef(null);
   const _todaySessionWR=React.useMemo(()=>{
     if(!Array.isArray(taraCallLog))return null;
     const _curSession=getMarketSessions().dominant;
@@ -19491,30 +19372,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
     const _w=_matches.filter(e=>e.result==='WIN').length;
     return{wr:(_w/_matches.length)*100,n:_matches.length};
   },[taraCallLog,currentAsset]);
-  React.useEffect(()=>{
-    if(!speedAutoMode||typeof setSpeedDial!=='function')return;
-    // V10.7.48: derive conviction state from analysis posterior + window elapsed
-    const _v1048post=Number(analysis?.rawProbAbove)||50;
-    const _v1048conv=Math.abs(_v1048post-50);
-    const _v1048winLen=ctx?.windowType==='15m'?900:300;
-    const _v1048elapsed=ctx?.elapsedSec||0;
-    const _adaptive=computeAdaptiveDial({
-      analysis,
-      streak:currentStreak,
-      todaySessionWR:_todaySessionWR?.wr,
-      todaySessionN:_todaySessionWR?.n,
-      convictionState:{conviction:_v1048conv,winLenSec:_v1048winLen,elapsedSec:_v1048elapsed},
-    });
-    const _rec=_adaptive.dial;
-    const _cur=Math.max(0,Math.min(100,speedDial||50));
-    // V10.7.46 FIX: removed `_rec===_lastAppliedRecRef.current` dedup. It prevented
-    //   re-correction when the dial drifted away from the applied value (e.g. user
-    //   dragged manually while auto was on). Now the only guard is the delta check
-    //   against the LIVE current value — if the dial drifts, auto re-snaps it.
-    if(Math.abs(_rec-_cur)<5)return;
-    _lastAppliedRecRef.current=_rec;
-    setSpeedDial(_rec);
-  },[speedAutoMode,analysis?.velocityRegime,analysis?.windowAmplitude?.label,analysis?.atrBps,analysis?.rawProbAbove,currentStreak?.type,currentStreak?.count,_todaySessionWR?.wr,_todaySessionWR?.n,ctx?.elapsedSec,setSpeedDial,speedDial]);
+  // V10.9.7: speedAutoMode effect REMOVED — dial removed entirely, see note below.
   if(!ctx||!ctx.phase)return null;
   // V8.7.2: Compute the user's actual win rate in the CURRENT session bucket.
   //   Sessions = ASIA / EU / US (matches the session field stamped on each call).
@@ -19641,85 +19499,14 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           style:{color:'rgba(244,114,182,0.95)',background:'rgba(244,114,182,0.10)',border:'1px solid rgba(244,114,182,0.25)'},
           title:'This phase has poor edge. Skip or half-size.',
         },'⚠ deadzone'),
-        // V9.7.2: Recommended speed-dial chip — same logic as TaraCallCard's dial recommendation.
-        //   Surfaces only when current dial is ≥10 off from rec. Tap to apply.
-        //   Logic: EXTREME/FAST velocity → faster; SLOW/DEAD/WHIPSAW → patient;
-        //   ATR<6 floors at 55, ATR>30 ceilings at 40.
-        (typeof setSpeedDial==='function'&&analysis)&&(()=>{
-          const _vr=analysis?.velocityRegime||'NORMAL';
-          const _wa=analysis?.windowAmplitude?.label||'NORMAL';
-          const _atr=Number(analysis?.atrBps)||0;
-          let _r=50;
-          if(_vr==='EXTREME')_r-=20;
-          else if(_vr==='FAST')_r-=10;
-          else if(_vr==='SLOW')_r+=15;
-          if(_wa==='WILD')_r-=10;
-          else if(_wa==='DEAD'||_wa==='OPENING')_r+=15;
-          else if(_wa==='WHIPSAW')_r+=20;
-          if(_atr>0&&_atr<6)_r=Math.max(_r,55);
-          if(_atr>30)_r=Math.min(_r,40);
-          const _rec=Math.max(0,Math.min(100,Math.round(_r/5)*5));
-          const _cur=Math.max(0,Math.min(100,speedDial||50));
-          const _delta=Math.abs(_rec-_cur);
-          // V9.8.6: Always visible (was: hidden when delta<10). User wants the rec
-          //   in view at all times so they know whether their dial matches conditions.
-          //   When current = recommended, render dimmed with a ✓ instead of "rec".
-          // V9.9.8: when auto-mode is ON, show "AUTO" instead of "rec" / ✓ and disable
-          //   the click-to-apply (auto-effect handles it). Distinct visual so user knows
-          //   the dial is being managed.
-          const _atRec=_delta<5;
-          const _label=_rec<=20?'⚡ FAST':_rec<=40?'fast':_rec<=60?'balanced':_rec<=80?'patient':'🛡 PATIENT';
-          const _color=_rec<=30?'rgb(244,114,182)':_rec<=70?T2_GOLD:'rgb(110,231,183)';
-          const _reason=_vr==='EXTREME'?'extreme velocity — slow locks miss'
-            :_wa==='WHIPSAW'?'whipsaw — patience pays'
-            :_wa==='DEAD'||_vr==='SLOW'?'low movement — wait for confluence'
-            :_wa==='WILD'?'wild swings — go fast'
-            :_vr==='FAST'?'fast tape — slight speed bias'
-            :'normal conditions';
-          if(speedAutoMode){
-            // V9.10.3: white text instead of gold-on-gold for readability. Border keeps
-            //   the regime color so the conditions cue is still visible. Pre-V9.10.3 the
-            //   text used `_color` (T2_GOLD for balanced regimes) on a gold-tinted bg —
-            //   text was essentially invisible against the background.
-            return React.createElement('button',{
-              onClick:(e)=>e.stopPropagation(),
-              className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded',
-              style:{
-                color:'rgba(232,233,228,0.95)',
-                background:`${_color.replace('rgb','rgba').replace(')',',0.10)')}`,
-                border:`1px solid ${_color}55`,
-                cursor:'default',
-              },
-              title:`Auto-mode ON · Tara managing dial at ${_rec} (${_label}). Reason: ${_reason}. Toggle off in trading settings to control manually.`,
-            },'auto · ',_rec);
-          }
-          return React.createElement('button',{
-            onClick:(e)=>{e.stopPropagation();if(!_atRec)setSpeedDial(_rec);},
-            className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded hover:bg-[#E8E9E4]/5 transition-colors',
-            style:{
-              color:_atRec?'rgba(232,233,228,0.50)':_color,
-              background:_atRec?'rgba(232,233,228,0.03)':'rgba(232,233,228,0.04)',
-              border:`1px solid ${_atRec?'rgba(232,233,228,0.12)':_color+'33'}`,
-              cursor:_atRec?'default':'pointer',
-            },
-            title:_atRec
-              ?`Current dial (${_cur}) matches recommended ${_rec} (${_label}). Conditions: ${_reason}.`
-              :`Recommended speed: ${_rec} (${_label}). Reason: ${_reason}. You're at ${_cur}. Tap to apply.`,
-          },'speed: ',_rec,_atRec?' ✓':' rec');
-        })(),
-        // V9.9.9: Direct AUTO/MANUAL toggle right next to the speed pill. Replaces
-        //   the previous "buried in trading settings" pattern. Tap to flip between
-        //   auto (Tara manages dial per conditions) and manual (user controls dial).
-        (typeof setSpeedAutoMode==='function')&&React.createElement('button',{
-          onClick:(e)=>{e.stopPropagation();setSpeedAutoMode(!speedAutoMode);},
-          className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded transition-colors',
-          style:speedAutoMode
-            ?{color:'rgb(110,231,183)',background:'rgba(110,231,183,0.10)',border:'1px solid rgba(110,231,183,0.35)'}
-            :{color:'rgba(232,233,228,0.55)',background:'rgba(232,233,228,0.03)',border:'1px solid rgba(232,233,228,0.15)'},
-          title:speedAutoMode
-            ?'Auto mode ON — Tara adjusts dial per conditions. Tap to take manual control.'
-            :'Manual mode — you control the dial. Tap to let Tara auto-adjust per conditions.',
-        },speedAutoMode?'auto ✓':'manual'),
+        // V10.9.7: speed-dial recommendation pill + auto/manual toggle REMOVED.
+        //   The dial was a global timing multiplier (0.1x-2.0x) sitting on top of
+        //   the tier ladder, V10.9.0 signal-agreement gate, V10.8.2 cushion history,
+        //   and V9.8.0 urgency protocol — all of which are already confidence/signal
+        //   based. 50 (the "balanced" recommendation) was the mathematical neutral
+        //   point (multiplier=1.0). Removing the dial = locking at that neutral
+        //   point permanently, letting the signal-based systems drive timing at
+        //   their tuned baseline without an extra global stretch/compress layer.
         // V8.7.2: Your-WR-this-session pill — only when we have ≥5 trades to be meaningful
         _sessionAdvice&&React.createElement('span',{
           className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 px-1.5 py-0.5 rounded tabular-nums',
@@ -21693,7 +21480,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,speedDial,setSpeedDial,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -21707,7 +21494,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
           V6.2.3: hidden lg:block (was md:block). */}
-      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} onDeleteEntry={onDeleteEntry} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={reversalRisk} className="hidden lg:block"/>
+      <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={taraCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} onSoftHint={onSoftHint} onHardForce={onHardForce} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} onEditEntry={onEditEntry} onDeleteEntry={onDeleteEntry} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={reversalRisk} className="hidden lg:block"/>
 
       {/* V9.1.5: Tape + Depth render as upgraded compact strips next to the small
           DOM bar at the top of the analysis card. No big panels here anymore. */}
@@ -27713,10 +27500,7 @@ function TaraApp(){
   feedFrozenRef.current=feedFrozen;
   // V6.5.7: SPEED DIAL — 0-100, 50 default. Lower = faster lock (fewer samples,
   //   shorter search phase, lower thresholds). Higher = more patient. Persists.
-  const[speedDial,setSpeedDial]=useState(()=>{
-    try{const v=parseInt(localStorage.getItem('tara_speed_dial')||'50',10);return Number.isFinite(v)?Math.max(0,Math.min(100,v)):50;}catch(e){return 50;}
-  });
-  useEffect(()=>{try{localStorage.setItem('tara_speed_dial',String(speedDial));}catch(e){}},[speedDial]);
+  // V10.9.7: speedDial state removed — dial removed entirely.
   // ── V8.2: TRADING SETTINGS ──────────────────────────────────────────────
   // Bet size, win payout, anti-tilt cooldown enable, Discord alert filter, TP/SL rules.
   // All localStorage-only (per-device prefs, no need to sync). Defaults match typical
@@ -27747,9 +27531,8 @@ function TaraApp(){
         //   velocityRegime + windowAmplitude + ATR). When OFF (default), user controls
         //   the dial manually as before. User toggles in trading settings; visual state
         //   shows in the MarketContextStrip speed pill.
-        speedAutoMode:!!v.speedAutoMode,
       };
-    }catch(_){return{betSize:10,winPayout:8.5,antiTiltEnabled:true,antiTiltMinutes:15,antiTiltStreakLen:4,highEdgeAlertOnly:false,highEdgeMinPp:15,takeProfitEnabled:false,takeProfitOffer:0.85,cutLossEnabled:false,cutLossMinutes:3,tier1OnlyMode:false,speedAutoMode:false};}
+    }catch(_){return{betSize:10,winPayout:8.5,antiTiltEnabled:true,antiTiltMinutes:15,antiTiltStreakLen:4,highEdgeAlertOnly:false,highEdgeMinPp:15,takeProfitEnabled:false,takeProfitOffer:0.85,cutLossEnabled:false,cutLossMinutes:3,tier1OnlyMode:false};}
   });
   useEffect(()=>{try{localStorage.setItem('taraTradingSettings_v1',JSON.stringify(tradingSettings));}catch(_){}},[tradingSettings]);
   const[showTradingSettings,setShowTradingSettings]=useState(false);
@@ -30340,9 +30123,7 @@ function TaraApp(){
   });
   const taraLearningsRef=useRef(taraLearnings);
   taraLearningsRef.current=taraLearnings;
-  // V6.5.7: speedDialRef so engine can read without prop changes
-  const speedDialRef=useRef(speedDial);
-  speedDialRef.current=speedDial;
+  // V10.9.7: speedDialRef removed — dial removed entirely.
   const _learningsHydratedRef=useRef(false);
   // V8.6: Ref so RMW write reads freshest local state at debounce-fire time
   const _learningsRef=useRef(taraLearnings);
@@ -36110,11 +35891,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   strong signals. 10s is enough to filter Kalshi initial-price snap noise without
     //   forcing slow ramp-up on clear setups.
     // V5.6.4: Mandatory search phase — first 10s, observe only.
-    // V7.5: search phase scales with speed dial. dial=0 → 2s, dial=25 → 4s, dial=50 → 10s,
-    //   dial=75 → 15s, dial=100 → 20s. Aggressive low-end so dial 25 feels truly fast.
-    const _dialSearch=Math.max(0,Math.min(100,speedDialRef.current||50));
-    const _searchMultS=_dialSearch<=50?(0.1+(_dialSearch/50)*0.9):(1.0+((_dialSearch-50)/50)*1.0);
-    let _searchPhase=Math.max(2,Math.round(10*_searchMultS));
+    // V10.9.7: speed dial removed. Search phase fixed at its neutral (dial=50,
+    //   multiplier=1.0) value of 10s — the tier ladder, V10.9.0 signal-agreement
+    //   gate, V10.8.2 cushion history, and V9.8.0 ULP handle adaptive timing.
+    let _searchPhase=10;
     // V9.8.0: URGENT LOCK PROTOCOL — when Kalshi is moving in our direction, halve
     //   the search phase. Combined with the lifecycle ULP (50% needSamples cut), a
     //   moving market gets locked in ~12s instead of ~33s. Detect urgency inline
@@ -36155,10 +35935,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   Active learning lives in lifecycle (samples) and confidence (display), not here.
     const _learn=taraLearningsRef.current;
     const _safety=Math.max(0,Math.min(8,_learn?.multipliers?.regimeFloorSafety?.[analysis.regime]||0));
-    // V7.5: SPEED DIAL — 0-100. Aggressive low-end: 0.10 (fast) → 1.0 → 2.0 (patient).
-    //   Matches the lifecycle curve so engine + lifecycle are in sync.
-    const _dialEng=Math.max(0,Math.min(100,speedDialRef.current||50));
-    const _speedMultEng=_dialEng<=50?(0.1+(_dialEng/50)*0.9):(1.0+((_dialEng-50)/50)*1.0);
+    // V10.9.7: speed dial removed. Multiplier fixed at its neutral (dial=50) value
+    //   of 1.0 — Q_FLOOR and CONV_FLOOR run at their tuned baseline (30/8 in
+    //   RANGE-CHOP), with regime-floor-safety and soft-hint still applying on top.
+    const _speedMultEng=1.0;
     // V6.2.6: SOFT HINT MODE — user pressed "Hint to Lock Faster" recently. Lower floors
     //   for 10 seconds. Tape-opposes, Kalshi-extreme, and edge-guard remain enforced.
     const _softHintActive=softHintRef.current>0&&(Date.now()-softHintRef.current)<10000;
@@ -40297,7 +40077,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           dayContext,
         }),
         // V9.7.6: dial setting at force — same telemetry as for engine locks
-        dialAtLock:typeof speedDialRef!=='undefined'&&speedDialRef?.current!=null?Number(speedDialRef.current):(typeof speedDial!=='undefined'?Number(speedDial):null),
+        dialAtLock:50, // V10.9.7: dial removed — neutral value kept for CSV/export schema stability
         isUserForced:true,reason:taraCallSnapshotRef.current.reason,
         // V7.0.7: tag asset for user-forced entries (was missing — defaulted to BTC on display).
         asset:currentAssetRef.current||currentAsset||'BTC',
@@ -40639,14 +40419,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const remaining=Math.max(0,totalSec-elapsedSec);
     // V6.5.7 ETA: write a baseline estimate IMMEDIATELY so the UI always has a value,
     //   even before any direction is claimed. Refined below once tier is determined.
-    //   Default-tier estimate at current dial: ~30 samples × speedMult, plus search phase remaining.
+    // V10.9.7: speed dial removed — baseline ETA uses neutral (dial=50) values:
+    //   10s search phase, 30 base samples.
     {
-      const _dialEarly=Math.max(0,Math.min(100,speedDialRef.current||50));
-      const _smultEarly=_dialEarly<=50?(0.1+(_dialEarly/50)*0.9):(1.0+((_dialEarly-50)/50)*1.0);
-      const _searchPhaseEarly=Math.max(3,Math.round(10*_smultEarly));
+      const _searchPhaseEarly=10;
       const _searchRem=Math.max(0,_searchPhaseEarly-elapsedSec);
-      // Default tier estimate. samples=0 → ~30 to lock at default. Scale by dial.
-      const _baseSamples=Math.max(1,Math.round(30*_smultEarly));
+      const _baseSamples=30;
       const _samplesRem=Math.max(0,_baseSamples-samples);
       const _baselineEta=_searchRem+_samplesRem;
       if(tc&&tc._ctx){tc._ctx.lockEtaSec=_baselineEta;tc._ctx.samples=samples;tc._ctx.needSamples=_baseSamples;tc._ctx.tierLabel=claimedDir?'forming':'scanning';}
@@ -41909,20 +41687,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     }
     // V6.2.6: Hard force — commit immediately, bypass sample requirement entirely
     const _hardForceActive=hardForceRef.current>0&&(Date.now()-hardForceRef.current)<5000;
-    // V7.5: Apply speed dial multiplier to lifecycle sample requirement. Was previously
-    //   linear 0.3 → 1.0 → 2.0 across [0, 50, 100]. User feedback: "even with low threshold
-    //   tara takes time to lock... I'm getting an entry at 65-70% for which I dont like to
-    //   get. the flip risk isn't worth it." Need MUCH more aggressive low-end so dial 25
-    //   actually feels fast. New curve:
-    //     dial 0  → 0.10  (one tick of confirmation, near-instant)
-    //     dial 25 → 0.30
-    //     dial 50 → 1.00  (default unchanged)
-    //     dial 75 → 1.50
-    //     dial 100→ 2.00  (patient unchanged)
-    //   Combines with the V7.4 tier filter: dial 25 = fast cadence, all tier flags allowed.
-    const _dialLc=Math.max(0,Math.min(100,speedDialRef.current||50));
-    const _speedMultLc=_dialLc<=50?(0.1+(_dialLc/50)*0.9):(1.0+((_dialLc-50)/50)*1.0);
-    needSamples=Math.max(1,Math.round(needSamples*_speedMultLc));
+    // V10.9.7: speed dial removed. needSamples and search phase run at the neutral
+    //   (dial=50, multiplier=1.0) baseline — the tier ladder above already set
+    //   needSamples per signal quality, V10.9.0 scaled it for signal agreement,
+    //   and V10.8.2 scaled it for cushion history. ULP (V9.8.0, below) still
+    //   applies its own 50% cut when Kalshi is moving fast in Tara's direction.
+    const _speedMultLc=1.0;
     // Cap so lock has time to be scored after committing
     needSamples=Math.min(needSamples,Math.max(15,remaining-90));
     // V9.8.0: URGENT LOCK PROTOCOL — when V9.7.6 urgency is active (Kalshi YES
@@ -42361,7 +42131,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         // V9.7.6: speed dial setting at lock — telemetry to audit whether dial=20 (FAST)
         //   actually produces faster locks than dial=50 (BALANCED). If we see dial=20 trades
         //   averaging the same secondsIntoWindow as dial=50, the dial isn't being applied.
-        dialAtLock:typeof speedDialRef!=='undefined'&&speedDialRef?.current!=null?Number(speedDialRef.current):(typeof speedDial!=='undefined'?Number(speedDial):null),
+        dialAtLock:50, // V10.9.7: dial removed — neutral value kept for CSV/export schema stability
         samples,needSamples,
         // V6.5.8: tag with active asset so memory can filter per-asset.
         //   V7.0.3: use ref.current to avoid stale closure.
@@ -44601,10 +44371,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           currentAsset={currentAsset}
           analysis={analysis}
           currentStreak={currentStreak}
-          speedDial={speedDial}
-          setSpeedDial={setSpeedDial}
-          speedAutoMode={tradingSettings?.speedAutoMode}
-          setSpeedAutoMode={(v)=>setTradingSettings(prev=>({...prev,speedAutoMode:!!v}))}
         />
 
         {/* V9.10.2: Unified Today card — replaces DailyInsightCard + TodayCard +
@@ -45253,7 +45019,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
             {/* V5.6.1: Tara's Call on mobile signal tab — moved here from the projections tab.
                 V6.2.3: lg:hidden (was md:hidden) since responsive layout now switches at lg. */}
-            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
+            <TaraCallCard taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} analysis={analysis} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
               // V9.9.3: same dual-axis edit logic as desktop ProjectionsCard call site.
               const _field=field||'result';
               setTaraCallLog(prev=>{
@@ -45364,7 +45130,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           </div>
 
           {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} speedDial={speedDial} setSpeedDial={setSpeedDial} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
             // V9.9.3: dual-axis edit. field === 'direction' edits e.dir, 'result' edits e.result.
             //   Default field is 'result' for backward compat. Both axes mark manualEdit + timestamp.
             //   Direction edit recomputes the result automatically if we have closing price + strike,
