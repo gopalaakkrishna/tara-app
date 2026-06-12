@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.11-v10.9.1-reconcile-refprice-fix';
-const TARA_VERSION_DISPLAY='Tara 10.9.1';
+const BASELINE_VERSION='2026.06.11-v10.9.2-whale-fresh-netscore';
+const TARA_VERSION_DISPLAY='Tara 10.9.2';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6699,7 +6699,7 @@ const useGlobalTape=(asset)=>{
             if(usd>_whaleFloor){
               const alert={src:'Binance',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};
               tapeRef.current.whaleAlerts.push(alert);
-              tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);
+              tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-60);
               processWhalePrint(alert);
               setWhaleLog(prev=>[alert,...prev].slice(0,30));
             }
@@ -6735,7 +6735,7 @@ const useGlobalTape=(asset)=>{
                 if(usd>_whaleFloor2){
                   const alert={src:'Bybit',side:isBuy?'BUY':'SELL',size:qty,usd,price,time:now};
                   tapeRef.current.whaleAlerts.push(alert);
-                  tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-20);
+                  tapeRef.current.whaleAlerts=tapeRef.current.whaleAlerts.slice(-60);
                   processWhalePrint(alert);
                   setWhaleLog(prev=>[alert,...prev].slice(0,30));
                 }
@@ -34141,7 +34141,51 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         if(_windowCushionHistoryRef.current.length>30)_windowCushionHistoryRef.current.shift();
       }
 
-      const eng=computeV99Posterior({currentPrice,referencePrice:_refPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert,deribitOptions,liqSignal,liqHeatmap,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable,kalshiStrike:kalshiStrikeRef.current});
+      // V10.9.2: FRESH WHALE NETSCORE — computed every scoring tick (~1s) directly
+      //   from tapeRef.current.whaleAlerts, instead of the useWhaleAlert hook's
+      //   state which only refreshes every 5s.
+      //   User-reported symptom: "we got a whale alert for buy/sell, then an
+      //   opposite print came in almost instantly that didn't show up in the
+      //   signal." Root cause: the hook recomputes netScore on its own 5s
+      //   interval. A single large print can dominate that score for up to
+      //   ~5 seconds even after an offsetting print arrives — and if Tara locks
+      //   inside that window, she's scoring on a transient imbalance that's
+      //   already been (or is about to be) cancelled out.
+      //   Fix: recompute the same {netScore, direction, transactionCount,
+      //   available} shape inline at the same ~1s cadence as price/gap/flow,
+      //   from the shared whaleAlerts array (now capped at 60 instead of 20 —
+      //   V10.9.2 — so a burst of prints doesn't truncate the 3-min lookback).
+      let _whaleFresh=whaleAlert;
+      try{
+        const _waAlerts=tapeRef?.current?.whaleAlerts;
+        if(Array.isArray(_waAlerts)&&_waAlerts.length){
+          const _waNow=Date.now();
+          const _waRecent=_waAlerts.filter(a=>a&&_waNow-a.time<180000);
+          if(!_waRecent.length){
+            _whaleFresh={netScore:0,direction:'neutral',transactionCount:0,available:true};
+          }else{
+            let _waBuy=0,_waSell=0;
+            _waRecent.forEach(a=>{if(a.side==='BUY')_waBuy+=a.usd;else _waSell+=a.usd;});
+            const _waTotal=_waBuy+_waSell;
+            if(_waTotal<100000){
+              _whaleFresh={netScore:0,direction:'neutral',transactionCount:_waRecent.length,available:true};
+            }else{
+              const _waRatio=_waBuy/_waTotal;
+              const _waRaw=Math.max(-6,Math.min(6,(_waRatio-0.5)*12));
+              _whaleFresh={
+                netScore:Math.round(_waRaw*10)/10,
+                direction:_waRaw>1?'bullish':_waRaw<-1?'bearish':'neutral',
+                transactionCount:_waRecent.length,
+                available:true,
+                buyUSD:Math.round(_waBuy/1000),
+                sellUSD:Math.round(_waSell/1000),
+              };
+            }
+          }
+        }
+      }catch(_){}
+
+      const eng=computeV99Posterior({currentPrice,referencePrice:_refPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert:_whaleFresh,deribitOptions,liqSignal,liqHeatmap,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable,kalshiStrike:kalshiStrikeRef.current});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
@@ -35187,6 +35231,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _rawConfNum=isDN?(100-posterior):posterior;
       const _displayConf=Math.min(85,Math.max(0,_rawConfNum));
       return{confidence:String(_displayConf.toFixed(1)),prediction:String(activePrediction),textColor:String(textColor),rawProbAbove:Number(posterior),regime:String(regime),session:String(_sessInfo.dominant),sessionDayRating:String(_sessInfo.dsRating),sessionDayKey:String(_sessInfo.dsKey),sessionDayAdj:Number(_sessInfo.dsAdj),velocityRegime:String(velocityRegime||'NORMAL'),trajectoryAdj:Number(eng.trajectoryAdj||0),projectedPrice:Number(eng.projectedPrice||0),projectedGapBps:Number(eng.projectedGapBps||0),reasoning,atrBps:Number(atrBps),realGapBps:Number(realGapBps),clockSeconds:Number(clockSeconds),isSystemLocked:Boolean(isEndgameLock),isPostDecay:Boolean(isPostDecay),isRugPull:Boolean(isRugPull),bb,livePnL:Number(livePnL),liveEstValue:Number(liveEstValue),kellyPct:Number(kellyPct),projections,advisor:_advisorResult,currentOdds:Number(currentOdds),aggrFlow:Number(aggrFlow),isEarlyWindow:Boolean(isEarlyWindow),consecutive:eng.consecutive,volRatio:Number(eng.volRatio),mtfAligned:Boolean(mtfAligned),mtfOpposed:Boolean(mtfOpposed),isLateLockZone:Boolean(isLateLockZone),isVeryLateLock:Boolean(isVeryLateLock),consecutiveNeeded:Number(CONSECUTIVE_NEEDED),
+        // V10.9.2 FIX: surface _refPrice (BRTI-corrected reference price) so code
+        //   outside this useMemo (_logSnapshotEntry, tier-multiplier block in the
+        //   lock state machine) can read analysis.referencePrice instead of
+        //   referencing the out-of-scope local _refPrice — which would throw
+        //   ReferenceError at runtime on every lock (caught here before ship).
+        referencePrice:Number(_refPrice)||Number(currentPrice)||0,
         // V148.1: surface rawSignalScores and mtfAlignment to consumers (V147 Score Breakdown
         //         panel was reading these but they weren't in the return — every bar showed 0).
         mtfAlignment:eng.mtfAlignment,
@@ -40253,15 +40303,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _lgHist=_windowCushionHistoryRef.current||[];
           const _lgDirSign=snapshot.call==='UP'?1:(snapshot.call==='DOWN'?-1:0);
           const _lgStrike=kalshiStrikeRef.current||0;
-          if(_lgHist.length>=3&&_lgDirSign!==0&&_lgStrike>0&&_refPrice>0){
+          // V10.9.2 FIX: _refPrice is a local const inside the `analysis` useMemo
+          //   (different closure) — referencing it here threw ReferenceError at
+          //   runtime on every lock. Read analysis.referencePrice instead (stamped
+          //   into the useMemo's return value for exactly this reason).
+          const _lgRefPrice=Number(analysis?.referencePrice)||Number(currentPrice)||0;
+          if(_lgHist.length>=3&&_lgDirSign!==0&&_lgStrike>0&&_lgRefPrice>0){
             const _lgCorrect=_lgHist.filter(h=>h.cushionBps*_lgDirSign>0).length;
             const _lgPct=_lgCorrect/_lgHist.length;
             const _lgRecent=_lgHist.slice(-2).reduce((s,h)=>s+h.cushionBps*_lgDirSign,0)/2;
             const _lgEarly=_lgHist.slice(0,2).reduce((s,h)=>s+h.cushionBps*_lgDirSign,0)/2;
             snapshot._cushionPctCorrect=Math.round(_lgPct*100)/100;
             snapshot._cushionTrend=Math.round((_lgRecent-_lgEarly)*10)/10;
-            // V10.9.1: BRTI-corrected reference price, not raw OKX currentPrice
-            snapshot._cushionNowBps=Math.round(((_refPrice-_lgStrike)/_lgStrike*10000*_lgDirSign)*10)/10;
+            // V10.9.1/V10.9.2: BRTI-corrected reference price via analysis.referencePrice
+            snapshot._cushionNowBps=Math.round(((_lgRefPrice-_lgStrike)/_lgStrike*10000*_lgDirSign)*10)/10;
             snapshot._cushionSnapshots=_lgHist.length;
           }
         }catch(_){}
@@ -41296,8 +41351,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _earlyAvg=_hist.slice(0,2).reduce((s,h)=>s+h.cushionBps*_callDirSign,0)/2;
       const _trend=_recentAvg-_earlyAvg; // positive = cushion growing toward direction
       // Current cushion in bps (aligned with call direction)
-      // V10.9.1: BRTI-corrected reference price, not raw OKX currentPrice
-      const _cushionNowBps=(_refPrice-kalshiStrikeRef.current)/kalshiStrikeRef.current*10000*_callDirSign;
+      // V10.9.1/V10.9.2: BRTI-corrected reference price via analysis.referencePrice
+      //   (_refPrice itself is a local const inside the `analysis` useMemo and is
+      //   not in scope here — referencing it directly threw ReferenceError at runtime)
+      const _tmRefPrice=Number(analysis?.referencePrice)||Number(currentPrice)||0;
+      const _cushionNowBps=(_tmRefPrice-kalshiStrikeRef.current)/kalshiStrikeRef.current*10000*_callDirSign;
       _cushionIntel={pctCorrect:_pctCorrect,trend:_trend,cushionNow:_cushionNowBps,snapshots:_hist.length};
       if(_pctCorrect>=0.80&&_trend>0&&_cushionNowBps>15){
         // Price has been consistently on the right side AND moving away from strike
