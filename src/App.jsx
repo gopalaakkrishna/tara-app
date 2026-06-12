@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.11-v10.9.0-signal-agreement-gate';
-const TARA_VERSION_DISPLAY='Tara 10.9.0';
+const BASELINE_VERSION='2026.06.11-v10.9.1-reconcile-refprice-fix';
+const TARA_VERSION_DISPLAY='Tara 10.9.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -9076,7 +9076,7 @@ const detectWithinWindowPattern=(c1m,windowOpenTime)=>{
 };
 
 const computeV99Posterior=(params)=>{
-  const{currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,calibration,windowOpenPrice,depthFlash,tfCandles,futuresData,tapeWindows,econCalRisk,spotPerpDiv}=params;
+  const{currentPrice,referencePrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,calibration,windowOpenPrice,depthFlash,tfCandles,futuresData,tapeWindows,econCalRisk,spotPerpDiv}=params;
   // Use regime-specific weights when current regime is identifiable, else use global adaptive weights
   const _regime=params.currentRegime||'RANGE-CHOP';
   const _regimeW=(params.regimeWeights&&params.regimeWeights[_regime])||null;
@@ -9551,7 +9551,10 @@ const computeV99Posterior=(params)=>{
   // V7.10: Compute realGapBps locally — the canonical declaration is later in the engine
   //   (line ~2315), but we need it here. Same formula. TDZ error before this fix:
   //   "Cannot access 'ft' before initialization" was minifier's name for realGapBps.
-  const _realGapBpsLocal=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
+  // V10.9.1: same referencePrice correction as the canonical realGapBps below —
+  //   this local copy feeds chase-reversal agreement checks and must match.
+  const _gapSpotLocal=Number(referencePrice||currentPrice)||currentPrice;
+  const _realGapBpsLocal=targetMargin>0?((_gapSpotLocal-targetMargin)/targetMargin)*10000:0;
   const _realizedAgreesChase=Math.abs(_realGapBpsLocal)>=5&&Math.sign(_realGapBpsLocal)===_chaseDirSign;
   const _projAgreesChase=Math.abs(_projectedGapBps)>=5&&Math.sign(_projectedGapBps)===_chaseDirSign;
   // V10.2.42 PHASE 2 — RELAXED FGT GATE for reversal detection.
@@ -9603,7 +9606,12 @@ const computeV99Posterior=(params)=>{
   reasoning.push(`[VEL] ${velocityRegime} regime (score: ${_velScore.toFixed(1)} | ATR: ${atrBps.toFixed(1)}bps)`);
   const vwap=calcVWAP(liveHistory);
   const bb=calcBB([...closes].reverse(),20);
-  const realGapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
+  // V10.9.1: realGapBps is THE dominant signal (delta +9.7 historically) — it's
+  //   spot-vs-strike, exactly the calc affected by OKX's $50-70 offset from CF
+  //   Benchmark. Use referencePrice (BRTI trimmed mean) when available so gap
+  //   reflects what Kalshi actually settles against, not the chart feed's price.
+  const _gapSpot=Number(referencePrice||currentPrice)||currentPrice;
+  const realGapBps=targetMargin>0?((_gapSpot-targetMargin)/targetMargin)*10000:0;
   // ── V134: STRIKE QUALITY SCORING ──────────────────────────────────────────
   // Detect when the strike was set during anomaly/spike vs normal price.
   // Compare strike to recent 5-min average. If far off, the strike is "dirty"
@@ -10214,7 +10222,11 @@ const computeV99Posterior=(params)=>{
   //   Cushion 0-10bps → slight positive (still uncertain)
   //   Cushion negative → negative contribution (price on wrong side of strike already)
   const _kStrike=Number(params.kalshiStrike||0);
-  const _spotNow=Number(params.currentPrice||0);
+  // V10.9.1: use referencePrice (Coinbase/Kraken/Gemini/Bitstamp trimmed mean) when
+  //   available — falls back to currentPrice if BRTI approx isn't warmed up yet.
+  //   Corrects for OKX-vs-CF-Benchmark offset ($50-70 typical) so strike distance
+  //   reflects what Kalshi actually settles against, regardless of chart feed.
+  const _spotNow=Number(params.referencePrice||params.currentPrice||0);
   const _isRange=regime==='RANGE-CHOP';
   if(_kStrike>0&&_spotNow>0){
     // Cushion in bps from spot to strike (positive = spot above strike)
@@ -20979,7 +20991,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           const _btns=[];
           // Shared apply function — patches entries directly by id, no merge logic.
           // Uses _taraApplyReconcile which writes atomically to localStorage + React state.
-          const _applyUpdates=(issues)=>{
+          const _applyUpdates=async(issues)=>{
             const _updMap=new Map();
             issues.forEach(_iss=>{
               if(_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0){
@@ -20991,8 +21003,11 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             });
             if(!_updMap.size)return;
             if(typeof window._taraApplyReconcile==='function'){
-              const applied=window._taraApplyReconcile(_updMap);
-              try{console.info(`[Reconcile] Applied ${applied} updates directly to localStorage`);}catch(_){}
+              // V10.9.1: _taraApplyReconcile is now async — reads full IDB history,
+              //   patches, writes full history back. Must await so UI doesn't
+              //   re-render against stale state mid-write.
+              const applied=await window._taraApplyReconcile(_updMap);
+              try{console.info(`[Reconcile] Applied ${applied} updates to full IndexedDB history`);}catch(_){}
             }
           };
           if(_pending.length>0){
@@ -21072,7 +21087,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                       :(_iss.suggested?{result:_iss.suggested}:null);
                     if(_upd){
                       const _m=new Map();_m.set(_iss.entryId,_upd);
-                      window._taraApplyReconcile(_m);
+                      Promise.resolve(window._taraApplyReconcile(_m)).catch(()=>{});
                     }
                   }else if(onEditEntry){
                     onEditEntry(_iss.entryId,_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0?_iss.fullUpdate:_iss.suggested,_iss.fullUpdate&&Object.keys(_iss.fullUpdate).length>0?'__fullUpdate__':(_iss.suggestedField||'result'));
@@ -29138,15 +29153,36 @@ function TaraApp(){
     //   Fix: read localStorage directly, apply patches by id (no merge logic),
     //   write back, then set React state directly with the result.
     //   This is atomic, no timing issues, no merge collisions.
-    window._taraApplyReconcile=(updateMap)=>{
+    window._taraApplyReconcile=async(updateMap)=>{
       // updateMap: Map of entryId → {result, strike, closingPrice, ...}
       if(!updateMap||!updateMap.size)return 0;
-      let _log=[];
+      // V10.9.1 FIX: Read from IndexedDB (full history, potentially 1000s of entries),
+      //   NOT localStorage (which is capped at a 500-entry fast-read cache).
+      //   The old code read localStorage_v1 (500 entries), patched it, and wrote
+      //   that 500-entry slice back to IDB as the new "full" history — silently
+      //   deleting every older trade from IDB on every reconcile. This is why
+      //   "reconcile only keeps recent trades" and "I have to re-import every
+      //   fresh load" were the same underlying bug: IDB kept shrinking to 500.
+      let _log=null;
       try{
-        const _raw=localStorage.getItem('taraCallLog_v1');
-        if(_raw)_log=JSON.parse(_raw);
+        _log=await _idbRead('taraCallLog');
       }catch(_){}
-      if(!_log.length)_log=[...(taraCallLogRef.current||[])];
+      if(!Array.isArray(_log)||!_log.length){
+        // Fallback: in-memory state (already has full history if IDB load-on-mount ran)
+        _log=[...(taraCallLogRef.current||[])];
+      }
+      // Also merge in current in-memory state — covers any trades locked since
+      //   IDB was last written (the periodic save is debounced).
+      if(Array.isArray(taraCallLogRef.current)&&taraCallLogRef.current.length){
+        const _seen=new Map(_log.filter(e=>e&&e.id).map(e=>[e.id,e]));
+        for(const e of taraCallLogRef.current){
+          if(!e||!e.id)continue;
+          const ex=_seen.get(e.id);
+          if(!ex)_seen.set(e.id,e);
+          else if(!ex.result&&e.result)_seen.set(e.id,e);
+        }
+        _log=Array.from(_seen.values()).sort((a,b)=>(a.id||0)-(b.id||0));
+      }
       let applied=0;
       const _patched=_log.map(e=>{
         if(!e||!e.id)return e;
@@ -29155,16 +29191,17 @@ function TaraApp(){
         applied++;
         return{...e,...upd,manualEdit:true,manualEditedAt:Date.now()};
       });
-      // Write to IndexedDB (primary) + localStorage cache — no debounce, no merge
+      // Write FULL patched history back to IndexedDB (no slicing to 500).
+      //   localStorage cache still gets the last-500 slice for fast first paint.
       try{
         const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:4000;
         const _save=_patched.slice(-_cap);
-        _idbWrite('taraCallLog',_save).catch(()=>{});          // primary: unlimited
+        await _idbWrite('taraCallLog',_save).catch(()=>{});     // primary: FULL history
         localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-500))); // cache: last 500
         sessionStorage.setItem('taraCallLog_session',JSON.stringify(_save.slice(-200)));
       }catch(_){}
-      // Set React state directly — no merge, exactly what we wrote
-      setTaraCallLog(_patched);
+      // Set React state to the full patched history — not just the 500-cache slice
+      setTaraCallLog(_patched.slice(-(typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:4000)));
       return applied;
     };
     // _taraForceSave: flush current state to IndexedDB + localStorage immediately
@@ -34073,22 +34110,38 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         try{return buildDowHourCalibration(taraCallLogRef.current||[]);}
         catch(_){return null;}
       })();
+      // V10.9.1: REFERENCE PRICE FOR STRIKE-DISTANCE CALCS.
+      //   Kalshi settles against CF Benchmark (Coinbase/Kraken/Gemini/Bitstamp blend).
+      //   When the user's selected chart feed (priceSource) is OKX — preferred for
+      //   chart quality — OKX BTC/USDT can run $50-70 off that blend. Using OKX's
+      //   currentPrice for strike-vs-spot math then misjudges cushion/gap by the
+      //   same $50-70, which can be enough to flip a no-go-edge sitout on a window
+      //   that's actually fine.
+      //   Fix: brtiApprox (V10.5.1) already polls Coinbase+Kraken+Gemini+Bitstamp —
+      //   NOT OKX — at 1.5s and computes a trimmed mean. Use that as _refPrice for
+      //   anything comparing spot to the Kalshi strike. Chart/tape/UI still use
+      //   currentPrice (OKX) untouched — only the strike-distance math is corrected.
+      //   Falls back to currentPrice if BRTI isn't warmed up yet (first ~10-15s).
+      const _refPrice=(brtiApprox&&brtiApprox.sourceCount>=2&&brtiApprox.samples60s>=5&&brtiApprox.current>0)
+        ?brtiApprox.current
+        :currentPrice;
+
       // V10.8.2: MID-WINDOW CUSHION TRACKER.
       //   Every 30 seconds, push a snapshot of how far price is from the Kalshi strike.
       //   This builds a history of whether price has been consistently on one side
       //   of the strike — which is far more predictive than a single snapshot at lock time.
       const _kStrikeNow=kalshiStrikeRef.current;
       const _cushionNow=Date.now();
-      if(_kStrikeNow>0&&currentPrice>0&&_cushionNow-(_cushionLastPushedRef.current||0)>=30000){
+      if(_kStrikeNow>0&&_refPrice>0&&_cushionNow-(_cushionLastPushedRef.current||0)>=30000){
         _cushionLastPushedRef.current=_cushionNow;
         const _elapsed=_cushionNow-(windowOpenTimeRef.current||_cushionNow);
-        const _cushBps=(currentPrice-_kStrikeNow)/_kStrikeNow*10000;
-        _windowCushionHistoryRef.current.push({t:_elapsed,cushionBps:_cushBps,spot:currentPrice});
+        const _cushBps=(_refPrice-_kStrikeNow)/_kStrikeNow*10000;
+        _windowCushionHistoryRef.current.push({t:_elapsed,cushionBps:_cushBps,spot:_refPrice});
         // Keep max 30 snapshots (15 minutes / 30s)
         if(_windowCushionHistoryRef.current.length>30)_windowCushionHistoryRef.current.shift();
       }
 
-      const eng=computeV99Posterior({currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert,deribitOptions,liqSignal,liqHeatmap,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable,kalshiStrike:kalshiStrikeRef.current});
+      const eng=computeV99Posterior({currentPrice,referencePrice:_refPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,tickHistoryRef,priceMemoryRef,windowType,timeFraction,clockSeconds,is15m,regimeMemory,adaptiveWeights,regimeWeights,sessionWeights,currentRegime:lastRegimeRef.current||'RANGE-CHOP',calibration,windowOpenPrice:windowOpenPriceRef.current||0,depthFlash,tfCandles,futuresData,tapeRef,tradeTicksRef:ticksRef,windowHigh:windowHighRef.current||0,windowLow:windowLowRef.current||0,windowHighTime:windowHighTimeRef.current||0,windowLowTime:windowLowTimeRef.current||0,windowOpenTime:windowOpenTimeRef.current||0,otherAssetData:_otherAssetRef.current,mlModel:taraMLModel,timeOfDayBoost:timeOfDayBoostMap,kalshiLead:_kalshiLead,regimeDirCalibration,macroShockData,currentAsset,tapeWindows,econCalRisk:computeEconCalendarRisk(),spotPerpDiv,whaleAlert,deribitOptions,liqSignal,liqHeatmap,recentWindowMovesBps:_recentWindowMovesBps,_v104Table,_dowHourTable,kalshiStrike:kalshiStrikeRef.current});
       const{posterior,regime,upThreshold,downThreshold,reasoning,atrBps,realGapBps,drift1m,drift5m,accel,pnlSlope,tickSlope,aggrFlow,isRugPull,isPostDecay,bb,velocityRegime,velocityScalars}=eng;
       lastRegimeRef.current=regime;
 
@@ -40200,14 +40253,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _lgHist=_windowCushionHistoryRef.current||[];
           const _lgDirSign=snapshot.call==='UP'?1:(snapshot.call==='DOWN'?-1:0);
           const _lgStrike=kalshiStrikeRef.current||0;
-          if(_lgHist.length>=3&&_lgDirSign!==0&&_lgStrike>0&&currentPrice>0){
+          if(_lgHist.length>=3&&_lgDirSign!==0&&_lgStrike>0&&_refPrice>0){
             const _lgCorrect=_lgHist.filter(h=>h.cushionBps*_lgDirSign>0).length;
             const _lgPct=_lgCorrect/_lgHist.length;
             const _lgRecent=_lgHist.slice(-2).reduce((s,h)=>s+h.cushionBps*_lgDirSign,0)/2;
             const _lgEarly=_lgHist.slice(0,2).reduce((s,h)=>s+h.cushionBps*_lgDirSign,0)/2;
             snapshot._cushionPctCorrect=Math.round(_lgPct*100)/100;
             snapshot._cushionTrend=Math.round((_lgRecent-_lgEarly)*10)/10;
-            snapshot._cushionNowBps=Math.round(((currentPrice-_lgStrike)/_lgStrike*10000*_lgDirSign)*10)/10;
+            // V10.9.1: BRTI-corrected reference price, not raw OKX currentPrice
+            snapshot._cushionNowBps=Math.round(((_refPrice-_lgStrike)/_lgStrike*10000*_lgDirSign)*10)/10;
             snapshot._cushionSnapshots=_lgHist.length;
           }
         }catch(_){}
@@ -41242,7 +41296,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _earlyAvg=_hist.slice(0,2).reduce((s,h)=>s+h.cushionBps*_callDirSign,0)/2;
       const _trend=_recentAvg-_earlyAvg; // positive = cushion growing toward direction
       // Current cushion in bps (aligned with call direction)
-      const _cushionNowBps=(currentPrice-kalshiStrikeRef.current)/kalshiStrikeRef.current*10000*_callDirSign;
+      // V10.9.1: BRTI-corrected reference price, not raw OKX currentPrice
+      const _cushionNowBps=(_refPrice-kalshiStrikeRef.current)/kalshiStrikeRef.current*10000*_callDirSign;
       _cushionIntel={pctCorrect:_pctCorrect,trend:_trend,cushionNow:_cushionNowBps,snapshots:_hist.length};
       if(_pctCorrect>=0.80&&_trend>0&&_cushionNowBps>15){
         // Price has been consistently on the right side AND moving away from strike
