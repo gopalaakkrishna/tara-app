@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.11-v10.9.4-weak-agreement-downsize';
-const TARA_VERSION_DISPLAY='Tara 10.9.4';
+const BASELINE_VERSION='2026.06.11-v10.9.6-deep-cache-5000';
+const TARA_VERSION_DISPLAY='Tara 10.9.6';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4689,7 +4689,7 @@ function computeDowHourShift(dowHourTable,now){
 //   At 1.2KB avg, 4000 entries = ~4.8MB which fits within Chrome's 10MB localStorage
 //   limit comfortably. IndexedDB (unlimited) is the primary store; localStorage
 //   is a fast-read cache only.
-const TARA_CALL_LOG_CAP=4000;
+const TARA_CALL_LOG_CAP=5000;
 
 // V9.10.9: Stable device label computed once at module load. Used as the canonical
 //   identifier for tagging locally-created entries (so the personal scorecard can filter
@@ -20560,25 +20560,64 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 }
                 _settledMarkets.sort((a,b)=>a.closeMs-b.closeMs);
 
-                // ── STEP 5: MATCH TARA ENTRIES BY CLOSE TIME (within 5 min) ─────────
+                // ── STEP 5: MATCH TARA ENTRIES TO SETTLED MARKETS ─────────
+                //   V10.9.5 FIX: the old matcher used Math.ceil(id/winMs)*winMs for the
+                //   expected close, then matched the closest settled market within a
+                //   flat 5-MINUTE tolerance. For 15m windows that 5min slop is a third
+                //   of a window — a late lock or any clock skew could match the WRONG
+                //   adjacent window, pulling that window's strike/close onto this entry.
+                //   This is the "reconcile matched the wrong window" bug.
+                //   Fix:
+                //     1. Derive the entry's window-close from its windowId when present
+                //        (windowId encodes the exact bucket start; close = start+winMs),
+                //        falling back to ceil(id) only when windowId is missing.
+                //     2. Build a close-time->market index and require the match to land
+                //        in the SAME window bucket (tolerance = 1/2 window minus 1s),
+                //        so an adjacent window can never be selected.
                 let _matchedEntries=0,_pendingResolved=0;
                 const _nowMs=Date.now();
+                // Index settled markets by their exact window-close bucket for O(1) exact match
+                const _marketByCloseBucket=new Map();
+                for(const m of _settledMarkets){
+                  const _mWinMs=m.windowType==='5m'?300000:900000;
+                  const _bucket=Math.round(m.closeMs/_mWinMs)*_mWinMs;
+                  const _bkey=m.windowType+'|'+_bucket;
+                  const _ex=_marketByCloseBucket.get(_bkey);
+                  if(!_ex||Math.abs(m.closeMs-_bucket)<Math.abs(_ex.closeMs-_bucket)){
+                    _marketByCloseBucket.set(_bkey,m);
+                  }
+                }
                 for(const e of taraCallLog){
                   if(!e||!e.id)continue;
                   if(e.dir!=='UP'&&e.dir!=='DOWN')continue;
                   const _winMs=(e.windowType||'15m')==='5m'?300000:900000;
-                  const _expectedClose=Math.ceil(e.id/_winMs)*_winMs;
+                  // Prefer windowId-derived close (exact bucket); fall back to ceil(id)
+                  let _expectedClose=null;
+                  if(typeof e.windowId==='string'&&e.windowId.includes('-')){
+                    try{
+                      const _widTs=e.windowId.slice(e.windowId.indexOf('-')+1);
+                      const _startMs=new Date(_widTs).getTime();
+                      if(Number.isFinite(_startMs)&&_startMs>0)_expectedClose=_startMs+_winMs;
+                    }catch(_){}
+                  }
+                  if(_expectedClose==null)_expectedClose=Math.ceil(e.id/_winMs)*_winMs;
                   if(_expectedClose>_nowMs-30000)continue;
                   const _whenStr=new Date(e.id).toISOString().slice(5,16).replace('T',' ');
-                  // Find settled market closest in time to this entry's expected close
-                  let _best=null,_bestDiff=Infinity;
-                  for(const m of _settledMarkets){
-                    if(m.windowType!==(e.windowType||'15m'))continue;
-                    const diff=Math.abs(m.closeMs-_expectedClose);
-                    if(diff<_bestDiff){_bestDiff=diff;_best=m;}
+                  // EXACT bucket match first (cannot select an adjacent window)
+                  const _eBucket=Math.round(_expectedClose/_winMs)*_winMs;
+                  let _best=_marketByCloseBucket.get((e.windowType||'15m')+'|'+_eBucket)||null;
+                  let _bestDiff=_best?Math.abs(_best.closeMs-_expectedClose):Infinity;
+                  // Fallback: nearest within HALF a window (strictly less than winMs/2),
+                  //   so a neighbouring window — exactly winMs away — is impossible to pick.
+                  if(!_best){
+                    for(const m of _settledMarkets){
+                      if(m.windowType!==(e.windowType||'15m'))continue;
+                      const diff=Math.abs(m.closeMs-_expectedClose);
+                      if(diff<_bestDiff){_bestDiff=diff;_best=m;}
+                    }
                   }
-                  // Must be within 5 minutes
-                  if(!_best||_bestDiff>300000)continue;
+                  const _maxTol=Math.floor(_winMs/2)-1000; // 449s for 15m, 149s for 5m
+                  if(!_best||_bestDiff>_maxTol)continue;
                   if(!_best.result)continue;
                   _matchedEntries++;
 
@@ -21103,9 +21142,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           if(_pending.length>0){
             _btns.push(React.createElement('button',{
               key:'apall-pend',
-              onClick:()=>{
+              onClick:async()=>{
                 if(!window.confirm(`Apply ${_pending.length} pending entries from Kalshi? This will mark each as WIN or LOSS based on Kalshi's settled result.`))return;
-                _applyUpdates(_pending);
+                await _applyUpdates(_pending);
                 setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='pending-resolve'&&i.kind!=='missing-fields'),pendingResolved:0}:null);
               },
               className:'px-3 py-1.5 rounded text-[10px] uppercase tracking-wider font-bold',
@@ -21115,10 +21154,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           if(_mismatches.length>0){
             _btns.push(React.createElement('button',{
               key:'apall-mis',
-              onClick:()=>{
+              onClick:async()=>{
                 if(!window.confirm(`Apply ${_mismatches.length} corrections to mismatched entries?`))return;
-                _applyUpdates(_mismatches);
-                setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='kalshi-mismatch')}:null);
+                await _applyUpdates(_mismatches);
                 setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='kalshi-mismatch')}:null);
               },
               className:'px-3 py-1.5 rounded text-[10px] uppercase tracking-wider font-bold',
@@ -29083,10 +29121,25 @@ function TaraApp(){
       //   This ensures recent trades are always available even if localStorage was trimmed.
       const stored=localStorage.getItem('taraCallLog_v1');
       const session=sessionStorage.getItem('taraCallLog_session');
+      // V10.9.6: prefer the DEEP minified cache (up to 5000 entries) over the
+      //   1000-entry fast cache. This is what makes the full trade count survive
+      //   a reload even when IndexedDB is empty/unavailable.
+      let _deepParsed=null;
+      try{
+        const _deepRaw=localStorage.getItem('taraCallLog_deep');
+        if(_deepRaw){
+          const _dp=JSON.parse(_deepRaw);
+          if(Array.isArray(_dp)&&_dp.length)_deepParsed=_dp;
+        }
+      }catch(_){}
       let parsed=[];
       if(stored){
         const _p=JSON.parse(stored);
         if(Array.isArray(_p))parsed=_p;
+      }
+      // If the deep cache has more entries than the fast cache, use it as the base.
+      if(_deepParsed&&_deepParsed.length>parsed.length){
+        parsed=_deepParsed;
       }
       // Merge sessionStorage entries — they may be more recent than localStorage
       if(session){
@@ -29219,10 +29272,19 @@ function TaraApp(){
         // V10.7.91: Force immediate localStorage save — don't rely on debounced useEffect.
         //   Also write a backup key so if taraCallLog_v1 gets clobbered, we can recover.
         try{
-          const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:4000;
+          const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:5000;
           const _save=merged.slice(-_cap);
           _idbWrite('taraCallLog',_save).catch(()=>{});          // primary: unlimited
-          localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-500))); // cache
+          localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
+          // V10.9.6: write DEEP minified cache (up to 5000) so the full imported
+          //   count survives reload even if IndexedDB fails. Without this, reload
+          //   fell back to the 1000-entry fast cache — the "base stayed at 500/1000"
+          //   bug the user reported.
+          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','noGoCategory']);
+          const _mini=_save.slice(-5000).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
+          for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
+            try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
+          }
           localStorage.setItem('taraCallLog_importedAt',String(Date.now()));
           localStorage.setItem('taraCallLog_importedCount',String(_save.length));
           sessionStorage.setItem('taraCallLog_session',JSON.stringify(_save.slice(-200)));
@@ -29301,16 +29363,23 @@ function TaraApp(){
         return{...e,...upd,manualEdit:true,manualEditedAt:Date.now()};
       });
       // Write FULL patched history back to IndexedDB (no slicing to 500).
-      //   localStorage cache still gets the last-500 slice for fast first paint.
+      //   localStorage cache still gets the last-1000 slice for fast first paint,
+      //   plus the deep minified cache (up to 5000) so corrected results survive
+      //   reload even if IndexedDB is unavailable.
       try{
-        const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:4000;
+        const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:5000;
         const _save=_patched.slice(-_cap);
         await _idbWrite('taraCallLog',_save).catch(()=>{});     // primary: FULL history
-        localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-500))); // cache: last 500
+        localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
+        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','noGoCategory']);
+        const _mini=_save.slice(-5000).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
+        for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
+          try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
+        }
         sessionStorage.setItem('taraCallLog_session',JSON.stringify(_save.slice(-200)));
       }catch(_){}
       // Set React state to the full patched history — not just the 500-cache slice
-      setTaraCallLog(_patched.slice(-(typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:4000)));
+      setTaraCallLog(_patched.slice(-(typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:5000)));
       return applied;
     };
     // _taraForceSave: flush current state to IndexedDB + localStorage immediately
@@ -29318,10 +29387,10 @@ function TaraApp(){
       try{
         const _cur=taraCallLogRef.current||[];
         if(!_cur.length)return;
-        const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:4000;
+        const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:5000;
         const _save=_cur.slice(-_cap);
         _idbWrite('taraCallLog',_save).catch(()=>{});          // primary
-        localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-500))); // cache
+        localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // cache (V10.9.5: 500->1000)
         sessionStorage.setItem('taraCallLog_session',JSON.stringify(_save.slice(-200)));
       }catch(_){}
     };
@@ -29506,6 +29575,23 @@ function TaraApp(){
       }));
       return{..._restClean,...(_scores?{signalScoresAtLock:_scores}:{})};
     };
+    // V10.9.6: MINIFIER for the DEEP localStorage cache. Keeps only the fields
+    //   needed for tier stats, P&L, display, and reconcile matching (~480 bytes
+    //   vs ~1.2KB stripped vs ~3.7KB full). At 480 bytes, 5000 entries = ~2.3MB,
+    //   which fits inside localStorage's ~5MB limit. This is the fallback base
+    //   when IndexedDB is unavailable or was truncated, so the user no longer
+    //   drops to "last 500" on reload — the full count survives in localStorage.
+    const _MINI_KEEP=new Set(['id','windowId','windowType','asset','dir','call','result',
+      'strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir',
+      'resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed',
+      'isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit',
+      'wasOverriddenNoTrade','noGoCategory']);
+    const _minifyEntry=(e)=>{
+      if(!e)return e;
+      const o={};
+      for(const k in e){if(_MINI_KEEP.has(k))o[k]=e[k];}
+      return o;
+    };
     // V10.7.88b: RMW (Read-Modify-Write) for localStorage.
     //   Previously: direct overwrite. Problem: with BTC + ETH tabs both open, ETH tab's
     //   localStorage write would overwrite BTC's freshly-resolved entries with its own
@@ -29527,8 +29613,23 @@ function TaraApp(){
     }catch(_){_mergedForStorage=_stripped;}
     // V10.7.95: Write full log to IndexedDB (no size limit) — primary store
     _idbWrite('taraCallLog',_mergedForStorage).catch(()=>{});
-    // Write last 500 to localStorage as fast-read cache for instant first paint
-    const _lsEntries=_mergedForStorage.slice(-500);
+    // V10.9.6: DEEP MINIFIED CACHE — up to 5000 entries (~2.3MB) in localStorage.
+    //   This is the resilient base: if IndexedDB fails/empties/was truncated, the
+    //   full trade count still loads from here on reload instead of dropping to
+    //   the small fast-paint cache. Auto-shrinks on quota error.
+    try{
+      const _mini=_mergedForStorage.slice(-5000).map(_minifyEntry);
+      let _miniSaved=false;
+      for(let _cap=_mini.length;_cap>=200;_cap=Math.floor(_cap*0.8)){
+        try{
+          localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_cap)));
+          _miniSaved=true;break;
+        }catch(_e){if(_cap<=200)break;}
+      }
+      if(_miniSaved)localStorage.setItem('taraCallLog_deepCount',String(Math.min(_mini.length,5000)));
+    }catch(_){}
+    // Write last 1000 full entries to localStorage as fast-read cache for instant first paint
+    const _lsEntries=_mergedForStorage.slice(-1000); // V10.9.5: 500->1000
     let _saved=false;
     for(let _cap=_lsEntries.length;_cap>=50;_cap=Math.floor(_cap*0.7)){
       try{
@@ -29617,10 +29718,15 @@ function TaraApp(){
       if(!Array.isArray(idbEntries)||!idbEntries.length)return;
       setTaraCallLog(prev=>{
         if(idbEntries.length<=prev.length){
-          // IDB has same or fewer — check if it has older entries not in prev
-          const prevIds=new Set(prev.map(e=>e?.id));
-          const hasOlder=idbEntries.some(e=>e&&!prevIds.has(e.id));
-          if(!hasOlder)return prev; // nothing new
+          // IDB has same or fewer — check if it has older entries not in prev,
+          //   OR different results (post-reconcile corrections) on shared ids.
+          const prevById=new Map(prev.map(e=>[e?.id,e]));
+          const hasOlder=idbEntries.some(e=>e&&!prevById.has(e.id));
+          const hasDifferentResult=idbEntries.some(e=>{
+            if(!e)return false;const p=prevById.get(e.id);
+            return p&&e.result&&p.result&&e.result!==p.result;
+          });
+          if(!hasOlder&&!hasDifferentResult)return prev; // truly nothing new
         }
         // Merge: IDB entries + current state, resolved wins, dedup by windowId
         const map=new Map();
@@ -29633,7 +29739,13 @@ function TaraApp(){
           if(ex.result&&e.result&&(e.id||0)>(ex.id||0)){map.set(key,e);return;}
         });
         const merged=Array.from(map.values()).sort((a,b)=>(a.id||0)-(b.id||0));
-        if(merged.length===prev.length)return prev;
+        // V10.9.5: don't bail on equal length alone — IDB may hold the same COUNT
+        //   but corrected results (post-reconcile) or different entries than the
+        //   localStorage cache. Compare resolved-count and a cheap content hash so
+        //   a reconcile that changed W/L (but not count) still loads as base.
+        const _resolvedCount=(arr)=>arr.reduce((n,e)=>n+((e&&(e.result==='WIN'||e.result==='LOSS'))?1:0),0);
+        const _sig=(arr)=>{let h=0;for(const e of arr){if(!e)continue;const s=(e.id||0)+'|'+(e.result||'');for(let i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))|0;}}return h;};
+        if(merged.length===prev.length&&_resolvedCount(merged)===_resolvedCount(prev)&&_sig(merged)===_sig(prev))return prev;
         try{console.info(`[IDB] Loaded ${merged.length} entries from IndexedDB (${idbEntries.length} stored, ${prev.length} in localStorage cache)`);}catch(_){}
         return merged;
       });
