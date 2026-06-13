@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.12-v10.9.9-discord-daily';
-const TARA_VERSION_DISPLAY='Tara 10.9.9';
+const BASELINE_VERSION='2026.06.13-v10.9.10-brti-blend-revival';
+const TARA_VERSION_DISPLAY='Tara 10.9.10';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13305,6 +13305,7 @@ function PredictionContent(props){
     kalshiYesPrice,
     newsSentiment, // V145: dual-source news scanner output (geoRisk, geoTopic, source)
     taraCall,taraScorecards,windowType, // V3.2.4: Tara's Call surface
+    brtiApprox, // V10.9.10: CF-Benchmark blend health for REF badge
     scalperPanelEl, // V9.17.2: when provided, replaces the engine prediction hero
   }=props;
   // V113: Track local broadcast state (so button shows "Sent ✓" after click)
@@ -13895,6 +13896,30 @@ function PredictionContent(props){
                   </div>
                 </>
               )}
+              {/* V10.9.10: REFERENCE-HEALTH badge — shows whether the CF-Benchmark
+                  blend (CB/KR/OKX-corrected/Bybit-corrected) is live and how many
+                  sources are feeding it. Green = anchor present + multi-source;
+                  amber = degraded (single/no-anchor, falling back toward chart feed).
+                  This makes silent feed failures visible — the thing that was
+                  causing bad reads when Coinbase broke. */}
+              {(()=>{
+                const _b=brtiApprox;
+                if(!_b||!(_b.current>0))return(
+                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/5" title="Reference price blend warming up or unavailable — using chart feed for now">
+                    <span className="text-[9px] uppercase text-[#E8E9E4]/50 tracking-wider">REF</span>
+                    <span className="text-[10px] text-amber-400/80">warming…</span>
+                  </div>
+                );
+                const _healthy=(_b.sourceCount>=2||(_b.sourceCount>=1&&_b.hasAnchor))&&_b.samples60s>=5;
+                const _div=_b.divergenceBps;
+                return(
+                  <div className={'flex items-center gap-1 px-1.5 py-0.5 rounded border '+(_healthy?'border-emerald-500/25 bg-emerald-500/5':'border-amber-500/30 bg-amber-500/5')} title={`CF-Benchmark blend · ${_b.sourceCount} source${_b.sourceCount===1?'':'s'} (${(_b.sources||[]).join('+')||'—'})${_b.correctedCount?` · ${_b.correctedCount} bias-corrected`:''}${_b.hasAnchor?' · anchor live':' · NO anchor'} · ${_b.samples60s} samples${_div!=null?` · chart ${_div>=0?'+':''}${_div}bps vs blend`:''}`}>
+                    <span className="text-[9px] uppercase text-[#E8E9E4]/50 tracking-wider">REF</span>
+                    <span className={'text-[10px] tabular-nums '+(_healthy?'text-emerald-300/80':'text-amber-400/80')}>{_b.sourceCount}src{_b.hasAnchor?'':'·noCB'}</span>
+                    {_div!=null&&Math.abs(_div)>=8&&<span className="text-[9px] text-amber-400/70" title="chart feed diverging from CF blend">{_div>=0?'+':''}{Math.round(_div)}</span>}
+                  </div>
+                );
+              })()}
               {/* V145: Geopolitics / macro risk pill — surfaces when news scanner detects elevated risk */}
               {newsSentiment&&newsSentiment.geoRisk>=0.3&&(
                 (()=>{
@@ -28398,6 +28423,10 @@ function TaraApp(){
   const brtiApproxRef=useRef(null);
   useEffect(()=>{brtiApproxRef.current=brtiApprox;},[brtiApprox]);
   const _brtiSamplesRef=useRef([]); // rolling 60s window of multi-exchange samples
+  // V10.9.10: rolling EMA offset (bps) of each hot exchange (OKX/Bybit) vs the
+  //   CB/KR anchor mean — used to bias-correct hot feeds onto the CF-Benchmark
+  //   scale so they stay usable in the blend even when the anchors drop out.
+  const _brtiOffsetRef=useRef({});
   // ─── V9.8.18: TARA TOAST SYSTEM ─────────────────────────────────────────
   // Stack of active popup notifications. State is array-of-toasts; per-kind cooldowns
   //   live on a ref so successive setToasts calls don't lose dedup state. pushToast
@@ -31837,6 +31866,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               sources:[_proxyData.source||'cf-proxy'],
               sourceCount:1,
               isExact:_proxyData.source==='cfbenchmarks',
+              hasAnchor:true, // V10.9.10: proxy IS the CF Benchmark — treat as anchored
+              correctedCount:0,
               divergenceBps:_divBps!=null?Math.round(_divBps*10)/10:null,
               lastUpdate:_now,
             });
@@ -31844,29 +31875,65 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }
         }
       }catch(_){} // proxy failed — fall through to constituent mean
-      // Constituent fallback: Coinbase + Kraken + Gemini + Bitstamp
+      // ── Constituent fallback (V10.9.10) ──────────────────────────────────
+      //   ROOT-CAUSE FIX: the old fallback used Gemini + Bitstamp, whose public
+      //   APIs fail CORS from the browser — so this blend almost never reached
+      //   the 2-source minimum (1 of 2737 trades had BRTI telemetry). When
+      //   Coinbase's own fetch hiccupped, the blend died entirely and Tara fell
+      //   back to the raw single-feed price.
+      //   New constituents are the feeds Tara already proves she CAN reach from
+      //   the browser (they power the live chart + tape): Coinbase, Kraken, OKX,
+      //   Bybit. CB + KR track CF Benchmark closely; OKX + Bybit run hot (~+50-70
+      //   on BTC) so we BIAS-CORRECT them toward the CB/KR consensus before
+      //   including them. This keeps the blend alive even if any one feed drops,
+      //   and keeps it CF-accurate even when only the hot feeds are up.
       const _cb=PRICE_SOURCES.coinbase;
       const _kr=PRICE_SOURCES.kraken;
-      const _geminiUrl=currentAsset==='BTC'
-        ?'https://api.gemini.com/v1/pubticker/btcusd'
-        :'https://api.gemini.com/v1/pubticker/ethusd';
-      const _bsUrl=`https://www.bitstamp.net/api/v2/ticker/${currentAsset==='BTC'?'btcusd':'ethusd'}/`;
+      const _okx=PRICE_SOURCES.okx;
+      const _bybitUrl=`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${currentAsset==='BTC'?'BTCUSDT':'ETHUSDT'}`;
       const _results=await Promise.all([
         _fetchOne(_cb.url(_cfg,currentAsset),_cb.parsePrice,'CB'),
         _fetchOne(_kr.url(_cfg,currentAsset),_kr.parsePrice,'KR'),
-        _fetchOne(_geminiUrl,(d)=>d?.last?parseFloat(d.last):null,'GEM'),
-        _fetchOne(_bsUrl,(d)=>d?.last?parseFloat(d.last):null,'BS'),
+        _okx?_fetchOne(_okx.url(_cfg,currentAsset),_okx.parsePrice,'OKX'):Promise.resolve(null),
+        _fetchOne(_bybitUrl,(d)=>{const v=d?.result?.list?.[0]?.lastPrice;return v?parseFloat(v):null;},'BYB'),
       ]);
-      const _ok=_results.filter(x=>x&&x.price>0);
-      if(_ok.length<2)return; // need at least 2 sources
-      // Trimmed mean: drop min and max if ≥3 sources, simple mean if 2
+      let _ok=_results.filter(x=>x&&x.price>0);
+      if(_ok.length<1)return; // nothing reachable this tick — keep last good value
+      // ── Bias-correct the hot exchanges toward the CB/KR anchor ──
+      //   Maintain a rolling offset (in bps) for each hot feed vs the anchor mean.
+      //   When the anchor (CB and/or KR) is present, update the offset; always
+      //   apply the latest known offset to OKX/Bybit so their contribution is
+      //   pulled onto the CF-Benchmark scale.
+      const _anchorVals=_ok.filter(x=>x.name==='CB'||x.name==='KR').map(x=>x.price);
+      const _anchorMean=_anchorVals.length?_anchorVals.reduce((s,p)=>s+p,0)/_anchorVals.length:null;
+      if(_anchorMean){
+        for(const x of _ok){
+          if(x.name==='OKX'||x.name==='BYB'){
+            const _offBps=((x.price-_anchorMean)/_anchorMean)*10000;
+            const _prev=_brtiOffsetRef.current[x.name];
+            // EMA the offset (alpha 0.1) so it adapts slowly, ignores spikes
+            _brtiOffsetRef.current[x.name]=_prev==null?_offBps:(_prev*0.9+_offBps*0.1);
+          }
+        }
+      }
+      // Apply correction: subtract each hot feed's learned offset
+      _ok=_ok.map(x=>{
+        if((x.name==='OKX'||x.name==='BYB')&&_brtiOffsetRef.current[x.name]!=null){
+          const _corr=x.price/(1+_brtiOffsetRef.current[x.name]/10000);
+          return{...x,price:_corr,corrected:true};
+        }
+        return x;
+      });
+      // Trimmed mean: drop min and max if ≥3 sources, simple mean if 2, raw if 1
       let _trimmed;
       if(_ok.length>=3){
         const _sorted=[..._ok].sort((a,b)=>a.price-b.price);
         const _middle=_sorted.slice(1,-1); // drop top + bottom
         _trimmed=_middle.reduce((s,x)=>s+x.price,0)/_middle.length;
-      }else{
+      }else if(_ok.length===2){
         _trimmed=(_ok[0].price+_ok[1].price)/2;
+      }else{
+        _trimmed=_ok[0].price; // single source — better than nothing, keeps blend alive
       }
       const _now=Date.now();
       // Add to rolling 60s window
@@ -31889,6 +31956,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         samples60s:_samples.length,
         sources:_ok.map(x=>x.name),
         sourceCount:_ok.length,
+        // V10.9.10: health/telemetry — whether the CF-anchor (CB/KR) was present
+        //   this tick, and how many hot feeds were bias-corrected into the blend.
+        hasAnchor:_ok.some(x=>x.name==='CB'||x.name==='KR'),
+        correctedCount:_ok.filter(x=>x.corrected).length,
         divergenceBps:_divBps!=null?Math.round(_divBps*10)/10:null,
         lastUpdate:_now,
       });
@@ -34408,21 +34479,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         try{return buildDowHourCalibration(taraCallLogRef.current||[]);}
         catch(_){return null;}
       })();
-      // V10.9.1: REFERENCE PRICE FOR STRIKE-DISTANCE CALCS.
-      //   Kalshi settles against CF Benchmark (Coinbase/Kraken/Gemini/Bitstamp blend).
-      //   When the user's selected chart feed (priceSource) is OKX — preferred for
-      //   chart quality — OKX BTC/USDT can run $50-70 off that blend. Using OKX's
-      //   currentPrice for strike-vs-spot math then misjudges cushion/gap by the
-      //   same $50-70, which can be enough to flip a no-go-edge sitout on a window
-      //   that's actually fine.
-      //   Fix: brtiApprox (V10.5.1) already polls Coinbase+Kraken+Gemini+Bitstamp —
-      //   NOT OKX — at 1.5s and computes a trimmed mean. Use that as _refPrice for
-      //   anything comparing spot to the Kalshi strike. Chart/tape/UI still use
-      //   currentPrice (OKX) untouched — only the strike-distance math is corrected.
-      //   Falls back to currentPrice if BRTI isn't warmed up yet (first ~10-15s).
-      const _refPrice=(brtiApprox&&brtiApprox.sourceCount>=2&&brtiApprox.samples60s>=5&&brtiApprox.current>0)
-        ?brtiApprox.current
-        :currentPrice;
+      // V10.9.1 / V10.9.10: REFERENCE PRICE FOR STRIKE-DISTANCE CALCS.
+      //   Kalshi settles against CF Benchmark. The selected chart feed (Coinbase
+      //   via TradingView, or OKX) can break or run $50-70 off that benchmark.
+      //   Using it for strike-vs-spot math misjudges cushion/gap by that amount,
+      //   enough to flip a no-go-edge sitout on a window that's actually fine.
+      //   Fix: brtiApprox (V10.9.10) blends the browser-reachable feeds Tara
+      //   already proves she can fetch — Coinbase + Kraken (CF anchors) + OKX +
+      //   Bybit (bias-corrected onto the anchor scale) — into a CF-accurate mean
+      //   at 1.5s. ALL strike-distance math uses this blend, never the raw chart
+      //   feed, so a broken chart feed is purely cosmetic for trading.
+      //   Gate: need >=2 sources OR (>=1 source WITH the CF anchor present and a
+      //   warmed 60s window), and at least 5 samples. Falls back to currentPrice
+      //   only during the first ~10s warmup or a total feed blackout.
+      const _brtiReady=brtiApprox&&brtiApprox.current>0&&brtiApprox.samples60s>=5&&
+        (brtiApprox.sourceCount>=2||(brtiApprox.sourceCount>=1&&brtiApprox.hasAnchor));
+      const _refPrice=_brtiReady?brtiApprox.current:currentPrice;
 
       // V10.8.2: MID-WINDOW CUSHION TRACKER.
       //   Every 30 seconds, push a snapshot of how far price is from the Kalshi strike.
@@ -45176,7 +45248,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
             {/* V9.1.2: TapeStrip relocated to compact bar next to Depth of Market. */}
 
-            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} manualKalshiEntry={manualKalshiEntry} setManualKalshiEntry={setManualKalshiEntry} positionReconciliation={positionReconciliation} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} scalperPanelEl={
+            <PredictionContent strikeConfirmed={strikeConfirmed} strikeMode={strikeMode} targetMargin={targetMargin} isLoading={isLoading} analysis={analysis} currentPrice={currentPrice} qualityGate={qualityGate} userPosition={userPosition} manualKalshiEntry={manualKalshiEntry} setManualKalshiEntry={setManualKalshiEntry} positionReconciliation={positionReconciliation} timeState={timeState} streakData={streakData} handleManualSync={handleManualSync} getMarketSessions={getMarketSessions} executeAction={executeAction} broadcastSignalManual={broadcastSignalManual} discordWebhook={discordWebhook} regimeDirWR={regimeDirWR} kalshiYesPrice={kalshiYesPrice} newsSentiment={newsSentiment} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} brtiApprox={brtiApprox} scalperPanelEl={
               <ScalperAdvisorPanel
                 scalperRead={scalperRead}
                 scalperSettings={scalperSettings}
