@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.11-v10.9.7-dial-removed';
-const TARA_VERSION_DISPLAY='Tara 10.9.7';
+const BASELINE_VERSION='2026.06.11-v10.9.8-edge-watch-alerts';
+const TARA_VERSION_DISPLAY='Tara 10.9.8';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14394,7 +14394,14 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     //   actually decided. We keep the lean direction visible (color + arrow) but make
     //   the headline read SITTING OUT honestly.
     const isOverrideSitOut=isLockedSnap&&(snap?.wasOverriddenSitOut===true);
-    const isOverrideNoTrade=isLockedSnap&&(snap?.wasOverriddenNoTrade===true);
+    // V10.9.8: no-go-edge / no-go-coinflip-late are real directional locks with a
+    //   pricing caution — the user wants them shown as normal LOCKED calls (with an
+    //   edge note), not as "NO TRADE". Only no-go-data remains a true no-trade
+    //   override (data failure). isEdgeWatch carries the caution into the sublabel
+    //   while letting the headline read LOCKED UP / LOCKED DOWN.
+    const _snapTierLc=snap?.tier||snap?.noGoCategory||'';
+    const isEdgeWatch=isLockedSnap&&(_snapTierLc==='no-go-edge'||_snapTierLc==='no-go-coinflip-late');
+    const isOverrideNoTrade=isLockedSnap&&(snap?.wasOverriddenNoTrade===true)&&!isEdgeWatch;
     const isOverrideAny=isOverrideSitOut||isOverrideNoTrade;
     const callColor=isOverrideAny
       ?(effDir==='UP'?'text-amber-300':'text-amber-300')
@@ -14436,6 +14443,8 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
       ?`would lean ${effDir} · ${dispConfidence}%`
       :isOverrideNoTrade&&effDir
       ?`would lean ${effDir} · ${dispConfidence}%`
+      :isEdgeWatch
+      ?`⚠ priced ahead · trade carefully when odds swing back`
       :null;
     const arrow=isNoGoSnap?'⊘':effDir==='UP'?'▲':effDir==='DOWN'?'▼':isSatOutSnap?'·':'·';
     // V5.6.5: Phase mirrors the call states.
@@ -14742,11 +14751,18 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           // V8.9.2: stronger styling when this is an override caution (would have
           //   been NO_TRADE or sit-out before V8.9.2). Normal V7.8 cautions stay
           //   gold; override cautions go rose so the user sees the elevated risk.
-          const _isOverride=snap.wasOverriddenNoTrade||snap.wasOverriddenSitOut;
-          const _color=_isOverride?'rgba(244,114,182,0.95)':T2_GOLD;
-          const _bg=_isOverride?'rgba(244,114,182,0.10)':'rgba(229,200,112,0.10)';
-          const _border=_isOverride?'rgba(244,114,182,0.35)':'rgba(229,200,112,0.28)';
-          const _label=snap.wasOverriddenNoTrade?'No-Trade Override'
+          // V10.9.8: no-go-edge / no-go-coinflip-late are real directional locks
+          //   with a pricing caution, not no-trade overrides. Label them "Edge Watch"
+          //   and use the amber caution color (not the rose no-trade color) so the
+          //   card reads as a normal lock with a "trade carefully" note. Only
+          //   no-go-data (data failure) keeps the rose No-Trade Override styling.
+          const _isEdgeWatch=snap.noGoCategory==='no-go-edge'||snap.tier==='no-go-edge'||snap.noGoCategory==='no-go-coinflip-late'||snap.tier==='no-go-coinflip-late';
+          const _isHardOverride=(snap.wasOverriddenNoTrade||snap.wasOverriddenSitOut)&&!_isEdgeWatch;
+          const _color=_isHardOverride?'rgba(244,114,182,0.95)':T2_GOLD;
+          const _bg=_isHardOverride?'rgba(244,114,182,0.10)':'rgba(229,200,112,0.10)';
+          const _border=_isHardOverride?'rgba(244,114,182,0.35)':'rgba(229,200,112,0.28)';
+          const _label=_isEdgeWatch?'Edge Watch'
+            :snap.wasOverriddenNoTrade?'No-Trade Override'
             :snap.wasOverriddenSitOut?'Sit-Out Override'
             :'Caution';
           return(
@@ -32557,10 +32573,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _rr=data.reversalRisk;
         const _baseColor=data.dir==='UP'?3404125:16478549;
         const _embedColor=_rr?.flag==='EXPECTED'?16478549:_rr?.flag==='WATCH'?16498744:_baseColor;
-        // V10.7.57: detect "is this really a trade" vs an override commit
-        const _isOverrideCall=data.wasOverriddenNoTrade===true||data.tier==='no-go-edge'||data.tier==='no-go-data'||data.tier==='single';
-        const _isTier3=_isOverrideCall||data.tier==='time-cap-commit'||data.tier==='timer-commit';
-        const _tierLabel=_isOverrideCall?'⚠ OVERRIDE':_isTier3?'⚠ TIER-3':data.tier?.includes('confluence')||data.tier==='super-confluent'?'★ TIER-1':'TIER-2';
+        // V10.9.8: no-go-edge is now a NORMAL lock with an edge-caution note, not an
+        //   "OVERRIDE (no-trade)". The user wants these alerted like any directional
+        //   call — Tara has a real read, the market is just priced ahead. Only
+        //   no-go-data remains a true override (data failure, no reliable signal).
+        const _isEdgeCaution=data.tier==='no-go-edge'||data.tier==='no-go-coinflip-late';
+        const _isOverrideCall=(data.wasOverriddenNoTrade===true&&!_isEdgeCaution)||data.tier==='no-go-data';
+        const _isTier3=_isOverrideCall||_isEdgeCaution||data.tier==='single'||data.tier==='time-cap-commit'||data.tier==='timer-commit';
+        const _tierLabel=_isOverrideCall?'⚠ OVERRIDE':_isEdgeCaution?'⚠ EDGE-WATCH':_isTier3?'⚠ TIER-3':data.tier?.includes('confluence')||data.tier==='super-confluent'?'★ TIER-1':'TIER-2';
         // V10.7.57: derive streak from data.recentResults if provided
         let _streakLine='';
         if(Array.isArray(data.recentResults)&&data.recentResults.length>0){
@@ -32578,12 +32598,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         // Compose title: short, sharp
         const _title=_isOverrideCall
           ?`TARA · ${_assetTag} · ${_arrow} ${data.dir} · OVERRIDE (no-trade)`
+          :_isEdgeCaution
+          ?`TARA · ${_assetTag} · ${_arrow} ${data.dir} LOCKED · ${data.confidence||0}% · ⚠ edge`
           :`TARA · ${_assetTag} · ${_arrow} ${data.dir} LOCKED · ${data.confidence||0}%`;
         // Compose description: one-line essential
         // V10.7.57b: Gap moved to its own field; description focuses on conviction + Kalshi + tier
         const _kalshiStr=data.kalshiAtLock!=null?` · Kalshi ${Math.round(Number(data.kalshiAtLock))}¢`:'';
         const _desc=_isOverrideCall
           ?`⚠ ${data.caution||data.reason||'No-edge call — Kalshi already priced this direction'}`
+          :_isEdgeCaution
+          ?`${data.confidence||0}% conviction${_kalshiStr} · ${_tierLabel}${_streakLine}\n⚠ ${data.caution||'Market priced ahead — trade carefully; better when odds swing back in favor'}`
           :`${data.confidence||0}% conviction${_kalshiStr} · ${_tierLabel}${_streakLine}`;
         // Compact fields — 6 max, all inline
         // V10.7.57b: GAP replaces FGT in field slot. Gap is the strongest predictor
@@ -32608,7 +32632,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
         embed={
           title:_title,
-          color:_isOverrideCall?13421772:_embedColor, // gray for override
+          color:_isOverrideCall?13421772:_embedColor, // gray for true override (no-go-data); directional for edge-watch locks
           description:_desc,
           fields:_fields,
           footer:{text:`${TARA_VERSION_DISPLAY} · lock`},
@@ -42394,14 +42418,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _commitAge=taraCallSnapshotRef.current?._committedAt
         ?Date.now()-taraCallSnapshotRef.current._committedAt:9999;
       if(_commitAge<2000)return; // too fresh — might still be overridden, check next render
-      // V10.7.73b: Also block no-go-data and no-go-edge from Discord.
-      //   These are automatic system overrides (stale price, data integrity, no edge)
-      //   not Tara's trading calls. User doesn't override them — system does.
-      //   Sending them to Discord confused users into thinking they manually overrode.
+      // V10.7.73b / V10.9.8: Discord broadcast gating for no-go tiers.
+      //   ORIGINAL (V10.7.73b): blocked no-go-data, no-go-edge, AND
+      //   no-go-coinflip-late from Discord — treated all as "system overrides".
+      //   V10.9.8 CHANGE (user request): no-go-edge means Tara HAS a directional
+      //   read, the market is just priced unfavorably (e.g. Tara leans UP 55%,
+      //   Kalshi has it at 62%). The user wants these treated as normal locks and
+      //   sent to Discord like any other directional call — with the edge concern
+      //   surfaced as a caution note ("priced too high/low — trade carefully when
+      //   odds come back in favor"). Same for no-go-coinflip-late (a real but
+      //   late/marginal read). ONLY no-go-data stays suppressed, because that's a
+      //   genuine data-integrity failure (stale price feed / missing Kalshi data)
+      //   where there is no reliable signal to act on.
       const _snapTier=taraCallSnapshotRef.current?.tier||'';
-      if(_snapTier==='no-go-data'||_snapTier==='no-go-edge'||_snapTier==='no-go-coinflip-late'){
+      if(_snapTier==='no-go-data'){
         taraBroadcastRef.current.sentLock=true; // mark as sent so we don't retry
-        // skip — don't broadcast system overrides to Discord
+        // skip — don't broadcast data-integrity failures to Discord
       } else {
       // V10.7.62: windowId guard — snapshot must belong to THIS window, not a previous one.
       //   V10.7.61 deferred snapshot clear (now reverted) caused the old window's snapshot
@@ -42478,13 +42510,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   This is the fix for "sound alerts don't work on other tabs."
         try{
           if(typeof Notification!=='undefined'&&Notification.permission==='granted'&&snap?.call&&snap.call!=='SIT_OUT'){
-            const _isOverride=snap?.wasOverriddenNoTrade===true;
+            const _isEdgeCautionN=snap?.tier==='no-go-edge'||snap?.tier==='no-go-coinflip-late';
+            const _isOverride=snap?.tier==='no-go-data'||(snap?.wasOverriddenNoTrade===true&&!_isEdgeCautionN);
             const _dir=snap.call==='UP'?'▲ UP':'▼ DOWN';
             const _conf=Math.round(Number(snap.confidence)||0);
             const _gap=targetMargin>0?(((currentPrice-targetMargin)/targetMargin)*10000).toFixed(1):'—';
             const _tag=`tara-lock-${snap.windowId||Date.now()}`;
             const n=new Notification(
-              _isOverride?`⚠ Tara ${_dir} (override)`:`🔒 Tara ${_dir} · ${_conf}%`,
+              _isOverride?`⚠ Tara ${_dir} (override)`:_isEdgeCautionN?`🔒 Tara ${_dir} · ${_conf}% · ⚠ edge`:`🔒 Tara ${_dir} · ${_conf}%`,
               {
                 body:`Gap ${_gap}bps · ${snap.regime||'—'} · ${snap.tier||'—'}`,
                 tag:_tag,
