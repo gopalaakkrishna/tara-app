@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.13-v10.9.12-ref-badge-statsbar';
-const TARA_VERSION_DISPLAY='Tara 10.9.12';
+const BASELINE_VERSION='2026.06.13-v10.9.13-discord-7day-record';
+const TARA_VERSION_DISPLAY='Tara 10.9.13';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32693,7 +32693,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {name:'Price',value:`$${(Number(data.price)||0).toFixed(0)}`,inline:true},
           {name:'Regime',value:(data.regime||'—').replace('RANGE-CHOP','CHOP').replace('SHORT SQUEEZE','SQUEEZE').replace('TRENDING ','TR-'),inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-          {name:'Record',value:`${data.taraRecord||'—'}\nToday: ${data.todayRecord||'—'}`,inline:true},
+          {name:'Record',value:`${data.taraRecord||'—'}\nToday: ${data.todayRecord||'—'}\n7-day: ${data.last7Record||'—'}`,inline:true},
         ];
         // Only add reversal risk row when EXPECTED or WATCH (worth the space)
         if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
@@ -42485,6 +42485,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const todayRecord=_todayResolved>0
       ? `${todayData.wins}W-${todayData.losses}L (${todayData.wr}%)`
       : `0W-0L —`;
+    // V10.9.13: rolling 7-day record (all window types, current asset) for the
+    //   lock embed. Counts resolved WIN/LOSS in the last 7×24h from taraCallLog.
+    const last7Record=(()=>{
+      try{
+        const _cut=Date.now()-7*24*60*60*1000;
+        const _src=(taraCallLog||[]).filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.asset||'BTC')===currentAsset&&(e.id||0)>=_cut);
+        if(!_src.length)return '0W-0L —';
+        const _w=_src.filter(e=>e.result==='WIN').length;
+        const _l=_src.length-_w;
+        return `${_w}W-${_l}L (${Math.round(_w/_src.length*100)}%)`;
+      }catch(_){return '0W-0L —';}
+    })();
     const fgtAbs=Math.abs(analysis.mtfAlignment||0);
     const fgtDir=(analysis.mtfAlignment||0)>0.05?'UP':(analysis.mtfAlignment||0)<-0.05?'DOWN':'';
     const baseData={
@@ -42496,6 +42508,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,
       taraRecord,
       todayRecord,
+      last7Record,
       strike:targetMargin,
       price:currentPrice,
     };
