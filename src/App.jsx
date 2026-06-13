@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.13-v10.9.10-brti-blend-revival';
-const TARA_VERSION_DISPLAY='Tara 10.9.10';
+const BASELINE_VERSION='2026.06.13-v10.9.11-mobile-betoffer-row';
+const TARA_VERSION_DISPLAY='Tara 10.9.11';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -44667,22 +44667,26 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             </div>
             <div className={'w-px h-8 bg-[#E8E9E4]/10 hidden lg:block'}></div>
 
+            {/* V10.9.11: Bet/Win + Live Offer share one row on mobile/compact so
+                the empty space to the right of each (when stacked) is reclaimed.
+                On lg+ they flow inline in the bar as before. */}
+            <div className="flex flex-row gap-3 w-full lg:contents">
             {/* Bet/Win */}
-            <div className="flex flex-col min-w-0 w-full lg:min-w-[140px] lg:w-auto">
+            <div className="flex flex-col min-w-0 flex-1 lg:flex-none lg:min-w-[140px] lg:w-auto">
               <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide mb-1'}>Bet  Max Win</div>
               <div className="flex items-center gap-1 text-sm sm:text-base font-serif">
-                $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className={'bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-16 text-center outline-none text-white'}/>
+                $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className={'bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
                 <span className={'text-[#E8E9E4]/30'}>&#47;</span>
-                $<input type="number" value={maxPayout===0?'':maxPayout} onChange={e=>setMaxPayout(Number(e.target.value))} className={'bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-16 text-center outline-none text-white'}/>
+                $<input type="number" value={maxPayout===0?'':maxPayout} onChange={e=>setMaxPayout(Number(e.target.value))} className={'bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
               </div>
             </div>
             <div className={'w-px h-8 bg-[#E8E9E4]/10 hidden lg:block'}></div>
 
             {/* Live Offer */}
-            <div className="flex flex-col min-w-0">
+            <div className="flex flex-col min-w-0 flex-1 lg:flex-none">
               <div className={'text-xs text-emerald-400/80 uppercase tracking-wide mb-1'}>Live Offer</div>
               <div className="flex items-center gap-1 text-emerald-400 text-sm sm:text-base font-serif">
-                $<input type="number" value={currentOffer} onChange={e=>setCurrentOffer(e.target.value)} placeholder="0.00" className={'bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-20 text-center outline-none placeholder-emerald-900'}/>
+                $<input type="number" value={currentOffer} onChange={e=>setCurrentOffer(e.target.value)} placeholder="0.00" className={'bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-16 sm:w-20 text-center outline-none placeholder-emerald-900'}/>
               </div>
               {kalshiYesPrice!==null&&windowType==='15m'&&(
                 <div className="flex items-center gap-1 mt-0.5" title="Live Kalshi YES price for current 15m market">
@@ -44693,6 +44697,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   )}
                 </div>
               )}
+            </div>
             </div>
             <div className={'w-px h-8 bg-[#E8E9E4]/10 hidden lg:block lg:ml-auto'}></div>
 
