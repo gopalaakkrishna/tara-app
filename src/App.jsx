@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.11-v10.9.8-edge-watch-alerts';
-const TARA_VERSION_DISPLAY='Tara 10.9.8';
+const BASELINE_VERSION='2026.06.12-v10.9.9-discord-daily';
+const TARA_VERSION_DISPLAY='Tara 10.9.9';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32622,7 +32622,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {name:'Price',value:`$${(Number(data.price)||0).toFixed(0)}`,inline:true},
           {name:'Regime',value:(data.regime||'—').replace('RANGE-CHOP','CHOP').replace('SHORT SQUEEZE','SQUEEZE').replace('TRENDING ','TR-'),inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-          {name:'Record',value:data.taraRecord||'—',inline:true},
+          {name:'Record',value:`${data.taraRecord||'—'}\nToday: ${data.todayRecord||'—'}`,inline:true},
         ];
         // Only add reversal risk row when EXPECTED or WATCH (worth the space)
         if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
@@ -32702,6 +32702,34 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             {name:'Record',value:data.taraRecord||'—',inline:false},
           ],
           footer:{text:`${TARA_VERSION_DISPLAY}  |  result`},
+          timestamp:new Date().toISOString(),
+        };
+      }
+
+      // V10.9.9: TARA_DAILY — on-demand daily summary (triggered via /daily chat
+      //   command). Gives a standing scoreboard: today's W/L/WR, avg ¢/trade EV
+      //   (not dollar P&L — per user request, EV in cents-per-trade is the more
+      //   honest measure since bet sizing varies), and a per-tier breakdown so
+      //   you can see at a glance which tiers carried the day.
+      else if(type==='TARA_DAILY'){
+        const _wr=data.wr!=null?`${data.wr}%`:'—';
+        const _avgStr=data.avgEvCents!=null?`${data.avgEvCents>=0?'+':''}${data.avgEvCents.toFixed(1)}¢/trade`:'—';
+        const _totalStr=data.totalEvCents!=null?`${data.totalEvCents>=0?'+':''}${Math.round(data.totalEvCents)}¢ total`:'';
+        const _color=(data.avgEvCents||0)>0?3404125:(data.avgEvCents||0)<0?16478549:9807270;
+        const _tierLines=(data.tierBreakdown||[])
+          .map(t=>`${t.tier}: ${t.wins}W-${t.losses}L (${t.wr}%)${t.avgEv!=null?` · ${t.avgEv>=0?'+':''}${t.avgEv.toFixed(1)}¢`:''}`)
+          .join('\n')||'—';
+        embed={
+          title:`TARA · ${_assetTag} · DAILY — ${data.dateLabel||''}`,
+          color:_color,
+          description:`${data.wins||0}W-${data.losses||0}L${data.sitouts?` · ${data.sitouts} sat out`:''} · WR ${_wr} · ${_avgStr}${_totalStr?` (${_totalStr})`:''}`,
+          fields:[
+            {name:'Streak',value:data.streakStr||'—',inline:true},
+            {name:'Best tier',value:data.bestTier||'—',inline:true},
+            {name:'Worst tier',value:data.worstTier||'—',inline:true},
+            {name:'By tier',value:_tierLines,inline:false},
+          ],
+          footer:{text:`${TARA_VERSION_DISPLAY}  |  daily summary`},
           timestamp:new Date().toISOString(),
         };
       }
@@ -42379,6 +42407,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const tc=taraCall;
     const tw=taraScorecards[windowType]||{wins:0,losses:0,sitouts:0};
     const taraRecord=`${tw.wins}W · ${tw.losses}L · ${tw.sitouts} sat out  (${tw.wins+tw.losses>0?((tw.wins/(tw.wins+tw.losses))*100).toFixed(1):'—'}%)`;
+    // V10.9.9: today's record (resets daily, all window types) — alongside the
+    //   all-time per-window-type record. Compact "today" line on every lock.
+    const _todayResolved=(todayData?.wins||0)+(todayData?.losses||0);
+    const todayRecord=_todayResolved>0
+      ? `${todayData.wins}W-${todayData.losses}L (${todayData.wr}%)`
+      : `0W-0L —`;
     const fgtAbs=Math.abs(analysis.mtfAlignment||0);
     const fgtDir=(analysis.mtfAlignment||0)>0.05?'UP':(analysis.mtfAlignment||0)<-0.05?'DOWN':'';
     const baseData={
@@ -42389,6 +42423,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       windowAmp:analysis.windowAmplitude?.label,
       clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`,
       taraRecord,
+      todayRecord,
       strike:targetMargin,
       price:currentPrice,
     };
@@ -43550,7 +43585,56 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     });
   };
 
-  const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${_fmtTimeTz(d,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast`;setChatLog([...log,{role:'tara',text:r}]);},400);};
+  const handleChatSubmit=(e)=>{if(e.key!=='Enter'||!chatInput.trim())return;const ut=chatInput.trim();const log=[...chatLog,{role:'user',text:ut}];setChatLog(log);setChatInput('');setTimeout(()=>{let r='';const u=ut.toLowerCase();if(u.includes('/daily')){
+      // V10.9.9: /daily — on-demand daily summary to Discord.
+      //   EV computed as cents-per-trade from kalshiAtLock (entry cost): WIN nets
+      //   (100-cost)¢, LOSS nets -cost¢. This is the per-trade EV measure, not
+      //   dollar P&L (which depends on bet sizing settings) — per user request.
+      const _now=new Date();
+      const _todayKey=_fmtDateTz(_now,timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'});
+      const _src=(taraCallLog||[]).filter(e=>e&&e.time&&(e.asset||'BTC')===currentAsset);
+      const _today=_src.filter(e=>{try{return _fmtDateTz(new Date(e.time),timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'})===_todayKey;}catch(_){return false;}});
+      const _resolved=_today.filter(e=>e.result==='WIN'||e.result==='LOSS');
+      const _evOf=(e)=>{
+        const k=e.kalshiAtLock;if(k==null||!Number.isFinite(Number(k)))return null;
+        const cost=e.dir==='UP'?Number(k):100-Number(k);
+        return e.result==='WIN'?(100-cost):-cost;
+      };
+      const _evs=_resolved.map(_evOf).filter(v=>v!=null);
+      const avgEvCents=_evs.length?_evs.reduce((a,b)=>a+b,0)/_evs.length:null;
+      const totalEvCents=_evs.length?_evs.reduce((a,b)=>a+b,0):null;
+      const wins=_resolved.filter(e=>e.result==='WIN').length;
+      const losses=_resolved.length-wins;
+      const sitouts=_today.filter(e=>e.result==='SITOUT').length;
+      const wr=_resolved.length?Math.round((wins/_resolved.length)*100):null;
+      // Streak from resolved, newest-first
+      let streakStr='—';
+      if(_resolved.length){
+        const last=_resolved[_resolved.length-1].result;
+        let n=0;for(let i=_resolved.length-1;i>=0;i--){if(_resolved[i].result===last)n++;else break;}
+        streakStr=n>=2?`${n}${last==='WIN'?'W':'L'} streak`:'—';
+      }
+      // Per-tier breakdown
+      const _tierMap={};
+      _resolved.forEach(e=>{
+        const t=e.tier||'?';
+        if(!_tierMap[t])_tierMap[t]={wins:0,losses:0,evs:[]};
+        _tierMap[t][e.result==='WIN'?'wins':'losses']++;
+        const ev=_evOf(e);if(ev!=null)_tierMap[t].evs.push(ev);
+      });
+      const tierBreakdown=Object.entries(_tierMap).map(([tier,v])=>{
+        const tot=v.wins+v.losses;
+        return{tier,wins:v.wins,losses:v.losses,wr:tot?Math.round((v.wins/tot)*100):0,
+          avgEv:v.evs.length?v.evs.reduce((a,b)=>a+b,0)/v.evs.length:null,total:tot};
+      }).sort((a,b)=>b.total-a.total);
+      const _byEv=tierBreakdown.filter(t=>t.avgEv!=null&&t.total>=2);
+      const bestTier=_byEv.length?(()=>{const t=_byEv.reduce((a,b)=>b.avgEv>a.avgEv?b:a);return`${t.tier} (${t.avgEv>=0?'+':''}${t.avgEv.toFixed(1)}¢)`;})():'—';
+      const worstTier=_byEv.length?(()=>{const t=_byEv.reduce((a,b)=>b.avgEv<a.avgEv?b:a);return`${t.tier} (${t.avgEv>=0?'+':''}${t.avgEv.toFixed(1)}¢)`;})():'—';
+      broadcastToDiscord('TARA_DAILY',{
+        dateLabel:_todayKey,wins,losses,sitouts,wr,avgEvCents,totalEvCents,streakStr,bestTier,worstTier,tierBreakdown,
+      });
+      r=`Daily summary sent: ${wins}W-${losses}L (${wr??'—'}%), avg ${avgEvCents!=null?(avgEvCents>=0?'+':'')+avgEvCents.toFixed(1):'—'}¢/trade.`;
+    }else if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${_fmtTimeTz(d,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast | /daily`;setChatLog([...log,{role:'tara',text:r}]);},400);};
 
   const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;try{localStorage.removeItem('taraLockedTimeSeries_v1');}catch(_){} /* V9.11.2 */posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false;_cloudRestoreCompletedRef.current=false;/* V7.10.4: also clear snapshot+samples so 15m↔5m doesn't carry stale state across window types */if(taraCallSnapshotRef.current!==undefined)taraCallSnapshotRef.current=null;if(taraCallSampleRef.current)taraCallSampleRef.current={dir:null,count:0};_rolloverGraceRef.current=Date.now();setForceRender(p=>p+1);};
   // V6.5.8: Asset switch handler. Same state-reset pattern as window toggle, plus
