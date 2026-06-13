@@ -4352,8 +4352,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.13-v10.9.11-mobile-betoffer-row';
-const TARA_VERSION_DISPLAY='Tara 10.9.11';
+const BASELINE_VERSION='2026.06.13-v10.9.12-ref-badge-statsbar';
+const TARA_VERSION_DISPLAY='Tara 10.9.12';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -44600,6 +44600,37 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   <span>{PRICE_SOURCES[priceSource].label}</span>
                   {feedFrozen&&<span className="opacity-90">·{feedStaleSeconds}s</span>}
                 </button>
+                {/* V10.9.11b: REF (CF-Benchmark blend) health badge — placed right
+                    under the FEED button so feed status + reference status sit
+                    together. Green = blend live & CF-accurate; amber = degraded
+                    (falling back toward the raw chart feed). This is the visible
+                    answer to "is the OKX offset being corrected right now." */}
+                {(()=>{
+                  const _b=brtiApprox;
+                  const _ready=_b&&_b.current>0&&_b.samples60s>=5&&(_b.sourceCount>=2||(_b.sourceCount>=1&&_b.hasAnchor));
+                  const _div=_b&&_b.divergenceBps!=null?_b.divergenceBps:null;
+                  const _label=!_b||!(_b.current>0)?'warming':_ready?`${_b.sourceCount}src`:`${_b.sourceCount||0}src·deg`;
+                  const _ok=_ready;
+                  const _title=!_b||!(_b.current>0)
+                    ?'Reference blend warming up — using chart feed for now'
+                    :`CF-Benchmark blend · ${_b.sourceCount} source${_b.sourceCount===1?'':'s'} (${(_b.sources||[]).join('+')||'—'})${_b.correctedCount?` · ${_b.correctedCount} bias-corrected`:''}${_b.hasAnchor?' · anchor live':' · NO CB/KR anchor'} · ${_b.samples60s} samples${_div!=null?` · chart ${_div>=0?'+':''}${_div}bps vs blend`:''}`;
+                  return(
+                    <div
+                      className="flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border self-start mt-1"
+                      style={{
+                        background:_ok?'rgba(110,231,183,0.10)':'rgba(229,200,112,0.10)',
+                        borderColor:_ok?'rgba(110,231,183,0.30)':'rgba(229,200,112,0.40)',
+                        color:_ok?'rgb(110,231,183)':'#E5C870',
+                      }}
+                      title={_title}
+                    >
+                      <span>REF</span>
+                      <span className="opacity-50">·</span>
+                      <span className="tabular-nums">{_label}</span>
+                      {_div!=null&&Math.abs(_div)>=8&&<span className="opacity-80">{_div>=0?'+':''}{Math.round(_div)}</span>}
+                    </div>
+                  );
+                })()}
                 {/* Big live price */}
                 {currentPrice>0&&(
                   <div className="flex flex-col">
@@ -44670,9 +44701,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             {/* V10.9.11: Bet/Win + Live Offer share one row on mobile/compact so
                 the empty space to the right of each (when stacked) is reclaimed.
                 On lg+ they flow inline in the bar as before. */}
-            <div className="flex flex-row gap-3 w-full lg:contents">
+            <div className="flex flex-row gap-2 w-full lg:contents">
             {/* Bet/Win */}
-            <div className="flex flex-col min-w-0 flex-1 lg:flex-none lg:min-w-[140px] lg:w-auto">
+            <div className="flex flex-col min-w-0 flex-none lg:min-w-[140px] lg:w-auto">
               <div className={'text-xs text-[#E8E9E4]/40 uppercase tracking-wide mb-1'}>Bet  Max Win</div>
               <div className="flex items-center gap-1 text-sm sm:text-base font-serif">
                 $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className={'bg-transparent border-b border-[#E8E9E4]/20 focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
@@ -44683,7 +44714,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className={'w-px h-8 bg-[#E8E9E4]/10 hidden lg:block'}></div>
 
             {/* Live Offer */}
-            <div className="flex flex-col min-w-0 flex-1 lg:flex-none">
+            <div className="flex flex-col min-w-0 flex-none">
               <div className={'text-xs text-emerald-400/80 uppercase tracking-wide mb-1'}>Live Offer</div>
               <div className="flex items-center gap-1 text-emerald-400 text-sm sm:text-base font-serif">
                 $<input type="number" value={currentOffer} onChange={e=>setCurrentOffer(e.target.value)} placeholder="0.00" className={'bg-transparent border-b border-emerald-500/30 focus:border-emerald-400 w-16 sm:w-20 text-center outline-none placeholder-emerald-900'}/>
