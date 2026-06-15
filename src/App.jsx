@@ -4360,8 +4360,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.15-v10.9.16-tdz-crash-fix';
-const TARA_VERSION_DISPLAY='Tara 10.9.16';
+const BASELINE_VERSION='2026.06.15-v10.9.18-whale-embed-sharper';
+const TARA_VERSION_DISPLAY='Tara 10.9.18';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -32686,34 +32686,40 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           if(_streak>=2)_streakLine=` · ${_streak}${_kind==='WIN'?'W':'L'} streak`;
         }
         const _arrow=data.dir==='UP'?'▲':data.dir==='DOWN'?'▼':'·';
-        // Compose title: short, sharp
-        const _title=_isOverrideCall
-          ?`TARA · ${_assetTag} · ${_arrow} ${data.dir} · OVERRIDE (no-trade)`
-          :_isEdgeCaution
-          ?`TARA · ${_assetTag} · ${_arrow} ${data.dir} LOCKED · ${data.confidence||0}% · ⚠ edge`
-          :`TARA · ${_assetTag} · ${_arrow} ${data.dir} LOCKED · ${data.confidence||0}%`;
-        // Compose description: one-line essential
-        // V10.7.57b: Gap moved to its own field; description focuses on conviction + Kalshi + tier
-        const _kalshiStr=data.kalshiAtLock!=null?` · Kalshi ${Math.round(Number(data.kalshiAtLock))}¢`:'';
-        const _desc=_isOverrideCall
-          ?`⚠ ${data.caution||data.reason||'No-edge call — Kalshi already priced this direction'}`
-          :_isEdgeCaution
-          ?`${data.confidence||0}% conviction${_kalshiStr} · ${_tierLabel}${_streakLine}\n⚠ ${data.caution||'Market priced ahead — trade carefully; better when odds swing back in favor'}`
-          :`${data.confidence||0}% conviction${_kalshiStr} · ${_tierLabel}${_streakLine}`;
-        // Compact fields — 6 max, all inline
-        // V10.7.57b: GAP replaces FGT in field slot. Gap is the strongest predictor
-        //   in our data (+55 directional edge); FGT is informational at best. Gap
-        //   tells you "how committed is the price gap" which is the most actionable
-        //   number on the lock. FGT moved out — visible in dashboard for those who want it.
+        // V10.9.17: SHORTER, SHARPER, PLAIN-LANGUAGE. Title states the call in one
+        //   glance; description translates the numbers into a human sentence (like
+        //   "BTC is $49 below the line with 9m left"); fields trimmed to what's
+        //   actually decision-useful. Strike now shows FULL precision (Kalshi
+        //   strikes carry cents, e.g. $66,830.51 — no rounding).
+        const _strikeNum=Number(data.strike)||0;
+        const _priceNum=Number(data.price)||0;
+        // Full-precision strike with thousands separators (keeps Kalshi's cents)
+        const _strikeFull=_strikeNum.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+        const _priceFull=_priceNum.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
         const _gapBps=Number(data.gap)||0;
+        const _dollarsFromLine=_priceNum-_strikeNum;
+        const _aboveBelow=_dollarsFromLine>=0?'above':'below';
+        const _kalshiC=data.kalshiAtLock!=null?`${Math.round(Number(data.kalshiAtLock))}¢`:null;
+        // Title: TARA ▼ DOWN · 84% (or with edge/override flag)
+        const _title=_isOverrideCall
+          ?`TARA ${_arrow} ${data.dir} · skipped (no edge)`
+          :_isEdgeCaution
+          ?`TARA ${_arrow} ${data.dir} · ${data.confidence||0}% · ⚠ priced ahead`
+          :`TARA ${_arrow} ${data.dir} · ${data.confidence||0}%`;
+        // Description: plain-language sentence + tier + streak
+        const _plain=`BTC $${_priceFull} · $${Math.abs(_dollarsFromLine).toFixed(2)} ${_aboveBelow} the $${_strikeFull} line${_kalshiC?` · entry ${_kalshiC}`:''}`;
+        const _desc=_isOverrideCall
+          ?`Skipped — ${data.caution||data.reason||'Kalshi already priced this move'}\n${_plain}`
+          :_isEdgeCaution
+          ?`${_plain} · ${_tierLabel}${_streakLine}\n⚠ Trade carefully — better when odds swing back`
+          :`${_plain} · ${_tierLabel}${_streakLine}`;
+        // Fields: trimmed. Regime + Quality on one row, Record below.
         const _gapDir=_gapBps>0?'▲':_gapBps<0?'▼':'·';
         const _fields=[
           {name:'Gap',value:`${_gapDir}${Math.abs(_gapBps).toFixed(1)}bps`,inline:true},
-          {name:'Strike',value:`$${(Number(data.strike)||0).toFixed(0)}`,inline:true},
-          {name:'Price',value:`$${(Number(data.price)||0).toFixed(0)}`,inline:true},
           {name:'Regime',value:(data.regime||'—').replace('RANGE-CHOP','CHOP').replace('SHORT SQUEEZE','SQUEEZE').replace('TRENDING ','TR-'),inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-          {name:'Record',value:`${data.taraRecord||'—'}\nToday: ${data.todayRecord||'—'}\n7-day: ${data.last7Record||'—'}`,inline:true},
+          {name:'Record',value:`All ${data.taraRecord||'—'}\nToday ${data.todayRecord||'—'} · 7d ${data.last7Record||'—'}`,inline:false},
         ];
         // Only add reversal risk row when EXPECTED or WATCH (worth the space)
         if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
@@ -32879,36 +32885,46 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       else if(type==='WHALE'){
         const isBuy=data.netFlow>0;
         const netAbs=Math.abs(data.netFlow);
+        // V10.9.18: plain-language + full-precision to match the lock embed.
+        //   Helpers: pluralize cleanly (no "1 prints"), full BTC price with cents.
+        const _plur=(n,word)=>`${n} ${word}${Number(n)===1?'':'s'}`;
+        const _k=(v)=>`$${(Math.abs(v)/1000).toFixed(0)}K`;
+        const _exCount=data.exchangeCount||1;
+        const _priceFull=(Number(data.price)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+        // Per-exchange detail as a plain sentence list (e.g. "Binance bought $111K (1 print)")
         const exLines=Object.entries(data.exchanges||{})
-          .map(([ex,v])=>`${ex}   ${v>0?'BUY':'SEL'}  $${(Math.abs(v)/1000).toFixed(0)}K  (${data.exchangeCounts?.[ex]||'?'} prints)`)
+          .map(([ex,v])=>`${ex} ${v>0?'bought':'sold'} ${_k(v)} (${_plur(data.exchangeCounts?.[ex]||0,'print')})`)
           .join('\n');
         const reliabilityNote=data.spotAligned
-          ? 'Spot and futures aligned — elevated reliability.'
-          : data.exchangeCount===1
-          ? 'Single exchange — treat as unconfirmed.'
-          : 'Futures only — possible hedging or basis trade.';
+          ? '✅ Spot and futures aligned — elevated reliability.'
+          : _exCount===1
+          ? '⚠️ Single exchange — treat as unconfirmed, could be noise.'
+          : '⚠️ Futures only — possible hedging or basis trade.';
         // V3.2.4: position-aware advisory line
         let advisoryLine='';
         if(data.whaleAdvisory){
           const a=data.whaleAdvisory;
           const tag=a.action==='HOLD'?'🟢 HOLD':a.action==='CASH OUT'?'🔴 CASH OUT':'🟡 WATCH';
-          advisoryLine=`\n**${tag}**  ·  position ${data.userPosition}\n${a.reason}\n`;
+          advisoryLine=`\n**${tag}** · your ${data.userPosition} position\n${a.reason}`;
         }
+        // Plain headline sentence: "$111K in buys hit Binance in the last 60s"
+        const _side=isBuy?'buying':'selling';
+        const _lead=`${_k(data.totalVol)} in whale ${_side} across ${_plur(_exCount,'exchange')} in the last 60s · ${_plur(data.tradeCount||0,'trade')}.`;
+        const _netLine=`Net flow ${isBuy?'+':'-'}${_k(netAbs)} (${isBuy?'buyers':'sellers'} dominating)`;
         embed={
-          title:`TARA · ${_assetTag} — WHALE PRESSURE: ${isBuy?'BUY':'SELL'}`,
+          title:`TARA — ${isBuy?'🐂 Big money BUYING':'🐻 Big money SELLING'}`,
           color:isBuy?3404125:16478549,
           description:[
-            `$${(data.totalVol/1000).toFixed(0)}K  |  ${data.tradeCount||'?'} prints  |  ${data.exchangeCount||1} exchange${data.exchangeCount!==1?'s':''}`,
-            `Net  ${isBuy?'+':'-'}$${(netAbs/1000).toFixed(0)}K`,
+            _lead,
+            _netLine,
             ``,
-            `\`\`\``,
             exLines||'—',
-            `\`\`\``,
-            `BTC  $${(data.price||0).toFixed(0)}  |  ${data.clock||'—'} remaining`,
-            `${reliabilityNote}`,
+            ``,
+            `BTC $${_priceFull} · window closes in ${data.clock||'—'}`,
+            reliabilityNote,
             advisoryLine,
           ].filter(Boolean).join('\n'),
-          footer:{text:`${TARA_VERSION_DISPLAY}  |  futures tape  |  not financial advice`},
+          footer:{text:`${TARA_VERSION_DISPLAY} · whale watch · not financial advice`},
           timestamp:new Date().toISOString(),
         };
       }
