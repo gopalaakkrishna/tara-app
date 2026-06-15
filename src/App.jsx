@@ -170,7 +170,13 @@ const SUPABASE_URL='https://vhbbkqmyyzddhezdgszm.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoYmJrcW15eXpkZGhlemRnc3ptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODMzNjUsImV4cCI6MjA5NDM1OTM2NX0.30zC6hbGEcCNSuOQNRfh81_3B0nwVDuUJeeqUydZCoM';
 // V10.7.85: Supabase sync paused — row limit hit, renews approx 2026-06-18.
 //   All trade data saves to localStorage as always. Set false to re-enable cloud sync.
-// V10.7.89d: _SB_PAUSED=true — Supabase row limit hit, resets ~Jun 18.
+// V10.7.89d: _SB_PAUSED=true — Supabase free-tier egress quota exceeded ("All
+//   services restricted", 402 on all requests). Per the project's billing page,
+//   the current cycle runs 14 Jun 2026 - 14 Jul 2026 — resets ~14 Jul 2026, NOT
+//   the earlier "~Jun 18" estimate. Do not flip this before then; every request
+//   will 402 until the quota resets. Re-check the Supabase usage dashboard before
+//   unpausing — if sync volume caused this, the same pattern may exhaust the new
+//   cycle's 5GB egress allowance again well before 14 Aug.
 //   With false: cloud reads on load were overwriting local data with stale 640-entry
 //   version even though localStorage had the correct 1867-entry import.
 //   With true: localStorage is the sole source of truth. All reads/writes disabled.
@@ -4352,8 +4358,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.13-v10.9.13-discord-7day-record';
-const TARA_VERSION_DISPLAY='Tara 10.9.13';
+const BASELINE_VERSION='2026.06.15-v10.9.14-feed-cadence-instrumentation';
+const TARA_VERSION_DISPLAY='Tara 10.9.14';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20645,7 +20651,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','feedAtLock','lockLatencySec','windowTypeTransitions','windowTypeChanged','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -20667,6 +20673,11 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     e.closingGapBps!=null?e.closingGapBps.toFixed(1):'',
                     e.lossPattern||'',_tier,
                     e.windowAmplitude||'',
+                    // V10.9.14: feed + cadence + window-evolution telemetry
+                    e.feedAtLock||'',
+                    e.lockLatencySec!=null?e.lockLatencySec:'',
+                    e.windowTypeTransitions||'',
+                    e.windowTypeChanged===true?'Y':(e.windowTypeChanged===false?'N':''),
                     // V9.7.6: lock-timing telemetry — secondsIntoWindow shows how
                     //   fast Tara locked; kalshiAtLock shows entry price; dialAtLock
                     //   shows the speed dial.
@@ -28567,6 +28578,12 @@ function TaraApp(){
   const windowHighTimeRef=useRef(0);
   const windowLowTimeRef=useRef(0);
   const windowOpenTimeRef=useRef(0);
+  // V10.9.14: track the sequence of windowAmplitude labels seen during the live
+  //   window, so each trade can record what window type it locked into AND whether
+  //   that read changed during the window (e.g. opened GRIND, became WHIPSAW).
+  //   Answers: how stable is the live window-type read, and does locking after a
+  //   transition lose more? Also stamps the active price feed + lock latency.
+  const _windowTypeSeqRef=useRef([]);
   // V10.9.3: AUTONOMOUS THEORY LAB — fully additive, dormant, zero-input.
   //   _theoryPendingRef holds the four theory calls computed for the CURRENT
   //   window (set at window open), keyed by windowId. When that window settles
@@ -31576,6 +31593,21 @@ function TaraApp(){
     return subscribeToPeerTabs(setPeerTabs);
   },[]);
 
+  // ── V10.9.14: WINDOW-TYPE TRANSITION TRACKING ──
+  //   Record each distinct windowAmplitude label seen during the live window (with
+  //   the second-into-window it first appeared). Lets every trade stamp the type at
+  //   lock + the full transition path, so we can measure how stable the live read
+  //   is and whether locking after a transition (e.g. GRIND→WHIPSAW) loses more.
+  useEffect(()=>{
+    const _label=analysis?.windowAmplitude?.label;
+    if(!_label||_label==='OPENING')return;
+    const _seq=_windowTypeSeqRef.current;
+    if(_seq.length&&_seq[_seq.length-1].label===_label)return; // no change
+    const _sec=windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null;
+    _seq.push({label:_label,atSec:_sec});
+    if(_seq.length>12)_seq.shift(); // cap memory
+  },[analysis?.windowAmplitude?.label]);
+
   // ── V8.5: WINDOW CONTEXT TRACKING (whale prints + geoRisk during active window) ──
   // Updates windowWhaleStatsRef + windowMaxGeoRiskRef whenever whaleLog or newsSentiment
   // changes, but ONLY if there's an active position. Refs reset at window open.
@@ -32282,6 +32314,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // V10.8.2: Reset cushion history for new window
     _windowCushionHistoryRef.current=[];
     _cushionLastPushedRef.current=0;
+    _windowTypeSeqRef.current=[]; // V10.9.14: reset window-type transition tracker
     setStrikeMode('manual');
     setPendingStrike(null);
     // Try Kalshi cache first (best source — preset strike from market)
@@ -42050,6 +42083,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }:null,
         atrBpsAtLock:analysis?.atrBps??null,
         windowAmplitudeAtLock:analysis?.windowAmplitude?.label??null,
+        // V10.9.14: feed + cadence + window-evolution instrumentation.
+        //   feedAtLock — active price feed (coinbase/okx/kraken): answers "CB vs OKX".
+        //   lockLatencySec — seconds from window open to lock: measures cadence.
+        //   windowTypeTransitions — live window-type path (e.g. GRIND>WHIPSAW).
+        feedAtLock:priceSourceRef.current||null,
+        lockLatencySec:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
+        windowTypeAtLock:analysis?.windowAmplitude?.label??null,
+        windowTypeTransitions:Array.isArray(_windowTypeSeqRef.current)&&_windowTypeSeqRef.current.length?_windowTypeSeqRef.current.map(s=>s.label).join('>'):null,
+        windowTypeChanged:Array.isArray(_windowTypeSeqRef.current)&&_windowTypeSeqRef.current.length>1,
         // V10.8.2: Cushion history at lock — was price consistently on the right side?
         _cushionPctCorrect:_cushionIntel?.pctCorrect??null,
         _cushionTrend:_cushionIntel?.trend!=null?Math.round(_cushionIntel.trend*10)/10:null,
@@ -42211,6 +42253,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }:null,
         atrBpsAtLock:analysis?.atrBps??null,
         windowAmplitudeAtLock:analysis?.windowAmplitude?.label??null,
+        // V10.9.14: feed + cadence + window-evolution instrumentation.
+        //   feedAtLock — active price feed (coinbase/okx/kraken): answers "CB vs OKX".
+        //   lockLatencySec — seconds from window open to lock: measures cadence.
+        //   windowTypeTransitions — live window-type path (e.g. GRIND>WHIPSAW).
+        feedAtLock:priceSourceRef.current||null,
+        lockLatencySec:windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null,
+        windowTypeAtLock:analysis?.windowAmplitude?.label??null,
+        windowTypeTransitions:Array.isArray(_windowTypeSeqRef.current)&&_windowTypeSeqRef.current.length?_windowTypeSeqRef.current.map(s=>s.label).join('>'):null,
+        windowTypeChanged:Array.isArray(_windowTypeSeqRef.current)&&_windowTypeSeqRef.current.length>1,
         // ── V9.7.9: V9.7.x GATE TELEMETRY ─────────────────────────────────
         // Stamp diagnostic state from each gate so post-hoc CSV audit can answer:
         //   "did the FGT cap save trades?" / "did the reversal damper prevent
