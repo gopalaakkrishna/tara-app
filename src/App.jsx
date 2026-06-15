@@ -170,18 +170,20 @@ const SUPABASE_URL='https://vhbbkqmyyzddhezdgszm.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoYmJrcW15eXpkZGhlemRnc3ptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODMzNjUsImV4cCI6MjA5NDM1OTM2NX0.30zC6hbGEcCNSuOQNRfh81_3B0nwVDuUJeeqUydZCoM';
 // V10.7.85: Supabase sync paused — row limit hit, renews approx 2026-06-18.
 //   All trade data saves to localStorage as always. Set false to re-enable cloud sync.
-// V10.7.89d: _SB_PAUSED=true — Supabase free-tier egress quota exceeded ("All
-//   services restricted", 402 on all requests). Per the project's billing page,
-//   the current cycle runs 14 Jun 2026 - 14 Jul 2026 — resets ~14 Jul 2026, NOT
-//   the earlier "~Jun 18" estimate. Do not flip this before then; every request
-//   will 402 until the quota resets. Re-check the Supabase usage dashboard before
-//   unpausing — if sync volume caused this, the same pattern may exhaust the new
-//   cycle's 5GB egress allowance again well before 14 Aug.
-//   With false: cloud reads on load were overwriting local data with stale 640-entry
-//   version even though localStorage had the correct 1867-entry import.
-//   With true: localStorage is the sole source of truth. All reads/writes disabled.
-//   To re-enable: flip to false and deploy. First write after reset pushes full local log.
-const _SB_PAUSED=true;
+// V10.9.15: _SB_PAUSED=false — RE-ENABLED. Supabase billing dashboard confirms
+//   the egress restriction is lifted: "all services restricted" banner gone, all
+//   meters fresh (Egress 0/5GB, DB 0.035/0.5GB, Storage 0/1GB), spend cap ENABLED
+//   (so overages make the project read-only rather than billing — no surprise
+//   charges). The prior stale-overwrite risk (cloud reads clobbering a longer
+//   local log) is now guarded by the V10.9.5/10.9.6 content-aware merge
+//   (resolved-count + signature compare at the setTaraCallLog reconcile), so
+//   re-enabling does not reintroduce that bug.
+//   WATCH EGRESS: last cycle hit the 5GB egress cap. If sync volume is the driver,
+//   the new cycle's 5GB could exhaust again — re-check the usage dashboard
+//   periodically. If egress climbs fast, the likely culprit is full taraCallLog
+//   reads on load; the fix would be incremental/diff sync rather than full-doc.
+//   To re-pause if needed: flip back to true and deploy.
+const _SB_PAUSED=false;
 // Supabase client is initialized lazily below after the helper module loads.
 // During the parallel-write phase, _sbClient may be null if init fails — code
 // must check before calling. Failed Supabase init is non-fatal (Firestore
@@ -4358,8 +4360,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.15-v10.9.14-feed-cadence-instrumentation';
-const TARA_VERSION_DISPLAY='Tara 10.9.14';
+const BASELINE_VERSION='2026.06.15-v10.9.15-supabase-resumed';
+const TARA_VERSION_DISPLAY='Tara 10.9.15';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
