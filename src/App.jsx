@@ -4360,8 +4360,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.15-v10.9.18-whale-embed-sharper';
-const TARA_VERSION_DISPLAY='Tara 10.9.18';
+const BASELINE_VERSION='2026.06.15-v10.9.19-dedup-upgrade-fix';
+const TARA_VERSION_DISPLAY='Tara 10.9.19';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -29227,6 +29227,24 @@ function TaraApp(){
       }catch(_){}
       // Set React state to the full patched history — not just the 500-cache slice
       setTaraCallLog(_patched.slice(-(typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:5000)));
+      // V10.9.19: force an immediate re-render so the on-screen log reflects the
+      //   applied fixes right away. The setTaraCallLog above updates state, but the
+      //   memoized log view + cloud-restore listener could otherwise leave the
+      //   display looking stale until the next reload ("applied but not saved" report).
+      try{setForceRender(p=>p+1);}catch(_){}
+      // Verify the write actually landed in IDB (catches silent quota/write failures).
+      try{
+        const _check=await _idbRead('taraCallLog').catch(()=>null);
+        const _appliedIds=Array.from(updateMap.keys());
+        const _landed=Array.isArray(_check)?_appliedIds.filter(id=>{
+          const _e=_check.find(x=>x&&x.id===id);
+          return _e&&_e.manualEdit===true;
+        }).length:0;
+        console.info(`[reconcile] applied ${applied} fixes · ${_landed}/${_appliedIds.length} verified persisted in IDB`);
+        if(_landed<_appliedIds.length){
+          console.warn('[reconcile] some fixes did not persist to IDB — possible quota/write failure. Data is still in React state + localStorage.');
+        }
+      }catch(_){}
       return applied;
     };
     // _taraForceSave: flush current state to IndexedDB + localStorage immediately
@@ -40983,12 +41001,40 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //   don't clobber each other. Was bug: when both assets locked the same
           //   window, second one's entry got silently dropped.
           const _logAsset=_entry.asset||'BTC';
-          const _existing=prev.find(e=>e&&e.windowId===_wid&&e.windowType===windowType&&(e.asset||'BTC')===_logAsset);
+          const _existingIdx=prev.findIndex(e=>e&&e.windowId===_wid&&e.windowType===windowType&&(e.asset||'BTC')===_logAsset);
+          const _existing=_existingIdx>=0?prev[_existingIdx]:null;
           if(_existing){
-            // V9.10.7: audit every silent dedup drop. Before this, dedup hits were
-            //   invisible — Tara appeared to call but nothing landed. Now every drop
-            //   produces an audit event with both entries so we can tell whether the
-            //   block was correct (true duplicate) or wrong (overwrote a richer entry).
+            // V10.9.19 FIX: dedup must not permanently block a later REAL lock.
+            //   Bug (seen 2026-06-15): Tara logs SIT_OUT early in a window, then forms
+            //   a genuine directional lock later in the SAME window — the second entry
+            //   matched the existing SIT_OUT and was dropped (return prev), so the real
+            //   trade never registered. This is the "locks missing / registering wrong"
+            //   report. A SIT_OUT (or an unresolved/leaner entry) is NOT a true duplicate
+            //   of a later directional commit — it should be UPGRADED, not blocked.
+            const _exCall=_existing.call||_existing.dir||'SIT_OUT';
+            const _newCall=_entry.call||_entry.dir||'SIT_OUT';
+            const _exResolved=_existing.result==='WIN'||_existing.result==='LOSS';
+            const _newDirectional=_newCall==='UP'||_newCall==='DOWN';
+            const _exSitout=_exCall==='SIT_OUT';
+            // Upgrade conditions (replace existing with new):
+            //   1. existing is SIT_OUT and new is a real directional call, OR
+            //   2. existing is unresolved and new carries a resolved result, OR
+            //   3. both directional same dir but new is richer (has signalScores, existing doesn't)
+            const _shouldUpgrade=
+              (!_exResolved && _exSitout && _newDirectional) ||
+              (!_exResolved && (_entry.result==='WIN'||_entry.result==='LOSS')) ||
+              (!_exResolved && _exCall===_newCall && !_existing.signalScoresAtLock && !!_entry.signalScoresAtLock);
+            if(_shouldUpgrade){
+              try{_lifecycleRecordLogResult(_wid,_logAsset,'upgraded',{from:_exCall,to:_newCall,existingId:_existing.id});}catch(_){}
+              try{_lifecycleRecordConfirmed(_wid,_logAsset);}catch(_){}
+              // Preserve the existing id/timestamp so cloud/reconcile keep tracking the
+              //   same record, but take the new (richer/directional) content.
+              const _merged={..._entry,id:_existing.id||_entry.id,time:_existing.time||_entry.time};
+              const _next=[...prev];
+              _next[_existingIdx]=_merged;
+              return _next;
+            }
+            // Otherwise: genuine duplicate — audit + block as before.
             _auditLogEvent('logSnapshotEntry-dedup-blocked',{
               source:'_logSnapshotEntry',
               wid:_wid,
@@ -40997,10 +41043,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               newEntry:{dir:_entry.dir,tier:_entry.tier,confidence:_entry.confidence,result:_entry.result,time:_entry.time},
               existingEntry:{id:_existing.id,dir:_existing.dir,tier:_existing.tier,result:_existing.result,time:_existing.time},
             });
-            // V10.7.45: dedup-blocked is sometimes correct (true duplicate) and sometimes
-            //   a bug (overwrote richer entry). Mark lifecycle so we can audit later.
             try{_lifecycleRecordLogResult(_wid,_logAsset,'dedup-blocked',{existingId:_existing.id,existingResult:_existing.result});}catch(_){}
-            // Also confirm — there IS an entry in the log for this window, even if not ours.
             try{_lifecycleRecordConfirmed(_wid,_logAsset);}catch(_){}
             return prev;
           }
