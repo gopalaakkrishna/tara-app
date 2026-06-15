@@ -4360,8 +4360,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.15-v10.9.15-supabase-resumed';
-const TARA_VERSION_DISPLAY='Tara 10.9.15';
+const BASELINE_VERSION='2026.06.15-v10.9.16-tdz-crash-fix';
+const TARA_VERSION_DISPLAY='Tara 10.9.16';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -31595,21 +31595,6 @@ function TaraApp(){
     return subscribeToPeerTabs(setPeerTabs);
   },[]);
 
-  // ── V10.9.14: WINDOW-TYPE TRANSITION TRACKING ──
-  //   Record each distinct windowAmplitude label seen during the live window (with
-  //   the second-into-window it first appeared). Lets every trade stamp the type at
-  //   lock + the full transition path, so we can measure how stable the live read
-  //   is and whether locking after a transition (e.g. GRIND→WHIPSAW) loses more.
-  useEffect(()=>{
-    const _label=analysis?.windowAmplitude?.label;
-    if(!_label||_label==='OPENING')return;
-    const _seq=_windowTypeSeqRef.current;
-    if(_seq.length&&_seq[_seq.length-1].label===_label)return; // no change
-    const _sec=windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null;
-    _seq.push({label:_label,atSec:_sec});
-    if(_seq.length>12)_seq.shift(); // cap memory
-  },[analysis?.windowAmplitude?.label]);
-
   // ── V8.5: WINDOW CONTEXT TRACKING (whale prints + geoRisk during active window) ──
   // Updates windowWhaleStatsRef + windowMaxGeoRiskRef whenever whaleLog or newsSentiment
   // changes, but ONLY if there's an active position. Refs reset at window open.
@@ -35773,6 +35758,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   // V6.4: keep analysisRef live so non-hooked code (regime sampler, etc.) can read it
   const analysisRef=useRef(null);
   useEffect(()=>{analysisRef.current=analysis;},[analysis]);
+
+  // ── V10.9.14: WINDOW-TYPE TRANSITION TRACKING ──
+  //   Record each distinct windowAmplitude label seen during the live window (with
+  //   the second-into-window it first appeared). Lets every trade stamp the type at
+  //   lock + the full transition path, so we can measure how stable the live read
+  //   is and whether locking after a transition (e.g. GRIND>WHIPSAW) loses more.
+  //   V10.9.15 FIX: must live AFTER the analysis useMemo (it reads analysis); placing
+  //   it earlier caused a temporal-dead-zone ReferenceError crash on load.
+  useEffect(()=>{
+    const _label=analysis?.windowAmplitude?.label;
+    if(!_label||_label==='OPENING')return;
+    const _seq=_windowTypeSeqRef.current;
+    if(!Array.isArray(_seq))return;
+    if(_seq.length&&_seq[_seq.length-1].label===_label)return; // no change
+    const _sec=windowOpenTimeRef.current?Math.round((Date.now()-windowOpenTimeRef.current)/1000):null;
+    _seq.push({label:_label,atSec:_sec});
+    if(_seq.length>12)_seq.shift(); // cap memory
+  },[analysis?.windowAmplitude?.label]);
 
   // V6.4: MULTI-SIGNAL PIVOT DETECTOR. Tracks sign-flips across (a) tape buy% crossing 50,
   //   (b) asymmetry score crossing zero, (c) FGT alignment crossing zero. When 3+ flips
