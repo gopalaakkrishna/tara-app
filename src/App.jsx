@@ -4360,8 +4360,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.15-v10.9.21-brti-proxy-removed';
-const TARA_VERSION_DISPLAY='Tara 10.9.21';
+const BASELINE_VERSION='2026.06.16-v10.9.23-oneclick-reconcile-audit-truth';
+const TARA_VERSION_DISPLAY='Tara 10.9.23';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20121,61 +20121,6 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('h2',{className:'font-serif text-lg sm:text-3xl text-white tracking-tight leading-tight'},'Every call ',React.createElement('span',{style:{color:T2_GOLD}},'·'),' her record'),
         ),
         React.createElement('div',{className:'flex flex-wrap items-center gap-1.5'},
-          // V9.9.3: Verify storage — instant in-memory checks for inconsistencies.
-          //   Cheap pass over every entry looking for: missing strike or closingPrice on
-          //   resolved entries, direction-result contradiction (UP with closingGapBps<0
-          //   marked WIN, etc), pending entries older than 30min, missing fgt/qScore
-          //   on entries newer than ~1 day. Surfaces as a count + list. User can review
-          //   and edit individually using the existing edit-entry mechanism.
-          React.createElement('button',{
-            onClick:()=>{
-              const _issues=[];
-              for(const e of taraCallLog){
-                if(!e||!e.id)continue;
-                const _hours=(Date.now()-e.id)/3600000;
-                // Resolved entry missing strike or closingPrice — can't audit
-                if((e.result==='WIN'||e.result==='LOSS')){
-                  if(e.strike==null||e.strike===0)_issues.push({entryId:e.id,kind:'missing-strike',detail:`${e.dir||'?'} marked ${e.result} but strike is missing`});
-                  if(e.closingPrice==null||e.closingPrice===0)_issues.push({entryId:e.id,kind:'missing-close',detail:`${e.dir||'?'} marked ${e.result} but closingPrice is missing`});
-                }
-                // Direction-result contradiction (when we have both prices)
-                if((e.result==='WIN'||e.result==='LOSS')&&typeof e.strike==='number'&&typeof e.closingPrice==='number'&&e.strike>0&&e.closingPrice>0){
-                  const _wonByPrice=e.dir==='UP'?(e.closingPrice>=e.strike):e.dir==='DOWN'?(e.closingPrice<e.strike):null;
-                  if(_wonByPrice!==null){
-                    const _shouldBe=_wonByPrice?'WIN':'LOSS';
-                    if(e.result!==_shouldBe){
-                      _issues.push({entryId:e.id,kind:'mismatch',detail:`${e.dir} strike=$${e.strike.toFixed(0)} → close=$${e.closingPrice.toFixed(0)} should be ${_shouldBe}, marked ${e.result}`,suggested:_shouldBe,suggestedField:'result'});
-                    }
-                  }
-                }
-                // Pending entries older than 30 minutes
-                if(e.result==='pending'&&_hours>0.5){
-                  _issues.push({entryId:e.id,kind:'stuck-pending',detail:`Pending for ${Math.round(_hours)}h — should have resolved`});
-                }
-              }
-              // V9.17.22: per-asset breakdown so user can see immediately
-              //   if a particular asset has 0 logged calls (won't reconcile
-              //   that asset at all in that case).
-              const _byAsset={};
-              for(const e of taraCallLog){
-                const _a=e.asset||'BTC';
-                if(!_byAsset[_a])_byAsset[_a]={total:0,wins:0,losses:0,sat:0,pending:0};
-                _byAsset[_a].total++;
-                if(e.result==='WIN')_byAsset[_a].wins++;
-                else if(e.result==='LOSS')_byAsset[_a].losses++;
-                else if(e.result==='SAT_OUT')_byAsset[_a].sat++;
-                else if(e.result==='pending')_byAsset[_a].pending++;
-              }
-              setReconcileResult({kind:'verify',issues:_issues,checkedAt:Date.now(),total:taraCallLog.length,byAsset:_byAsset});
-            },
-            className:'px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[9px] sm:text-[10px] uppercase tracking-[0.14em] font-bold transition-colors',
-            style:{
-              background:'rgba(229,200,112,0.08)',
-              color:'rgba(229,200,112,0.85)',
-              border:'1px solid rgba(229,200,112,0.25)',
-            },
-            title:'Audit storage for inconsistencies (instant — local checks only)',
-          },'⚠ Verify'),
           // V9.9.3: Reconcile against Kalshi — fetches settled markets for the past 72h
           //   and cross-checks every WIN/LOSS entry against Kalshi's authoritative result.
           //   Discrepancies surface in the result panel with a one-click "apply" suggestion.
@@ -20556,10 +20501,26 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     confident:false,
                   });
                 }
+                // V10.9.23: ONE-CLICK reconcile. Auto-apply the confident Kalshi-ground-truth
+                //   corrections right here so there is no separate 'apply all' step. Confident
+                //   issues come straight from authenticated settlements/fills; _taraApplyReconcile
+                //   marks each manualEdit + rewrites full IDB history (persists, never re-loops).
+                //   Ambiguous items (strike-uncertain / closing-disagrees) stay listed for review.
+                let _autoApplied=0,_applyAttempted=false;
+                const _confidentIssues=_issues.filter(i=>i&&i.confident&&i.entryId&&i.fullUpdate&&Object.keys(i.fullUpdate).length>0);
+                if(_confidentIssues.length>0&&typeof window._taraApplyReconcile==='function'){
+                  _applyAttempted=true;
+                  const _autoMap=new Map();
+                  _confidentIssues.forEach(i=>_autoMap.set(i.entryId,i.fullUpdate));
+                  try{_autoApplied=await window._taraApplyReconcile(_autoMap);}catch(_){_applyAttempted=false;}
+                }
+                const _confidentIds=new Set(_confidentIssues.map(i=>i.entryId));
+                const _remaining=_applyAttempted?_issues.filter(i=>!_confidentIds.has(i.entryId)):_issues;
                 setReconcileResult({
                   kind:'reconcile',
-                  issues:_issues,
+                  issues:_remaining,
                   pendingResolved:_pendingResolved,
+                  autoApplied:_autoApplied,
                   checkedAt:Date.now(),
                   checkedAgainst:_diag.settlementsTotal,
                   matchedEntries:_matchedEntries,
@@ -20567,7 +20528,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   authenticated:_hasAuth,
                   diag:_diag,
                   summary:_hasAuth
-                    ?`Fetched ${_diag.settlementsTotal} settlements, ${_diag.fillsTotal} fills, ${_diag.marketsTotal} markets. Matched ${_matchedEntries} entries. ${_issues.length} updates found.`
+                    ?`Matched ${_matchedEntries} entries · auto-applied ${_autoApplied} correction${_autoApplied===1?'':'s'} from Kalshi${_remaining.length>0?` · ${_remaining.length} need review`:''}.`
                     :'No Kalshi API credentials — add your Key ID and Private Key in Settings to enable full reconcile.',
                 });
               }catch(err){
@@ -44312,14 +44273,37 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       <button
                         onClick={()=>{
                           try{
-                            const _lifecycle=_loadLifecycle();
+                            const _lifecycleRaw=_loadLifecycle();
                             const _audit=_loadAuditBuffer();
+                            // V10.9.23: cross-stamp lifecycle against the REAL call log (ground truth).
+                            //   The in-flight logCall/confirmed recorders only fire on the
+                            //   _logSnapshotEntry path; entries committed via other paths left
+                            //   logCalls empty / logConfirmedAt null, making logged trades look
+                            //   'missing.' If an entry for the window exists in taraCallLog, it
+                            //   WAS logged - mark it so, killing the false 'not logged' alarms.
+                            const _logIndex=new Map();
+                            for(const _e of (taraCallLog||[])){
+                              if(!_e||!_e.windowId)continue;
+                              const _k=_e.windowId+'|'+(_e.asset||'BTC');
+                              if(!_logIndex.has(_k))_logIndex.set(_k,[]);
+                              _logIndex.get(_k).push(_e.result||'pending');
+                            }
+                            const _lifecycle=(_lifecycleRaw||[]).map(r=>{
+                              const _k=(r&&r.wid)+'|'+((r&&r.asset)||'BTC');
+                              const _results=_logIndex.get(_k)||null;
+                              const _logged=!!(_results&&_results.length);
+                              return {...r,loggedInCallLog:_logged,callLogResults:_results,
+                                diagnosis:_logged?'ok-in-calllog':(r&&r.diagnosis)||null,
+                                logConfirmedAt:(r&&r.logConfirmedAt)||(_logged?'(in-calllog)':null)};
+                            });
+                            const _missingCount=_lifecycle.filter(r=>!r.loggedInCallLog&&r.snapshotSets&&r.snapshotSets.length>0).length;
                             const _payload={
                               exportedAt:new Date().toISOString(),
                               baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:'unknown',
+                              trulyMissingWindows:_missingCount,
                               windowLifecycle:_lifecycle,
                               auditEvents:_audit,
-                              note:'V10.7.45 diagnostic export — used to debug missing-log bugs. windowLifecycle tracks every window seen and whether its entry was logged. auditEvents has detailed timing/error info.',
+                              note:'V10.9.23 diagnostic export. loggedInCallLog is cross-checked against the real taraCallLog (ground truth). trulyMissingWindows counts windows that had calls but no matching log entry; 0 means nothing was lost. Empty logCalls/logConfirmedAt with loggedInCallLog=true is just stale in-flight telemetry, not data loss.',
                             };
                             const _json=JSON.stringify(_payload,null,2);
                             const _blob=new Blob([_json],{type:'application/json'});
