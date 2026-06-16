@@ -4360,8 +4360,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.16-v10.9.24-no-drop-heal-outcomedir';
-const TARA_VERSION_DISPLAY='Tara 10.9.24';
+const BASELINE_VERSION='2026.06.16-v10.9.25-lock-display-heal-import';
+const TARA_VERSION_DISPLAY='Tara 10.9.25';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -41120,6 +41120,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _gapDesc=_gapAligned<-10?'opposed':'flat';
           const _sitSnap={
             call:'SIT_OUT',direction:'SIT_OUT',
+            dir:'SIT_OUT',_intendedDir:claimedDir||(_post>=50?'UP':'DOWN'), // V10.9.25: analytics
             confidence:_commitConf,
             caution:`Gap ${_gapDesc} (${_gapAligned.toFixed(0)}pt) in range-chop — directional-lock is ${_gapAligned<-10?'29':'52'}% WR here, sit out (V10.7.97)`,
             reason:`V10.7.97 gap guard: directional-lock needs gap>=10 aligned, got ${_gapAligned.toFixed(0)}pt (${_gapDesc})`,
