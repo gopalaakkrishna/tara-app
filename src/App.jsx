@@ -4360,8 +4360,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.15-v10.9.19-dedup-upgrade-fix';
-const TARA_VERSION_DISPLAY='Tara 10.9.19';
+const BASELINE_VERSION='2026.06.15-v10.9.20-reconcile-persist-merge-fix';
+const TARA_VERSION_DISPLAY='Tara 10.9.20';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -29385,14 +29385,26 @@ function TaraApp(){
     // V8.8.6: asset in dedup key so BTC + ETH coexist for the same windowId
     const _key=(e)=>(e?.asset||'BTC')+'|'+(e?.windowId||'')+'|'+(e?.windowType||'');
     const _shouldReplace=(prev,inc)=>{
+      // V10.9.20 FIX: a manual/reconcile correction is the highest source of truth.
+      //   Bug: reconcile patches an entry IN PLACE (same id), so when both prev and
+      //   inc were "resolved", Rule 2 (keep higher id) saw equal ids → kept the OLD
+      //   pre-correction entry → the reconcile fix reverted on the very next save and
+      //   on reload, and re-reconcile kept finding the same issue. Now: if inc is
+      //   manualEdit and prev is not, inc always wins. If both are manualEdit, the
+      //   newer manualEditedAt wins.
+      const _pm=prev.manualEdit===true, _im=inc.manualEdit===true;
+      if(_im&&!_pm)return true;
+      if(_pm&&!_im)return false;
+      if(_pm&&_im)return(inc.manualEditedAt||0)>=(prev.manualEditedAt||0);
       // Rule 1: resolved beats unresolved always
       if(!prev.result&&inc.result)return true;
       if(prev.result&&!inc.result)return false;
-      // Rule 2: between two resolved entries, keep the newer one (higher id)
-      // V10.7.86c fix: was (inc.id < prev.id) which is BACKWARDS — was keeping older entries
-      if(prev.result&&inc.result)return(inc.id||0)>(prev.id||0);
+      // Rule 2: between two resolved entries, keep the newer one (higher id).
+      //   On equal ids (same entry, no manual edit either side), keep inc so the
+      //   freshest in-memory copy wins rather than a stale cache copy.
+      if(prev.result&&inc.result)return(inc.id||0)>=(prev.id||0);
       // Rule 3: between two unresolved entries, keep the newer one
-      return(inc.id||0)>(prev.id||0);
+      return(inc.id||0)>=(prev.id||0);
     };
     const byKey=new Map();
     (existing||[]).forEach(e=>{
