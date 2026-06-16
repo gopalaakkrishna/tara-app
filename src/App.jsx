@@ -4360,8 +4360,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.15-v10.9.20-reconcile-persist-merge-fix';
-const TARA_VERSION_DISPLAY='Tara 10.9.20';
+const BASELINE_VERSION='2026.06.15-v10.9.21-brti-proxy-removed';
+const TARA_VERSION_DISPLAY='Tara 10.9.21';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -31878,10 +31878,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   },[currentAsset,priceSource]);
 
   // V10.5.1 — CROSS-EXCHANGE BRTI APPROXIMATION
-  //   V10.7.59: Added /api/brti Vercel edge route as PRIMARY source.
-  //   Server-side proxy hits CF Benchmarks official endpoint directly (no CORS).
-  //   Falls back to 4-constituent trimmed mean if proxy unavailable.
-  //   Constituent exchanges (CB/KR/GEM/BS) remain as local browser fallback.
+  //   V10.9.21: server proxy route REMOVED (brti.js deleted from the Vercel
+  //   project). The client-side constituent blend below (CB/KR/OKX/Bybit, hot
+  //   feeds bias-corrected toward the CB/KR anchor) is now the sole BRTI
+  //   reference. It was already the live path (telemetry showed src:3, not the
+  //   proxy), so removing it just stops a dead per-poll fetch that 404'd.
   useEffect(()=>{
     const _cfg=ASSET_CONFIG[currentAsset]||ASSET_CONFIG.BTC;
     const _fetchOne=async(url,parsePrice,name)=>{
@@ -31894,36 +31895,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       }catch(_){return null;}
     };
     const _poll=async()=>{
-      // V10.7.59: Try Vercel proxy first — gets exact CF Benchmarks BRTI server-side
-      try{
-        const _proxyRes=await fetch('/api/brti',{cache:'no-store',signal:AbortSignal.timeout(2000)});
-        if(_proxyRes.ok){
-          const _proxyData=await _proxyRes.json();
-          if(_proxyData.ok&&_proxyData.price&&Number.isFinite(_proxyData.price)&&_proxyData.price>10000){
-            const _p=_proxyData.price;
-            const _now=Date.now();
-            _brtiSamplesRef.current.push({p:_p,t:_now,sources:[_proxyData.source||'cf-proxy']});
-            _brtiSamplesRef.current=_brtiSamplesRef.current.filter(s=>_now-s.t<60000);
-            const _samples=_brtiSamplesRef.current;
-            const _avgPrice=_samples.reduce((s,x)=>s+x.p,0)/_samples.length;
-            const _singlePrice=Number(currentPriceRef.current)||null;
-            const _divBps=(_singlePrice&&_avgPrice)?((_singlePrice-_avgPrice)/_avgPrice)*10000:null;
-            setBrtiApprox({
-              current:Math.round(_avgPrice*100)/100,
-              instant:Math.round((_samples.slice(-5).reduce((s,x)=>s+x.p,0)/Math.min(_samples.length,5))*100)/100,
-              samples60s:_samples.length,
-              sources:[_proxyData.source||'cf-proxy'],
-              sourceCount:1,
-              isExact:_proxyData.source==='cfbenchmarks',
-              hasAnchor:true, // V10.9.10: proxy IS the CF Benchmark — treat as anchored
-              correctedCount:0,
-              divergenceBps:_divBps!=null?Math.round(_divBps*10)/10:null,
-              lastUpdate:_now,
-            });
-            return; // got exact BRTI — skip constituent fallback
-          }
-        }
-      }catch(_){} // proxy failed — fall through to constituent mean
       // ── Constituent fallback (V10.9.10) ──────────────────────────────────
       //   ROOT-CAUSE FIX: the old fallback used Gemini + Bitstamp, whose public
       //   APIs fail CORS from the browser — so this blend almost never reached
