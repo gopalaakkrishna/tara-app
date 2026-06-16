@@ -4360,8 +4360,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.16-v10.9.23-oneclick-reconcile-audit-truth';
-const TARA_VERSION_DISPLAY='Tara 10.9.23';
+const BASELINE_VERSION='2026.06.16-v10.9.24-no-drop-heal-outcomedir';
+const TARA_VERSION_DISPLAY='Tara 10.9.24';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20464,10 +20464,11 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     _updates.resolvedAt=new Date(_best.settled_time).getTime();
                   }
 
-                  // outcomeDir
-                  if(!e.outcomeDir){
-                    _updates.outcomeDir=_wasAbove?'UP':'DOWN';
-                  }
+                  // outcomeDir - V10.9.24: ALWAYS set to match the Kalshi outcome, not
+                  //   just when missing. Leaving a stale outcomeDir that contradicts the
+                  //   corrected result made reconciled entries look 'corrupt' to the
+                  //   cloud-sync filter and get dropped. Keep result<->outcomeDir consistent.
+                  _updates.outcomeDir=_wasAbove?'UP':'DOWN';
 
                   if(Object.keys(_updates).length>0){
                     const _kind=(_updates.result&&e.result!=='WIN'&&e.result!=='LOSS')?'pending-resolve'
@@ -29977,7 +29978,16 @@ function TaraApp(){
           f=_fixAsset(f);
           if(!f)return; // V7.1: legacy SOL/DOGE entry — drop
           f=_autoResolve(f);
-          if(_isCorrupt(f))return; // drop corrupt
+          // V10.9.24: NEVER drop a local entry on cloud sync. The old _isCorrupt drop
+          //   silently deleted hand-corrected trades whose outcomeDir had gone stale
+          //   (result said WIN, outcomeDir still said the losing side) - that was the
+          //   'trades vanish after reconcile/sync' data loss. Heal instead: trust the
+          //   stored result (manual = Kalshi truth; auto = self-consistent) and snap
+          //   outcomeDir to match so the entry stays counted and never re-flags.
+          if((f.result==='WIN'||f.result==='LOSS')&&(f.dir==='UP'||f.dir==='DOWN')){
+            const _wantOD=f.result==='WIN'?f.dir:(f.dir==='UP'?'DOWN':'UP');
+            if(f.outcomeDir&&f.outcomeDir!==_wantOD){f={...f,outcomeDir:_wantOD};changed=true;}
+          }
           byKey.set(_key(f),f);
         });
         d.entries.forEach(raw=>{
