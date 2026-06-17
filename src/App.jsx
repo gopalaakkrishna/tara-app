@@ -343,6 +343,151 @@ const cloudSupabaseRead=async(path)=>{
 //   our own writes back to us. These big docs sync on load + on explicit pull/import
 //   instead; small fast docs (lock state, pnl) keep realtime for cross-device awareness.
 const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','history/pastWindows']);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V11 SELECTIVITY ENGINE — data-driven gate on all directional snap commits.
+//   Basis: 2,736 resolved forward-test trades (live Kalshi, Jun 2026).
+//   Philosophy: remove verified drains, boost confirmed edges, add Kalshi edge
+//     awareness. Hard gates only where data is conclusive (n≥100, WR<60%).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Historical WR by tier (2,736 resolved trades). Used for delta adjustments + gates.
+const _V11_TIER_WR={
+  'no-go-edge':75.8,'tape-led':72.9,'super-confluence':75.0,'user-forced':70.0,
+  'time-cap-commit':62.4,'directional-lock':60.3,'no-go-data':58.9,
+  'patient':55.9,'structural-led':53.8,
+};
+
+// Tiers that are hard-removed (WR < 59%, verified n≥100 or consistent underperform).
+// These become v11-sitout instead of a directional commit.
+const _V11_HARD_GATE_TIERS=new Set(['patient','no-go-data','v10_7_5_force_commit',
+  'edge-sitout','deadzone-sitout','gap-opposed-timecap-sitout','deadzone-hour-sitout',
+  'kalshi-window-closed']);
+
+// Returns EDT hour (0-23) and weekend flag for a Date object.
+const _v11EDTHour=(d=new Date())=>{
+  const edt=new Date(d.toLocaleString('en-US',{timeZone:'America/New_York'}));
+  return{h:edt.getHours(),weekend:edt.getDay()===0||edt.getDay()===6};
+};
+
+// Kalshi edge: how much better is our adjusted posterior vs market pricing?
+// Returns {edge:number|null, label:string, sit:bool, warn:bool, boost:bool}
+const _v11KalshiEdge=(posterior,kalshiAtLock,direction)=>{
+  if(!kalshiAtLock||kalshiAtLock<=0)return{edge:null,label:'no Kalshi price',sit:false,warn:false,boost:false};
+  // kalshiAtLock is the YES price (0-100). For DOWN calls, edge uses the NO side.
+  const mktProb=direction==='UP'?Number(kalshiAtLock):(100-Number(kalshiAtLock));
+  const edge=posterior-mktProb;
+  // If market disagrees strongly: sit out (market has info we don't)
+  if(edge<=-12)return{edge,label:`mkt prices ${mktProb.toFixed(0)}%, our post=${posterior.toFixed(0)}% (-${Math.abs(edge).toFixed(0)}pp edge deficit)`,sit:true,warn:false,boost:false};
+  if(edge<=-6)return{edge,label:`weak Kalshi edge (${edge.toFixed(0)}pp vs market)`,sit:false,warn:true,boost:false};
+  if(edge>=10)return{edge,label:`strong Kalshi edge +${edge.toFixed(0)}pp (mkt mispriced)`,sit:false,warn:false,boost:true};
+  return{edge,label:`Kalshi edge ${edge>=0?'+':''}${edge.toFixed(0)}pp`,sit:false,warn:false,boost:false};
+};
+
+// Session adjustment: known hour/day combinations from historical data.
+const _v11SessionDelta=(h,weekend)=>{
+  if(!weekend){
+    if(h===8)return{delta:-12,label:'WD 08:00 (42% WR hist — US pre-mkt noise)'};
+    if(h<=1)return{delta:-5,label:`WD ${h===0?'00':'01'}:00 (58-60% WR hist)` };
+    if(h===4||h===5)return{delta:+4,label:`WD 0${h}:00 (70% WR hist — Asia quiet trend)` };
+    if(h===17)return{delta:+4,label:'WD 17:00 (70% WR hist — US close momentum)'};
+    if(h===21)return{delta:+4,label:'WD 21:00 (68% WR hist)'};
+  }else{
+    if(h===1)return{delta:+10,label:'WE 01:00 (79% WR hist)'};
+    if(h===8||h===9)return{delta:+8,label:`WE 0${h}:00 (78-80% WR hist)` };
+    if(h===15)return{delta:+7,label:'WE 15:00 (77% WR hist)'};
+    if(h===5||h===6)return{delta:+4,label:`WE 0${h}:00 (71-74% WR hist)` };
+  }
+  return{delta:0,label:null};
+};
+
+// ── MAIN V11 GATE ───────────────────────────────────────────────────────────
+// Called with the snap object before it is committed. Returns:
+//   {allow:true, why, qualityScore, sizeGuidance, kalshiEdge}
+//   {allow:false, reason, category} — caller converts to v11-sitout snap.
+const _v11Gate=(snap)=>{
+  const tier=snap?.tier||'';
+  const conf=Number(snap?.confidence||50);
+  const post=Number(snap?.atPosterior||snap?.confidence||50);
+  const qs=Number(snap?.qScore||0);
+  const dir=snap?.call||snap?.direction||'UP';
+  const regime=snap?.regime||'';
+  const kLock=snap?.kalshiAtLock;
+  const{h,weekend}=_v11EDTHour();
+  const postDev=Math.abs(post-50);
+  const reasons=[];
+  let qualityScore=50;
+
+  // ── HARD TIER GATE ───────────────────────────────────────────────────────
+  if(_V11_HARD_GATE_TIERS.has(tier)){
+    return{allow:false,reason:`${tier} gated (${(_V11_TIER_WR[tier]||55).toFixed(1)}% WR hist, n≥100 — below threshold)`,category:'v11-tier-gate'};
+  }
+
+  // ── STRUCTURAL-LED: soft gate — only high conviction survives ────────────
+  if(tier==='structural-led'){
+    if(conf<70)return{allow:false,reason:`structural-led conf ${conf}% < 70% threshold (53.8% WR tier — only high-conf survives)`,category:'v11-struct-gate'};
+    qualityScore-=10; reasons.push('structural-led (53.8% WR hist)');
+  }
+
+  // ── TIME-CAP-COMMIT: gate on coin-flip posterior ─────────────────────────
+  if(tier==='time-cap-commit'&&postDev<10){
+    return{allow:false,reason:`time-cap coin-flip: post ${post.toFixed(0)}% (only ${postDev.toFixed(0)}pt from 50) — marginal EV`,category:'v11-timecap-gate'};
+  }
+
+  // ── DIRECTIONAL-LOCK: require qScore OR conf signal ──────────────────────
+  if(tier==='directional-lock'&&qs<25&&conf<60){
+    return{allow:false,reason:`directional-lock: qScore ${qs}<25 AND conf ${conf}%<60% — signal quality below threshold`,category:'v11-dlq-gate'};
+  }
+
+  // ── SESSION BLACKOUT / ADJUSTMENT ────────────────────────────────────────
+  const sessAdj=_v11SessionDelta(h,weekend);
+  if(sessAdj.delta<=-10&&postDev<15){
+    return{allow:false,reason:`${sessAdj.label} + low conviction (${postDev.toFixed(0)}pt) — not worth entry`,category:'v11-session-gate'};
+  }
+  if(sessAdj.delta!==0){qualityScore+=sessAdj.delta*0.8;if(sessAdj.label)reasons.push(sessAdj.label);}
+
+  // ── KALSHI EDGE CHECK ────────────────────────────────────────────────────
+  const ke=_v11KalshiEdge(post,kLock,dir);
+  if(ke.sit)return{allow:false,reason:ke.label,category:'v11-kalshi-edge'};
+  if(ke.warn){qualityScore-=12;reasons.push(ke.label);}
+  else if(ke.boost){qualityScore+=10;reasons.push(ke.label);}
+
+  // ── REGIME ADJUSTMENT ────────────────────────────────────────────────────
+  if(regime==='RANGE-CHOP'||regime==='CHOP'){qualityScore-=6;reasons.push('RANGE-CHOP (-6 quality)');}
+  else if(regime==='TRENDING'||regime==='STRONG_TREND'){qualityScore+=5;reasons.push(`${regime} (+5 quality)`);}
+
+  // ── TIER QUALITY ─────────────────────────────────────────────────────────
+  const tierWR=_V11_TIER_WR[tier];
+  if(tierWR){
+    qualityScore+=(tierWR-63)*0.8; // scale deviation from 63% baseline
+    if(tierWR>=73)reasons.push(`${tier} (${tierWR}% WR tier)`);
+  }
+
+  // ── QSCORE BOOST / PENALTY ───────────────────────────────────────────────
+  if(qs>=70){qualityScore+=8;reasons.push(`qScore ${qs} (high quality)`);}
+  else if(qs<20&&tier!=='no-go-edge'){qualityScore-=8;}
+
+  // ── FINAL COIN-FLIP CHECK ────────────────────────────────────────────────
+  if(postDev<7){
+    return{allow:false,reason:`posterior ${post.toFixed(0)}% (${postDev.toFixed(0)}pt from 50) — too close to coin flip`,category:'v11-coinflip'};
+  }
+
+  // ── SIZE GUIDANCE ────────────────────────────────────────────────────────
+  const qClamped=Math.max(0,Math.min(100,qualityScore));
+  const sizeGuidance=qClamped>=72?'FULL':qClamped>=52?'STANDARD':qClamped>=35?'HALF':'QUARTER';
+
+  // ── WHY STRING ───────────────────────────────────────────────────────────
+  const tierLabel=tier==='no-go-edge'?'PRIME':tier==='tape-led'?'STRONG':tier==='super-confluence'?'PRIME':tier==='time-cap-commit'?'LATE':'STD';
+  const why=[
+    `[${tierLabel}] ${post.toFixed(0)}% post · ${conf.toFixed(0)}% conf`,
+    ke.edge!==null?ke.label:null,
+    sessAdj.label,
+    ...reasons.filter(r=>!r.includes(ke.label)&&r!==sessAdj.label),
+  ].filter(Boolean).slice(0,3).join(' · ');
+
+  return{allow:true,qualityScore:qClamped,sizeGuidance,why,kalshiEdge:ke,reasons,tier};
+};
+
 const cloudSupabaseWatch=(path,callback)=>{
   if(!_sbClient||!path||typeof callback!=='function')return ()=>{};
   if(_NO_REALTIME_PATHS.has(path)){
@@ -4388,8 +4533,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.17-v10.9.30-egress-root-locktick';
-const TARA_VERSION_DISPLAY='Tara 10.9.30';
+const BASELINE_VERSION='2026.06.17-v11.1.0-aggressive-gate-htf';
+const TARA_VERSION_DISPLAY='Tara 11.1.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14831,6 +14976,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _border=_isHardOverride?'rgba(244,114,182,0.35)':'rgba(229,200,112,0.28)';
           const _label=_isEdgeWatch?'Edge Watch'
             :snap.wasOverriddenNoTrade?'No-Trade Override'
+            :snap._originalTier?`V11 Gate (was ${snap._originalTier})`
             :snap.wasOverriddenSitOut?'Sit-Out Override'
             :'Caution';
           return(
@@ -14841,6 +14987,31 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             </div>
           );
         })()}
+        {/* V11: quality score + size guidance + WHY for allowed directional calls */}
+        {isLockedSnap&&snap.v11Why&&(
+          <div className="mb-1.5 px-2.5 py-1 rounded flex items-center gap-2 flex-wrap"
+               style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)'}}>
+            {snap.v11Size&&(
+              <span className="text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded"
+                    style={{background:snap.v11Size==='FULL'?'rgba(52,211,153,0.18)':snap.v11Size==='STANDARD'?'rgba(251,191,36,0.15)':snap.v11Size==='HALF'?'rgba(251,146,60,0.15)':'rgba(239,68,68,0.15)',
+                            color:snap.v11Size==='FULL'?'#6ee7b7':snap.v11Size==='STANDARD'?'#fcd34d':snap.v11Size==='HALF'?'#fb923c':'#fca5a5'}}>
+                {snap.v11Size} SIZE
+              </span>
+            )}
+            {snap.v11Quality!=null&&(
+              <span className="text-[9px] opacity-50 font-mono">Q{snap.v11Quality}</span>
+            )}
+            <span className="text-[10px] opacity-60 leading-tight flex-1 min-w-0 truncate">
+              {snap.v11Why}
+            </span>
+            {snap.v11KalshiEdge!=null&&(
+              <span className="text-[9px] font-mono"
+                    style={{color:snap.v11KalshiEdge>=8?'#6ee7b7':snap.v11KalshiEdge<=-5?'#fca5a5':'#94a3b8'}}>
+                K{snap.v11KalshiEdge>=0?'+':''}{snap.v11KalshiEdge.toFixed(0)}
+              </span>
+            )}
+          </div>
+        )}
         {/* V6.2.8: When sitting out, show what direction Tara would have leaned if forced.
              Lets the user see her implicit read even when she's not committing. Helps them
              make their own manual call when they have an external read that disagrees with
