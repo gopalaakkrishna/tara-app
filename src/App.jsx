@@ -344,6 +344,10 @@ const cloudSupabaseRead=async(path)=>{
 //   instead; small fast docs (lock state, pnl) keep realtime for cross-device awareness.
 const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','history/pastWindows']);
 
+// V11.2 live timing recommendation — written by the timing controller each tick,
+//   read by _logSnapshotEntry to stamp committed snaps, and by the card for display.
+let _v112Live={timing:'now',why:'',oddsCeil:null,kForDir:null,at:0};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // V11 SELECTIVITY ENGINE — data-driven gate on all directional snap commits.
 //   Basis: 2,736 resolved forward-test trades (live Kalshi, Jun 2026).
@@ -4533,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.17-v11.1.0-aggressive-gate-htf';
-const TARA_VERSION_DISPLAY='Tara 11.1.0';
+const BASELINE_VERSION='2026.06.17-v11.2.0-dynamic-timing';
+const TARA_VERSION_DISPLAY='Tara 11.2.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4564,7 +4568,7 @@ const V104_ROLLING_WINDOW=200; // Per-cell rolling window for auto-recal
 const USE_V104_1_DELAY_GATE=true;
 const V104_1_KALSHI_EXPENSIVE_THRESHOLD=55; // V10.6.4: was 50 — only truly expensive entries trigger
 const V104_1_CONVICTION_STRONG_THRESHOLD=80; // V10.6.4: was 85 — 80%+ skips the delay
-const V104_1_DEADLINE_SECONDS_LEFT=240; // V10.6.4: was 180 — lock by 4 min remaining (was 3)
+const V104_1_DEADLINE_SECONDS_LEFT=150; // V11.2: was 240 — more patient runway, hard-lock by 2.5min remaining
 
 // V10.6.3 — SLIPPAGE-AWARE EV
 //   Real Kalshi fills cost ~1¢ more than the lock-time YES mid price due to
@@ -15124,6 +15128,21 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               {phaseHint&&<span className="text-[8px] tracking-wider text-[#E8E9E4]/35 hidden sm:inline">· {phaseHint}</span>}
             </div>
           </div>
+          {/* V11.2: dynamic timing recommendation — early / wait / now / late */}
+          {(()=>{
+            const _tm=snap?(snap._v112Timing||null):(taraCall&&taraCall._v112Timing||null);
+            const _tw=snap?(snap._v112Why||null):(taraCall&&taraCall._v112Why||null);
+            if(!_tm&&!_tw)return null;
+            const _tmU=(_tm||'').toUpperCase();
+            const _color=_tm==='wait'?'#E5C870':_tm==='early'?'#6ee7b7':_tm==='late'?'#fb923c':'#a7f3d0';
+            const _icon=_tm==='wait'?'\u23F3':_tm==='early'?'\u26A1':_tm==='late'?'\u23F1':'\u2192';
+            const _verb=_tm==='wait'?'WAIT':_tm==='early'?'LOCK EARLY':_tm==='late'?'LOCK LATE':'LOCK NOW';
+            return React.createElement('div',{className:'flex items-center gap-1.5 mb-1 px-2 py-1 rounded',
+              style:{background:'rgba(255,255,255,0.035)',border:'1px solid rgba(255,255,255,0.07)'}},
+              React.createElement('span',{className:'text-[10px] font-bold tracking-wide shrink-0',style:{color:_color}},`${_icon} ${_verb}`),
+              _tw?React.createElement('span',{className:'text-[10px] opacity-60 leading-tight truncate'},_tw):null
+            );
+          })()}
           <div className="relative h-1.5 bg-[#0E100F] rounded-full overflow-hidden">
             {/* Minute tick markers */}
             {_minMarkers.map((mk,i)=>(
@@ -40256,7 +40275,48 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _expensiveEntry=_kForDir!=null&&_kForDir>=_slippageAdjustedThreshold;
       const _marginalConv=_convNow<V104_1_CONVICTION_STRONG_THRESHOLD;
       const _hasTimeToWait=_secsLeft>V104_1_DEADLINE_SECONDS_LEFT;
-      if(_expensiveEntry&&_marginalConv&&_hasTimeToWait){
+      // ═══════════════════════════════════════════════════════════════════
+      // V11.2 DYNAMIC TIMING CONTROLLER
+      //   Philosophy: call most windows, minimal sit-outs, win through TIMING.
+      //   Early (first ~2m): lock ONLY on strong conviction AND good odds.
+      //   Middle: patient — wait, let tape/momentum clarify.
+      //   Late (<3m): lock when direction clear, accept up to ~72c.
+      //   Final (<75s): accept up to ~80c if price clearly swung our way.
+      //   Replaces the old expensive&&marginal&&time wait condition with a
+      //   phase-aware controller. The hard deadline below still forces a lock.
+      const _winLenSec112=windowType==='15m'?900:300;
+      const _elapsed112=_winLenSec112-_secsLeft;
+      const _isEarly112=_secsLeft>(_winLenSec112-120);   // first 2 min
+      const _isLate112=_secsLeft<=180;                    // last 3 min
+      const _isFinal112=_secsLeft<=75;                    // last ~75s
+      // Conviction bands (confidence is Tara's fused tape+momentum+posterior read)
+      const _convStrong112=_convNow>=75;
+      const _convClear112=_convNow>=62;   // 'momentum clear enough to act'
+      // Odds ceiling by phase — accept worse odds later only when direction is clear
+      const _oddsCeil112=_isFinal112?80:_isLate112?72:_isEarly112?63:68;
+      const _oddsOk112=_kForDir==null||_kForDir<=_oddsCeil112;
+      let _v112Wait=false,_v112Timing='now',_v112Why='';
+      if(_isEarly112){
+        // Early: discipline — strong conviction AND good odds, else be patient.
+        if(_convStrong112&&_oddsOk112){_v112Timing='early';_v112Why=`Early lock: strong ${_convNow.toFixed(0)}% conviction at ${_kForDir!=null?_kForDir.toFixed(0)+'c':'good'} odds`;}
+        else{_v112Wait=true;_v112Timing='wait';_v112Why=_convStrong112?`Patient: conviction strong but ${_kForDir!=null?_kForDir.toFixed(0)+'c':''} odds rich early — wait for price`:`Patient: ${_convNow.toFixed(0)}% conviction building — let price action decide`;}
+      }else if(_isLate112){
+        // Late: lock when direction is clear; accept higher odds. Only a true
+        //   coin-flip into the final seconds is left to park (downstream sit-out).
+        if(_convClear112&&_oddsOk112){_v112Timing=_isFinal112?'late':'now';_v112Why=`${_isFinal112?'Final':'Late'} lock: ${_convNow.toFixed(0)}% conviction, direction clear at ${_kForDir!=null?_kForDir.toFixed(0)+'c':'good'} odds`;}
+        else if(!_convClear112&&_isFinal112){_v112Wait=false;_v112Timing='now';_v112Why=`Undecided coin-flip into final ${_secsLeft}s — marginal`;}
+        else{_v112Wait=true;_v112Timing='wait';_v112Why=`Patient (late): ${_convNow.toFixed(0)}% conviction, waiting for a clear swing`;}
+      }else{
+        // Middle: patient default. Lock only on strong conviction + acceptable odds.
+        if(_convStrong112&&_oddsOk112){_v112Timing='now';_v112Why=`Mid lock: ${_convNow.toFixed(0)}% conviction at ${_kForDir!=null?_kForDir.toFixed(0)+'c':'good'} odds`;}
+        else{_v112Wait=true;_v112Timing='wait';_v112Why=`Patient: letting tape/momentum decide (${_convNow.toFixed(0)}% conviction${_kForDir!=null&&!_oddsOk112?', '+_kForDir.toFixed(0)+'c rich':''})`;}
+      }
+      // Hard deadline always wins — never wait past it.
+      if(!_hasTimeToWait){_v112Wait=false;if(_v112Timing==='wait'){_v112Timing='now';_v112Why=`Deadline lock (${_secsLeft}s left): committing at ${_convNow.toFixed(0)}% conviction`;}}
+      // Expose live timing recommendation on taraCall for the card (during wait).
+      try{tc._v112Timing=_v112Timing;tc._v112Why=_v112Why;tc._v112OddsCeil=_oddsCeil112;tc._v112KForDir=_kForDir;}catch(_){}
+      _v112Live={timing:_v112Timing,why:_v112Why,oddsCeil:_oddsCeil112,kForDir:_kForDir,at:Date.now()};
+      if(_v112Wait){
         // Track delay duration per window
         if(!_v104_1_delayStateRef.current||_v104_1_delayStateRef.current.windowId!==computeWindowId(windowType)){
           _v104_1_delayStateRef.current={windowId:computeWindowId(windowType),ticks:0,firstSeenAt:Date.now(),firstKForDir:_kForDir,firstConv:_convNow,firstDir:_dirNow};
@@ -41399,6 +41459,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _v10_7_6_originalDir:_v107_6.flipped?_v107_6.originalDir:null,
             _v10_7_5_rangeBps:_rangeBps,
             _v10790_gapAligned:_gapAligned,
+            _v112Timing:(_v112Live.at&&Date.now()-_v112Live.at<30000?_v112Live.timing:null),
+            _v112Why:(_v112Live.at&&Date.now()-_v112Live.at<30000?_v112Live.why:null),
           };
           taraCallSnapshotRef.current=_forceSnap;
           _logSnapshotEntry(_forceSnap);
@@ -41718,6 +41780,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               _v10_7_6_revReasons:_v107_6.reasons,
               _v10_7_6_originalDir:_v107_6.flipped?_v107_6.originalDir:null,
               _v10_7_5_rangeBps:_rangeBps,
+              _v112Timing:(_v112Live.at&&Date.now()-_v112Live.at<30000?_v112Live.timing:null),
+              _v112Why:(_v112Live.at&&Date.now()-_v112Live.at<30000?_v112Live.why:null),
             };
             taraCallSnapshotRef.current=_forceSnap;
             _logSnapshotEntry(_forceSnap);
