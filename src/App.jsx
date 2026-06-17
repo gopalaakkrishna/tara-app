@@ -337,8 +337,19 @@ const cloudSupabaseRead=async(path)=>{
 // Subscribe to changes on a specific doc. Returns an unsubscribe function.
 //   Matches cloudWatch signature: callback receives the new data payload.
 //   Uses Supabase Realtime postgres_changes events.
+// V10.9.29 EGRESS: paths in this set skip the live postgres_changes subscription.
+//   Supabase realtime rebroadcasts the ENTIRE row `data` column on every change.
+//   For memory/taraCallLog (~2.6MB) that was ~157MB/day of pure egress just echoing
+//   our own writes back to us. These big docs sync on load + on explicit pull/import
+//   instead; small fast docs (lock state, pnl) keep realtime for cross-device awareness.
+const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','history/pastWindows']);
 const cloudSupabaseWatch=(path,callback)=>{
   if(!_sbClient||!path||typeof callback!=='function')return ()=>{};
+  if(_NO_REALTIME_PATHS.has(path)){
+    // No live subscription — the initial read in cloudWatch already delivered current
+    //   state; further changes are picked up on next load/manual sync. Saves ~50% egress.
+    return ()=>{};
+  }
   let _ch=null;
   try{
     // Channel per path so each subscriber has its own. Supabase auto-merges
@@ -392,6 +403,8 @@ const cloudSupabaseDelete=async(path)=>{
 //   Same per-path debounce as the Firestore version (separate timer map).
 const _sbWriteQueueRMW=new Map();
 const _sbWritePendingRMW=new Map();
+const _sbLastSyncSig=new Map(); // V10.9.29: path -> last successfully-synced signature
+const _sbPendingSig=new Map();  // V10.9.29: path -> signature being written this cycle
 const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
   if(!_sbClient||!path)return;
   if(_sbWriteQueueRMW.has(path))clearTimeout(_sbWriteQueueRMW.get(path));
@@ -400,6 +413,20 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
     _sbWriteQueueRMW.delete(path);
     _sbWritePendingRMW.delete(path);
     if(!_sbClient)return;
+    // V10.9.29 EGRESS: cheap pre-gate for the big log doc. If the local signature
+    //   (entry count + max id) is unchanged since our last successful write, there is
+    //   nothing new to sync - skip the 2.6MB read+write entirely.
+    if(path==='memory/taraCallLog'){
+      try{
+        const _ld=getLocalData();
+        const _arr=Array.isArray(_ld)?_ld:(Array.isArray(_ld&&_ld.entries)?_ld.entries:[]);
+        let _maxId=0,_res=0;
+        for(const e of _arr){if(e){if((e.id||0)>_maxId)_maxId=e.id||0;if(e.result==='WIN'||e.result==='LOSS')_res++;}}
+        const _sig=_arr.length+':'+_maxId+':'+_res;
+        if(_sbLastSyncSig.get(path)===_sig)return; // nothing material changed
+        _sbPendingSig.set(path,_sig);
+      }catch(_){}
+    }
     // Optimistic RMW with retry. 5 attempts matches Firestore default.
     let _attempts=0;
     while(_attempts<5){
@@ -437,6 +464,7 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
             await new Promise(r=>setTimeout(r,50*_attempts));
             continue;
           }
+          if(_sbPendingSig.has(path))_sbLastSyncSig.set(path,_sbPendingSig.get(path)); // V10.9.29
           return; // success
         } else {
           // No existing row — plain insert. If it conflicts (race with another
@@ -4360,8 +4388,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.16-v10.9.28-analytics-see-full-history';
-const TARA_VERSION_DISPLAY='Tara 10.9.28';
+const BASELINE_VERSION='2026.06.17-v10.9.30-egress-root-locktick';
+const TARA_VERSION_DISPLAY='Tara 10.9.30';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34312,6 +34340,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   We restore it anyway — the lock-release effect already running every tick will fire
   //   the appropriate safety release (rugpull/spike/deep-adverse-gap) on the very next tick.
   //   So we honor the historical commitment but let live data invalidate it normally.
+  // V10.9.30: stable "feed is alive" boolean. Flips false->true ONCE when the first
+  //   price arrives and then stays true across ticks, so the lock-watch effect below
+  //   subscribes once per window/asset instead of re-subscribing on every tick.
+  const _priceAlive=!!currentPrice;
   // V7.10.4: REAL-TIME LISTENER. Replaced one-shot cloudRead with cloudWatch so cross-
   //   browser sync actually works. When Browser A locks, Browser B's onSnapshot fires within
   //   ~1s and adopts the snapshot. Path is per-asset+windowType (state/currentLock_BTC_15m
@@ -34329,7 +34361,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // V10.7.85: when Supabase is paused, mark restore complete immediately so
     //   lifecycle commit paths don't wait forever for a cloud read that won't come.
     if(_SB_PAUSED||!_sbClient){_cloudRestoreCompletedRef.current=true;return;}
-    if(!currentPrice||!currentAsset||!windowType)return; // V10.2.0: was _fbDb
+    // V10.9.30 EGRESS ROOT FIX: was `!currentPrice` (state) which changes on EVERY price
+    //   tick (multiple/sec). With currentPrice in deps, this effect re-subscribed the
+    //   Supabase realtime channel + did a fresh cloudRead of the lock doc every tick —
+    //   the dominant egress driver (a GET every 1-3s, all day). Gate on the ref and use a
+    //   stable boolean (_priceAlive) in deps so we subscribe ONCE per window+asset.
+    if(!currentPriceRef.current||!currentAsset||!windowType)return;
     let cancelled=false;
     const expectedWid=computeWindowId(windowType);
     const _expectedAsset=currentAssetRef.current||currentAsset||'BTC';
@@ -34437,7 +34474,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       }
     });
     return()=>{cancelled=true;unsub();};
-  },[currentPrice,windowType,currentAsset]);
+  },[_priceAlive,windowType,currentAsset]);
 
   // ── MAIN ANALYSIS ──
   const analysis=useMemo(()=>{
@@ -43262,14 +43299,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   React.useEffect(()=>{
     if(!_sbClient)return; // V10.2.0: was _fbDb
     let cancelled=false;
-    cloudRead('baseline/canonical').then(d=>{
-      if(cancelled||!d)return;
-      setBaselineMeta({
-        savedAt:Number(d.savedAt)||0,
-        sourceDevice:String(d.sourceDevice||'unknown'),
-        sizes:d.sizes||null,
-      });
-    }).catch(_=>{});
+    // V10.9.30 EGRESS: was cloudRead() which downloads the whole 2.67MB baseline doc
+    //   (it embeds a full copy of the call log) just to show a 'last saved' label.
+    //   Read only the tiny metadata columns from the JSON instead via a narrow select.
+    (async()=>{
+      try{
+        if(!_sbClient)return;
+        const {data:_row}=await _sbClient.from('tara_state')
+          .select('data->savedAt, data->sourceDevice, data->sizes')
+          .eq('doc_path','baseline/canonical').maybeSingle();
+        if(cancelled||!_row)return;
+        setBaselineMeta({
+          savedAt:Number(_row.savedAt)||0,
+          sourceDevice:String(_row.sourceDevice||'unknown'),
+          sizes:_row.sizes||null,
+        });
+      }catch(_){}
+    })();
     return()=>{cancelled=true;};
   },[]);
   const saveAsBaseline=async()=>{
