@@ -4360,8 +4360,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.16-v10.9.26-calendar-time-fallback';
-const TARA_VERSION_DISPLAY='Tara 10.9.26';
+const BASELINE_VERSION='2026.06.16-v10.9.28-analytics-see-full-history';
+const TARA_VERSION_DISPLAY='Tara 10.9.28';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4521,7 +4521,11 @@ const _deduplicateByWindow=(entries)=>{
 // The single canonical scored trade list from a call log array
 const _canonicalTrades=(callLog)=>{
   if(!Array.isArray(callLog)||callLog.length===0)return[];
-  return _deduplicateByWindow(callLog);
+  // V10.9.28: backfill time from id. ~89% of entries never had e.time, so every
+  //   analytics path that filters/sorts on e.time (walk-forward WR, recency weight,
+  //   day/hour cells, P&L curve) was silently seeing only ~11% of history. e.id IS
+  //   the lock timestamp; normalize once here so all downstream readers are whole.
+  return _deduplicateByWindow(callLog).map(e=>(e&&!e.time&&e.id)?{...e,time:e.id}:e);
 };
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -4617,7 +4621,9 @@ const _DOW_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
 function buildDowHourCalibration(callLog){
   if(!Array.isArray(callLog)||callLog.length===0)return null;
-  const resolved=callLog.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&e.time);
+  // V10.9.28: use e.time||e.id (id is the lock timestamp). Was training on ~11% of
+  //   history because ~89% of entries lack e.time; now the day/hour tilt sees them all.
+  const resolved=callLog.filter(e=>e&&(e.result==='WIN'||e.result==='LOSS')&&(e.time||e.id));
   if(resolved.length<50)return null;
   // V10.6.1-style recency weighting (30-day half-life) reused for consistency
   const _HALF_LIFE_DAYS=30;
@@ -4625,10 +4631,11 @@ function buildDowHourCalibration(callLog){
   const _msPerDay=86400000;
   const cells={};
   for(const e of resolved){
-    const _t=new Date(e.time);
+    const _ts=e.time||e.id;
+    const _t=new Date(_ts);
     const _key=_t.getUTCDay()+'-'+_t.getUTCHours();
     if(!cells[_key])cells[_key]={w:0,n:0,wWins:0,wSum:0,pnl:0,wPnl:0};
-    const _ageDays=Math.max(0,(_now-e.time)/_msPerDay);
+    const _ageDays=Math.max(0,(_now-_ts)/_msPerDay);
     const _wt=Math.exp(-_ageDays/_HALF_LIFE_DAYS);
     const k=e.kalshiAtLock||50;
     if(e.result==='WIN'){
@@ -18885,7 +18892,7 @@ function RecentCallsHeatmap({recent,size=14,timeFormat}){
     recent.map((e,i)=>{
       const _w=e.result==='WIN';
       const _bg=_w?'rgba(110,231,183,0.85)':'rgba(244,114,182,0.85)';
-      const _t=e.time?_fmtTimeTz(new Date(e.time),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:false}):'';
+      const _t=(e.time||e.id)?_fmtTimeTz(new Date(e.time||e.id),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:false}):''; // V10.9.28
       return React.createElement('div',{
         key:e.id||i,
         title:`${e.result} · ${e.dir} · ${_t} · ${e.regime||''}`,
@@ -18902,12 +18909,12 @@ function RecentCallsHeatmap({recent,size=14,timeFormat}){
 
 function DailyPnLCurve({todayCalls,height=40}){
   // Build cumulative P&L curve: +1 on WIN, -1 on LOSS
-  const _resolved=(todayCalls||[]).filter(e=>e.result==='WIN'||e.result==='LOSS').sort((a,b)=>a.time-b.time);
+  const _resolved=(todayCalls||[]).filter(e=>e.result==='WIN'||e.result==='LOSS').sort((a,b)=>(a.time||a.id||0)-(b.time||b.id||0)); // V10.9.28
   if(_resolved.length<2){
     return React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/35 italic',style:{height}},'Need at least 2 resolved trades for curve');
   }
   let cum=0;
-  const points=_resolved.map(e=>{cum+=(e.result==='WIN'?1:-1);return{time:e.time,cum};});
+  const points=_resolved.map(e=>{cum+=(e.result==='WIN'?1:-1);return{time:e.time||e.id,cum};}); // V10.9.28
   const minC=Math.min(0,...points.map(p=>p.cum));
   const maxC=Math.max(0,...points.map(p=>p.cum));
   const range=Math.max(1,maxC-minC);
@@ -19843,10 +19850,10 @@ function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,time
                 key:e.id,
                 className:'flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] tabular-nums font-bold',
                 style:{background:c.bg,color:c.fg},
-                title:`${_fmtTime(e.time)} · ${e.regime||'?'} · q${e.qScore||0} · ${e.dir||'?'} ${e.confidence||0}% · ${r}${e.gapBps!=null?` · ${formatSignedInt(e.gapBps)} bps`:''}`,
+                title:`${_fmtTime(e.time||e.id)} · ${e.regime||'?'} · q${e.qScore||0} · ${e.dir||'?'} ${e.confidence||0}% · ${r}${e.gapBps!=null?` · ${formatSignedInt(e.gapBps)} bps`:''}`,
               },
                 React.createElement('span',null,_dirArrow(e.dir)),
-                React.createElement('span',{className:'text-[8px] opacity-70'},_fmtTime(e.time)),
+                React.createElement('span',{className:'text-[8px] opacity-70'},_fmtTime(e.time||e.id)),
                 e.result&&React.createElement('span',{className:'text-[8px]'},r==='WIN'?'✓':r==='LOSS'?'✗':'—'),
               );
             })
@@ -21378,10 +21385,10 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                         const _period=_periodFromWindowId(e.windowId,e.windowType);
                         const _strikeFmt=_fmtPrice(e.strike);
                         const _closeFmt=_fmtPrice(e.closingPrice);
-                        const _timeLabel=new Date(e.time).toLocaleTimeString('en-US',{..._tzOpt,hour:'2-digit',minute:'2-digit',hour12:false});
+                        const _timeLabel=new Date(e.time||e.id).toLocaleTimeString('en-US',{..._tzOpt,hour:'2-digit',minute:'2-digit',hour12:false}); // V10.9.27: id fallback (was 'Invalid Date' on the ~90% of entries with no e.time)
                         const _dirLabel=e.dir==='UP'?'▲ UP':e.dir==='DOWN'?'▼ DOWN':e.dir==='NO_TRADE'?'⊘ NO TRADE':'· SIT OUT';
                         // V7.10.6: Phase badge — backfilled from timestamp if entry lacks session
-                        const _phaseKey=e.phase||(typeof inferPhaseFromTimestamp==='function'?inferPhaseFromTimestamp(e.time):null);
+                        const _phaseKey=e.phase||(typeof inferPhaseFromTimestamp==='function'?inferPhaseFromTimestamp(e.time||e.id):null); // V10.9.27: id fallback
                         const _phaseProfile=_phaseKey&&typeof PHASE_PROFILES!=='undefined'?PHASE_PROFILES[_phaseKey]:null;
                         return(
                         React.createElement('div',{key:e.id,className:'px-2 sm:px-4 py-2.5 sm:py-3 hover:bg-[#E8E9E4]/3 transition-colors overflow-hidden min-w-0 w-full'},
@@ -30961,10 +30968,10 @@ function TaraApp(){
   const todayData=useMemo(()=>{
     const _now=new Date();
     const _todayKey=_fmtDateTz(_now,timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'});
-    const _src=(taraCallLog||[]).filter(e=>e&&e.time&&(e.asset||'BTC')===currentAsset);
+    const _src=(taraCallLog||[]).filter(e=>e&&(e.time||e.id)&&(e.asset||'BTC')===currentAsset); // V10.9.28: id fallback
     // Today only — same calendar day in viewer's selected timezone (V9.7.3)
     const todayCalls=_src.filter(e=>{
-      try{return _fmtDateTz(new Date(e.time),timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'})===_todayKey;}
+      try{return _fmtDateTz(new Date(e.time||e.id),timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'})===_todayKey;}
       catch(_){return false;}
     });
     const wins=todayCalls.filter(e=>e.result==='WIN').length;
@@ -31007,7 +31014,7 @@ function TaraApp(){
     todayCalls.forEach(e=>{
       if(e.result!=='WIN'&&e.result!=='LOSS')return;
       try{
-        const h=new Date(e.time).getUTCHours();
+        const h=new Date(e.time||e.id).getUTCHours(); // V10.9.28
         if(!hourlyBuckets[h])hourlyBuckets[h]={wins:0,losses:0};
         hourlyBuckets[h][e.result==='WIN'?'wins':'losses']+=1;
       }catch(_){}
@@ -31044,7 +31051,7 @@ function TaraApp(){
     });
     // ── V8.2: Per-asset recent-WR for asset-rotation hint ──
     const _otherAsset='BTC';
-    const _recent24h=(taraCallLog||[]).filter(e=>e&&e.time&&(_now.getTime()-e.time)<24*60*60*1000&&(e.result==='WIN'||e.result==='LOSS'));
+    const _recent24h=(taraCallLog||[]).filter(e=>{const _t=e&&(e.time||e.id);return _t&&(_now.getTime()-_t)<24*60*60*1000&&(e.result==='WIN'||e.result==='LOSS');}); // V10.9.28: id fallback
     const _curRecent=_recent24h.filter(e=>(e.asset||'BTC')===currentAsset);
     const _otherRecent=_recent24h.filter(e=>(e.asset||'BTC')===_otherAsset);
     let assetRotation=null;
@@ -43753,8 +43760,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   dollar P&L (which depends on bet sizing settings) — per user request.
       const _now=new Date();
       const _todayKey=_fmtDateTz(_now,timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'});
-      const _src=(taraCallLog||[]).filter(e=>e&&e.time&&(e.asset||'BTC')===currentAsset);
-      const _today=_src.filter(e=>{try{return _fmtDateTz(new Date(e.time),timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'})===_todayKey;}catch(_){return false;}});
+      const _src=(taraCallLog||[]).filter(e=>e&&(e.time||e.id)&&(e.asset||'BTC')===currentAsset); // V10.9.28: id fallback
+      const _today=_src.filter(e=>{try{return _fmtDateTz(new Date(e.time||e.id),timeFormat,{year:'numeric',month:'2-digit',day:'2-digit'})===_todayKey;}catch(_){return false;}});
       const _resolved=_today.filter(e=>e.result==='WIN'||e.result==='LOSS');
       const _evOf=(e)=>{
         const k=e.kalshiAtLock;if(k==null||!Number.isFinite(Number(k)))return null;
