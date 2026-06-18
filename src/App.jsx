@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.17-v11.2.2-wake-lock-resync';
-const TARA_VERSION_DISPLAY='Tara 11.2.2';
+const BASELINE_VERSION='2026.06.18-v11.2.3-ev-gates';
+const TARA_VERSION_DISPLAY='Tara 11.2.3';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -41077,6 +41077,39 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
       }
       //   These capture context the engine doesn't use as signals — needed for
+      // V11.2.3 EV GATES â data-driven sit-out rules from 2,821-trade analysis.
+      //   Rule A: cost 50-60c with no regime stamp â 50% WR, -5.2c EV (n=706).
+      //   Rule B: SHORT SQUEEZE regime â 25% WR, pure noise (n=12).
+      //   Rule C: HTF direction disagrees with call â 40% WR (n=22, when populated).
+      //   All three convert to SIT_OUT in-place so lifecycle/dedup paths are unaffected.
+      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&snapshot.wasOverriddenNoTrade!==true){
+        try{
+          const _g_kal=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock):null;
+          const _g_dir=snapshot.call||snapshot.direction;
+          const _g_regime=snapshot.regime||analysis?.regime||'';
+          const _g_htfDir=snapshot.htfDominantDir||(analysis?.htfDominantDir)||null;
+          const _g_sit=(why)=>{
+            snapshot.call='SIT_OUT';snapshot.wasOverriddenNoTrade=true;
+            snapshot.noGoCategory='v1123-ev-gate';
+            snapshot.caution=`V11.2.3 EV gate: ${why}`;
+          };
+          if(_g_kal!=null&&_g_dir){
+            const _g_cost=_g_dir==='UP'?_g_kal:(100-_g_kal);
+            // Rule A: coin-flip price band with no regime context
+            if(_g_cost>=50&&_g_cost<60&&!_g_regime){
+              _g_sit(`cost ${_g_cost.toFixed(0)}c in 50-60c band, no regime stamp â 54% WR, -5c EV historically`);
+            }
+            // Rule B: SHORT SQUEEZE is untradeable (25% WR)
+            else if(_g_regime==='SHORT SQUEEZE'){
+              _g_sit('SHORT SQUEEZE regime â 25% WR, forced-covering distorts all signals');
+            }
+            // Rule C: HTF direction explicitly opposes call (only when field is populated)
+            else if(_g_htfDir&&_g_htfDir!==_g_dir){
+              _g_sit(`HTF direction ${_g_htfDir} opposes ${_g_dir} call â 40% WR when HTF disagrees`);
+            }
+          }
+        }catch(_ev_gate_err){}
+      }
       //   XGBoost to learn something new beyond what the posterior already encodes.
       //   Fields: abortCount, bbwRank, timeFraction, kalshiVelocity, windowsSinceReset
       // V10.7.86: removed 'snapshot.locked' gate — was preventing ML fields from stamping
