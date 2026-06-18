@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.17-v11.2.1-fast-reconcile';
-const TARA_VERSION_DISPLAY='Tara 11.2.1';
+const BASELINE_VERSION='2026.06.17-v11.2.2-wake-lock-resync';
+const TARA_VERSION_DISPLAY='Tara 11.2.2';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34720,6 +34720,80 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     });
     return()=>{cancelled=true;unsub();};
   },[_priceAlive,windowType,currentAsset]);
+
+  // V11.2.2 BACKGROUND-WAKE LOCK RESYNC.
+  //   Why this exists: a backgrounded/inactive tab has its setInterval decision loop and
+  //   price polls throttled by the browser (>=1/min, frozen on mobile), so it cannot
+  //   compute its own lock on time; AND its Supabase realtime WebSocket can drop while
+  //   hidden, and postgres_changes does NOT replay events missed during the gap. Net
+  //   effect: secondary devices show no call / a late call until a manual Force Resync.
+  //   The live lock-watch effect above will NOT re-fire on foreground because its deps
+  //   (_priceAlive,windowType,currentAsset) don't change when a tab regains focus and
+  //   currentPrice never nulls. So we add a dedicated foreground re-read here.
+  //   On visibilitychange->visible OR window focus: do ONE read of the lock doc and adopt
+  //   via the SAME first-write-wins rule the realtime watch uses. One GET per foreground
+  //   transition (cooldown-guarded), so egress impact is negligible. Purely additive and
+  //   never overrides an earlier local commit, so it cannot corrupt a lock.
+  useEffect(()=>{
+    if(_SB_PAUSED||!_sbClient)return;
+    let _busy=false,_lastAt=0;
+    const _resyncLockOnWake=async()=>{
+      const _now=Date.now();
+      if(_busy||(_now-_lastAt)<1500)return;
+      if(!currentAsset||!windowType)return;
+      _busy=true;_lastAt=_now;
+      try{
+        const path=_lockCloudPath();
+        const d=await cloudSupabaseRead(path);
+        _cloudLockMirrorRef.current=d||null;
+        if(!d)return;
+        const expectedWid=computeWindowId(windowType);
+        if(d.windowId!==expectedWid)return;
+        const _expectedAsset=currentAssetRef.current||currentAsset||'BTC';
+        if(d.windowType&&d.windowType!==windowType)return;
+        if(d.asset&&d.asset!==_expectedAsset)return;
+        const _shouldAdopt=(cloudObj,localObj)=>{
+          if(!cloudObj)return false;
+          const _cWid=cloudObj.windowId||cloudObj.lockedWindowId||null;
+          const _curWid=timeState?.nextWindow||timeState?.startWindow||lastWindowRef.current||null;
+          if(_cWid&&_curWid&&_cWid!==_curWid)return false;
+          if(!localObj)return true;
+          const _cT=Number(cloudObj._committedAt)||0,_lT=Number(localObj._committedAt)||0;
+          if(_cT>0&&_lT===0)return true;
+          if(_cT>0&&_lT>0&&(_cT+1000)<_lT)return true;
+          return false;
+        };
+        let adopted=false;
+        if(d.engineLock&&_shouldAdopt(d.engineLock,lockedCallRef.current)){
+          let _ts=Array.isArray(lockedCallRef.current?.timeSeries)?lockedCallRef.current.timeSeries:null;
+          const _rh=Array.isArray(lockedCallRef.current?.releaseSignalsHistory)?lockedCallRef.current.releaseSignalsHistory:null;
+          if(!_ts||_ts.length===0){try{const _raw=localStorage.getItem('taraLockedTimeSeries_v1');if(_raw){const _sv=JSON.parse(_raw);if(_sv&&Array.isArray(_sv.ts)&&_sv.ts.length>0&&_sv.windowId===d.engineLock?.windowId)_ts=_sv.ts;}}catch(_){}}
+          lockedCallRef.current={...d.engineLock};
+          if(!lockedCallRef.current.windowId&&d.windowId)lockedCallRef.current.windowId=d.windowId;
+          if(_ts&&_ts.length>0)lockedCallRef.current.timeSeries=_ts;
+          if(_rh&&_rh.length>0)lockedCallRef.current.releaseSignalsHistory=_rh;
+          taraAdviceRef.current=d.engineLock.dir==='UP'?'UP - CONFIRMED':'DOWN - CONFIRMED';
+          engineLockedDirRef.current=d.engineLock.dir;
+          adopted=true;
+        }
+        if(d.taraSnapshot&&_shouldAdopt(d.taraSnapshot,taraCallSnapshotRef.current)){
+          taraCallSnapshotRef.current={...d.taraSnapshot};
+          adopted=true;
+        }
+        if(d.taraSamples&&taraCallSampleRef.current&&taraCallSampleRef.current.dir===null&&d.taraSamples.dir){
+          taraCallSampleRef.current={...d.taraSamples};
+          adopted=true;
+        }
+        if(adopted){console.info('[V11.2.2] wake-resync adopted lock from cloud . '+path);setForceRender(p=>p+1);}
+      }catch(e){console.warn('[V11.2.2] wake-resync failed',e?.message);}
+      finally{_busy=false;}
+    };
+    const _onVis=()=>{if(document.visibilityState==='visible')_resyncLockOnWake();};
+    const _onFocus=()=>_resyncLockOnWake();
+    document.addEventListener('visibilitychange',_onVis);
+    window.addEventListener('focus',_onFocus);
+    return()=>{document.removeEventListener('visibilitychange',_onVis);window.removeEventListener('focus',_onFocus);};
+  },[windowType,currentAsset]);
 
   // ── MAIN ANALYSIS ──
   const analysis=useMemo(()=>{
