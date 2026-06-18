@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.18-v11.2.5-weather-live';
-const TARA_VERSION_DISPLAY='Tara 11.2.5';
+const BASELINE_VERSION='2026.06.18-v11.2.6-fight-gate-freshness';
+const TARA_VERSION_DISPLAY='Tara 11.2.6';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34086,7 +34086,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     fetchKalshi();
     // V6.3.1: Expose fetchKalshi via ref so external code (window rollover) can trigger refetches
     triggerKalshiFetchRef.current=fetchKalshi;
-    const iv=setInterval(fetchKalshi,30000);
+    // V11.2.6 - poll 15s (was 30s). kalshiAtLock is stamped from this feed; at 30s the
+    //   lock price could be a full window-move stale, which fed wrong-side fights. 15s
+    //   halves staleness. This is a Vercel-proxy/Kalshi REST call (small JSON), NOT a
+    //   Supabase read, so it does not touch the 5GB Supabase egress cap. True per-second
+    //   live still needs the server-side authed WS proxy (separate build).
+    const iv=setInterval(fetchKalshi,15000);
     // V5.0: Refetch when tab becomes visible again — background tabs can stall the interval
     const onVisible=()=>{if(document.visibilityState==='visible')fetchKalshi();};
     document.addEventListener('visibilitychange',onVisible);
@@ -41558,6 +41563,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   Rule B: SHORT SQUEEZE regime â 25% WR, pure noise (n=12).
       //   Rule C: HTF direction disagrees with call â 40% WR (n=22, when populated).
       //   All three convert to SIT_OUT in-place so lifecycle/dedup paths are unaffected.
+      // V11.2.6 PRICE FRESHNESS STAMP - kalshiAtLock comes from kalshiYesPrice, which
+      //   updates on a 15s REST poll (WS is off; Kalshi requires auth headers the browser
+      //   cannot set). So the stamped price can be up to one poll-cycle stale. We never
+      //   measured this. Stamp the age now so staleness is visible in the log, and so the
+      //   fighting-the-market gate below can refuse to act on a price it cannot trust.
+      let _v1126_priceAgeMs=null;
+      try{
+        const _v1126_asset=currentAssetRef.current||currentAsset||'BTC';
+        const _v1126_lastAt=lastKalshiSuccessRef.current?.[_v1126_asset]?.at||0;
+        if(_v1126_lastAt>0){
+          _v1126_priceAgeMs=Date.now()-_v1126_lastAt;
+          if(snapshot)snapshot.kalshiPriceAgeMs=_v1126_priceAgeMs;
+        }
+      }catch(_v1126_age_err){}
       if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&snapshot.wasOverriddenNoTrade!==true){
         try{
           const _g_kal=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock):null;
@@ -41571,12 +41590,33 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           };
           if(_g_kal!=null&&_g_dir){
             const _g_cost=_g_dir==='UP'?_g_kal:(100-_g_kal);
+            const _g_hasQSignal=(snapshot.qScore!=null&&Number(snapshot.qScore)>=40)||(snapshot.qScoreV2!=null&&Number(snapshot.qScoreV2)>=40);
+            const _g_isTapeTier=snapshot.tier==='tape'||snapshot.tier==='tape-led';
+            // V11.2.6 RULE D - FIGHTING-THE-MARKET GATE.
+            //   Locking the side the Kalshi market prices as the underdog. Last-500 data:
+            //     side WITH market favorite = 70% WR (n=445); AGAINST favorite = 58% WR (n=55).
+            //   Scales with how hard we fight (margin past 50 = 50 - our cost):
+            //     fought 0-5pts  (cost 45-50): 75% WR (n=20) - legit tie-break, KEEP
+            //     fought 5-10pts (cost 40-45): 47% WR (n=17) - BLOCK
+            //     fought 10-15pts(cost 35-40): 50% WR (n=10) - BLOCK
+            //   cost<35 already blocked by the V10.7.82 cost guard above. Rule D covers
+            //   the 35-45c underdog band. Tape-led carved out (order-flow can lead price).
+            const _g_isFightBleed=_g_cost>=35&&_g_cost<45;
+            // V11.2.6 STALE-PRICE GUARD - if the lock price is older than ~40s (a missed
+            //   15s poll) AND we are taking the underdog side at all (cost<50), the gap we
+            //   are reading cannot be trusted. Betting against the favorite on a stale price
+            //   is the exact wrong-side failure mode. Sit out.
+            const _g_stale=_v1126_priceAgeMs!=null&&_v1126_priceAgeMs>40000;
+            if(_g_isFightBleed&&!_g_isTapeTier){
+              _g_sit(`fighting market favorite (our cost ${_g_cost.toFixed(0)}c = underdog by ${(50-_g_cost).toFixed(0)}pts) - 47-50% WR vs 70% with-market`);
+            }
+            else if(_g_stale&&_g_cost<50&&!_g_isTapeTier){
+              _g_sit(`stale Kalshi price (${(_v1126_priceAgeMs/1000).toFixed(0)}s old) on underdog ${_g_dir} (cost ${_g_cost.toFixed(0)}c) - cannot trust gap, sit out`);
+            }
             // Rule A: no-signal 50-60c sit-out.
             //   With regime OR qScore>=40 OR tape tier, 50-60c runs 71-78% WR — take the trade.
             //   With NO regime AND NO qScore AND NOT tape: 54% WR, -5c EV (n=706) — sit out.
-            const _g_hasQSignal=(snapshot.qScore!=null&&Number(snapshot.qScore)>=40)||(snapshot.qScoreV2!=null&&Number(snapshot.qScoreV2)>=40);
-            const _g_isTapeTier=snapshot.tier==='tape'||snapshot.tier==='tape-led';
-            if(_g_cost>=50&&_g_cost<60&&!_g_regime&&!_g_hasQSignal&&!_g_isTapeTier){
+            else if(_g_cost>=50&&_g_cost<60&&!_g_regime&&!_g_hasQSignal&&!_g_isTapeTier){
               _g_sit(`cost ${_g_cost.toFixed(0)}c in 50-60c band, no regime/qScore/tape signal — 54% WR, -5c EV when blind`);
             }
             // Rule B: SHORT SQUEEZE is untradeable (25% WR)
