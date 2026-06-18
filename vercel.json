@@ -5,6 +5,18 @@
       "destination": "https://api.elections.kalshi.com/trade-api/v2/:path*"
     },
     {
+      "source": "/api/kalshi-public/:path*",
+      "destination": "https://external-api.kalshi.com/trade-api/v2/:path*"
+    },
+    {
+      "source": "/api/openmeteo/:path*",
+      "destination": "https://api.open-meteo.com/v1/:path*"
+    },
+    {
+      "source": "/api/nws/:path*",
+      "destination": "https://api.weather.gov/:path*"
+    },
+    {
       "source": "/api/news",
       "destination": "https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Fwww.coindesk.com%2Farc%2Foutboundfeeds%2Frss%2F"
     },
