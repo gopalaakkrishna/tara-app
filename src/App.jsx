@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.18-v11.2.3-ev-gates';
-const TARA_VERSION_DISPLAY='Tara 11.2.3';
+const BASELINE_VERSION='2026.06.18-v11.2.3b-ev-gates-refined';
+const TARA_VERSION_DISPLAY='Tara 11.2.3b';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -41095,9 +41095,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           };
           if(_g_kal!=null&&_g_dir){
             const _g_cost=_g_dir==='UP'?_g_kal:(100-_g_kal);
-            // Rule A: coin-flip price band with no regime context
-            if(_g_cost>=50&&_g_cost<60&&!_g_regime){
-              _g_sit(`cost ${_g_cost.toFixed(0)}c in 50-60c band, no regime stamp â 54% WR, -5c EV historically`);
+            // Rule A: no-signal 50-60c sit-out.
+            //   With regime OR qScore>=40 OR tape tier, 50-60c runs 71-78% WR — take the trade.
+            //   With NO regime AND NO qScore AND NOT tape: 54% WR, -5c EV (n=706) — sit out.
+            const _g_hasQSignal=(snapshot.qScore!=null&&Number(snapshot.qScore)>=40)||(snapshot.qScoreV2!=null&&Number(snapshot.qScoreV2)>=40);
+            const _g_isTapeTier=snapshot.tier==='tape'||snapshot.tier==='tape-led';
+            if(_g_cost>=50&&_g_cost<60&&!_g_regime&&!_g_hasQSignal&&!_g_isTapeTier){
+              _g_sit(`cost ${_g_cost.toFixed(0)}c in 50-60c band, no regime/qScore/tape signal — 54% WR, -5c EV when blind`);
             }
             // Rule B: SHORT SQUEEZE is untradeable (25% WR)
             else if(_g_regime==='SHORT SQUEEZE'){
