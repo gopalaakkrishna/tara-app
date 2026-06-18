@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.18-v11.2.3b-ev-gates-refined';
-const TARA_VERSION_DISPLAY='Tara 11.2.3b';
+const BASELINE_VERSION='2026.06.18-v11.2.4-weather-tab';
+const TARA_VERSION_DISPLAY='Tara 11.2.4';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -24114,6 +24114,224 @@ function ChartBottomCard({mobileTab,resolution,setResolution,asset,priceSource})
 }
 
 // ── V111: MobileTabBar - 4 tabs: signal/projections/logs/chart ──
+
+// ── V11.2.3b WEATHER TAB ─────────────────────────────────────────────────────
+//   Standalone Kalshi weather prediction tracker. Completely independent of BTC.
+//   Same discipline: add a market, enter your read, LOCK it, mark WIN/LOSS on
+//   settlement. EV tracked per market type exactly like the BTC call log.
+function WeatherTab({weatherLog,setWeatherLog,weatherDraft,setWeatherDraft}){
+  const[locked,setLocked]=React.useState(null); // {id, market, yesPrice, myRead, notes, lockedAt}
+  const[filter,setFilter]=React.useState('all'); // 'all' | 'pending' | 'resolved'
+
+  const MTYPE=(market)=>{
+    const m=(market||'').toLowerCase();
+    if(m.includes('temp')||m.includes('\u00b0')||m.includes('high')||m.includes('low'))return'temp';
+    if(m.includes('rain')||m.includes('snow')||m.includes('precip'))return'precip';
+    if(m.includes('hurricane')||m.includes('storm')||m.includes('cyclone'))return'storm';
+    return'other';
+  };
+  const MCOLOR={temp:'rgb(251,191,36)',precip:'rgb(96,165,250)',storm:'rgb(244,114,182)',other:'rgb(110,231,183)'};
+  const MLABEL={temp:'TEMP',precip:'PRECIP',storm:'STORM',other:'OTHER'};
+
+  const addLock=()=>{
+    const{market,yesPrice,myRead,notes}=weatherDraft;
+    if(!market.trim()||!myRead)return;
+    const entry={
+      id:Date.now(),
+      market:market.trim(),
+      yesPrice:parseFloat(yesPrice)||null,
+      myRead, // 'YES' | 'NO'
+      notes:notes.trim(),
+      lockedAt:Date.now(),
+      result:null, // null=pending, 'WIN', 'LOSS'
+      settledAt:null,
+    };
+    const next=[entry,...weatherLog];
+    setWeatherLog(next);
+    try{localStorage.setItem('taraWeatherLog_v1',JSON.stringify(next.slice(0,500)));}catch(_){}
+    setWeatherDraft({market:'',yesPrice:'',myRead:'',notes:''});
+  };
+
+  const settle=(id,result)=>{
+    const next=weatherLog.map(e=>e.id===id?{...e,result,settledAt:Date.now()}:e);
+    setWeatherLog(next);
+    try{localStorage.setItem('taraWeatherLog_v1',JSON.stringify(next.slice(0,500)));}catch(_){}
+  };
+
+  const del=(id)=>{
+    const next=weatherLog.filter(e=>e.id!==id);
+    setWeatherLog(next);
+    try{localStorage.setItem('taraWeatherLog_v1',JSON.stringify(next.slice(0,500)));}catch(_){}
+  };
+
+  const resolved=weatherLog.filter(e=>e.result==='WIN'||e.result==='LOSS');
+  const pending=weatherLog.filter(e=>!e.result);
+  const wr=resolved.length?Math.round(100*resolved.filter(e=>e.result==='WIN').length/resolved.length):null;
+
+  // EV by type
+  const evByType={};
+  resolved.forEach(e=>{
+    const t=MTYPE(e.market);
+    if(!evByType[t])evByType[t]={w:0,l:0,totalCost:0};
+    if(e.result==='WIN')evByType[t].w++;else evByType[t].l++;
+    if(e.myRead==='YES'&&e.yesPrice)evByType[t].totalCost+=e.yesPrice;
+    else if(e.myRead==='NO'&&e.yesPrice)evByType[t].totalCost+=(100-e.yesPrice);
+  });
+
+  const display=filter==='pending'?pending:filter==='resolved'?resolved:weatherLog;
+
+  return React.createElement('div',{className:'flex flex-col gap-3 w-full min-h-0'},
+
+    // ── stats bar ──
+    React.createElement('div',{className:'flex items-center gap-2 flex-wrap shrink-0'},
+      React.createElement('div',{className:'flex items-center gap-2 bg-[#181A19] border border-[#E8E9E4]/10 rounded-xl px-3 py-2'},
+        React.createElement('span',{className:'text-xs text-[#E8E9E4]/40 uppercase tracking-wider font-bold'},'WR'),
+        React.createElement('span',{className:'text-lg font-serif font-bold',style:{color:wr===null?'#E8E9E4':wr>=60?'rgb(110,231,183)':'rgb(244,114,182)'}},
+          wr===null?'—':wr+'%'),
+        React.createElement('span',{className:'text-[10px] text-[#E8E9E4]/30'},`${resolved.length} settled`)
+      ),
+      React.createElement('div',{className:'flex items-center gap-2 bg-[#181A19] border border-[#E8E9E4]/10 rounded-xl px-3 py-2'},
+        React.createElement('span',{className:'text-xs text-[#E8E9E4]/40 uppercase tracking-wider font-bold'},'PENDING'),
+        React.createElement('span',{className:'text-lg font-serif font-bold text-amber-400'},pending.length)
+      ),
+      // per-type WR pills
+      ...Object.entries(evByType).map(([t,d])=>{
+        const n=d.w+d.l; const twr=Math.round(100*d.w/n);
+        const avgCost=n>0?d.totalCost/n:0;
+        const ev=twr-avgCost;
+        return React.createElement('div',{key:t,className:'flex items-center gap-1.5 bg-[#181A19] border border-[#E8E9E4]/10 rounded-xl px-3 py-2'},
+          React.createElement('span',{className:'text-[10px] font-bold px-1.5 py-0.5 rounded',style:{background:MCOLOR[t]+'22',color:MCOLOR[t],border:'1px solid '+MCOLOR[t]+'44'}},MLABEL[t]),
+          React.createElement('span',{className:'text-sm font-bold',style:{color:twr>=60?'rgb(110,231,183)':'rgb(244,114,182)'}},twr+'%'),
+          React.createElement('span',{className:'text-[10px]',style:{color:ev>0?'rgb(110,231,183)':'rgb(244,114,182)'}},(ev>0?'+':'')+ev.toFixed(1)+'c EV')
+        );
+      })
+    ),
+
+    // ── add market card ──
+    React.createElement('div',{className:'bg-[#181A19] border border-[#E8E9E4]/10 rounded-xl p-4 shrink-0'},
+      React.createElement('div',{className:'text-xs uppercase tracking-widest font-bold text-[#E8E9E4]/40 mb-3'},'Add Market'),
+      React.createElement('div',{className:'flex flex-col sm:flex-row gap-2'},
+        React.createElement('input',{
+          value:weatherDraft.market,
+          onChange:e=>setWeatherDraft(p=>({...p,market:e.target.value})),
+          placeholder:'Market name  e.g. NYC High Temp Jun 18 · 85-86\u00b0F',
+          className:'flex-1 bg-[#111312] border border-[#E8E9E4]/15 rounded-lg px-3 py-2 text-sm text-[#E8E9E4] placeholder-[#E8E9E4]/20 focus:outline-none focus:border-indigo-500/50',
+        }),
+        React.createElement('input',{
+          value:weatherDraft.yesPrice,
+          onChange:e=>setWeatherDraft(p=>({...p,yesPrice:e.target.value})),
+          placeholder:'YES price (\u00a2)',
+          type:'number',min:1,max:99,
+          className:'w-28 bg-[#111312] border border-[#E8E9E4]/15 rounded-lg px-3 py-2 text-sm text-[#E8E9E4] placeholder-[#E8E9E4]/20 focus:outline-none focus:border-indigo-500/50',
+        })
+      ),
+      React.createElement('div',{className:'flex items-center gap-2 mt-2'},
+        React.createElement('span',{className:'text-xs text-[#E8E9E4]/40 font-bold uppercase tracking-wider'},'My read:'),
+        React.createElement('button',{
+          onClick:()=>setWeatherDraft(p=>({...p,myRead:'YES'})),
+          className:'px-4 py-1.5 rounded-lg text-sm font-bold border transition-all '+(weatherDraft.myRead==='YES'?'bg-emerald-500/25 text-emerald-300 border-emerald-500/50':'border-[#E8E9E4]/15 text-[#E8E9E4]/40 hover:text-emerald-300'),
+        },'YES'),
+        React.createElement('button',{
+          onClick:()=>setWeatherDraft(p=>({...p,myRead:'NO'})),
+          className:'px-4 py-1.5 rounded-lg text-sm font-bold border transition-all '+(weatherDraft.myRead==='NO'?'bg-rose-500/25 text-rose-300 border-rose-500/50':'border-[#E8E9E4]/15 text-[#E8E9E4]/40 hover:text-rose-300'),
+        },'NO'),
+        React.createElement('input',{
+          value:weatherDraft.notes,
+          onChange:e=>setWeatherDraft(p=>({...p,notes:e.target.value})),
+          placeholder:'Notes (optional)',
+          className:'flex-1 bg-[#111312] border border-[#E8E9E4]/15 rounded-lg px-3 py-2 text-sm text-[#E8E9E4] placeholder-[#E8E9E4]/20 focus:outline-none focus:border-indigo-500/50',
+        }),
+        React.createElement('button',{
+          onClick:addLock,
+          disabled:!weatherDraft.market.trim()||!weatherDraft.myRead,
+          className:'px-5 py-2 rounded-lg text-sm font-bold uppercase tracking-wide border transition-all disabled:opacity-30 disabled:cursor-not-allowed',
+          style:{background:'rgba(212,175,55,0.15)',color:'#E5C870',border:'1px solid rgba(212,175,55,0.35)'},
+        },'\uD83D\uDD12 LOCK')
+      )
+    ),
+
+    // ── filter row + log ──
+    React.createElement('div',{className:'flex items-center gap-2 shrink-0'},
+      ['all','pending','resolved'].map(f=>
+        React.createElement('button',{key:f,onClick:()=>setFilter(f),
+          className:'px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all '+(filter===f?'bg-indigo-500/20 text-indigo-300 border-indigo-500/40':'text-[#E8E9E4]/30 border-[#E8E9E4]/10 hover:text-[#E8E9E4]/60')
+        },f==='all'?`ALL (${weatherLog.length})`:f==='pending'?`PENDING (${pending.length})`:`SETTLED (${resolved.length})`)
+      )
+    ),
+
+    // ── entries list ──
+    React.createElement('div',{className:'flex flex-col gap-2 overflow-y-auto'},
+      display.length===0&&React.createElement('div',{className:'text-center py-12 text-[#E8E9E4]/20 text-sm'},'No markets yet — add one above'),
+      ...display.map(e=>{
+        const isPending=!e.result;
+        const isWin=e.result==='WIN';
+        const isLoss=e.result==='LOSS';
+        const mt=MTYPE(e.market);
+        const cost=e.myRead==='YES'?e.yesPrice:(e.yesPrice!=null?100-e.yesPrice:null);
+        const ev=e.result&&cost!=null?(e.result==='WIN'?100-cost:-cost):null;
+        const borderColor=isPending?'rgba(232,233,228,0.1)':isWin?'rgba(110,231,183,0.3)':'rgba(244,114,182,0.3)';
+        const bg=isPending?'#181A19':isWin?'rgba(110,231,183,0.04)':'rgba(244,114,182,0.04)';
+        return React.createElement('div',{key:e.id,
+          className:'rounded-xl border p-3 flex flex-col sm:flex-row sm:items-center gap-3',
+          style:{background:bg,borderColor}},
+
+          // type badge + market name
+          React.createElement('div',{className:'flex items-start gap-2 flex-1 min-w-0'},
+            React.createElement('span',{className:'shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded mt-0.5',
+              style:{background:MCOLOR[mt]+'22',color:MCOLOR[mt],border:'1px solid '+MCOLOR[mt]+'44'}},MLABEL[mt]),
+            React.createElement('div',{className:'min-w-0'},
+              React.createElement('div',{className:'text-sm font-bold text-[#E8E9E4] leading-snug truncate'},e.market),
+              React.createElement('div',{className:'text-[10px] text-[#E8E9E4]/40 mt-0.5'},
+                e.notes||('\u2014'),
+                e.lockedAt?' \u00b7 locked '+new Date(e.lockedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''
+              )
+            )
+          ),
+
+          // my read + cost + EV
+          React.createElement('div',{className:'flex items-center gap-2 shrink-0'},
+            React.createElement('span',{
+              className:'text-xs font-bold px-2.5 py-1 rounded-lg border',
+              style:{
+                background:e.myRead==='YES'?'rgba(110,231,183,0.15)':'rgba(244,114,182,0.15)',
+                color:e.myRead==='YES'?'rgb(110,231,183)':'rgb(244,114,182)',
+                borderColor:e.myRead==='YES'?'rgba(110,231,183,0.3)':'rgba(244,114,182,0.3)'
+              }
+            },e.myRead+(cost!=null?' \u00b7 '+cost.toFixed(0)+'\u00a2':'')),
+            ev!=null&&React.createElement('span',{
+              className:'text-xs font-bold',
+              style:{color:ev>0?'rgb(110,231,183)':'rgb(244,114,182)'}
+            },(ev>0?'+':'')+ev.toFixed(0)+'c')
+          ),
+
+          // settle buttons or result badge
+          isPending
+            ?React.createElement('div',{className:'flex items-center gap-1.5 shrink-0'},
+                React.createElement('button',{onClick:()=>settle(e.id,'WIN'),
+                  className:'px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/40 text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 transition-all'},'WIN'),
+                React.createElement('button',{onClick:()=>settle(e.id,'LOSS'),
+                  className:'px-3 py-1.5 rounded-lg text-xs font-bold border border-rose-500/40 text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 transition-all'},'LOSS'),
+                React.createElement('button',{onClick:()=>del(e.id),
+                  className:'px-2 py-1.5 rounded-lg text-xs text-[#E8E9E4]/20 hover:text-rose-400 border border-[#E8E9E4]/10 transition-all'},'\u2715')
+              )
+            :React.createElement('div',{className:'flex items-center gap-1.5 shrink-0'},
+                React.createElement('span',{
+                  className:'px-3 py-1 rounded-lg text-xs font-bold border',
+                  style:{
+                    background:isWin?'rgba(110,231,183,0.2)':'rgba(244,114,182,0.2)',
+                    color:isWin?'rgb(110,231,183)':'rgb(244,114,182)',
+                    borderColor:isWin?'rgba(110,231,183,0.4)':'rgba(244,114,182,0.4)',
+                  }
+                },e.result),
+                React.createElement('button',{onClick:()=>del(e.id),
+                  className:'px-2 py-1.5 rounded-lg text-xs text-[#E8E9E4]/20 hover:text-rose-400 border border-[#E8E9E4]/10 transition-all'},'\u2715')
+              )
+        );
+      })
+    )
+  );
+}
+
 function MobileTabBar({mobileTab,setMobileTab,setShowBrain,setShowStats}){
   const tabs=[
     {id:'signal',label:'SIGNAL'},
@@ -28630,6 +28848,13 @@ function TaraApp(){
   // V138: Clean up stale Premium Mode localStorage entry from previous installs
   useEffect(()=>{try{localStorage.removeItem('taraPremiumMode');}catch(e){}},[]);
   const[mobileTab,setMobileTab]=useState('signal'); // signal | chart | logs
+  const[activeMode,setActiveMode]=useState('trading'); // 'trading' | 'weather'
+  const[weatherLog,setWeatherLog]=useState(()=>{
+    try{const r=localStorage.getItem('taraWeatherLog_v1');return r?JSON.parse(r):[]; }catch(_){return[];}
+  });
+  const[weatherDraft,setWeatherDraft]=useState({
+    market:'',yesPrice:'',myRead:'',notes:''
+  });
   // V9.16: New simplified default layout. simpleMode=true shows the new
   //   Overview layout (call + coach + chart + session bar). simpleMode=false
   //   shows the V9.15 legacy layout exactly as before — failsafe during the
@@ -44614,6 +44839,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               })}
             </div>
 
+            {/* WEATHER TAB TOGGLE */}
+            <button onClick={()=>setActiveMode(m=>m==='weather'?'trading':'weather')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wide border transition-all ${activeMode==='weather'?'bg-sky-500/20 text-sky-300 border-sky-500/40':'border-[#E8E9E4]/15 text-[#E8E9E4]/40 hover:text-sky-300 hover:border-sky-500/30'}`}
+              title='Weather prediction markets'
+            >
+              <span>⛅</span>
+              <span className='hidden sm:inline'>WEATHER</span>
+            </button>
             {/* 5m / 15m */}
             <div className={'flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0'}>
               <button onClick={()=>handleWindowToggle('5m')} className={`px-2.5 sm:px-4 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='5m'?'bg-indigo-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>5m</button>
@@ -45663,6 +45896,26 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   with no awkward intermediate stage. Tablet users get cleaner stacked layout. */}
         {/* V8.4: min-w-0 on grid + columns prevents content overflow from forcing
             the grid to stretch wider than viewport. auto-rows-fr keeps cols same height. */}
+        {/* V11.2.3b: WEATHER MODE — replaces main grid when active */}
+        {activeMode==='weather'&&(
+          <div className='flex flex-col gap-3 flex-1 min-h-0'>
+            <div className='flex items-center gap-2 shrink-0'>
+              <span className='text-base font-serif text-[#E8E9E4]/80'>⛅ Weather Markets</span>
+              <span className='text-[10px] text-[#E8E9E4]/30 font-bold uppercase tracking-wider'>Kalshi prediction tracker</span>
+              <button onClick={()=>setActiveMode('trading')} className='ml-auto text-[10px] text-[#E8E9E4]/30 hover:text-[#E8E9E4]/70 border border-[#E8E9E4]/10 px-2 py-1 rounded-lg transition-all'>
+                ← back to BTC
+              </button>
+            </div>
+            <WeatherTab
+              weatherLog={weatherLog}
+              setWeatherLog={setWeatherLog}
+              weatherDraft={weatherDraft}
+              setWeatherDraft={setWeatherDraft}
+            />
+          </div>
+        )}
+        {activeMode==='trading'&&(
+        <>
         <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0 pb-16 lg:pb-0">
           
           {/* ── PREDICTION CARD ── */}
@@ -45970,6 +46223,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
         <ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution} asset={currentAsset} priceSource={priceSource}/>
+        </>
+        )}
 
       {/* ── FLOW INTELLIGENCE PANEL ── */}
       <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState} timeFormat={timeFormat}/>
