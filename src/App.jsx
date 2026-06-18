@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.17-v11.2.0-dynamic-timing';
-const TARA_VERSION_DISPLAY='Tara 11.2.0';
+const BASELINE_VERSION='2026.06.17-v11.2.1-fast-reconcile';
+const TARA_VERSION_DISPLAY='Tara 11.2.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20478,9 +20478,51 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   return st>=_minLogTime&&st<=_maxLogTime;
                 });
 
-                // Fetch individual markets for settlement tickers (most accurate — your actual positions)
-                const _tickersToFetch=Array.from(new Set(_relevantSettlements.map(s=>s.ticker)));
-                const _BATCH=10; // parallel batches of 10
+                // V11.2.1 FAST RECONCILE: only fetch markets for windows that still
+                //   need data. An entry is COMPLETE when it has a settled result AND a
+                //   strike AND a closing price — re-fetching those markets is the
+                //   dominant cost on re-runs and changes nothing. WIN/LOSS ground truth
+                //   for ALL windows still comes from the (already-fetched, free)
+                //   settlements list, so mismatch detection is unaffected for the
+                //   windows we do fetch. Build the set of incomplete window-close
+                //   buckets (mirroring the matcher's bucket key) and only fetch tickers
+                //   whose settled_time lands in (or adjacent to) an incomplete bucket.
+                const _winMsFor=(wt)=>wt==='5m'?300000:900000;
+                const _incompleteBuckets=new Set();
+                for(const e of taraCallLog){
+                  if(!e||!e.id)continue;
+                  if(e.dir!=='UP'&&e.dir!=='DOWN')continue;
+                  const _wt=e.windowType||'15m';
+                  const _wm=_winMsFor(_wt);
+                  const _complete=(e.result==='WIN'||e.result==='LOSS')&&Number(e.strike)>0&&Number(e.closingPrice)>0;
+                  if(_complete)continue;
+                  let _close=null;
+                  if(typeof e.windowId==='string'&&e.windowId.includes('-')){
+                    try{const _ts=new Date(e.windowId.slice(e.windowId.indexOf('-')+1)).getTime();if(Number.isFinite(_ts)&&_ts>0)_close=_ts+_wm;}catch(_){}
+                  }
+                  if(_close==null)_close=Math.ceil(e.id/_wm)*_wm;
+                  const _b=Math.round(_close/_wm)*_wm;
+                  // include the bucket and its two neighbours so settled_time skew
+                  //   can never drop a ticker a pending entry needs
+                  _incompleteBuckets.add(_wt+'|'+_b);
+                  _incompleteBuckets.add(_wt+'|'+(_b+_wm));
+                  _incompleteBuckets.add(_wt+'|'+(_b-_wm));
+                }
+                _diag.incompleteBuckets=_incompleteBuckets.size;
+                const _settleBucketKey=(s)=>{
+                  const wt=/15M/.test(s.ticker||'')?'15m':'5m';
+                  const wm=_winMsFor(wt);
+                  const st=new Date(s.settled_time||0).getTime();
+                  return wt+'|'+(Math.round(st/wm)*wm);
+                };
+                // Fetch individual markets ONLY for settlements mapping to incomplete windows.
+                const _needFetch=_incompleteBuckets.size>0
+                  ? _relevantSettlements.filter(s=>_incompleteBuckets.has(_settleBucketKey(s)))
+                  : [];
+                const _tickersToFetch=Array.from(new Set(_needFetch.map(s=>s.ticker)));
+                _diag.tickersToFetch=_tickersToFetch.length;
+                _diag.tickersSkipped=Array.from(new Set(_relevantSettlements.map(s=>s.ticker))).length-_tickersToFetch.length;
+                const _BATCH=20; // V11.2.1: parallel batches of 20 (was 10)
                 for(let i=0;i<_tickersToFetch.length;i+=_BATCH){
                   const batch=_tickersToFetch.slice(i,i+_BATCH);
                   await Promise.all(batch.map(async ticker=>{
@@ -20506,9 +20548,22 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   }));
                 }
 
-                // Path B: also try bulk series query for any entries missing from settlements
-                // This catches windows where Tara locked but settlement isn't in your portfolio
-                if(_hasAuth){
+                // Path B: bulk series query for windows Tara locked but that aren't in
+                //   your settlements. V11.2.1: only run when incomplete buckets remain
+                //   UNCOVERED after Path A. On a fully-reconciled log this is skipped
+                //   entirely — Path B was up to 60 sequential signed fetches every run.
+                const _coveredBuckets=new Set();
+                for(const [,mk] of _marketByTicker){
+                  if(!mk.close_time)continue;
+                  const wm=mk.windowType==='5m'?300000:900000;
+                  _coveredBuckets.add(mk.windowType+'|'+(Math.round(mk.close_time/wm)*wm));
+                }
+                let _uncoveredIncomplete=0;
+                for(const b of _incompleteBuckets){if(!_coveredBuckets.has(b))_uncoveredIncomplete++;}
+                _diag.uncoveredIncomplete=_uncoveredIncomplete;
+                const _runPathB=_hasAuth&&_incompleteBuckets.size>0&&_uncoveredIncomplete>0;
+                _diag.pathBRan=_runPathB;
+                if(_runPathB){
                   for(const _series of ['KXBTC15M','KXBTC5M']){
                     let _mcursor=null;
                     for(let _p=0;_p<30;_p++){
