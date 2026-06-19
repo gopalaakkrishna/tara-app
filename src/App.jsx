@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.19-v12.5.0-early-lock';
-const TARA_VERSION_DISPLAY='Tara 12.5';
+const BASELINE_VERSION='2026.06.19-v12.6.0-early-lock-fix';
+const TARA_VERSION_DISPLAY='Tara 12.6';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -21031,7 +21031,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','feedAtLock','lockLatencySec','windowTypeTransitions','windowTypeChanged','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','atSecondsLeft','kalshiPriceAgeMs','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','feedAtLock','lockLatencySec','windowTypeTransitions','windowTypeChanged','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','atSecondsLeft','kalshiPriceAgeMs','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -21177,6 +21177,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     e.fastLockFired===true?'Y':'',
                     e.earlyLockFired===true?'Y':'',
                     e.earlyLockTier!=null?e.earlyLockTier:'',
+                    e.taraVersion||'',
                   ].map(v=>typeof v==='string'&&v.includes(',')?`"${v}"`:String(v));
                   _rows.push(_row.join(','));
                 });
@@ -42111,6 +42112,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           fastLockFired:_fastLockFired===true||null,
           earlyLockFired:_earlyLockFired===true||null,
           earlyLockTier:_earlyLockTier||null,
+          // V12.6: stamp build version on every entry — tells us which device/build
+          //   fired the lock. 0% stamp rate on 'version' = all entries came from stale
+          //   cached builds. Hard-refresh every device when deploying.
+          taraVersion:BASELINE_VERSION,
         };
         setTaraCallLog(prev=>{
           // V9.10.4: per-asset dedup so BTC + ETH snapshots for the same window slot
@@ -43223,7 +43228,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       if(
         !taraCallSnapshotRef.current&&    // not already committed
         claimedDir&&                      // direction established (samples accumulating)
-        (clockSeconds||0)>=480&&          // past 8 minutes into the 15m window
+        elapsedSec>=480&&                 // past 8 minutes into the 15m window
         !_instantForceReady               // not a manual force (those use their own path)
       ){
         const _fastKal=analysis?.kalshiForDirection??null; // Kalshi% for claimedDir
@@ -43240,7 +43245,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _fastIsSqueezeOrHighChop=
           _fastRegime==='SHORT SQUEEZE'||
           _fastRegime==='LONG SQUEEZE'||
-          (_fastRegime==='HIGH VOL CHOP'&&(clockSeconds||0)>=600); // HVC + <5m left = volatile
+          (_fastRegime==='HIGH VOL CHOP'&&elapsedSec>=600); // HVC + <5m left = volatile
         if(
           _fastKalDir!=null&&
           _fastKalDir>=88&&
