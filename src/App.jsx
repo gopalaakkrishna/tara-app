@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.18-v11.2.6-fight-gate-freshness';
-const TARA_VERSION_DISPLAY='Tara 11.2.6';
+const BASELINE_VERSION='2026.06.19-v12.0.0-regime-telemetry';
+const TARA_VERSION_DISPLAY='Tara 12.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10327,6 +10327,14 @@ const computeV99Posterior=(params)=>{
     rawSignalScores._bbwRank=_v10736.bbwRank;
     rawSignalScores._atrp=_v10736.atrp;
     rawSignalScores._whipsaw=_v10736.whipsawCount;
+    // V12.0: also stamp regime label + boolean flags — they were computed but silently
+    //   dropped. The CSV showed 0% regime stamp because these never reached the entry.
+    rawSignalScores._v10736regime=_v10736.regime;
+    rawSignalScores._isHighVol=_v10736.isHighVol;
+    rawSignalScores._isTrend=_v10736.isTrend;
+    rawSignalScores._isChop=_v10736.isChop;
+    rawSignalScores._isCompressing=_v10736.isCompressing;
+    rawSignalScores._priceAboveMedian=_v10736.priceAboveMedian;
   }else{
     // Not enough history (< 30 bars) — fall back to old logic
     if(drift1m>3||drift1m<-3){
@@ -20895,7 +20903,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','feedAtLock','lockLatencySec','windowTypeTransitions','windowTypeChanged','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','feedAtLock','lockLatencySec','windowTypeTransitions','windowTypeChanged','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','atSecondsLeft','kalshiPriceAgeMs'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -21022,6 +21030,20 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     e.sessionTierMode||'',
                     e.sessionTierMult!=null?e.sessionTierMult:'',
                     e.sessionTierApplied===true?'true':e.sessionTierApplied===false?'false':'',
+                    // V12.0: regime classifier telemetry
+                    e.regimeV12||'',
+                    e.adxAtLock!=null?Number(e.adxAtLock).toFixed(1):'',
+                    e.bbwRankAtLock!=null?e.bbwRankAtLock:'',
+                    e.atrpAtLock!=null?Number(e.atrpAtLock).toFixed(2):'',
+                    e.whipsawAtLock!=null?e.whipsawAtLock:'',
+                    e.isHighVolAtLock===true?'Y':e.isHighVolAtLock===false?'N':'',
+                    e.isTrendAtLock===true?'Y':e.isTrendAtLock===false?'N':'',
+                    e.isChopAtLock===true?'Y':e.isChopAtLock===false?'N':'',
+                    e.isCompressingAtLock===true?'Y':e.isCompressingAtLock===false?'N':'',
+                    e.priceAboveMedianAtLock===true?'Y':e.priceAboveMedianAtLock===false?'N':'',
+                    // V12.0: timing + price freshness
+                    e.atSecondsLeft!=null?e.atSecondsLeft:'',
+                    e.kalshiPriceAgeMs!=null?Math.round(e.kalshiPriceAgeMs):'',
                   ].map(v=>typeof v==='string'&&v.includes(',')?`"${v}"`:String(v));
                   _rows.push(_row.join(','));
                 });
@@ -41912,6 +41934,28 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //   `dir` was set but `call` was missing from entries, breaking downstream
           //   analysis that reads `call`.
           call:snapshot.call||snapshot.direction||null,
+          // V12.0: regime classifier telemetry — V10.7.36 computes these every tick
+          //   but they were never persisted. Stamping here enables the V12.1 adaptive
+          //   gate (regime-specific lock bars) to be tuned from real data, not guesses.
+          regimeV12:analysis?.rawSignalScores?._v10736regime||'',
+          adxAtLock:analysis?.rawSignalScores?._adx??null,
+          bbwRankAtLock:analysis?.rawSignalScores?._bbwRank??null,
+          atrpAtLock:analysis?.rawSignalScores?._atrp??null,
+          whipsawAtLock:analysis?.rawSignalScores?._whipsaw??null,
+          isHighVolAtLock:analysis?.rawSignalScores?._isHighVol??null,
+          isTrendAtLock:analysis?.rawSignalScores?._isTrend??null,
+          isChopAtLock:analysis?.rawSignalScores?._isChop??null,
+          isCompressingAtLock:analysis?.rawSignalScores?._isCompressing??null,
+          priceAboveMedianAtLock:analysis?.rawSignalScores?._priceAboveMedian??null,
+          // V12.0: lock timing — secondsIntoWindow was in the CSV header since V9.7.6
+          //   but stamped at only 2% (most paths never wrote it). Compute from timeState
+          //   which is always in scope. atSecondsLeft = inverse (time remaining at lock).
+          secondsIntoWindow:(()=>{try{const _tot=windowType==='15m'?900:300;const _rem=Math.max(0,(timeState.minsRemaining||0)*60+(timeState.secsRemaining||0));return Math.round(Math.max(0,_tot-_rem));}catch(_){return null;}})(),
+          atSecondsLeft:(()=>{try{return Math.round(Math.max(0,(timeState.minsRemaining||0)*60+(timeState.secsRemaining||0)));}catch(_){return null;}})(),
+          // V12.0: Kalshi price age (V11.2.6 stamps this on snapshot; forward to entry).
+          kalshiPriceAgeMs:snapshot.kalshiPriceAgeMs??null,
+          // V12.0: last60sDriftBps — was in CSV header but never stamped on entries.
+          last60sDriftBps:analysis?.last60sDriftBps??analysis?.last60sDrift??null,
         };
         setTaraCallLog(prev=>{
           // V9.10.4: per-asset dedup so BTC + ETH snapshots for the same window slot
