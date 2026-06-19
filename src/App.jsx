@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.19-v12.2.1-entry-cost-display';
-const TARA_VERSION_DISPLAY='Tara 12.2.1';
+const BASELINE_VERSION='2026.06.19-v12.3.0-smc-sweep-fvg';
+const TARA_VERSION_DISPLAY='Tara 12.3';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10245,6 +10245,81 @@ const computeV99Posterior=(params)=>{
     rawSignalScores.bos=bosClamped;
     totalScore+=bosClamped;
   }
+
+  // ── SIGNAL 5e: LIQUIDITY SWEEP DETECTOR (V12.3) ───────────────────
+  // ICT/SMC step 2: price spikes through prior swing high/low to grab stops,
+  // then reverses. Sweep-and-fade = strongest ICT directional signal.
+  let _smcSweep=null;
+  try{
+    if(liveHistory&&liveHistory.length>=12&&atr>0){
+      const _swSlice=liveHistory.slice(2,20);
+      const _swHigh=Math.max(..._swSlice.map(b=>b.h));
+      const _swLow=Math.min(..._swSlice.map(b=>b.l));
+      const _spikeBars=liveHistory.slice(0,3);
+      const _curClose=liveHistory[0].c;
+      const _piercedHigh=_spikeBars.some(b=>b.h>_swHigh);
+      const _highExtent=_piercedHigh?Math.max(..._spikeBars.map(b=>b.h))-_swHigh:0;
+      const _bearSweep=_piercedHigh&&_curClose<_swHigh&&_highExtent>0;
+      const _bearRej=_bearSweep?Math.max(0,1-Math.abs(_curClose-_swHigh)/Math.max(atr,1)):0;
+      const _piercedLow=_spikeBars.some(b=>b.l<_swLow);
+      const _lowExtent=_piercedLow?_swLow-Math.min(..._spikeBars.map(b=>b.l)):0;
+      const _bullSweep=_piercedLow&&_curClose>_swLow&&_lowExtent>0;
+      const _bullRej=_bullSweep?Math.max(0,1-Math.abs(_curClose-_swLow)/Math.max(atr,1)):0;
+      if(_bearSweep||_bullSweep){
+        const _sDir=_bearSweep?"DOWN":"UP";
+        const _ext=_bearSweep?_highExtent:_lowExtent;
+        const _rej=_bearSweep?_bearRej:_bullRej;
+        const _extBps=Math.round((_ext/currentPrice)*10000);
+        const _pts=Math.round(10+(Math.min(_extBps,20)/20)*5+_rej*3);
+        const _adj=_bearSweep?-_pts:_pts;
+        const _lvl=_bearSweep?Math.round(_swHigh):Math.round(_swLow);
+        _smcSweep={dir:_sDir,extBps:_extBps,rejPct:Math.round(_rej*100),score:_adj,level:_lvl};
+        totalScore+=_adj;
+        rawSignalScores._sweep=_adj;
+        reasoning.push(`[SMC-SWEEP] ${_sDir}: pierced ${_bearSweep?"swing high":"swing low"} $${_lvl} by ${_extBps}bps, ${_rej>=0.6?"clean":"weak"} rejection -> ${_adj>0?"+":""}${_adj}pts`);
+      } else { rawSignalScores._sweep=0; }
+    }
+  }catch(_swErr){}
+
+  // ── SIGNAL 5f: FAIR VALUE GAP (FVG) DETECTOR (V12.3) ─────────────────
+  // ICT/SMC step 3: 3-candle price imbalance. Bearish FVG = candle[n].low >
+  // candle[n-2].high. IFVG fires when price returns to gap from wrong side.
+  let _smcFVG=null;
+  try{
+    if(liveHistory&&liveHistory.length>=10&&currentPrice>0&&atr>0){
+      let _bestFVG=null;
+      for(let _fi=2;_fi<Math.min(30,liveHistory.length);_fi++){
+        const _b2=liveHistory[_fi];const _b0=liveHistory[_fi-2];
+        if(_b2.l>_b0.h&&(_b2.l-_b0.h)>atr*0.15){
+          _bestFVG={type:"bearish",gapHigh:_b2.l,gapLow:_b0.h,size:Math.round((_b2.l-_b0.h)/currentPrice*10000),age:_fi};break;
+        }
+        if(_b2.h<_b0.l&&(_b0.l-_b2.h)>atr*0.15){
+          _bestFVG={type:"bullish",gapHigh:_b0.l,gapLow:_b2.h,size:Math.round((_b0.l-_b2.h)/currentPrice*10000),age:_fi};break;
+        }
+      }
+      if(_bestFVG){
+        const _inside=currentPrice>=_bestFVG.gapLow&&currentPrice<=_bestFVG.gapHigh;
+        const _nearBelow=currentPrice<_bestFVG.gapLow&&(_bestFVG.gapLow-currentPrice)<atr*0.5;
+        const _nearAbove=currentPrice>_bestFVG.gapHigh&&(currentPrice-_bestFVG.gapHigh)<atr*0.5;
+        let _fvgAdj=0;let _fvgLabel="";
+        if(_bestFVG.type==="bearish"&&(_inside||_nearBelow)){
+          const _str=Math.min(1,_bestFVG.size/15);
+          _fvgAdj=-Math.round(8+_str*6);
+          _fvgLabel=_inside?"inside bearish FVG (resistance)":"approaching bearish FVG from below (IFVG)";
+        } else if(_bestFVG.type==="bullish"&&(_inside||_nearAbove)){
+          const _str=Math.min(1,_bestFVG.size/15);
+          _fvgAdj=Math.round(8+_str*6);
+          _fvgLabel=_inside?"inside bullish FVG (support)":"approaching bullish FVG from above (IFVG)";
+        }
+        if(_fvgAdj!==0){
+          _smcFVG={..._bestFVG,adj:_fvgAdj,label:_fvgLabel};
+          totalScore+=_fvgAdj;rawSignalScores._fvg=_fvgAdj;
+          reasoning.push(`[SMC-FVG] ${_fvgLabel} (${_bestFVG.size}bps gap, age ${_bestFVG.age}bars) -> ${_fvgAdj>0?"+":""}${_fvgAdj}pts`);
+        } else { rawSignalScores._fvg=0; }
+      }
+    }
+  }catch(_fvgErr){}
+
 
   // ── SIGNAL 5d: MACD + OBV (V10.7.37) ────────────────────────────────────
   // MACD(12,26,9) on hl2. Histogram zero-cross = strong momentum flip.
@@ -20956,7 +21031,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','feedAtLock','lockLatencySec','windowTypeTransitions','windowTypeChanged','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','atSecondsLeft','kalshiPriceAgeMs'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','feedAtLock','lockLatencySec','windowTypeTransitions','windowTypeChanged','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','atSecondsLeft','kalshiPriceAgeMs','smcSweepScore','smcFvgScore'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -21097,6 +21172,8 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     // V12.0: timing + price freshness
                     e.atSecondsLeft!=null?e.atSecondsLeft:'',
                     e.kalshiPriceAgeMs!=null?Math.round(e.kalshiPriceAgeMs):'',
+                    e.smcSweepScore!=null?e.smcSweepScore:'',
+                    e.smcFvgScore!=null?e.smcFvgScore:'',
                   ].map(v=>typeof v==='string'&&v.includes(',')?`"${v}"`:String(v));
                   _rows.push(_row.join(','));
                 });
@@ -42026,6 +42103,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           kalshiPriceAgeMs:snapshot.kalshiPriceAgeMs??null,
           // V12.0: last60sDriftBps — was in CSV header but never stamped on entries.
           last60sDriftBps:analysis?.last60sDriftBps??analysis?.last60sDrift??null,
+          smcSweepScore:analysis?.rawSignalScores?._sweep??null,
+          smcFvgScore:analysis?.rawSignalScores?._fvg??null,
         };
         setTaraCallLog(prev=>{
           // V9.10.4: per-asset dedup so BTC + ETH snapshots for the same window slot
