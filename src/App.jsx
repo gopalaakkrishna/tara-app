@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.19-v12.6.0-early-lock-fix';
-const TARA_VERSION_DISPLAY='Tara 12.6';
+const BASELINE_VERSION='2026.06.19-v12.6.1-regime-source-fix';
+const TARA_VERSION_DISPLAY='Tara 12.6.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -41706,6 +41706,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   Result: rollover scoring couldn't find pending entries → trades never resolved →
     //   memory + scorecards stopped updating for both BTC and ETH. Bug shipped in V7.8 and
     //   compounded each version since.
+    // V12.4/12.5: declare early-lock and fast-lock state vars BEFORE _logSnapshotEntry
+    //   so the function closes over initialized bindings. (V12.6 bug: these were declared
+    //   AFTER the function definition causing TDZ crash when early call sites at 41203/41457
+    //   triggered the function before the let declarations were reached.)
+    let _earlyLockFired=false;
+    let _earlyLockTier=null;
+    let _fastLockFired=false;
     const _logSnapshotEntry=(snapshot)=>{
       // V10.7.82: Universal entry cost guard — block entries outside valid range
       //   regardless of which code path created the snapshot.
@@ -43130,8 +43137,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   - Already past the good-odds window (Kalshi > 82c = too late, use V12.4)
     //   - No claimed direction yet (still in search phase)
     //   - Feed frozen
-    let _earlyLockFired=false;
-    let _earlyLockTier=null;
     try{
       if(
         !taraCallSnapshotRef.current&&    // not already committed
@@ -43152,9 +43157,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           ?(claimedDir==='UP'?_elKalRaw:(100-_elKalRaw))
           :null;
         const _elRegime=analysis?.regime||'';
+        // V12.6.1 FIX: the main-engine regime string is stuck on 'RANGE-CHOP' ~90% of
+        //   the time and NEVER emits 'TRENDING UP/DOWN' — so the old string match meant
+        //   Tier 1 (needs trending) never fired and Tiers 2/3 (need not-chop) were always
+        //   blocked. Use the V10.7.36 classifier booleans instead — those are the real
+        //   trend/chop/highvol reads, exposed on rawSignalScores.
+        const _elRss=analysis?.rawSignalScores||{};
         const _elIsBadRegime=_elRegime==='SHORT SQUEEZE'||_elRegime==='LONG SQUEEZE';
-        const _elIsTrending=_elRegime==='TRENDING UP'||_elRegime==='TRENDING DOWN';
-        const _elIsChop=_elRegime==='RANGE-CHOP'||_elRegime==='HIGH VOL CHOP';
+        const _elIsTrending=_elRss._isTrend===true;
+        const _elIsChop=_elRss._isChop===true||_elRss._isHighVol===true;
         const _elHostile=hostileWindow; // DEAD or WHIPSAW — already computed above
         const _elTapeWith=tapeStronglyAgrees||tapeSuperStrong;
         // Guard: odds already bad (let V12.4 handle the 88c+ case)
@@ -43223,8 +43234,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   Action: set needSamples = 1 so the existing commit check fires immediately
     //   on the next condition. Tier stamps as 'fast-lock-high-cert' for audit.
     //   Stamped in log as fastLockFired=true.
-    let _fastLockFired=false;
-    try{
+        try{
       if(
         !taraCallSnapshotRef.current&&    // not already committed
         claimedDir&&                      // direction established (samples accumulating)
