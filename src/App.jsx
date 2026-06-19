@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.19-v12.3.0-smc-sweep-fvg';
-const TARA_VERSION_DISPLAY='Tara 12.3';
+const BASELINE_VERSION='2026.06.19-v12.5.0-early-lock';
+const TARA_VERSION_DISPLAY='Tara 12.5';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -21031,7 +21031,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','feedAtLock','lockLatencySec','windowTypeTransitions','windowTypeChanged','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','atSecondsLeft','kalshiPriceAgeMs','smcSweepScore','smcFvgScore'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','feedAtLock','lockLatencySec','windowTypeTransitions','windowTypeChanged','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','atSecondsLeft','kalshiPriceAgeMs','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -21174,6 +21174,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     e.kalshiPriceAgeMs!=null?Math.round(e.kalshiPriceAgeMs):'',
                     e.smcSweepScore!=null?e.smcSweepScore:'',
                     e.smcFvgScore!=null?e.smcFvgScore:'',
+                    e.fastLockFired===true?'Y':'',
+                    e.earlyLockFired===true?'Y':'',
+                    e.earlyLockTier!=null?e.earlyLockTier:'',
                   ].map(v=>typeof v==='string'&&v.includes(',')?`"${v}"`:String(v));
                   _rows.push(_row.join(','));
                 });
@@ -42105,6 +42108,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           last60sDriftBps:analysis?.last60sDriftBps??analysis?.last60sDrift??null,
           smcSweepScore:analysis?.rawSignalScores?._sweep??null,
           smcFvgScore:analysis?.rawSignalScores?._fvg??null,
+          fastLockFired:_fastLockFired===true||null,
+          earlyLockFired:_earlyLockFired===true||null,
+          earlyLockTier:_earlyLockTier||null,
         };
         setTaraCallLog(prev=>{
           // V9.10.4: per-asset dedup so BTC + ETH snapshots for the same window slot
@@ -43094,6 +43100,162 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       // banner; the call card will show a stale-feed footer note.
       return;
     }
+    // V12.5: QUALITY-TRIGGERED EARLY LOCK
+    // Root cause of the late-entry / 90c+ problem: needSamples counts ticks, not
+    // signal quality. A clear 65c setup at minute 2 waits 60 ticks; by tick 60
+    // price has moved to 90c and Tara locks late at terrible EV.
+    //
+    // Data (last 500): 60-75c band = 72% WR / +5.8c EV. 90c+ = 93% WR / -4.3c EV.
+    // Same trades, different entry price. Early = good. Late = wasteful.
+    //
+    // This block fires BEFORE the sample counter check. When signal quality is
+    // HIGH and odds are GOOD, we drop needSamples to 1 and commit now.
+    //
+    // THREE-TIER system:
+    //   TIER 1 — Triple confluence (strongest): gap >= 12bps + Kalshi 62-78c + trending
+    //     regime + tape agrees. Fire after just 90s (let signals settle minimally).
+    //   TIER 2 — Strong gap + good odds: gap >= 8bps + Kalshi 60-80c + not hostile
+    //     window. Fire after 120s.
+    //   TIER 3 — Good odds alone: Kalshi 65-75c + direction claimed 60s+ + not chop.
+    //     Fire after 180s (3 min). Catches the 'obvious from the start' windows.
+    //
+    // Guards (any of these blocks all tiers):
+    //   - SQUEEZE regime (Rule B absolute block)
+    //   - Hostile window (DEAD/WHIPSAW)
+    //   - Already past the good-odds window (Kalshi > 82c = too late, use V12.4)
+    //   - No claimed direction yet (still in search phase)
+    //   - Feed frozen
+    let _earlyLockFired=false;
+    let _earlyLockTier=null;
+    try{
+      if(
+        !taraCallSnapshotRef.current&&    // not already committed
+        claimedDir&&                      // direction established
+        !_instantForceReady&&             // not a manual force
+        !feedFrozenRef.current            // feed alive
+      ){
+        const _elDir=claimedDir;
+        // Gap vs strike (bps, positive = price on claimedDir's side)
+        const _elGapBps=targetMargin>0&&currentPrice>0
+          ?((claimedDir==='UP'
+              ?(currentPrice-targetMargin)
+              :(targetMargin-currentPrice))/targetMargin)*10000
+          :0;
+        // Kalshi price on the claimed side (0-100)
+        const _elKalRaw=typeof kalshiYesPrice==='number'?kalshiYesPrice:null;
+        const _elKalDir=_elKalRaw!=null
+          ?(claimedDir==='UP'?_elKalRaw:(100-_elKalRaw))
+          :null;
+        const _elRegime=analysis?.regime||'';
+        const _elIsBadRegime=_elRegime==='SHORT SQUEEZE'||_elRegime==='LONG SQUEEZE';
+        const _elIsTrending=_elRegime==='TRENDING UP'||_elRegime==='TRENDING DOWN';
+        const _elIsChop=_elRegime==='RANGE-CHOP'||_elRegime==='HIGH VOL CHOP';
+        const _elHostile=hostileWindow; // DEAD or WHIPSAW — already computed above
+        const _elTapeWith=tapeStronglyAgrees||tapeSuperStrong;
+        // Guard: odds already bad (let V12.4 handle the 88c+ case)
+        const _elOddsGood=_elKalDir!=null&&_elKalDir>=58&&_elKalDir<=82;
+        if(!_elIsBadRegime&&!_elHostile&&_elOddsGood&&_elKalDir!=null){
+          // TIER 1: triple confluence — gap + Kalshi sweet spot + trending + tape
+          if(
+            _elGapBps>=12&&
+            _elKalDir>=62&&_elKalDir<=78&&
+            _elIsTrending&&
+            _elTapeWith&&
+            elapsedSec>=90
+          ){
+            needSamples=1;
+            _earlyLockFired=true;
+            _earlyLockTier=1;
+            try{console.info('[V12.5 EARLY-LOCK T1] gap',_elGapBps.toFixed(0)+'bps kalshi',_elKalDir.toFixed(0)+'c trending+tape elapsed',elapsedSec+'s');}catch(_){}
+          }
+          // TIER 2: strong gap + good odds + not hostile
+          else if(
+            _elGapBps>=8&&
+            _elKalDir>=60&&_elKalDir<=80&&
+            !_elIsChop&&
+            elapsedSec>=120
+          ){
+            needSamples=1;
+            _earlyLockFired=true;
+            _earlyLockTier=2;
+            try{console.info('[V12.5 EARLY-LOCK T2] gap',_elGapBps.toFixed(0)+'bps kalshi',_elKalDir.toFixed(0)+'c not-chop elapsed',elapsedSec+'s');}catch(_){}
+          }
+          // TIER 3: Kalshi in sweet spot + time + not chop
+          else if(
+            _elKalDir>=65&&_elKalDir<=75&&
+            _elGapBps>=4&&
+            !_elIsChop&&
+            elapsedSec>=180
+          ){
+            needSamples=1;
+            _earlyLockFired=true;
+            _earlyLockTier=3;
+            try{console.info('[V12.5 EARLY-LOCK T3] kalshi',_elKalDir.toFixed(0)+'c gap',_elGapBps.toFixed(0)+'bps elapsed',elapsedSec+'s');}catch(_){}
+          }
+        }
+      }
+    }catch(_elErr){}
+
+    // V12.4: HIGH-CERTAINTY LATE-WINDOW FAST-LOCK
+    //   Problem: when Kalshi is at 88-99c on one side and the gap vs strike agrees,
+    //   the trade is as clear as it gets. But the sample accumulation counter doesn't
+    //   know what Kalshi says — it just counts ticks. So Tara scans all the way to
+    //   the force-commit at end-of-window (isSystemLocked), entering at 94c+ with
+    //   near-zero EV instead of locking at 82c earlier with meaningful edge.
+    //
+    //   Conditions (ALL must hold):
+    //     1. Window past 8 minutes (clockSeconds >= 480, timeFraction >= 0.53 on 15m)
+    //        — don't fast-lock early; let signals develop normally first half.
+    //     2. Kalshi strongly favors the claimed direction by >= 88c
+    //        — market has already priced the move, we're just confirming.
+    //     3. Gap vs strike agrees with direction (gapForDirection > 0)
+    //        — price is already on the right side of the line.
+    //     4. A direction is already claimed (claimedDir set) — not a brand-new scan.
+    //        This means samples have been accumulating and direction is consistent.
+    //     5. Not SQUEEZE regime (Rule B blocks those regardless).
+    //     6. Not HIGH VOL CHOP with a late entry (chop can spike through at 95c and reverse).
+    //
+    //   Action: set needSamples = 1 so the existing commit check fires immediately
+    //   on the next condition. Tier stamps as 'fast-lock-high-cert' for audit.
+    //   Stamped in log as fastLockFired=true.
+    let _fastLockFired=false;
+    try{
+      if(
+        !taraCallSnapshotRef.current&&    // not already committed
+        claimedDir&&                      // direction established (samples accumulating)
+        (clockSeconds||0)>=480&&          // past 8 minutes into the 15m window
+        !_instantForceReady               // not a manual force (those use their own path)
+      ){
+        const _fastKal=analysis?.kalshiForDirection??null; // Kalshi% for claimedDir
+        const _fastKalRaw=typeof kalshiYesPrice==='number'?kalshiYesPrice:null;
+        // kalshiForDirection = probability on claimedDir's side (already direction-adjusted)
+        // Fall back to raw yes price adjusted for direction if kalshiForDirection unavailable
+        const _fastKalDir=_fastKal!=null
+          ?_fastKal
+          :(_fastKalRaw!=null?(claimedDir==='UP'?_fastKalRaw:(100-_fastKalRaw)):null);
+        const _fastGapOk=analysis?.rawProbAbove!=null
+          ?((claimedDir==='UP'&&analysis.rawProbAbove>50)||(claimedDir==='DOWN'&&analysis.rawProbAbove<50))
+          :true; // gap unknown = allow (don't over-restrict)
+        const _fastRegime=analysis?.regime||'';
+        const _fastIsSqueezeOrHighChop=
+          _fastRegime==='SHORT SQUEEZE'||
+          _fastRegime==='LONG SQUEEZE'||
+          (_fastRegime==='HIGH VOL CHOP'&&(clockSeconds||0)>=600); // HVC + <5m left = volatile
+        if(
+          _fastKalDir!=null&&
+          _fastKalDir>=88&&
+          _fastGapOk&&
+          !_fastIsSqueezeOrHighChop
+        ){
+          // All conditions met. Reduce needSamples to 1 so the commit check below fires.
+          const _prevNeed=needSamples;
+          needSamples=1;
+          _fastLockFired=true;
+          try{console.info('[V12.4 FAST-LOCK] Kalshi',_fastKalDir.toFixed(0)+'c on',claimedDir,
+            '· gap OK · needSamples',_prevNeed,'->1 · clockSec',clockSeconds);}catch(_){}
+        }
+      }
+    }catch(_flErr){}
     if(samples>=needSamples||analysis?.isSystemLocked||_instantForceReady){
       // V10.8.0: MINIMUM CONVICTION TIME FLOOR.
       //   User trades later in windows anyway — signals at second 3 are noise.
