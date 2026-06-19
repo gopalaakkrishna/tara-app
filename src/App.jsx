@@ -4537,8 +4537,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.19-v12.0.0-regime-telemetry';
-const TARA_VERSION_DISPLAY='Tara 12.0';
+const BASELINE_VERSION='2026.06.19-v12.2.1-entry-cost-display';
+const TARA_VERSION_DISPLAY='Tara 12.2.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -8967,6 +8967,39 @@ const computeAdvisor=(params)=>{
     + (momentumWith?10:0)                         // momentum recovering bonus
   );
 
+  // V12.1 COACH LANGUAGE HELPERS — plain-English atoms for every in-trade branch.
+  //   These translate raw numbers into human sentences so the advisor reads like
+  //   a trader calling it, not a dashboard logging it.
+  //
+  //   _velAdvStr   — Kalshi velocity moving AGAINST the position (market sees it first)
+  //   _velConfStr  — Kalshi velocity moving WITH the position (tape confirming)
+  //   _driftStr    — how much Tara’s own conviction has shifted since lock
+  //   _kDriftStr   — how far the Kalshi price has moved since lock
+  //   _timePress   — urgency tag when time is short
+  //   _peakStr     — peak-profit context when the trade was winning
+  const _velAdvStr=_kalshiVel!=null&&((isUP&&_kalshiVel<=-3)||(isDN&&_kalshiVel>=3))
+    ?(isUP
+      ?`Kalshi pricing DOWN at ${Math.abs(_kalshiVel).toFixed(0)}¢/30s — market sees it before the chart`
+      :`Kalshi pricing UP at ${Math.abs(_kalshiVel).toFixed(0)}¢/30s — market sees it before the chart`
+    ):null;
+  const _velConfStr=_kalshiVel!=null&&((isUP&&_kalshiVel>=3)||(isDN&&_kalshiVel<=-3))
+    ?`Kalshi running ${isUP?'UP':'DOWN'} with you at ${Math.abs(_kalshiVel).toFixed(0)}¢/30s`
+    :null;
+  const _driftPts12=_lockDirConfAtLock!=null&&_lockDirConfNow!=null?Math.round(_lockDirConfNow-_lockDirConfAtLock):null;
+  const _driftStr12=_driftPts12!=null&&Math.abs(_driftPts12)>=5
+    ?(_driftPts12>0
+      ?`Tara’s conviction up ${_driftPts12}pts since lock`
+      :`Tara’s conviction slipped ${Math.abs(_driftPts12)}pts since lock (${Math.round(_lockDirConfAtLock)}→${Math.round(_lockDirConfNow)}%)`
+    ):null;
+  const _kDriftPts12=_kalshiAtLockDirConf!=null&&_kalshiNowDirConf!=null?Math.round(_kalshiNowDirConf-_kalshiAtLockDirConf):null;
+  const _kDriftStr12=_kDriftPts12!=null&&Math.abs(_kDriftPts12)>=8
+    ?(_kDriftPts12<0
+      ?`Kalshi flipped ${Math.abs(_kDriftPts12)}pts against you (${Math.round(_kalshiAtLockDirConf)}→${Math.round(_kalshiNowDirConf)}¢)`
+      :`Kalshi moved ${_kDriftPts12}pts with you (${Math.round(_kalshiAtLockDirConf)}→${Math.round(_kalshiNowDirConf)}¢)`
+    ):null;
+  const _timePress12=timeRemainingFrac<0.10?'under 90s left':timeRemainingFrac<0.20?'under 3m left':timeRemainingFrac<0.33?'under 5m left':'';
+  const _peakStr12=(peakOffer>betAmount&&betAmount>0)?`was +${(((peakOffer-betAmount)/betAmount)*100).toFixed(0)}% at peak`:null;
+
   // ── 1. HARD STOPS — always fire first ────────────────────────────────────
   if(positionStatus?.isStopHit)return{label:'30% STOP HIT — EXIT NOW',reason:`Hard stop breached. Entry: $${(positionStatus.entry||0).toFixed(0)} → Now: $${cp.toFixed(0)}. PnL: ${pnlPct.toFixed(1)}%. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EXECUTE EMERGENCY EXIT',actionTarget:'SIT OUT'};
   if(isRugPull&&showRugPullAlerts&&isUP)return{label:'RUG PULL — EMERGENCY EXIT',reason:`Catastrophic drop detected. Exit long immediately. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EMERGENCY CASHOUT',actionTarget:'SIT OUT'};
@@ -9003,12 +9036,14 @@ const computeAdvisor=(params)=>{
     const _gapStr=`Gap: ${gapForPosition>=0?'+':''}${gapForPosition.toFixed(1)} bps`;
     if(_liveConf>=72){
       // High conviction opposite — Tara says you're on the wrong side, urgent
-      return{label:`⚠ TARA REVERSED · ${_liveDir}`,reason:`Tara now leans ${_liveDir} ${_opposingConf}% — opposite of your ${userPosition} position · ${_gapStr} · ${timeLabel}`,color:'rose',animate:true,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+      const _rvNote=[_driftStr12,_velAdvStr,_kDriftStr12].filter(Boolean).join('. ');
+      return{label:`FLIP — engine reads ${_liveDir} ${_opposingConf}%`,reason:`Tara reversed on your ${userPosition} trade.${_rvNote?` ${_rvNote}.`:''} ${_gapStr}. ${_timePress12?_timePress12+'. ':''}Exit or know exactly why you’re holding against the engine.`,color:'rose',animate:true,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
     }
     if(_liveConf>=65){
       // Medium conviction opposite — flag it, but action depends on profit/gap
       const _action=offerAboveBet?'TAKE PROFIT NOW':'EXIT NOW';
-      return{label:`⚠ Tara opposes · ${_liveDir} ${_opposingConf}%`,reason:`Tara reading conditions for ${_liveDir} now · ${_gapStr} · ${timeLabel}`,color:'amber',animate:true,hasAction:true,actionLabel:_action,actionTarget:offerAboveBet?'CASH':'SIT OUT'};
+      const _oppNote=[_velAdvStr,_kDriftStr12].filter(Boolean).join('. ');
+      return{label:`ENGINE DRIFTING ${_liveDir} ${_opposingConf}% — watch`,reason:`Tara leaning ${_liveDir} against your ${userPosition} position.${_oppNote?` ${_oppNote}.`:''} Not a full reversal yet — but the setup that justified entry is weakening. ${_gapStr}. ${timeLabel}.`,color:'amber',animate:true,hasAction:true,actionLabel:_action,actionTarget:offerAboveBet?'CASH':'SIT OUT'};
     }
     // Mild opposition — informational, no forced action
     return{label:`Tara leaning ${_liveDir} ${_opposingConf}%`,reason:`Mild disagreement with your ${userPosition} · ${_gapStr} · ${timeLabel}`,color:'amber',animate:false,hasAction:false};
@@ -9021,12 +9056,17 @@ const computeAdvisor=(params)=>{
     const _why=[];
     if(_livePosteriorInverted)_why.push(`posterior conviction ${Math.round(_lockDirConfAtLock)}→${Math.round(_lockDirConfNow)}%`);
     if(_kalshiLiveInverted)_why.push(`Kalshi ${Math.round(_kalshiAtLockDirConf)}→${Math.round(_kalshiNowDirConf)}%`);
-    return{label:`CONDITIONS ERODING · ${userPosition}`,reason:`Lock-time edge fading: ${_why.join(' · ')} · ${gapStr} · ${timeLabel}`,color:'amber',animate:false,hasAction:true,actionLabel:offerAboveBet?'TAKE PROFIT':'TIGHTEN EXIT',actionTarget:'CASH'};
+    const _erodeParts=[...(_why||[]),_velAdvStr,_kDriftStr12].filter(Boolean);
+    const _erodeDetail=_erodeParts.length?_erodeParts.join('. ')+'.':'';
+    return{label:`CONDITIONS ERODING · ${userPosition}`,reason:`Edge that justified this lock is fading. ${_erodeDetail} Position is ${isActuallyWinning?`winning by ${gapForPosition.toFixed(0)}bps — consider locking in`:'near the line — thin margin for error'}. ${_timePress12||timeLabel}.`,color:'amber',animate:false,hasAction:true,actionLabel:offerAboveBet?'TAKE PROFIT':'TIGHTEN EXIT',actionTarget:'CASH'};
   }
 
   // ── 2. DEEP ADVERSE — always cut regardless of model confidence ───────────
   // Data: even 89% UP calls fail in adverse. Don't let model override reality.
-  if(gapMagnitude>30&&isActuallyLosing)return{label:'CUT LOSSES — EXIT NOW',reason:`${gapMagnitude.toFixed(0)} bps adverse — too deep to recover. ${gapStr}. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT NOW',actionTarget:'SIT OUT'};
+  if(gapMagnitude>30&&isActuallyLosing){
+    const _deepNote=_velAdvStr?` ${_velAdvStr}.`:(_kDriftStr12?` ${_kDriftStr12}.`:'');
+    return{label:`CUT — DEEP ADVERSE`,reason:`${gapMagnitude.toFixed(0)} bps against you — too far to realistically recover.${_deepNote} ${gapStr}. Take the loss now, not after it gets worse. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT NOW',actionTarget:'SIT OUT'};
+  }
 
   // ── V9.7.8: EARLY-CUT WHEN KALSHI ALSO INVERTS ───────────────────────────
   // Old gate: CUT LOSSES needed >30 bps adverse OR comebackScore < 35.
@@ -9037,7 +9077,7 @@ const computeAdvisor=(params)=>{
   if(isActuallyLosing&&gapMagnitude>=5&&_kalshiVel!=null){
     const _kalshiInvertingAdverse=isUP?_kalshiVel<=-3:_kalshiVel>=3;
     if(_kalshiInvertingAdverse){
-      return{label:'CUT LOSSES — KALSHI + SPOT BOTH ADVERSE',reason:`${gapMagnitude.toFixed(0)} bps adverse + Kalshi YES ${_kalshiVel>0?'+':''}${_kalshiVel.toFixed(0)}¢/30s against ${userPosition} · both signals confirm exit · [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT NOW',actionTarget:'SIT OUT'};
+      return{label:`CUT — CHART + MARKET BOTH SAY NO`,reason:`${gapMagnitude.toFixed(0)} bps adverse AND the prediction market pricing against ${userPosition} at ${Math.abs(_kalshiVel).toFixed(0)}¢/30s. When both the spot chart and Kalshi disagree with you — that’s not a coincidence. ${gapStr}. Exit. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT NOW',actionTarget:'SIT OUT'};
     }
   }
 
@@ -9068,10 +9108,12 @@ const computeAdvisor=(params)=>{
   if(_kalshiVel!=null){
     const _adverseToUser=isUP?_kalshiVel<=-5:_kalshiVel>=5; // YES dropping = bad for UP, YES rising = bad for DOWN
     if(_adverseToUser&&!isLate){
-      return{label:'KALSHI INVERTED — EXIT EARLY',reason:`Kalshi YES ${_kalshiVel>0?'+':''}${_kalshiVel.toFixed(0)}¢/30s — tape moving against ${userPosition}. ${gapStr}. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'EXIT NOW',actionTarget:'SIT OUT'};
+      const _kInvDir12=isUP?'DOWN':'UP';
+      return{label:`KALSHI SEES ${_kInvDir12} — EXIT EARLY`,reason:`Prediction market pricing ${_kInvDir12} at ${Math.abs(_kalshiVel).toFixed(0)}¢/30s — money is moving against your ${userPosition} trade. Kalshi sees it before the chart shows it. ${_kDriftStr12?_kDriftStr12+'. ':''}${gapStr}. Don’t wait for the candles to confirm.`,color:'rose',animate:true,hasAction:true,actionLabel:'EXIT NOW',actionTarget:'SIT OUT'};
     }
     if(_adverseToUser&&isLate){
-      return{label:'KALSHI INVERTED — TAKE LOSS',reason:`Kalshi YES ${_kalshiVel>0?'+':''}${_kalshiVel.toFixed(0)}¢/30s adverse with ${timeLabel} left. ${gapStr}.`,color:'rose',animate:true,hasAction:true,actionLabel:'EXIT NOW',actionTarget:'SIT OUT'};
+      const _kLateDir12=isUP?'DOWN':'UP';
+      return{label:`KALSHI ${_kLateDir12} — TAKE THE LOSS`,reason:`${timeLabel} left and Kalshi is pricing ${_kLateDir12} at ${Math.abs(_kalshiVel).toFixed(0)}¢/30s. No time for a reversal. ${gapStr}. Exit clean.`,color:'rose',animate:true,hasAction:true,actionLabel:'EXIT NOW',actionTarget:'SIT OUT'};
     }
     // Slight adverse but not yet at exit threshold — note it for context
     if((isUP?_kalshiVel<=-2:_kalshiVel>=2)&&isActuallyWinning&&_kalshiVel!=null){
@@ -9081,9 +9123,18 @@ const computeAdvisor=(params)=>{
   if(isActuallyLosing){
     if(comebackScore<35||isVeryLate)return{label:'CUT LOSSES — EXIT NOW',reason:`${gapMagnitude.toFixed(0)} bps adverse. Comeback score: ${comebackScore.toFixed(0)}/100 — not worth holding. ${gapStr}. [${timeLabel}]`,color:'rose',animate:true,hasAction:true,actionLabel:'CUT LOSSES NOW',actionTarget:'SIT OUT'};
     if(isLate&&comebackScore<55)return{label:'CUT LOSSES',reason:`${gapMagnitude.toFixed(0)} bps adverse with ${timeLabel} left. Score: ${comebackScore.toFixed(0)}/100. Take the loss. ${gapStr}.`,color:'rose',animate:false,hasAction:true,actionLabel:'EXECUTE CASHOUT',actionTarget:'SIT OUT'};
-    if(comebackScore>65&&momentumWith)return{label:'TARA HOLDS — RECOVERY LIKELY',reason:`${gapMagnitude.toFixed(0)} bps adverse BUT comeback score ${comebackScore.toFixed(0)}/100 — high confidence recovery. ${gapStr}. [${timeLabel}]`,color:'amber',animate:true,hasAction:true,actionLabel:'EXIT IF UNSURE',actionTarget:'SIT OUT'};
-    if(comebackScore>50)return{label:'ADVERSE — TARA WATCHING',reason:`${gapMagnitude.toFixed(0)} bps adverse. Score: ${comebackScore.toFixed(0)}/100. Tara: ${winSide.toFixed(0)}% confident. Momentum${momentumWith?' turning':' flat'}. ${gapStr}. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'EXIT IF NEEDED',actionTarget:'SIT OUT'};
-    return{label:'ADVERSE — EXIT IF NEEDED',reason:`${gapMagnitude.toFixed(0)} bps adverse. Score: ${comebackScore.toFixed(0)}/100. Momentum against. Consider exit. ${gapStr}. [${timeLabel}]`,color:'rose',animate:false,hasAction:true,actionLabel:'EXIT IF NEEDED',actionTarget:'SIT OUT'};
+    if(comebackScore>65&&momentumWith){
+      const _cbNote=[_velConfStr,_driftStr12].filter(Boolean).join('. ');
+      return{label:`ADVERSE BUT RECOVERING — HOLD`,reason:`${gapMagnitude.toFixed(0)} bps down but momentum just turned ${userPosition}.${_cbNote?` ${_cbNote}.`:''} Comeback score ${comebackScore.toFixed(0)}/100 — conditions for a reversal are present. ${gapStr}. ${_timePress12?'Watch time: '+_timePress12+'.':timeLabel}.`,color:'amber',animate:true,hasAction:true,actionLabel:'EXIT IF UNSURE',actionTarget:'SIT OUT'};
+    }
+    if(comebackScore>50){
+      const _peakContext=_peakStr12?` (${_peakStr12})`:'';
+      const _fwd=momentumWith?` Momentum starting to turn ${userPosition} — give it a few ticks.`:` No momentum yet — need a reversal candle soon or consider cutting.`;
+      const _watchNote=_velAdvStr?` ${_velAdvStr}.`:'';
+      return{label:`ADVERSE — WATCHING FOR BOUNCE`,reason:`${gapMagnitude.toFixed(0)} bps down${_peakContext}. Tara ${winSide.toFixed(0)}%${_driftStr12?`, ${_driftStr12}`:''}.${_watchNote}${_fwd} ${gapStr}. [${timeLabel}]`,color:'amber',animate:false,hasAction:true,actionLabel:'EXIT IF NEEDED',actionTarget:'SIT OUT'};
+    }
+    const _lowNote=[_velAdvStr,_peakStr12?`was ${_peakStr12}`:null].filter(Boolean).join('. ');
+    return{label:`ADVERSE — LOW RECOVERY ODDS`,reason:`${gapMagnitude.toFixed(0)} bps down${_lowNote?`. ${_lowNote}`:''}. Comeback score ${comebackScore.toFixed(0)}/100 with momentum against — the trade isn’t looking for a way back. ${gapStr}. [${timeLabel}]`,color:'rose',animate:false,hasAction:true,actionLabel:'EXIT IF NEEDED',actionTarget:'SIT OUT'};
   }
 
   // ── 5. NEAR STRIKE (small adverse buffer zone) ─────────────────────────────
@@ -9102,14 +9153,16 @@ const computeAdvisor=(params)=>{
   //   moving with us at +5¢/30s." Tape is telling us the move is real.
   const _kalshiConfirmsHold=_kalshiVel!=null&&((isUP&&_kalshiVel>=5)||(isDN&&_kalshiVel<=-5));
   if(isActuallyWinning&&_kalshiConfirmsHold){
-    return{label:`KALSHI CONFIRMS · HOLD ${userPosition}`,reason:`Kalshi YES ${_kalshiVel>0?'+':''}${_kalshiVel.toFixed(0)}¢/30s with ${userPosition} · ${gapStr} · Tara ${winSide.toFixed(0)}% · [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+    return{label:`KALSHI LOCKED IN · HOLD ${userPosition}`,reason:`Prediction market confirming ${userPosition} at ${Math.abs(_kalshiVel).toFixed(0)}¢/30s — money is flowing your way. ${gapStr}. Tara ${winSide.toFixed(0)}%.${_driftStr12?` ${_driftStr12}.`:''} ${_timePress12||timeLabel}.`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
   }
   if(isActuallyWinning&&_taraAgreesStrong&&gapMagnitude>10){
     // V9.8.13: edge computed from LIVE conf vs current Kalshi (was using lock-time confidence)
     const _liveEdge = _kPctNow!=null
       ? (_liveDir==='UP'?_liveConf-_kPctNow:_liveConf-(100-_kPctNow))
       : null;
-    return{label:`TARA AGREES · HOLD ${userPosition}`,reason:`Tara ${userPosition} ${Math.round(_liveConf)}% · Edge ${_liveEdge!=null?(_liveEdge>=0?'+':'')+Math.round(_liveEdge)+'pt':'—'} · ${gapStr} · ${timeLabel}`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
+    const _holdEdgeNote=_liveEdge!=null?`${Math.abs(_liveEdge).toFixed(0)}pt ${_liveEdge>=0?'edge on your side':'edge slipping'}`:null;
+    const _holdKNote=_velConfStr?`${_velConfStr} — tape confirming.`:null;
+    return{label:`SOLID · HOLD ${userPosition}`,reason:`${gapForPosition.toFixed(0)} bps clean. Tara ${userPosition} ${Math.round(_liveConf)}%${_holdEdgeNote?`, ${_holdEdgeNote}`:''}. ${[_holdKNote,_driftStr12].filter(Boolean).join(' ')||'Position holding well.'} ${_timePress12||timeLabel}.`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
   }
   if(isActuallyWinning&&winSide>80&&!offerAboveBet)return{label:'MAX PROFIT ZONE',reason:`${gapForPosition.toFixed(0)} bps favorable. Tara: ${winSide.toFixed(0)}% confident. Wait for offer to appear. ${gapStr}. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT IF OFFERED',actionTarget:'CASH'};
   if(isActuallyWinning&&momentumWith&&gapMagnitude>10)return{label:'HOLD STRONG',reason:`${gapForPosition.toFixed(0)} bps above/below strike. Momentum aligned. ${gapStr}. Tara: ${winSide.toFixed(0)}%. [${timeLabel}]`,color:'emerald',animate:false,hasAction:true,actionLabel:'CASHOUT NOW',actionTarget:'CASH'};
@@ -33455,7 +33508,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _gapBps=Number(data.gap)||0;
         const _dollarsFromLine=_priceNum-_strikeNum;
         const _aboveBelow=_dollarsFromLine>=0?'above':'below';
-        const _kalshiC=data.kalshiAtLock!=null?`${Math.round(Number(data.kalshiAtLock))}¢`:null;
+        // V12.2: show direction-adjusted cost, not raw YES price.
+        //   kalshiAtLock is ALWAYS the Kalshi YES (UP) price.
+        //   For UP calls: cost = kalshiAtLock (correct as-is).
+        //   For DOWN calls: cost = 100 - kalshiAtLock.
+        //   Old code showed '1¢' for a DOWN call when YES=1 (meaning DOWN actually costs 99¢).
+        //   New: shows the actual cost the user is paying for their side.
+        const _kalshiRaw=data.kalshiAtLock!=null?Number(data.kalshiAtLock):null;
+        const _kalshiCost=_kalshiRaw!=null?(data.dir==='UP'?_kalshiRaw:(100-_kalshiRaw)):null;
+        const _kalshiC=_kalshiCost!=null?`${Math.round(_kalshiCost)}¢`:null;
         // Title: TARA ▼ DOWN · 84% (or with edge/override flag)
         const _title=_isOverrideCall
           ?`TARA ${_arrow} ${data.dir} · skipped (no edge)`
@@ -33475,7 +33536,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {name:'Gap',value:`${_gapDir}${Math.abs(_gapBps).toFixed(1)}bps`,inline:true},
           {name:'Regime',value:(data.regime||'—').replace('RANGE-CHOP','CHOP').replace('SHORT SQUEEZE','SQUEEZE').replace('TRENDING ','TR-'),inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-          {name:'Record',value:`All ${data.taraRecord||'—'}\nToday ${data.todayRecord||'—'} · 7d ${data.last7Record||'—'}`,inline:false},
+          {name:'Record',value:`Today ${data.todayRecord||'—'} · All-time ${data.taraRecord||'—'}`,inline:false},
         ];
         // Only add reversal risk row when EXPECTED or WATCH (worth the space)
         if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
@@ -33597,21 +33658,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   broadcast. Body of the card lands as the description so the user gets full
       //   context, not just a label.
       else if(type==='COACH_ALERT'){
-        const _color=data.tone==='urgent'?16478549:data.tone==='watch'?15974710:9807270;
-        const _gapStr=data.gap!=null?`${data.gap>0?'+':''}${data.gap.toFixed(1)} bps`:'—';
+        // V12.1: Phone-first layout. Title = the call. Description = full context in plain
+        //   English (the improved coach body). No fields — just the key context line up top.
+        //   Before: 6-field grid + raw reason string = hard to scan on phone in < 2 sec.
+        //   After: two lines. First line = position + gap + clock. Second = what to do and why.
+        const _color12=data.tone==='urgent'?16478549:data.tone==='watch'?15974710:9807270;
+        const _gapStr12=data.gap!=null?`${data.gap>=0?'+':''}${data.gap.toFixed(1)} bps`:'—';
+        const _ctxLine=[
+          data.position?`${data.position} position`:null,
+          data.clock?`${data.clock} left`:null,
+          data.gap!=null?_gapStr12:null,
+          (data.price!=null&&data.strike!=null)?`BTC $${Math.round(data.price).toLocaleString()} · strike $${Math.round(data.strike).toLocaleString()}`:null,
+        ].filter(Boolean).join('  ·  ');
         embed={
-          title:`TARA · ${_assetTag} · ${data.title||'COACH ALERT'}`,
-          color:_color,
-          description:data.body||'',
-          fields:[
-            data.position?{name:'Position',value:data.position,inline:true}:null,
-            data.gap!=null?{name:'Gap',value:_gapStr,inline:true}:null,
-            data.posterior!=null?{name:'Tara conf',value:`${Math.round(data.posterior)}%`,inline:true}:null,
-            data.clock?{name:'Clock',value:data.clock,inline:true}:null,
-            data.price!=null?{name:'Price',value:`$${data.price.toFixed(0)}`,inline:true}:null,
-            data.strike!=null?{name:'Strike',value:`$${data.strike.toFixed(0)}`,inline:true}:null,
-          ].filter(Boolean),
-          footer:{text:`${TARA_VERSION_DISPLAY}  |  coach alert`},
+          title:data.title||'COACH ALERT',
+          color:_color12,
+          description:[_ctxLine,data.body||''].filter(Boolean).join('\n'),
+          fields:[],
+          footer:{text:`${TARA_VERSION_DISPLAY} · coach`},
           timestamp:new Date().toISOString(),
         };
       }
@@ -41566,7 +41630,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   regardless of which code path created the snapshot.
       //   Data showed 5 entries >85¢ and 2 entries <35¢ slipping through.
       //   These were on no-go-edge/time-cap-commit paths that bypass the main gate.
-      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&snapshot.wasOverriddenNoTrade!==true&&snapshot.tier!=='no-go-data'){
+      // V12.2: no-go-edge and no-go-coinflip-late tiers arrive with wasOverriddenNoTrade=true
+      //   already set (they are 'override' trades by design). That flag was gating BOTH the
+      //   cost guard AND the EV gates — so a 1¢ entry in SQUEEZE with whale opposing and
+      //   quality=0 passed through with no checks at all. Edge-watch tiers must still run
+      //   through every guard — they just can't be blocked by the override flag alone.
+      const _isEdgeWatchTier=snapshot?.tier==='no-go-edge'||snapshot?.tier==='no-go-coinflip-late';
+      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&(snapshot.wasOverriddenNoTrade!==true||_isEdgeWatchTier)&&snapshot.tier!=='no-go-data'){
         const _snapKal=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock):null;
         const _snapDir=snapshot.call||snapshot.direction;
         if(_snapKal!=null&&_snapDir){
@@ -41575,7 +41645,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             // Entry cost out of range — convert to sit-out
             snapshot.call='SIT_OUT';
             snapshot.wasOverriddenNoTrade=true;
-            snapshot.caution=`Entry cost ${_snapCost.toFixed(0)}¢ outside valid range (35-85¢) — sitting out`;
+            snapshot.caution=`Entry cost ${_snapCost.toFixed(0)}¢ outside valid range (35-85¢) — sitting out (V12.2 guard)`;
           }
         }
       }
@@ -41599,7 +41669,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           if(snapshot)snapshot.kalshiPriceAgeMs=_v1126_priceAgeMs;
         }
       }catch(_v1126_age_err){}
-      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&snapshot.wasOverriddenNoTrade!==true){
+      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&(snapshot.wasOverriddenNoTrade!==true||_isEdgeWatchTier)){
         try{
           const _g_kal=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock):null;
           const _g_dir=snapshot.call||snapshot.direction;
