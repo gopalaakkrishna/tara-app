@@ -344,6 +344,57 @@ const cloudSupabaseRead=async(path)=>{
 //   instead; small fast docs (lock state, pnl) keep realtime for cross-device awareness.
 const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','history/pastWindows']);
 
+// V12.8: MULTI-DEVICE SYNC HEARTBEAT ──────────────────────────────────────────
+//   Problem this solves: memory/taraCallLog is in _NO_REALTIME_PATHS (the 2.6MB doc
+//   can't ride realtime without ~157MB/day egress). So after the initial load read,
+//   a LIVE device never pulls down entries another device commits — the two diverge
+//   and the displayed W/L record 'freezes' relative to the other device's activity.
+//
+//   Fix: a TINY realtime heartbeat doc (state/syncHeartbeat, ~150 bytes) carrying a
+//   monotonic signature of the log {resolved, maxId, count}. It is NOT in
+//   _NO_REALTIME_PATHS, so it gets live postgres_changes for near-free. When a device
+//   sees the cloud heartbeat signature is AHEAD of its own local signature, it triggers
+//   ONE catch-up pull of the big doc and merges it in. The expensive read only fires
+//   when there is genuinely newer data elsewhere - never on a blind timer, and never
+//   once the two devices have converged.
+const _SYNC_HEARTBEAT_PATH='state/syncHeartbeat';
+// Stable per-device id, persisted so a device keeps its identity across reloads.
+const _taraDeviceId=(()=>{
+  try{
+    let id=localStorage.getItem('tara_deviceId');
+    if(!id){id='dev-'+Math.random().toString(36).slice(2,8)+'-'+Date.now().toString(36).slice(-4);localStorage.setItem('tara_deviceId',id);}
+    return id;
+  }catch(_){return 'dev-ephemeral';}
+})();
+// Compute a comparable signature from a call-log array. resolved is the primary,
+//   monotonic axis (only goes up as trades settle); maxId (Date.now()-based) and
+//   count are tiebreakers. Cheap to compute, cheap to compare.
+const _computeLogSig=(arr)=>{
+  let resolved=0,maxId=0,count=0;
+  if(Array.isArray(arr)){
+    for(const e of arr){
+      if(!e)continue;count++;
+      if(e.result==='WIN'||e.result==='LOSS')resolved++;
+      const _id=e.id||0;if(_id>maxId)maxId=_id;
+    }
+  }
+  return{resolved,maxId,count};
+};
+// Is signature A strictly behind signature B? (i.e. should A pull from a source at B)
+//   Behind = fewer resolved trades, or equal resolved but an older max id.
+const _sigBehind=(a,b)=>{
+  if(!a||!b)return false;
+  if((b.resolved||0)>(a.resolved||0))return true;
+  if((b.resolved||0)===(a.resolved||0)&&(b.maxId||0)>(a.maxId||0))return true;
+  return false;
+};
+// Element-wise max of two signatures (the heartbeat doc only ever moves up).
+const _sigMax=(a,b)=>({
+  resolved:Math.max((a&&a.resolved)||0,(b&&b.resolved)||0),
+  maxId:Math.max((a&&a.maxId)||0,(b&&b.maxId)||0),
+  count:Math.max((a&&a.count)||0,(b&&b.count)||0),
+});
+
 // V11.2 live timing recommendation — written by the timing controller each tick,
 //   read by _logSnapshotEntry to stamp committed snaps, and by the card for display.
 let _v112Live={timing:'now',why:'',oddsCeil:null,kForDir:null,at:0};
@@ -4537,8 +4588,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.19-v12.6.1-regime-source-fix';
-const TARA_VERSION_DISPLAY='Tara 12.6.1';
+const BASELINE_VERSION='2026.06.20-v12.8.0-multidevice-sync-heartbeat';
+const TARA_VERSION_DISPLAY='Tara 12.8';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -10320,6 +10371,98 @@ const computeV99Posterior=(params)=>{
     }
   }catch(_fvgErr){}
 
+
+  // ── SIGNAL 5g: HALFTREND + SUPERTREND CONFIRMATION (V12.7) ─────────
+  // Two trend-following indicators on the 1m chart, used as CONFIRMATION (not primary).
+  // They carry less weight than Gap/Tape but more than weak signals. Their main value
+  // is late-entry quality: when <5min left, they confirm whether momentum still holds.
+  //
+  // SUPERTREND: ATR-band trend filter. Basis = hl2. Upper/lower bands = hl2 +/- mult*ATR.
+  //   Trend flips to UP when close crosses above the prior lower band, DOWN when it
+  //   crosses below the prior upper band. Standard ATR(10) mult 3; we use atr(14) with
+  //   a 1m-tuned mult of 2.5 for faster response inside 15m windows.
+  //
+  // HALFTREND: a smoothed trend-channel indicator. Simplified deterministic version:
+  //   trend is UP while price holds above the EMA midline and the rolling high channel,
+  //   DOWN while it holds below the midline and the rolling low channel. Approximated
+  //   with an n-bar high/low envelope + EMA midline (same flip behavior, no full state).
+  //
+  // Output: _htDir / _stDir, recent-flip distances, and a combined _trendConfirm
+  //   stamped to rawSignalScores so the late-entry gate (V12.5) can read it.
+  let _trendConfirm=null;
+  try{
+    if(liveHistory&&liveHistory.length>=18&&atr>0&&currentPrice>0){
+      const _ob=liveHistory.slice(0,40).slice().reverse(); // oldest->newest, up to 40 bars
+      const _N=_ob.length;
+      // SUPERTREND (ATR bands, mult 2.5)
+      const _stMult=2.5;
+      let _stTrend=1; // 1=UP, -1=DOWN
+      let _stPrevUpper=null,_stPrevLower=null,_stPrevClose=null;
+      let _stFlipIdx=0;
+      for(let _i=0;_i<_N;_i++){
+        const _c=_ob[_i];
+        const _hl2=(_c.h+_c.l)/2;
+        const _bUpper=_hl2+_stMult*atr;
+        const _bLower=_hl2-_stMult*atr;
+        const _upper=(_stPrevUpper==null)?_bUpper:(_bUpper<_stPrevUpper||_stPrevClose>_stPrevUpper)?_bUpper:_stPrevUpper;
+        const _lower=(_stPrevLower==null)?_bLower:(_bLower>_stPrevLower||_stPrevClose<_stPrevLower)?_bLower:_stPrevLower;
+        let _newTrend=_stTrend;
+        if(_stPrevUpper!=null){
+          if(_stTrend===-1&&_c.c>_stPrevUpper){_newTrend=1;}
+          else if(_stTrend===1&&_c.c<_stPrevLower){_newTrend=-1;}
+        }
+        if(_newTrend!==_stTrend){_stFlipIdx=_i;_stTrend=_newTrend;}
+        _stPrevUpper=_upper;_stPrevLower=_lower;_stPrevClose=_c.c;
+      }
+      const _stDir=_stTrend===1?'UP':'DOWN';
+      const _stBarsSinceFlip=_N-1-_stFlipIdx;
+      // HALFTREND (high/low envelope + EMA midline)
+      const _htAmp=4;
+      let _htTrend=1;
+      let _htFlipIdx=0;
+      let _htEma=_ob[0].c;
+      const _htK=2/(6+1);
+      for(let _i=1;_i<_N;_i++){
+        _htEma=_ob[_i].c*_htK+_htEma*(1-_htK);
+        const _lo=Math.min(..._ob.slice(Math.max(0,_i-_htAmp+1),_i+1).map(b=>b.l));
+        const _hi=Math.max(..._ob.slice(Math.max(0,_i-_htAmp+1),_i+1).map(b=>b.h));
+        let _newHt=_htTrend;
+        if(_htTrend===-1&&_ob[_i].c>_htEma&&_ob[_i].c>=_hi-atr*0.25){_newHt=1;}
+        else if(_htTrend===1&&_ob[_i].c<_htEma&&_ob[_i].c<=_lo+atr*0.25){_newHt=-1;}
+        if(_newHt!==_htTrend){_htFlipIdx=_i;_htTrend=_newHt;}
+      }
+      const _htDir=_htTrend===1?'UP':'DOWN';
+      const _htBarsSinceFlip=_N-1-_htFlipIdx;
+      // COMBINE
+      const _aligned=_htDir===_stDir;
+      const _minBarsSinceFlip=Math.min(_htBarsSinceFlip,_stBarsSinceFlip);
+      const _strongAligned=_aligned&&_minBarsSinceFlip>=3;
+      const _conflict=!_aligned;
+      _trendConfirm={
+        htDir:_htDir,stDir:_stDir,
+        aligned:_aligned,strongAligned:_strongAligned,conflict:_conflict,
+        dir:_aligned?_htDir:null,
+        barsSinceFlip:_minBarsSinceFlip,
+        htBarsSinceFlip:_htBarsSinceFlip,stBarsSinceFlip:_stBarsSinceFlip,
+      };
+      rawSignalScores._trendConfirm=_trendConfirm;
+      // SCORE CONTRIBUTION (confirmation weight: moderate)
+      const _callLean=totalScore>0?'UP':totalScore<0?'DOWN':null;
+      let _tcAdj=0;
+      if(_callLean&&_aligned&&_trendConfirm.dir===_callLean){
+        _tcAdj=_strongAligned?(_callLean==='UP'?9:-9):(_callLean==='UP'?5:-5);
+        reasoning.push(`[TREND-CONFIRM] HalfTrend + SuperTrend both ${_trendConfirm.dir}${_strongAligned?' (settled, no recent flip)':''} confirm ${_callLean} -> ${_tcAdj>0?'+':''}${_tcAdj}pts`);
+      } else if(_callLean&&_aligned&&_trendConfirm.dir&&_trendConfirm.dir!==_callLean){
+        _tcAdj=_strongAligned?(_callLean==='UP'?-8:8):(_callLean==='UP'?-5:5);
+        reasoning.push(`[TREND-CONFIRM] HalfTrend + SuperTrend both ${_trendConfirm.dir} OPPOSE ${_callLean} lean -> ${_tcAdj>0?'+':''}${_tcAdj}pts caution`);
+      } else if(_conflict){
+        if(_callLean==='UP')_tcAdj=-2;else if(_callLean==='DOWN')_tcAdj=2;
+        reasoning.push(`[TREND-CONFIRM] HalfTrend ${_htDir} vs SuperTrend ${_stDir} conflict -> dampen ${_tcAdj>0?'+':''}${_tcAdj}pts`);
+      }
+      totalScore+=_tcAdj;
+      rawSignalScores._trendConfirmScore=_tcAdj;
+    }
+  }catch(_tcErr){}
 
   // ── SIGNAL 5d: MACD + OBV (V10.7.37) ────────────────────────────────────
   // MACD(12,26,9) on hl2. Histogram zero-cross = strong momentum flip.
@@ -21031,7 +21174,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           React.createElement('button',{
             onClick:()=>{
               try{
-                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','feedAtLock','lockLatencySec','windowTypeTransitions','windowTypeChanged','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','atSecondsLeft','kalshiPriceAgeMs','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion'];
+                const _headers=['date','time','asset','windowType','direction','result','posterior','regime','phase','strike','closingPrice','closingGapBps','lossPattern','tier','windowAmplitude','feedAtLock','lockLatencySec','windowTypeTransitions','windowTypeChanged','secondsIntoWindow','kalshiAtLock','dialAtLock','kalshiAtClose','kalshiVelocityAtLock','urgencyApplied','ulpApplied','samplesNeededOriginal','reversalDamperApplied','reversalDamperMult','recentCandleDirsAtLock','fgtCounterApplied','convBeforeFgtCap','regimeCalApplied','regimeCalKey','regimeCalShift','regimeCalN','fgt','qScore','qScoreV2','qScoreV2_regCal','qScoreV2_sess','qScoreV2_regWR','qScoreV2_post','qScoreV2_late','reversalRiskFlag','reversalRiskScore','reversalRiskTopSignals','maxAdverseExcursionBps','maxFavorableExcursionBps','peakClockSec','troughClockSec','last60sDriftBps','timeSeriesLen','chartPattern','trendStructure','trendStructureStrength','trendlineBreak','trendlineBreakMagBps','patternTotalAdj','htfPattern1m','htfPattern5m','htfPattern15m','htfConfluence','htfDominantDir','htfTotalAdj','fundingRate','oiDeltaPct','basisPct','fundingAdj','oiAdj','basisAdj','futuresTotalAdj','session','device','tradeTimingDecision','tradeTimingScore','tradeTimingReason','tradeTimingMode','sessionTierMode','sessionTierMult','sessionTierApplied','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','atSecondsLeft','kalshiPriceAgeMs','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','htDir','stDir','trendAligned','trendConfirmScore'];
                 const _rows=[_headers.join(',')];
                 (taraCallLog||[]).forEach(e=>{
                   if(!e)return;
@@ -21178,6 +21321,10 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     e.earlyLockFired===true?'Y':'',
                     e.earlyLockTier!=null?e.earlyLockTier:'',
                     e.taraVersion||'',
+                    e.htDir||'',
+                    e.stDir||'',
+                    e.trendAligned||'',
+                    e.trendConfirmScore!=null?e.trendConfirmScore:'',
                   ].map(v=>typeof v==='string'&&v.includes(',')?`"${v}"`:String(v));
                   _rows.push(_row.join(','));
                 });
@@ -30259,6 +30406,13 @@ function TaraApp(){
   // V8.1: Track if we have user-action writes pending pre-hydration. If true, force a
   //   write the moment cloudWatch hydrates so those entries don't get silently dropped.
   const _logWritePendingRef=useRef(false);
+  // V12.8: multi-device sync heartbeat refs.
+  //   _lastBeatSigRef    — last signature this device wrote to the heartbeat (throttle).
+  //   _lastCatchUpPullRef — timestamp of last catch-up pull (cooldown, anti-storm).
+  //   _catchUpInFlightRef — true while a catch-up pull is awaiting cloud read (guard).
+  const _lastBeatSigRef=useRef(null);
+  const _lastCatchUpPullRef=useRef(0);
+  const _catchUpInFlightRef=useRef(false);
   // V8.3: Helper to merge two arrays of call log entries. Used by both RMW write
   //   and the BroadcastChannel handler. Mirrors the cloudWatch merge logic.
   const _mergeCallLogEntries=React.useCallback((existing,incoming)=>{
@@ -30457,6 +30611,28 @@ function TaraApp(){
         //   for cross-device sync — lock state (small, fast) handles real-time awareness.
         60000,
       );
+      // V12.8: bump the tiny realtime heartbeat with this device's post-write signature.
+      //   RMW so the doc only ever moves UP (element-wise max). A device that is behind
+      //   writing its lower sig will NOT pull the heartbeat back down. Throttled so it
+      //   only fires when our local signature actually advanced since last beat.
+      try{
+        const _localSig=_computeLogSig(taraCallLogRef.current);
+        const _last=_lastBeatSigRef.current;
+        if(!_last||_sigBehind(_last,_localSig)){
+          _lastBeatSigRef.current=_localSig;
+          cloudWriteDebouncedRMW(
+            _SYNC_HEARTBEAT_PATH,
+            ()=>_computeLogSig(taraCallLogRef.current),
+            (cloudData,localSig)=>{
+              const _cloud=cloudData&&cloudData.sig?cloudData.sig:null;
+              const _next=_sigMax(_cloud,localSig);
+              if(_cloud&&!_sigBehind(_cloud,localSig))return null;
+              return{sig:_next,by:_taraDeviceId,version:BASELINE_VERSION,ts:Date.now()};
+            },
+            3000,
+          );
+        }
+      }catch(_hbErr){}
     } else if(taraCallLog.length>0){
       // Pre-hydration but we have data → mark pending. Once cloudWatch fires we'll flush.
       _logWritePendingRef.current=true;
@@ -30994,6 +31170,50 @@ function TaraApp(){
     });
     return unsub;
   },[_backfillCallLogId]);
+  // V12.8: SYNC-HEARTBEAT SUBSCRIBER + CATCH-UP PULL
+  //   Subscribes to the tiny realtime heartbeat. When the cloud signature is ahead of
+  //   this device's local log signature, another device has committed entries we have
+  //   not seen. We then do ONE catch-up read of the big memory/taraCallLog doc and merge
+  //   it in via _mergeCallLogEntries (resolved-beats-pending, manualEdit-wins). Guarded
+  //   by a 20s cooldown + in-flight flag so two behind devices cannot pull-storm each
+  //   other; once converged, local==cloud and no further pulls fire.
+  useEffect(()=>{
+    const _doCatchUpPull=async(reason)=>{
+      if(_catchUpInFlightRef.current)return;
+      const _now=Date.now();
+      if(_now-_lastCatchUpPullRef.current<20000)return; // 20s cooldown
+      _catchUpInFlightRef.current=true;
+      _lastCatchUpPullRef.current=_now;
+      try{
+        const _cloudData=await cloudSupabaseRead('memory/taraCallLog');
+        const _cloudEntries=(_cloudData&&Array.isArray(_cloudData.entries))?_cloudData.entries:[];
+        if(!_cloudEntries.length){_catchUpInFlightRef.current=false;return;}
+        setTaraCallLog(prev=>{
+          const _merged=_mergeCallLogEntries(prev,_cloudEntries);
+          // Only commit to state if the merge actually changed something, to avoid
+          //   a render/write loop (a state change re-fires the big-log write effect).
+          const _ps=_computeLogSig(prev),_ms=_computeLogSig(_merged);
+          if(_merged.length===prev.length&&_ms.resolved===_ps.resolved&&_ms.maxId===_ps.maxId)return prev;
+          try{console.info('[V12.8 SYNC] catch-up pull ('+reason+'): '+prev.length+' -> '+_merged.length+' entries, resolved '+_ps.resolved+' -> '+_ms.resolved);}catch(_){}
+          return _merged;
+        });
+      }catch(e){
+        try{console.warn('[V12.8 SYNC] catch-up pull failed',e&&e.message);}catch(_){}
+      }finally{
+        _catchUpInFlightRef.current=false;
+      }
+    };
+    const _unsub=cloudWatch(_SYNC_HEARTBEAT_PATH,(d)=>{
+      if(!d||!d.sig)return;
+      // Ignore our own beats (we are already at or above that signature).
+      if(d.by===_taraDeviceId)return;
+      const _localSig=_computeLogSig(taraCallLogRef.current);
+      if(_sigBehind(_localSig,d.sig)){
+        _doCatchUpPull('heartbeat from '+(d.by||'?'));
+      }
+    });
+    return ()=>{try{_unsub&&_unsub();}catch(_){}};
+  },[_mergeCallLogEntries]);
   // V7.10.5: PERSONAL SCORECARDS persist + sync. Was in-memory only — every reload reset
   //   to defaults, and no two devices ever agreed. Now: localStorage cached, cloud-synced
   //   via scorecards/personal, max-per-cell merge so any device's increments propagate
@@ -42123,6 +42343,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //   fired the lock. 0% stamp rate on 'version' = all entries came from stale
           //   cached builds. Hard-refresh every device when deploying.
           taraVersion:BASELINE_VERSION,
+          htDir:analysis?.rawSignalScores?._trendConfirm?.htDir||null,
+          stDir:analysis?.rawSignalScores?._trendConfirm?.stDir||null,
+          trendAligned:analysis?.rawSignalScores?._trendConfirm?.aligned===true?'Y':(analysis?.rawSignalScores?._trendConfirm?(analysis.rawSignalScores._trendConfirm.conflict?'CONFLICT':'N'):null),
+          trendConfirmScore:analysis?.rawSignalScores?._trendConfirmScore??null,
         };
         setTaraCallLog(prev=>{
           // V9.10.4: per-asset dedup so BTC + ETH snapshots for the same window slot
@@ -43168,6 +43392,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _elIsChop=_elRss._isChop===true||_elRss._isHighVol===true;
         const _elHostile=hostileWindow; // DEAD or WHIPSAW — already computed above
         const _elTapeWith=tapeStronglyAgrees||tapeSuperStrong;
+        // V12.7: HalfTrend + SuperTrend confirmation for the early-lock decision.
+        //   _tcWith   = both indicators aligned WITH the claimed direction
+        //   _tcAgainst= both indicators aligned AGAINST the claimed direction
+        //   _tcConflict= the two indicators disagree with each other
+        const _elTC=_elRss._trendConfirm||null;
+        const _tcWith=_elTC&&_elTC.aligned&&_elTC.dir===claimedDir;
+        const _tcStrongWith=_tcWith&&_elTC.strongAligned;
+        const _tcAgainst=_elTC&&_elTC.aligned&&_elTC.dir&&_elTC.dir!==claimedDir;
+        const _tcConflict=_elTC&&_elTC.conflict;
         // Guard: odds already bad (let V12.4 handle the 88c+ case)
         const _elOddsGood=_elKalDir!=null&&_elKalDir>=58&&_elKalDir<=82;
         if(!_elIsBadRegime&&!_elHostile&&_elOddsGood&&_elKalDir!=null){
@@ -43176,7 +43409,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _elGapBps>=12&&
             _elKalDir>=62&&_elKalDir<=78&&
             _elIsTrending&&
-            _elTapeWith&&
+            (_elTapeWith||_tcStrongWith)&&  // V12.7: strong HT+ST alignment can stand in for tape
+            !_tcAgainst&&                   // V12.7: never fire T1 when both trend indicators oppose
             elapsedSec>=90
           ){
             needSamples=1;
@@ -43189,6 +43423,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _elGapBps>=8&&
             _elKalDir>=60&&_elKalDir<=80&&
             !_elIsChop&&
+            !_tcAgainst&&                   // V12.7: block when both trend indicators oppose
             elapsedSec>=120
           ){
             needSamples=1;
@@ -43201,6 +43436,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _elKalDir>=65&&_elKalDir<=75&&
             _elGapBps>=4&&
             !_elIsChop&&
+            !_tcAgainst&&                   // V12.7: weakest tier — block on any trend opposition
             elapsedSec>=180
           ){
             needSamples=1;
@@ -43322,6 +43558,49 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _logSnapshotEntry(_edgeSnap); // V7.10.1
           _persistLock();
           return;
+        }
+      }
+      // V12.7: LATE-ENTRY TREND-CONFIRMATION FILTER
+      //   For late entries (<5min left), HalfTrend + SuperTrend are the cleanest read on
+      //   whether momentum still holds. Rule (per spec): if BOTH indicators point AGAINST
+      //   the direction Tara wants to lock on a late entry, strongly discourage the lock
+      //   UNLESS gap + tape are both very strong (those override as primary signals).
+      //   This is the late-entry quality filter — it does NOT touch early/mid locks.
+      {
+        const _leSecLeft=timeState.minsRemaining*60+timeState.secsRemaining;
+        const _leIsLate=_leSecLeft<=300; // <=5 minutes left
+        const _leTC=analysis?.rawSignalScores?._trendConfirm||null;
+        const _leDir=_committedCall;
+        if(_leIsLate&&_leTC&&_leTC.aligned&&_leTC.dir&&_leDir&&_leTC.dir!==_leDir&&!_instantForceReady){
+          // Both HalfTrend AND SuperTrend agree with each other and BOTH oppose the lock.
+          // Check the override: only proceed if gap AND tape are both very strong.
+          const _leGapStrong=Math.abs(analysis?.realGapBps||0)>=20;
+          const _leTapeStrong=tapeSuperStrong===true;
+          const _leOverride=_leGapStrong&&_leTapeStrong;
+          if(!_leOverride){
+            const _leSnap={
+              call:'SIT_OUT',direction:null,confidence:0,
+              reason:`Late entry (${Math.round(_leSecLeft/60)}m left) but HalfTrend + SuperTrend both ${_leTC.dir} oppose ${_leDir} — momentum against the lock`,
+              atSecondsLeft:_leSecLeft,
+              atPosterior:analysis?.rawProbAbove,
+              kalshiAtLock:typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null,
+              locked:false,earlyLock:false,
+              isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+              samples,needSamples:0,
+              tier:'late-trend-oppose-sitout',
+              session:_session,
+              regime:analysis?.regime||'',
+              qScore:Math.round(qualityGate?.score||0),qScoreV2:Math.round(qualityGateV2?.score||0),qScoreV2Components:qualityGateV2?.components||null,
+              fgt:analysis?.mtfAlignment,
+              isNoGo:true,
+              noGoCategory:'late-trend-oppose',
+            };
+            taraCallSnapshotRef.current=_leSnap;
+            _logSnapshotEntry(_leSnap);
+            _persistLock();
+            try{console.info('[V12.7 LATE-TREND-OPPOSE] sit out:',_leTC.dir,'opposes',_leDir,'· secLeft',_leSecLeft);}catch(_){}
+            return;
+          }
         }
       }
       // V9.9.6: TIER-1 ONLY MODE — convert non-Tier-1 locks to SIT_OUT when enabled.
