@@ -4588,8 +4588,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.20-v12.8.0-multidevice-sync-heartbeat';
-const TARA_VERSION_DISPLAY='Tara 12.8';
+const BASELINE_VERSION='2026.06.20-v12.9.0-missed-window-detector';
+const TARA_VERSION_DISPLAY='Tara 12.9';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35661,6 +35661,97 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     document.addEventListener('visibilitychange',_onVis);
     window.addEventListener('focus',_onFocus);
     return()=>{document.removeEventListener('visibilitychange',_onVis);window.removeEventListener('focus',_onFocus);};
+  },[windowType,currentAsset]);
+
+  // V12.9: WAKE-TIME MISSED-WINDOW DETECTOR
+  //   The decision engine runs on the main thread, driven by price/analysis updates.
+  //   When the tab is backgrounded (or the phone is locked), the browser throttles or
+  //   suspends that work, so windows that open AND close while hidden get NO logged
+  //   decision - they become silent holes in the record (the 14 missed-window gaps/day).
+  //   We can't run the engine while suspended, but we CAN make the gap honest: on wake,
+  //   enumerate every window whose close fell inside the hidden interval, and for any with
+  //   no existing log entry, write a distinct MISSED marker.
+  //
+  //   The marker uses result:'MISSED' - invisible to every WR/EV/sit-out tally (those all
+  //   filter WIN|LOSS or SITOUT) - and id=window-open time, so a real trade for the same
+  //   window (locked after open, higher id) always wins the merge. A missed marker can
+  //   never overwrite a real entry, and it propagates via the V12.8 heartbeat like any
+  //   other entry. Purely additive: it records a hole, it does not fabricate a result.
+  const _hiddenAtRef=useRef(0);
+  const _lastMissedScanRef=useRef(0);
+  useEffect(()=>{
+    const _winMs=()=>windowType==='15m'?900000:300000;
+    const _onHidden=()=>{ if(document.visibilityState==='hidden'&&_hiddenAtRef.current===0)_hiddenAtRef.current=Date.now(); };
+    const _scanMissed=()=>{
+      const _hiddenAt=_hiddenAtRef.current;
+      _hiddenAtRef.current=0; // consume
+      if(!_hiddenAt)return;
+      const _now=Date.now();
+      if(_now-_lastMissedScanRef.current<3000)return; // de-dupe vis+focus double-fire
+      _lastMissedScanRef.current=_now;
+      // Only a real suspension misses windows. A brief blur (< 2 min) does not stall the
+      //   engine meaningfully, so ignore short hidden gaps to avoid false MISSED markers.
+      if(_now-_hiddenAt<120000)return;
+      const _wm=_winMs();
+      // A window is missed if its CLOSE time fell within (_hiddenAt, _now]. Enumerate
+      //   window-open buckets whose close (open+_wm) lands in that interval.
+      const _firstClose=Math.ceil(_hiddenAt/_wm)*_wm; // first window-close at/after hidden
+      if(_firstClose> _now-30000)return; // nothing fully closed+settled while hidden
+      const _wt=windowType||'15m';
+      const _asset=currentAssetRef.current||currentAsset||'BTC';
+      // Build set of windowIds already present so we never double-log.
+      const _have=new Set();
+      for(const e of (taraCallLogRef.current||[])){ if(e&&e.windowId)_have.add((e.asset||'BTC')+'|'+e.windowId); }
+      const _markers=[];
+      const _settleBefore=_now-30000; // window must have closed >=30s ago
+      for(let _close=_firstClose; _close<=_settleBefore; _close+=_wm){
+        const _open=_close-_wm;
+        // Skip the window currently in progress (its close is in the future handled by <=_now).
+        const _wid=_wt+'-'+new Date(_open).toISOString();
+        if(_have.has(_asset+'|'+_wid))continue;
+        _markers.push({
+          id:_open,                       // window-open time: always < any real lock id
+          time:_open,
+          windowId:_wid,
+          windowType:_wt,
+          asset:_asset,
+          result:'MISSED',
+          dir:null,call:'SIT_OUT',
+          tier:'missed-backgrounded',
+          noGoCategory:'missed-backgrounded',
+          _missedWhileBackgrounded:true,
+          confidence:0,
+        });
+      }
+      if(!_markers.length)return;
+      // Cap the backfill (e.g. overnight sleep) so we don't flood the log. Keep the most
+      //   recent N; stamp the truncated count on the newest marker for diagnostics.
+      const _CAP=12;
+      let _final=_markers;
+      if(_markers.length>_CAP){
+        const _dropped=_markers.length-_CAP;
+        _final=_markers.slice(-_CAP);
+        _final[_final.length-1]._missedTruncatedCount=_dropped;
+      }
+      try{console.info('[V12.9 MISSED] hidden '+Math.round((_now-_hiddenAt)/60000)+'min, logging '+_final.length+' missed '+_wt+' window(s)'+(_markers.length>_CAP?(' (+'+(_markers.length-_CAP)+' older truncated)'):''));}catch(_){}
+      setTaraCallLog(prev=>{
+        const _byKey=new Set((prev||[]).map(e=>e&&e.windowId?((e.asset||'BTC')+'|'+e.windowId):''));
+        const _add=_final.filter(m=>!_byKey.has(m.asset+'|'+m.windowId));
+        if(!_add.length)return prev;
+        return [...prev,..._add].sort((a,b)=>(a.id||0)-(b.id||0));
+      });
+    };
+    const _onVis=()=>{ if(document.visibilityState==='visible')_scanMissed(); else _onHidden(); };
+    const _onFocus=()=>_scanMissed();
+    const _onBlur=()=>_onHidden();
+    document.addEventListener('visibilitychange',_onVis);
+    window.addEventListener('focus',_onFocus);
+    window.addEventListener('blur',_onBlur);
+    return ()=>{
+      document.removeEventListener('visibilitychange',_onVis);
+      window.removeEventListener('focus',_onFocus);
+      window.removeEventListener('blur',_onBlur);
+    };
   },[windowType,currentAsset]);
 
   // ── MAIN ANALYSIS ──
