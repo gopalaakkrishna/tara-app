@@ -4588,8 +4588,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.20-v12.9.0-missed-window-detector';
-const TARA_VERSION_DISPLAY='Tara 12.9';
+const BASELINE_VERSION='2026.06.21-v13.0.0-mod-gap-chop-gate';
+const TARA_VERSION_DISPLAY='Tara 13.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -42789,6 +42789,68 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }
         } else if(_flatGapWatchRef.current?.windowId===_curWid){
           _flatGapWatchRef.current=null;
+        }
+      }
+      // (e) MODERATE-GAP-IN-CHOP SIT-OUT -- V13.0
+      //   Most-repeated finding across all history: gap 10-25bps from strike + Kalshi
+      //   priced 55-65c on our side + CHOP = -1.2c/trade over n=262. At 55-65c the edge
+      //   is often marginally positive, so these slip past no-go-edge; the gap is moderate
+      //   (not <8 score) so flat-gap watch never catches them; and it is not a range-
+      //   position cut so mid-range-chop-sitout misses them too. Genuine coverage gap. In
+      //   chop a moderate gap at mid-odds is a coin flip you overpay for: price oscillates
+      //   back across the strike before close.
+      //   Uses the RELIABLE chop classifier (_isChop/_isHighVol), NOT analysis.regime
+      //   (stuck on RANGE-CHOP ~90% of windows -- would fire everywhere).
+      //   Builds a real SIT_OUT (the default _noGoReason path commits-with-caution, it
+      //   does not sit out). Overridable when there is strong confirmation. Bands are
+      //   named constants -- tune after the next CSV shows live fire-rate + WR.
+      if(!_noGoReason){
+        const _MGC_GAP_LO=10,_MGC_GAP_HI=25;   // moderate gap band (bps from strike)
+        const _MGC_K_LO=55,_MGC_K_HI=65;        // mid-odds band (cents, our side)
+        const _mgcRss=analysis?.rawSignalScores||{};
+        const _mgcChop=_mgcRss._isChop===true||_mgcRss._isHighVol===true;
+        const _mgcGapBps=targetMargin>0?Math.abs((currentPrice-targetMargin)/targetMargin*10000):0;
+        const _mgcKForDir=_commitDir==='UP'?_kPctNow:(_kPctNow!=null?(100-_kPctNow):null);
+        const _mgcInGap=_mgcGapBps>=_MGC_GAP_LO&&_mgcGapBps<=_MGC_GAP_HI;
+        const _mgcInOdds=_mgcKForDir!=null&&_mgcKForDir>=_MGC_K_LO&&_mgcKForDir<=_MGC_K_HI;
+        if(_mgcChop&&_mgcInGap&&_mgcInOdds&&_commitDir){
+          // Override paths -- strong confirmation rescues the trade.
+          const _mgcTC=_mgcRss._trendConfirm||null;
+          const _mgcTapeWith=(tapeStronglyAgrees||tapeSuperStrong)===true;
+          const _mgcTrendWith=!!(_mgcTC&&_mgcTC.strongAligned&&_mgcTC.dir===_commitDir);
+          const _mgcEdge=(_commitConf!=null&&_mgcKForDir!=null)?(_commitConf-_mgcKForDir):0;
+          const _mgcMispriced=_mgcGapBps>=20&&_mgcEdge>=5;
+          const _mgcOverride=_mgcTapeWith||_mgcTrendWith||_mgcMispriced;
+          if(!_mgcOverride){
+            const _mgcSit={
+              call:'SIT_OUT',direction:'SIT_OUT',
+              confidence:_commitConf||0,
+              caution:`Moderate gap in chop -- ${_mgcGapBps.toFixed(0)}bps off strike, Kalshi ${Math.round(_mgcKForDir)}c on ${_commitDir}, chop regime -> coin-flip you'd overpay for (sit out)`,
+              reason:`V13.0 mod-gap-chop sit-out: ${_mgcGapBps.toFixed(0)}bps gap, ${Math.round(_mgcKForDir)}c, chop (-1.2c/trade bucket, n=262)`,
+              wasOverriddenNoTrade:true,
+              noGoCategory:'mod-gap-chop-sitout',
+              atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+              atPosterior:_post,
+              kalshiAtLock:_kPctNow,
+              locked:true,earlyLock:false,
+              isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+              samples:0,needSamples:0,
+              tier:'mod-gap-chop-sitout',
+              session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+              regime:analysis?.regime||'',
+              qScore:Math.round(_qFast),
+              fgt:analysis?.mtfAlignment,
+              _committedAt:Date.now(),
+              _mgcGapBps:Math.round(_mgcGapBps),
+              _mgcKForDir:Math.round(_mgcKForDir),
+              _mgcEdge:Math.round(_mgcEdge),
+            };
+            try{console.info('[V13.0 MOD-GAP-CHOP] sit-out: '+_mgcGapBps.toFixed(0)+'bps, '+Math.round(_mgcKForDir)+'c on '+_commitDir+', chop');}catch(_){}
+            taraCallSnapshotRef.current=_mgcSit;
+            _logSnapshotEntry(_mgcSit);
+            _persistLock();
+            return;
+          }
         }
       }
       if(_noGoReason){
