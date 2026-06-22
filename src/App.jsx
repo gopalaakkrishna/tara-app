@@ -2378,8 +2378,10 @@ const useLiqHeatmap=()=>{
         if(d?.ok)setLiqHeatmap(d);
       }catch(_){}
     };
-    // V13.2: DISABLED - /api/coinglass is a dead stub (returns ok:false). Polling it 24/7
-    //   only burned Vercel Edge Requests (~4,320/device/day) for data we never use.
+    // V13.2.1: left OFF on the evidence. liqHeatmap was empirically ANTI-PREDICTIVE over
+    //   1,819 trades (win +4.6 vs loss +4.7, delta -0.1) and already throttled to 20%.
+    //   Dropping it removes noise and ~4,320 Vercel edge req/device/day. Re-enable here
+    //   (e.g. setInterval 180000) if you ever want the OI-wall display back.
     return()=>{_stopped=true;};
   },[]);
   return liqHeatmap;
@@ -2398,8 +2400,12 @@ const useDeribitOptions=()=>{
         setDeribit(d);
       }catch(_){}
     };
-    // V13.2: DISABLED - /api/deribit dead stub. Saved ~2,880 Vercel edge req/device/day.
-    return()=>{_stopped=true;};
+    // V13.2.1: re-enabled but slowed 30s -> 180s. deribitOptions (IV skew / put-call) IS
+    //   wired into the score, but it's a structural signal that moves over minutes, not
+    //   ticks. 3min keeps it fresh while cutting ~83% of its Vercel edge requests.
+    _poll();
+    const iv=setInterval(_poll,180000);
+    return()=>{_stopped=true;clearInterval(iv);};
   },[]);
   return deribit;
 };
@@ -2422,8 +2428,13 @@ const useLiqSignal=()=>{
         setLiqSignal(d);
       }catch(_){}
     };
-    // V13.2: DISABLED - /api/liq dead stub. Saved ~5,760 Vercel edge req/device/day.
-    return()=>{_stopped=true;};
+    // V13.2.1: re-enabled but slowed 15s -> 120s. liqSignal feeds up to +/-8 to the score
+    //   (funding extreme, CB premium, liq cascades). 2min keeps the structural part fresh
+    //   while cutting ~87% of its Vercel edge requests. (Fast liq cascades are the only
+    //   part that decays in seconds; the tape already catches violent moves directly.)
+    _poll();
+    const iv=setInterval(_poll,120000);
+    return()=>{_stopped=true;clearInterval(iv);};
   },[]);
   return liqSignal;
 };
@@ -4586,8 +4597,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.22-v13.2.0-edge-egress-cuts';
-const TARA_VERSION_DISPLAY='Tara 13.2';
+const BASELINE_VERSION='2026.06.22-v13.2.1-slow-feeds-not-dead';
+const TARA_VERSION_DISPLAY='Tara 13.2.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
