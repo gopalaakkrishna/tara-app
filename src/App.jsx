@@ -4588,8 +4588,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.22-v13.1.0-sticky-telemetry';
-const TARA_VERSION_DISPLAY='Tara 13.1';
+const BASELINE_VERSION='2026.06.22-v13.1.1-telemetry-health-badge';
+const TARA_VERSION_DISPLAY='Tara 13.1.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -45901,6 +45901,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#E5C870'}}></span>
               {TARA_VERSION_DISPLAY.replace(/^Tara\s+/,'')}
             </span>
+            {/* V13.1: telemetry-health badge - confirms rich-entry stamping after deploy */}
+            {(()=>{try{
+              const _tl=Array.isArray(taraCallLogRef.current)?taraCallLogRef.current:[];
+              const _real=_tl.filter(e=>e&&e.result!=='MISSED'&&!e._missedWhileBackgrounded).slice(-50);
+              const _n=_real.length; if(_n===0)return null;
+              const _rich=_real.filter(e=>!!e.taraVersion).length;
+              const _pct=_rich/_n;
+              const _col=_pct>=0.9?{bg:'rgba(34,197,94,0.12)',bd:'rgba(34,197,94,0.35)',fg:'#86efac'}
+                        :_pct>=0.5?{bg:'rgba(251,191,36,0.12)',bd:'rgba(251,191,36,0.3)',fg:'rgba(251,191,36,0.9)'}
+                        :{bg:'rgba(244,63,94,0.12)',bd:'rgba(244,63,94,0.35)',fg:'#fda4af'};
+              return React.createElement('span',{
+                className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.12em] px-1.5 py-0.5 rounded-md uppercase cursor-default',
+                style:{background:_col.bg,border:'1px solid '+_col.bd,color:_col.fg},
+                title:`Telemetry stamp rate on the last ${_n} real entries: ${_rich}/${_n} carry full signal data (regime, chop, SMC, trend, lock timing). Climbs to ${_n}/${_n} once every trading device runs v13.1+. Persistently low = a device is on a stale cached build - hard-refresh it.`,
+              },`TEL ${_rich}/${_n}`);
+            }catch(_){return null;}})()}
             {_SB_PAUSED&&React.createElement('span',{
               className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.14em] px-1.5 py-0.5 rounded-md uppercase cursor-default',
               style:{background:'rgba(251,191,36,0.1)',border:'1px solid rgba(251,191,36,0.3)',color:'rgba(251,191,36,0.8)'},
