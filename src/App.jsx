@@ -2378,9 +2378,9 @@ const useLiqHeatmap=()=>{
         if(d?.ok)setLiqHeatmap(d);
       }catch(_){}
     };
-    _poll();
-    const iv=setInterval(_poll,20000);
-    return()=>{_stopped=true;clearInterval(iv);};
+    // V13.2: DISABLED - /api/coinglass is a dead stub (returns ok:false). Polling it 24/7
+    //   only burned Vercel Edge Requests (~4,320/device/day) for data we never use.
+    return()=>{_stopped=true;};
   },[]);
   return liqHeatmap;
 };
@@ -2398,9 +2398,8 @@ const useDeribitOptions=()=>{
         setDeribit(d);
       }catch(_){}
     };
-    _poll();
-    const iv=setInterval(_poll,30000);
-    return()=>{_stopped=true;clearInterval(iv);};
+    // V13.2: DISABLED - /api/deribit dead stub. Saved ~2,880 Vercel edge req/device/day.
+    return()=>{_stopped=true;};
   },[]);
   return deribit;
 };
@@ -2423,9 +2422,8 @@ const useLiqSignal=()=>{
         setLiqSignal(d);
       }catch(_){}
     };
-    _poll();
-    const iv=setInterval(_poll,15000);
-    return()=>{_stopped=true;clearInterval(iv);};
+    // V13.2: DISABLED - /api/liq dead stub. Saved ~5,760 Vercel edge req/device/day.
+    return()=>{_stopped=true;};
   },[]);
   return liqSignal;
 };
@@ -4588,8 +4586,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.22-v13.1.1-telemetry-health-badge';
-const TARA_VERSION_DISPLAY='Tara 13.1.1';
+const BASELINE_VERSION='2026.06.22-v13.2.0-edge-egress-cuts';
+const TARA_VERSION_DISPLAY='Tara 13.2';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4933,6 +4931,12 @@ function computeDowHourShift(dowHourTable,now){
 //   limit comfortably. IndexedDB (unlimited) is the primary store; localStorage
 //   is a fast-read cache only.
 const TARA_CALL_LOG_CAP=5000;
+// V13.2: Supabase EGRESS FIX. The cloud doc was the full 5000-entry log (~2.9MB, and
+//   bigger now that V13.1 telemetry enriched each entry). Every 60s RMW read+merge moved
+//   the whole doc -> ~52% of the 5GB egress cap. Cross-device sync only needs RECENT
+//   windows; resolved old windows never change and live in each device's IndexedDB.
+//   Cap the CLOUD copy to the last 1200 (~10 days of 15m windows) -> ~3x less egress.
+const _TARA_CLOUD_LOG_CAP=1200;
 
 // V9.10.9: Stable device label computed once at module load. Used as the canonical
 //   identifier for tagging locally-created entries (so the personal scorecard can filter
@@ -23461,7 +23465,7 @@ function NewsFeedCard({timeFormat,pushToast}={}){
     };
     fetchNewsRef.current=fetchNews; // V9.0: expose for retry button
     fetchNews();
-    const iv=setInterval(fetchNews,30000); // V134: 30s polling
+    const iv=setInterval(fetchNews,300000); // V13.2: 5min (was 30s) - RSS barely changes; cut ~2,600 edge req/device/day
     return()=>{clearInterval(iv);clearInterval(macroIv);};
   },[]);
 
@@ -30607,11 +30611,16 @@ function TaraApp(){
           //   Now: skip when all NEW entries (not in cloud) are resolved versions of
           //   existing pending cloud entries — those only change the result field locally.
           //   We still write when genuinely new windows appear or cloud is behind.
-          const _mergedIds=new Set(merged.map(e=>e?.windowId||''));
+          // V13.2: compute the capped cloud slice (what we will actually write) and run
+          //   the skip-logic against IT, not the full local merge. Comparing full local
+          //   vs the capped cloud would keep _hasNewWindows/_localHasMoreResolved
+          //   permanently true and write every 60s. Full history stays in local IDB.
+          const _cloudSlice=merged.slice(-_TARA_CLOUD_LOG_CAP);
+          const _mergedIds=new Set(_cloudSlice.map(e=>e?.windowId||''));
           const _cloudIds=new Set(cloudEntries.map(e=>e?.windowId||''));
-          const _hasNewWindows=merged.some(e=>e?.windowId&&!_cloudIds.has(e.windowId));
+          const _hasNewWindows=_cloudSlice.some(e=>e?.windowId&&!_cloudIds.has(e.windowId));
           const _cloudHasUnresolved=cloudEntries.some(e=>!e?.result||e.result==='PENDING');
-          const _localHasMoreResolved=merged.filter(e=>e?.result==='WIN'||e?.result==='LOSS').length>
+          const _localHasMoreResolved=_cloudSlice.filter(e=>e?.result==='WIN'||e?.result==='LOSS').length>
                                       cloudEntries.filter(e=>e?.result==='WIN'||e?.result==='LOSS').length;
           // Skip if: no new windows AND cloud isn't stale AND no newly resolved trades
           if(!_hasNewWindows&&!_cloudHasUnresolved&&!_localHasMoreResolved){
@@ -30629,7 +30638,7 @@ function TaraApp(){
             const{signalScoresAtLock:_,reasoning:__,...rest}=e;
             return rest;
           };
-          return{entries:merged.map(_stripForCloud),_strippedAt:Date.now()};
+          return{entries:_cloudSlice.map(_stripForCloud),_strippedAt:Date.now()};
         },
         // V10.7.85: throttle callLog cloud writes from 300ms to 60s.
         //   callLog is large (3MB) and changes on every trade. At 300ms debounce it
