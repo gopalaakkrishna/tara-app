@@ -4588,8 +4588,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.21-v13.0.0-mod-gap-chop-gate';
-const TARA_VERSION_DISPLAY='Tara 13.0';
+const BASELINE_VERSION='2026.06.22-v13.1.0-sticky-telemetry';
+const TARA_VERSION_DISPLAY='Tara 13.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30440,6 +30440,25 @@ function TaraApp(){
       // Rule 3: between two unresolved entries, keep the newer one
       return(inc.id||0)>=(prev.id||0);
     };
+    // V13.1: STICKY TELEMETRY. Fields are stamped at LOCK (rich, pending). When the
+    //   window RESOLVES ~15min later, Rule 1 (resolved beats unresolved) lets a LEAN
+    //   resolved copy (from the minified _deep cache or a 2nd device) REPLACE the rich
+    //   pending entry wholesale, wiping telemetry. Root cause of the 3/3596 stamp rate.
+    //   Fix: whichever copy wins the tiebreak, backfill any sticky field it lacks from
+    //   the loser. Once any copy carries telemetry, it survives every future merge.
+    const _STICKY_TELEMETRY=['regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore'];
+    const _coalesceSticky=(winner,loser)=>{
+      if(!winner||!loser)return winner;
+      let _out=winner;
+      for(let _i=0;_i<_STICKY_TELEMETRY.length;_i++){
+        const _f=_STICKY_TELEMETRY[_i];const _wv=winner[_f];
+        if(_wv===undefined||_wv===null||_wv===''){
+          const _lv=loser[_f];
+          if(_lv!==undefined&&_lv!==null&&_lv!==''){if(_out===winner)_out={...winner};_out[_f]=_lv;}
+        }
+      }
+      return _out;
+    };
     const byKey=new Map();
     (existing||[]).forEach(e=>{
       if(!e||!e.windowId)return;
@@ -30450,7 +30469,8 @@ function TaraApp(){
       const k=_key(e);
       const ex=byKey.get(k);
       if(!ex)byKey.set(k,e);
-      else if(_shouldReplace(ex,e))byKey.set(k,e);
+      else if(_shouldReplace(ex,e))byKey.set(k,_coalesceSticky(e,ex));
+      else byKey.set(k,_coalesceSticky(ex,e)); // V13.1: loser may carry telemetry winner lacks
     });
     return Array.from(byKey.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-TARA_CALL_LOG_CAP);
   },[]);
@@ -30496,7 +30516,13 @@ function TaraApp(){
       'strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir',
       'resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed',
       'isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit',
-      'wasOverriddenNoTrade','noGoCategory']);
+      'wasOverriddenNoTrade','noGoCategory',
+      // V13.1: telemetry must survive the deep-cache minify (was the local lean source)
+      'regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock',
+      'isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock',
+      'secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore',
+      'smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device',
+      'htDir','stDir','trendAligned','trendConfirmScore']);
     const _minifyEntry=(e)=>{
       if(!e)return e;
       const o={};
@@ -42434,6 +42460,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //   fired the lock. 0% stamp rate on 'version' = all entries came from stale
           //   cached builds. Hard-refresh every device when deploying.
           taraVersion:BASELINE_VERSION,
+          device:_taraDeviceId,
           htDir:analysis?.rawSignalScores?._trendConfirm?.htDir||null,
           stDir:analysis?.rawSignalScores?._trendConfirm?.stDir||null,
           trendAligned:analysis?.rawSignalScores?._trendConfirm?.aligned===true?'Y':(analysis?.rawSignalScores?._trendConfirm?(analysis.rawSignalScores._trendConfirm.conflict?'CONFLICT':'N'):null),
