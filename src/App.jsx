@@ -4597,8 +4597,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.22-v13.2.1-slow-feeds-not-dead';
-const TARA_VERSION_DISPLAY='Tara 13.2.1';
+const BASELINE_VERSION='2026.06.22-v13.2.2-cap-aware-drift';
+const TARA_VERSION_DISPLAY='Tara 13.2.2';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -23636,8 +23636,16 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
   const _baselineDate=baselineMeta?.savedAt?new Date(baselineMeta.savedAt).toLocaleString():null;
   const _baselineSizes=baselineMeta?.sizes||{};
   // V9.1.9: drift detection — compare local vs cloud for the source-of-truth log
-  const _logDrift=cloudDiag?Math.abs((cloudDiag.log||0)-(localCounts.taraCallLog||0)):null;
-  const _hasDrift=_logDrift!=null&&_logDrift>0;
+  // V13.2.2: cap-aware drift. The cloud log is intentionally CAPPED at _TARA_CLOUD_LOG_CAP
+  //   (egress fix); local keeps full history, so local>=cloud is the NORMAL healthy state,
+  //   not drift. Real drift is only when the cloud is AHEAD of local (this device missed
+  //   windows another device logged). Raw abs() count made the cap trip a permanent alarm.
+  const _cloudLog=cloudDiag?(cloudDiag.log||0):0;
+  const _localLog=localCounts.taraCallLog||0;
+  const _logDelta=cloudDiag?(_cloudLog-_localLog):null;        // signed: + means cloud ahead
+  const _logDrift=_logDelta!=null?Math.abs(_logDelta):null;
+  const _hasDrift=_logDelta!=null&&_logDelta>10;               // only real drift = device behind cloud
+  const _expectedCapGap=_logDelta!=null&&_logDelta<0&&_cloudLog<=(_TARA_CLOUD_LOG_CAP+50);
   return React.createElement('div',{
     className:'fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8',
     style:{background:'rgba(0,0,0,0.75)',backdropFilter:'blur(4px)'},
@@ -23701,7 +23709,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
                 React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#E8E9E4]/40 mb-1'},'CLOUD · everyone'),
                 diagError?React.createElement('div',{className:'text-[10px] text-rose-400'},'Read failed: ',diagError):
                   cloudDiag?React.createElement('div',{className:'text-[11px] tabular-nums leading-snug text-[#E8E9E4]/80 space-y-0.5'},
-                    React.createElement('div',{className:'font-bold '+(Math.abs(cloudDiag.log-localCounts.taraCallLog)>0?'text-amber-300':'')},
+                    React.createElement('div',{className:'font-bold '+(_hasDrift?'text-amber-300':'')},
                       `${cloudDiag.log} log entries`,
                       Math.abs(cloudDiag.log-localCounts.taraCallLog)>0?` (Δ${cloudDiag.log-localCounts.taraCallLog})`:''
                     ),
@@ -23718,9 +23726,11 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
               )
             ),
             // Drift hint
-            _hasDrift&&React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-amber-300 leading-snug',style:{borderTop:'1px solid rgba(232,233,228,0.10)'}},
-              `Local and cloud have different log sizes (Δ ${_logDrift}). Press Force Resync to merge — or save this device as baseline if local has more recent data.`
-            )
+            _hasDrift?React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-amber-300 leading-snug',style:{borderTop:'1px solid rgba(232,233,228,0.10)'}},
+              `Cloud is ahead of this device by ${_logDrift} windows - another device logged windows this one hasn't pulled. Press Force Resync from Cloud to merge them in. (Don't Save as baseline here - this device is the one that's behind.)`
+            ):(_expectedCapGap?React.createElement('div',{className:'mt-2 pt-2 text-[10px] text-[#E8E9E4]/45 leading-snug',style:{borderTop:'1px solid rgba(232,233,228,0.10)'}},
+              `Cloud keeps the most recent ${_TARA_CLOUD_LOG_CAP} windows; this device holds the full ${_localLog}. That gap is the egress cap working as designed - not drift, and nothing is lost (full history lives here and in your exports). Avoid Save as baseline, which would re-upload the full log and undo the egress cut.`
+            ):null)
           ),
           // === LOCAL-ONLY SECTION ===
           React.createElement('div',{className:'pt-3',style:{borderTop:'1px solid rgba(232,233,228,0.08)'}},
