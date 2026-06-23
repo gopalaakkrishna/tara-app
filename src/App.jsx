@@ -4597,8 +4597,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.23-v13.3.0-remove-5m-eth';
-const TARA_VERSION_DISPLAY='Tara 13.3.0';
+const BASELINE_VERSION='2026.06.23-v13.3.1-immutable-settlement';
+const TARA_VERSION_DISPLAY='Tara 13.3.1';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30166,7 +30166,7 @@ function TaraApp(){
           const existing=map.get(key);
           if(!existing)map.set(key,e);
           else if(!existing.result&&e.result)map.set(key,e);
-          else if(existing.result&&e.result&&(e.id||0)>(existing.id||0))map.set(key,e);
+          else if(existing.result&&e.result&&((e.manualEdit===true&&existing.manualEdit!==true)||(existing.result===e.result&&(e.id||0)>(existing.id||0))))map.set(key,e); /* V13.3.1: immutable settlement - no cross-device WIN/LOSS flip */
         });
         const merged=Array.from(map.values()).sort((a,b)=>(a.id||0)-(b.id||0));
         // V10.7.91: Force immediate localStorage save — don't rely on debounced useEffect.
@@ -30462,7 +30462,7 @@ function TaraApp(){
       // Rule 2: between two resolved entries, keep the newer one (higher id).
       //   On equal ids (same entry, no manual edit either side), keep inc so the
       //   freshest in-memory copy wins rather than a stale cache copy.
-      if(prev.result&&inc.result)return(inc.id||0)>=(prev.id||0);
+      if(prev.result&&inc.result){if(prev.result===inc.result)return(inc.id||0)>=(prev.id||0);try{_auditLogEvent('settlement-conflict',{windowId:prev.windowId||inc.windowId||'',windowType:prev.windowType||inc.windowType||'',kept:prev.result,rejected:inc.result,prevId:prev.id||0,incId:inc.id||0,prevCall:prev.call||prev.dir||null,incCall:inc.call||inc.dir||null});}catch(_){}return false;} /* V13.3.1: settlement immutable - keep first-resolved, never flip via merge */
       // Rule 3: between two unresolved entries, keep the newer one
       return(inc.id||0)>=(prev.id||0);
     };
@@ -30726,7 +30726,7 @@ function TaraApp(){
           const ex=map.get(key);
           if(!ex){map.set(key,e);return;}
           if(!ex.result&&e.result){map.set(key,e);return;}
-          if(ex.result&&e.result&&(e.id||0)>(ex.id||0)){map.set(key,e);return;}
+          if(ex.result&&e.result&&((e.manualEdit===true&&ex.manualEdit!==true)||(ex.result===e.result&&(e.id||0)>(ex.id||0)))){map.set(key,e);return;} /* V13.3.1: immutable settlement - reconcile passes, divergent flips blocked */
         });
         const merged=Array.from(map.values()).sort((a,b)=>(a.id||0)-(b.id||0));
         // V10.9.5: don't bail on equal length alone — IDB may hold the same COUNT
