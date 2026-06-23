@@ -4597,8 +4597,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.22-v13.2.3-sitout-mix-badge';
-const TARA_VERSION_DISPLAY='Tara 13.2.3';
+const BASELINE_VERSION='2026.06.23-v13.3.0-remove-5m-eth';
+const TARA_VERSION_DISPLAY='Tara 13.3.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -45654,7 +45654,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       r=`Daily summary sent: ${wins}W-${losses}L (${wr??'—'}%), avg ${avgEvCents!=null?(avgEvCents>=0?'+':'')+avgEvCents.toFixed(1):'—'}¢/trade.`;
     }else if(u.includes('/broadcast')){const g=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;const dir=analysis?.prediction.includes('UP')?'UP':analysis?.prediction.includes('DOWN')?'DOWN':'SIT OUT';broadcastToDiscord('SIGNAL',{dir,price:currentPrice,strike:targetMargin,gap:g,clock:`${timeState.minsRemaining}m ${timeState.secsRemaining}s`});r='Signal broadcasted to Discord.';}else if(u.includes('why')||u.includes('explain'))r=`Posterior UP: ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Regime: ${analysis?.regime}. Signal composite output. Ask 'whale' or 'position'.`;else if(u.includes('whale'))r=whaleLog.length>0?whaleLog.slice(0,8).map(w=>{const d=new Date(w.time);return`${_fmtTimeTz(d,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})} ${w.src} ${w.side} $${(w.usd/1000).toFixed(0)}K @ $${w.price.toFixed(0)}`;}).join('\n'):'No whale trades yet.';else if(u.includes('position'))r=positionStatus?`${positionStatus.side} @ $${positionStatus.entry.toFixed(2)} | PnL: ${positionStatus.pnlPct>0?'+':''}${positionStatus.pnlPct.toFixed(1)}% | ${positionStatus.isStopHit?'STOP HIT':'Safe'}`:'No active position.';else if(u.includes('session'))r=`Active: ${marketSessions.sessions.map(s=>`${s.flag} ${s.name}`).join(' + ')} | Dominant: ${marketSessions.dominant}`;else r=`P(UP): ${Number(analysis?.rawProbAbove||0).toFixed(1)}%. Advisor: ${analysis?.advisor?.label||'—'}. Try: why | whale | position | session | /broadcast | /daily`;setChatLog([...log,{role:'tara',text:r}]);},400);};
 
-  const handleWindowToggle=(t)=>{if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;try{localStorage.removeItem('taraLockedTimeSeries_v1');}catch(_){} /* V9.11.2 */posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false;_cloudRestoreCompletedRef.current=false;/* V7.10.4: also clear snapshot+samples so 15m↔5m doesn't carry stale state across window types */if(taraCallSnapshotRef.current!==undefined)taraCallSnapshotRef.current=null;if(taraCallSampleRef.current)taraCallSampleRef.current={dir:null,count:0};_rolloverGraceRef.current=Date.now();setForceRender(p=>p+1);};
+  const handleWindowToggle=(t)=>{if(t!=='15m')return;/* v13.3.0: 5m removed */if(t===windowType)return;setWindowType(String(t));setPendingStrike(null);taraAdviceRef.current='SEARCHING...';engineLockedDirRef.current=null;lockedCallRef.current=null;lockReleasedAtRef.current=0;try{localStorage.removeItem('taraLockedTimeSeries_v1');}catch(_){} /* V9.11.2 */posteriorHistoryRef.current=[];biasCountRef.current={UP:0,DOWN:0};hasReversedRef.current=false;manuallyClosedRef.current=null;windowSignalDirRef.current=null;softHintRef.current=0;hardForceRef.current=0;kalshiWasBelowThreshUpRef.current=false;kalshiWasBelowThreshDownRef.current=false;kalshiLastBelowThreshUpRef.current=0;kalshiLastBelowThreshDownRef.current=0;isManualStrikeRef.current=false;hasSetInitialMargin.current=false;fetchWindowOpenPrice(t);setUserPosition(null);setPositionEntry(null);setCurrentOffer('');setBetAmount(0);setMaxPayout(0);lastWindowRef.current='';peakOfferRef.current=0;_hasRestoredLockRef.current=false;_cloudRestoreCompletedRef.current=false;/* V7.10.4: also clear snapshot+samples so 15m↔5m doesn't carry stale state across window types */if(taraCallSnapshotRef.current!==undefined)taraCallSnapshotRef.current=null;if(taraCallSampleRef.current)taraCallSampleRef.current={dir:null,count:0};_rolloverGraceRef.current=Date.now();setForceRender(p=>p+1);};
   // V6.5.8: Asset switch handler. Same state-reset pattern as window toggle, plus
   //   clears price history (since BTC ticks are useless for ETH). Triggers re-fetch
   //   of Kalshi market for the new asset on next poll.
@@ -46041,11 +46041,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <span>⛅</span>
               <span className='hidden sm:inline'>WEATHER</span>
             </button>
-            {/* 5m / 15m */}
-            <div className={'flex bg-[#181A19] border border-[#E8E9E4]/20 rounded-lg p-0.5 shrink-0'}>
-              <button onClick={()=>handleWindowToggle('5m')} className={`px-2.5 sm:px-4 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='5m'?'bg-indigo-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>5m</button>
-              <button onClick={()=>handleWindowToggle('15m')} className={`px-2.5 sm:px-4 py-1 text-xs uppercase font-bold tracking-wide rounded-md transition-all ${windowType==='15m'?'bg-emerald-500 text-white shadow-md':'text-[#E8E9E4]/40 hover:text-[#E8E9E4]/80'}`}>15m</button>
-            </div>
+            {/* window fixed at 15m, 5m removed v13.3.0 */}
 
             {/* Sound */}
             <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#E8E9E4]/10 text-[#E8E9E4]/40'}`} title={soundEnabled?'Sound on':'Sound off'}>
@@ -47584,12 +47580,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         <div className="flex items-center justify-between px-3 py-2 gap-2">
           {/* Asset + Window */}
           <div className="flex items-center gap-1.5">
-            <button onClick={()=>setCurrentAsset(currentAsset==='BTC'?'ETH':'BTC')} className="px-2 py-1.5 rounded-md text-xs font-bold min-h-[36px]" style={{background:currentAsset==='BTC'?'rgba(247,147,26,0.15)':'rgba(98,126,234,0.15)',color:currentAsset==='BTC'?'rgb(247,147,26)':'rgb(98,126,234)',border:`1px solid ${currentAsset==='BTC'?'rgba(247,147,26,0.3)':'rgba(98,126,234,0.3)'}`}}>
-              {'₿ BTC'}
-            </button>
-            <button onClick={()=>handleWindowToggle(windowType==='15m'?'5m':'15m')} className="px-2 py-1.5 rounded-md text-xs font-bold min-h-[36px]" style={{background:windowType==='15m'?'rgba(16,185,129,0.15)':'rgba(99,102,241,0.15)',color:windowType==='15m'?'rgb(16,185,129)':'rgb(99,102,241)',border:`1px solid ${windowType==='15m'?'rgba(16,185,129,0.3)':'rgba(99,102,241,0.3)'}`}}>
-              {windowType}
-            </button>
+            <span className="px-2 py-1.5 rounded-md text-xs font-bold min-h-[36px] flex items-center" style={{background:'rgba(247,147,26,0.15)',color:'rgb(247,147,26)',border:'1px solid rgba(247,147,26,0.3)'}}>
+              {'₿ BTC · 15m'}
+            </span>
           </div>
           {/* Current call direction + price */}
           <div className="flex items-center gap-2 text-xs tabular-nums">
