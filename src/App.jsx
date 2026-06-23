@@ -4597,8 +4597,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.22-v13.2.2-cap-aware-drift';
-const TARA_VERSION_DISPLAY='Tara 13.2.2';
+const BASELINE_VERSION='2026.06.22-v13.2.3-sitout-mix-badge';
+const TARA_VERSION_DISPLAY='Tara 13.2.3';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19049,6 +19049,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
       React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
         React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold shrink-0',style:{color:T2_GOLD}},'Today'),
         React.createElement('span',{className:'text-[11px] tabular-nums text-[#E8E9E4]/75 font-bold shrink-0'},`${wins}W·${losses}L`,sitouts>0?` · ${sitouts}so`:''),
+        sitouts>0&&todayData.sitoutMix&&React.createElement('span',{className:'text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-bold shrink-0',style:{color:todayData.sitoutMix.color,background:todayData.sitoutMix.bg},title:'Sit-out mix - '+todayData.sitoutMix.detail+'. Priced-out (no payout) and fade (deep underdog) passes are always correct; a high coinflip count is the only sign the gates may be over-tightening on tradeable windows.'},todayData.sitoutMix.verdict),
         wr!=null&&React.createElement('span',{className:'text-[10px] tabular-nums shrink-0',style:{color:_wrColor(wr,wins+losses)}},`${wr}% WR`),
         // Delta vs 7d — the "should I trust today?" cue
         _delta7d!=null&&React.createElement('span',{
@@ -32293,8 +32294,35 @@ function TaraApp(){
         };
       }
     }
+    // V13.2.3: today's sit-out composition - answers "am I sitting out too much?" inline.
+    //   By favored-side cost (kalshiAtLock): >=85 = priced-out (right dir, no payout left),
+    //   <=35 = deep-underdog/fade, 35-85 = valid-range coinflip (the only debatable band).
+    //   Priced-out + fade are always correct passes; a high coinflip share is the one tell
+    //   that the gates may be flinching on tradeable windows.
+    let _soPriced=0,_soFade=0,_soFlip=0,_soNoCost=0;
+    todayCalls.forEach(e=>{
+      if(e.result!=='SITOUT')return;
+      const _c=(typeof e.kalshiAtLock==='number')?e.kalshiAtLock:null;
+      if(_c==null||_c<=0)_soNoCost++;
+      else if(_c>=85)_soPriced++;
+      else if(_c<=35)_soFade++;
+      else _soFlip++;
+    });
+    const _soCosted=_soPriced+_soFade+_soFlip;
+    let _sitoutMix=null;
+    if(sitouts>0){
+      const _detail=`${_soPriced} priced-out \u00b7 ${_soFade} fade \u00b7 ${_soFlip} coinflip`+(_soNoCost?` \u00b7 ${_soNoCost} no-price`:'');
+      const _flipShare=_soCosted>0?_soFlip/_soCosted:0;
+      let _verdict,_col,_bg;
+      if(_soCosted<4){_verdict='thin';_col='rgba(232,233,228,0.55)';_bg='rgba(232,233,228,0.06)';}
+      else if(_flipShare>0.40){_verdict='check gates';_col='rgba(229,200,112,0.95)';_bg='rgba(229,200,112,0.12)';}
+      else if(_flipShare<=0.20){_verdict='dead tape';_col='rgba(232,233,228,0.60)';_bg='rgba(232,233,228,0.06)';}
+      else{_verdict='selective';_col='rgb(110,231,183)';_bg='rgba(110,231,183,0.10)';}
+      _sitoutMix={verdict:_verdict,detail:_detail,color:_col,bg:_bg,priced:_soPriced,fade:_soFade,flip:_soFlip,noCost:_soNoCost,flipShare:_flipShare};
+    }
     return{
       todayCalls,wins,losses,sitouts,pending,resolved,wr,
+      sitoutMix:_sitoutMix,
       dollarPnL,
       streak,streakType,lastResult,tilt,strongTilt,heater,
       cooldownMinSinceLoss,inCooldown,
