@@ -4600,8 +4600,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.23-v13.3.5-merge-invariant';
-const TARA_VERSION_DISPLAY='Tara 13.3.5';
+const BASELINE_VERSION='2026.06.23-v13.3.6-pill-coherence';
+const TARA_VERSION_DISPLAY='Tara 13.3.6';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20362,13 +20362,25 @@ function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,time
             recent.map((e)=>{
               const r=e.result||'pending';
               const c=_resultColors[r]||_resultColors.pending;
+              // V13.3.6: coherent pill direction. The glyph and color come
+              //   from result; the arrow must agree with them. A real trade
+              //   (WIN/LOSS) shows its position direction, recovered from
+              //   outcomeDir when the dir field is missing (WIN: dir=outcome;
+              //   LOSS: dir=opposite). A sit-out or pending shows no arrow.
+              //   Stops an entry rendering as a sit-out while marked win/loss.
+              let _ddir=null;
+              if(r==='WIN'||r==='LOSS'){
+                _ddir=(e.dir==='UP'||e.dir==='DOWN')?e.dir
+                  :(e.outcomeDir==='UP'||e.outcomeDir==='DOWN')?(r==='WIN'?e.outcomeDir:(e.outcomeDir==='UP'?'DOWN':'UP'))
+                  :null;
+              }
               return React.createElement('div',{
                 key:e.id,
                 className:'flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] tabular-nums font-bold',
                 style:{background:c.bg,color:c.fg},
                 title:`${_fmtTime(e.time||e.id)} · ${e.regime||'?'} · q${e.qScore||0} · ${e.dir||'?'} ${e.confidence||0}% · ${r}${e.gapBps!=null?` · ${formatSignedInt(e.gapBps)} bps`:''}`,
               },
-                React.createElement('span',null,_dirArrow(e.dir)),
+                React.createElement('span',null,_dirArrow(_ddir)),
                 React.createElement('span',{className:'text-[8px] opacity-70'},_fmtTime(e.time||e.id)),
                 e.result&&React.createElement('span',{className:'text-[8px]'},r==='WIN'?'✓':r==='LOSS'?'✗':'—'),
               );
