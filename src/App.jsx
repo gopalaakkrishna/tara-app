@@ -4597,8 +4597,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.23-v13.3.3-sitout-merge-fix';
-const TARA_VERSION_DISPLAY='Tara 13.3.3';
+const BASELINE_VERSION='2026.06.23-v13.3.4-score-arrow-relabel';
+const TARA_VERSION_DISPLAY='Tara 13.3.4';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -24316,7 +24316,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
               {/* Total row with gold accent divider above (V2.1 — major boundary) */}
               <div className="flex items-center gap-2 text-[10px] pt-1.5 mt-1" style={{borderTop:'1px solid '+T2_GOLD_BORDER}}>
                 <span className="w-16 shrink-0 font-bold uppercase tracking-[0.18em] text-[8px]" style={{color:T2_GOLD}}>Total</span>
-                <span style={T2_MONO_STYLE} className={'flex-1 text-[#E8E9E4]/40'}>→ posterior {post.toFixed(0)}% {dir}</span>
+                <span style={T2_MONO_STYLE} className={'flex-1 text-[#E8E9E4]/40'}>vs posterior {post.toFixed(0)}% {dir}</span>
                 <span style={T2_MONO_STYLE} className={'w-10 text-right font-bold '+(totalAll>0?'text-emerald-400':'text-rose-400')}>{formatSignedInt(totalAll)}</span>
               </div>
             </div>
