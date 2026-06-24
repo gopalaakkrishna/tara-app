@@ -4600,8 +4600,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.23-v13.3.6-pill-coherence';
-const TARA_VERSION_DISPLAY='Tara 13.3.6';
+const BASELINE_VERSION='2026.06.23-v13.3.7-total-reconcile';
+const TARA_VERSION_DISPLAY='Tara 13.3.7';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -24245,7 +24245,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
           // V3.1.11 FIX: Display was using V136 stale calibration (4=±30, 3=±18, 2=±8).
           //   That made the breakdown show 18-26 fewer points than FGT actually contributed.
           const fgtContribution=mtf!=null?(fgtAbs>=3.5?42:fgtAbs>=2.5?26:fgtAbs>=1.5?14:fgtAbs>=0.7?6:0)*Math.sign(mtf):0;
-          const totalAll=entries.reduce((s,e)=>s+e.v,0)+fgtContribution;
+          const totalAll=entries.reduce((s,e)=>s+e.v,0); /* V13.3.7: FGT excluded (removed from synthesis V10.7.25). Total = directional signal sum only. */
           // Render rows
           const maxAbs=Math.max(8,...entries.map(e=>Math.abs(e.v)),Math.abs(fgtContribution));
           const colorFor=v=>v>0.5?'bg-emerald-400/70':v<-0.5?'bg-rose-400/70':'bg-[#E8E9E4]/15';
@@ -24276,7 +24276,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
                     width:`${(Math.abs(fgtContribution)/maxAbs)*50}%`,
                   }}></div>
                 </div>
-                <span style={T2_MONO_STYLE} className={'text-[10px] w-10 shrink-0 text-right font-bold '+(fgtContribution>0?'text-emerald-300':fgtContribution<0?'text-rose-300':'text-[#E8E9E4]/30')}>{formatSignedInt(fgtContribution)}</span>
+                <span style={T2_MONO_STYLE} className={'text-[10px] w-10 shrink-0 text-right font-bold text-[#E8E9E4]/30'}>{formatSignedInt(fgtContribution)}</span>
               </div>
               {/* V6.2.0/V6.2.1: Structural primary indicators — Grand Trend + Trend Channel.
                    Now show multi-TF alignment (1m/5m/15m) like the user's TradingView workflow.
