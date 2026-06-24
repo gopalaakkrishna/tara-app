@@ -2225,6 +2225,9 @@ const taraCleanupLog=(log)=>{
     // Keep resolved over unresolved, older id over newer
     if(!existing.result&&e.result){seen.set(k,e);return;}
     if(existing.result&&!e.result)return;
+    // V13.3.5: a real trade (WIN/LOSS) outranks a SITOUT/NO_TRADE record of the same window.
+    if((e.result==='WIN'||e.result==='LOSS')&&(existing.result==='SITOUT'||existing.result==='NO_TRADE')){seen.set(k,e);return;}
+    if((existing.result==='WIN'||existing.result==='LOSS')&&(e.result==='SITOUT'||e.result==='NO_TRADE'))return;
     if((e.id||0)<(existing.id||0))seen.set(k,e);
   });
   entries=Array.from(seen.values()).sort((a,b)=>(a.id||0)-(b.id||0));
@@ -4597,8 +4600,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.23-v13.3.4-score-arrow-relabel';
-const TARA_VERSION_DISPLAY='Tara 13.3.4';
+const BASELINE_VERSION='2026.06.23-v13.3.5-merge-invariant';
+const TARA_VERSION_DISPLAY='Tara 13.3.5';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30206,6 +30209,7 @@ function TaraApp(){
                     const ex=cMap.get(k);
                     if(!ex)cMap.set(k,e);
                     else if(!ex.result&&e.result)cMap.set(k,e);
+                    else if((e.result==='WIN'||e.result==='LOSS')&&(ex.result==='SITOUT'||ex.result==='NO_TRADE'))cMap.set(k,e); /* V13.3.5: real trade outranks stored sit-out */
                   });
                   return{entries:Array.from(cMap.values()).sort((a,b)=>(a.id||0)-(b.id||0))};
                 },
