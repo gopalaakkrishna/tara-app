@@ -2223,6 +2223,8 @@ const taraCleanupLog=(log)=>{
     const existing=seen.get(k);
     if(!existing){seen.set(k,e);return;}
     // Keep resolved over unresolved, older id over newer
+    if((existing.result==='SITOUT'||existing.result==='NO_TRADE')&&(e.dir==='UP'||e.dir==='DOWN')&&e.result!=='SITOUT'&&e.result!=='NO_TRADE'){seen.set(k,e);return;}
+    if((e.result==='SITOUT'||e.result==='NO_TRADE')&&(existing.dir==='UP'||existing.dir==='DOWN')&&existing.result!=='SITOUT'&&existing.result!=='NO_TRADE')return;
     if(!existing.result&&e.result){seen.set(k,e);return;}
     if(existing.result&&!e.result)return;
     // V13.3.5: a real trade (WIN/LOSS) outranks a SITOUT/NO_TRADE record of the same window.
@@ -4600,8 +4602,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.24-v13.3.8-leaning-headline';
-const TARA_VERSION_DISPLAY='Tara 13.3.8';
+const BASELINE_VERSION='2026.06.25-v13.3.9-sync-directional-precedence';
+const TARA_VERSION_DISPLAY='Tara 13.3.9';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30144,6 +30146,10 @@ function TaraApp(){
         const existing=seen.get(k);
         if(!existing){seen.set(k,e);return;}
         // Resolved beats unresolved
+        if((e.result==='WIN'||e.result==='LOSS')&&(existing.result==='SITOUT'||existing.result==='NO_TRADE')){seen.set(k,e);return;}
+        if((existing.result==='WIN'||existing.result==='LOSS')&&(e.result==='SITOUT'||e.result==='NO_TRADE'))return;
+        if((existing.result==='SITOUT'||existing.result==='NO_TRADE')&&(e.dir==='UP'||e.dir==='DOWN')&&e.result!=='SITOUT'&&e.result!=='NO_TRADE'){seen.set(k,e);return;}
+        if((e.result==='SITOUT'||e.result==='NO_TRADE')&&(existing.dir==='UP'||existing.dir==='DOWN')&&existing.result!=='SITOUT'&&existing.result!=='NO_TRADE')return;
         if(existing.result&&!e.result)return;
         if(!existing.result&&e.result){seen.set(k,e);return;}
         // Both resolved: keep newer (higher id). Both unresolved: keep newer.
@@ -30180,6 +30186,8 @@ function TaraApp(){
           const key=(e.asset||'BTC')+'|'+(e.windowId||'')+'|'+(e.windowType||'');
           const existing=map.get(key);
           if(!existing)map.set(key,e);
+          else if((existing.result==='SITOUT'||existing.result==='NO_TRADE')&&(e.dir==='UP'||e.dir==='DOWN')&&e.result!=='SITOUT'&&e.result!=='NO_TRADE')map.set(key,e);
+          else if((e.result==='SITOUT'||e.result==='NO_TRADE')&&(existing.dir==='UP'||existing.dir==='DOWN')&&existing.result!=='SITOUT'&&existing.result!=='NO_TRADE'){}
           else if(!existing.result&&e.result)map.set(key,e);
           else if((e.result==='WIN'||e.result==='LOSS')&&(existing.result==='SITOUT'||existing.result==='NO_TRADE'))map.set(key,e); /* V13.3.3: real trade outranks stored sit-out */
           else if(existing.result&&e.result&&((e.manualEdit===true&&existing.manualEdit!==true)||(existing.result===e.result&&(e.id||0)>(existing.id||0))))map.set(key,e); /* V13.3.1: immutable settlement - no cross-device WIN/LOSS flip */
@@ -30220,6 +30228,8 @@ function TaraApp(){
                     const k=(e.asset||'BTC')+'|'+(e.windowId||'')+'|'+(e.windowType||'');
                     const ex=cMap.get(k);
                     if(!ex)cMap.set(k,e);
+                    else if((ex.result==='SITOUT'||ex.result==='NO_TRADE')&&(e.dir==='UP'||e.dir==='DOWN')&&e.result!=='SITOUT'&&e.result!=='NO_TRADE')cMap.set(k,e);
+                    else if((e.result==='SITOUT'||e.result==='NO_TRADE')&&(ex.dir==='UP'||ex.dir==='DOWN')&&ex.result!=='SITOUT'&&ex.result!=='NO_TRADE'){}
                     else if(!ex.result&&e.result)cMap.set(k,e);
                     else if((e.result==='WIN'||e.result==='LOSS')&&(ex.result==='SITOUT'||ex.result==='NO_TRADE'))cMap.set(k,e); /* V13.3.5: real trade outranks stored sit-out */
                   });
@@ -30482,6 +30492,8 @@ function TaraApp(){
       if((inc.result==='WIN'||inc.result==='LOSS')&&(prev.result==='SITOUT'||prev.result==='NO_TRADE'))return true;
       if((prev.result==='WIN'||prev.result==='LOSS')&&(inc.result==='SITOUT'||inc.result==='NO_TRADE'))return false;
       // Rule 1: resolved beats unresolved always
+      if((prev.dir==='UP'||prev.dir==='DOWN')&&(inc.result==='SITOUT'||inc.result==='NO_TRADE')&&prev.result!=='SITOUT'&&prev.result!=='NO_TRADE')return false;
+      if((inc.dir==='UP'||inc.dir==='DOWN')&&(prev.result==='SITOUT'||prev.result==='NO_TRADE')&&inc.result!=='SITOUT'&&inc.result!=='NO_TRADE')return true;
       if(!prev.result&&inc.result)return true;
       if(prev.result&&!inc.result)return false;
       // Rule 2: between two resolved entries, keep the newer one (higher id).
@@ -30750,6 +30762,8 @@ function TaraApp(){
           const key=(e.asset||'BTC')+'|'+(e.windowId||String(e.id||''))+'|'+(e.windowType||'15m');
           const ex=map.get(key);
           if(!ex){map.set(key,e);return;}
+          if((ex.result==='SITOUT'||ex.result==='NO_TRADE')&&(e.dir==='UP'||e.dir==='DOWN')&&e.result!=='SITOUT'&&e.result!=='NO_TRADE'){map.set(key,e);return;}
+          if((e.result==='SITOUT'||e.result==='NO_TRADE')&&(ex.dir==='UP'||ex.dir==='DOWN')&&ex.result!=='SITOUT'&&ex.result!=='NO_TRADE')return;
           if(!ex.result&&e.result){map.set(key,e);return;}
           if((e.result==='WIN'||e.result==='LOSS')&&(ex.result==='SITOUT'||ex.result==='NO_TRADE')){map.set(key,e);return;} /* V13.3.3: real trade outranks stored sit-out */
           if(ex.result&&e.result&&((e.manualEdit===true&&ex.manualEdit!==true)||(ex.result===e.result&&(e.id||0)>(ex.id||0)))){map.set(key,e);return;} /* V13.3.1: immutable settlement - reconcile passes, divergent flips blocked */
