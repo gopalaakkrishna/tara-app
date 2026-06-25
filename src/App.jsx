@@ -4600,8 +4600,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.23-v13.3.7-total-reconcile';
-const TARA_VERSION_DISPLAY='Tara 13.3.7';
+const BASELINE_VERSION='2026.06.24-v13.3.8-leaning-headline';
+const TARA_VERSION_DISPLAY='Tara 13.3.8';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14949,7 +14949,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
       ?(snap.call==='UP'?'LOCKED UP':'LOCKED DOWN')
       :isNoGoSnap?'NO TRADE'
       :isSatOutSnap?'SITTING OUT'
-      :isWatching?(effDir==='UP'?'WATCHING UP':'WATCHING DOWN')
+      :isWatching?(effDir==='UP'?'LEANING UP':'LEANING DOWN')
       :'SCANNING';
     // V10.7.47: sublabel for override sit-out shows the "would have leaned" direction so user
     //   has a hint to override on if they disagree with Tara's sit-out call.
@@ -14965,7 +14965,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     // V6.0.5: WATCHING gets its own phase label so user can see formation state.
     // V7.9: NO_TRADE label.
     // V10.7.47: phase reflects override state honestly.
-    const phaseLabel=snap?(isOverrideSitOut?'SITTING OUT':isOverrideNoTrade?'NO TRADE':isNoGoSnap?'NO TRADE':isSatOutSnap?'SITTING OUT':'LOCKED'):isWatching?'WATCHING':'SCANNING';
+    const phaseLabel=snap?(isOverrideSitOut?'SITTING OUT':isOverrideNoTrade?'NO TRADE':isNoGoSnap?'NO TRADE':isSatOutSnap?'SITTING OUT':'LOCKED'):isWatching?'LEANING':'SCANNING';
     const samplesLeft=Math.max(0,(tc.needSamples||180)-(tc.samples||0));
     // Window timing
     const _totalSec=windowType==='15m'?900:300;
