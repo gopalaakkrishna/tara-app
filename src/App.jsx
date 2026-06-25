@@ -4602,8 +4602,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.25-v13.3.9-sync-directional-precedence';
-const TARA_VERSION_DISPLAY='Tara 13.3.9';
+const BASELINE_VERSION='2026.06.25-v13.4.0-postlock-reversal-instrumentation';
+const TARA_VERSION_DISPLAY='Tara 13.4.0';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -29640,6 +29640,7 @@ function TaraApp(){
   //   Answers: has price been consistently above/below the strike, or oscillating?
   //   {t: elapsed_ms, cushionBps: (spot-strike)/strike*10000, spotPrice}
   const _windowCushionHistoryRef=useRef([]);
+  const _postLockTrajRef=useRef({}); // V13.4.0: post-lock cushion trajectory {windowId:{ticks,correct,peakBps,everAhead,reversed,wasAhead}} for reversal-vs-wrong-from-start
   const _cushionLastPushedRef=useRef(0);
   // V3.1.7+: Window amplitude tracking — high/low since window open. Reset on rollover.
   //         Powers the "is this a wild window or a dead window" classification.
@@ -30509,7 +30510,7 @@ function TaraApp(){
     //   pending entry wholesale, wiping telemetry. Root cause of the 3/3596 stamp rate.
     //   Fix: whichever copy wins the tiebreak, backfill any sticky field it lacks from
     //   the loser. Once any copy carries telemetry, it survives every future merge.
-    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore'];
+    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed'];
     const _coalesceSticky=(winner,loser)=>{
       if(!winner||!loser)return winner;
       let _out=winner;
@@ -35121,6 +35122,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _logSnap=taraCallLogRef.current||[];
         const _tabAsset='BTC';
         const _pendingEntry=_logSnap.find(e=>e&&e.windowId===_wid&&e.result===null&&(e.asset||'BTC')===_tabAsset);
+        try{var _ptjR=_postLockTrajRef.current[_wid];if(_ptjR&&_ptjR.ticks>0){var _evA=!!_ptjR.everAhead;var _pkB=Math.round(_ptjR.peakBps*10)/10;var _pcC=Math.round((_ptjR.correct/_ptjR.ticks)*100)/100;var _rvD=!!_ptjR.reversed;setTaraCallLog(function(prev){return prev.map(function(e){return (e&&e.windowId===_wid&&(e.asset||'BTC')===_tabAsset&&e.postLockEverAhead===undefined)?Object.assign({},e,{postLockEverAhead:_evA,postLockPeakBps:_pkB,postLockPctCorrect:_pcC,postLockReversed:_rvD}):e;});});delete _postLockTrajRef.current[_wid];}}catch(_){}
         const _entryAsset=_pendingEntry?.asset||_tabAsset;
         const _entryStrike=Number(_pendingEntry?.strike)||0;
         // Prefer entry's strike (asset-correct, locked-in), else current targetMargin if it
@@ -35969,6 +35971,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         _windowCushionHistoryRef.current.push({t:_elapsed,cushionBps:_cushBps,spot:_refPrice});
         // Keep max 30 snapshots (15 minutes / 30s)
         if(_windowCushionHistoryRef.current.length>30)_windowCushionHistoryRef.current.shift();
+        try{var _lcT=lockedCallRef.current;if(_lcT&&(_lcT.dir==='UP'||_lcT.dir==='DOWN')&&_lcT.windowId){var _dsT=_lcT.dir==='UP'?1:-1;var _aheadT=_cushBps*_dsT;var _wT=_lcT.windowId;var _ptj=_postLockTrajRef.current[_wT];if(!_ptj){_ptj={ticks:0,correct:0,peakBps:-1e9,everAhead:false,reversed:false,wasAhead:false};_postLockTrajRef.current[_wT]=_ptj;var _ksT=Object.keys(_postLockTrajRef.current);if(_ksT.length>40)delete _postLockTrajRef.current[_ksT[0]];}_ptj.ticks++;if(_aheadT>0){_ptj.correct++;_ptj.everAhead=true;}if(_aheadT>_ptj.peakBps)_ptj.peakBps=_aheadT;if(_aheadT>=5)_ptj.wasAhead=true;if(_ptj.wasAhead&&_aheadT<0)_ptj.reversed=true;}}catch(_){}
       }
 
       // V10.9.2: FRESH WHALE NETSCORE — computed every scoring tick (~1s) directly
