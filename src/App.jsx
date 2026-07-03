@@ -4602,8 +4602,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.06.25-v13.4.1-reversal-damper-at-lock';
-const TARA_VERSION_DISPLAY='Tara 13.4.1';
+const BASELINE_VERSION='2026.07.03-v13.4.2-live-coach-reversal-capture';
+const TARA_VERSION_DISPLAY='Tara 13.4.2';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15963,7 +15963,7 @@ function BestPracticesModal({open,onClose}){
 //     3. ACCELERATION detection (last 10s velocity vs prior 30s) — sharper alert
 //        than just "risk elevated" because it reflects what's happening RIGHT
 //        NOW, not what conditions look like.
-function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef,autoOrderState,killSwitchEngaged,onKillSwitch,onUrgentCoachAlert,reversalRisk,onClearAutoOrder}){
+function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementRisk,currentPrice,targetMargin,timeState,kalshiYesPrice,currentOffer,whaleLog,tradingSettings,todayData,tickHistoryRef,autoOrderState,killSwitchEngaged,onKillSwitch,onUrgentCoachAlert,reversalRisk,onClearAutoOrder,liveCoachReversalRef}){
   // V9.1.7: Per-position peak/trough refs. Reset on position open or direction flip.
   const _peakBpsRef=React.useRef({pos:null,peak:-Infinity,trough:Infinity,openTime:0});
   // V9.2.1: Sound alert tracking — only beep when a NEW urgent card appears, not on every render.
@@ -16081,6 +16081,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     if(_peak>=15&&_drawdownFromPeak>=10&&_winning&&_drawdownFromPeak/Math.abs(_peak)>=0.5){
       cards.push({tone:'urgent',icon:'📉',title:`Drawing down from +${Math.round(_peak)}bps peak`,
         body:`You hit +${Math.round(_peak)}bps but you're now at +${Math.round(_favoredGap)}bps — gave back ${Math.round(_drawdownFromPeak)}bps. ${_offerVal>=0.65?'Offer $'+_offerVal.toFixed(2)+' is still strong — take it before more reversal.':'Watch the next 30s carefully — this is reversal territory.'}`});
+      try{if(liveCoachReversalRef&&liveCoachReversalRef.current){var _lcr=liveCoachReversalRef.current;_lcr.fired=true;if(_peak>_lcr.peakBps)_lcr.peakBps=_peak;if(_drawdownFromPeak>_lcr.drawdownBps)_lcr.drawdownBps=_drawdownFromPeak;}}catch(_){}
     }
 
     // ⛔ EXIT NOW signals
@@ -29781,6 +29782,7 @@ function TaraApp(){
   const posteriorHistoryRef=useRef([]);    // rolling 10-sample history for confirming lock
   const biasCountRef=useRef({UP:0,DOWN:0}); // consecutive samples in same direction before lock
   const peakOfferRef=useRef(0);
+  const liveCoachReversalRef=useRef({fired:false,peakBps:0,drawdownBps:0}); // V13.4.2: stamped by LiveTradeCoach's 'Drawing down from peak' urgent card; read at rollover
   const hasReversedRef=useRef(false);
   // Tracks whether user manually closed the trade this window (prevents double-scoring at rollover)
   // Values: null=no trade, 'WIN'=user cashed out profit, 'LOSS'=user cut losses
@@ -30510,7 +30512,7 @@ function TaraApp(){
     //   pending entry wholesale, wiping telemetry. Root cause of the 3/3596 stamp rate.
     //   Fix: whichever copy wins the tiebreak, backfill any sticky field it lacks from
     //   the loser. Once any copy carries telemetry, it survives every future merge.
-    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult'];
+    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps'];
     const _coalesceSticky=(winner,loser)=>{
       if(!winner||!loser)return winner;
       let _out=winner;
@@ -35123,6 +35125,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _tabAsset='BTC';
         const _pendingEntry=_logSnap.find(e=>e&&e.windowId===_wid&&e.result===null&&(e.asset||'BTC')===_tabAsset);
         try{var _ptjR=_postLockTrajRef.current[_wid];if(_ptjR&&_ptjR.ticks>0){var _evA=!!_ptjR.everAhead;var _pkB=Math.round(_ptjR.peakBps*10)/10;var _pcC=Math.round((_ptjR.correct/_ptjR.ticks)*100)/100;var _rvD=!!_ptjR.reversed;setTaraCallLog(function(prev){return prev.map(function(e){return (e&&e.windowId===_wid&&(e.asset||'BTC')===_tabAsset&&e.postLockEverAhead===undefined)?Object.assign({},e,{postLockEverAhead:_evA,postLockPeakBps:_pkB,postLockPctCorrect:_pcC,postLockReversed:_rvD}):e;});});delete _postLockTrajRef.current[_wid];}}catch(_){}
+        try{if(liveCoachReversalRef&&liveCoachReversalRef.current){var _lcrF=liveCoachReversalRef.current;if(_lcrF.fired){var _lcrFired=true,_lcrPeak=Math.round(_lcrF.peakBps*10)/10,_lcrDD=Math.round(_lcrF.drawdownBps*10)/10;setTaraCallLog(function(prev){return prev.map(function(e){return (e&&e.windowId===_wid&&(e.asset||'BTC')===_tabAsset&&e.liveCoachReversalFired===undefined)?Object.assign({},e,{liveCoachReversalFired:_lcrFired,liveCoachReversalPeakBps:_lcrPeak,liveCoachReversalDrawdownBps:_lcrDD}):e;});});}}}catch(_){}
         const _entryAsset=_pendingEntry?.asset||_tabAsset;
         const _entryStrike=Number(_pendingEntry?.strike)||0;
         // Prefer entry's strike (asset-correct, locked-in), else current targetMargin if it
@@ -35567,7 +35570,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   after each WIN/LOSS, causing intermittent double-scanning.
   //   Neither needs to trigger rollover — only window transition does.
 
-  useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
+  useEffect(()=>{if(userPosition===null){peakOfferRef.current=0;liveCoachReversalRef.current={fired:false,peakBps:0,drawdownBps:0};}else{const o=parseFloat(currentOffer)||0;if(o>peakOfferRef.current)peakOfferRef.current=o;}},[currentOffer,userPosition]);
 
   // V5.6: LOCK RESTORE — runs once on mount once currentPrice is alive.
   //   Reads cloud state/currentLock. If the saved windowId matches the window we're in
@@ -47020,6 +47023,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           killSwitchEngaged={killSwitchEngaged}
           onKillSwitch={()=>setKillSwitchEngaged(v=>!v)}
           onUrgentCoachAlert={(payload)=>broadcastToDiscord('COACH_ALERT',payload)}
+          liveCoachReversalRef={liveCoachReversalRef}
           reversalRisk={lockedCallRef.current?.reversalRisk||null}
           onClearAutoOrder={()=>setAutoOrderState(null)}
         />
