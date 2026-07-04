@@ -1244,6 +1244,7 @@ const cloudWatch=(path,callback)=>{
 };
 // Coalesces rapid updates per-path into a single Firestore write (saves quota + bandwidth).
 const _writeQueue=new Map();
+let _lastLocalPersistAt=0; // V13.4.4: throttle gate for the expensive taraCallLog local-persist block below (was running unthrottled on every taraCallLog change)
 // V8.1: Track latest pending data per path so we can synchronously flush on tab close.
 //   Map of path → most recent data, separate from the timeout map.
 const _writePending=new Map();
@@ -1333,7 +1334,7 @@ const _cloudFlushAllRMW=()=>{
 //   during Session 2's dual-write phase).
 const cloudFlushAllCombined=()=>cloudFlushAll()+_cloudFlushAllRMW();
 if(typeof window!=='undefined'){
-  const _onLeave=()=>{try{cloudFlushAllCombined();}catch(_){}};
+  const _onLeave=()=>{try{cloudFlushAllCombined();}catch(_){}try{if(typeof window!=='undefined'&&typeof window._taraForceSave==='function')window._taraForceSave();}catch(_){}}; // V13.4.4: unconditional local-persist flush on leave, bypasses the throttle gate above
   window.addEventListener('pagehide',_onLeave);
   window.addEventListener('beforeunload',_onLeave);
   window.addEventListener('visibilitychange',()=>{
@@ -4602,8 +4603,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.03-v13.4.3-brti-closure-diagnostic';
-const TARA_VERSION_DISPLAY='Tara 13.4.3';
+const BASELINE_VERSION='2026.07.04-v13.4.4-localpersist-throttle';
+const TARA_VERSION_DISPLAY='Tara 13.4.4';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30550,6 +30551,8 @@ function TaraApp(){
     //   Fix: strip verbose fields before localStorage write (same as cloud write).
     //     If still too large, progressively trim oldest entries until it fits.
     //     Surface persistent failures via a ref so the UI can warn the user.
+    if(Date.now()-_lastLocalPersistAt>=2500){ // V13.4.4: throttle to at most 1 full local persist per 2.5s; guaranteed flush on tab-leave via _onLeave below (unaffected by this gate)
+    _lastLocalPersistAt=Date.now();
     const _stripForStorage=(e)=>{
       if(!e)return e;
       // V10.7.95: Drop ALL _v10_* telemetry from stored entries.
@@ -30656,6 +30659,7 @@ function TaraApp(){
         sessionStorage.setItem('taraCallLog_session',JSON.stringify(_session));
       }catch(_){}
     }
+    } // V13.4.4: end throttle gate
     if(_callLogHydratedRef.current){
       // V8.3: Switch from simple cloudWriteDebounced to RMW. Reads current cloud first,
       //   merges with local, writes union — protects against last-write-wins clobbering
