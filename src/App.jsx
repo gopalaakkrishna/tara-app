@@ -4602,8 +4602,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.03-v13.4.2-live-coach-reversal-capture';
-const TARA_VERSION_DISPLAY='Tara 13.4.2';
+const BASELINE_VERSION='2026.07.03-v13.4.3-brti-closure-diagnostic';
+const TARA_VERSION_DISPLAY='Tara 13.4.3';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30512,7 +30512,7 @@ function TaraApp(){
     //   pending entry wholesale, wiping telemetry. Root cause of the 3/3596 stamp rate.
     //   Fix: whichever copy wins the tiebreak, backfill any sticky field it lacks from
     //   the loser. Once any copy carries telemetry, it survives every future merge.
-    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps'];
+    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','_v10_5_1_brti','_diag_brtiRefLive'];
     const _coalesceSticky=(winner,loser)=>{
       if(!winner||!loser)return winner;
       let _out=winner;
@@ -41811,7 +41811,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
-          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
+          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null, _diag_brtiRefLive:(brtiApproxRef&&brtiApproxRef.current)?{current:brtiApproxRef.current.current,divBps:brtiApproxRef.current.divergenceBps,n:brtiApproxRef.current.samples60s,src:brtiApproxRef.current.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
@@ -42006,7 +42006,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
-          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
+          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null, _diag_brtiRefLive:(brtiApproxRef&&brtiApproxRef.current)?{current:brtiApproxRef.current.current,divBps:brtiApproxRef.current.divergenceBps,n:brtiApproxRef.current.samples60s,src:brtiApproxRef.current.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
@@ -42478,7 +42478,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
-          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
+          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null, _diag_brtiRefLive:(brtiApproxRef&&brtiApproxRef.current)?{current:brtiApproxRef.current.current,divBps:brtiApproxRef.current.divergenceBps,n:brtiApproxRef.current.samples60s,src:brtiApproxRef.current.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
@@ -44320,7 +44320,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _v10_4_0_calibration:analysis?._v10_4_0_calibration||null,
           _v10_4_0_regimeCaps:analysis?._v10_4_0_regimeCaps||null,
           _v10_4_3_windowCtx:analysis?._v10_4_3_windowCtx||null,
-          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null,
+          _v10_5_1_brti:brtiApprox?{current:brtiApprox.current,divBps:brtiApprox.divergenceBps,n:brtiApprox.samples60s,src:brtiApprox.sourceCount}:null, _diag_brtiRefLive:(brtiApproxRef&&brtiApproxRef.current)?{current:brtiApproxRef.current.current,divBps:brtiApproxRef.current.divergenceBps,n:brtiApproxRef.current.samples60s,src:brtiApproxRef.current.sourceCount}:null,
           _v10_6_2_dowHour:analysis?._v10_6_2_dowHour||null,
           _v10_7_4_flipped:taraCall?._v10_7_4_flipped?{originalDir:taraCall._v10_7_4_originalDir,votes:taraCall._v10_7_4_votes,reasons:taraCall._v10_7_4_voteReasons}:null,
           _v10_7_11_universalFlipped:taraCall?._v10_7_11_universalFlipped?{flipType:taraCall._v10_7_11_flipType,originalDir:taraCall._v10_7_11_originalDir,votes:taraCall._v10_7_11_votes,reasons:taraCall._v10_7_11_reasons,gapBps:taraCall._v10_7_11_gapBps,driftBps:taraCall._v10_7_11_driftBps,minsLeft:taraCall._v10_7_11_minsLeft}:null,
