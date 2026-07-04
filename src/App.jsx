@@ -4603,8 +4603,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.04-v13.4.4-localpersist-throttle';
-const TARA_VERSION_DISPLAY='Tara 13.4.4';
+const BASELINE_VERSION='2026.07.04-v13.4.5-memo-safe-batch1';
+const TARA_VERSION_DISPLAY='Tara 13.4.5';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15702,7 +15702,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
 //   resolved windows as colored arrows (▲ green = closed UP, ▼ red = closed DOWN). Collapsed
 //   pill displays last 3 outcomes inline. Click to expand into a vertical list with full
 //   timestamps. Filters by current windowType so 15m and 5m have separate histories.
-function PastWindowsPill({pastWindows,windowType,timeFormat}){
+const PastWindowsPill=React.memo(function PastWindowsPill({pastWindows,windowType,timeFormat}){
   const[open,setOpen]=React.useState(false);
   const filtered=React.useMemo(()=>{
     return [...(pastWindows||[])].filter(e=>e&&e.windowType===windowType&&(e.dir==='UP'||e.dir==='DOWN')).reverse();
@@ -15753,7 +15753,7 @@ function PastWindowsPill({pastWindows,windowType,timeFormat}){
       )),
     ),
   );
-}
+})
 
 // ── V8.5: BEST PRACTICES MODAL ──────────────────────────────────────────────
 // Comprehensive trader's guide. Tells the user how Tara WANTS to be used: when to
@@ -18666,7 +18666,7 @@ function MissionPanel({mission,setMission,regimeDirCalibration,killSwitchEngaged
 }
 
 // ── V8.2: ANTI-TILT COOLDOWN BANNER ──────────────────────────────────────────
-function AntiTiltCooldownBanner({tiltLockUntil,setTiltLockUntil,settings,onOverride}){
+const AntiTiltCooldownBanner=React.memo(function AntiTiltCooldownBanner({tiltLockUntil,setTiltLockUntil,settings,onOverride}){
   const[now,setNow]=React.useState(Date.now());
   React.useEffect(()=>{
     if(!tiltLockUntil||tiltLockUntil<=Date.now())return;
@@ -18708,7 +18708,7 @@ function AntiTiltCooldownBanner({tiltLockUntil,setTiltLockUntil,settings,onOverr
       },'Override'),
     ),
   );
-}
+})
 
 // ── V8.2: ASSET ROTATION HINT ────────────────────────────────────────────────
 function AssetRotationHint({rotation,onSwitch}){
@@ -19207,7 +19207,7 @@ function TPSLBanner({settings,userPosition,currentOffer,positionStatus,positionO
 // ── V8.3: TAB PRESENCE PILL ──────────────────────────────────────────────────
 // Shows when other tabs of Tara are open in the same browser. Reassures the user
 // that multi-tab is being handled (their other tab's calls aren't being lost).
-function TabPresencePill({peerTabs}){
+const TabPresencePill=React.memo(function TabPresencePill({peerTabs}){
   if(!peerTabs||peerTabs.length===0)return null;
   // Group by asset for a compact display
   const byAsset={};
@@ -19224,7 +19224,7 @@ function TabPresencePill({peerTabs}){
     React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold',style:{color:'rgba(147,197,253,0.55)'}},'+'+peerTabs.length+(peerTabs.length>1?' tabs':' tab')),
     React.createElement('span',{className:'text-[10px] tabular-nums font-bold hidden sm:inline',style:{color:'rgba(147,197,253,0.95)'}},_label),
   );
-}
+})
 
 // ── V8.1: MOVEMENT RISK PILL — REAL-TIME RISK PULSE ─────────────────────────
 // Header pill showing current market risk level, directional bias, and predictive readout.
@@ -19365,7 +19365,7 @@ function TodayPnLPill({todayData,onClick}){
   );
 }
 
-function StreakTiltPill({todayData}){
+const StreakTiltPill=React.memo(function StreakTiltPill({todayData}){
   if(!todayData||todayData.streak<2)return null;
   const{streak,streakType,tilt,strongTilt,heater,inCooldown,cooldownMinSinceLoss}=todayData;
   // Three states: TILT (after losses), HEATER (after wins), or just streak indicator
@@ -19398,7 +19398,7 @@ function StreakTiltPill({todayData}){
     React.createElement('span',{className:'text-[10px] shrink-0',style:{color:_color}},_icon),
     React.createElement('span',{className:'text-[9px] sm:text-[10px] uppercase font-bold tabular-nums tracking-wider',style:{color:_color}},_label),
   );
-}
+})
 
 // ── V8.0: TODAY CARD — heatmap + P&L curve + volatility sparkline ─────────
 // Collapsible card showing today's at-a-glance trader analytics. Designed to slide
@@ -20331,7 +20331,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
 // V5.6.1: Tara's Memory — compact strip showing the most recent calls inline in the
 //   Tara card. Click "all" to open a fuller paged view. The strip + modal both source
 //   from taraCallLog (cloud-synced array of every call she's made).
-function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,timeFormat,onEditEntry,onDeleteEntry}){
+const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,timeFormat,onEditEntry,onDeleteEntry}){
   const[open,setOpen]=React.useState(false);
   const[learnOpen,setLearnOpen]=React.useState(false);
   const recent=React.useMemo(()=>{
@@ -20394,7 +20394,7 @@ function TaraMemoryStrip({taraCallLog,windowType,taraLearnings,useLocalTime,time
     open&&React.createElement(TaraMemoryModal,{taraCallLog:taraCallLog,onClose:()=>setOpen(false),useLocalTime:useLocalTime,timeFormat:timeFormat,onEditEntry:onEditEntry,onDeleteEntry:onDeleteEntry,initialFilter:windowType}),
     learnOpen&&React.createElement(TaraLearningsModal,{learnings:taraLearnings,onClose:()=>setLearnOpen(false)}),
   );
-}
+})
 
 // V5.6.8: TaraLearningsModal — readout of what Tara has learned. Shows the actually-active
 //   learning signals: per regime+direction speed/confidence adjustments + per-tier speed
@@ -28336,7 +28336,7 @@ ${_d.responseBody||'(empty)'}`;
 // Renders in header next to other status pills. Shows current balance and
 // today's delta from UTC midnight baseline. Replaces the V9.17.3-removed
 // local P&L counter with real Kalshi-source data.
-function KalshiBalancePill({kalshiBalance}){
+const KalshiBalancePill=React.memo(function KalshiBalancePill({kalshiBalance}){
   if(!kalshiBalance||kalshiBalance.status==='no-creds')return null;
   const _bal=kalshiBalance.balance;
   const _base=kalshiBalance.baseline;
@@ -28362,7 +28362,7 @@ function KalshiBalancePill({kalshiBalance}){
       `${_delta>=0?'+':''}$${_delta.toFixed(2)}`,
     ),
   );
-}
+})
 
 // V9.17.7: RoundTicketCard removed (was dead code). Trade ticket info now
 //   renders inline inside ScalperAdvisorPanel when Tara is locked (V9.17.6).
