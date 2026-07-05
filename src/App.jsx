@@ -4603,8 +4603,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.04-v13.4.8-sync-latency-diagnostic';
-const TARA_VERSION_DISPLAY='Tara 13.4.8';
+const BASELINE_VERSION='2026.07.04-v13.4.9-reconcile-sitout-fill-check';
+const TARA_VERSION_DISPLAY='Tara 13.4.9';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -21085,6 +21085,65 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     });
                   }
                 }
+                for(const e of taraCallLog){
+                  if(!e||!e.id)continue;
+                  if(e.dir!=='SIT_OUT')continue;
+                  const _winMsS=(e.windowType||'15m')==='5m'?300000:900000;
+                  let _expectedCloseS=null;
+                  if(typeof e.windowId==='string'&&e.windowId.includes('-')){
+                    try{
+                      const _widTsS=e.windowId.slice(e.windowId.indexOf('-')+1);
+                      const _startMsS=new Date(_widTsS).getTime();
+                      if(Number.isFinite(_startMsS)&&_startMsS>0)_expectedCloseS=_startMsS+_winMsS;
+                    }catch(_){}
+                  }
+                  if(_expectedCloseS==null)_expectedCloseS=Math.ceil(e.id/_winMsS)*_winMsS;
+                  if(_expectedCloseS>_nowMs-30000)continue;
+                  const _eBucketS=Math.round(_expectedCloseS/_winMsS)*_winMsS;
+                  let _bestS=_marketByCloseBucket.get((e.windowType||'15m')+'|'+_eBucketS)||null;
+                  let _bestDiffS=_bestS?Math.abs(_bestS.closeMs-_expectedCloseS):Infinity;
+                  if(!_bestS){
+                    for(const m of _settledMarkets){
+                      if(m.windowType!==(e.windowType||'15m'))continue;
+                      const diff=Math.abs(m.closeMs-_expectedCloseS);
+                      if(diff<_bestDiffS){_bestDiffS=diff;_bestS=m;}
+                    }
+                  }
+                  const _maxTolS=Math.floor(_winMsS/2)-1000;
+                  if(!_bestS||_bestDiffS>_maxTolS)continue;
+                  if(!_bestS.result)continue;
+                  const _fillS=fillsMap.get(_bestS.ticker);
+                  if(!_fillS)continue;
+                  const _sideS=_fillS.outcome_side||_fillS.side||null;
+                  if(_sideS!=='yes'&&_sideS!=='no')continue;
+                  const _recoveredDir=_sideS==='yes'?'UP':'DOWN';
+                  const _wasAboveS=_bestS.result==='yes';
+                  const _shouldBeS=_recoveredDir==='UP'?(_wasAboveS?'WIN':'LOSS'):(_wasAboveS?'LOSS':'WIN');
+                  const _whenStrS=new Date(e.id).toISOString().slice(5,16).replace('T',' ');
+                  _issues.push({
+                    entryId:e.id,
+                    kind:'sitout-had-fill',
+                    detail:`${_whenStrS} - logged as SIT OUT but a real Kalshi fill exists for this window (bought ${_sideS.toUpperCase()}). Recovered as ${_recoveredDir}, ${_shouldBeS}.`,
+                    suggested:_recoveredDir,
+                    suggestedField:'dir',
+                    confident:false,
+                    kalshiData:{
+                      ticker:_bestS.ticker,
+                      strike:_bestS.floor_strike,
+                      expirationValue:_bestS.expiration_value,
+                      result:_bestS.result,
+                      fillSide:_sideS,
+                    },
+                    fullUpdate:{
+                      dir:_recoveredDir,
+                      direction:_recoveredDir,
+                      result:_shouldBeS,
+                      outcomeDir:_wasAboveS?'UP':'DOWN',
+                      wasOverriddenNoTrade:false,
+                      caution:'Recovered from Kalshi fill history (V13.4.9) - was mislabeled SIT_OUT',
+                    },
+                  });
+                }
                 // ── FALLBACK: if no credentials, use old public API approach ──────
                 if(!_hasAuth){
                   // No credentials — inform user
@@ -21611,7 +21670,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           const _when=_entry?new Date(_entry.id).toLocaleString('en-US',{..._tzOpt,month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false}):'';
           // V9.17.15: color per kind. Uncertain kinds get amber tint to signal "review needed",
           //   confident kinds (pending-resolve, kalshi-mismatch) get neutral with green apply.
-          const _isUncertain=_iss.kind==='strike-uncertain'||_iss.kind==='closing-disagrees';
+          const _isUncertain=_iss.kind==='strike-uncertain'||_iss.kind==='closing-disagrees'||_iss.kind==='sitout-had-fill';
           const _cardBg=_isUncertain?'rgba(229,200,112,0.06)':'rgba(14,16,15,0.5)';
           const _cardBorder=_isUncertain?'rgba(229,200,112,0.20)':'rgba(232,233,228,0.06)';
           return React.createElement('div',{
