@@ -4603,8 +4603,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.04-v13.4.5-memo-safe-batch1';
-const TARA_VERSION_DISPLAY='Tara 13.4.5';
+const BASELINE_VERSION='2026.07.04-v13.4.6-settlement-sitout-guard';
+const TARA_VERSION_DISPLAY='Tara 13.4.6';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35236,9 +35236,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               //   pick either one and write the wrong asset's outcome onto it.
               const _resolveAsset='BTC';
               setTaraCallLog(prev=>{
-                let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_resolveAsset&&e.windowId===_capturedWindowId&&e.result===null);
+                let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_resolveAsset&&e.windowId===_capturedWindowId&&e.result===null&&e.dir!=='SIT_OUT');
                 if(!idx){
-                  idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&(e.asset||'BTC')===_resolveAsset&&e.result===null&&e.windowType===_capturedWindowType);
+                  idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&(e.asset||'BTC')===_resolveAsset&&e.result===null&&e.windowType===_capturedWindowType&&e.dir!=='SIT_OUT');
                 }
                 if(!idx)return prev;
                 if(idx.e.result!==null)return prev;
@@ -35492,9 +35492,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               return `5m-${new Date(_justClosedBucket).toISOString()}`;
             })();
             setTaraCallLog(prev=>{
-              let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.windowId===_capturedWindowId&&e.result===null);
+              let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.windowId===_capturedWindowId&&e.result===null&&e.dir!=='SIT_OUT');
               if(!idx){
-                idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.result===null&&e.windowType===_capturedWindowType);
+                idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.result===null&&e.windowType===_capturedWindowType&&e.dir!=='SIT_OUT');
               }
               if(!idx)return prev;
               if(idx.e.result!==null)return prev;
