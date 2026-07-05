@@ -4603,8 +4603,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.04-v13.4.6-settlement-sitout-guard';
-const TARA_VERSION_DISPLAY='Tara 13.4.6';
+const BASELINE_VERSION='2026.07.04-v13.4.8-sync-latency-diagnostic';
+const TARA_VERSION_DISPLAY='Tara 13.4.8';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -23648,6 +23648,24 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
     }
   },[]);
   React.useEffect(()=>{_runDiag();},[_runDiag]);
+  const[_primaryDevice,_setPrimaryDeviceLocal]=React.useState(undefined);
+  const[_primaryBusy,_setPrimaryBusy]=React.useState(false);
+  React.useEffect(()=>{
+    let _live=true;
+    cloudRead('settings/primaryDevice').then(d=>{if(_live)_setPrimaryDeviceLocal(d?.deviceId||null);});
+    return()=>{_live=false;};
+  },[]);
+  const _isMyDevicePrimary=_primaryDevice===_taraDeviceId;
+  const _handleSetPrimary=React.useCallback(async()=>{
+    _setPrimaryBusy(true);
+    try{
+      const _next=_isMyDevicePrimary?null:_taraDeviceId;
+      const _ok=await cloudWrite('settings/primaryDevice',{deviceId:_next,setAt:Date.now()});
+      if(_ok)_setPrimaryDeviceLocal(_next);
+    }finally{
+      _setPrimaryBusy(false);
+    }
+  },[_isMyDevicePrimary]);
   React.useEffect(()=>{
     const onKey=(e)=>{if(e.key==='Escape')onClose();};
     window.addEventListener('keydown',onKey);
@@ -23688,6 +23706,23 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
         },'✕')
       ),
       React.createElement('div',{className:'px-5 py-4 space-y-3'},
+        React.createElement('div',{className:'p-3 rounded-md text-xs',style:{background:'rgba(232,233,228,0.03)',border:`1px solid ${_isMyDevicePrimary?'rgba(134,239,172,0.30)':'rgba(232,233,228,0.08)'}`}},
+          React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
+            React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(232,233,228,0.55)'}},'Trading device'),
+          ),
+          React.createElement('div',{className:'text-[11px] text-[#E8E9E4]/70 mb-2'},
+            _primaryDevice===undefined?'Checking...':
+            _primaryDevice===null?'No trading device designated. Every device can commit trades.':
+            _isMyDevicePrimary?'This device is your designated trading device.':
+            'Another device is designated. This device will sit out live signals.'
+          ),
+          React.createElement('button',{
+            onClick:_handleSetPrimary,
+            disabled:_primaryBusy||_primaryDevice===undefined,
+            className:'text-[10px] uppercase tracking-[0.14em] font-bold px-2 py-1 rounded border transition-colors hover:bg-[#E8E9E4]/5 disabled:opacity-50',
+            style:{color:'rgba(229,200,112,0.85)',border:'1px solid rgba(229,200,112,0.25)'},
+          },_isMyDevicePrimary?'Release':'Make this the trading device')
+        ),
         // V9.2.0: SIDE-BY-SIDE diagnostic — shared (cloud) vs local (this device only).
         //   Tara's calls + memory are SHARED across all devices/users via Firestore.
         //   Personal scorecard is LOCAL to this device only — not synced.
@@ -29643,6 +29678,13 @@ function TaraApp(){
   //   {t: elapsed_ms, cushionBps: (spot-strike)/strike*10000, spotPrice}
   const _windowCushionHistoryRef=useRef([]);
   const _postLockTrajRef=useRef({}); // V13.4.0: post-lock cushion trajectory {windowId:{ticks,correct,peakBps,everAhead,reversed,wasAhead}} for reversal-vs-wrong-from-start
+  const primaryDeviceIdRef=useRef(null);
+  const _syncLatencyRef=useRef([]);
+  const _syncLatencySeenRef=useRef(new Set());
+  useEffect(()=>{
+    const unsub=cloudWatch('settings/primaryDevice',(data)=>{primaryDeviceIdRef.current=data?.deviceId||null;});
+    return unsub;
+  },[]);
   const _cushionLastPushedRef=useRef(0);
   // V3.1.7+: Window amplitude tracking — high/low since window open. Reset on rollover.
   //         Powers the "is this a wild window or a dead window" classification.
@@ -31092,6 +31134,22 @@ function TaraApp(){
     const unsub=cloudWatch('memory/taraCallLog',(d)=>{
       _callLogHydratedRef.current=true;
       if(!d||!Array.isArray(d.entries)||!d.entries.length)return;
+      try{
+        const _now=Date.now();
+        let _newLatencyRows=false;
+        for(const _e of d.entries){
+          if(!_e||!_e.id||!_e.device||_e.device===_taraDeviceId)continue;
+          if(_syncLatencySeenRef.current.has(_e.id))continue;
+          _syncLatencySeenRef.current.add(_e.id);
+          _syncLatencyRef.current.push({windowId:_e.windowId,fromDevice:_e.device,committedAt:_e.id,receivedAt:_now,latencyMs:_now-_e.id});
+          _newLatencyRows=true;
+        }
+        if(_newLatencyRows){
+          if(_syncLatencyRef.current.length>500)_syncLatencyRef.current=_syncLatencyRef.current.slice(-500);
+          try{localStorage.setItem('tara_syncLatencyLog_v1',JSON.stringify(_syncLatencyRef.current));}catch(_){}
+          if(typeof window!=='undefined')window._taraSyncLatencyLog=_syncLatencyRef.current;
+        }
+      }catch(_){}
       setTaraCallLog(prev=>{
         // V5.6.9: Dedup by windowId+windowType, not by entry id. Multiple devices commit
         //   their own entries with different ids for the same window — these need to
@@ -42159,6 +42217,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     let _earlyLockTier=null;
     let _fastLockFired=false;
     const _logSnapshotEntry=(snapshot)=>{
+      if(primaryDeviceIdRef.current&&primaryDeviceIdRef.current!==_taraDeviceId&&snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'){
+        snapshot.call='SIT_OUT';
+        snapshot.direction='SIT_OUT';
+        snapshot.wasOverriddenNoTrade=true;
+        snapshot.caution='Secondary device guard (V13.4.7)';
+      }
       // V10.7.82: Universal entry cost guard — block entries outside valid range
       //   regardless of which code path created the snapshot.
       //   Data showed 5 entries >85¢ and 2 entries <35¢ slipping through.
