@@ -4603,8 +4603,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.04-v13.4.9-reconcile-sitout-fill-check';
-const TARA_VERSION_DISPLAY='Tara 13.4.9';
+const BASELINE_VERSION='2026.07.05-v13.4.11-bulk-apply-sitout-fills';
+const TARA_VERSION_DISPLAY='Tara 13.4.11';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20377,6 +20377,8 @@ const TaraMemoryStrip=React.memo(function TaraMemoryStrip({taraCallLog,windowTyp
                 _ddir=(e.dir==='UP'||e.dir==='DOWN')?e.dir
                   :(e.outcomeDir==='UP'||e.outcomeDir==='DOWN')?(r==='WIN'?e.outcomeDir:(e.outcomeDir==='UP'?'DOWN':'UP'))
                   :null;
+              }else if(r==='pending'&&(e.dir==='UP'||e.dir==='DOWN')){
+                _ddir=e.dir; // V13.4.10: a still-open real call gets its direction shown (dimmed), distinct from a sit-out's neutral dot
               }
               return React.createElement('div',{
                 key:e.id,
@@ -21597,6 +21599,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         },(()=>{
           const _pending=reconcileResult.issues.filter(i=>i.kind==='pending-resolve'||i.kind==='missing-fields');
           const _mismatches=reconcileResult.issues.filter(i=>i.kind==='kalshi-mismatch');
+          const _sitoutFills=reconcileResult.issues.filter(i=>i.kind==='sitout-had-fill');
           const _btns=[];
           // Shared apply function — patches entries directly by id, no merge logic.
           // Uses _taraApplyReconcile which writes atomically to localStorage + React state.
@@ -21642,6 +21645,18 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               className:'px-3 py-1.5 rounded text-[10px] uppercase tracking-wider font-bold',
               style:{background:'rgba(110,231,183,0.15)',color:'rgb(110,231,183)',border:'1px solid rgba(110,231,183,0.40)'},
             },`Apply all ${_mismatches.length} fixes`));
+          }
+          if(_sitoutFills.length>0){
+            _btns.push(React.createElement('button',{
+              key:'apall-sitoutfill',
+              onClick:async()=>{
+                if(!window.confirm(`Apply ${_sitoutFills.length} recovered trades from Kalshi fill history?\n\nEach of these is currently logged as SIT OUT, but a real Kalshi fill exists for that window. This will change them to the recovered direction (UP or DOWN) and mark WIN or LOSS based on Kalshi's settled result.\n\nThis cannot be undone.`))return;
+                await _applyUpdates(_sitoutFills);
+                setReconcileResult(prev=>prev?{...prev,issues:prev.issues.filter(i=>i.kind!=='sitout-had-fill')}:null);
+              },
+              className:'px-3 py-1.5 rounded text-[10px] uppercase tracking-wider font-bold',
+              style:{background:'rgba(229,200,112,0.15)',color:'#E5C870',border:'1px solid rgba(229,200,112,0.40)'},
+            },`Apply all ${_sitoutFills.length} recovered trades`));
           }
           // V10.7.43: bulk delete unverifiable entries (missing strike or closingPrice).
           //   These can never be audited (no way to verify WIN/LOSS without prices) and
