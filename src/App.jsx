@@ -4603,8 +4603,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.05-v13.4.12-sitout-resolution-regression-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.12';
+const BASELINE_VERSION='2026.07.07-v13.4.13-stuck-sitout-backfill';
+const TARA_VERSION_DISPLAY='Tara 13.4.13';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -21115,7 +21115,30 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   if(!_bestS||_bestDiffS>_maxTolS)continue;
                   if(!_bestS.result)continue;
                   const _fillS=fillsMap.get(_bestS.ticker);
-                  if(!_fillS)continue;
+                  if(!_fillS){
+                    // V13.4.13: no fill confirms this genuinely was a sit-out. If it's
+                    //   still stuck at result:null (the pre-V13.4.12 resolution-lookup
+                    //   regression), finalize it here. This is not a directional claim
+                    //   -- dir is already correctly SIT_OUT -- just completing a status
+                    //   stamp that should have happened automatically, so it's safe to
+                    //   auto-apply.
+                    if(e.result===null){
+                      _issues.push({
+                        entryId:e.id,
+                        kind:'sitout-stuck-pending',
+                        detail:`${new Date(e.id).toISOString().slice(5,16).replace('T',' ')} - genuine sit-out stuck at pending (no Kalshi fill found). Finalizing as SITOUT.`,
+                        suggested:'SITOUT',
+                        suggestedField:'result',
+                        confident:true,
+                        fullUpdate:{
+                          result:'SITOUT',
+                          resolvedAt:Date.now(),
+                          resolution:'reconcile-backfill-v13.4.13',
+                        },
+                      });
+                    }
+                    continue;
+                  }
                   const _sideS=_fillS.outcome_side||_fillS.side||null;
                   if(_sideS!=='yes'&&_sideS!=='no')continue;
                   const _recoveredDir=_sideS==='yes'?'UP':'DOWN';
