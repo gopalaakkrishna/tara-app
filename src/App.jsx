@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.10-v13.4.18-refined-palette';
-const TARA_VERSION_DISPLAY='Tara 13.4.18';
+const BASELINE_VERSION='2026.07.10-v13.4.19-webfonts';
+const TARA_VERSION_DISPLAY='Tara 13.4.19';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
