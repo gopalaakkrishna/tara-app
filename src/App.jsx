@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.10-v13.4.19-webfonts';
-const TARA_VERSION_DISPLAY='Tara 13.4.19';
+const BASELINE_VERSION='2026.07.10-v13.4.20-depth-pass1';
+const TARA_VERSION_DISPLAY='Tara 13.4.20';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15056,7 +15056,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
       }
     }
     return(
-      <div className={"mb-3 px-3 py-3 rounded-lg shrink-0 "+(className||"")} style={{background:bgClr,border:'1px solid '+borderClr,boxShadow:isLockedSnap?`inset 0 0 24px ${snap.call==='UP'?'rgba(52,211,153,0.06)':'rgba(244,114,182,0.06)'}`:'none'}}>
+      <div className={"mb-3 px-3 py-3 rounded-lg shrink-0 "+(className||"")} style={{background:bgClr,border:'1px solid '+borderClr,boxShadow:isLockedSnap?`0 6px 20px rgba(10,9,7,0.35), 0 1px 0 rgba(237,234,227,0.04) inset, inset 0 0 24px ${snap.call==='UP'?'rgba(127,161,137,0.07)':'rgba(178,101,88,0.07)'}`:'0 4px 16px rgba(10,9,7,0.28), 0 1px 0 rgba(237,234,227,0.03) inset'}}>
         <div className="flex items-baseline justify-between mb-2">
           <span className="text-[10px] uppercase tracking-[0.22em] font-bold" style={{color:T2_GOLD}}>Tara's Call</span>
           <div className="flex items-baseline gap-2">
@@ -15065,7 +15065,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             {/* V10.3.1: coin-flip detector — high conviction but weak core signals.
                 Locks still fire, but user sees the awareness badge. Audit showed 75-84%
                 conviction with weak htfPatterns/flow = 50% WR (true coin flip). */}
-            {analysis?._v10_3_1_coinFlip&&!snap?.isStructuralLed&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:'#F59E0B'}}>⚠ coin-flip · weak core</span>}
+            {analysis?._v10_3_1_coinFlip&&!snap?.isStructuralLed&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:'#D4A24C'}}>⚠ coin-flip · weak core</span>}
             {/* V5.7.7: Confluence indicator — visible while forming and after lock. */}
             {!(tc?._ctx?.isStructuralLed||snap?.isStructuralLed)&&(tc?._ctx?.isSuperConfluent||snap?.isSuperConfluent)&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:T2_GOLD}}>★ super-confluence</span>}
             {!(tc?._ctx?.isStructuralLed||snap?.isStructuralLed)&&!(tc?._ctx?.isSuperConfluent||snap?.isSuperConfluent)&&(tc?._ctx?.isConfluent||snap?.isConfluent)&&<span className="text-[8px] tracking-[0.18em] uppercase font-bold" style={{color:T2_GOLD}}>★ confluence</span>}
@@ -19279,7 +19279,7 @@ const SyncStatusPill=React.memo(function SyncStatusPill({onClick}){
   if(status.state==='disabled'){
     _health='disabled';_color='rgba(232,233,228,0.4)';_bg='rgba(232,233,228,0.03)';_border='rgba(232,233,228,0.10)';_label='SYNC OFF';
   } else if(status.state==='error'&&status.lastError&&(_now-status.lastError.at)<30000&&displayError){
-    _health='error';_color='rgb(244,114,182)';_bg='rgba(244,114,182,0.06)';_border='rgba(244,114,182,0.30)';_label='SYNC ERR';_dotPulse=true;
+    _health='error';_color='rgb(178,101,88)';_bg='rgba(178,101,88,0.06)';_border='rgba(178,101,88,0.30)';_label='SYNC ERR';_dotPulse=true;
   } else if(status.state==='writing'&&displayWriting){
     _health='writing';_color='rgba(201,169,97,0.95)';_bg='rgba(201,169,97,0.06)';_border='rgba(201,169,97,0.25)';_label='SYNCING';_dotPulse=true;
   } else if(status.listeners>0&&_lastOkAgo!=null&&_lastOkAgo<60000){
@@ -19297,7 +19297,7 @@ const SyncStatusPill=React.memo(function SyncStatusPill({onClick}){
   ].filter(Boolean).join('\n');
   return React.createElement('div',{
     className:'flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-md shrink-0'+(onClick?' cursor-pointer hover:bg-[#EDEAE3]/3':''),
-    style:{background:_bg,border:'1px solid '+_border},
+    style:{background:_bg,border:'1px solid '+_border,boxShadow:'0 2px 6px rgba(10,9,7,0.22)'},
     title:_title,
     onClick,
   },
@@ -19352,13 +19352,13 @@ const TodayPnLPill=React.memo(function TodayPnLPill({todayData,onClick}){
   if(!todayData||(todayData.wins+todayData.losses)===0)return null;
   const{wins,losses,wr,resolved,dollarPnL}=todayData;
   const _net=wins-losses;
-  const _color=_net>=2?'rgba(127,161,137,0.95)':_net>=0?'rgba(201,169,97,0.85)':'rgba(244,114,182,0.85)';
-  const _bg=_net>=2?'rgba(127,161,137,0.08)':_net>=0?'rgba(201,169,97,0.06)':'rgba(244,114,182,0.06)';
-  const _border=_net>=2?'rgba(127,161,137,0.25)':_net>=0?'rgba(201,169,97,0.22)':'rgba(244,114,182,0.25)';
+  const _color=_net>=2?'rgba(127,161,137,0.95)':_net>=0?'rgba(201,169,97,0.85)':'rgba(178,101,88,0.85)';
+  const _bg=_net>=2?'rgba(127,161,137,0.08)':_net>=0?'rgba(201,169,97,0.06)':'rgba(178,101,88,0.06)';
+  const _border=_net>=2?'rgba(127,161,137,0.25)':_net>=0?'rgba(201,169,97,0.22)':'rgba(178,101,88,0.25)';
   const _dollarLabel=dollarPnL!=null?(dollarPnL>=0?'+$':'-$')+Math.abs(dollarPnL).toFixed(2):null;
   return React.createElement('div',{
     className:'flex items-baseline gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-md shrink-0'+(onClick?' cursor-pointer hover:bg-[#EDEAE3]/3':''),
-    style:{background:_bg,border:'1px solid '+_border},
+    style:{background:_bg,border:'1px solid '+_border,boxShadow:'0 2px 6px rgba(10,9,7,0.22)'},
     title:`Today: ${wins}W ${losses}L${todayData.sitouts>0?' '+todayData.sitouts+'so':''}${todayData.pending>0?' ('+todayData.pending+' pending)':''}${_dollarLabel?' · '+_dollarLabel:''}${onClick?' · click to configure bet size':''}`,
     onClick,
   },
@@ -25078,12 +25078,13 @@ const MobileTabBar=React.memo(function MobileTabBar({mobileTab,setMobileTab,setS
     <div className="md:hidden flex gap-1 mb-2 shrink-0">
       {tabs.map(t=>{
         const active=mobileTab===t.id;
-        const cls='flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'bg-indigo-500/15 text-indigo-300 border-indigo-500/40':'text-[#EDEAE3]/40 border-[#EDEAE3]/10');
-        return(<button key={t.id} onClick={()=>setMobileTab(t.id)} className={cls}>{t.label}</button>);
+        const cls='flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'text-[#C9A961] border-[#C9A961]/40':'text-[#EDEAE3]/40 border-[#EDEAE3]/10');
+        const activeStyle=active?{background:T2_GOLD_GLOW,boxShadow:'0 2px 8px rgba(10,9,7,0.25)'}:{boxShadow:'0 1px 4px rgba(10,9,7,0.15)'};
+        return(<button key={t.id} onClick={()=>setMobileTab(t.id)} className={cls} style={activeStyle}>{t.label}</button>);
       })}
       {/* V3.2.2: Brain + Stats access on mobile — header buttons hidden at this width */}
-      <button onClick={()=>setShowBrain&&setShowBrain(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}} title="Tara's Brain">🧠</button>
-      <button onClick={()=>setShowStats&&setShowStats(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}} title="Stats">📊</button>
+      <button onClick={()=>setShowBrain&&setShowBrain(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 2px 6px rgba(10,9,7,0.2)'}} title="Tara's Brain">🧠</button>
+      <button onClick={()=>setShowStats&&setShowStats(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 2px 6px rgba(10,9,7,0.2)'}} title="Stats">📊</button>
     </div>
   );
 })
