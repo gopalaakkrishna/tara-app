@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0A0907" />
+    <meta name="theme-color" content="#0A0A0A" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -17,53 +17,49 @@
     />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-      // V13.4.18 design pass — refined palette. Overrides Tailwind's stock
-      // emerald/rose/amber scales at the shades Tara actually uses, so every
-      // existing `text-emerald-400`, `bg-rose-500/10`, etc. class across the
-      // app repaints without touching component code. Same semantic roles
-      // (emerald=win/UP, rose=loss/DOWN, amber=warm/caution) — just warmer,
-      // more muted exact values in place of Tailwind's stock saturated ones.
-      // V13.4.19: also point font-sans/font-mono at real webfonts (loaded
-      // above) instead of Tailwind's system-font stack — repaints all 72
-      // existing `font-mono` and 4 `font-sans` classes across the app the
-      // same way the palette override repaints colors. Base body font is
-      // set separately below so untagged text picks it up too.
+      // V13.4.29 design pass — STRICT black/white/gray + red/green/gold.
+      // Complete rewrite of the palette override on explicit direction: the
+      // app should read as a black-and-white theme with exactly three signal
+      // colors — green (win/positive), red (loss/negative), gold (signature
+      // accent/brand). Every OTHER Tailwind color family actually used in the
+      // app is collapsed into one of those three (or grayscale) here, so no
+      // stray hue can appear anywhere without a corresponding code change.
+      // This replaces the V13.4.18/28 muted-multi-hue approach entirely —
+      // that iteration tried to preserve categorical color variety (sage,
+      // oxblood, indigo, etc.); this one deliberately removes it in favor of
+      // stark simplicity, per direct feedback that the multi-hue version
+      // read as inconsistent rather than considered.
+      //
+      // Mapping:
+      //   green  <- emerald, teal        (win / UP / positive)
+      //   red    <- rose, red, pink      (loss / DOWN / negative)
+      //   gold   <- amber, orange, yellow (signature accent / warm / caution)
+      //   gray   <- indigo, sky, blue, purple, violet, cyan (everything else)
+      // zinc/gray/neutral/stone are already grayscale and untouched.
       tailwind.config = {
         theme: {
           extend: {
             colors: {
               emerald: {
-                200: '#C4D4C7',
-                300: '#A3BCA8',
-                400: '#7FA189',
-                500: '#688C72',
-                600: '#54735D',
-                700: '#435C4A',
-                900: '#233022',
+                200: '#A7E8B8', 300: '#6FDB8C', 400: '#34C759',
+                500: '#22A344', 600: '#1A7D35', 700: '#145F29', 900: '#0A3315',
               },
+              teal: { 400: '#34C759' },
               rose: {
-                200: '#DDBDB6',
-                300: '#C4938A',
-                400: '#B26558',
-                500: '#9A5145',
-                600: '#7D4038',
+                200: '#F5B4B4', 300: '#EE8888', 400: '#E5484D',
+                500: '#C93A3E', 600: '#A32E31',
               },
-              amber: {
-                300: '#E0B978',
-                400: '#D4A24C',
-                500: '#BD8A38',
-              },
-              // V13.4.28: indigo was missed in the original palette override —
-              // 135 usages across buttons, focus rings, and icons were still
-              // rendering Tailwind's stock, fully-saturated indigo, clashing
-              // hard against the muted warm palette everywhere else. Muted to
-              // a neutral slate-blue for utility/focus states.
-              indigo: {
-                100: '#DDE1E7',
-                300: '#AEB8C4',
-                400: '#8C98A8',
-                500: '#6E7A8C',
-              },
+              red: { 400: '#E5484D' },
+              pink: { 400: '#E5484D' },
+              amber: { 300: '#E0B978', 400: '#D4A24C', 500: '#BD8A38' },
+              orange: { 400: '#D4A24C' },
+              yellow: { 400: '#D4A24C' },
+              indigo: { 100: '#E5E5E5', 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
+              sky: { 200: '#D4D4D4', 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
+              blue: { 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
+              purple: { 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
+              violet: { 200: '#D4D4D4', 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
+              cyan: { 400: '#8C8C8C' },
             },
             fontFamily: {
               sans: ['"Instrument Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
