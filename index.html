@@ -53,6 +53,17 @@
                 400: '#D4A24C',
                 500: '#BD8A38',
               },
+              // V13.4.28: indigo was missed in the original palette override —
+              // 135 usages across buttons, focus rings, and icons were still
+              // rendering Tailwind's stock, fully-saturated indigo, clashing
+              // hard against the muted warm palette everywhere else. Muted to
+              // a neutral slate-blue for utility/focus states.
+              indigo: {
+                100: '#DDE1E7',
+                300: '#AEB8C4',
+                400: '#8C98A8',
+                500: '#6E7A8C',
+              },
             },
             fontFamily: {
               sans: ['"Instrument Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
