@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.10-v13.4.23-depth-recalibrate-test';
-const TARA_VERSION_DISPLAY='Tara 13.4.23';
+const BASELINE_VERSION='2026.07.10-v13.4.24-card-contrast';
+const TARA_VERSION_DISPLAY='Tara 13.4.24';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13463,7 +13463,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
   }
   return(
     <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0A0907] border border-l border-b border-[#EDEAE3]/15 rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
-      <div className={'p-3 bg-[#1A1815] border-b border-[#EDEAE3]/10 flex justify-between items-center shrink-0'}>
+      <div className={'p-3 bg-[#2B2620] border-b border-[#EDEAE3]/10 flex justify-between items-center shrink-0'}>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></div>
           <span className={'text-xs font-bold uppercase tracking-widest text-[#EDEAE3]/70'}>Flow Intelligence</span>
@@ -13474,7 +13474,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
       <div className="overflow-y-auto flex-1 p-3 space-y-3">
 
         {/* Flow Score */}
-        <div className={'p-3 rounded-xl bg-[#1A1815] border border-[#EDEAE3]/10'}>
+        <div className={'p-3 rounded-xl bg-[#2B2620] border border-[#EDEAE3]/10'}>
           <div className="flex justify-between items-start mb-2">
             <div>
               <div className={`text-lg font-bold font-serif ${scoreColor}`}>{fs.score.toFixed(0)}<span className="text-xs font-sans ml-1 opacity-60">&#47;100</span></div>
@@ -13495,7 +13495,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
         </div>
 
         {/* Whale Streak */}
-        <div className={`p-3 rounded-xl border ${hasStreak?(isBuy?'bg-emerald-500/5 border-emerald-500/30':'bg-rose-500/5 border-rose-500/30'):'bg-[#1A1815] border-[#EDEAE3]/8'}`}>
+        <div className={`p-3 rounded-xl border ${hasStreak?(isBuy?'bg-emerald-500/5 border-emerald-500/30':'bg-rose-500/5 border-rose-500/30'):'bg-[#2B2620] border-[#EDEAE3]/8'}`}>
           <div className={'text-[10px] uppercase tracking-widest text-[#EDEAE3]/40 mb-1.5 font-bold'}>Whale Streak</div>
           {hasStreak?(
             <div>
@@ -13514,7 +13514,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
         </div>
 
         {/* OI Context */}
-        <div className={'p-3 rounded-xl bg-[#1A1815] border border-[#EDEAE3]/8'}>
+        <div className={'p-3 rounded-xl bg-[#2B2620] border border-[#EDEAE3]/8'}>
           <div className={'text-[10px] uppercase tracking-widest text-[#EDEAE3]/40 mb-1.5 font-bold'}>Open Interest Context</div>
           <div className="flex items-center gap-2 mb-1">
             <span className={`text-xs font-bold ${oiColor}`}>OI {oi>=0?'+':''}{oi.toFixed(2)}% (5m)</span>
@@ -13534,7 +13534,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
 
         {/* Long-Short Ratio */}
         {bloomberg?.longShortRatio&&(
-          <div className={'p-3 rounded-xl bg-[#1A1815] border border-[#EDEAE3]/8'}>
+          <div className={'p-3 rounded-xl bg-[#2B2620] border border-[#EDEAE3]/8'}>
             <div className={'text-[10px] uppercase tracking-widest text-[#EDEAE3]/40 mb-2 font-bold'}>Market Positioning (Binance)</div>
             <div className="flex items-center gap-2 mb-1">
               <div className={'flex-1 h-2 bg-[#EDEAE3]/10 rounded-full overflow-hidden'}>
@@ -13590,7 +13590,7 @@ function TheoryLabPanel({show,setShow,theoryStats,theoryLog}){
   };
   return(
     <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0A0907] border border-l border-b border-[#EDEAE3]/15 rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
-      <div className={'p-3 bg-[#1A1815] border-b border-[#EDEAE3]/10 flex justify-between items-center shrink-0'}>
+      <div className={'p-3 bg-[#2B2620] border-b border-[#EDEAE3]/10 flex justify-between items-center shrink-0'}>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></div>
           <span className={'text-xs font-bold uppercase tracking-widest text-[#EDEAE3]/70'}>Theory Lab</span>
@@ -13608,7 +13608,7 @@ function TheoryLabPanel({show,setShow,theoryStats,theoryLog}){
             const n=v?.n||0,correct=v?.correct||0;
             const wr=n>0?correct/n:0;
             return(
-              <div key={key} className="flex items-center justify-between bg-[#1A1815] rounded-lg px-2.5 py-2 border border-[#EDEAE3]/5">
+              <div key={key} className="flex items-center justify-between bg-[#2B2620] rounded-lg px-2.5 py-2 border border-[#EDEAE3]/5">
                 <span className={'text-xs text-[#EDEAE3]/70'}>{_labels[key]||key}</span>
                 <div className="flex items-center gap-2">
                   {n<30&&n>0&&<span className={'text-[9px] text-[#EDEAE3]/30 italic'}>low-n</span>}
@@ -15744,7 +15744,7 @@ const PastWindowsPill=React.memo(function PastWindowsPill({pastWindows,windowTyp
       ),
     ),
     open&&React.createElement('div',{
-      className:'absolute top-full mt-1.5 right-0 sm:left-0 sm:right-auto bg-[#1A1815] border border-[#EDEAE3]/15 rounded-lg shadow-2xl py-1.5 min-w-[180px] z-50 max-h-[320px] overflow-y-auto',
+      className:'absolute top-full mt-1.5 right-0 sm:left-0 sm:right-auto bg-[#2B2620] border border-[#EDEAE3]/15 rounded-lg shadow-2xl py-1.5 min-w-[180px] z-50 max-h-[320px] overflow-y-auto',
       style:{boxShadow:'0 8px 32px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(201,169,97,0.06)'},
     },
       filtered.slice(0,15).map((w)=>React.createElement('div',{
@@ -15782,7 +15782,7 @@ function BestPracticesModal({open,onClose}){
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#1A1815] border border-[#EDEAE3]/15 rounded-xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
+      className:'bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
       onClick:(e)=>e.stopPropagation(),
       style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(201,169,97,0.06)'},
     },
@@ -16483,7 +16483,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#1A1815] border border-[#EDEAE3]/15 rounded-xl shadow-2xl max-w-2xl w-full p-5 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
+      className:'bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl shadow-2xl max-w-2xl w-full p-5 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
       onClick:(e)=>e.stopPropagation(),
       style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(201,169,97,0.06)'},
     },
@@ -19820,7 +19820,7 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
   },
     React.createElement('div',{
       className:'w-full max-w-3xl rounded-xl my-auto',
-      style:{background:'#1A1815',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
+      style:{background:'#2B2620',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
       onClick:(e)=>e.stopPropagation(),
     },
       // Header
@@ -20553,7 +20553,7 @@ function TaraLearningsModal({learnings,onClose}){
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#1A1815] border border-[#EDEAE3]/15 rounded-xl shadow-2xl max-w-md w-full max-h-[85vh] overflow-y-auto p-5',
+      className:'bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl shadow-2xl max-w-md w-full max-h-[85vh] overflow-y-auto p-5',
       onClick:(e)=>e.stopPropagation(),
       style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(201,169,97,0.06)'},
     },
@@ -21480,23 +21480,23 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         ),
       ),
       React.createElement('div',{className:'grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-2 mb-4'},
-        React.createElement('div',{className:'bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
+        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold mb-1'},'Total calls'),
           React.createElement('div',{className:'text-2xl font-bold text-white tabular-nums'},counts.total),
         ),
-        React.createElement('div',{className:'bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
+        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold mb-1'},'Win rate'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:_wr>=60?'rgb(127,161,137)':_wr>=50?'#fff':'rgb(178,101,88)'}},_wr!==null?`${_wr}%`:'—'),
         ),
-        React.createElement('div',{className:'bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
+        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold mb-1'},'Wins'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(127,161,137)'}},counts.wins),
         ),
-        React.createElement('div',{className:'bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
+        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold mb-1'},'Losses'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(178,101,88)'}},counts.losses),
         ),
-        React.createElement('div',{className:'bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
+        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold mb-1'},'Sat out'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:T2_GOLD}},counts.sitouts),
         ),
@@ -21830,7 +21830,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           return`${x.toFixed(1)},${y.toFixed(1)}`;
         }).join(' ');
         const _zeroY=_svgH-(((-_minPnl)/_range)*_svgH);
-        return React.createElement('div',{className:'mb-4 p-3 rounded-xl bg-[#1A1815] border border-[#EDEAE3]/8'},
+        return React.createElement('div',{className:'mb-4 p-3 rounded-xl bg-[#2B2620] border border-[#EDEAE3]/8'},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('span',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold'},'P&L Summary'),
             React.createElement('span',{className:'text-[10px] tabular-nums text-[#EDEAE3]/50'},`${_withBets.length} trades with bet amounts`)
@@ -21886,7 +21886,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         });
         const _activeTiers=_tiers.filter(t=>_stats[t].wins+_stats[t].losses>0);
         if(_activeTiers.length===0)return null;
-        return React.createElement('div',{className:'bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] mb-4'},
+        return React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] mb-4'},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold'},'Win rate by tier'),
             React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#EDEAE3]/30'},filter==='15m'?'15m only':filter==='5m'?'5m only':'all windows'),
@@ -21954,7 +21954,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             // Sort newest first
             const days=Array.from(byDay.entries()).map(([k,v])=>({key:k,...v})).sort((a,b)=>b.date-a.date);
             if(days.length===0){
-              return React.createElement('div',{className:'bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-8 text-center text-[#EDEAE3]/40 italic'},'No data yet.');
+              return React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-8 text-center text-[#EDEAE3]/40 italic'},'No data yet.');
             }
             return React.createElement('div',{className:'space-y-3 max-h-[65vh] overflow-y-auto pr-1'},
               days.map(day=>{
@@ -21976,7 +21976,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   else if(e.result==='SITOUT')hourBins[h].sitouts++;
                 });
                 const _maxHourTotal=Math.max(1,...hourBins.map(b=>b.total));
-                return React.createElement('div',{key:day.key,className:'bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4'},
+                return React.createElement('div',{key:day.key,className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4'},
                   // Day header
                   React.createElement('div',{className:'flex items-baseline justify-between mb-3 flex-wrap gap-2'},
                     React.createElement('div',{className:'flex items-baseline gap-3'},
@@ -22040,7 +22040,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               }),
             );
           })()
-        : React.createElement('div',{className:'bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl overflow-hidden'},
+        : React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl overflow-hidden'},
         filtered.length===0
           ? React.createElement('div',{className:'p-8 text-center text-[#EDEAE3]/40 italic'},'No calls match this filter yet.')
           : (()=>{
@@ -22231,7 +22231,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
   const tabs=[{id:'5m',label:'5 MIN'},{id:'15m',label:'15 MIN'},{id:'1h',label:'1 HOUR'}];
 
   return(
-    <div className={'bg-[#1A1815] p-3 sm:p-4 rounded-xl border border-[#EDEAE3]/10 shadow-md flex flex-col relative min-w-0 '+(mobileTab!=='projections'?'hidden lg:flex':'')}>
+    <div className={'bg-[#2B2620] p-3 sm:p-4 rounded-xl border border-[#EDEAE3]/10 shadow-md flex flex-col relative min-w-0 '+(mobileTab!=='projections'?'hidden lg:flex':'')}>
       <T2Stamp code="PROJ · 042"/>
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
@@ -22906,7 +22906,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
         </div>
 
         {/* Tab toggle */}
-        <div className="flex gap-1 mb-5 p-1 rounded-lg bg-[#1A1815] w-fit border border-[#EDEAE3]/8">
+        <div className="flex gap-1 mb-5 p-1 rounded-lg bg-[#2B2620] w-fit border border-[#EDEAE3]/8">
           {['today','week','all'].map(t=>(
             <button key={t} onClick={()=>{setTab(t);setSelectedHour(null);}} className={'px-4 py-1.5 text-xs uppercase font-bold tracking-wider rounded-md transition-colors '+(tab===t?'':'text-[#EDEAE3]/40 hover:text-[#EDEAE3]/70')} style={tab===t?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>
               {t==='today'?'Today':t==='week'?'7 Days':'All Time'}
@@ -22916,19 +22916,19 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
 
         {/* Top stats grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-5">
-          <div className="bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+          <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
             <T2Stamp code="ALL · 001"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEAE3]/40 font-bold mb-1.5">Trades</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{trades.length}</div>
             <div className="text-[10px] text-[#EDEAE3]/35 mt-0.5">resolved</div>
           </div>
-          <div className="bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+          <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
             <T2Stamp code="ACC · 002"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEAE3]/40 font-bold mb-1.5">Accuracy</div>
             <div className={'text-2xl sm:text-3xl font-bold '+(wr>=60?'text-emerald-400':wr>=50?'text-white':'text-rose-400')} style={T2_MONO_STYLE}>{trades.length>0?wr.toFixed(0):'—'}%</div>
             <div className="text-[10px] text-[#EDEAE3]/35 mt-0.5">{wins}W · {losses}L</div>
           </div>
-          <div className="bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+          <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
             <T2Stamp code="STR · 003"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEAE3]/40 font-bold mb-1.5">Streak</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{(()=>{
@@ -22940,7 +22940,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
             })()}</div>
             <div className="text-[10px] mt-0.5" style={{color:trades.length>0&&[...trades].sort((a,b)=>b.id-a.id)[0]?.result==='WIN'?'#7fa189':'#b26558'}}>{trades.length>0?[...trades].sort((a,b)=>b.id-a.id)[0]?.result.toLowerCase():''}</div>
           </div>
-          <div className="bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+          <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
             <T2Stamp code="LIFE · 004"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEAE3]/40 font-bold mb-1.5">Lifetime</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{((scorecards?.['15m']?.wins||0)/Math.max(1,(scorecards?.['15m']?.wins||0)+(scorecards?.['15m']?.losses||0))*100).toFixed(0)}%</div>
@@ -22949,7 +22949,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
         </div>
 
         {/* Insights surface */}
-        <div className="bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-4 sm:p-5 mb-5 relative">
+        <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-4 sm:p-5 mb-5 relative">
           <T2Stamp code="INS · 005"/>
           <div className="text-xs uppercase tracking-[0.22em] font-bold mb-3" style={{color:T2_GOLD}}>Insights</div>
           <div className="space-y-2">
@@ -22967,7 +22967,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
         </div>
 
         {/* Hourly heatmap */}
-        <div className="bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-4 sm:p-5 mb-5 relative">
+        <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-4 sm:p-5 mb-5 relative">
           <T2Stamp code="HOUR · 006"/>
           <div className="flex items-baseline justify-between mb-3">
             <div className="text-xs uppercase tracking-[0.22em] font-bold" style={{color:T2_GOLD}}>Hourly Breakdown <span className="text-[10px] tracking-wider text-[#EDEAE3]/30 ml-1 font-normal normal-case">LOCAL · tap to drill</span></div>
@@ -23076,7 +23076,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
 // Cohort row card — used inside StatsView
 function CohortCard({title,stamp,rows}){
   return(
-    <div className="bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+    <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
       <T2Stamp code={stamp}/>
       <div className="text-[10px] uppercase tracking-[0.22em] font-bold mb-3" style={{color:T2_GOLD}}>{title}</div>
       {rows.length===0&&<div className="text-[11px] text-[#EDEAE3]/30 italic">No data</div>}
@@ -23216,7 +23216,7 @@ function TapeStrip({tapeWindows,whaleLog}){
     );
   };
   return(
-    <div className="bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+    <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
       <T2Stamp code="TAPE · 030"/>
       <div className="flex items-baseline justify-between mb-2">
         <div className="flex items-baseline gap-2.5">
@@ -23397,7 +23397,7 @@ function DepthStrip({orderBook,targetMargin}){
     );
   };
   return(
-    <div className="bg-[#1A1815] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+    <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
       <T2Stamp code="DOM · BAND"/>
       <div className="flex items-baseline justify-between mb-2">
         <div className="flex items-baseline gap-2.5">
@@ -23793,10 +23793,10 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
   },
     React.createElement('div',{
       className:'w-full max-w-lg rounded-xl my-auto max-h-[90vh] overflow-y-auto',
-      style:{background:'#1A1815',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
+      style:{background:'#2B2620',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
       onClick:(e)=>e.stopPropagation(),
     },
-      React.createElement('div',{className:'flex items-center justify-between px-5 py-4 sticky top-0',style:{borderBottom:'1px solid rgba(237,234,227,0.10)',background:'#1A1815'}},
+      React.createElement('div',{className:'flex items-center justify-between px-5 py-4 sticky top-0',style:{borderBottom:'1px solid rgba(237,234,227,0.10)',background:'#2B2620'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Sync'),
           React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(201,169,97,0.85)'}},'cross-device')
@@ -24126,11 +24126,11 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
   },
     React.createElement('div',{
       className:'w-full max-w-4xl mx-2 my-4 sm:my-8 rounded-xl',
-      style:{background:'#1A1815',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 60px rgba(201,169,97,0.10)'},
+      style:{background:'#2B2620',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 60px rgba(201,169,97,0.10)'},
       onClick:e=>e.stopPropagation(),
     },
       // Header
-      React.createElement('div',{className:'sticky top-0 z-10 flex items-center justify-between px-5 py-4 rounded-t-xl',style:{background:'#1A1815',borderBottom:'1px solid rgba(237,234,227,0.10)'}},
+      React.createElement('div',{className:'sticky top-0 z-10 flex items-center justify-between px-5 py-4 rounded-t-xl',style:{background:'#2B2620',borderBottom:'1px solid rgba(237,234,227,0.10)'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Analytics'),
           React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:T2_GOLD}},`${resolved.length} resolved · ${_wrPct}% WR`),
@@ -24265,7 +24265,7 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
   },
     React.createElement('div',{
       className:'w-full max-w-2xl rounded-xl my-auto',
-      style:{background:'#1A1815',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
+      style:{background:'#2B2620',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
       onClick:(e)=>e.stopPropagation(),
     },
       React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid rgba(237,234,227,0.10)'}},
@@ -24357,7 +24357,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
   const ls=bloomberg?.longShortRatio||1;
 
   return(
-    <div className={'bg-[#1A1815] p-3 sm:p-4 rounded-xl border border-[#EDEAE3]/10 shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
+    <div className={'bg-[#2B2620] p-3 sm:p-4 rounded-xl border border-[#EDEAE3]/10 shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
       <T2Stamp code="SCR · 008"/>
       {/* V146.1 Fix B: Score Breakdown — per-signal contribution to current posterior */}
       <div className="shrink-0">
@@ -24580,7 +24580,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
 // ── V111: ChartBottomCard - TradingView at bottom, full width ──
 function ChartBottomCard({mobileTab,resolution,setResolution,asset,priceSource}){
   return(
-    <div className={'bg-[#1A1815] p-3 sm:p-4 rounded-xl border border-[#EDEAE3]/10 shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
+    <div className={'bg-[#2B2620] p-3 sm:p-4 rounded-xl border border-[#EDEAE3]/10 shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
       <div className="flex justify-between items-center mb-2 shrink-0">
         <span className={'text-xs uppercase tracking-[0.2em] text-[#EDEAE3]/40 font-bold'}>Live Chart</span>
         <div className="flex gap-1">
@@ -24871,14 +24871,14 @@ function WeatherTab({weatherLog,setWeatherLog}){
 
     // top stats
     React.createElement('div',{className:'flex flex-wrap items-center gap-2 shrink-0'},
-      React.createElement('div',{className:'flex items-center gap-2 bg-[#1A1815] border border-[#EDEAE3]/10 rounded-xl px-3 py-2'},
+      React.createElement('div',{className:'flex items-center gap-2 bg-[#2B2620] border border-[#EDEAE3]/10 rounded-xl px-3 py-2'},
         React.createElement('span',{className:'text-[10px] text-[#EDEAE3]/40 font-bold uppercase tracking-wider'},'WR'),
         React.createElement('span',{className:'text-lg font-serif font-bold',style:{color:wr===null?'rgba(237,234,227,0.4)':wr>=60?'rgb(127,161,137)':'rgb(178,101,88)'}},wr===null?'—':wr+'%'),
         React.createElement('span',{className:'text-[10px] text-[#EDEAE3]/25'},resolved.length+' settled · '+pending.length+' pending')
       ),
       // best call badge
       curCityData?.scored?.find(s=>s.call)&&React.createElement('div',{
-        className:'flex items-center gap-2 bg-[#1A1815] border border-sky-500/30 rounded-xl px-3 py-2'},
+        className:'flex items-center gap-2 bg-[#2B2620] border border-sky-500/30 rounded-xl px-3 py-2'},
         React.createElement('span',{className:'text-[9px] text-sky-400 font-bold uppercase tracking-wider'},'TARA EDGE'),
         React.createElement('span',{className:'text-sm font-bold text-[#EDEAE3]'},
           activeCity+' '+curCityData.scored.find(s=>s.call).subtitle),
@@ -24923,7 +24923,7 @@ function WeatherTab({weatherLog,setWeatherLog}){
       ),
 
       // forecast header
-      curCityData&&React.createElement('div',{className:'bg-[#1A1815] border border-[#EDEAE3]/10 rounded-xl p-3'},
+      curCityData&&React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/10 rounded-xl p-3'},
         React.createElement('div',{className:'flex flex-wrap items-center gap-3 mb-3'},
           React.createElement('span',{className:'text-xs font-bold text-[#EDEAE3]/70'},curCity?.label||activeCity),
           curCityData.forecast?.hi!=null&&React.createElement('span',{className:'text-xs text-sky-300'},
@@ -24985,7 +24985,7 @@ function WeatherTab({weatherLog,setWeatherLog}){
         const ed=extraData[s.series];
         const CAT_COLOR={snow:'rgb(186,230,253)',precip:'rgb(96,165,250)',storm:'rgb(251,146,60)'};
         const col=CAT_COLOR[s.cat]||'rgb(237,234,227)';
-        return React.createElement('div',{key:s.series,className:'bg-[#1A1815] border border-[#EDEAE3]/10 rounded-xl p-4'},
+        return React.createElement('div',{key:s.series,className:'bg-[#2B2620] border border-[#EDEAE3]/10 rounded-xl p-4'},
           React.createElement('div',{className:'flex items-center gap-2 mb-3'},
             React.createElement('span',{className:'text-xs font-bold px-2 py-0.5 rounded',
               style:{background:col+'22',color:col,border:'1px solid '+col+'44'}},s.cat.toUpperCase()),
@@ -25033,7 +25033,7 @@ function WeatherTab({weatherLog,setWeatherLog}){
         return React.createElement('div',{key:e.id,
           className:'rounded-xl border p-3 flex flex-col sm:flex-row sm:items-center gap-3',
           style:{borderColor:isPending?'rgba(237,234,227,0.1)':isWin?'rgba(127,161,137,0.3)':'rgba(178,101,88,0.3)',
-                 background:isPending?'#1A1815':isWin?'rgba(127,161,137,0.04)':'rgba(178,101,88,0.04)'}},
+                 background:isPending?'#2B2620':isWin?'rgba(127,161,137,0.04)':'rgba(178,101,88,0.04)'}},
           React.createElement('div',{className:'flex-1 min-w-0'},
             React.createElement('div',{className:'text-sm font-bold text-[#EDEAE3] truncate'},e.market),
             React.createElement('div',{className:'text-[10px] text-[#EDEAE3]/35 mt-0.5'},
@@ -46107,7 +46107,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* V134: Sync progress overlay */}
       {syncState&&syncState.active&&(
         <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
-          <div className="bg-[#1A1815] rounded-xl border border-indigo-500/30 p-6 max-w-md w-full shadow-2xl">
+          <div className="bg-[#2B2620] rounded-xl border border-indigo-500/30 p-6 max-w-md w-full shadow-2xl">
             <div className="text-xs uppercase tracking-widest text-indigo-300 font-bold mb-3">
               {syncState.complete?'✓ Sync Complete':syncState.error?'⚠ Sync Failed':'🔄 Syncing Tara'}
             </div>
@@ -46129,7 +46129,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* V134: SYNC PROGRESS OVERLAY ── shows during baseline sync */}
       {syncState.active&&(
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={'bg-[#1A1815] border rounded-xl shadow-2xl max-w-sm w-full p-6 '+(syncState.error?'border-rose-500/50':syncState.complete?'border-emerald-500/50':'border-indigo-500/40')}>
+          <div className={'bg-[#2B2620] border rounded-xl shadow-2xl max-w-sm w-full p-6 '+(syncState.error?'border-rose-500/50':syncState.complete?'border-emerald-500/50':'border-indigo-500/40')}>
             <div className="flex items-center gap-3 mb-4">
               <span className="text-2xl">{syncState.error?'⚠️':syncState.complete?'✓':'⟳'}</span>
               <div>
@@ -46235,7 +46235,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           <div className="flex items-center gap-1.5 shrink-0">
 
             {/* BTC */}
-            <div className={'flex bg-[#1A1815] border border-[#EDEAE3]/20 rounded-lg p-0.5 shrink-0'}>
+            <div className={'flex bg-[#2B2620] border border-[#EDEAE3]/20 rounded-lg p-0.5 shrink-0'}>
               {ASSET_KEYS.map(k=>{
                 const _c=ASSET_CONFIG[k];
                 const _active=currentAsset===k;
@@ -46619,7 +46619,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
 
         /* ── CARD REFINEMENT — NO BORDERS, TONE-SHIFT ───────── */
-        [data-tara-theme="simple"] .bg-\\[\\#1A1815\\] {
+        [data-tara-theme="simple"] .bg-\\[\\#2B2620\\] {
           background: var(--tara-bg-card) !important;
         }
         [data-tara-theme="simple"] .bg-\\[\\#0A0907\\]\\/95 { background: var(--tara-bg-header) !important; }
@@ -46645,14 +46645,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
            pinpoint just one card via CSS selectors, we apply a faint ambient
            glow to any card containing the Tara's Call label via :has().
            Browsers without :has support get no glow — graceful degradation. */
-        [data-tara-theme="simple"] .bg-\\[\\#1A1815\\]:has(span:where(:contains("Tara's Call"))),
-        [data-tara-theme="simple"] .bg-\\[\\#1A1815\\]:has(div:where(:contains("Tara's Call"))) {
+        [data-tara-theme="simple"] .bg-\\[\\#2B2620\\]:has(span:where(:contains("Tara's Call"))),
+        [data-tara-theme="simple"] .bg-\\[\\#2B2620\\]:has(div:where(:contains("Tara's Call"))) {
           background: radial-gradient(120% 80% at 50% 0%, rgba(201,169,97,0.04) 0%, var(--tara-bg-card) 60%) !important;
           position: relative;
         }
         /* Subtle hairline accent at top of Tara's Call card */
-        [data-tara-theme="simple"] .bg-\\[\\#1A1815\\]:has(span:where(:contains("Tara's Call"))):before,
-        [data-tara-theme="simple"] .bg-\\[\\#1A1815\\]:has(div:where(:contains("Tara's Call"))):before {
+        [data-tara-theme="simple"] .bg-\\[\\#2B2620\\]:has(span:where(:contains("Tara's Call"))):before,
+        [data-tara-theme="simple"] .bg-\\[\\#2B2620\\]:has(div:where(:contains("Tara's Call"))):before {
           content: '';
           position: absolute;
           top: 0; left: 0; right: 0; height: 1px;
@@ -46786,7 +46786,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
 
         {/* STATS BAR — hidden in weather mode */}
-        <div className={'bg-[#1A1815] rounded-xl border border-[#EDEAE3]/10 shadow-md relative overflow-hidden shrink-0'} style={{display:activeMode==='weather'?'none':''}}>
+        <div className={'bg-[#2B2620] rounded-xl border border-[#EDEAE3]/10 shadow-md relative overflow-hidden shrink-0'} style={{display:activeMode==='weather'?'none':''}}>
           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
           <div className="p-2 sm:p-3 flex flex-wrap lg:flex-nowrap lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-hidden">
             
@@ -47262,7 +47262,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         />
 
         {/* MOBILE TAB NAV */}
-        <div className={'flex lg:hidden bg-[#1A1815] border border-[#EDEAE3]/10 rounded-xl p-1 gap-1 shrink-0'}>
+        <div className={'flex lg:hidden bg-[#2B2620] border border-[#EDEAE3]/10 rounded-xl p-1 gap-1 shrink-0'}>
           {[{id:'signal',label:'Signal',icon:<IC.Zap className="w-4 h-4"/>},{id:'chart',label:'Chart',icon:<IC.Activity className="w-4 h-4"/>},{id:'logs',label:'Analytics',icon:<IC.BarChart className="w-4 h-4"/>}].map(tab=>(
             <button key={tab.id} onClick={()=>setMobileTab(tab.id)} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${mobileTab===tab.id?'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30':'text-[#EDEAE3]/40 hover:text-[#EDEAE3]/70'}`}>
               {tab.icon}{tab.label}
@@ -47331,7 +47331,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0 pb-16 lg:pb-0">
           
           {/* ── PREDICTION CARD ── */}
-          <div className={`bg-[#1A1815] p-3 sm:p-4 rounded-xl border border-[#EDEAE3]/10 shadow-md flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
+          <div className={`bg-[#2B2620] p-3 sm:p-4 rounded-xl border border-[#EDEAE3]/10 shadow-md flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
             <div className="absolute top-0 left-0 w-full h-px rounded-t-xl" style={{background:'linear-gradient(to right, transparent, '+T2_GOLD_BORDER+' 30%, '+T2_GOLD_BORDER+' 70%, transparent)'}}></div>
             <T2Stamp code="PRED · 015"/>
             <div className="flex justify-between items-center mb-3 shrink-0">
@@ -47645,7 +47645,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* Settings */}
       {showSettings&&(
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#1A1815] border border-[#EDEAE3]/20 rounded-2xl w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto'} style={{scrollbarWidth:'thin'}}>
+          <div className={'bg-[#2B2620] border border-[#EDEAE3]/20 rounded-2xl w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto'} style={{scrollbarWidth:'thin'}}>
             <div className="p-4 sm:p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Link className="w-5 h-5 text-indigo-400"/>Discord Integration</h2>
@@ -47754,7 +47754,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         {discordEditingId===entry.id&&(
                           <div className={'border-t border-[#EDEAE3]/8 p-2.5'}>
                             <textarea value={discordEditText} onChange={e=>setDiscordEditText(e.target.value)} rows={2}
-                              className={'w-full bg-[#1A1815] border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-400 resize-none mb-2'}
+                              className={'w-full bg-[#2B2620] border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-400 resize-none mb-2'}
                               placeholder="Add a note to this message (e.g. 'Closed early, took profits at $75,200')"/>
                             <div className="flex gap-2">
                               <button onClick={async()=>{
@@ -47782,7 +47782,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* Chat */}
       <div className={`fixed bottom-[68px] lg:bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
-          <div className={'bg-[#1A1815] border border-[#EDEAE3]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
+          <div className={'bg-[#2B2620] border border-[#EDEAE3]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
             <div className={'bg-[#0F0E0C] p-2.5 flex justify-between items-center border-b border-[#EDEAE3]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.1.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#0F0E0C]/50'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
@@ -47792,7 +47792,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 </div>
               ))}
             </div>
-            <div className={'p-2.5 bg-[#0F0E0C] border-t border-[#EDEAE3]/10'}><input type="text" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={handleChatSubmit} placeholder={`Ask about ${windowType} window...`} className={'w-full bg-[#1A1815] border border-[#EDEAE3]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/></div>
+            <div className={'p-2.5 bg-[#0F0E0C] border-t border-[#EDEAE3]/10'}><input type="text" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={handleChatSubmit} placeholder={`Ask about ${windowType} window...`} className={'w-full bg-[#2B2620] border border-[#EDEAE3]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/></div>
           </div>
         )}
         {!isChatOpen&&<button onClick={()=>setIsChatOpen(true)} className={'bg-indigo-500 hover:bg-indigo-400 text-white p-3 rounded-full shadow-lg border border-indigo-400/50 transition-transform hover:scale-105'}><IC.Msg className="w-5 h-5"/></button>}
@@ -47827,8 +47827,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* ── ANALYTICS / TRAINING DASHBOARD ── */}
       {showAnalytics&&(
         <div className={'fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#1A1815] border border-[#EDEAE3]/20 rounded-2xl w-full max-w-3xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
-            <div className={'sticky top-0 bg-[#1A1815] border-b border-[#EDEAE3]/10 p-4 flex justify-between items-center z-10'}>
+          <div className={'bg-[#2B2620] border border-[#EDEAE3]/20 rounded-2xl w-full max-w-3xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
+            <div className={'sticky top-0 bg-[#2B2620] border-b border-[#EDEAE3]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base font-serif text-white flex items-center gap-2"><IC.BarChart className="w-5 h-5 text-indigo-400"/>Tara Training Engine</h2>
                 {(()=>{
@@ -48014,7 +48014,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                           <span className={`text-xs ${delta>0?'text-emerald-400':delta<0?'text-rose-400':'text-[#EDEAE3]/30'}`}>{delta>0?'+':''}{delta.toFixed(1)}</span>
                         </div>
                       </div>
-                      <div className="w-full h-1.5 bg-[#1A1815] rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-[#2B2620] rounded-full overflow-hidden">
                         <div className={`h-full rounded-full transition-all duration-500 ${delta>2?'bg-emerald-500':delta<-2?'bg-rose-500':'bg-indigo-500'}`} style={{width:`${Math.min(100,pct)}%`}}/>
                       </div>
                       <div className={'flex justify-between mt-0.5 text-xs text-[#EDEAE3]/20'}>
@@ -48474,8 +48474,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* ── HOW TARA WORKS GUIDE ── */}
       {showGuide&&(
         <div className={'fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#1A1815] border border-[#EDEAE3]/20 rounded-2xl w-full max-w-2xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
-            <div className={'sticky top-0 bg-[#1A1815] border-b border-[#EDEAE3]/10 p-4 flex justify-between items-center z-10'}>
+          <div className={'bg-[#2B2620] border border-[#EDEAE3]/20 rounded-2xl w-full max-w-2xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
+            <div className={'sticky top-0 bg-[#2B2620] border-b border-[#EDEAE3]/10 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
                   <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 8.8.2 Works
@@ -48487,7 +48487,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className={'p-4 sm:p-6 space-y-6 text-sm text-[#EDEAE3]/80'}>
 
               {/* V8.7: CURRENT-STATE OVERVIEW — replaces stale V134 summary */}
-              <section className={'bg-[#1A1815] border-2 rounded-lg p-4'} style={{borderColor:'rgba(201,169,97,0.30)'}}>
+              <section className={'bg-[#2B2620] border-2 rounded-lg p-4'} style={{borderColor:'rgba(201,169,97,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:T2_GOLD}}>★ Current Tara — V8.7 Overview</h3>
                 <div className="space-y-3 text-xs leading-relaxed text-[#EDEAE3]/75">
                   <p><strong className="text-white">What Tara does:</strong> Reads BTC price action, tape flow, regime, FGT alignment, and a 7-signal fusion to predict whether the price will close above or below strike at the end of each 15m or 5m window. She makes a call when she has high enough conviction; otherwise she sits out. She learns from every result and adapts her weights over time.</p>
@@ -48498,7 +48498,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </section>
 
               {/* V8.7: LEARNING SYSTEM — current */}
-              <section className={'bg-[#1A1815] border rounded-lg p-4'} style={{borderColor:'rgba(168,85,247,0.30)'}}>
+              <section className={'bg-[#2B2620] border rounded-lg p-4'} style={{borderColor:'rgba(168,85,247,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:'rgba(168,85,247,0.95)'}}>🧠 How Tara Learns Every Trade</h3>
                 <div className="space-y-2.5 text-xs leading-relaxed text-[#EDEAE3]/70">
                   <p><strong className="text-white">5 parallel learning loops fire on every WIN/LOSS:</strong></p>
@@ -48516,7 +48516,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </section>
 
               {/* V8.7: SYNC ARCHITECTURE */}
-              <section className={'bg-[#1A1815] border rounded-lg p-4'} style={{borderColor:'rgba(127,161,137,0.30)'}}>
+              <section className={'bg-[#2B2620] border rounded-lg p-4'} style={{borderColor:'rgba(127,161,137,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:'rgba(127,161,137,0.95)'}}>☁ Cross-Device Sync (V8.6)</h3>
                 <div className="space-y-2 text-xs leading-relaxed text-[#EDEAE3]/70">
                   <p>All 11 sync paths use atomic Firestore transactions with smart merge functions:</p>
