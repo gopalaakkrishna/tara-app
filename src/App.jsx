@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.10-v13.4.24-card-contrast';
-const TARA_VERSION_DISPLAY='Tara 13.4.24';
+const BASELINE_VERSION='2026.07.10-v13.4.26-typography-pass';
+const TARA_VERSION_DISPLAY='Tara 13.4.26';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15731,7 +15731,7 @@ const PastWindowsPill=React.memo(function PastWindowsPill({pastWindows,windowTyp
   return React.createElement('div',{ref:wrapRef,className:'relative'},
     React.createElement('button',{
       onClick:()=>setOpen(!open),
-      className:'flex items-center gap-1.5 bg-[#0F0E0C] border border-[#EDEAE3]/12 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide hover:border-[rgba(201,169,97,0.4)] transition-colors shadow-[0_2px_6px_rgba(10,9,7,0.22)]',
+      className:'flex items-center gap-1.5 bg-[#0F0E0C] border border-[#EDEAE3]/12 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide hover:border-[rgba(201,169,97,0.4)] transition-colors shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_4px_12px_rgba(0,0,0,0.4)]',
     },
       React.createElement('span',{className:`text-[10px] text-[#EDEAE3]/55 transition-transform inline-block ${open?'rotate-180':''}`},'▾'),
       React.createElement('span',{className:'text-[#EDEAE3]/65 text-[11px]'},'Past'),
@@ -18686,7 +18686,7 @@ const AntiTiltCooldownBanner=React.memo(function AntiTiltCooldownBanner({tiltLoc
     style:{
       border:'1px solid rgba(178,101,88,0.50)',
       background:'linear-gradient(90deg, rgba(178,101,88,0.10) 0%, rgba(178,101,88,0.04) 100%)',
-      boxShadow:'0 4px 14px rgba(10,9,7,0.3)',
+      boxShadow:'inset 0 1px 0 rgba(237,234,227,0.06), 0 5px 18px rgba(0,0,0,0.45)',
     },
   },
     React.createElement('div',{className:'flex items-baseline justify-between gap-3 flex-wrap'},
@@ -19223,7 +19223,7 @@ const TabPresencePill=React.memo(function TabPresencePill({peerTabs}){
   const _label=Object.entries(byAsset).map(([a,n])=>n>1?`${n}×${a}`:a).join(' · ');
   return React.createElement('div',{
     className:'flex items-baseline gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-md shrink-0',
-    style:{background:'rgba(147,197,253,0.06)',border:'1px solid rgba(147,197,253,0.22)',boxShadow:'0 2px 6px rgba(10,9,7,0.22)'},
+    style:{background:'rgba(147,197,253,0.06)',border:'1px solid rgba(147,197,253,0.22)',boxShadow:'inset 0 1px 0 rgba(237,234,227,0.08), 0 4px 12px rgba(0,0,0,0.4)'},
     title:`${peerTabs.length} other tab${peerTabs.length>1?'s':''} of Tara open in this browser. Their calls and yours are being merged automatically.`,
   },
     React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold',style:{color:'rgba(147,197,253,0.55)'}},'+'+peerTabs.length+(peerTabs.length>1?' tabs':' tab')),
@@ -19297,8 +19297,8 @@ const SyncStatusPill=React.memo(function SyncStatusPill({onClick}){
     onClick?'Click to force-resync from cloud':null,
   ].filter(Boolean).join('\n');
   return React.createElement('div',{
-    className:'flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-md shrink-0'+(onClick?' cursor-pointer hover:bg-[#EDEAE3]/3':''),
-    style:{background:_bg,border:'1px solid '+_border,boxShadow:'0 2px 6px rgba(10,9,7,0.22)'},
+    className:'flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-1 rounded-lg shrink-0'+(onClick?' cursor-pointer hover:bg-[#EDEAE3]/3':''),
+    style:{background:_bg,border:'1px solid '+_border,boxShadow:'inset 0 1px 0 rgba(237,234,227,0.08), 0 4px 12px rgba(0,0,0,0.4)'},
     title:_title,
     onClick,
   },
@@ -19397,7 +19397,7 @@ const StreakTiltPill=React.memo(function StreakTiltPill({todayData}){
     :`${streak} ${streakType==='hot'?'wins':'losses'} streak`;
   return React.createElement('div',{
     className:'flex items-baseline gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-md shrink-0'+(_pulse?' animate-pulse':''),
-    style:{background:_bg,border:'1px solid '+_border,boxShadow:'0 2px 6px rgba(10,9,7,0.22)'},
+    style:{background:_bg,border:'1px solid '+_border,boxShadow:'inset 0 1px 0 rgba(237,234,227,0.08), 0 4px 12px rgba(0,0,0,0.4)'},
     title:_title,
   },
     React.createElement('span',{className:'text-[10px] shrink-0',style:{color:_color}},_icon),
@@ -21480,25 +21480,25 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         ),
       ),
       React.createElement('div',{className:'grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-2 mb-4'},
-        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
+        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold mb-1'},'Total calls'),
-          React.createElement('div',{className:'text-2xl font-bold text-white tabular-nums'},counts.total),
+          React.createElement('div',{className:'text-2xl font-bold text-white tabular-nums',style:{fontFamily:'"IBM Plex Mono",monospace'}},counts.total),
         ),
-        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
+        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold mb-1'},'Win rate'),
-          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:_wr>=60?'rgb(127,161,137)':_wr>=50?'#fff':'rgb(178,101,88)'}},_wr!==null?`${_wr}%`:'—'),
+          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:_wr>=60?'rgb(127,161,137)':_wr>=50?'#fff':'rgb(178,101,88)',fontFamily:'"IBM Plex Mono",monospace'}},_wr!==null?`${_wr}%`:'—'),
         ),
-        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
+        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold mb-1'},'Wins'),
-          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(127,161,137)'}},counts.wins),
+          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(127,161,137)',fontFamily:'"IBM Plex Mono",monospace'}},counts.wins),
         ),
-        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
+        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold mb-1'},'Losses'),
-          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(178,101,88)'}},counts.losses),
+          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(178,101,88)',fontFamily:'"IBM Plex Mono",monospace'}},counts.losses),
         ),
-        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)]'},
+        React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold mb-1'},'Sat out'),
-          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:T2_GOLD}},counts.sitouts),
+          React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:T2_GOLD,fontFamily:'"IBM Plex Mono",monospace'}},counts.sitouts),
         ),
       ),
       // V10.7.85: Local-only mode banner — shown when Supabase sync is paused.
@@ -21886,7 +21886,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         });
         const _activeTiers=_tiers.filter(t=>_stats[t].wins+_stats[t].losses>0);
         if(_activeTiers.length===0)return null;
-        return React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] mb-4'},
+        return React.createElement('div',{className:'bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)] mb-4'},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEAE3]/40 font-bold'},'Win rate by tier'),
             React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#EDEAE3]/30'},filter==='15m'?'15m only':filter==='5m'?'5m only':'all windows'),
@@ -21976,7 +21976,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   else if(e.result==='SITOUT')hourBins[h].sitouts++;
                 });
                 const _maxHourTotal=Math.max(1,...hourBins.map(b=>b.total));
-                return React.createElement('div',{key:day.key,className:'bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4'},
+                return React.createElement('div',{key:day.key,className:'bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)] sm:p-4'},
                   // Day header
                   React.createElement('div',{className:'flex items-baseline justify-between mb-3 flex-wrap gap-2'},
                     React.createElement('div',{className:'flex items-baseline gap-3'},
@@ -22916,19 +22916,19 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
 
         {/* Top stats grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-5">
-          <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+          <div className="bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)] sm:p-4 relative">
             <T2Stamp code="ALL · 001"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEAE3]/40 font-bold mb-1.5">Trades</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{trades.length}</div>
             <div className="text-[10px] text-[#EDEAE3]/35 mt-0.5">resolved</div>
           </div>
-          <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+          <div className="bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)] sm:p-4 relative">
             <T2Stamp code="ACC · 002"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEAE3]/40 font-bold mb-1.5">Accuracy</div>
             <div className={'text-2xl sm:text-3xl font-bold '+(wr>=60?'text-emerald-400':wr>=50?'text-white':'text-rose-400')} style={T2_MONO_STYLE}>{trades.length>0?wr.toFixed(0):'—'}%</div>
             <div className="text-[10px] text-[#EDEAE3]/35 mt-0.5">{wins}W · {losses}L</div>
           </div>
-          <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+          <div className="bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)] sm:p-4 relative">
             <T2Stamp code="STR · 003"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEAE3]/40 font-bold mb-1.5">Streak</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{(()=>{
@@ -22940,7 +22940,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
             })()}</div>
             <div className="text-[10px] mt-0.5" style={{color:trades.length>0&&[...trades].sort((a,b)=>b.id-a.id)[0]?.result==='WIN'?'#7fa189':'#b26558'}}>{trades.length>0?[...trades].sort((a,b)=>b.id-a.id)[0]?.result.toLowerCase():''}</div>
           </div>
-          <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+          <div className="bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)] sm:p-4 relative">
             <T2Stamp code="LIFE · 004"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEAE3]/40 font-bold mb-1.5">Lifetime</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{((scorecards?.['15m']?.wins||0)/Math.max(1,(scorecards?.['15m']?.wins||0)+(scorecards?.['15m']?.losses||0))*100).toFixed(0)}%</div>
@@ -23076,7 +23076,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
 // Cohort row card — used inside StatsView
 function CohortCard({title,stamp,rows}){
   return(
-    <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+    <div className="bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)] sm:p-4 relative">
       <T2Stamp code={stamp}/>
       <div className="text-[10px] uppercase tracking-[0.22em] font-bold mb-3" style={{color:T2_GOLD}}>{title}</div>
       {rows.length===0&&<div className="text-[11px] text-[#EDEAE3]/30 italic">No data</div>}
@@ -23216,7 +23216,7 @@ function TapeStrip({tapeWindows,whaleLog}){
     );
   };
   return(
-    <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+    <div className="bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)] sm:p-4 relative">
       <T2Stamp code="TAPE · 030"/>
       <div className="flex items-baseline justify-between mb-2">
         <div className="flex items-baseline gap-2.5">
@@ -23397,7 +23397,7 @@ function DepthStrip({orderBook,targetMargin}){
     );
   };
   return(
-    <div className="bg-[#2B2620] border border-[#EDEAE3]/8 rounded-xl p-3 shadow-[0_4px_14px_rgba(10,9,7,0.25)] sm:p-4 relative">
+    <div className="bg-[#2B2620] border border-[#EDEAE3]/15 rounded-xl p-3 shadow-[inset_0_1px_0_rgba(237,234,227,0.08),0_5px_16px_rgba(0,0,0,0.4)] sm:p-4 relative">
       <T2Stamp code="DOM · BAND"/>
       <div className="flex items-baseline justify-between mb-2">
         <div className="flex items-baseline gap-2.5">
@@ -25080,12 +25080,12 @@ const MobileTabBar=React.memo(function MobileTabBar({mobileTab,setMobileTab,setS
       {tabs.map(t=>{
         const active=mobileTab===t.id;
         const cls='flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'text-[#C9A961] border-[#C9A961]/40':'text-[#EDEAE3]/40 border-[#EDEAE3]/10');
-        const activeStyle=active?{background:T2_GOLD_GLOW,boxShadow:'0 2px 8px rgba(10,9,7,0.25)'}:{boxShadow:'0 1px 4px rgba(10,9,7,0.15)'};
+        const activeStyle=active?{background:T2_GOLD_GLOW,boxShadow:'inset 0 1px 0 rgba(237,234,227,0.08), 0 4px 12px rgba(0,0,0,0.4)'}:{boxShadow:'inset 0 1px 0 rgba(237,234,227,0.04), 0 2px 8px rgba(0,0,0,0.3)'};
         return(<button key={t.id} onClick={()=>setMobileTab(t.id)} className={cls} style={activeStyle}>{t.label}</button>);
       })}
       {/* V3.2.2: Brain + Stats access on mobile — header buttons hidden at this width */}
-      <button onClick={()=>setShowBrain&&setShowBrain(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 2px 6px rgba(10,9,7,0.2)'}} title="Tara's Brain">🧠</button>
-      <button onClick={()=>setShowStats&&setShowStats(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 2px 6px rgba(10,9,7,0.2)'}} title="Stats">📊</button>
+      <button onClick={()=>setShowBrain&&setShowBrain(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'inset 0 1px 0 rgba(237,234,227,0.08), 0 4px 12px rgba(0,0,0,0.4)'}} title="Tara's Brain">🧠</button>
+      <button onClick={()=>setShowStats&&setShowStats(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'inset 0 1px 0 rgba(237,234,227,0.08), 0 4px 12px rgba(0,0,0,0.4)'}} title="Stats">📊</button>
     </div>
   );
 })
@@ -28483,11 +28483,11 @@ const KalshiBalancePill=React.memo(function KalshiBalancePill({kalshiBalance}){
   const _deltaColor=_delta>0.01?'#7FA189':_delta<-0.01?'#B26558':'rgba(237,234,227,0.55)';
   const _isStale=kalshiBalance.lastFetchAt&&(Date.now()-kalshiBalance.lastFetchAt>120000); // 2min stale threshold
   return React.createElement('span',{
-    className:'inline-flex items-baseline gap-1.5 text-[10px] uppercase tracking-[0.10em] px-2 py-1 rounded',
+    className:'inline-flex items-baseline gap-2 text-[10px] uppercase tracking-[0.10em] px-3 py-1.5 rounded-lg',
     style:{
       background:'rgba(0,0,0,0.30)',
       border:'1px solid rgba(237,234,227,0.08)',
-      boxShadow:'0 2px 6px rgba(10,9,7,0.22)',
+      boxShadow:'inset 0 1px 0 rgba(237,234,227,0.08), 0 4px 12px rgba(0,0,0,0.4)',
       fontFamily:'IBM Plex Mono,ui-monospace,monospace',
       letterSpacing:'0.02em',
       textTransform:'none',
@@ -28496,7 +28496,7 @@ const KalshiBalancePill=React.memo(function KalshiBalancePill({kalshiBalance}){
     title:kalshiBalance.status==='error'?`Kalshi balance error: ${kalshiBalance.error||'unknown'}`:`Kalshi balance · last updated ${kalshiBalance.lastFetchAt?new Date(kalshiBalance.lastFetchAt).toLocaleTimeString():'never'}`,
   },
     React.createElement('span',{className:'text-[#EDEAE3]/45'},'kalshi'),
-    React.createElement('span',{className:'tabular-nums font-medium text-[#EDEAE3]/85'},`$${_bal.toFixed(2)}`),
+    React.createElement('span',{className:'tabular-nums font-semibold text-[13px] text-[#EDEAE3]/95'},`$${_bal.toFixed(2)}`),
     React.createElement('span',{className:'tabular-nums',style:{color:_deltaColor}},
       `${_delta>=0?'+':''}$${_delta.toFixed(2)}`,
     ),
