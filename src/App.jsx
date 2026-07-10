@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.10-v13.4.21-color-debt-cleanup';
-const TARA_VERSION_DISPLAY='Tara 13.4.21';
+const BASELINE_VERSION='2026.07.10-v13.4.22-depth-pass2';
+const TARA_VERSION_DISPLAY='Tara 13.4.22';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15731,7 +15731,7 @@ const PastWindowsPill=React.memo(function PastWindowsPill({pastWindows,windowTyp
   return React.createElement('div',{ref:wrapRef,className:'relative'},
     React.createElement('button',{
       onClick:()=>setOpen(!open),
-      className:'flex items-center gap-1.5 bg-[#0F0E0C] border border-[#EDEAE3]/12 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide hover:border-[rgba(201,169,97,0.4)] transition-colors',
+      className:'flex items-center gap-1.5 bg-[#0F0E0C] border border-[#EDEAE3]/12 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide hover:border-[rgba(201,169,97,0.4)] transition-colors shadow-[0_2px_6px_rgba(10,9,7,0.22)]',
     },
       React.createElement('span',{className:`text-[10px] text-[#EDEAE3]/55 transition-transform inline-block ${open?'rotate-180':''}`},'▾'),
       React.createElement('span',{className:'text-[#EDEAE3]/65 text-[11px]'},'Past'),
@@ -18686,6 +18686,7 @@ const AntiTiltCooldownBanner=React.memo(function AntiTiltCooldownBanner({tiltLoc
     style:{
       border:'1px solid rgba(178,101,88,0.50)',
       background:'linear-gradient(90deg, rgba(178,101,88,0.10) 0%, rgba(178,101,88,0.04) 100%)',
+      boxShadow:'0 4px 14px rgba(10,9,7,0.3)',
     },
   },
     React.createElement('div',{className:'flex items-baseline justify-between gap-3 flex-wrap'},
@@ -19222,7 +19223,7 @@ const TabPresencePill=React.memo(function TabPresencePill({peerTabs}){
   const _label=Object.entries(byAsset).map(([a,n])=>n>1?`${n}×${a}`:a).join(' · ');
   return React.createElement('div',{
     className:'flex items-baseline gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-md shrink-0',
-    style:{background:'rgba(147,197,253,0.06)',border:'1px solid rgba(147,197,253,0.22)'},
+    style:{background:'rgba(147,197,253,0.06)',border:'1px solid rgba(147,197,253,0.22)',boxShadow:'0 2px 6px rgba(10,9,7,0.22)'},
     title:`${peerTabs.length} other tab${peerTabs.length>1?'s':''} of Tara open in this browser. Their calls and yours are being merged automatically.`,
   },
     React.createElement('span',{className:'text-[8px] uppercase tracking-wider font-bold',style:{color:'rgba(147,197,253,0.55)'}},'+'+peerTabs.length+(peerTabs.length>1?' tabs':' tab')),
@@ -19396,7 +19397,7 @@ const StreakTiltPill=React.memo(function StreakTiltPill({todayData}){
     :`${streak} ${streakType==='hot'?'wins':'losses'} streak`;
   return React.createElement('div',{
     className:'flex items-baseline gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-md shrink-0'+(_pulse?' animate-pulse':''),
-    style:{background:_bg,border:'1px solid '+_border},
+    style:{background:_bg,border:'1px solid '+_border,boxShadow:'0 2px 6px rgba(10,9,7,0.22)'},
     title:_title,
   },
     React.createElement('span',{className:'text-[10px] shrink-0',style:{color:_color}},_icon),
@@ -28486,6 +28487,7 @@ const KalshiBalancePill=React.memo(function KalshiBalancePill({kalshiBalance}){
     style:{
       background:'rgba(0,0,0,0.30)',
       border:'1px solid rgba(237,234,227,0.08)',
+      boxShadow:'0 2px 6px rgba(10,9,7,0.22)',
       fontFamily:'IBM Plex Mono,ui-monospace,monospace',
       letterSpacing:'0.02em',
       textTransform:'none',
