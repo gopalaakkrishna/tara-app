@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.10-v13.4.22-depth-pass2';
-const TARA_VERSION_DISPLAY='Tara 13.4.22';
+const BASELINE_VERSION='2026.07.10-v13.4.23-depth-recalibrate-test';
+const TARA_VERSION_DISPLAY='Tara 13.4.23';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19358,15 +19358,15 @@ const TodayPnLPill=React.memo(function TodayPnLPill({todayData,onClick}){
   const _border=_net>=2?'rgba(127,161,137,0.25)':_net>=0?'rgba(201,169,97,0.22)':'rgba(178,101,88,0.25)';
   const _dollarLabel=dollarPnL!=null?(dollarPnL>=0?'+$':'-$')+Math.abs(dollarPnL).toFixed(2):null;
   return React.createElement('div',{
-    className:'flex items-baseline gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 rounded-md shrink-0'+(onClick?' cursor-pointer hover:bg-[#EDEAE3]/3':''),
-    style:{background:_bg,border:'1px solid '+_border,boxShadow:'0 2px 6px rgba(10,9,7,0.22)'},
+    className:'flex items-baseline gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg shrink-0'+(onClick?' cursor-pointer hover:bg-[#EDEAE3]/3':''),
+    style:{background:_bg,border:'1px solid '+_border,boxShadow:'inset 0 1px 0 rgba(237,234,227,0.09), 0 4px 12px rgba(0,0,0,0.4)'},
     title:`Today: ${wins}W ${losses}L${todayData.sitouts>0?' '+todayData.sitouts+'so':''}${todayData.pending>0?' ('+todayData.pending+' pending)':''}${_dollarLabel?' · '+_dollarLabel:''}${onClick?' · click to configure bet size':''}`,
     onClick,
   },
-    React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-wider text-[#EDEAE3]/40'},'Today'),
-    React.createElement('span',{className:'text-[10px] sm:text-[11px] tabular-nums font-bold',style:{color:_color}},`${wins}W·${losses}L`),
-    _dollarLabel&&React.createElement('span',{className:'text-[10px] sm:text-[11px] tabular-nums font-bold hidden sm:inline',style:{color:_color}},_dollarLabel),
-    wr!=null&&React.createElement('span',{className:'text-[9px] sm:text-[10px] tabular-nums hidden lg:inline',style:{color:_color,opacity:0.75}},`${wr}%`),
+    React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.12em] text-[#EDEAE3]/40'},'Today'),
+    React.createElement('span',{className:'text-[13px] sm:text-[15px] tabular-nums font-semibold',style:{color:_color,fontFamily:'"IBM Plex Mono",monospace'}},`${wins}W·${losses}L`),
+    _dollarLabel&&React.createElement('span',{className:'text-[13px] sm:text-[15px] tabular-nums font-semibold hidden sm:inline',style:{color:_color,fontFamily:'"IBM Plex Mono",monospace'}},_dollarLabel),
+    wr!=null&&React.createElement('span',{className:'text-[10px] sm:text-[11px] tabular-nums hidden lg:inline',style:{color:_color,opacity:0.8,fontFamily:'"IBM Plex Mono",monospace'}},`${wr}%`),
   );
 })
 
