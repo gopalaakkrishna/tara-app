@@ -9,6 +9,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Tara</title>
     <link rel="manifest" href="/manifest.json" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       // V13.4.18 design pass — refined palette. Overrides Tailwind's stock
@@ -17,6 +23,11 @@
       // app repaints without touching component code. Same semantic roles
       // (emerald=win/UP, rose=loss/DOWN, amber=warm/caution) — just warmer,
       // more muted exact values in place of Tailwind's stock saturated ones.
+      // V13.4.19: also point font-sans/font-mono at real webfonts (loaded
+      // above) instead of Tailwind's system-font stack — repaints all 72
+      // existing `font-mono` and 4 `font-sans` classes across the app the
+      // same way the palette override repaints colors. Base body font is
+      // set separately below so untagged text picks it up too.
       tailwind.config = {
         theme: {
           extend: {
@@ -43,10 +54,22 @@
                 500: '#BD8A38',
               },
             },
+            fontFamily: {
+              sans: ['"Instrument Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+              mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
+            },
           },
         },
       };
     </script>
+    <style>
+      /* V13.4.19: base font for any text that isn't explicitly tagged with a
+         Tailwind font-sans/font-mono class — same webfont, applies globally
+         with zero component changes. */
+      html, body {
+        font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
