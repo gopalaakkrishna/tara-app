@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.10-v13.4.15-memo-batch2';
-const TARA_VERSION_DISPLAY='Tara 13.4.15';
+const BASELINE_VERSION='2026.07.10-v13.4.16-local-cap-10k';
+const TARA_VERSION_DISPLAY='Tara 13.4.16';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -4951,7 +4951,7 @@ function computeDowHourShift(dowHourTable,now){
 //   At 1.2KB avg, 4000 entries = ~4.8MB which fits within Chrome's 10MB localStorage
 //   limit comfortably. IndexedDB (unlimited) is the primary store; localStorage
 //   is a fast-read cache only.
-const TARA_CALL_LOG_CAP=5000;
+const TARA_CALL_LOG_CAP=10000;
 // V13.2: Supabase EGRESS FIX. The cloud doc was the full 5000-entry log (~2.9MB, and
 //   bigger now that V13.1 telemetry enriched each entry). Every 60s RMW read+merge moved
 //   the whole doc -> ~52% of the 5GB egress cap. Cross-device sync only needs RECENT
