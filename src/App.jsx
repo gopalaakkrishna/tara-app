@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.10-v13.4.16-local-cap-10k';
-const TARA_VERSION_DISPLAY='Tara 13.4.16';
+const BASELINE_VERSION='2026.07.10-v13.4.17-deepcache-cap-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.17';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30185,7 +30185,7 @@ function TaraApp(){
       //   This ensures recent trades are always available even if localStorage was trimmed.
       const stored=localStorage.getItem('taraCallLog_v1');
       const session=sessionStorage.getItem('taraCallLog_session');
-      // V10.9.6: prefer the DEEP minified cache (up to 5000 entries) over the
+      // V10.9.6: prefer the DEEP minified cache (up to TARA_CALL_LOG_CAP entries) over the
       //   1000-entry fast cache. This is what makes the full trade count survive
       //   a reload even when IndexedDB is empty/unavailable.
       let _deepParsed=null;
@@ -30347,12 +30347,12 @@ function TaraApp(){
           const _save=merged.slice(-_cap);
           _idbWrite('taraCallLog',_save).catch(()=>{});          // primary: unlimited
           localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
-          // V10.9.6: write DEEP minified cache (up to 5000) so the full imported
+          // V10.9.6: write DEEP minified cache (up to TARA_CALL_LOG_CAP) so the full imported
           //   count survives reload even if IndexedDB fails. Without this, reload
           //   fell back to the 1000-entry fast cache — the "base stayed at 500/1000"
           //   bug the user reported.
           const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','noGoCategory']);
-          const _mini=_save.slice(-5000).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
+          const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
           for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
             try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
           }
@@ -30438,7 +30438,7 @@ function TaraApp(){
       });
       // Write FULL patched history back to IndexedDB (no slicing to 500).
       //   localStorage cache still gets the last-1000 slice for fast first paint,
-      //   plus the deep minified cache (up to 5000) so corrected results survive
+      //   plus the deep minified cache (up to TARA_CALL_LOG_CAP) so corrected results survive
       //   reload even if IndexedDB is unavailable.
       try{
         const _cap=typeof TARA_CALL_LOG_CAP!=='undefined'?TARA_CALL_LOG_CAP:5000;
@@ -30446,7 +30446,7 @@ function TaraApp(){
         await _idbWrite('taraCallLog',_save).catch(()=>{});     // primary: FULL history
         localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
         const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','noGoCategory']);
-        const _mini=_save.slice(-5000).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
+        const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
         for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
           try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
         }
@@ -30762,12 +30762,12 @@ function TaraApp(){
     }catch(_){_mergedForStorage=_stripped;}
     // V10.7.95: Write full log to IndexedDB (no size limit) — primary store
     _idbWrite('taraCallLog',_mergedForStorage).catch(()=>{});
-    // V10.9.6: DEEP MINIFIED CACHE — up to 5000 entries (~2.3MB) in localStorage.
+    // V10.9.6: DEEP MINIFIED CACHE — up to TARA_CALL_LOG_CAP entries in localStorage.
     //   This is the resilient base: if IndexedDB fails/empties/was truncated, the
     //   full trade count still loads from here on reload instead of dropping to
     //   the small fast-paint cache. Auto-shrinks on quota error.
     try{
-      const _mini=_mergedForStorage.slice(-5000).map(_minifyEntry);
+      const _mini=_mergedForStorage.slice(-TARA_CALL_LOG_CAP).map(_minifyEntry);
       let _miniSaved=false;
       for(let _cap=_mini.length;_cap>=200;_cap=Math.floor(_cap*0.8)){
         try{
