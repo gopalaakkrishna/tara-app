@@ -170,20 +170,24 @@ const SUPABASE_URL='https://vhbbkqmyyzddhezdgszm.supabase.co';
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoYmJrcW15eXpkZGhlemRnc3ptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODMzNjUsImV4cCI6MjA5NDM1OTM2NX0.30zC6hbGEcCNSuOQNRfh81_3B0nwVDuUJeeqUydZCoM';
 // V10.7.85: Supabase sync paused — row limit hit, renews approx 2026-06-18.
 //   All trade data saves to localStorage as always. Set false to re-enable cloud sync.
-// V10.9.15: _SB_PAUSED=false — RE-ENABLED. Supabase billing dashboard confirms
-//   the egress restriction is lifted: "all services restricted" banner gone, all
-//   meters fresh (Egress 0/5GB, DB 0.035/0.5GB, Storage 0/1GB), spend cap ENABLED
-//   (so overages make the project read-only rather than billing — no surprise
-//   charges). The prior stale-overwrite risk (cloud reads clobbering a longer
-//   local log) is now guarded by the V10.9.5/10.9.6 content-aware merge
-//   (resolved-count + signature compare at the setTaraCallLog reconcile), so
-//   re-enabling does not reintroduce that bug.
-//   WATCH EGRESS: last cycle hit the 5GB egress cap. If sync volume is the driver,
-//   the new cycle's 5GB could exhaust again — re-check the usage dashboard
-//   periodically. If egress climbs fast, the likely culprit is full taraCallLog
-//   reads on load; the fix would be incremental/diff sync rather than full-doc.
-//   To re-pause if needed: flip back to true and deploy.
-const _SB_PAUSED=false;
+// V13.4.14: _SB_PAUSED=true — RE-PAUSED. API logs show every Supabase call
+//   (reads, writes, realtime) returning HTTP 402 Payment Required continuously
+//   for 78+ min - project suspended over billing, matching V10.9.15's prior
+//   5GB egress-cap incident. Pausing here so the app degrades gracefully to
+//   local-only instead of blindly retrying a dead backend on every tick.
+//   ALSO shipped this version: memory/taraCallLog outgoing cloud writes are now
+//   capped at _TARA_CLOUD_LOG_CAP everywhere (previously only the main 60s sync
+//   path capped it - baseline-save/apply, force-push, and the import/hydration
+//   flush paths were writing the full uncapped log). This does NOT touch local
+//   storage (IndexedDB stays unlimited, taraCallLog state stays TARA_CALL_LOG_CAP)
+//   or baseline/canonical (still the full backup) — only what gets echoed to the
+//   live cloud doc that every device realtime listener reads. The receive side
+//   already merges (union) rather than replaces, so a smaller cloud doc cannot
+//   drop entries a device already has locally — confirmed by re-reading the
+//   cloudWatch handler before making this change.
+//   ACTION NEEDED (user): resolve billing in the Supabase dashboard. Once fixed,
+//   confirm meters are healthy, then flip this back to false like V10.9.15 did.
+const _SB_PAUSED=true;
 // Supabase client is initialized lazily below after the helper module loads.
 // During the parallel-write phase, _sbClient may be null if init fails — code
 // must check before calling. Failed Supabase init is non-fatal (Firestore
@@ -4603,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.07-v13.4.13-stuck-sitout-backfill';
-const TARA_VERSION_DISPLAY='Tara 13.4.13';
+const BASELINE_VERSION='2026.07.10-v13.4.15-memo-batch2';
+const TARA_VERSION_DISPLAY='Tara 13.4.15';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -19233,7 +19237,7 @@ const TabPresencePill=React.memo(function TabPresencePill({peerTabs}){
 // Visible health indicator for cloud sync. Subscribes to module-level _cloudSyncStatus
 // and re-renders on changes. Color-coded: green dot when healthy + recently-written,
 // amber when writing in progress, rose when error. Click → opens force-resync menu.
-function SyncStatusPill({onClick}){
+const SyncStatusPill=React.memo(function SyncStatusPill({onClick}){
   const[status,setStatus]=React.useState(()=>({state:'idle',lastOk:null,lastError:null,writes:0,reads:0,listeners:0}));
   // V8.8.7: 750ms hysteresis on the writing label.
   // V8.9.3: 2-second hysteresis on the error label too — Firestore SDK auto-retries
@@ -19303,7 +19307,7 @@ function SyncStatusPill({onClick}){
     }),
     React.createElement('span',{className:'text-[8px] sm:text-[9px] uppercase tracking-wider font-bold',style:{color:_color}},_label),
   );
-}
+})
 
 function MovementRiskPill({movementRisk}){
   if(!movementRisk||movementRisk.level==='CALM'&&movementRisk.score<5)return null;
@@ -19344,7 +19348,7 @@ function MovementRiskPill({movementRisk}){
 // Two small pills designed to fit in the header row. Both source from todayData
 // (cloud-persisted, survives reload). Visible psychological anchors so user knows
 // emotional state at a glance.
-function TodayPnLPill({todayData,onClick}){
+const TodayPnLPill=React.memo(function TodayPnLPill({todayData,onClick}){
   if(!todayData||(todayData.wins+todayData.losses)===0)return null;
   const{wins,losses,wr,resolved,dollarPnL}=todayData;
   const _net=wins-losses;
@@ -19363,7 +19367,7 @@ function TodayPnLPill({todayData,onClick}){
     _dollarLabel&&React.createElement('span',{className:'text-[10px] sm:text-[11px] tabular-nums font-bold hidden sm:inline',style:{color:_color}},_dollarLabel),
     wr!=null&&React.createElement('span',{className:'text-[9px] sm:text-[10px] tabular-nums hidden lg:inline',style:{color:_color,opacity:0.75}},`${wr}%`),
   );
-}
+})
 
 const StreakTiltPill=React.memo(function StreakTiltPill({todayData}){
   if(!todayData||todayData.streak<2)return null;
@@ -25063,7 +25067,7 @@ function WeatherTab({weatherLog,setWeatherLog}){
   );
 }
 
-function MobileTabBar({mobileTab,setMobileTab,setShowBrain,setShowStats}){
+const MobileTabBar=React.memo(function MobileTabBar({mobileTab,setMobileTab,setShowBrain,setShowStats}){
   const tabs=[
     {id:'signal',label:'SIGNAL'},
     {id:'projections',label:'TARGETS'},
@@ -25082,7 +25086,7 @@ function MobileTabBar({mobileTab,setMobileTab,setShowBrain,setShowStats}){
       <button onClick={()=>setShowStats&&setShowStats(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}} title="Stats">📊</button>
     </div>
   );
-}
+})
 
 
 
@@ -30376,7 +30380,7 @@ function TaraApp(){
                     else if(!ex.result&&e.result)cMap.set(k,e);
                     else if((e.result==='WIN'||e.result==='LOSS')&&(ex.result==='SITOUT'||ex.result==='NO_TRADE'))cMap.set(k,e); /* V13.3.5: real trade outranks stored sit-out */
                   });
-                  return{entries:Array.from(cMap.values()).sort((a,b)=>(a.id||0)-(b.id||0))};
+                  return{entries:Array.from(cMap.values()).sort((a,b)=>(a.id||0)-(b.id||0)).slice(-_TARA_CLOUD_LOG_CAP)};
                 },
                 500, // very short debounce — this is the import flush
               );
@@ -31380,7 +31384,7 @@ function TaraApp(){
                 (cloudData,localEntries)=>{
                   const cloudEntries=(cloudData&&Array.isArray(cloudData.entries))?cloudData.entries:[];
                   const merged=_mergeCallLogEntries(cloudEntries,localEntries);
-                  return{entries:merged};
+                  return{entries:merged.slice(-_TARA_CLOUD_LOG_CAP)};
                 },
                 50, // very short debounce — this IS the flush
               );
@@ -45297,6 +45301,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   const[baselineMeta,setBaselineMeta]=React.useState(null); // {savedAt, sourceDevice, sizes}
   const[baselineBusy,setBaselineBusy]=React.useState(false);
   const[syncMenuOpen,setSyncMenuOpen]=React.useState(false);
+  // V13.4.14: stable callback refs so TodayPnLPill/SyncStatusPill can be React.memo'd
+  //   without the memo being defeated by a fresh inline arrow function every render.
+  const _onTodayPnLClick=React.useCallback(()=>setShowTradingSettings(true),[]);
+  const _onSyncStatusClick=React.useCallback(()=>{if(forceResyncing||baselineBusy)return;setSyncMenuOpen(true);setShowHeaderOverflow(false);},[forceResyncing,baselineBusy]);
   const[scheduleModalMain,setScheduleModalMain]=React.useState(false);
   // V9.2.2: Dedicated analytics page
   const[analyticsPageOpen,setAnalyticsPageOpen]=React.useState(false);
@@ -45399,7 +45407,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       // V9.2.0: scorecards/personal write removed — that's a local-only path now.
       try{
         const _liveWrites=[];
-        _liveWrites.push(cloudWrite('memory/taraCallLog',{entries:_strippedLog,_baselineSave:_payload.savedAt}));
+        _liveWrites.push(cloudWrite('memory/taraCallLog',{entries:_strippedLog.slice(-_TARA_CLOUD_LOG_CAP),_baselineSave:_payload.savedAt}));
         _liveWrites.push(cloudWrite('history/pastWindows',{entries:_payload.data.pastWindows,_baselineSave:_payload.savedAt}));
         _liveWrites.push(cloudWrite('state/lifetimePnL',{value:_payload.data.lifetimePnL,updatedAt:_payload.data.pnlUpdatedAt,_baselineSave:_payload.savedAt}));
         if(_payload.data.taraLearnings){
@@ -45493,7 +45501,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       try{
         const _writes=[];
         if(Array.isArray(_d.taraCallLog)){
-          _writes.push(cloudWrite('memory/taraCallLog',{entries:_d.taraCallLog,_baselineApply:Date.now()}));
+          _writes.push(cloudWrite('memory/taraCallLog',{entries:_d.taraCallLog.slice(-_TARA_CLOUD_LOG_CAP),_baselineApply:Date.now()}));
         }
         // V9.2.0: scorecards write removed — personal record is local-only.
         if(Array.isArray(_d.pastWindows)){
@@ -45547,7 +45555,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     try{
       const _writes=[];
       const _stripEntry=(e)=>{if(!e)return e;const{signalScoresAtLock:_,reasoning:__,...r}=e;return r;};
-      _writes.push(cloudWrite('memory/taraCallLog',{entries:_log.map(_stripEntry),_forcePush:Date.now(),_pushedBy:_deviceLabel}));
+      _writes.push(cloudWrite('memory/taraCallLog',{entries:_log.map(_stripEntry).slice(-_TARA_CLOUD_LOG_CAP),_forcePush:Date.now(),_pushedBy:_deviceLabel}));
       _writes.push(cloudWrite('history/pastWindows',{entries:_past,_forcePush:Date.now()}));
       _writes.push(cloudWrite('state/lifetimePnL',{value:_pnl,updatedAt:Date.now(),_forcePush:Date.now()}));
       if(taraLearnings)_writes.push(cloudWrite('learnings/tara',{...taraLearnings,_forcePush:Date.now()}));
@@ -46215,7 +46223,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           </div>
 
           {/* TODAY P&L */}
-          <TodayPnLPill todayData={todayData} onClick={()=>setShowTradingSettings(true)}/>
+          <TodayPnLPill todayData={todayData} onClick={_onTodayPnLClick}/>
 
           {/* SPACER */}
           <div className="flex-1"/>
@@ -46341,7 +46349,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   <div className="px-3 py-2">
                     <div className="text-[9px] uppercase tracking-[0.15em] text-[#E8E9E4]/30 mb-1.5">System</div>
                     <div className="flex flex-wrap gap-1.5 items-center">
-                      <SyncStatusPill onClick={()=>{if(forceResyncing||baselineBusy)return;setSyncMenuOpen(true);setShowHeaderOverflow(false);}}/>
+                      <SyncStatusPill onClick={_onSyncStatusClick}/>
                       <TabPresencePill peerTabs={peerTabs}/>
                       {/* Time format */}
                       <div className="flex flex-col items-center cursor-pointer px-1.5 py-0.5 rounded-md border border-[#E8E9E4]/8 hover:border-indigo-500/30 transition-colors" onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')}>
