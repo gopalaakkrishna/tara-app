@@ -3,13 +3,50 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0E100F" />
+    <meta name="theme-color" content="#0A0907" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Tara</title>
     <link rel="manifest" href="/manifest.json" />
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // V13.4.18 design pass — refined palette. Overrides Tailwind's stock
+      // emerald/rose/amber scales at the shades Tara actually uses, so every
+      // existing `text-emerald-400`, `bg-rose-500/10`, etc. class across the
+      // app repaints without touching component code. Same semantic roles
+      // (emerald=win/UP, rose=loss/DOWN, amber=warm/caution) — just warmer,
+      // more muted exact values in place of Tailwind's stock saturated ones.
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              emerald: {
+                200: '#C4D4C7',
+                300: '#A3BCA8',
+                400: '#7FA189',
+                500: '#688C72',
+                600: '#54735D',
+                700: '#435C4A',
+                900: '#233022',
+              },
+              rose: {
+                200: '#DDBDB6',
+                300: '#C4938A',
+                400: '#B26558',
+                500: '#9A5145',
+                600: '#7D4038',
+              },
+              amber: {
+                300: '#E0B978',
+                400: '#D4A24C',
+                500: '#BD8A38',
+              },
+            },
+          },
+        },
+      };
+    </script>
   </head>
   <body>
     <div id="root"></div>
