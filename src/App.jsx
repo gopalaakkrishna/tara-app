@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.11-v13.4.39-solid-toggle-states';
-const TARA_VERSION_DISPLAY='Tara 13.4.39';
+const BASELINE_VERSION='2026.07.11-v13.4.41-score-bar-polish';
+const TARA_VERSION_DISPLAY='Tara 13.4.41';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -24389,7 +24389,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
           const totalAll=entries.reduce((s,e)=>s+e.v,0); /* V13.3.7: FGT excluded (removed from synthesis V10.7.25). Total = directional signal sum only. */
           // Render rows
           const maxAbs=Math.max(8,...entries.map(e=>Math.abs(e.v)),Math.abs(fgtContribution));
-          const colorFor=v=>v>0.5?'bg-emerald-400/70':v<-0.5?'bg-rose-400/70':'bg-[#EDEDED]/15';
+          const colorFor=v=>v>0.5?'bg-emerald-400':v<-0.5?'bg-rose-400':'bg-[#EDEDED]/15';
           return(
             <div className="space-y-1">
               {entries.map(e=>(
@@ -24409,7 +24409,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
               ))}
               {/* FGT row — primary signal, separated with gold-tinted divider (V2.1) */}
               <div className="flex items-center gap-2 text-[10px] pt-1.5 mt-0.5" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
-                <span className={'text-purple-300 w-16 shrink-0 font-bold'}>FGT {fgtAbsDisplay}/4</span>
+                <span className={'w-16 shrink-0 font-bold'} style={{color:T2_GOLD}}>FGT {fgtAbsDisplay}/4</span>
                 <div className="flex-1 relative h-3 bg-[#0A0A0A] rounded-lg overflow-hidden">
                   <div className="absolute top-0 bottom-0 left-1/2 w-px bg-[#EDEDED]/20"></div>
                   <div className={'absolute top-0 bottom-0 '+(fgtContribution>0?'bg-emerald-400':fgtContribution<0?'bg-rose-400':'bg-[#EDEDED]/15')} style={{
@@ -24441,7 +24441,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
                 return React.createElement(React.Fragment,null,
                   // Combined alignment header
                   React.createElement('div',{className:'flex items-center gap-2 text-[10px] pt-1.5 mt-0.5',style:{borderTop:'1px solid rgba(196,181,253,0.18)'}},
-                    React.createElement('span',{className:'w-16 shrink-0 font-bold text-[10px]',style:{color:'#C4B5FD'}},'Structural'),
+                    React.createElement('span',{className:'w-16 shrink-0 font-bold text-[10px]',style:{color:T2_GOLD}},'Structural'),
                     React.createElement('span',{className:`flex-1 ${_structColor} text-[10px] font-bold`},`${_arrowFor(_structDir)} ${_structDir} · ${_structCount}/6 align`),
                     React.createElement('span',{className:'w-10 shrink-0 text-right font-mono text-[10px] text-[#EDEDED]/40'},_structCount>=4?'gate':_structCount>=3?'edge':'mixed')
                   ),
@@ -47017,7 +47017,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <div className="px-3 pb-2 block">
                 <div className="flex items-baseline justify-between mb-1 gap-2 min-w-0">
                   <div className="flex items-baseline gap-2 min-w-0">
-                    <span className="text-xs text-[#EDEDED]/30 uppercase tracking-wide whitespace-nowrap">Depth of Market</span>
+                    <span className="text-xs text-[#EDEDED]/50 uppercase tracking-wide whitespace-nowrap">Depth of Market</span>
                     {_qColor&&React.createElement('span',{className:'inline-flex items-center gap-1'},
                       React.createElement('span',{className:'inline-flex gap-0.5'},
                         [0,1,2].map(i=>React.createElement('span',{
