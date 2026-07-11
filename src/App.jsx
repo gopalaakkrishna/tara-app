@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.11-v13.4.35-radius-consistency';
-const TARA_VERSION_DISPLAY='Tara 13.4.35';
+const BASELINE_VERSION='2026.07.11-v13.4.36-label-tracking';
+const TARA_VERSION_DISPLAY='Tara 13.4.36';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13907,7 +13907,7 @@ function PredictionContent(props){
         <div className="flex items-center gap-2 mb-1 flex-wrap justify-center">
           <span className={'text-xs text-[#EDEDED]/40 uppercase tracking-[0.2em] font-bold'}>Prediction</span>
           {analysis.regime&&(
-            <span className={'text-xs text-indigo-400 uppercase bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded-lg'}>{analysis.regime}</span>
+            <span className={'text-xs text-indigo-400 uppercase tracking-wide bg-indigo-500/10 border border-indigo-500/20 px-2 py-1 rounded-lg'}>{analysis.regime}</span>
           )}
           {/* V134: Regime-Direction WR warning */}
           {analysis.lockInfo&&regimeDirWR&&(()=>{
@@ -15608,7 +15608,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
               <div className="px-2.5 py-2 rounded-lg" style={{background:'rgba(237,237,237,0.05)',border:'1px solid rgba(237,237,237,0.10)'}}>
                 <div className="flex items-baseline justify-between gap-2 mb-0.5">
                   <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/55 font-bold">Lock ETA</span>
-                  {_tierLabel&&<span className="text-[9px] uppercase text-[#EDEDED]/35 tabular-nums">{_tierLabel}</span>}
+                  {_tierLabel&&<span className="text-[9px] uppercase tracking-wide text-[#EDEDED]/35 tabular-nums">{_tierLabel}</span>}
                 </div>
                 <div className="text-[18px] font-bold tabular-nums tracking-tight leading-tight" style={{color:_color}}>{_etaStr}</div>
                 {_blockerLine&&<div className="text-[9px] text-[#EDEDED]/45 italic mt-0.5 tabular-nums">{_blockerLine}</div>}
@@ -23683,7 +23683,7 @@ function NewsFeedCard({timeFormat,pushToast}={}){
                 <span className="min-w-0">{hot&&'🔥 '}{n.title.slice(0,90)}{n.title.length>90?'...':''}</span>
               </div>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className={'text-[9px] text-[#EDEDED]/40 uppercase'}>{n.source}</span>
+                <span className={'text-[9px] text-[#EDEDED]/40 uppercase tracking-wide'}>{n.source}</span>
                 <span className={'text-[9px] text-[#EDEDED]/30'}>· {formatAge(n.time)}</span>
                 {_absTime&&<span className={'text-[9px] text-[#EDEDED]/30 tabular-nums'}>· {_absTime}</span>}
               </div>
@@ -24527,19 +24527,19 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
         <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2'} style={{color:T2_GOLD}}>Live Feeds</div>
         <div className="grid grid-cols-2 gap-2 mb-2">
           <div className={'p-1.5 rounded-lg bg-[#0A0A0A]'}>
-            <div className={'text-[9px] uppercase text-[#EDEDED]/40 font-bold'}>Buy Flow</div>
+            <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>Buy Flow</div>
             <div className="text-emerald-400 text-xs font-bold">{buyPct.toFixed(0)}%</div>
           </div>
           <div className={'p-1.5 rounded-lg bg-[#0A0A0A]'}>
-            <div className={'text-[9px] uppercase text-[#EDEDED]/40 font-bold'}>OI 5m</div>
+            <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>OI 5m</div>
             <div className={'text-xs font-bold '+(oi>=0?'text-emerald-400':'text-rose-400')}>{oi>=0?'+':''}{oi.toFixed(2)}%</div>
           </div>
           <div className={'p-1.5 rounded-lg bg-[#0A0A0A]'}>
-            <div className={'text-[9px] uppercase text-[#EDEDED]/40 font-bold'}>Funding</div>
+            <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>Funding</div>
             <div className={'text-xs font-bold '+(fr>=0?'text-emerald-400':'text-rose-400')}>{fr>=0?'+':''}{fr.toFixed(4)}%</div>
           </div>
           <div className={'p-1.5 rounded-lg bg-[#0A0A0A]'}>
-            <div className={'text-[9px] uppercase text-[#EDEDED]/40 font-bold'}>L/S</div>
+            <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>L/S</div>
             <div className={'text-xs font-bold '+(ls>=1?'text-emerald-400':'text-rose-400')}>{ls.toFixed(2)}</div>
           </div>
         </div>
@@ -46900,7 +46900,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   {targetMargin>0&&strikeMode==='manual'&&(
                     <button
                       onClick={()=>{isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);}}
-                      className="shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase bg-indigo-500 hover:bg-indigo-400 text-white transition-colors">OK ✓</button>
+                      className="shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wide bg-indigo-500 hover:bg-indigo-400 text-white transition-colors">OK ✓</button>
                   )}
                 </div>
                 {strikeSource!=='kalshi'&&kalshiDebug.ok!==null&&(
@@ -46941,7 +46941,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </div>
               {kalshiYesPrice!==null&&windowType==='15m'&&(
                 <div className="flex items-center gap-1 mt-0.5" title="Live Kalshi YES price for current 15m market">
-                  <span className={'text-[9px] text-purple-400/70 uppercase font-bold'}>KLSH</span>
+                  <span className={'text-[9px] text-purple-400/70 uppercase tracking-wide font-bold'}>KLSH</span>
                   <span className="text-[10px] text-purple-300 font-mono">${kalshiYesPrice.toFixed(2)}</span>
                   {currentOffer&&Math.abs(parseFloat(currentOffer)-kalshiYesPrice)>2&&(
                     <span className="text-[9px] text-amber-400" title="Divergence vs Kalshi">⚡</span>
@@ -46956,7 +46956,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className="col-span-2 lg:col-span-none lg:ml-auto flex flex-col">
               {positionStatus?(
                 <div className={'bg-[#0A0A0A] border border-amber-500/20 rounded-lg p-1.5'}>
-                  <div className="flex justify-between text-xs mb-1"><span className={'text-[#EDEDED]/40 uppercase'}>POSITION</span><span className={positionStatus.side==='UP'?'text-emerald-400 font-bold':'text-rose-400 font-bold'}>{positionStatus.side} @ ${(positionStatus.entry||0).toFixed(0)}</span></div>
+                  <div className="flex justify-between text-xs mb-1"><span className={'text-[#EDEDED]/40 uppercase tracking-wide'}>POSITION</span><span className={positionStatus.side==='UP'?'text-emerald-400 font-bold':'text-rose-400 font-bold'}>{positionStatus.side} @ ${(positionStatus.entry||0).toFixed(0)}</span></div>
                   <div className="flex justify-between items-center">
                     <span className={`text-lg font-serif font-bold ${positionStatus.pnlPct>0?'text-emerald-400':'text-rose-400'}`}>{positionStatus.pnlPct>0?'+':''}{positionStatus.pnlPct.toFixed(1)}%</span>
                     <span className={`text-xs font-bold uppercase ${positionStatus.isStopHit?'text-rose-500 animate-pulse':'text-[#EDEDED]/30'}`}>{positionStatus.isStopHit?'STOP HIT':'SAFE'}</span>
@@ -47905,17 +47905,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     {/* Top metrics row */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8">
-                        <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold">Overall WR</div>
+                        <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold">Overall WR</div>
                         <div className={'text-lg font-mono font-bold '+(bt.wr>=0.65?'text-emerald-400':bt.wr>=0.55?'text-amber-400':'text-rose-400')}>{fmt(bt.wr)}</div>
                         <div className="text-[10px] text-[#EDEDED]/30">{bt.n} trades</div>
                       </div>
                       <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8">
-                        <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold">Brier Score</div>
+                        <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold">Brier Score</div>
                         <div className={'text-lg font-mono font-bold '+(bt.brier<0.15?'text-emerald-400':bt.brier<0.20?'text-amber-400':'text-rose-400')}>{bt.brier.toFixed(3)}</div>
                         <div className="text-[10px] text-[#EDEDED]/30">{bt.brier<0.10?'Excellent':bt.brier<0.15?'Strong':bt.brier<0.20?'Useful':bt.brier<0.24?'Marginal':'No skill'}</div>
                       </div>
                       <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8">
-                        <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold">UP / DOWN</div>
+                        <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold">UP / DOWN</div>
                         <div className="text-sm font-mono">
                           <span className="text-emerald-400">{fmt(bt.upWR)}</span>
                           <span className="text-[#EDEDED]/30 mx-1">/</span>
@@ -47924,7 +47924,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         <div className="text-[10px] text-[#EDEDED]/30">direction split</div>
                       </div>
                       <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8">
-                        <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold">Streaks</div>
+                        <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold">Streaks</div>
                         <div className="text-sm font-mono">
                           <span className="text-emerald-400">{bt.maxWinStreak}W</span>
                           <span className="text-[#EDEDED]/30 mx-1">/</span>
@@ -47935,7 +47935,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     </div>
                     {/* Filter scenarios — what WR if we'd applied different filters? */}
                     <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8">
-                      <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold mb-2">Selectivity Scenarios — "What if I'd only taken these?"</div>
+                      <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-2">Selectivity Scenarios — "What if I'd only taken these?"</div>
                       <div className="space-y-1.5">
                         {Object.entries(bt.filterScenarios).filter(([k,v])=>v).map(([name,s])=>{
                           const diff=s.wr-bt.wr;
@@ -47953,7 +47953,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     </div>
                     {/* Per-regime breakdown */}
                     <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8">
-                      <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold mb-2">Per-Regime Performance</div>
+                      <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-2">Per-Regime Performance</div>
                       <div className="space-y-1.5">
                         {Object.entries(bt.regimePerf).sort((a,b)=>b[1].n-a[1].n).map(([name,s])=>{
                           const wr=s.wins/s.n;
@@ -47969,7 +47969,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     </div>
                     {/* Lock timing */}
                     <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8">
-                      <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold mb-2">Performance by Lock Timing</div>
+                      <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-2">Performance by Lock Timing</div>
                       <div className="space-y-1.5">
                         {Object.entries(bt.clockPerf).map(([name,s])=>{
                           if(s.n===0)return null;
@@ -47986,7 +47986,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     </div>
                     {/* Confidence calibration */}
                     <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8">
-                      <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold mb-2">Calibration: Predicted vs Actual</div>
+                      <div className="text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-2">Calibration: Predicted vs Actual</div>
                       <div className="space-y-1">
                         {Object.entries(bt.confBuckets).filter(([_,s])=>s.n>0).map(([conf,s])=>{
                           const wr=s.wins/s.n;
@@ -48017,7 +48017,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     const delta=val-def;
                     return(<div key={key} className={'bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8'}>
                       <div className="flex justify-between items-center mb-1.5">
-                        <span className={'text-xs font-bold uppercase text-[#EDEDED]/70'}>{key}</span>
+                        <span className={'text-xs font-bold uppercase tracking-wide text-[#EDEDED]/70'}>{key}</span>
                         <div className="flex items-center gap-1.5">
                           {wrPct&&<span className={'text-xs text-indigo-400/80'}>{wrPct}% acc</span>}
                           <span className={`text-xs font-mono font-bold ${delta>0?'text-emerald-400':delta<0?'text-rose-400':'text-[#EDEDED]/50'}`}>{val.toFixed(1)}</span>
@@ -48271,7 +48271,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
                           {Object.entries(w).map(([k,v])=>(
                             <div key={k} className="text-center">
-                              <div className={'text-[9px] text-[#EDEDED]/30 uppercase'}>{k.slice(0,3)}</div>
+                              <div className={'text-[9px] text-[#EDEDED]/30 uppercase tracking-wide'}>{k.slice(0,3)}</div>
                               <div className={'text-[11px] font-mono font-bold text-[#EDEDED]/70'}>{v.toFixed(1)}</div>
                             </div>
                           ))}
@@ -48327,7 +48327,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     <div className="space-y-4">
                       {/* By session (most actionable) */}
                       <div>
-                        <div className={'text-[10px] uppercase text-[#EDEDED]/40 font-bold mb-2'}>By Session</div>
+                        <div className={'text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-2'}>By Session</div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                           {['EU','ASIA','US','OFF-HOURS'].map(s=>{
                             const v=bySession[s]||{W:0,L:0};
@@ -48335,7 +48335,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                             const wr=n>0?(100*v.W/n):0;
                             return(
                               <div key={s} className={`p-2 rounded-lg border border-[#EDEDED]/8 ${cellCls(wr,n)}`}>
-                                <div className="text-[10px] uppercase font-bold opacity-70">{s}</div>
+                                <div className="text-[10px] uppercase tracking-wide font-bold opacity-70">{s}</div>
                                 <div className="text-base font-mono font-bold mt-0.5">{n>0?wr.toFixed(0)+'%':'—'}</div>
                                 <div className="text-[9px] opacity-60">{v.W}W-{v.L}L · {n} trades</div>
                               </div>
@@ -48346,7 +48346,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
                       {/* By day of week */}
                       <div>
-                        <div className={'text-[10px] uppercase text-[#EDEDED]/40 font-bold mb-2'}>By Day of Week</div>
+                        <div className={'text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-2'}>By Day of Week</div>
                         <div className="grid grid-cols-7 gap-1">
                           {dowLabels.map((lbl,idx)=>{
                             const v=byDOW[idx]||{W:0,L:0};
@@ -48354,7 +48354,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                             const wr=n>0?(100*v.W/n):0;
                             return(
                               <div key={lbl} className={`p-1.5 rounded-lg text-center border border-[#EDEDED]/8 ${cellCls(wr,n)}`}>
-                                <div className="text-[9px] uppercase opacity-70">{lbl}</div>
+                                <div className="text-[9px] uppercase tracking-wide opacity-70">{lbl}</div>
                                 <div className="text-xs font-mono font-bold mt-0.5">{n>0?wr.toFixed(0)+'%':'—'}</div>
                                 <div className="text-[8px] opacity-60">{n>0?`${v.W}-${v.L}`:'—'}</div>
                               </div>
@@ -48365,7 +48365,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
                       {/* By hour of day */}
                       <div>
-                        <div className={'text-[10px] uppercase text-[#EDEDED]/40 font-bold mb-2'}>By Hour of Day (local)</div>
+                        <div className={'text-[10px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-2'}>By Hour of Day (local)</div>
                         <div className="grid grid-cols-12 gap-1">
                           {Array.from({length:24}).map((_,h)=>{
                             const v=byHour[h]||{W:0,L:0};
@@ -48384,7 +48384,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
                       {/* Color legend */}
                       <div className="flex items-center gap-3 text-[9px] text-[#EDEDED]/40 pt-1 border-t border-[#EDEDED]/8">
-                        <span className="font-bold uppercase">Legend</span>
+                        <span className="font-bold uppercase tracking-wide">Legend</span>
                         <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-lg bg-emerald-500/15"></div><span>≥65% WR</span></div>
                         <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-lg bg-amber-500/10"></div><span>55-64%</span></div>
                         <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-lg bg-[#0A0A0A] border border-[#EDEDED]/15"></div><span>45-54%</span></div>
@@ -48566,23 +48566,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <h3 className={'text-indigo-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-indigo-500/20 pb-1'}>📊 Prediction States — What Each One Means</h3>
                 <div className="space-y-3">
                   <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8'}>
-                    <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">SCANNING...</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase'}>Do nothing</span></div>
+                    <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">SCANNING...</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase tracking-wide'}>Do nothing</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>Tara's composite score is between 42–58% — a coin flip zone. No structural edge exists right now. Do not enter. Most tools show a number at all times to look busy — Tara shows nothing when there's genuinely nothing to show.</p>
                   </div>
                   <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-amber-500/15'}>
-                    <div className="flex items-center gap-2 mb-1"><span className="text-amber-400 font-bold text-xs">UP (FORMING) or DOWN (FORMING)</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase'}>Get ready</span></div>
+                    <div className="flex items-center gap-2 mb-1"><span className="text-amber-400 font-bold text-xs">UP (FORMING) or DOWN (FORMING)</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase tracking-wide'}>Get ready</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>Posterior has crossed 58%+ or below 42% — there's a lean — but not enough consecutive readings yet to commit. The forming progress bar shows how close she is to locking. You can enter here for more time in the trade, but it's higher risk than waiting for the lock.</p>
                   </div>
                   <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-emerald-500/20'}>
-                    <div className="flex items-center gap-2 mb-1"><span className="text-emerald-400 font-bold text-xs">UP — LOCKED 🔒</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase'}>Entry signal — act now</span></div>
+                    <div className="flex items-center gap-2 mb-1"><span className="text-emerald-400 font-bold text-xs">UP — LOCKED 🔒</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase tracking-wide'}>Entry signal — act now</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>2 consecutive readings (15m) or 1 consecutive (5m) all above the regime-specific threshold (60-75 depending on regime). Tara has committed for the window. She will NOT change this prediction without a 25+ point posterior collapse or severe trajectory flip. The lock state machine is designed to commit and stay committed. This is the <strong className="text-white">primary state to enter on.</strong></p>
                   </div>
                   <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-rose-500/20'}>
-                    <div className="flex items-center gap-2 mb-1"><span className="text-rose-400 font-bold text-xs">DOWN — LOCKED 🔒</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase'}>Entry signal — act now</span></div>
+                    <div className="flex items-center gap-2 mb-1"><span className="text-rose-400 font-bold text-xs">DOWN — LOCKED 🔒</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase tracking-wide'}>Entry signal — act now</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>Same as UP — LOCKED but bearish. Posterior consistently below the regime-specific DOWN threshold (20-36 depending on regime — V2.8 made these symmetric with UP-side thresholds in choppy regimes). If you missed the entry window and it's late, the advisor will say WINDOW CLOSING — don't chase it.</p>
                   </div>
                   <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-zinc-500/15'}>
-                    <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">NO CALL — WINDOW CLOSED — LOCK RELEASED</span><span className="text-[10px] text-rose-400 uppercase">Sit out</span></div>
+                    <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">NO CALL — WINDOW CLOSED — LOCK RELEASED</span><span className="text-[10px] text-rose-400 uppercase tracking-wide">Sit out</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}><strong className="text-white">NO CALL:</strong> Never reached threshold before endgame. Skip this round.<br/><strong className="text-white">WINDOW CLOSED:</strong> Last 90s (15m) or 45s (5m) with no lock. Too late to enter safely.<br/><strong className="text-white">LOCK RELEASED:</strong> Posterior collapsed 25+ points or trajectory/FGT flipped against direction. Tara released — respect it immediately.</p>
                   </div>
                 </div>
@@ -48648,7 +48648,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     {label:'RECOVERY IN PROGRESS',color:'text-amber-400',desc:'Losing but momentum just flipped toward you. Give it room — don\'t panic exit at the worst moment.'},
                   ].map((a,i)=>(
                     <div key={i} className={'flex gap-3 bg-[#0A0A0A] rounded-lg p-2 border border-[#EDEDED]/8'}>
-                      <span className={`${a.color} font-bold shrink-0 min-w-[140px] text-[10px] uppercase`}>{a.label}</span>
+                      <span className={`${a.color} font-bold shrink-0 min-w-[140px] text-[10px] uppercase tracking-wide`}>{a.label}</span>
                       <span className={'text-[#EDEDED]/50 text-[11px] leading-snug'}>{a.desc}</span>
                     </div>
                   ))}
@@ -48787,7 +48787,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             const wr=total>0?(wins/total*100).toFixed(1):'—';
             return(
               <>
-                <span className="text-[#EDEDED]/35 uppercase">Regime</span>
+                <span className="text-[#EDEDED]/35 uppercase tracking-wide">Regime</span>
                 <span className="text-[#EDEDED]/70">{regimeLabel}</span>
                 {(()=>{
                   // V10.7.75: show which regime strategy is active
@@ -48802,16 +48802,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   return <span className={`${_mode.cls} font-medium ml-0.5`}>({_mode.label})</span>;
                 })()}
                 <span className="text-[#EDEDED]/15">·</span>
-                <span className="text-[#EDEDED]/35 uppercase">Session</span>
+                <span className="text-[#EDEDED]/35 uppercase tracking-wide">Session</span>
                 <span className="text-[#EDEDED]/70">{sessionLabel}</span>
                 <span className="text-[#EDEDED]/15">·</span>
-                <span className="text-[#EDEDED]/35 uppercase">Vel</span>
+                <span className="text-[#EDEDED]/35 uppercase tracking-wide">Vel</span>
                 <span className="text-[#EDEDED]/70">{velLabel}</span>
                 <span className="text-[#EDEDED]/15 hidden sm:inline">·</span>
-                <span className="text-[#EDEDED]/35 uppercase hidden sm:inline">Macro</span>
+                <span className="text-[#EDEDED]/35 uppercase tracking-wide hidden sm:inline">Macro</span>
                 <span className={'hidden sm:inline '+macroCls}>{macroState.state||'CLEAR'}</span>
                 <span className="text-[#EDEDED]/15 hidden sm:inline">·</span>
-                <span className="text-[#EDEDED]/35 uppercase hidden sm:inline">Geo</span>
+                <span className="text-[#EDEDED]/35 uppercase tracking-wide hidden sm:inline">Geo</span>
                 <span className="hidden sm:inline" style={{color:geoColor}}>{geoLabel}{geoRisk>=0.3?` ${(geoRisk*100).toFixed(0)}%`:''}</span>
                 {(()=>{
                   // V10.7.76: Show nearest liquidation wall in status bar
@@ -48825,7 +48825,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   return(
                     <>
                       <span className="text-[#EDEDED]/15 hidden sm:inline">·</span>
-                      <span className="text-[#EDEDED]/35 uppercase hidden sm:inline">Wall</span>
+                      <span className="text-[#EDEDED]/35 uppercase tracking-wide hidden sm:inline">Wall</span>
                       <span className="hidden sm:inline font-medium" style={{color:_wColor}}>{_wArrow}{_wDist}bps ${_wSize}M</span>
                     </>
                   );
