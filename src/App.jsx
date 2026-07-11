@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.11-v13.4.41-score-bar-polish';
-const TARA_VERSION_DISPLAY='Tara 13.4.41';
+const BASELINE_VERSION='2026.07.11-v13.4.42-meter-polish';
+const TARA_VERSION_DISPLAY='Tara 13.4.42';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -13465,7 +13465,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
     <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0A0A0A] border border-l border-b border-[#2A2A2A] rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
       <div className={'p-3 bg-[#171717] border-b border-[#1F1F1F] flex justify-between items-center shrink-0'}>
         <div className="flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></div>
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
           <span className={'text-xs font-bold uppercase tracking-widest text-[#EDEDED]/70'}>Flow Intelligence</span>
           <span className={'text-[10px] text-[#EDEDED]/25 font-mono'}>futures tape · $100K+</span>
         </div>
@@ -13592,7 +13592,7 @@ function TheoryLabPanel({show,setShow,theoryStats,theoryLog}){
     <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0A0A0A] border border-l border-b border-[#2A2A2A] rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
       <div className={'p-3 bg-[#171717] border-b border-[#1F1F1F] flex justify-between items-center shrink-0'}>
         <div className="flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></div>
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
           <span className={'text-xs font-bold uppercase tracking-widest text-[#EDEDED]/70'}>Theory Lab</span>
           <span className={'text-[10px] text-[#EDEDED]/25 font-mono'}>shadow · weight 0</span>
         </div>
@@ -15249,7 +15249,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 {/* Deadzone marker (0-5) at start */}
                 <div className="absolute inset-y-0 left-0" style={{width:'16.6%',background:'rgba(255,77,106,0.10)'}}/>
                 {/* Fill bar */}
-                <div className="absolute inset-y-0 left-0 transition-all" style={{width:`${_fillPct}%`,background:_zoneColor,opacity:0.85}}/>
+                <div className="absolute inset-y-0 left-0 transition-all" style={{width:`${_fillPct}%`,background:_zoneColor}}/>
                 {/* Zone divider lines at 5/10/15 (= 16.6%/33.3%/50%) */}
                 <div className="absolute inset-y-0" style={{left:'16.6%',width:'1px',background:'rgba(237,237,237,0.20)'}}/>
                 <div className="absolute inset-y-0" style={{left:'33.3%',width:'1px',background:'rgba(237,237,237,0.15)'}}/>
