@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.11-v13.4.38-neutral-borders-simple-only';
-const TARA_VERSION_DISPLAY='Tara 13.4.38';
+const BASELINE_VERSION='2026.07.11-v13.4.39-solid-toggle-states';
+const TARA_VERSION_DISPLAY='Tara 13.4.39';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14618,7 +14618,7 @@ function ManualKalshiEntryInput({userPosition,manualKalshiEntry,setManualKalshiE
             onClick={_clear}
             className="px-2 py-1 rounded-lg text-[10px] uppercase tracking-wide transition-colors"
             style={{
-              background:'rgba(237,237,237,0.05)',
+              background:'#141414',
               color:'rgba(237,237,237,0.55)',
               border:'1px solid #1F1F1F',
               cursor:'pointer',
@@ -15605,7 +15605,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _color='rgb(40,204,149)';
           return(
             <div className="border-t border-[#1F1F1F] pt-2.5 mt-2.5">
-              <div className="px-2.5 py-2 rounded-lg" style={{background:'rgba(237,237,237,0.05)',border:'1px solid #1F1F1F'}}>
+              <div className="px-2.5 py-2 rounded-lg" style={{background:'#141414',border:'1px solid #1F1F1F'}}>
                 <div className="flex items-baseline justify-between gap-2 mb-0.5">
                   <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/55 font-bold">Lock ETA</span>
                   {_tierLabel&&<span className="text-[9px] uppercase tracking-wide text-[#EDEDED]/35 tabular-nums">{_tierLabel}</span>}
@@ -16269,7 +16269,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
             const _entry=_waMap[_waLabel]||{plain:_waLabel.toLowerCase(),color:'rgba(237,237,237,0.7)',hint:''};
             return React.createElement('span',{
               className:'text-[9px] uppercase tracking-[0.14em] font-bold px-1.5 py-0.5 rounded-lg',
-              style:{color:_entry.color,background:'rgba(237,237,237,0.05)',border:'1px solid #1F1F1F'},
+              style:{color:_entry.color,background:'#141414',border:'1px solid #1F1F1F'},
               title:`${_waLabel} — ${_entry.hint}. Range: ${Math.round(_wa.rangeBps||0)}bps · ${_wa.directionChanges||0} reversals.`,
             },_entry.plain);
           })(),
@@ -16281,7 +16281,7 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
                 analysis.regime==='TRENDING DOWN'?'rgba(255,77,106,0.95)':
                 analysis.regime==='HIGH VOL CHOP'?'rgba(201,169,97,0.95)':
                 'rgba(147,197,253,0.85)',
-              background:'rgba(237,237,237,0.05)',
+              background:'#141414',
               border:'1px solid #1F1F1F',
             },
             title:`Market regime: ${analysis.regime}`,
@@ -19105,7 +19105,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
         React.createElement('div',{className:'text-[8px] uppercase font-bold tracking-[0.12em] text-[#EDEDED]/40 mb-1'},'WR by recency'),
         React.createElement('div',{className:'grid grid-cols-3 gap-1.5'},
           [{label:'7d',d:wr7d},{label:'30d',d:wr30d},{label:'all',d:wrLifetime}].map(({label,d})=>(
-            React.createElement('div',{key:label,className:'p-1.5 rounded-lg min-w-0',style:{background:'rgba(237,237,237,0.05)',border:'1px solid #1F1F1F'}},
+            React.createElement('div',{key:label,className:'p-1.5 rounded-lg min-w-0',style:{background:'#141414',border:'1px solid #1F1F1F'}},
               React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#EDEDED]/40 mb-0.5'},label),
               React.createElement('div',{className:'flex items-baseline gap-1 flex-wrap'},
                 React.createElement('span',{className:'text-sm font-bold tabular-nums',style:{color:_wrColor(d?.wr,d?.total||0)}},d?.wr==null?'—':`${d.wr}%`),
@@ -19705,7 +19705,7 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
           ),
           React.createElement('div',{className:'space-y-1'},
             grp.rows.map((s,i)=>(
-              React.createElement('div',{key:i,className:'flex items-center gap-2 px-2 py-1 rounded-lg text-[10px] min-w-0',style:{background:'rgba(237,237,237,0.05)',border:`1px solid ${s.tierBorder}`}},
+              React.createElement('div',{key:i,className:'flex items-center gap-2 px-2 py-1 rounded-lg text-[10px] min-w-0',style:{background:'#141414',border:`1px solid ${s.tierBorder}`}},
                 React.createElement('span',{className:'text-[10px] shrink-0'},s.tier==='TRADE'?'🟢':s.tier==='BREAK'?'⏸':'🟡'),
                 React.createElement('span',{className:'tabular-nums text-[#EDEDED]/55 shrink-0',style:{minWidth:'92px'}},`${_fmtTime(s.startsAt)}–${_fmtTime(s.endsAt)}`),
                 React.createElement('span',{className:'font-bold uppercase tracking-wider shrink-0',style:{color:s.tierColor,fontSize:'9px',minWidth:'66px'}},s.tierLabel),
@@ -20037,7 +20037,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           const _liqLabel=_liqMap[ctx.phase.liquidity]||ctx.phase.liquidity;
           return React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg',style:{
             color:ctx.phase.liquidity==='EXTREME'?'rgb(40,204,149)':ctx.phase.liquidity==='HIGH'?'rgb(40,204,149)':ctx.phase.liquidity==='MED'?'rgba(201,169,97,0.85)':'rgba(255,77,106,0.7)',
-            background:'rgba(237,237,237,0.05)',
+            background:'#141414',
           },title:`Liquidity: ${ctx.phase.liquidity}`},_liqLabel);
         })(),
         (()=>{
@@ -20045,7 +20045,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
           const _volLabel=_volMap[ctx.phase.vol]||ctx.phase.vol.toLowerCase();
           return React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] tabular-nums shrink-0 px-1.5 py-0.5 rounded-lg hidden sm:inline-block',style:{
             color:ctx.phase.vol==='EXPANDING'?'rgba(255,77,106,0.85)':ctx.phase.vol==='COMPRESSING'?'rgba(147,197,253,0.85)':'rgba(237,237,237,0.55)',
-            background:'rgba(237,237,237,0.05)',
+            background:'#141414',
           },title:`Volatility: ${ctx.phase.vol}`},_volLabel);
         })(),
         // V9.1.2: "Tara sees" plain-language pill — shows what direction Tara
@@ -20056,7 +20056,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
             color:analysis.regime==='TRENDING UP'||analysis.regime==='SHORT SQUEEZE'?'rgb(40,204,149)'
               :analysis.regime==='TRENDING DOWN'?'rgba(255,77,106,0.95)'
               :'rgba(237,237,237,0.65)',
-            background:'rgba(237,237,237,0.05)',
+            background:'#141414',
             border:'1px solid #1F1F1F',
           },
           title:`Tara's read: ${regimeToPlainLabel(analysis.regime)}`,
@@ -21475,7 +21475,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             },
             title:'Download call log as CSV for spreadsheet analysis',
           },'↓ Export CSV'),
-          React.createElement('div',{className:'px-2 py-1 rounded-lg text-[9px] uppercase tracking-[0.14em] font-bold',style:{background:'rgba(237,237,237,0.05)',color:'rgba(237,237,237,0.5)',border:'1px solid #1F1F1F'},title:'All times shown in this view honor the time format toggle in the header'},_resolvedFmt.toUpperCase()),
+          React.createElement('div',{className:'px-2 py-1 rounded-lg text-[9px] uppercase tracking-[0.14em] font-bold',style:{background:'#141414',color:'rgba(237,237,237,0.5)',border:'1px solid #1F1F1F'},title:'All times shown in this view honor the time format toggle in the header'},_resolvedFmt.toUpperCase()),
           React.createElement('button',{onClick:onClose,className:'p-2 rounded-lg hover:bg-[#EDEDED]/5 text-[#EDEDED]/60 hover:text-white transition-colors text-xl'},'✕'),
         ),
       ),
@@ -21895,7 +21895,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             _activeTiers.map(t=>{
               const s=_stats[t];const total=s.wins+s.losses;const wr=total>0?Math.round((s.wins/total)*100):0;
               const _wrColor=wr>=70?'rgb(40,204,149)':wr>=55?'#fff':'rgb(255,77,106)';
-              return React.createElement('div',{key:t,className:'rounded-lg p-2',style:{background:'rgba(237,237,237,0.05)',border:'1px solid #1F1F1F'}},
+              return React.createElement('div',{key:t,className:'rounded-lg p-2',style:{background:'#141414',border:'1px solid #1F1F1F'}},
                 React.createElement('div',{className:'text-[8px] uppercase tracking-[0.14em] font-bold mb-1',style:{color:_tierColors[t]}},_tierLabels[t]),
                 React.createElement('div',{className:'flex items-baseline gap-1.5'},
                   React.createElement('span',{className:'text-base font-bold tabular-nums',style:{color:_wrColor}},`${wr}%`),
@@ -22109,7 +22109,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                           React.createElement('div',{className:'flex items-center justify-between gap-3 mb-2'},
                             React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 min-w-0 flex-1 flex-wrap'},
                               React.createElement('span',{className:'tabular-nums text-[11px] text-[#EDEDED]/65 font-bold shrink-0'},_timeLabel),
-                              React.createElement('span',{className:'tabular-nums text-[9px] text-[#EDEDED]/30 shrink-0 px-1.5 py-0.5 rounded-lg',style:{background:'rgba(237,237,237,0.05)'}},(e.windowType||'').toUpperCase()),
+                              React.createElement('span',{className:'tabular-nums text-[9px] text-[#EDEDED]/30 shrink-0 px-1.5 py-0.5 rounded-lg',style:{background:'#141414'}},(e.windowType||'').toUpperCase()),
                               _period&&React.createElement('span',{className:'tabular-nums text-[10px] text-[#EDEDED]/55 shrink-0',style:T2_MONO_STYLE},_period),
                               // Phase / session badge
                               _phaseProfile&&React.createElement('span',{
@@ -23808,7 +23808,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
         },'✕')
       ),
       React.createElement('div',{className:'px-5 py-4 space-y-3'},
-        React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'rgba(237,237,237,0.05)',border:`1px solid ${_isMyDevicePrimary?'rgba(40,204,149,0.30)':'rgba(237,237,237,0.08)'}`}},
+        React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'#141414',border:`1px solid ${_isMyDevicePrimary?'rgba(40,204,149,0.30)':'rgba(237,237,237,0.08)'}`}},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(237,237,237,0.55)'}},'Trading device'),
           ),
@@ -23828,7 +23828,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
         // V9.2.0: SIDE-BY-SIDE diagnostic — shared (cloud) vs local (this device only).
         //   Tara's calls + memory are SHARED across all devices/users via Firestore.
         //   Personal scorecard is LOCAL to this device only — not synced.
-        React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'rgba(237,237,237,0.05)',border:`1px solid ${_hasDrift?'rgba(255,77,106,0.30)':'rgba(237,237,237,0.08)'}`}},
+        React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'#141414',border:`1px solid ${_hasDrift?'rgba(255,77,106,0.30)':'rgba(237,237,237,0.08)'}`}},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold',style:{color:_hasDrift?'rgba(255,77,106,0.95)':'rgba(237,237,237,0.55)'}},_hasDrift?'⚠ DRIFT DETECTED':'Sync diagnostic'),
             React.createElement('button',{
@@ -23989,7 +23989,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
         React.createElement('button',{
           onClick:onCleanup,
           className:'w-full text-left p-3 rounded-lg transition-colors hover:bg-rose-500/10',
-          style:{background:'rgba(237,237,237,0.05)',border:'1px solid #1F1F1F'},
+          style:{background:'#141414',border:'1px solid #1F1F1F'},
         },
           React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
             React.createElement('span',{className:'text-[10px] uppercase tracking-[0.16em] font-bold text-[#EDEDED]/55'},'🧹 Clean Up Log'),
@@ -23999,7 +23999,7 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
           )
         ),
         // V9.2.3: HEALTH DASHBOARD
-        healthData&&React.createElement('div',{className:'p-3 rounded-lg',style:{background:'rgba(237,237,237,0.05)',border:'1px solid #1F1F1F'}},
+        healthData&&React.createElement('div',{className:'p-3 rounded-lg',style:{background:'#141414',border:'1px solid #1F1F1F'}},
           React.createElement('div',{className:'text-[10px] uppercase tracking-[0.16em] font-bold text-[#EDEDED]/45 mb-2'},'System Health'),
           React.createElement('div',{className:'space-y-1.5 text-[11px]'},
             // Coinbase feed
@@ -24314,7 +24314,7 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
               key:i,
               href:n.url,target:'_blank',rel:'noopener noreferrer',
               className:'block p-3 rounded-lg hover:bg-[#161616] transition-colors',
-              style:{background:'rgba(237,237,237,0.05)',border:'1px solid #1F1F1F'},
+              style:{background:'#141414',border:'1px solid #1F1F1F'},
             },
               React.createElement('div',{className:'flex items-start gap-3'},
                 React.createElement('div',{className:'shrink-0 w-8 text-center',title:impactLabel},
@@ -27233,7 +27233,7 @@ function ScalperAdvisorPanel({
             className:_btnBase,
             style:_isAuto
               ?{background:'rgba(40,204,149,0.16)',color:'rgb(40,204,149)',borderRight:'1px solid rgba(40,204,149,0.30)'}
-              :{background:'rgba(237,237,237,0.05)',color:'rgba(237,237,237,0.45)',borderRight:'1px solid #1F1F1F'},
+              :{background:'#141414',color:'rgba(237,237,237,0.45)',borderRight:'1px solid #1F1F1F'},
             onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,enabled:true}));},
             title:'auto-exec ON: place orders automatically when Tara locks',
           },'auto'),
@@ -27242,7 +27242,7 @@ function ScalperAdvisorPanel({
             className:_btnBase,
             style:!_isAuto
               ?{background:'rgba(201,169,97,0.16)',color:'#C9A961'}
-              :{background:'rgba(237,237,237,0.05)',color:'rgba(237,237,237,0.45)'},
+              :{background:'#141414',color:'rgba(237,237,237,0.45)'},
             onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,enabled:false}));},
             title:'manual only: Tara still locks but no orders fire automatically',
           },'manual'),
@@ -27261,7 +27261,7 @@ function ScalperAdvisorPanel({
             className:_btnBase,
             style:_isCall
               ?{background:'rgba(201,169,97,0.16)',color:'#C9A961',borderRight:'1px solid rgba(201,169,97,0.30)'}
-              :{background:'rgba(237,237,237,0.05)',color:'rgba(237,237,237,0.45)',borderRight:'1px solid #1F1F1F'},
+              :{background:'#141414',color:'rgba(237,237,237,0.45)',borderRight:'1px solid #1F1F1F'},
             onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,signalSource:'snapshot'}));},
             title:"use Tara's settled call (snapshot) — public read, 67% WR baseline",
           },"tara's call"),
@@ -27270,7 +27270,7 @@ function ScalperAdvisorPanel({
             className:_btnBase,
             style:!_isCall
               ?{background:'rgba(40,204,149,0.16)',color:'rgb(40,204,149)'}
-              :{background:'rgba(237,237,237,0.05)',color:'rgba(237,237,237,0.45)'},
+              :{background:'#141414',color:'rgba(237,237,237,0.45)'},
             onClick:()=>{if(typeof setAutoExecSettings==='function')setAutoExecSettings(prev=>({...prev,signalSource:'lock'}));},
             title:"use Tara's engine lock — fires earlier, may diverge from snapshot. real 'Tara's Trade' model is phase 4 work.",
           },[
@@ -46325,7 +46325,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                             onPointerUp={()=>{if(_pr.current){clearTimeout(_pr.current);_pr.current=null;setTradingSettings(prev=>({...prev,tier1OnlyMode:!prev?.tier1OnlyMode}));}}}
                             onPointerLeave={()=>{if(_pr.current){clearTimeout(_pr.current);_pr.current=null;}}}
                             className="px-2 py-1 rounded-lg text-[10px] uppercase font-bold tracking-wider transition-colors select-none"
-                            style={_on?{color:'rgb(40,204,149)',background:'rgba(40,204,149,0.10)',border:'1px solid rgba(40,204,149,0.35)'}:{color:'rgba(237,237,237,0.55)',background:'rgba(237,237,237,0.05)',border:'1px solid rgba(237,237,237,0.15)'}}
+                            style={_on?{color:'rgb(40,204,149)',background:'rgba(40,204,149,0.10)',border:'1px solid rgba(40,204,149,0.35)'}:{color:'rgba(237,237,237,0.55)',background:'#141414',border:'1px solid rgba(237,237,237,0.15)'}}
                             title={_on?'Tier-1 Only ON — tap to allow all. Long-press for settings.':'All tiers. Tap to enable Tier-1 Only. Long-press for settings.'}
                           >{_on?'★ TIER-1':'TIERS · ALL'}</button>
                         );
@@ -46333,7 +46333,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       {/* Auto-exec */}
                       <button onClick={()=>setShowTradingSettings(true)}
                         className="px-2 py-1 rounded-lg text-[10px] uppercase font-bold tracking-wider transition-colors"
-                        style={killSwitchEngaged?{color:'#FF4D6A',background:'rgba(255,77,106,0.15)',border:'1px solid rgba(255,77,106,0.40)'}:autoExecSettings.dryRun?{color:'#D4A24C',background:'rgba(212,162,76,0.10)',border:'1px solid rgba(212,162,76,0.30)'}:autoExecSettings.enabled?{color:'#28CC95',background:'rgba(40,204,149,0.10)',border:'1px solid rgba(40,204,149,0.30)'}:{color:'rgba(237,237,237,0.35)',background:'rgba(237,237,237,0.05)',border:'1px solid #1F1F1F'}}
+                        style={killSwitchEngaged?{color:'#FF4D6A',background:'rgba(255,77,106,0.15)',border:'1px solid rgba(255,77,106,0.40)'}:autoExecSettings.dryRun?{color:'#D4A24C',background:'rgba(212,162,76,0.10)',border:'1px solid rgba(212,162,76,0.30)'}:autoExecSettings.enabled?{color:'#28CC95',background:'rgba(40,204,149,0.10)',border:'1px solid rgba(40,204,149,0.30)'}:{color:'rgba(237,237,237,0.35)',background:'#141414',border:'1px solid #1F1F1F'}}
                         title="Auto-exec settings"
                       >{killSwitchEngaged?'⛔ KILLED':autoExecSettings.dryRun?'DRY · AUTO':autoExecSettings.enabled?'⚡ AUTO':'AUTO · OFF'}</button>
                       {/* shadow feed */}
@@ -46348,7 +46348,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         return(
                           <button onClick={()=>setShowDualFeed(v=>!v)}
                             className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors select-none"
-                            style={showDualFeed?{background:'rgba(237,237,237,0.08)',border:'1px solid rgba(237,237,237,0.25)',color:'rgba(237,237,237,0.80)'}:{background:'rgba(237,237,237,0.05)',border:'1px solid rgba(237,237,237,0.12)',color:'rgba(237,237,237,0.40)'}}
+                            style={showDualFeed?{background:'rgba(237,237,237,0.08)',border:'1px solid rgba(237,237,237,0.25)',color:'rgba(237,237,237,0.80)'}:{background:'#141414',border:'1px solid rgba(237,237,237,0.12)',color:'rgba(237,237,237,0.40)'}}
                           >
                             <span style={{color:_dfcfg.color||'rgba(237,237,237,0.55)'}}>{_dfcfg.icon||'?'}</span>
                             <span>{_dfa}</span>
