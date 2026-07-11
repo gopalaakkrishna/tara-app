@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.11-v13.4.36-label-tracking';
-const TARA_VERSION_DISPLAY='Tara 13.4.36';
+const BASELINE_VERSION='2026.07.11-v13.4.37-header-palette-clean';
+const TARA_VERSION_DISPLAY='Tara 13.4.37';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -18685,7 +18685,7 @@ const AntiTiltCooldownBanner=React.memo(function AntiTiltCooldownBanner({tiltLoc
     className:'rounded-lg overflow-hidden mb-2 sm:mb-3 px-3 sm:px-4 py-2.5 animate-pulse',
     style:{
       border:'1px solid rgba(255,77,106,0.50)',
-      background:'linear-gradient(90deg, rgba(255,77,106,0.10) 0%, rgba(255,77,106,0.04) 100%)',
+      background:'rgba(255,77,106,0.07)',
       boxShadow:'0 3px 10px rgba(0,0,0,0.35)',
     },
   },
@@ -19999,10 +19999,10 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
   // Top-level border tint by severity
   const _borderColor=_criticalCount>0?'rgba(255,77,106,0.35)':_warningCount>0?'rgba(201,169,97,0.30)':'rgba(237,237,237,0.10)';
   const _bgGradient=_criticalCount>0
-    ?'linear-gradient(90deg, rgba(255,77,106,0.06) 0%, rgba(255,77,106,0.02) 100%)'
+    ?'rgba(255,77,106,0.05)'
     :_warningCount>0
-    ?'linear-gradient(90deg, rgba(201,169,97,0.05) 0%, rgba(201,169,97,0.01) 100%)'
-    :'linear-gradient(90deg, rgba(237,237,237,0.02) 0%, rgba(237,237,237,0.005) 100%)';
+    ?'rgba(201,169,97,0.04)'
+    :'rgba(237,237,237,0.02)';
   // Format the countdown to next phase
   const _nextLabel=ctx.nextPhase.minutesUntil<60
     ?`${ctx.nextPhase.minutesUntil}m`
@@ -46189,7 +46189,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {/* LEFT: Logo + version + balance */}
           <div className="flex items-center gap-1.5 shrink-0">
             <h1 className="text-base sm:text-lg font-serif tracking-tight text-white">Tara</h1>
-            <span className={'hidden sm:flex items-center gap-1.5 text-[10px] font-sans font-bold tracking-wider px-2 py-0.5 rounded-lg border'} style={{background:'linear-gradient(135deg,rgba(212,175,55,0.15),rgba(212,175,55,0.05))',borderColor:'rgba(212,175,55,0.35)',color:'#C9A961',boxShadow:'inset 0 0 12px rgba(212,175,55,0.08)'}}>
+            <span className={'hidden sm:flex items-center gap-1.5 text-[10px] font-sans font-bold tracking-wider px-2 py-0.5 rounded-lg border'} style={{background:'rgba(201,169,97,0.10)',borderColor:'rgba(201,169,97,0.30)',color:'#C9A961'}}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#C9A961'}}></span>
               {TARA_VERSION_DISPLAY.replace(/^Tara\s+/,'')}
             </span>
@@ -46200,9 +46200,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               const _n=_real.length; if(_n===0)return null;
               const _rich=_real.filter(e=>!!e.taraVersion).length;
               const _pct=_rich/_n;
-              const _col=_pct>=0.9?{bg:'rgba(34,197,94,0.12)',bd:'rgba(34,197,94,0.35)',fg:'#86efac'}
+              const _col=_pct>=0.9?{bg:'rgba(40,204,149,0.12)',bd:'rgba(40,204,149,0.35)',fg:'#28CC95'}
                         :_pct>=0.5?{bg:'rgba(212,162,76,0.12)',bd:'rgba(212,162,76,0.3)',fg:'rgba(212,162,76,0.9)'}
-                        :{bg:'rgba(244,63,94,0.12)',bd:'rgba(244,63,94,0.35)',fg:'#fda4af'};
+                        :{bg:'rgba(255,77,106,0.12)',bd:'rgba(255,77,106,0.35)',fg:'#FF4D6A'};
               return React.createElement('span',{
                 className:'hidden sm:flex items-center gap-1 text-[9px] font-bold tracking-[0.12em] px-1.5 py-0.5 rounded-lg uppercase cursor-default',
                 style:{background:_col.bg,border:'1px solid '+_col.bd,color:_col.fg},
@@ -46469,8 +46469,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               enough yet to deserve a banner. */}
       {feedFrozen&&(
         <div className="sticky top-[44px] sm:top-[52px] z-40 px-2 sm:px-4 py-2 border-b" style={{
-          background:'linear-gradient(180deg, rgba(244,63,94,0.18), rgba(244,63,94,0.08))',
-          borderColor:'rgba(244,63,94,0.45)',
+          background:'rgba(255,77,106,0.13)',
+          borderColor:'rgba(255,77,106,0.45)',
         }}>
           <div className="max-w-[1600px] mx-auto flex flex-wrap items-center gap-2 sm:gap-3 text-[11px] sm:text-xs">
             <span className="font-bold tracking-wide text-rose-300">⚠ FEED FROZEN</span>
@@ -46812,7 +46812,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     setPriceSource(_next);
                   }}
                   className="flex items-center gap-1 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-lg border transition-colors mb-1 self-start"
-                  style={{background:feedFrozen?'rgba(244,63,94,0.12)':feedSlow?'rgba(201,169,97,0.12)':'rgba(255,255,255,0.04)',borderColor:feedFrozen?'rgba(244,63,94,0.45)':feedSlow?'rgba(201,169,97,0.40)':'rgba(255,255,255,0.15)',color:feedFrozen?'#fb7185':feedSlow?'#C9A961':'rgba(237,237,237,0.55)'}}
+                  style={{background:feedFrozen?'rgba(255,77,106,0.12)':feedSlow?'rgba(201,169,97,0.12)':'rgba(255,255,255,0.04)',borderColor:feedFrozen?'rgba(255,77,106,0.45)':feedSlow?'rgba(201,169,97,0.40)':'rgba(255,255,255,0.15)',color:feedFrozen?'#fb7185':feedSlow?'#C9A961':'rgba(237,237,237,0.55)'}}
                   title={`Live price source: ${PRICE_SOURCES[priceSource].name}. Click to cycle. ${feedFrozen?`FROZEN ${feedStaleSeconds}s`:feedSlow?`Slow (${feedStaleSeconds}s)`:'Live'}`}
                 >
                   <span>FEED</span>
