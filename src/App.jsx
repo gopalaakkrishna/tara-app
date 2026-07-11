@@ -1346,6 +1346,28 @@ if(typeof window!=='undefined'){
   });
 }
 
+// V13.4.46: keep the screen awake while Tara is open+visible so a sleeping
+//   phone screen does not suspend the scan loop and miss windows.
+(function(){
+  if(typeof navigator==='undefined'||!('wakeLock'in navigator))return;
+  let _wl=null;
+  const _acquire=async()=>{
+    try{
+      if(_wl)return;
+      if(typeof document==='undefined'||document.visibilityState!=='visible')return;
+      _wl=await navigator.wakeLock.request('screen');
+      _wl.addEventListener('release',()=>{_wl=null;});
+    }catch(_){_wl=null;}
+  };
+  const _release=async()=>{try{if(_wl){const w=_wl;_wl=null;await w.release();}}catch(_){_wl=null;}};
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible')_acquire();else _release();
+  });
+  window.addEventListener('focus',_acquire);
+  if(document.readyState==='complete')_acquire();
+  else window.addEventListener('load',_acquire);
+})();
+
 // ═══════════════════════════════════════════════════════════════════════════
 // V10.2.0 — PHASE 4 LATEST-DECISION PUB/SUB (cross-component bridge)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4607,8 +4629,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.11-v13.4.44-predictor-cleanup-tool';
-const TARA_VERSION_DISPLAY='Tara 13.4.44';
+const BASELINE_VERSION='2026.07.11-v13.4.46-wakelock-more-locks';
+const TARA_VERSION_DISPLAY='Tara 13.4.46';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -6135,9 +6157,10 @@ const buildCalibrationTable=(callLog)=>{
   if(!Array.isArray(callLog)||callLog.length===0)return table;
   for(const e of callLog){
     if(!e||(e.result!=='WIN'&&e.result!=='LOSS'))continue;
-    if(!e.regime||!e.tier||!e.dir)continue;
+    if(e.betAmt==null)continue; // V13.4.45: committed locks only (not predictor reads)
+    const _regime=e.regimeV12||e.regime; // V13.4.45: entries persist regimeV12, not top-level regime
+    if(!_regime||!e.tier||!e.dir)continue;
     if(e.dir!=='UP'&&e.dir!=='DOWN')continue;
-    const _regime=e.regime;
     const _tier=_calTierCanon(e.tier);
     const _dir=e.dir;
     const _kBucket=_calBucketKalshi(e.kalshiAtLock);
@@ -39023,7 +39046,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     if(_calCall==='UP'||_calCall==='DOWN'){
       const _calTable=buildCalibrationTable(taraCallLogRef.current||[]);
       const _calLookup=lookupCalibration(_calTable,{
-        regime:analysis?.regime||'',
+        regime:analysis?.rawSignalScores?._v10736regime||analysis?.regime||'', // V13.4.45: match regimeV12 keys
         tier:taraCall?._ctx?.tier||taraCall?.tier||'',
         dir:_calCall,
         kalshiAtLock:typeof kalshiYesPrice==='number'?kalshiYesPrice:null,
