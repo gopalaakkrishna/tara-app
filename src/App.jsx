@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.10-v13.4.33-solid-panels';
-const TARA_VERSION_DISPLAY='Tara 13.4.33';
+const BASELINE_VERSION='2026.07.11-v13.4.34-true-black-base';
+const TARA_VERSION_DISPLAY='Tara 13.4.34';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -8803,7 +8803,7 @@ const TradingViewChart=({resolution,onResolutionChange,asset,priceSource})=>{
     <div style={{userSelect:'none',width:'100%'}}>
       {/* Resolution toolbar */}
       <div className="flex items-center justify-between px-3 pb-2 flex-wrap gap-2">
-        <div className={'flex items-center gap-0.5 bg-[#121212] rounded-lg border border-[#EDEDED]/5 overflow-hidden'}>
+        <div className={'flex items-center gap-0.5 bg-[#0A0A0A] rounded-lg border border-[#EDEDED]/8 overflow-hidden'}>
           {['1m','3m','5m','15m','30m','1h'].map(r=>(
             <button key={r}
               onClick={()=>onResolutionChange&&onResolutionChange(r)}
@@ -8825,7 +8825,7 @@ const TradingViewChart=({resolution,onResolutionChange,asset,priceSource})=>{
           height:'430px',
           border:'none',
           borderRadius:'8px',
-          background:'#121212',
+          background:'#0A0A0A',
           display:'block',
         }}
         allowFullScreen
@@ -13393,7 +13393,7 @@ class ErrorBoundary extends React.Component{
       }catch(_){}
     };
     return(
-      <div className="min-h-screen bg-[#121212] text-rose-500 p-6 sm:p-8 font-mono">
+      <div className="min-h-screen bg-[#0A0A0A] text-rose-500 p-6 sm:p-8 font-mono">
         <div className="max-w-3xl">
           <h1 className="text-2xl font-bold mb-1">Tara Engine Crash</h1>
           <p className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/40 mb-4">{typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:'unknown version'}</p>
@@ -13405,11 +13405,11 @@ class ErrorBoundary extends React.Component{
             <div className="px-3 pb-3 space-y-3">
               <div>
                 <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/45 mb-1">JS stack</div>
-                <pre className="bg-black p-2 rounded text-[10px] whitespace-pre-wrap break-all border border-[#EDEDED]/10 max-h-64 overflow-auto leading-snug text-[#EDEDED]/85">{_err?.stack||'(no stack)'}</pre>
+                <pre className="bg-black p-2 rounded text-[10px] whitespace-pre-wrap break-all border border-[#EDEDED]/8 max-h-64 overflow-auto leading-snug text-[#EDEDED]/85">{_err?.stack||'(no stack)'}</pre>
               </div>
               <div>
                 <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/45 mb-1">React component stack</div>
-                <pre className="bg-black p-2 rounded text-[10px] whitespace-pre-wrap break-all border border-[#EDEDED]/10 max-h-48 overflow-auto leading-snug text-[#EDEDED]/85">{_info?.componentStack||'(captured on next render — try refreshing if blank)'}</pre>
+                <pre className="bg-black p-2 rounded text-[10px] whitespace-pre-wrap break-all border border-[#EDEDED]/8 max-h-48 overflow-auto leading-snug text-[#EDEDED]/85">{_info?.componentStack||'(captured on next render — try refreshing if blank)'}</pre>
               </div>
             </div>
           </details>
@@ -13417,7 +13417,7 @@ class ErrorBoundary extends React.Component{
             Tara hit an error during render. Service workers and browser caches have been cleared in the background. Your trade history, weights, and learning are safe in Supabase.
           </p>
           <div className="flex gap-3 flex-wrap">
-            <button onClick={_copyDiag} className={'px-4 py-2 rounded font-bold border transition-colors '+(this.state.copied?'bg-[#C9A961]/15 border-[#C9A961] text-[#C9A961]':'bg-[#EDEDED]/5 border-[#EDEDED]/20 text-[#EDEDED]/85 hover:bg-[#EDEDED]/10')}>{this.state.copied?'Copied — paste to me':'Copy diagnostic'}</button>
+            <button onClick={_copyDiag} className={'px-4 py-2 rounded font-bold border transition-colors '+(this.state.copied?'bg-[#C9A961]/15 border-[#C9A961] text-[#C9A961]':'bg-[#EDEDED]/5 border-[#EDEDED]/15 text-[#EDEDED]/85 hover:bg-[#EDEDED]/10')}>{this.state.copied?'Copied — paste to me':'Copy diagnostic'}</button>
             <button onClick={_softRecover} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold">Refresh Code Only (keeps data)</button>
             <button onClick={_hardRecover} className="px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white rounded font-bold">Hard Recovery (clears everything)</button>
           </div>
@@ -13463,7 +13463,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
   }
   return(
     <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0A0A0A] border border-l border-b border-[#EDEDED]/15 rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
-      <div className={'p-3 bg-[#262626] border-b border-[#EDEDED]/10 flex justify-between items-center shrink-0'}>
+      <div className={'p-3 bg-[#171717] border-b border-[#EDEDED]/8 flex justify-between items-center shrink-0'}>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></div>
           <span className={'text-xs font-bold uppercase tracking-widest text-[#EDEDED]/70'}>Flow Intelligence</span>
@@ -13474,7 +13474,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
       <div className="overflow-y-auto flex-1 p-3 space-y-3">
 
         {/* Flow Score */}
-        <div className={'p-3 rounded-xl bg-[#262626] border border-[#EDEDED]/10'}>
+        <div className={'p-3 rounded-xl bg-[#171717] border border-[#EDEDED]/8'}>
           <div className="flex justify-between items-start mb-2">
             <div>
               <div className={`text-lg font-bold font-serif ${scoreColor}`}>{fs.score.toFixed(0)}<span className="text-xs font-sans ml-1 opacity-60">&#47;100</span></div>
@@ -13495,7 +13495,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
         </div>
 
         {/* Whale Streak */}
-        <div className={`p-3 rounded-xl border ${hasStreak?(isBuy?'bg-emerald-500/5 border-emerald-500/30':'bg-rose-500/5 border-rose-500/30'):'bg-[#262626] border-[#EDEDED]/8'}`}>
+        <div className={`p-3 rounded-xl border ${hasStreak?(isBuy?'bg-emerald-500/5 border-emerald-500/30':'bg-rose-500/5 border-rose-500/30'):'bg-[#171717] border-[#EDEDED]/8'}`}>
           <div className={'text-[10px] uppercase tracking-widest text-[#EDEDED]/40 mb-1.5 font-bold'}>Whale Streak</div>
           {hasStreak?(
             <div>
@@ -13514,7 +13514,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
         </div>
 
         {/* OI Context */}
-        <div className={'p-3 rounded-xl bg-[#262626] border border-[#EDEDED]/8'}>
+        <div className={'p-3 rounded-xl bg-[#171717] border border-[#EDEDED]/8'}>
           <div className={'text-[10px] uppercase tracking-widest text-[#EDEDED]/40 mb-1.5 font-bold'}>Open Interest Context</div>
           <div className="flex items-center gap-2 mb-1">
             <span className={`text-xs font-bold ${oiColor}`}>OI {oi>=0?'+':''}{oi.toFixed(2)}% (5m)</span>
@@ -13534,7 +13534,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
 
         {/* Long-Short Ratio */}
         {bloomberg?.longShortRatio&&(
-          <div className={'p-3 rounded-xl bg-[#262626] border border-[#EDEDED]/8'}>
+          <div className={'p-3 rounded-xl bg-[#171717] border border-[#EDEDED]/8'}>
             <div className={'text-[10px] uppercase tracking-widest text-[#EDEDED]/40 mb-2 font-bold'}>Market Positioning (Binance)</div>
             <div className="flex items-center gap-2 mb-1">
               <div className={'flex-1 h-2 bg-[#EDEDED]/10 rounded-full overflow-hidden'}>
@@ -13559,7 +13559,7 @@ function FlowPanel({showWhaleLog,setShowWhaleLog,flowSignal,tapeRef,whaleLog,blo
           <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
             {whaleLog.length===0?<div className={'text-xs text-[#EDEDED]/30 italic'}>No prints yet</div>:whaleLog.slice(0,20).map((w,i)=>{
               const d=new Date(w.time);
-              return(<div key={i} className={`flex items-center gap-2 text-xs p-1.5 rounded bg-[#121212] border ${w.side==='BUY'?'border-emerald-500/15':'border-rose-500/15'}`}>
+              return(<div key={i} className={`flex items-center gap-2 text-xs p-1.5 rounded bg-[#0A0A0A] border ${w.side==='BUY'?'border-emerald-500/15':'border-rose-500/15'}`}>
                 <span className={'text-[#EDEDED]/25 font-mono shrink-0'}>{_fmtTimeTz(d,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>
                 <span className={`font-bold text-[10px] ${w.side==='BUY'?'text-emerald-500':'text-rose-500'}`}>{w.side}</span>
                 <span className={'text-[#EDEDED]/50'}>${(w.usd*0.001).toFixed(0)}K</span>
@@ -13590,7 +13590,7 @@ function TheoryLabPanel({show,setShow,theoryStats,theoryLog}){
   };
   return(
     <div className={'fixed top-11 right-0 z-50 w-80 sm:w-96 max-h-[82vh] overflow-hidden flex flex-col bg-[#0A0A0A] border border-l border-b border-[#EDEDED]/15 rounded-bl-xl shadow-2xl'} style={{boxShadow:'0 8px 32px rgba(0,0,0,0.6)'}}>
-      <div className={'p-3 bg-[#262626] border-b border-[#EDEDED]/10 flex justify-between items-center shrink-0'}>
+      <div className={'p-3 bg-[#171717] border-b border-[#EDEDED]/8 flex justify-between items-center shrink-0'}>
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse"></div>
           <span className={'text-xs font-bold uppercase tracking-widest text-[#EDEDED]/70'}>Theory Lab</span>
@@ -13608,7 +13608,7 @@ function TheoryLabPanel({show,setShow,theoryStats,theoryLog}){
             const n=v?.n||0,correct=v?.correct||0;
             const wr=n>0?correct/n:0;
             return(
-              <div key={key} className="flex items-center justify-between bg-[#262626] rounded-lg px-2.5 py-2 border border-[#EDEDED]/5">
+              <div key={key} className="flex items-center justify-between bg-[#171717] rounded-lg px-2.5 py-2 border border-[#EDEDED]/8">
                 <span className={'text-xs text-[#EDEDED]/70'}>{_labels[key]||key}</span>
                 <div className="flex items-center gap-2">
                   {n<30&&n>0&&<span className={'text-[9px] text-[#EDEDED]/30 italic'}>low-n</span>}
@@ -13620,7 +13620,7 @@ function TheoryLabPanel({show,setShow,theoryStats,theoryLog}){
           })}
         </div>
         {_last&&(
-          <div className="pt-2 border-t border-[#EDEDED]/5">
+          <div className="pt-2 border-t border-[#EDEDED]/8">
             <div className={'text-[10px] uppercase tracking-wider text-[#EDEDED]/30 mb-1.5'}>Last scored window</div>
             <div className="text-[10px] text-[#EDEDED]/50 font-mono leading-relaxed space-y-0.5">
               <div>outcome: <span className={_last.outcomeDir==='UP'?'text-emerald-400':'text-rose-400'}>{_last.outcomeDir}</span>{_last.round_number_flag?<span className="ml-2 text-amber-400/70">● round#</span>:null}</div>
@@ -13650,7 +13650,7 @@ const FlowBtn=({flowSignal,active,onClick,cls})=>{
     ?'bg-rose-500/15 border-rose-500/40 text-rose-400 animate-pulse'
     :isEmerging
     ?'bg-amber-500/10 border-amber-500/30 text-amber-400'
-    :'border-[#EDEDED]/10 text-[#EDEDED]/40 hover:text-purple-400';
+    :'border-[#EDEDED]/8 text-[#EDEDED]/40 hover:text-purple-400';
   const baseCls=cls==='hidden sm:flex'
     ?'hidden sm:flex items-center gap-1 p-1.5 rounded-lg border text-xs transition-all '
     :'flex items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all ';
@@ -13667,7 +13667,7 @@ const FlowBtn=({flowSignal,active,onClick,cls})=>{
 const TheoryLabBtn=({active,onClick,cls})=>{
   const colorCls=active
     ?'bg-violet-500/20 border-violet-500/40 text-violet-400'
-    :'border-[#EDEDED]/10 text-[#EDEDED]/40 hover:text-violet-400';
+    :'border-[#EDEDED]/8 text-[#EDEDED]/40 hover:text-violet-400';
   const baseCls=cls==='hidden sm:flex'
     ?'hidden sm:flex items-center gap-1 p-1.5 rounded-lg border text-xs transition-all '
     :'flex items-center gap-1 justify-center px-2 py-1.5 rounded-lg text-xs transition-all ';
@@ -13777,8 +13777,8 @@ function PositionReconciliationBanner({positionReconciliation}){
 function SyncButtons({userPosition,handleManualSync}){
   const upActive=userPosition==='UP';
   const dnActive=userPosition==='DOWN';
-  const upCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(upActive?'bg-emerald-600 text-white border-emerald-400':'border-[#EDEDED]/10');
-  const dnCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(dnActive?'bg-rose-600 text-white border-rose-400':'border-[#EDEDED]/10');
+  const upCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(upActive?'bg-emerald-600 text-white border-emerald-400':'border-[#EDEDED]/8');
+  const dnCls='flex-1 py-2 border rounded-lg text-xs uppercase font-bold tracking-wide transition-all '+(dnActive?'bg-rose-600 text-white border-rose-400':'border-[#EDEDED]/8');
   return(
     <div className="flex gap-2">
       <button onClick={()=>handleManualSync('UP')} className={upCls}
@@ -13995,7 +13995,7 @@ function PredictionContent(props){
                 : (lbl==='RANGE')
                 ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/30'
                 : (lbl==='DEAD')
-                ? 'text-[#EDEDED]/50 bg-[#EDEDED]/5 border-[#EDEDED]/20'
+                ? 'text-[#EDEDED]/50 bg-[#EDEDED]/5 border-[#EDEDED]/15'
                 : 'text-[#EDEDED]/60 bg-[#EDEDED]/5 border-[#EDEDED]/15';
               const icon=
                 lbl==='TRENDING'?'↗':
@@ -14326,7 +14326,7 @@ function PredictionContent(props){
                     <span className="text-[#EDEDED]/55">{line}</span>
                     {samplesNeeded>0&&<span className="text-[#EDEDED]/35 tabular-nums">{samplesHave}/{samplesNeeded}</span>}
                   </div>
-                  <div className="w-full h-1 bg-[#121212] rounded-full overflow-hidden">
+                  <div className="w-full h-1 bg-[#0A0A0A] rounded-full overflow-hidden">
                     <div className={formingBarCls} style={{width:formingPct+'%'}}/>
                   </div>
                 </>
@@ -14473,7 +14473,7 @@ function PredictionContent(props){
       )}
 
       {!userPosition&&analysis.lockInfo&&(
-        <div className={'mb-2 p-2.5 rounded-lg bg-[#121212] border border-[#EDEDED]/8'}>
+        <div className={'mb-2 p-2.5 rounded-lg bg-[#0A0A0A] border border-[#EDEDED]/8'}>
           <div className={'text-[10px] uppercase tracking-wide text-[#EDEDED]/30 font-bold mb-1.5'}>Entry checklist</div>
           <div className="space-y-1">
             {checklistItems.map((item,i)=>{
@@ -14491,7 +14491,7 @@ function PredictionContent(props){
         </div>
       )}
 
-      <div className={'flex flex-col gap-1.5 border-t border-[#EDEDED]/10 pt-3 mt-4'}>
+      <div className={'flex flex-col gap-1.5 border-t border-[#EDEDED]/8 pt-3 mt-4'}>
         <span className={'text-xs uppercase tracking-wide text-[#EDEDED]/30 text-center'}>-30% Stop Guard Sync</span>
         <SyncButtons userPosition={userPosition} handleManualSync={handleManualSync}/>
       </div>
@@ -14767,7 +14767,7 @@ function DecisionalOverlay({taraCall,kalshiYesPrice,convictionTrajectory,todayDa
   const _showRiskChip=movementRisk&&(movementRisk.level==='ELEVATED'||movementRisk.level==='EXTREME');
   // Don't render if nothing meaningful to show
   if(!_edgeLabel&&!_sizeHint&&!_showCooldown&&!_showTrajectory&&!_showRiskChip)return null;
-  return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#EDEDED]/5'},
+  return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#EDEDED]/8'},
     React.createElement('div',{className:'flex items-center justify-between gap-2 flex-wrap'},
       React.createElement('div',{className:'flex items-baseline gap-2 sm:gap-3 flex-wrap'},
         // Edge pill
@@ -15379,7 +15379,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _pastThresh=_kalshiForDir!=null&&_kalshiForDir>_ENTRY_THRESH;
           const _closeToThresh=_kalshiForDir!=null&&_kalshiForDir>=62&&_kalshiForDir<=_ENTRY_THRESH;
           const _kColor=_pastThresh?'text-rose-400':_closeToThresh?'text-amber-400':_kalshiForDir!=null?'text-emerald-400':'text-[#EDEDED]/55';
-          const _kBorder=_pastThresh?'border-rose-500/40':_closeToThresh?'border-amber-500/30':'border-[#EDEDED]/12';
+          const _kBorder=_pastThresh?'border-rose-500/40':_closeToThresh?'border-amber-500/30':'border-[#EDEDED]/15';
           // V6.4.1: live both-side Kalshi % even when Tara has no direction yet
           const _kalshiLive=_kPct!=null&&!isNaN(_kPct);
           const _kUpPct=_kalshiLive?Math.round(_kPct):null;
@@ -15489,7 +15489,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           const _edgeColor=_edge>=15?'text-emerald-400':_edge>=5?'text-emerald-400/70':_edge>=-5?'text-[#EDEDED]/55':'text-amber-400/85';
           const _edgeLabel=_edge>=20?'BIG EDGE':_edge>=10?'GOOD EDGE':_edge>=0?'MODEST EDGE':_edge>=-10?'LATE ENTRY':'KALSHI AHEAD';
           return(
-            <div className="mb-3 px-2.5 py-2 rounded-md bg-[#0D0D0D] border border-[#EDEDED]/10">
+            <div className="mb-3 px-2.5 py-2 rounded-md bg-[#0D0D0D] border border-[#EDEDED]/8">
               <div className="flex items-baseline justify-between gap-2 mb-1">
                 <span className="text-[8px] uppercase tracking-[0.2em] text-[#EDEDED]/40 font-bold">Edge vs market</span>
                 <span className={`text-[9px] uppercase tracking-wider font-bold ${_edgeColor}`}>{_edgeLabel}</span>
@@ -15731,7 +15731,7 @@ const PastWindowsPill=React.memo(function PastWindowsPill({pastWindows,windowTyp
   return React.createElement('div',{ref:wrapRef,className:'relative'},
     React.createElement('button',{
       onClick:()=>setOpen(!open),
-      className:'flex items-center gap-1.5 bg-[#121212] border border-[#EDEDED]/12 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide hover:border-[rgba(201,169,97,0.4)] transition-colors shadow-sm',
+      className:'flex items-center gap-1.5 bg-[#0A0A0A] border border-[#EDEDED]/15 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide hover:border-[rgba(201,169,97,0.4)] transition-colors shadow-sm',
     },
       React.createElement('span',{className:`text-[10px] text-[#EDEDED]/55 transition-transform inline-block ${open?'rotate-180':''}`},'▾'),
       React.createElement('span',{className:'text-[#EDEDED]/65 text-[11px]'},'Past'),
@@ -15744,7 +15744,7 @@ const PastWindowsPill=React.memo(function PastWindowsPill({pastWindows,windowTyp
       ),
     ),
     open&&React.createElement('div',{
-      className:'absolute top-full mt-1.5 right-0 sm:left-0 sm:right-auto bg-[#262626] border border-[#EDEDED]/15 rounded-lg shadow-2xl py-1.5 min-w-[180px] z-50 max-h-[320px] overflow-y-auto',
+      className:'absolute top-full mt-1.5 right-0 sm:left-0 sm:right-auto bg-[#171717] border border-[#EDEDED]/15 rounded-lg shadow-2xl py-1.5 min-w-[180px] z-50 max-h-[320px] overflow-y-auto',
       style:{boxShadow:'0 8px 32px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(201,169,97,0.06)'},
     },
       filtered.slice(0,15).map((w)=>React.createElement('div',{
@@ -15782,12 +15782,12 @@ function BestPracticesModal({open,onClose}){
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#262626] border border-[#EDEDED]/15 rounded-xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
+      className:'bg-[#171717] border border-[#EDEDED]/15 rounded-xl shadow-2xl max-w-2xl w-full p-4 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
       onClick:(e)=>e.stopPropagation(),
       style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(201,169,97,0.06)'},
     },
       // Header
-      React.createElement('div',{className:'flex justify-between items-baseline mb-4 sm:mb-5 pb-3 border-b border-[#EDEDED]/10'},
+      React.createElement('div',{className:'flex justify-between items-baseline mb-4 sm:mb-5 pb-3 border-b border-[#EDEDED]/8'},
         React.createElement('div',null,
           React.createElement('h2',{className:'text-lg sm:text-xl font-serif text-white tracking-tight'},'Best Practices · Trading with Tara'),
           React.createElement('p',{className:'text-[10px] uppercase tracking-wider text-[#EDEDED]/45 mt-0.5'},'how to extract her edge'),
@@ -15939,7 +15939,7 @@ function BestPracticesModal({open,onClose}){
       ]),
 
       React.createElement('div',{
-        className:'mt-5 pt-4 border-t border-[#EDEDED]/10 text-center',
+        className:'mt-5 pt-4 border-t border-[#EDEDED]/8 text-center',
       },
         React.createElement('button',{
           onClick:onClose,
@@ -16483,7 +16483,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#262626] border border-[#EDEDED]/15 rounded-xl shadow-2xl max-w-2xl w-full p-5 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
+      className:'bg-[#171717] border border-[#EDEDED]/15 rounded-xl shadow-2xl max-w-2xl w-full p-5 sm:p-6 my-2 sm:my-8 max-h-[96vh] overflow-y-auto',
       onClick:(e)=>e.stopPropagation(),
       style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(201,169,97,0.06)'},
     },
@@ -16574,7 +16574,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       //   are now the single source of truth. antiTiltEnabled/antiTiltStreakLen/
       //   antiTiltMinutes settings are kept in localStorage for backward compat
       //   but no longer wired to any active code path or surfaced in UI.
-      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0D0D0D] border border-[#EDEDED]/5'},
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0D0D0D] border border-[#EDEDED]/8'},
         React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/35 mb-1'},'Anti-tilt cooldown'),
         React.createElement('div',{className:'text-[10px] text-[#EDEDED]/45 leading-snug'},
           'Moved into ',React.createElement('span',{style:{color:T2_GOLD,fontWeight:'bold'}},'Cooldown after losses'),' in Kalshi Auto-Execution settings below. Single source of truth, no more duplicates.',
@@ -16608,7 +16608,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       //   (suggested $0.19 exits on $0.84-expected positions per real-world test).
       //   takeProfitEnabled/Offer/cutLossEnabled/Minutes preserved in localStorage
       //   for backward compat, no longer surfaced.
-      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0D0D0D] border border-[#EDEDED]/5'},
+      React.createElement('div',{className:'mb-4 p-3 rounded-lg bg-[#0D0D0D] border border-[#EDEDED]/8'},
         React.createElement('div',{className:'text-[9px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/35 mb-1'},'Auto exit suggestions'),
         React.createElement('div',{className:'text-[10px] text-[#EDEDED]/45 leading-snug'},
           'Moved into ',React.createElement('span',{style:{color:T2_GOLD,fontWeight:'bold'}},'Exit thresholds'),' in Kalshi Auto-Execution below. The auto-exit layer (88¢/13¢) is the active system — single source of truth.',
@@ -18042,7 +18042,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
       // generous spacing. The bracketed note frames it as a separate tool that
       // doesn't fight Tara's auto-exec.
       scalperSettings&&typeof setScalperSettings==='function'&&React.createElement('section',{
-        className:'pt-4 mt-4 border-t border-[#EDEDED]/10',
+        className:'pt-4 mt-4 border-t border-[#EDEDED]/8',
       },
         // V9.19.25: section header redesigned to make this VISUALLY DISTINCT from
         //   Kalshi Auto-Execution. Both used gold before, which made them feel like
@@ -18218,7 +18218,7 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 }),
               ),
             ),
-            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer pt-1 mt-1 border-t border-[#EDEDED]/5'},
+            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer pt-1 mt-1 border-t border-[#EDEDED]/8'},
               React.createElement('div',{className:'flex flex-col'},
                 React.createElement('span',{className:'text-[11px] text-[#EDEDED]/80',style:{letterSpacing:'0.02em'}},'block weak hours'),
                 React.createElement('span',{className:'text-[9px] text-[#EDEDED]/40',style:{letterSpacing:'0.02em'}},'12-17 est skip window'),
@@ -18260,10 +18260,10 @@ function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,sav
                 className:'ml-2',
               }),
             ),
-            !!scalperSettings.autoExecEnabled&&React.createElement('div',{className:'text-[9px] text-amber-400/70 italic mt-2 pt-2 border-t border-[#EDEDED]/5'},
+            !!scalperSettings.autoExecEnabled&&React.createElement('div',{className:'text-[9px] text-amber-400/70 italic mt-2 pt-2 border-t border-[#EDEDED]/8'},
               'tara auto-exec disabled — scalper auto-exec takes precedence. enable conflict guard below for extra safety.',
             ),
-            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer mt-2 pt-2 border-t border-[#EDEDED]/5'},
+            React.createElement('label',{className:'flex items-baseline justify-between cursor-pointer mt-2 pt-2 border-t border-[#EDEDED]/8'},
               React.createElement('div',{className:'flex flex-col'},
                 React.createElement('span',{className:'text-[11px] text-[#EDEDED]/75',style:{letterSpacing:'0.02em'}},'conflict guard'),
                 React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45',style:{letterSpacing:'0.02em'}},'block scalper auto-exec when tara has a locked position'),
@@ -19099,7 +19099,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
       },insight),
     ),
     // ── ZONE 3: Expandable detail (collapsed by default) ──
-    expanded&&React.createElement('div',{className:'border-t border-[#EDEDED]/5 px-3 sm:px-4 py-3 space-y-3'},
+    expanded&&React.createElement('div',{className:'border-t border-[#EDEDED]/8 px-3 sm:px-4 py-3 space-y-3'},
       // WR by recency — 3 compact cards
       wrLifetime&&React.createElement('div',null,
         React.createElement('div',{className:'text-[8px] uppercase font-bold tracking-[0.12em] text-[#EDEDED]/40 mb-1'},'WR by recency'),
@@ -19159,7 +19159,7 @@ function UnifiedTodayCard({todayData,bestWindowsToday,tickHistoryRef,upcomingMac
         React.createElement(VolatilitySparkline,{tickHistoryRef,height:28}),
       ),
       // Best windows hint
-      bestWindowsToday&&bestWindowsToday.best&&bestWindowsToday.best.length>0&&React.createElement('div',{className:'pt-1.5 border-t border-[#EDEDED]/5'},
+      bestWindowsToday&&bestWindowsToday.best&&bestWindowsToday.best.length>0&&React.createElement('div',{className:'pt-1.5 border-t border-[#EDEDED]/8'},
         React.createElement('div',{className:'flex items-baseline gap-2 mb-1'},
           React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/40'},`Best ${bestWindowsToday.dayName} hours`),
           React.createElement('span',{className:'text-[9px] text-[#EDEDED]/30'},'historical ≥3'),
@@ -19665,7 +19665,7 @@ function TradeScheduleStrip({taraCallLog,currentAsset,timeFormat,onOpenFullSched
   // Preserve insertion order
   const _sessionOrder=Object.keys(_upcomingBySession);
 
-  return React.createElement('div',{className:'mb-2 px-3 py-2.5 rounded-lg min-w-0 overflow-hidden',style:{background:'#121212',border:'1px solid rgba(237,237,237,0.08)'}},
+  return React.createElement('div',{className:'mb-2 px-3 py-2.5 rounded-lg min-w-0 overflow-hidden',style:{background:'#0A0A0A',border:'1px solid rgba(237,237,237,0.08)'}},
     // Header
     React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
       React.createElement('span',{className:'text-[9px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(201,169,97,0.85)'}},'Today\'s Schedule'),
@@ -19820,7 +19820,7 @@ function TradeScheduleModal({taraCallLog,currentAsset,timeFormat,onClose}){
   },
     React.createElement('div',{
       className:'w-full max-w-3xl rounded-xl my-auto',
-      style:{background:'#262626',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
+      style:{background:'#171717',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
       onClick:(e)=>e.stopPropagation(),
     },
       // Header
@@ -20117,7 +20117,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
       ),
     ),
     // Expanded detail panel
-    expanded&&React.createElement('div',{className:'border-t border-[#EDEDED]/5 px-3 sm:px-4 py-3 space-y-2.5 text-[11px]'},
+    expanded&&React.createElement('div',{className:'border-t border-[#EDEDED]/8 px-3 sm:px-4 py-3 space-y-2.5 text-[11px]'},
       // V9.13: ADAPTIVE SCHEDULE STRIP — 24-hour heatmap of recommended trade
       //   activity, with current adaptive dial reasoning. Always shown at top of
       //   expanded panel so user can see at-a-glance whether they're in a green
@@ -20228,7 +20228,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         ),
       ),
       // V8.7: Coin flip risk pill
-      React.createElement('div',{className:'flex items-baseline justify-between gap-2 pb-1 border-b border-[#EDEDED]/5'},
+      React.createElement('div',{className:'flex items-baseline justify-between gap-2 pb-1 border-b border-[#EDEDED]/8'},
         React.createElement('span',{className:'text-[8px] uppercase tracking-[0.14em] font-bold text-[#EDEDED]/30'},'Coin-flip risk'),
         React.createElement('span',{className:'text-[10px] uppercase font-bold tabular-nums tracking-wider',style:{
           color:ctx.phase.coinFlipRisk==='LOW'?'rgb(40,204,149)':ctx.phase.coinFlipRisk==='MEDIUM'?'rgba(201,169,97,0.95)':'rgba(255,77,106,0.95)',
@@ -20250,7 +20250,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         React.createElement('span',{className:'text-[#EDEDED]/75 leading-relaxed italic'},ctx.phase.whatTaraDoes),
       ),
       // Character description (legacy field — still useful as one-liner)
-      React.createElement('div',{className:'flex items-baseline gap-2 pt-1.5 border-t border-[#EDEDED]/5'},
+      React.createElement('div',{className:'flex items-baseline gap-2 pt-1.5 border-t border-[#EDEDED]/8'},
         React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] text-[#EDEDED]/30 shrink-0 mt-0.5'},'Character'),
         React.createElement('span',{className:'text-[#EDEDED]/55 leading-relaxed'},ctx.phase.character),
       ),
@@ -20274,7 +20274,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         ),
       ),
       // Macro event detail if active
-      ctx.macro.state!=='CLEAR'&&ctx.macro.event&&React.createElement('div',{className:'flex items-baseline gap-2 pt-1 border-t border-[#EDEDED]/5'},
+      ctx.macro.state!=='CLEAR'&&ctx.macro.event&&React.createElement('div',{className:'flex items-baseline gap-2 pt-1 border-t border-[#EDEDED]/8'},
         React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 mt-0.5',style:{color:'rgba(255,77,106,0.85)'}},'Macro'),
         React.createElement('span',{style:{color:'rgba(255,77,106,0.85)'}},
           ctx.macro.event.name,' · ',ctx.macro.event.impact,' impact · state: ',ctx.macro.state,
@@ -20317,7 +20317,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         }
         if(!_bestRange||_bestWr<0.55)return null;
         const _wrPct=Math.round(_bestWr*100);
-        return React.createElement('div',{className:'flex items-baseline gap-2 pt-1.5 border-t border-[#EDEDED]/5'},
+        return React.createElement('div',{className:'flex items-baseline gap-2 pt-1.5 border-t border-[#EDEDED]/8'},
           React.createElement('span',{className:'text-[8px] uppercase font-bold tracking-[0.14em] shrink-0 mt-0.5',style:{color:'rgb(40,204,149)'}},'Entry timing'),
           React.createElement('span',{className:'text-[#EDEDED]/75 leading-relaxed'},
             `Best entry window: minutes ${_bestRange} (${_wrPct}% WR over ${_bestN} trades). Entries before minute ${_bestRange.split('-')[0]} tend to lock on noise; after minute ${_bestRange.split('-')[1]} tends to chase.`
@@ -20325,7 +20325,7 @@ function MarketContextStrip({useLocalTime,timeFormat,taraLearnings,taraCallLog,c
         );
       })(),
       // Footer: dominant session + day rating
-      React.createElement('div',{className:'flex items-baseline justify-between gap-2 pt-1.5 border-t border-[#EDEDED]/5 text-[9px] text-[#EDEDED]/35 uppercase tracking-wider'},
+      React.createElement('div',{className:'flex items-baseline justify-between gap-2 pt-1.5 border-t border-[#EDEDED]/8 text-[9px] text-[#EDEDED]/35 uppercase tracking-wider'},
         React.createElement('span',null,ctx.dayName,' · ',ctx.sessions.dominant,' DOMINANT · DAY×SESS RATING ',ctx.sessions.dsRating),
         React.createElement('span',null,'ALL TIMES UTC'),
       ),
@@ -20431,7 +20431,7 @@ function TaraLearningsModal({learnings,onClose}){
           const wrColor=wr>=70?'text-emerald-400':wr>=55?'text-[#EDEDED]/80':wr>=45?'text-amber-400/80':'text-rose-400';
           const [regime,dir]=k.split('|');
           const arrow=dir==='UP'?'▲':'▼';
-          return React.createElement('div',{key:k,className:'px-2 py-2 rounded bg-[#0D0D0D] border border-[#EDEDED]/6'},
+          return React.createElement('div',{key:k,className:'px-2 py-2 rounded bg-[#0D0D0D] border border-[#EDEDED]/8'},
             React.createElement('div',{className:'flex items-baseline justify-between gap-2 mb-0.5'},
               React.createElement('span',{className:'text-[11px] font-bold tracking-wide text-[#EDEDED]/85 truncate flex items-baseline gap-1.5'},
                 React.createElement('span',{className:dir==='UP'?'text-emerald-400':'text-rose-400'},arrow),
@@ -20461,7 +20461,7 @@ function TaraLearningsModal({learnings,onClose}){
           const _adjLabel=adj<0?`${Math.abs(Math.round(adj*100))}% faster lock`:adj>0?`${Math.round(adj*100)}% slower`:'no change';
           const _adjColor=adj<0?'text-emerald-400/85':adj>0?'text-amber-400/80':'text-[#EDEDED]/35';
           const wrColor=wr>=70?'text-emerald-400':wr>=55?'text-[#EDEDED]/80':wr>=45?'text-amber-400/80':'text-rose-400';
-          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded bg-[#0D0D0D] border border-[#EDEDED]/6'},
+          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded bg-[#0D0D0D] border border-[#EDEDED]/8'},
             React.createElement('span',{className:'text-[11px] font-bold tracking-wide text-[#EDEDED]/85 truncate'},k),
             React.createElement('div',{className:'flex items-baseline gap-2 shrink-0'},
               React.createElement('span',{className:`text-[11px] tabular-nums font-bold ${wrColor}`},`${v.wins}W·${v.losses}L`),
@@ -20490,7 +20490,7 @@ function TaraLearningsModal({learnings,onClose}){
           const wrColor=wr>=70?'text-emerald-400':wr>=55?'text-[#EDEDED]/80':wr>=45?'text-amber-400/80':'text-rose-400';
           const _label=k==='structural-led'?'◈ Structural-led':k==='super-confluence'?'★ Super-confluence':k==='confluence'?'★ Confluence':k==='tape-led'?'⚡ Tape-led (fast)':k==='rising-confluence'?'↗ Rising (early entry)':'Single-signal';
           const _color=k==='structural-led'?{color:'#C4B5FD'}:k==='super-confluence'||k==='confluence'?{color:T2_GOLD}:k==='tape-led'?{color:'#7DD3FC'}:k==='rising-confluence'?{color:'#A6E3A1'}:{color:'rgba(237,237,237,0.85)'};
-          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded bg-[#0D0D0D] border border-[#EDEDED]/6'},
+          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded bg-[#0D0D0D] border border-[#EDEDED]/8'},
             React.createElement('span',{className:'text-[11px] font-bold tracking-wide truncate',style:_color},_label),
             React.createElement('div',{className:'flex items-baseline gap-2 shrink-0'},
               React.createElement('span',{className:`text-[11px] tabular-nums font-bold ${wrColor}`},`${v.wins}W·${v.losses}L`),
@@ -20516,7 +20516,7 @@ function TaraLearningsModal({learnings,onClose}){
           const wrColor=wr>=70?'text-emerald-400':wr>=55?'text-[#EDEDED]/80':wr>=45?'text-amber-400/80':'text-rose-400';
           const _label=k==='big-edge'?'BIG EDGE (≥+15pt)':k==='good-edge'?'GOOD EDGE (+5..+15)':k==='tight'?'TIGHT (-5..+5)':'LATE ENTRY (≤-5)';
           const _color=k==='big-edge'?{color:'#86EFAC'}:k==='good-edge'?{color:'rgba(40,204,149,0.7)'}:k==='tight'?{color:'rgba(237,237,237,0.65)'}:{color:'rgba(212,162,76,0.85)'};
-          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded bg-[#0D0D0D] border border-[#EDEDED]/6'},
+          return React.createElement('div',{key:k,className:'flex items-baseline justify-between gap-2 px-2 py-1.5 rounded bg-[#0D0D0D] border border-[#EDEDED]/8'},
             React.createElement('span',{className:'text-[11px] font-bold tracking-wide truncate',style:_color},_label),
             React.createElement('div',{className:'flex items-baseline gap-2 shrink-0'},
               React.createElement('span',{className:`text-[11px] tabular-nums font-bold ${wrColor}`},`${v.wins}W·${v.losses}L`),
@@ -20553,7 +20553,7 @@ function TaraLearningsModal({learnings,onClose}){
     onClick:onClose,
   },
     React.createElement('div',{
-      className:'bg-[#262626] border border-[#EDEDED]/15 rounded-xl shadow-2xl max-w-md w-full max-h-[85vh] overflow-y-auto p-5',
+      className:'bg-[#171717] border border-[#EDEDED]/15 rounded-xl shadow-2xl max-w-md w-full max-h-[85vh] overflow-y-auto p-5',
       onClick:(e)=>e.stopPropagation(),
       style:{boxShadow:'0 20px 60px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(201,169,97,0.06)'},
     },
@@ -21480,23 +21480,23 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         ),
       ),
       React.createElement('div',{className:'grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-2 mb-4'},
-        React.createElement('div',{className:'bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Total calls'),
           React.createElement('div',{className:'text-2xl font-bold text-white tabular-nums',style:{fontFamily:'"IBM Plex Mono",monospace'}},counts.total),
         ),
-        React.createElement('div',{className:'bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Win rate'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:_wr>=60?'rgb(40,204,149)':_wr>=50?'#fff':'rgb(255,77,106)',fontFamily:'"IBM Plex Mono",monospace'}},_wr!==null?`${_wr}%`:'—'),
         ),
-        React.createElement('div',{className:'bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Wins'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(40,204,149)',fontFamily:'"IBM Plex Mono",monospace'}},counts.wins),
         ),
-        React.createElement('div',{className:'bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Losses'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:'rgb(255,77,106)',fontFamily:'"IBM Plex Mono",monospace'}},counts.losses),
         ),
-        React.createElement('div',{className:'bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
+        React.createElement('div',{className:'bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
           React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Sat out'),
           React.createElement('div',{className:'text-2xl font-bold tabular-nums',style:{color:T2_GOLD,fontFamily:'"IBM Plex Mono",monospace'}},counts.sitouts),
         ),
@@ -21830,7 +21830,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
           return`${x.toFixed(1)},${y.toFixed(1)}`;
         }).join(' ');
         const _zeroY=_svgH-(((-_minPnl)/_range)*_svgH);
-        return React.createElement('div',{className:'mb-4 p-3 rounded-xl bg-[#262626] border border-[#EDEDED]/8'},
+        return React.createElement('div',{className:'mb-4 p-3 rounded-xl bg-[#171717] border border-[#EDEDED]/8'},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('span',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold'},'P&L Summary'),
             React.createElement('span',{className:'text-[10px] tabular-nums text-[#EDEDED]/50'},`${_withBets.length} trades with bet amounts`)
@@ -21886,7 +21886,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
         });
         const _activeTiers=_tiers.filter(t=>_stats[t].wins+_stats[t].losses>0);
         if(_activeTiers.length===0)return null;
-        return React.createElement('div',{className:'bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] mb-4'},
+        return React.createElement('div',{className:'bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] mb-4'},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold'},'Win rate by tier'),
             React.createElement('div',{className:'text-[8px] uppercase tracking-wider text-[#EDEDED]/30'},filter==='15m'?'15m only':filter==='5m'?'5m only':'all windows'),
@@ -21954,7 +21954,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
             // Sort newest first
             const days=Array.from(byDay.entries()).map(([k,v])=>({key:k,...v})).sort((a,b)=>b.date-a.date);
             if(days.length===0){
-              return React.createElement('div',{className:'bg-[#262626] border border-[#EDEDED]/8 rounded-xl p-8 text-center text-[#EDEDED]/40 italic'},'No data yet.');
+              return React.createElement('div',{className:'bg-[#171717] border border-[#EDEDED]/8 rounded-xl p-8 text-center text-[#EDEDED]/40 italic'},'No data yet.');
             }
             return React.createElement('div',{className:'space-y-3 max-h-[65vh] overflow-y-auto pr-1'},
               days.map(day=>{
@@ -21976,7 +21976,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   else if(e.result==='SITOUT')hourBins[h].sitouts++;
                 });
                 const _maxHourTotal=Math.max(1,...hourBins.map(b=>b.total));
-                return React.createElement('div',{key:day.key,className:'bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4'},
+                return React.createElement('div',{key:day.key,className:'bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4'},
                   // Day header
                   React.createElement('div',{className:'flex items-baseline justify-between mb-3 flex-wrap gap-2'},
                     React.createElement('div',{className:'flex items-baseline gap-3'},
@@ -22019,7 +22019,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     )),
                   ),
                   // Per-call mini-list (collapsed to most recent 5 by default)
-                  React.createElement('div',{className:'mt-2 pt-2 border-t border-[#EDEDED]/5 space-y-1'},
+                  React.createElement('div',{className:'mt-2 pt-2 border-t border-[#EDEDED]/8 space-y-1'},
                     _entries.slice().reverse().slice(0,5).map(e=>{
                       const _t=new Date(e.time||e.id).toLocaleTimeString('en-US',{..._tzOpt,hour:'2-digit',minute:'2-digit',hour12:false}); // V10.9.26
                       const _per=_periodFromWindowId(e.windowId,e.windowType);
@@ -22040,7 +22040,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
               }),
             );
           })()
-        : React.createElement('div',{className:'bg-[#262626] border border-[#EDEDED]/8 rounded-xl overflow-hidden'},
+        : React.createElement('div',{className:'bg-[#171717] border border-[#EDEDED]/8 rounded-xl overflow-hidden'},
         filtered.length===0
           ? React.createElement('div',{className:'p-8 text-center text-[#EDEDED]/40 italic'},'No calls match this filter yet.')
           : (()=>{
@@ -22231,7 +22231,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
   const tabs=[{id:'5m',label:'5 MIN'},{id:'15m',label:'15 MIN'},{id:'1h',label:'1 HOUR'}];
 
   return(
-    <div className={'bg-[#262626] p-3 sm:p-4 rounded-xl border border-[#EDEDED]/10 shadow-md flex flex-col relative min-w-0 '+(mobileTab!=='projections'?'hidden lg:flex':'')}>
+    <div className={'bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#EDEDED]/8 shadow-md flex flex-col relative min-w-0 '+(mobileTab!=='projections'?'hidden lg:flex':'')}>
       <T2Stamp code="PROJ · 042"/>
 
       {/* V4.2: TARA'S CALL — primary panel, top of column.
@@ -22258,7 +22258,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
       ):(
         <div className="flex-1 flex flex-col gap-2 overflow-hidden">
           {/* Header showing window context */}
-          <div className={'text-[10px] uppercase tracking-widest text-[#EDEDED]/40 font-bold text-center pb-1 border-b border-[#EDEDED]/10'}>
+          <div className={'text-[10px] uppercase tracking-widest text-[#EDEDED]/40 font-bold text-center pb-1 border-b border-[#EDEDED]/8'}>
             {tabs.find(t=>t.id===activeTimeframe)?.label} forecast · From ${currentPrice.toLocaleString(undefined,{maximumFractionDigits:0})}
             {/* V145.2: show which model is producing the projection */}
             {proj.fgtSrc&&<span className={'ml-2 text-[9px] '+(proj.fgtSrc.includes('HPotter')?'text-indigo-400/70':'text-[#EDEDED]/30')}>· {proj.fgtSrc}</span>}
@@ -22278,7 +22278,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
               // V149: dim extrapolated rows (beyond model horizon)
               const extraDim=point.extrapolated?'opacity-40':'';
               return(
-                <div key={i} className={'p-2 rounded-lg bg-[#121212] border border-[#EDEDED]/8 '+extraDim} title={point.extrapolated?'Beyond model forecast horizon — speculative':''}>
+                <div key={i} className={'p-2 rounded-lg bg-[#0A0A0A] border border-[#EDEDED]/8 '+extraDim} title={point.extrapolated?'Beyond model forecast horizon — speculative':''}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={'text-[11px] font-mono font-bold text-[#EDEDED]/70 shrink-0'}>{point.timeStr}</span>
@@ -22302,7 +22302,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
         </div>
       )}
       {/* Quick view of all 3 timeframes */}
-      <div className="grid grid-cols-3 gap-2 mt-3 shrink-0 border-t border-[#EDEDED]/10 pt-3">
+      <div className="grid grid-cols-3 gap-2 mt-3 shrink-0 border-t border-[#EDEDED]/8 pt-3">
         {projections.map(p=>{
           const pUp=p.price>=currentPrice;
           const pCls=pUp?'text-emerald-400':'text-rose-400';
@@ -22310,7 +22310,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
           const isActive=p.id===activeTimeframe;
           return(
             <button key={p.id} onClick={()=>setActiveTimeframe(p.id)}
-              className={'p-1.5 rounded-lg border text-left transition-all '+(isActive?'bg-[#121212] border-indigo-500/30':'border-transparent hover:bg-[#161616]')}>
+              className={'p-1.5 rounded-lg border text-left transition-all '+(isActive?'bg-[#0A0A0A] border-indigo-500/30':'border-transparent hover:bg-[#161616]')}>
               <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>{p.time}</div>
               <div className="text-xs font-mono font-bold text-white">${Number(p.price||0).toFixed(0)}</div>
               <div className="flex items-center gap-1">
@@ -22906,7 +22906,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
         </div>
 
         {/* Tab toggle */}
-        <div className="flex gap-1 mb-5 p-1 rounded-lg bg-[#262626] w-fit border border-[#EDEDED]/8">
+        <div className="flex gap-1 mb-5 p-1 rounded-lg bg-[#171717] w-fit border border-[#EDEDED]/8">
           {['today','week','all'].map(t=>(
             <button key={t} onClick={()=>{setTab(t);setSelectedHour(null);}} className={'px-4 py-1.5 text-xs uppercase font-bold tracking-wider rounded-md transition-colors '+(tab===t?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70')} style={tab===t?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>
               {t==='today'?'Today':t==='week'?'7 Days':'All Time'}
@@ -22916,19 +22916,19 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
 
         {/* Top stats grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-5">
-          <div className="bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
             <T2Stamp code="ALL · 001"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Trades</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{trades.length}</div>
             <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">resolved</div>
           </div>
-          <div className="bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
             <T2Stamp code="ACC · 002"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Accuracy</div>
             <div className={'text-2xl sm:text-3xl font-bold '+(wr>=60?'text-emerald-400':wr>=50?'text-white':'text-rose-400')} style={T2_MONO_STYLE}>{trades.length>0?wr.toFixed(0):'—'}%</div>
             <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">{wins}W · {losses}L</div>
           </div>
-          <div className="bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
             <T2Stamp code="STR · 003"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Streak</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{(()=>{
@@ -22940,7 +22940,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
             })()}</div>
             <div className="text-[10px] mt-0.5" style={{color:trades.length>0&&[...trades].sort((a,b)=>b.id-a.id)[0]?.result==='WIN'?'#7fa189':'#b26558'}}>{trades.length>0?[...trades].sort((a,b)=>b.id-a.id)[0]?.result.toLowerCase():''}</div>
           </div>
-          <div className="bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+          <div className="bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
             <T2Stamp code="LIFE · 004"/>
             <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Lifetime</div>
             <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{((scorecards?.['15m']?.wins||0)/Math.max(1,(scorecards?.['15m']?.wins||0)+(scorecards?.['15m']?.losses||0))*100).toFixed(0)}%</div>
@@ -22949,7 +22949,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
         </div>
 
         {/* Insights surface */}
-        <div className="bg-[#262626] border border-[#EDEDED]/8 rounded-xl p-4 sm:p-5 mb-5 relative">
+        <div className="bg-[#171717] border border-[#EDEDED]/8 rounded-xl p-4 sm:p-5 mb-5 relative">
           <T2Stamp code="INS · 005"/>
           <div className="text-xs uppercase tracking-[0.22em] font-bold mb-3" style={{color:T2_GOLD}}>Insights</div>
           <div className="space-y-2">
@@ -22957,7 +22957,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
               const color=i.kind==='positive'?'#7fa189':i.kind==='negative'?T2_COPPER:'rgba(237,237,237,0.7)';
               const dot=i.kind==='positive'?'#7fa189':i.kind==='negative'?T2_COPPER:T2_GOLD;
               return(
-                <div key={idx} className="flex items-start gap-3 p-2 rounded-md bg-[#0D0D0D] border border-[#EDEDED]/4">
+                <div key={idx} className="flex items-start gap-3 p-2 rounded-md bg-[#0D0D0D] border border-[#EDEDED]/8">
                   <span className="inline-block w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{background:dot}}></span>
                   <span className="text-[12px] sm:text-[13px] leading-relaxed" style={{color}}>{i.text}</span>
                 </div>
@@ -22967,7 +22967,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
         </div>
 
         {/* Hourly heatmap */}
-        <div className="bg-[#262626] border border-[#EDEDED]/8 rounded-xl p-4 sm:p-5 mb-5 relative">
+        <div className="bg-[#171717] border border-[#EDEDED]/8 rounded-xl p-4 sm:p-5 mb-5 relative">
           <T2Stamp code="HOUR · 006"/>
           <div className="flex items-baseline justify-between mb-3">
             <div className="text-xs uppercase tracking-[0.22em] font-bold" style={{color:T2_GOLD}}>Hourly Breakdown <span className="text-[10px] tracking-wider text-[#EDEDED]/30 ml-1 font-normal normal-case">LOCAL · tap to drill</span></div>
@@ -23076,7 +23076,7 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
 // Cohort row card — used inside StatsView
 function CohortCard({title,stamp,rows}){
   return(
-    <div className="bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+    <div className="bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
       <T2Stamp code={stamp}/>
       <div className="text-[10px] uppercase tracking-[0.22em] font-bold mb-3" style={{color:T2_GOLD}}>{title}</div>
       {rows.length===0&&<div className="text-[11px] text-[#EDEDED]/30 italic">No data</div>}
@@ -23216,7 +23216,7 @@ function TapeStrip({tapeWindows,whaleLog}){
     );
   };
   return(
-    <div className="bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+    <div className="bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
       <T2Stamp code="TAPE · 030"/>
       <div className="flex items-baseline justify-between mb-2">
         <div className="flex items-baseline gap-2.5">
@@ -23397,7 +23397,7 @@ function DepthStrip({orderBook,targetMargin}){
     );
   };
   return(
-    <div className="bg-[#262626] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
+    <div className="bg-[#171717] border border-[#EDEDED]/15 rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] sm:p-4 relative">
       <T2Stamp code="DOM · BAND"/>
       <div className="flex items-baseline justify-between mb-2">
         <div className="flex items-baseline gap-2.5">
@@ -23434,7 +23434,7 @@ function DepthStrip({orderBook,targetMargin}){
         <span className="text-[11px] sm:text-xs tabular-nums text-[#EDEDED]/55">{hlAboveFloor?dominantPct.toFixed(1)+'%':'—'}</span>
         <span className="text-[11px] sm:text-xs font-bold tabular-nums" style={{color:askColor}}>ASK {fmtUSD(hlAsks)}</span>
       </div>
-      <div className="w-full h-1.5 bg-[#121212] rounded-full overflow-hidden flex relative mb-2">
+      <div className="w-full h-1.5 bg-[#0A0A0A] rounded-full overflow-hidden flex relative mb-2">
         <div style={{width:`${hlBidPct}%`,background:bidColor,opacity:hlAboveFloor?0.85:0.30}} className="h-full transition-all duration-300"></div>
         <div style={{width:`${100-hlBidPct}%`,background:askColor,opacity:hlAboveFloor?0.85:0.30}} className="h-full transition-all duration-300"></div>
       </div>
@@ -23636,7 +23636,7 @@ function NewsFeedCard({timeFormat,pushToast}={}){
           {macroEvents.map((e,i)=>{
             const isImminent=Math.abs(e.minutesUntil)<=15;
             const isNow=e.minutesUntil<=0&&Math.abs(e.minutesUntil)<=2;
-            const cls=isNow?'bg-rose-500/15 border-rose-500/40 text-rose-300 animate-pulse':isImminent?'bg-amber-500/10 border-amber-500/30 text-amber-300':'bg-[#121212] border-[#EDEDED]/8 text-[#EDEDED]/60';
+            const cls=isNow?'bg-rose-500/15 border-rose-500/40 text-rose-300 animate-pulse':isImminent?'bg-amber-500/10 border-amber-500/30 text-amber-300':'bg-[#0A0A0A] border-[#EDEDED]/8 text-[#EDEDED]/60';
             const label=e.minutesUntil>0?`in ${e.minutesUntil}m`:`${Math.abs(e.minutesUntil)}m ago`;
             return(<div key={i} className={'p-1.5 rounded border text-[10px] flex justify-between '+cls}>
               <span className="font-bold">{e.name}</span>
@@ -23793,10 +23793,10 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
   },
     React.createElement('div',{
       className:'w-full max-w-lg rounded-xl my-auto max-h-[90vh] overflow-y-auto',
-      style:{background:'#262626',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
+      style:{background:'#171717',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
       onClick:(e)=>e.stopPropagation(),
     },
-      React.createElement('div',{className:'flex items-center justify-between px-5 py-4 sticky top-0',style:{borderBottom:'1px solid rgba(237,237,237,0.10)',background:'#262626'}},
+      React.createElement('div',{className:'flex items-center justify-between px-5 py-4 sticky top-0',style:{borderBottom:'1px solid rgba(237,237,237,0.10)',background:'#171717'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Sync'),
           React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:'rgba(201,169,97,0.85)'}},'cross-device')
@@ -24126,11 +24126,11 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
   },
     React.createElement('div',{
       className:'w-full max-w-4xl mx-2 my-4 sm:my-8 rounded-xl',
-      style:{background:'#262626',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 60px rgba(201,169,97,0.10)'},
+      style:{background:'#171717',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 60px rgba(201,169,97,0.10)'},
       onClick:e=>e.stopPropagation(),
     },
       // Header
-      React.createElement('div',{className:'sticky top-0 z-10 flex items-center justify-between px-5 py-4 rounded-t-xl',style:{background:'#262626',borderBottom:'1px solid rgba(237,237,237,0.10)'}},
+      React.createElement('div',{className:'sticky top-0 z-10 flex items-center justify-between px-5 py-4 rounded-t-xl',style:{background:'#171717',borderBottom:'1px solid rgba(237,237,237,0.10)'}},
         React.createElement('div',{className:'flex items-baseline gap-3'},
           React.createElement('h2',{className:'font-serif text-2xl tracking-tight text-white'},'Analytics'),
           React.createElement('span',{className:'text-[10px] uppercase tracking-[0.18em] font-bold',style:{color:T2_GOLD}},`${resolved.length} resolved · ${_wrPct}% WR`),
@@ -24171,11 +24171,11 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
         React.createElement('div',{className:'grid grid-cols-1 sm:grid-cols-2 gap-4'},
           ['BTC'].map(asset=>{
             const d=pnlByAsset[asset];
-            if(!d||d.trades===0)return React.createElement('div',{key:asset,className:'p-3 rounded-lg bg-[#121212] border border-[#EDEDED]/5'},
+            if(!d||d.trades===0)return React.createElement('div',{key:asset,className:'p-3 rounded-lg bg-[#0A0A0A] border border-[#EDEDED]/8'},
               React.createElement('div',{className:'text-[10px] uppercase tracking-wider font-bold',style:{color:asset==='BTC'?'rgb(247,147,26)':'rgb(98,126,234)'}},`${asset} P&L`),
               React.createElement('div',{className:'text-[11px] text-[#EDEDED]/40 italic mt-1'},'No trades with bet amounts yet')
             );
-            return React.createElement('div',{key:asset,className:'p-3 rounded-lg bg-[#121212] border border-[#EDEDED]/5'},
+            return React.createElement('div',{key:asset,className:'p-3 rounded-lg bg-[#0A0A0A] border border-[#EDEDED]/8'},
               React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
                 React.createElement('span',{className:'text-[10px] uppercase tracking-wider font-bold',style:{color:asset==='BTC'?'rgb(247,147,26)':'rgb(98,126,234)'}},`${asset} · ${d.trades} trades`),
                 React.createElement('span',{className:'text-sm font-bold tabular-nums',style:{color:d.pnl>=0?'rgb(40,204,149)':'rgb(255,77,106)'}},`${d.pnl>=0?'+':''}$${d.pnl.toFixed(2)}`)
@@ -24191,7 +24191,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
             regimeDir.map((r,i)=>{
               const wrPct=Math.round(r.wr*100);
               const color=wrPct>=65?'rgb(40,204,149)':wrPct>=50?'rgba(201,169,97,0.85)':'rgb(255,77,106)';
-              return React.createElement('div',{key:i,className:'flex items-center justify-between p-2 rounded bg-[#121212] border border-[#EDEDED]/5'},
+              return React.createElement('div',{key:i,className:'flex items-center justify-between p-2 rounded bg-[#0A0A0A] border border-[#EDEDED]/8'},
                 React.createElement('div',{className:'flex items-center gap-2 min-w-0'},
                   React.createElement('span',{className:'text-[10px] font-bold',style:{color:r.dir==='UP'?'rgb(40,204,149)':'rgb(255,77,106)'}},r.dir==='UP'?'▲':'▼'),
                   React.createElement('span',{className:'text-[11px] text-[#EDEDED]/70 truncate'},r.regime)
@@ -24214,7 +24214,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
               const _labels={LATE_REVERSAL:'Late reversal — was winning, flipped',MID_REVERSAL:'Mid-window fade',EARLY_PEAK:'Early peak, sustained loss',WRONG_FROM_START:'Never above water',WHALE_SPIKE:'Contrary whale spike',MACRO_SHOCK:'Macro event shock',UNKNOWN:'Unclassified'};
               return React.createElement('div',{key:i,className:'flex items-center gap-3 text-[11px]'},
                 React.createElement('span',{className:'text-[#EDEDED]/50 w-32 shrink-0 truncate'},_labels[pat]||pat),
-                React.createElement('div',{className:'flex-1 h-2 bg-[#121212] rounded-full overflow-hidden'},
+                React.createElement('div',{className:'flex-1 h-2 bg-[#0A0A0A] rounded-full overflow-hidden'},
                   React.createElement('div',{className:'h-full rounded-full transition-all',style:{width:`${pct}%`,background:'rgba(255,77,106,0.6)'}})
                 ),
                 React.createElement('span',{className:'text-[#EDEDED]/40 tabular-nums w-16 text-right'},`${n} (${pct.toFixed(0)}%)`)
@@ -24225,7 +24225,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
         // ═══ ML MODEL STATUS ═══
         mlInfo?React.createElement('div',null,
           React.createElement('div',{className:'text-[10px] uppercase tracking-[0.18em] font-bold mb-3',style:{color:'rgba(176,176,176,0.85)'}},'ML Model · Feature Importance'),
-          React.createElement('div',{className:'p-3 rounded-lg bg-[#121212] border border-[#EDEDED]/5'},
+          React.createElement('div',{className:'p-3 rounded-lg bg-[#0A0A0A] border border-[#EDEDED]/8'},
             React.createElement('div',{className:'flex items-baseline justify-between mb-3'},
               React.createElement('span',{className:'text-[11px] text-[#EDEDED]/70'},`Logistic regression · ${mlInfo.nTrades} training samples · ${(mlInfo.accuracy*100).toFixed(1)}% accuracy`),
               React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40'},`Trained ${_fmtTimeTz(new Date(mlInfo.trainedAt),timeFormat,{hour:'2-digit',minute:'2-digit',hour12:false})}`)
@@ -24244,7 +24244,7 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
               })
             )
           )
-        ):React.createElement('div',{className:'p-3 rounded-lg bg-[#121212] border border-[#EDEDED]/5 text-[11px] text-[#EDEDED]/40'},
+        ):React.createElement('div',{className:'p-3 rounded-lg bg-[#0A0A0A] border border-[#EDEDED]/8 text-[11px] text-[#EDEDED]/40'},
           `ML model needs ≥${TARA_ML_MIN_TRADES} resolved trades with signal data. Currently: ${resolved.filter(e=>e.signalScoresAtLock).length}.`
         ),
       )
@@ -24265,7 +24265,7 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
   },
     React.createElement('div',{
       className:'w-full max-w-2xl rounded-xl my-auto',
-      style:{background:'#262626',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
+      style:{background:'#171717',border:'1px solid rgba(201,169,97,0.20)',boxShadow:'0 0 40px rgba(201,169,97,0.15)'},
       onClick:(e)=>e.stopPropagation(),
     },
       React.createElement('div',{className:'flex items-center justify-between px-5 py-4',style:{borderBottom:'1px solid rgba(237,237,237,0.10)'}},
@@ -24286,7 +24286,7 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
             macroEvents.map((e,i)=>{
               const isImminent=Math.abs(e.minutesUntil)<=15;
               const isNow=e.minutesUntil<=0&&Math.abs(e.minutesUntil)<=2;
-              const cls=isNow?'bg-rose-500/15 border-rose-500/40 text-rose-300':isImminent?'bg-amber-500/10 border-amber-500/30 text-amber-300':'bg-[#121212] border-[#EDEDED]/10 text-[#EDEDED]/70';
+              const cls=isNow?'bg-rose-500/15 border-rose-500/40 text-rose-300':isImminent?'bg-amber-500/10 border-amber-500/30 text-amber-300':'bg-[#0A0A0A] border-[#EDEDED]/8 text-[#EDEDED]/70';
               const label=e.minutesUntil>0?`in ${e.minutesUntil}m`:`${Math.abs(e.minutesUntil)}m ago`;
               return React.createElement('div',{key:i,className:'p-2 rounded border text-[11px] flex justify-between '+cls},
                 React.createElement('span',{className:'font-bold'},e.name),
@@ -24357,7 +24357,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
   const ls=bloomberg?.longShortRatio||1;
 
   return(
-    <div className={'bg-[#262626] p-3 sm:p-4 rounded-xl border border-[#EDEDED]/10 shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
+    <div className={'bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#EDEDED]/8 shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
       <T2Stamp code="SCR · 008"/>
       {/* V146.1 Fix B: Score Breakdown — per-signal contribution to current posterior */}
       <div className="shrink-0">
@@ -24395,7 +24395,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
               {entries.map(e=>(
                 <div key={e.k} className="flex items-center gap-2 text-[10px]">
                   <span className={'text-[#EDEDED]/50 w-16 shrink-0'}>{e.label}</span>
-                  <div className="flex-1 relative h-3 bg-[#121212] rounded-sm overflow-hidden">
+                  <div className="flex-1 relative h-3 bg-[#0A0A0A] rounded-sm overflow-hidden">
                     {/* center line at 50% */}
                     <div className="absolute top-0 bottom-0 left-1/2 w-px bg-[#EDEDED]/20"></div>
                     {/* bar */}
@@ -24410,7 +24410,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
               {/* FGT row — primary signal, separated with gold-tinted divider (V2.1) */}
               <div className="flex items-center gap-2 text-[10px] pt-1.5 mt-0.5" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
                 <span className={'text-purple-300 w-16 shrink-0 font-bold'}>FGT {fgtAbsDisplay}/4</span>
-                <div className="flex-1 relative h-3 bg-[#121212] rounded-sm overflow-hidden">
+                <div className="flex-1 relative h-3 bg-[#0A0A0A] rounded-sm overflow-hidden">
                   <div className="absolute top-0 bottom-0 left-1/2 w-px bg-[#EDEDED]/20"></div>
                   <div className={'absolute top-0 bottom-0 '+(fgtContribution>0?'bg-emerald-400':fgtContribution<0?'bg-rose-400':'bg-[#EDEDED]/15')} style={{
                     left:fgtContribution>=0?'50%':`calc(50% - ${(Math.abs(fgtContribution)/maxAbs)*50}%)`,
@@ -24526,19 +24526,19 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
       <div className="shrink-0 pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
         <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2'} style={{color:T2_GOLD}}>Live Feeds</div>
         <div className="grid grid-cols-2 gap-2 mb-2">
-          <div className={'p-1.5 rounded bg-[#121212]'}>
+          <div className={'p-1.5 rounded bg-[#0A0A0A]'}>
             <div className={'text-[9px] uppercase text-[#EDEDED]/40 font-bold'}>Buy Flow</div>
             <div className="text-emerald-400 text-xs font-bold">{buyPct.toFixed(0)}%</div>
           </div>
-          <div className={'p-1.5 rounded bg-[#121212]'}>
+          <div className={'p-1.5 rounded bg-[#0A0A0A]'}>
             <div className={'text-[9px] uppercase text-[#EDEDED]/40 font-bold'}>OI 5m</div>
             <div className={'text-xs font-bold '+(oi>=0?'text-emerald-400':'text-rose-400')}>{oi>=0?'+':''}{oi.toFixed(2)}%</div>
           </div>
-          <div className={'p-1.5 rounded bg-[#121212]'}>
+          <div className={'p-1.5 rounded bg-[#0A0A0A]'}>
             <div className={'text-[9px] uppercase text-[#EDEDED]/40 font-bold'}>Funding</div>
             <div className={'text-xs font-bold '+(fr>=0?'text-emerald-400':'text-rose-400')}>{fr>=0?'+':''}{fr.toFixed(4)}%</div>
           </div>
-          <div className={'p-1.5 rounded bg-[#121212]'}>
+          <div className={'p-1.5 rounded bg-[#0A0A0A]'}>
             <div className={'text-[9px] uppercase text-[#EDEDED]/40 font-bold'}>L/S</div>
             <div className={'text-xs font-bold '+(ls>=1?'text-emerald-400':'text-rose-400')}>{ls.toFixed(2)}</div>
           </div>
@@ -24580,7 +24580,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
 // ── V111: ChartBottomCard - TradingView at bottom, full width ──
 function ChartBottomCard({mobileTab,resolution,setResolution,asset,priceSource}){
   return(
-    <div className={'bg-[#262626] p-3 sm:p-4 rounded-xl border border-[#EDEDED]/10 shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
+    <div className={'bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#EDEDED]/8 shadow-md flex flex-col '+(mobileTab!=='chart'?'hidden lg:flex':'')}>
       <div className="flex justify-between items-center mb-2 shrink-0">
         <span className={'text-xs uppercase tracking-[0.2em] text-[#EDEDED]/40 font-bold'}>Live Chart</span>
         <div className="flex gap-1">
@@ -24706,10 +24706,10 @@ function ManualWeatherEntry({onLock}){
     React.createElement('div',{className:'flex gap-2'},
       React.createElement('input',{value:draft.market,onChange:e=>setDraft(p=>({...p,market:e.target.value})),
         placeholder:'Market name e.g. "Rain in Seattle this month · Above 2 inches"',
-        className:'flex-1 bg-[#121212] border border-[#EDEDED]/15 rounded-lg px-3 py-2 text-sm text-[#EDEDED] placeholder-[#EDEDED]/20 focus:outline-none focus:border-sky-500/40'}),
+        className:'flex-1 bg-[#0A0A0A] border border-[#EDEDED]/15 rounded-lg px-3 py-2 text-sm text-[#EDEDED] placeholder-[#EDEDED]/20 focus:outline-none focus:border-sky-500/40'}),
       React.createElement('input',{value:draft.yesPrice,onChange:e=>setDraft(p=>({...p,yesPrice:e.target.value})),
         type:'number',min:1,max:99,placeholder:'YES ¢',
-        className:'w-24 bg-[#121212] border border-[#EDEDED]/15 rounded-lg px-3 py-2 text-sm text-[#EDEDED] placeholder-[#EDEDED]/20 focus:outline-none focus:border-sky-500/40'})
+        className:'w-24 bg-[#0A0A0A] border border-[#EDEDED]/15 rounded-lg px-3 py-2 text-sm text-[#EDEDED] placeholder-[#EDEDED]/20 focus:outline-none focus:border-sky-500/40'})
     ),
     React.createElement('div',{className:'flex items-center gap-2'},
       React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40 font-bold uppercase tracking-wider'},'My read:'),
@@ -24719,7 +24719,7 @@ function ManualWeatherEntry({onLock}){
           :'border-[#EDEDED]/15 text-[#EDEDED]/40')},r)),
       React.createElement('input',{value:draft.notes,onChange:e=>setDraft(p=>({...p,notes:e.target.value})),
         placeholder:'Why (optional)',
-        className:'flex-1 bg-[#121212] border border-[#EDEDED]/15 rounded-lg px-3 py-2 text-sm text-[#EDEDED] placeholder-[#EDEDED]/20 focus:outline-none focus:border-sky-500/40'}),
+        className:'flex-1 bg-[#0A0A0A] border border-[#EDEDED]/15 rounded-lg px-3 py-2 text-sm text-[#EDEDED] placeholder-[#EDEDED]/20 focus:outline-none focus:border-sky-500/40'}),
       React.createElement('button',{onClick:lock,
         disabled:!draft.market.trim()||!draft.myRead,
         className:'px-4 py-2 rounded-lg text-sm font-bold border transition-all disabled:opacity-30',
@@ -24871,14 +24871,14 @@ function WeatherTab({weatherLog,setWeatherLog}){
 
     // top stats
     React.createElement('div',{className:'flex flex-wrap items-center gap-2 shrink-0'},
-      React.createElement('div',{className:'flex items-center gap-2 bg-[#262626] border border-[#EDEDED]/10 rounded-xl px-3 py-2'},
+      React.createElement('div',{className:'flex items-center gap-2 bg-[#171717] border border-[#EDEDED]/8 rounded-xl px-3 py-2'},
         React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40 font-bold uppercase tracking-wider'},'WR'),
         React.createElement('span',{className:'text-lg font-serif font-bold',style:{color:wr===null?'rgba(237,237,237,0.4)':wr>=60?'rgb(40,204,149)':'rgb(255,77,106)'}},wr===null?'—':wr+'%'),
         React.createElement('span',{className:'text-[10px] text-[#EDEDED]/25'},resolved.length+' settled · '+pending.length+' pending')
       ),
       // best call badge
       curCityData?.scored?.find(s=>s.call)&&React.createElement('div',{
-        className:'flex items-center gap-2 bg-[#262626] border border-sky-500/30 rounded-xl px-3 py-2'},
+        className:'flex items-center gap-2 bg-[#171717] border border-sky-500/30 rounded-xl px-3 py-2'},
         React.createElement('span',{className:'text-[9px] text-sky-400 font-bold uppercase tracking-wider'},'TARA EDGE'),
         React.createElement('span',{className:'text-sm font-bold text-[#EDEDED]'},
           activeCity+' '+curCityData.scored.find(s=>s.call).subtitle),
@@ -24889,7 +24889,7 @@ function WeatherTab({weatherLog,setWeatherLog}){
           curCityData.scored.find(s=>s.call).call+' '+Math.abs(curCityData.scored.find(s=>s.call).edge)+'pt edge')
       ),
       React.createElement('button',{onClick:()=>fetchAll(true),
-        className:'ml-auto flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider border border-[#EDEDED]/10 text-[#EDEDED]/40 hover:text-sky-300 hover:border-sky-500/30 transition-all'},
+        className:'ml-auto flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider border border-[#EDEDED]/8 text-[#EDEDED]/40 hover:text-sky-300 hover:border-sky-500/30 transition-all'},
         '\u27F3 Refresh')
     ),
 
@@ -24897,7 +24897,7 @@ function WeatherTab({weatherLog,setWeatherLog}){
     React.createElement('div',{className:'flex gap-1.5 shrink-0'},
       [['temp','Daily Temp'],['extra','Snow/Rain/Storms'],['log','My Log ('+weatherLog.length+')']].map(([v,l])=>
         React.createElement('button',{key:v,onClick:()=>setActiveView(v),
-          className:'px-3 py-1.5 rounded-lg text-xs font-bold border transition-all '+(activeView===v?'bg-sky-500/20 text-sky-200 border-sky-500/40':'border-[#EDEDED]/10 text-[#EDEDED]/40 hover:text-sky-300')
+          className:'px-3 py-1.5 rounded-lg text-xs font-bold border transition-all '+(activeView===v?'bg-sky-500/20 text-sky-200 border-sky-500/40':'border-[#EDEDED]/8 text-[#EDEDED]/40 hover:text-sky-300')
         },l)
       )
     ),
@@ -24910,7 +24910,7 @@ function WeatherTab({weatherLog,setWeatherLog}){
           const cd=cityData[city.name];
           const best=cd?.scored?.find(s=>s.call);
           return React.createElement('button',{key:city.name,onClick:()=>setActiveCity(city.name),
-            className:'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all '+(activeCity===city.name?'bg-sky-500/20 text-sky-200 border-sky-500/40':'border-[#EDEDED]/10 text-[#EDEDED]/50 hover:border-sky-500/20 hover:text-sky-300')
+            className:'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all '+(activeCity===city.name?'bg-sky-500/20 text-sky-200 border-sky-500/40':'border-[#EDEDED]/8 text-[#EDEDED]/50 hover:border-sky-500/20 hover:text-sky-300')
           },
             city.name,
             cd?.forecast?.hi!=null&&React.createElement('span',{className:'text-[10px] font-mono opacity-70'},cd.forecast.hi+'°F'),
@@ -24923,7 +24923,7 @@ function WeatherTab({weatherLog,setWeatherLog}){
       ),
 
       // forecast header
-      curCityData&&React.createElement('div',{className:'bg-[#262626] border border-[#EDEDED]/10 rounded-xl p-3'},
+      curCityData&&React.createElement('div',{className:'bg-[#171717] border border-[#EDEDED]/8 rounded-xl p-3'},
         React.createElement('div',{className:'flex flex-wrap items-center gap-3 mb-3'},
           React.createElement('span',{className:'text-xs font-bold text-[#EDEDED]/70'},curCity?.label||activeCity),
           curCityData.forecast?.hi!=null&&React.createElement('span',{className:'text-xs text-sky-300'},
@@ -24985,7 +24985,7 @@ function WeatherTab({weatherLog,setWeatherLog}){
         const ed=extraData[s.series];
         const CAT_COLOR={snow:'rgb(186,230,253)',precip:'rgb(96,165,250)',storm:'rgb(251,146,60)'};
         const col=CAT_COLOR[s.cat]||'rgb(237,237,237)';
-        return React.createElement('div',{key:s.series,className:'bg-[#262626] border border-[#EDEDED]/10 rounded-xl p-4'},
+        return React.createElement('div',{key:s.series,className:'bg-[#171717] border border-[#EDEDED]/8 rounded-xl p-4'},
           React.createElement('div',{className:'flex items-center gap-2 mb-3'},
             React.createElement('span',{className:'text-xs font-bold px-2 py-0.5 rounded',
               style:{background:col+'22',color:col,border:'1px solid '+col+'44'}},s.cat.toUpperCase()),
@@ -25021,7 +25021,7 @@ function WeatherTab({weatherLog,setWeatherLog}){
       React.createElement('div',{className:'flex gap-2 shrink-0'},
         ['all','pending','resolved'].map(f=>
           React.createElement('button',{key:f,onClick:()=>setFilter(f),
-            className:'px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all '+(filter===f?'bg-sky-500/20 text-sky-200 border-sky-500/40':'text-[#EDEDED]/30 border-[#EDEDED]/10')
+            className:'px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all '+(filter===f?'bg-sky-500/20 text-sky-200 border-sky-500/40':'text-[#EDEDED]/30 border-[#EDEDED]/8')
           },f==='all'?'ALL ('+weatherLog.length+')':f==='pending'?'PENDING ('+pending.length+')':'SETTLED ('+resolved.length+')')
         )
       ),
@@ -25033,7 +25033,7 @@ function WeatherTab({weatherLog,setWeatherLog}){
         return React.createElement('div',{key:e.id,
           className:'rounded-xl border p-3 flex flex-col sm:flex-row sm:items-center gap-3',
           style:{borderColor:isPending?'rgba(237,237,237,0.1)':isWin?'rgba(40,204,149,0.3)':'rgba(255,77,106,0.3)',
-                 background:isPending?'#262626':isWin?'rgba(40,204,149,0.04)':'rgba(255,77,106,0.04)'}},
+                 background:isPending?'#171717':isWin?'rgba(40,204,149,0.04)':'rgba(255,77,106,0.04)'}},
           React.createElement('div',{className:'flex-1 min-w-0'},
             React.createElement('div',{className:'text-sm font-bold text-[#EDEDED] truncate'},e.market),
             React.createElement('div',{className:'text-[10px] text-[#EDEDED]/35 mt-0.5'},
@@ -25053,14 +25053,14 @@ function WeatherTab({weatherLog,setWeatherLog}){
             ?React.createElement('div',{className:'flex gap-1.5 shrink-0'},
                 React.createElement('button',{onClick:()=>settle(e.id,'WIN'),className:'px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/40 text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 transition-all'},'WIN'),
                 React.createElement('button',{onClick:()=>settle(e.id,'LOSS'),className:'px-3 py-1.5 rounded-lg text-xs font-bold border border-rose-500/40 text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 transition-all'},'LOSS'),
-                React.createElement('button',{onClick:()=>del(e.id),className:'px-2 py-1.5 text-[#EDEDED]/20 hover:text-rose-400 border border-[#EDEDED]/10 rounded-lg text-xs'},'\u00d7')
+                React.createElement('button',{onClick:()=>del(e.id),className:'px-2 py-1.5 text-[#EDEDED]/20 hover:text-rose-400 border border-[#EDEDED]/8 rounded-lg text-xs'},'\u00d7')
               )
             :React.createElement('div',{className:'flex gap-1.5 shrink-0'},
                 React.createElement('span',{className:'px-3 py-1 rounded-lg text-xs font-bold border',
                   style:{background:isWin?'rgba(40,204,149,0.2)':'rgba(255,77,106,0.2)',
                          color:isWin?'rgb(40,204,149)':'rgb(255,77,106)',
                          borderColor:isWin?'rgba(40,204,149,0.4)':'rgba(255,77,106,0.4)'}},e.result),
-                React.createElement('button',{onClick:()=>del(e.id),className:'px-2 py-1.5 text-[#EDEDED]/20 hover:text-rose-400 border border-[#EDEDED]/10 rounded-lg text-xs'},'\u00d7')
+                React.createElement('button',{onClick:()=>del(e.id),className:'px-2 py-1.5 text-[#EDEDED]/20 hover:text-rose-400 border border-[#EDEDED]/8 rounded-lg text-xs'},'\u00d7')
               )
         );
       })
@@ -25079,7 +25079,7 @@ const MobileTabBar=React.memo(function MobileTabBar({mobileTab,setMobileTab,setS
     <div className="md:hidden flex gap-1 mb-2 shrink-0">
       {tabs.map(t=>{
         const active=mobileTab===t.id;
-        const cls='flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'text-[#C9A961] border-[#C9A961]/40':'text-[#EDEDED]/40 border-[#EDEDED]/10');
+        const cls='flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-lg border transition-all '+(active?'text-[#C9A961] border-[#C9A961]/40':'text-[#EDEDED]/40 border-[#EDEDED]/8');
         const activeStyle=active?{background:T2_GOLD_GLOW,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}:{boxShadow:'0 2px 6px rgba(0,0,0,0.25)'};
         return(<button key={t.id} onClick={()=>setMobileTab(t.id)} className={cls} style={activeStyle}>{t.label}</button>);
       })}
@@ -27014,7 +27014,7 @@ function ScalperAdvisorPanel({
       `today ${_stats.wins}w·${_stats.losses}l · ${_stats.netCents>=0?'+':''}${_stats.netCents}¢`),
   );
   // Sub-header: current engine read line (always-on)
-  const _readLineEl=React.createElement('div',{className:'flex items-baseline gap-2 mb-3 pb-2 border-b border-[#EDEDED]/5'},
+  const _readLineEl=React.createElement('div',{className:'flex items-baseline gap-2 mb-3 pb-2 border-b border-[#EDEDED]/8'},
     React.createElement('span',{className:'text-[9px] uppercase text-[#EDEDED]/35',style:{letterSpacing:'0.06em'}},'reads'),
     React.createElement('span',{className:'text-base font-medium tabular-nums',style:{color:_readDirColor,fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
       `${_readArrow} ${_dir?_dir.toLowerCase():'flat'}`),
@@ -27421,7 +27421,7 @@ function ScalperAdvisorPanel({
           :_todayManual.length>0&&_todayAuto.length===0
             ?'(all manual)'
             :'';
-      return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#EDEDED]/5 text-[10px] tabular-nums flex flex-wrap items-baseline gap-2',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
+      return React.createElement('div',{className:'mt-2 pt-2 border-t border-[#EDEDED]/8 text-[10px] tabular-nums flex flex-wrap items-baseline gap-2',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
         React.createElement('span',{style:{color:'rgba(237,237,237,0.40)'}},'today'),
         React.createElement('span',{style:{color:'rgba(237,237,237,0.55)'}},'·'),
         React.createElement('span',{style:{color:'rgba(237,237,237,0.55)'}},'P&L'),
@@ -27555,12 +27555,12 @@ function ScalperAdvisorPanel({
           React.createElement('span',{className:'text-base tabular-nums font-medium',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
             `${scalperPosition.side==='LONG_YES'?'long yes':'long no'} @ ${scalperPosition.entryCents.toFixed(0)}¢ × ${scalperPosition.contracts}`),
         ),
-        React.createElement('div',{className:'flex items-baseline justify-between py-1.5 border-t border-[#EDEDED]/5'},
+        React.createElement('div',{className:'flex items-baseline justify-between py-1.5 border-t border-[#EDEDED]/8'},
           React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45',style:{letterSpacing:'0.02em'}},'unrealized'),
           React.createElement('span',{className:'text-base tabular-nums font-medium',style:{color:_color,fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
             `${_unrealizedPerContract>=0?'+':''}${_unrealizedPerContract.toFixed(0)}¢/ct · ${_unrealizedTotal>=0?'+':''}${_unrealizedTotal.toFixed(0)}¢`),
         ),
-        React.createElement('div',{className:'flex items-baseline justify-between py-1.5 border-t border-[#EDEDED]/5'},
+        React.createElement('div',{className:'flex items-baseline justify-between py-1.5 border-t border-[#EDEDED]/8'},
           React.createElement('span',{className:'text-[10px] text-[#EDEDED]/45',style:{letterSpacing:'0.02em'}},'hold'),
           React.createElement('span',{className:'text-[12px] tabular-nums text-[#EDEDED]/65',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
             `${Math.floor(_holdSec/60)}m ${_holdSec%60}s · target ${scalperPosition.suggestedTargetCents}¢ · stop ${scalperPosition.suggestedStopCents}¢`),
@@ -27626,7 +27626,7 @@ function ScalperAdvisorPanel({
     // Scalper status mini-note that appears at the bottom
     let _scalperNote=null;
     if(_state==='DISABLED'){
-      _scalperNote=React.createElement('div',{className:'flex items-baseline justify-between pt-2 mt-2 border-t border-[#EDEDED]/5'},
+      _scalperNote=React.createElement('div',{className:'flex items-baseline justify-between pt-2 mt-2 border-t border-[#EDEDED]/8'},
         React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40',style:{letterSpacing:'0.02em'}},'scalper off'),
         React.createElement('button',{
           onClick:()=>setShowTradingSettings(true),
@@ -27635,11 +27635,11 @@ function ScalperAdvisorPanel({
         },'enable scalper'),
       );
     } else if(_state==='BLOCKED'){
-      _scalperNote=React.createElement('div',{className:'pt-2 mt-2 border-t border-[#EDEDED]/5'},
+      _scalperNote=React.createElement('div',{className:'pt-2 mt-2 border-t border-[#EDEDED]/8'},
         React.createElement('div',{className:'text-[10px] text-[#EDEDED]/40',style:{letterSpacing:'0.02em'}},`scalper paused · ${_elig.blockReason}`),
       );
     } else if(_state==='IDLE'){
-      _scalperNote=React.createElement('div',{className:'flex items-baseline justify-between pt-2 mt-2 border-t border-[#EDEDED]/5'},
+      _scalperNote=React.createElement('div',{className:'flex items-baseline justify-between pt-2 mt-2 border-t border-[#EDEDED]/8'},
         React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40',style:{letterSpacing:'0.02em'}},'scalper watching'),
         React.createElement('span',{className:'text-[10px] tabular-nums text-[#EDEDED]/35',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},
           `${(scalperSettings.maxSuggestionsPerHour||3)-_scalperGetHourlyCount(scalperLog,scalperSuggestionsRef)}/${scalperSettings.maxSuggestionsPerHour||3} left this hour`),
@@ -27814,19 +27814,19 @@ ${_d.responseBody||'(empty)'}`;
         })(),
         // EXITED PATH — replace ticket with realized summary
         _isExited&&_liveValid?[
-          React.createElement('div',{key:'ex-entry',className:'flex items-baseline justify-between py-2 border-t border-[#EDEDED]/5'},
+          React.createElement('div',{key:'ex-entry',className:'flex items-baseline justify-between py-2 border-t border-[#EDEDED]/8'},
             React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55',style:{letterSpacing:'0.02em'}},'entry → exit'),
             React.createElement('span',{className:'text-base tabular-nums font-medium',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},`${_liveEntryCents}¢ → ${_liveExitCents}¢`),
           ),
-          React.createElement('div',{key:'ex-count',className:'flex items-baseline justify-between py-2 border-t border-[#EDEDED]/5'},
+          React.createElement('div',{key:'ex-count',className:'flex items-baseline justify-between py-2 border-t border-[#EDEDED]/8'},
             React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55',style:{letterSpacing:'0.02em'}},'contracts'),
             React.createElement('span',{className:'text-[13px] tabular-nums text-[#EDEDED]/85',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},`${_liveContractsActual}`),
           ),
-          React.createElement('div',{key:'ex-stake',className:'flex items-baseline justify-between py-2 border-t border-[#EDEDED]/5'},
+          React.createElement('div',{key:'ex-stake',className:'flex items-baseline justify-between py-2 border-t border-[#EDEDED]/8'},
             React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55',style:{letterSpacing:'0.02em'}},'stake'),
             React.createElement('span',{className:'text-[13px] tabular-nums text-[#EDEDED]/85',style:{fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},`$${_liveStakeDollars.toFixed(2)}`),
           ),
-          React.createElement('div',{key:'ex-pnl',className:'flex items-baseline justify-between py-2 border-t border-[#EDEDED]/5'},
+          React.createElement('div',{key:'ex-pnl',className:'flex items-baseline justify-between py-2 border-t border-[#EDEDED]/8'},
             React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55',style:{letterSpacing:'0.02em'}},'result'),
             React.createElement('span',{className:'text-base tabular-nums font-medium',style:{
               color:_liveRealCents===0?'#EDEDED':(_liveIsWin?'rgb(40,204,149)':'rgba(255,77,106,0.95)'),
@@ -27852,7 +27852,7 @@ ${_d.responseBody||'(empty)'}`;
             const _renderTip=(id,label,value,tip,valColor)=>{
               const _isOpen=tappedTip===id;
               return React.createElement('div',{key:id},
-                React.createElement('div',{className:'flex items-baseline justify-between py-2 border-t border-[#EDEDED]/5'},
+                React.createElement('div',{className:'flex items-baseline justify-between py-2 border-t border-[#EDEDED]/8'},
                   React.createElement('button',{
                     type:'button',
                     onClick:()=>setTappedTip(_isOpen?null:id),
@@ -28110,7 +28110,7 @@ ${_d.responseBody||'(empty)'}`;
               ));
             }else if(_positionKnown===false&&_slDelta===0){
               // No-stop-loss warning in pre-fill state
-              _rows.push(React.createElement('div',{key:'nostop',className:'pt-2 mt-1 border-t border-[#EDEDED]/5'},
+              _rows.push(React.createElement('div',{key:'nostop',className:'pt-2 mt-1 border-t border-[#EDEDED]/8'},
                 React.createElement('div',{className:'text-[10px] italic',style:{color:'rgba(237,237,237,0.40)'}},'no stop loss · position rides to settlement or target'),
                 React.createElement('button',{
                   onClick:()=>{if(typeof setShowTradingSettings==='function')setShowTradingSettings(true);},
@@ -28164,7 +28164,7 @@ ${_d.responseBody||'(empty)'}`;
             }
             // exiting status banner (when in the middle of exiting)
             if(_liveStatus==='exiting'&&autoOrderState?.exitReason){
-              _rows.push(React.createElement('div',{key:'exiting',className:'pt-2 mt-1 border-t border-[#EDEDED]/5 text-[10px]',style:{color:'rgba(212,162,76,0.95)'}},
+              _rows.push(React.createElement('div',{key:'exiting',className:'pt-2 mt-1 border-t border-[#EDEDED]/8 text-[10px]',style:{color:'rgba(212,162,76,0.95)'}},
                 `exiting · ${autoOrderState.exitReason}`,
               ));
             }
@@ -28189,7 +28189,7 @@ ${_d.responseBody||'(empty)'}`;
               const _smartDir=scalperRead?.dir||taraCall?.direction||taraCall?.call||null;
               const _smartConv=scalperRead?.dir?Number(scalperRead.conviction)||0:Number(taraCall?.confidence)||0;
               const _smartSrc=scalperRead?.dir?'tape':'tara';
-              _rows.push(React.createElement('div',{key:'mon-toggle',className:'pt-2 mt-1 border-t border-[#EDEDED]/5'},
+              _rows.push(React.createElement('div',{key:'mon-toggle',className:'pt-2 mt-1 border-t border-[#EDEDED]/8'},
                 React.createElement('button',{
                   type:'button',
                   onClick:()=>setShowMonitoring(v=>!v),
@@ -45984,7 +45984,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     clockSeconds:timeState?.secsRemaining,
   });
 
-  if(!isMounted)return<div className={'min-h-screen bg-[#121212] flex items-center justify-center text-[#EDEDED]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.1.0...</div>;
+  if(!isMounted)return<div className={'min-h-screen bg-[#0A0A0A] flex items-center justify-center text-[#EDEDED]/50 font-serif text-xl animate-pulse'}>Initializing Tara 7.1.0...</div>;
 
   const totalDOM=(orderBook.localBuy+orderBook.localSell)||1;
   const buyPct=(orderBook.localBuy/totalDOM)*100;
@@ -45992,7 +45992,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   const advisor=analysis?.advisor||{label:'CONNECTING...',reason:'Fetching market data...',color:'zinc',animate:false,hasAction:false};
 
   return(
-    <div data-tara-theme={simpleMode?'simple':'advanced'} className={'min-h-screen bg-[#121212] text-[#EDEDED] font-sans flex flex-col selection:bg-[#EDEDED]/20'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
+    <div data-tara-theme={simpleMode?'simple':'advanced'} className={'min-h-screen bg-[#0A0A0A] text-[#EDEDED] font-sans flex flex-col selection:bg-[#EDEDED]/20'} style={{fontSize:"16px",lineHeight:"1.5",overflowX:"hidden",maxWidth:"100vw"}}>
       {/* V9.8.18: Toast notifications — pump/dump + velocity-flip alerts. Fixed
           top-right, auto-close after a few seconds, dismiss on outside-click or
           tap. Stack capped at 3 concurrent. */}
@@ -46117,7 +46117,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* V134: Sync progress overlay */}
       {syncState&&syncState.active&&(
         <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4">
-          <div className="bg-[#262626] rounded-xl border border-indigo-500/30 p-6 max-w-md w-full shadow-2xl">
+          <div className="bg-[#171717] rounded-xl border border-indigo-500/30 p-6 max-w-md w-full shadow-2xl">
             <div className="text-xs uppercase tracking-widest text-indigo-300 font-bold mb-3">
               {syncState.complete?'✓ Sync Complete':syncState.error?'⚠ Sync Failed':'🔄 Syncing Tara'}
             </div>
@@ -46139,7 +46139,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* V134: SYNC PROGRESS OVERLAY ── shows during baseline sync */}
       {syncState.active&&(
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={'bg-[#262626] border rounded-xl shadow-2xl max-w-sm w-full p-6 '+(syncState.error?'border-rose-500/50':syncState.complete?'border-emerald-500/50':'border-indigo-500/40')}>
+          <div className={'bg-[#171717] border rounded-xl shadow-2xl max-w-sm w-full p-6 '+(syncState.error?'border-rose-500/50':syncState.complete?'border-emerald-500/50':'border-indigo-500/40')}>
             <div className="flex items-center gap-3 mb-4">
               <span className="text-2xl">{syncState.error?'⚠️':syncState.complete?'✓':'⟳'}</span>
               <div>
@@ -46183,7 +46183,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
       {/* V134: Learning toast removed — was crashing on minified prod build, will revisit */}
       {/* ── STICKY HEADER — V10.7.44b CLEAN ── */}
-      <header className={'sticky top-0 z-40 bg-[#121212] backdrop-blur-md border-b border-[#EDEDED]/10 px-2 sm:px-4 py-2 shrink-0'}>
+      <header className={'sticky top-0 z-40 bg-[#0A0A0A] backdrop-blur-md border-b border-[#EDEDED]/8 px-2 sm:px-4 py-2 shrink-0'}>
         <div className="max-w-[1600px] mx-auto flex items-center gap-1.5 sm:gap-2">
 
           {/* LEFT: Logo + version + balance */}
@@ -46245,7 +46245,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           <div className="flex items-center gap-1.5 shrink-0">
 
             {/* BTC */}
-            <div className={'flex bg-[#262626] border border-[#EDEDED]/20 rounded-lg p-0.5 shrink-0'}>
+            <div className={'flex bg-[#171717] border border-[#EDEDED]/15 rounded-lg p-0.5 shrink-0'}>
               {ASSET_KEYS.map(k=>{
                 const _c=ASSET_CONFIG[k];
                 const _active=currentAsset===k;
@@ -46278,7 +46278,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             {/* window fixed at 15m, 5m removed v13.3.0 */}
 
             {/* Sound */}
-            <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#EDEDED]/10 text-[#EDEDED]/40'}`} title={soundEnabled?'Sound on':'Sound off'}>
+            <button onClick={handleSoundToggle} className={`p-1.5 rounded-lg border transition-colors ${soundEnabled?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#EDEDED]/8 text-[#EDEDED]/40'}`} title={soundEnabled?'Sound on':'Sound off'}>
               {soundEnabled?<IC.Vol2 className="w-3.5 h-3.5"/>:<IC.VolX className="w-3.5 h-3.5"/>}
             </button>
 
@@ -46286,14 +46286,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className="relative">
               <button
                 onClick={()=>setShowHeaderOverflow(v=>!v)}
-                className={`p-1.5 rounded-lg border transition-colors text-sm leading-none font-bold ${showHeaderOverflow?'bg-[#EDEDED]/10 border-[#EDEDED]/30 text-[#EDEDED]/80':'border-[#EDEDED]/10 text-[#EDEDED]/40 hover:text-[#EDEDED]/70'}`}
+                className={`p-1.5 rounded-lg border transition-colors text-sm leading-none font-bold ${showHeaderOverflow?'bg-[#EDEDED]/10 border-[#EDEDED]/15 text-[#EDEDED]/80':'border-[#EDEDED]/8 text-[#EDEDED]/40 hover:text-[#EDEDED]/70'}`}
                 title="More options"
               >···</button>
 
               {/* Overflow panel */}
               {showHeaderOverflow&&(
                 <div
-                  className="absolute right-0 top-full mt-1.5 z-50 rounded-xl border border-[#EDEDED]/12 shadow-2xl overflow-hidden"
+                  className="absolute right-0 top-full mt-1.5 z-50 rounded-xl border border-[#EDEDED]/15 shadow-2xl overflow-hidden"
                   style={{background:'rgba(18,20,19,0.98)',backdropFilter:'blur(16px)',minWidth:'260px'}}
                   onMouseLeave={()=>setShowHeaderOverflow(false)}
                 >
@@ -46370,7 +46370,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       </div>
                       {/* Simple/Advanced */}
                       <button onClick={()=>setSimpleMode(!simpleMode)}
-                        className="text-[10px] uppercase tracking-[0.14em] px-2 py-1 rounded border border-[#EDEDED]/12 hover:border-[#EDEDED]/35 text-[#EDEDED]/40 hover:text-[#EDEDED]/75 transition-colors"
+                        className="text-[10px] uppercase tracking-[0.14em] px-2 py-1 rounded border border-[#EDEDED]/15 hover:border-[#EDEDED]/15 text-[#EDEDED]/40 hover:text-[#EDEDED]/75 transition-colors"
                         style={{fontFamily:'ui-monospace,monospace'}}
                       >{simpleMode?'advanced':'simple'}</button>
                       {/* Volume */}
@@ -46394,8 +46394,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       <button onClick={()=>{setShowGuide(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors text-xs" title="How Tara Works">? Help</button>
                       <FlowBtn flowSignal={flowSignal} active={showWhaleLog} onClick={()=>{setShowWhaleLog(!showWhaleLog);setShowHeaderOverflow(false);}} cls="flex"/>
                       <TheoryLabBtn active={showTheoryLab} onClick={()=>{setShowTheoryLab(!showTheoryLab);setShowHeaderOverflow(false);}} cls="flex"/>
-                      <button onClick={()=>{setShowSettings(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#EDEDED]/10 text-[#EDEDED]/40 hover:text-indigo-400 transition-colors" title="Feed Settings"><IC.Link className="w-3.5 h-3.5"/></button>
-                      <button onClick={()=>{setShowAnalytics(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#EDEDED]/10 text-[#EDEDED]/40 hover:text-indigo-400 transition-colors" title="Training Engine"><IC.BarChart className="w-3.5 h-3.5"/></button>
+                      <button onClick={()=>{setShowSettings(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#EDEDED]/8 text-[#EDEDED]/40 hover:text-indigo-400 transition-colors" title="Feed Settings"><IC.Link className="w-3.5 h-3.5"/></button>
+                      <button onClick={()=>{setShowAnalytics(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-[#EDEDED]/8 text-[#EDEDED]/40 hover:text-indigo-400 transition-colors" title="Training Engine"><IC.BarChart className="w-3.5 h-3.5"/></button>
                       <button onClick={()=>{setAnalyticsPageOpen(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-indigo-500/20 text-indigo-400/60 hover:text-indigo-400 transition-colors text-xs" title="Analytics Page">📊 Analytics</button>
                       {/* V10.7.45: Window lifecycle audit export — diagnostic for missing-log bugs */}
                       <button
@@ -46629,11 +46629,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
 
         /* ── CARD REFINEMENT — NO BORDERS, TONE-SHIFT ───────── */
-        [data-tara-theme="simple"] .bg-\\[\\#262626\\] {
+        [data-tara-theme="simple"] .bg-\\[\\#171717\\] {
           background: var(--tara-bg-card) !important;
         }
         [data-tara-theme="simple"] .bg-\\[\\#0A0A0A\\]\\/95 { background: var(--tara-bg-header) !important; }
-        [data-tara-theme="simple"] .bg-\\[\\#121212\\]\\/95 { background: var(--tara-bg-header) !important; }
+        [data-tara-theme="simple"] .bg-\\[\\#0A0A0A\\]\\/95 { background: var(--tara-bg-header) !important; }
         /* Card borders go from outline to barely-there divider */
         [data-tara-theme="simple"] .border-\\[\\#EDEDED\\]\\/10,
         [data-tara-theme="simple"] .border-\\[\\#EDEDED\\]\\/8,
@@ -46655,14 +46655,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
            pinpoint just one card via CSS selectors, we apply a faint ambient
            glow to any card containing the Tara's Call label via :has().
            Browsers without :has support get no glow — graceful degradation. */
-        [data-tara-theme="simple"] .bg-\\[\\#262626\\]:has(span:where(:contains("Tara's Call"))),
-        [data-tara-theme="simple"] .bg-\\[\\#262626\\]:has(div:where(:contains("Tara's Call"))) {
+        [data-tara-theme="simple"] .bg-\\[\\#171717\\]:has(span:where(:contains("Tara's Call"))),
+        [data-tara-theme="simple"] .bg-\\[\\#171717\\]:has(div:where(:contains("Tara's Call"))) {
           background: radial-gradient(120% 80% at 50% 0%, rgba(201,169,97,0.04) 0%, var(--tara-bg-card) 60%) !important;
           position: relative;
         }
         /* Subtle hairline accent at top of Tara's Call card */
-        [data-tara-theme="simple"] .bg-\\[\\#262626\\]:has(span:where(:contains("Tara's Call"))):before,
-        [data-tara-theme="simple"] .bg-\\[\\#262626\\]:has(div:where(:contains("Tara's Call"))):before {
+        [data-tara-theme="simple"] .bg-\\[\\#171717\\]:has(span:where(:contains("Tara's Call"))):before,
+        [data-tara-theme="simple"] .bg-\\[\\#171717\\]:has(div:where(:contains("Tara's Call"))):before {
           content: '';
           position: absolute;
           top: 0; left: 0; right: 0; height: 1px;
@@ -46796,7 +46796,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
 
         {/* STATS BAR — hidden in weather mode */}
-        <div className={'bg-[#262626] rounded-xl border border-[#EDEDED]/10 shadow-md relative overflow-hidden shrink-0'} style={{display:activeMode==='weather'?'none':''}}>
+        <div className={'bg-[#171717] rounded-xl border border-[#EDEDED]/8 shadow-md relative overflow-hidden shrink-0'} style={{display:activeMode==='weather'?'none':''}}>
           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
           <div className="p-2 sm:p-3 flex flex-wrap lg:flex-nowrap lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-hidden">
             
@@ -46894,7 +46894,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     onChange={e=>{const v=Number(e.target.value);setTargetMargin(v);isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(false);}}
                     onKeyDown={e=>{if(e.key==='Enter'&&targetMargin>0){isManualStrikeRef.current=true;setStrikeMode('manual');setPendingStrike(null);setStrikeConfirmed(true);e.target.blur();}}}
                     onBlur={()=>{}}
-                    className={'bg-transparent text-white font-serif text-base sm:text-lg w-full focus:outline-none border-b border-[#EDEDED]/10 focus:border-indigo-400'}
+                    className={'bg-transparent text-white font-serif text-base sm:text-lg w-full focus:outline-none border-b border-[#EDEDED]/8 focus:border-indigo-400'}
                     placeholder="Auto-set"
                   />
                   {targetMargin>0&&strikeMode==='manual'&&(
@@ -46926,9 +46926,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className="flex flex-col min-w-0 flex-none lg:min-w-[140px] lg:w-auto">
               <div className={'text-xs text-[#EDEDED]/40 uppercase tracking-wide mb-1'}>Bet  Max Win</div>
               <div className="flex items-center gap-1 text-sm sm:text-base font-serif">
-                $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className={'bg-transparent border-b border-[#EDEDED]/20 focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
+                $<input type="number" value={betAmount===0?'':betAmount} onChange={e=>setBetAmount(Number(e.target.value))} className={'bg-transparent border-b border-[#EDEDED]/15 focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
                 <span className={'text-[#EDEDED]/30'}>&#47;</span>
-                $<input type="number" value={maxPayout===0?'':maxPayout} onChange={e=>setMaxPayout(Number(e.target.value))} className={'bg-transparent border-b border-[#EDEDED]/20 focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
+                $<input type="number" value={maxPayout===0?'':maxPayout} onChange={e=>setMaxPayout(Number(e.target.value))} className={'bg-transparent border-b border-[#EDEDED]/15 focus:border-indigo-400 w-14 sm:w-16 text-center outline-none text-white'}/>
               </div>
             </div>
             <div className={'w-px h-8 bg-[#EDEDED]/10 hidden lg:block'}></div>
@@ -46955,7 +46955,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             {/* Position / Score */}
             <div className="col-span-2 lg:col-span-none lg:ml-auto flex flex-col">
               {positionStatus?(
-                <div className={'bg-[#121212] border border-amber-500/20 rounded-lg p-1.5'}>
+                <div className={'bg-[#0A0A0A] border border-amber-500/20 rounded-lg p-1.5'}>
                   <div className="flex justify-between text-xs mb-1"><span className={'text-[#EDEDED]/40 uppercase'}>POSITION</span><span className={positionStatus.side==='UP'?'text-emerald-400 font-bold':'text-rose-400 font-bold'}>{positionStatus.side} @ ${(positionStatus.entry||0).toFixed(0)}</span></div>
                   <div className="flex justify-between items-center">
                     <span className={`text-lg font-serif font-bold ${positionStatus.pnlPct>0?'text-emerald-400':'text-rose-400'}`}>{positionStatus.pnlPct>0?'+':''}{positionStatus.pnlPct.toFixed(1)}%</span>
@@ -47036,7 +47036,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     <span className="text-[#EDEDED]/25 ml-1">ASK</span>
                   </span>
                 </div>
-                <div className="w-full h-1 bg-[#121212] rounded-full overflow-hidden flex">
+                <div className="w-full h-1 bg-[#0A0A0A] rounded-full overflow-hidden flex">
                   <div style={{width:`${_hlBidPct}%`}} className="h-full bg-emerald-500/70 transition-all duration-300"></div>
                   <div style={{width:`${_hlAskPct}%`}} className="h-full bg-rose-500/70 transition-all duration-300"></div>
                 </div>
@@ -47118,7 +47118,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     <span className="text-[#EDEDED]/25 ml-1">SELL</span>
                   </span>
                 </div>
-                <div className="w-full h-1 bg-[#121212] rounded-full overflow-hidden flex">
+                <div className="w-full h-1 bg-[#0A0A0A] rounded-full overflow-hidden flex">
                   <div style={{width:`${_tBuyPct}%`}} className="h-full bg-emerald-500/70 transition-all duration-300"></div>
                   <div style={{width:`${_tSellPct}%`}} className="h-full bg-rose-500/70 transition-all duration-300"></div>
                 </div>
@@ -47272,7 +47272,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         />
 
         {/* MOBILE TAB NAV */}
-        <div className={'flex lg:hidden bg-[#262626] border border-[#EDEDED]/10 rounded-xl p-1 gap-1 shrink-0'}>
+        <div className={'flex lg:hidden bg-[#171717] border border-[#EDEDED]/8 rounded-xl p-1 gap-1 shrink-0'}>
           {[{id:'signal',label:'Signal',icon:<IC.Zap className="w-4 h-4"/>},{id:'chart',label:'Chart',icon:<IC.Activity className="w-4 h-4"/>},{id:'logs',label:'Analytics',icon:<IC.BarChart className="w-4 h-4"/>}].map(tab=>(
             <button key={tab.id} onClick={()=>setMobileTab(tab.id)} className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all ${mobileTab===tab.id?'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70'}`}>
               {tab.icon}{tab.label}
@@ -47324,7 +47324,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className='flex items-center gap-2 shrink-0'>
               <span className='text-base font-serif text-[#EDEDED]/80'>⛅ Weather Markets</span>
               <span className='text-[10px] text-[#EDEDED]/30 font-bold uppercase tracking-wider'>Kalshi prediction tracker</span>
-              <button onClick={()=>setActiveMode('trading')} className='ml-auto text-[10px] text-[#EDEDED]/30 hover:text-[#EDEDED]/70 border border-[#EDEDED]/10 px-2 py-1 rounded-lg transition-all'>
+              <button onClick={()=>setActiveMode('trading')} className='ml-auto text-[10px] text-[#EDEDED]/30 hover:text-[#EDEDED]/70 border border-[#EDEDED]/8 px-2 py-1 rounded-lg transition-all'>
                 ← back to BTC
               </button>
             </div>
@@ -47341,12 +47341,12 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0 pb-16 lg:pb-0">
           
           {/* ── PREDICTION CARD ── */}
-          <div className={`bg-[#262626] p-3 sm:p-4 rounded-xl border border-[#EDEDED]/10 shadow-md flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
+          <div className={`bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#EDEDED]/8 shadow-md flex flex-col relative min-w-0 ${mobileTab!=='signal'?'hidden lg:flex':''}`}>
             <div className="absolute top-0 left-0 w-full h-px rounded-t-xl" style={{background:'linear-gradient(to right, transparent, '+T2_GOLD_BORDER+' 30%, '+T2_GOLD_BORDER+' 70%, transparent)'}}></div>
             <T2Stamp code="PRED · 015"/>
             <div className="flex justify-between items-center mb-3 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <div onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')} className={'flex items-center gap-1.5 bg-[#121212] border border-[#EDEDED]/10 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide cursor-pointer hover:border-indigo-500/30 transition-colors'} title={`Time format: ${timeFormat.toUpperCase()} · click to cycle`}>
+                <div onClick={()=>setTimeFormat(timeFormat==='local'?'utc':timeFormat==='utc'?'est':'local')} className={'flex items-center gap-1.5 bg-[#0A0A0A] border border-[#EDEDED]/8 px-2 py-1 rounded-full text-xs font-bold uppercase tracking-wide cursor-pointer hover:border-indigo-500/30 transition-colors'} title={`Time format: ${timeFormat.toUpperCase()} · click to cycle`}>
                   <IC.Clock className="w-4 h-4"/>
                   <span className={'text-[#EDEDED]/60 hidden sm:inline'}>{timeState.startWindow}–{timeState.nextWindow} {timeFormat.toUpperCase()}</span>
                   <span className="text-white font-bold text-sm">{timeState.minsRemaining}m {timeState.secsRemaining}s</span>
@@ -47655,7 +47655,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* Settings */}
       {showSettings&&(
         <div className={'fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#262626] border border-[#EDEDED]/20 rounded-2xl w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto'} style={{scrollbarWidth:'thin'}}>
+          <div className={'bg-[#171717] border border-[#EDEDED]/15 rounded-2xl w-full max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto'} style={{scrollbarWidth:'thin'}}>
             <div className="p-4 sm:p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2"><IC.Link className="w-5 h-5 text-indigo-400"/>Discord Integration</h2>
@@ -47680,7 +47680,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         value={_val}
                         onChange={e=>setDiscordWebhooks(prev=>({...prev,[k]:e.target.value}))}
                         placeholder={_val?'':'Optional · empty = no broadcasts for this asset'}
-                        className={'flex-1 bg-[#121212] border border-[#EDEDED]/20 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-400 text-white font-mono'}
+                        className={'flex-1 bg-[#0A0A0A] border border-[#EDEDED]/15 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-400 text-white font-mono'}
                         style={_val?{borderColor:_c.color+'66'}:{}}
                       />
                     </div>
@@ -47692,16 +47692,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <div>
                   <label className={'text-[10px] text-[#EDEDED]/40 uppercase tracking-wide mb-1 block'}>Bot Display Name</label>
-                  <input type="text" value={discordUsername} onChange={e=>setDiscordUsername(e.target.value)} placeholder="Tara Terminal V110" className={'w-full bg-[#121212] border border-[#EDEDED]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
+                  <input type="text" value={discordUsername} onChange={e=>setDiscordUsername(e.target.value)} placeholder="Tara Terminal V110" className={'w-full bg-[#0A0A0A] border border-[#EDEDED]/15 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
                 </div>
                 <div>
                   <label className={'text-[10px] text-[#EDEDED]/40 uppercase tracking-wide mb-1 block'}>Avatar Image URL</label>
-                  <input type="url" value={discordAvatar} onChange={e=>setDiscordAvatar(e.target.value)} placeholder="https://i.imgur.com/..." className={'w-full bg-[#121212] border border-[#EDEDED]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
+                  <input type="url" value={discordAvatar} onChange={e=>setDiscordAvatar(e.target.value)} placeholder="https://i.imgur.com/..." className={'w-full bg-[#0A0A0A] border border-[#EDEDED]/15 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/>
                 </div>
               </div>
               {discordAvatar&&(
-                <div className={'flex items-center gap-2 mb-3 p-2 bg-[#121212] rounded-lg border border-[#EDEDED]/8'}>
-                  <img src={discordAvatar} alt="Bot avatar preview" className={'w-8 h-8 rounded-full object-cover border border-[#EDEDED]/20'} onError={e=>e.target.style.display='none'}/>
+                <div className={'flex items-center gap-2 mb-3 p-2 bg-[#0A0A0A] rounded-lg border border-[#EDEDED]/8'}>
+                  <img src={discordAvatar} alt="Bot avatar preview" className={'w-8 h-8 rounded-full object-cover border border-[#EDEDED]/15'} onError={e=>e.target.style.display='none'}/>
                   <div>
                     <div className="text-xs font-bold text-white">{discordUsername||'Tara Terminal V110'}</div>
                     <div className={'text-[10px] text-[#EDEDED]/40'}>Preview of how bot appears in Discord</div>
@@ -47718,7 +47718,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </div>
 
               {/* V111: Sync to baseline training data */}
-              <div className={'mb-3 p-3 rounded-lg bg-[#121212] border border-[#EDEDED]/10'}>
+              <div className={'mb-3 p-3 rounded-lg bg-[#0A0A0A] border border-[#EDEDED]/8'}>
                 <div className={'text-[11px] text-[#EDEDED]/70 mb-2 leading-relaxed'}>
                   <strong className={'text-emerald-400'}>Sync to Latest Training</strong> · Refreshes Tara to the latest baked baseline (487W-302L · 33W-25L 5m · 57 trades trained · V3.1). Use when switching devices.
                 </div>
@@ -47733,7 +47733,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
               {discordStatusMsg&&<div className={'mb-3 text-xs text-center text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg py-2'}>{discordStatusMsg}</div>}
 
-              <div className={'border-t border-[#EDEDED]/10 pt-4'}>
+              <div className={'border-t border-[#EDEDED]/8 pt-4'}>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className={'text-xs font-bold uppercase tracking-wide text-[#EDEDED]/60'}>Sent Messages ({discordLog.length})</h3>
                   <p className={'text-[10px] text-[#EDEDED]/30'}>Edit or delete within 15 min</p>
@@ -47744,7 +47744,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 ):(
                   <div className="space-y-2">
                     {discordLog.map(entry=>(
-                      <div key={entry.id} className={'bg-[#121212] rounded-lg border border-[#EDEDED]/8 overflow-hidden'}>
+                      <div key={entry.id} className={'bg-[#0A0A0A] rounded-lg border border-[#EDEDED]/8 overflow-hidden'}>
                         <div className="flex items-center gap-2 p-2.5">
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entry.type==='LOCK'?'bg-indigo-400':entry.type==='CLOSE'?'bg-emerald-400':'bg-amber-400'}`}/>
                           <div className="flex-1 min-w-0">
@@ -47764,7 +47764,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         {discordEditingId===entry.id&&(
                           <div className={'border-t border-[#EDEDED]/8 p-2.5'}>
                             <textarea value={discordEditText} onChange={e=>setDiscordEditText(e.target.value)} rows={2}
-                              className={'w-full bg-[#262626] border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-400 resize-none mb-2'}
+                              className={'w-full bg-[#171717] border border-indigo-500/30 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-400 resize-none mb-2'}
                               placeholder="Add a note to this message (e.g. 'Closed early, took profits at $75,200')"/>
                             <div className="flex gap-2">
                               <button onClick={async()=>{
@@ -47774,7 +47774,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                                 setTimeout(()=>setDiscordStatusMsg(''),3000);
                               }} className={'flex-1 py-1.5 rounded-lg text-xs font-bold bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors'}>Add Note</button>
                               <button onClick={()=>{setDiscordEditingId(null);setDiscordEditText('');}}
-                                className={'px-3 py-1.5 rounded-lg text-xs font-bold border border-[#EDEDED]/10 text-[#EDEDED]/40 hover:text-white transition-colors'}>Cancel</button>
+                                className={'px-3 py-1.5 rounded-lg text-xs font-bold border border-[#EDEDED]/8 text-[#EDEDED]/40 hover:text-white transition-colors'}>Cancel</button>
                             </div>
                           </div>
                         )}
@@ -47792,17 +47792,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* Chat */}
       <div className={`fixed bottom-[68px] lg:bottom-4 right-4 z-50 flex flex-col items-end transition-all ${isChatOpen?'w-[90vw] sm:w-80':'w-auto'}`}>
         {isChatOpen&&(
-          <div className={'bg-[#262626] border border-[#EDEDED]/20 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
-            <div className={'bg-[#121212] p-2.5 flex justify-between items-center border-b border-[#EDEDED]/10'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.1.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
+          <div className={'bg-[#171717] border border-[#EDEDED]/15 shadow-2xl rounded-xl w-full mb-3 overflow-hidden flex flex-col h-[55vh] sm:h-96'}>
+            <div className={'bg-[#0A0A0A] p-2.5 flex justify-between items-center border-b border-[#EDEDED]/8'}><span className="text-xs font-bold uppercase tracking-wide flex items-center gap-2"><IC.Msg className="w-3.5 h-3.5 text-indigo-400"/>Chat with Tara 7.1.0</span><button onClick={()=>setIsChatOpen(false)} className="opacity-50 hover:opacity-100"><IC.X className="w-4 h-4"/></button></div>
             <div className={'flex-1 overflow-y-auto p-3 space-y-3 bg-[#161616]'} style={{scrollbarWidth:'thin'}}>
               {chatLog.map((msg,i)=>(
                 <div key={i} className={`flex flex-col ${msg.role==='user'?'items-end':'items-start'}`}>
                   <span className={`text-xs uppercase opacity-30 mb-1 ${msg.role==='user'?'mr-1':'ml-1'}`}>{msg.role}</span>
-                  <div className={`text-xs p-2 rounded-lg max-w-[88%] leading-relaxed whitespace-pre-wrap ${msg.role==='user'?'bg-indigo-500/20 text-indigo-100 border border-indigo-500/30 rounded-tr-none':'bg-[#2A2D2C] text-[#EDEDED] border border-[#EDEDED]/10 rounded-tl-none'}`}>{msg.text}</div>
+                  <div className={`text-xs p-2 rounded-lg max-w-[88%] leading-relaxed whitespace-pre-wrap ${msg.role==='user'?'bg-indigo-500/20 text-indigo-100 border border-indigo-500/30 rounded-tr-none':'bg-[#2A2D2C] text-[#EDEDED] border border-[#EDEDED]/8 rounded-tl-none'}`}>{msg.text}</div>
                 </div>
               ))}
             </div>
-            <div className={'p-2.5 bg-[#121212] border-t border-[#EDEDED]/10'}><input type="text" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={handleChatSubmit} placeholder={`Ask about ${windowType} window...`} className={'w-full bg-[#262626] border border-[#EDEDED]/20 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/></div>
+            <div className={'p-2.5 bg-[#0A0A0A] border-t border-[#EDEDED]/8'}><input type="text" value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={handleChatSubmit} placeholder={`Ask about ${windowType} window...`} className={'w-full bg-[#171717] border border-[#EDEDED]/15 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-indigo-400 text-white'}/></div>
           </div>
         )}
         {!isChatOpen&&<button onClick={()=>setIsChatOpen(true)} className={'bg-indigo-500 hover:bg-indigo-400 text-white p-3 rounded-full shadow-lg border border-indigo-400/50 transition-transform hover:scale-105'}><IC.Msg className="w-5 h-5"/></button>}
@@ -47837,8 +47837,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* ── ANALYTICS / TRAINING DASHBOARD ── */}
       {showAnalytics&&(
         <div className={'fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#262626] border border-[#EDEDED]/20 rounded-2xl w-full max-w-3xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
-            <div className={'sticky top-0 bg-[#262626] border-b border-[#EDEDED]/10 p-4 flex justify-between items-center z-10'}>
+          <div className={'bg-[#171717] border border-[#EDEDED]/15 rounded-2xl w-full max-w-3xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
+            <div className={'sticky top-0 bg-[#171717] border-b border-[#EDEDED]/8 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base font-serif text-white flex items-center gap-2"><IC.BarChart className="w-5 h-5 text-indigo-400"/>Tara Training Engine</h2>
                 {(()=>{
@@ -47899,22 +47899,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 <h3 className="text-xs font-bold uppercase tracking-wide text-emerald-400 mb-3">🔬 Backtest — Historical Performance Audit</h3>
                 {(()=>{
                   const bt=runFullBacktest(tradeLog);
-                  if(!bt.ready)return(<div className="text-xs text-[#EDEDED]/50 p-3 bg-[#121212] rounded-lg">{bt.note}</div>);
+                  if(!bt.ready)return(<div className="text-xs text-[#EDEDED]/50 p-3 bg-[#0A0A0A] rounded-lg">{bt.note}</div>);
                   const fmt=p=>(p*100).toFixed(1)+'%';
                   return(<div className="space-y-3">
                     {/* Top metrics row */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <div className="bg-[#121212] rounded-lg p-2.5 border border-[#EDEDED]/5">
+                      <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8">
                         <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold">Overall WR</div>
                         <div className={'text-lg font-mono font-bold '+(bt.wr>=0.65?'text-emerald-400':bt.wr>=0.55?'text-amber-400':'text-rose-400')}>{fmt(bt.wr)}</div>
                         <div className="text-[10px] text-[#EDEDED]/30">{bt.n} trades</div>
                       </div>
-                      <div className="bg-[#121212] rounded-lg p-2.5 border border-[#EDEDED]/5">
+                      <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8">
                         <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold">Brier Score</div>
                         <div className={'text-lg font-mono font-bold '+(bt.brier<0.15?'text-emerald-400':bt.brier<0.20?'text-amber-400':'text-rose-400')}>{bt.brier.toFixed(3)}</div>
                         <div className="text-[10px] text-[#EDEDED]/30">{bt.brier<0.10?'Excellent':bt.brier<0.15?'Strong':bt.brier<0.20?'Useful':bt.brier<0.24?'Marginal':'No skill'}</div>
                       </div>
-                      <div className="bg-[#121212] rounded-lg p-2.5 border border-[#EDEDED]/5">
+                      <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8">
                         <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold">UP / DOWN</div>
                         <div className="text-sm font-mono">
                           <span className="text-emerald-400">{fmt(bt.upWR)}</span>
@@ -47923,7 +47923,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         </div>
                         <div className="text-[10px] text-[#EDEDED]/30">direction split</div>
                       </div>
-                      <div className="bg-[#121212] rounded-lg p-2.5 border border-[#EDEDED]/5">
+                      <div className="bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8">
                         <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold">Streaks</div>
                         <div className="text-sm font-mono">
                           <span className="text-emerald-400">{bt.maxWinStreak}W</span>
@@ -47934,7 +47934,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       </div>
                     </div>
                     {/* Filter scenarios — what WR if we'd applied different filters? */}
-                    <div className="bg-[#121212] rounded-lg p-3 border border-[#EDEDED]/5">
+                    <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8">
                       <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold mb-2">Selectivity Scenarios — "What if I'd only taken these?"</div>
                       <div className="space-y-1.5">
                         {Object.entries(bt.filterScenarios).filter(([k,v])=>v).map(([name,s])=>{
@@ -47952,7 +47952,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       </div>
                     </div>
                     {/* Per-regime breakdown */}
-                    <div className="bg-[#121212] rounded-lg p-3 border border-[#EDEDED]/5">
+                    <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8">
                       <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold mb-2">Per-Regime Performance</div>
                       <div className="space-y-1.5">
                         {Object.entries(bt.regimePerf).sort((a,b)=>b[1].n-a[1].n).map(([name,s])=>{
@@ -47968,7 +47968,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       </div>
                     </div>
                     {/* Lock timing */}
-                    <div className="bg-[#121212] rounded-lg p-3 border border-[#EDEDED]/5">
+                    <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8">
                       <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold mb-2">Performance by Lock Timing</div>
                       <div className="space-y-1.5">
                         {Object.entries(bt.clockPerf).map(([name,s])=>{
@@ -47985,7 +47985,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                       </div>
                     </div>
                     {/* Confidence calibration */}
-                    <div className="bg-[#121212] rounded-lg p-3 border border-[#EDEDED]/5">
+                    <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8">
                       <div className="text-[10px] uppercase text-[#EDEDED]/40 font-bold mb-2">Calibration: Predicted vs Actual</div>
                       <div className="space-y-1">
                         {Object.entries(bt.confBuckets).filter(([_,s])=>s.n>0).map(([conf,s])=>{
@@ -48015,7 +48015,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     const def=DEFAULT_WEIGHTS[key]||20;const pct=(val/55)*100;
                     const acc=signalAccuracy[key];const wrPct=acc?.total>=3?((acc.right/acc.total)*100).toFixed(0):null;
                     const delta=val-def;
-                    return(<div key={key} className={'bg-[#121212] rounded-lg p-2.5 border border-[#EDEDED]/5'}>
+                    return(<div key={key} className={'bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8'}>
                       <div className="flex justify-between items-center mb-1.5">
                         <span className={'text-xs font-bold uppercase text-[#EDEDED]/70'}>{key}</span>
                         <div className="flex items-center gap-1.5">
@@ -48024,7 +48024,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                           <span className={`text-xs ${delta>0?'text-emerald-400':delta<0?'text-rose-400':'text-[#EDEDED]/30'}`}>{delta>0?'+':''}{delta.toFixed(1)}</span>
                         </div>
                       </div>
-                      <div className="w-full h-1.5 bg-[#262626] rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-[#171717] rounded-full overflow-hidden">
                         <div className={`h-full rounded-full transition-all duration-500 ${delta>2?'bg-emerald-500':delta<-2?'bg-rose-500':'bg-indigo-500'}`} style={{width:`${Math.min(100,pct)}%`}}/>
                       </div>
                       <div className={'flex justify-between mt-0.5 text-xs text-[#EDEDED]/20'}>
@@ -48040,13 +48040,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-amber-400 mb-3">Probability Calibration (posterior accuracy)</h3>
                 {tradeLog.filter(t=>t.result).length<10?(
-                  <div className={'text-xs text-[#EDEDED]/40 italic text-center py-4 bg-[#121212] rounded-lg border border-[#EDEDED]/5'}>Need 10+ resolved trades to calibrate. Currently: {tradeLog.filter(t=>t.result).length}</div>
+                  <div className={'text-xs text-[#EDEDED]/40 italic text-center py-4 bg-[#0A0A0A] rounded-lg border border-[#EDEDED]/8'}>Need 10+ resolved trades to calibrate. Currently: {tradeLog.filter(t=>t.result).length}</div>
                 ):(
                   <div className="grid grid-cols-5 sm:grid-cols-10 gap-1">
                     {[0,10,20,30,40,50,60,70,80,90].map(b=>{
                       const calVal=calibration[b];const isNull=calVal==null;
                       const diff=isNull?0:calVal-b;
-                      return(<div key={b} className={'bg-[#121212] rounded-lg p-1.5 border border-[#EDEDED]/5 text-center'}>
+                      return(<div key={b} className={'bg-[#0A0A0A] rounded-lg p-1.5 border border-[#EDEDED]/8 text-center'}>
                         <div className={'text-xs text-[#EDEDED]/30 mb-1'}>{b}-{b+10}%</div>
                         <div className={`text-xs font-bold font-mono ${isNull?'text-[#EDEDED]/20':Math.abs(diff)<5?'text-emerald-400':Math.abs(diff)<15?'text-amber-400':'text-rose-400'}`}>
                           {isNull?'—':`${calVal.toFixed(0)}%`}
@@ -48084,7 +48084,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         const totalAll=totalManual+totalTara;
                         const wins=manual.wins+tara.wins;
                         const wr=totalAll>0?((wins/totalAll)*100):0;
-                        return(<div key={sess} className={'bg-[#121212] rounded-lg p-2.5 border border-[#EDEDED]/5 text-center'}>
+                        return(<div key={sess} className={'bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8 text-center'}>
                           <div className={'text-xs font-bold text-[#EDEDED]/70 mb-1'}>{sess}</div>
                           <div className={`text-lg font-serif font-bold ${wr>=60?'text-emerald-400':wr>=45?'text-amber-400':totalAll>0?'text-rose-400':'text-[#EDEDED]/35'}`}>{totalAll>0?`${wr.toFixed(0)}%`:'—'}</div>
                           <div className={'text-[10px] text-[#EDEDED]/55 mt-0.5'}>{wins}W · {(manual.losses+tara.losses)}L</div>
@@ -48099,7 +48099,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               {/* Hourly Heatmap */}
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-wide text-purple-400 mb-3">Performance by Hour (local)</h3>
-                {Object.keys(hourlyPerf).length<3?<div className={'text-xs text-[#EDEDED]/40 italic text-center py-4 bg-[#121212] rounded-lg border border-[#EDEDED]/5'}>Need more trades to build hourly map.</div>:(
+                {Object.keys(hourlyPerf).length<3?<div className={'text-xs text-[#EDEDED]/40 italic text-center py-4 bg-[#0A0A0A] rounded-lg border border-[#EDEDED]/8'}>Need more trades to build hourly map.</div>:(
                 <div className="grid grid-cols-6 sm:grid-cols-12 gap-1">
                   {Array.from({length:24},(_,h)=>{
                     const d=hourlyPerf[h];const total=d?(d.wins+d.losses):0;const wr=total>0?((d.wins/total)*100):null;
@@ -48144,7 +48144,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     setSelectedTradeId(null);
                   };
                   return(
-                    <div className={'mb-3 p-3 rounded-xl border-2 border-indigo-500/40 bg-[#121212]'}>
+                    <div className={'mb-3 p-3 rounded-xl border-2 border-indigo-500/40 bg-[#0A0A0A]'}>
                       <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className={`font-bold text-sm ${selected.dir==='UP'?'text-emerald-400':'text-rose-400'}`}>{selected.dir}</span>
@@ -48190,7 +48190,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                           isSel?'border-indigo-500/60 bg-indigo-500/10 ring-1 ring-indigo-500/30'
                           :t.result==='WIN'?'border-emerald-500/20 bg-emerald-500/5 hover:border-emerald-500/40'
                           :t.result==='LOSS'?'border-rose-500/20 bg-rose-500/5 hover:border-rose-500/40'
-                          :'border-[#EDEDED]/5 hover:border-[#EDEDED]/15'}`}>
+                          :'border-[#EDEDED]/8 hover:border-[#EDEDED]/15'}`}>
                         <div className={`w-2 h-2 rounded-full shrink-0 ${isSel?'bg-indigo-400':t.result==='WIN'?'bg-emerald-500':t.result==='LOSS'?'bg-rose-500':'bg-[#EDEDED]/20'}`}/>
                         <span className={'text-[#EDEDED]/40 font-mono shrink-0 text-[10px] hidden sm:inline'}>{_fmtDateTz(d,timeFormat,{month:'short',day:'numeric'})} </span>
                         <span className={'text-[#EDEDED]/40 font-mono shrink-0 text-[10px]'}>{_fmtTimeTz(d,timeFormat,{hour:'2-digit',minute:'2-digit',hour12:true})}</span>
@@ -48212,7 +48212,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 {/* Window tab selector */}
                 <div className="flex gap-1 mb-3">
                   {['15m','5m'].map(wt=>(
-                    <button key={wt} onClick={()=>{}} className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${windowType===wt?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#EDEDED]/10 text-[#EDEDED]/30'}`}>{wt}</button>
+                    <button key={wt} onClick={()=>{}} className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${windowType===wt?'bg-indigo-500/20 border-indigo-500/40 text-indigo-400':'border-[#EDEDED]/8 text-[#EDEDED]/30'}`}>{wt}</button>
                   ))}
                   <span className={'text-[9px] text-[#EDEDED]/25 ml-2 self-center'}>Showing trades from your active window</span>
                 </div>
@@ -48263,7 +48263,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     const rgWins=rgTrades.filter(t=>t.result==='WIN').length;
                     const isActive=lastRegimeRef.current===rg;
                     return(
-                      <div key={rg} className={`p-2.5 rounded-lg border ${isActive?'border-indigo-500/40 bg-indigo-500/5':'border-[#EDEDED]/8 bg-[#121212]'}`}>
+                      <div key={rg} className={`p-2.5 rounded-lg border ${isActive?'border-indigo-500/40 bg-indigo-500/5':'border-[#EDEDED]/8 bg-[#0A0A0A]'}`}>
                         <div className="flex justify-between items-center mb-2">
                           <span className={`text-xs font-bold uppercase ${isActive?'text-indigo-400':'text-[#EDEDED]/50'}`}>{rg}{isActive&&' ◀ active'}</span>
                           <span className={'text-[10px] text-[#EDEDED]/30'}>{rgTrades.length} trades · {rgTrades.length>0?(rgWins/rgTrades.length*100).toFixed(0)+'% WR':'no data'}</span>
@@ -48321,7 +48321,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
                   const dowLabels=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
                   const formatHour=h=>{const h12=h%12||12;return `${h12}${h<12?'a':'p'}`;};
-                  const cellCls=(wr,n)=>n<2?'bg-[#121212] text-[#EDEDED]/25':wr>=65?'bg-emerald-500/15 text-emerald-300':wr>=55?'bg-amber-500/10 text-amber-300':wr>=45?'bg-[#121212] text-[#EDEDED]/50':'bg-rose-500/10 text-rose-300';
+                  const cellCls=(wr,n)=>n<2?'bg-[#0A0A0A] text-[#EDEDED]/25':wr>=65?'bg-emerald-500/15 text-emerald-300':wr>=55?'bg-amber-500/10 text-amber-300':wr>=45?'bg-[#0A0A0A] text-[#EDEDED]/50':'bg-rose-500/10 text-rose-300';
 
                   return(
                     <div className="space-y-4">
@@ -48387,7 +48387,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                         <span className="font-bold uppercase">Legend</span>
                         <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-emerald-500/15"></div><span>≥65% WR</span></div>
                         <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-amber-500/10"></div><span>55-64%</span></div>
-                        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-[#121212] border border-[#EDEDED]/15"></div><span>45-54%</span></div>
+                        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-[#0A0A0A] border border-[#EDEDED]/15"></div><span>45-54%</span></div>
                         <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-rose-500/10"></div><span>&lt; 45%</span></div>
                       </div>
                     </div>
@@ -48445,7 +48445,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                                   <span className={`font-bold shrink-0 ${t.result==='WIN'?'text-emerald-400':'text-rose-400'}`}>{t.result}</span>
                                 </div>
                                 {hasV145&&(
-                                  <div className="flex items-center gap-2 text-[9px] mt-1 pt-1 border-t border-[#EDEDED]/6 text-[#EDEDED]/40">
+                                  <div className="flex items-center gap-2 text-[9px] mt-1 pt-1 border-t border-[#EDEDED]/8 text-[#EDEDED]/40">
                                     <span className="font-mono">@${Math.round(t.entryPrice).toLocaleString()}</span>
                                     <span>→</span>
                                     <span className="font-mono">${Math.round(t.closingPrice).toLocaleString()}</span>
@@ -48484,8 +48484,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       {/* ── HOW TARA WORKS GUIDE ── */}
       {showGuide&&(
         <div className={'fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4'}>
-          <div className={'bg-[#262626] border border-[#EDEDED]/20 rounded-2xl w-full max-w-2xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
-            <div className={'sticky top-0 bg-[#262626] border-b border-[#EDEDED]/10 p-4 flex justify-between items-center z-10'}>
+          <div className={'bg-[#171717] border border-[#EDEDED]/15 rounded-2xl w-full max-w-2xl max-h-[95vh] mx-2 sm:mx-0 overflow-y-auto shadow-2xl'} style={{scrollbarWidth:'thin'}}>
+            <div className={'sticky top-0 bg-[#171717] border-b border-[#EDEDED]/8 p-4 flex justify-between items-center z-10'}>
               <div>
                 <h2 className="text-base sm:text-lg font-serif text-white flex items-center gap-2">
                   <span className="text-indigo-400 text-xl font-bold">?</span> How Tara 8.8.2 Works
@@ -48497,7 +48497,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className={'p-4 sm:p-6 space-y-6 text-sm text-[#EDEDED]/80'}>
 
               {/* V8.7: CURRENT-STATE OVERVIEW — replaces stale V134 summary */}
-              <section className={'bg-[#262626] border-2 rounded-lg p-4'} style={{borderColor:'rgba(201,169,97,0.30)'}}>
+              <section className={'bg-[#171717] border-2 rounded-lg p-4'} style={{borderColor:'rgba(201,169,97,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:T2_GOLD}}>★ Current Tara — V8.7 Overview</h3>
                 <div className="space-y-3 text-xs leading-relaxed text-[#EDEDED]/75">
                   <p><strong className="text-white">What Tara does:</strong> Reads BTC price action, tape flow, regime, FGT alignment, and a 7-signal fusion to predict whether the price will close above or below strike at the end of each 15m or 5m window. She makes a call when she has high enough conviction; otherwise she sits out. She learns from every result and adapts her weights over time.</p>
@@ -48508,7 +48508,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </section>
 
               {/* V8.7: LEARNING SYSTEM — current */}
-              <section className={'bg-[#262626] border rounded-lg p-4'} style={{borderColor:'rgba(168,85,247,0.30)'}}>
+              <section className={'bg-[#171717] border rounded-lg p-4'} style={{borderColor:'rgba(168,85,247,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:'rgba(168,85,247,0.95)'}}>🧠 How Tara Learns Every Trade</h3>
                 <div className="space-y-2.5 text-xs leading-relaxed text-[#EDEDED]/70">
                   <p><strong className="text-white">5 parallel learning loops fire on every WIN/LOSS:</strong></p>
@@ -48526,7 +48526,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               </section>
 
               {/* V8.7: SYNC ARCHITECTURE */}
-              <section className={'bg-[#262626] border rounded-lg p-4'} style={{borderColor:'rgba(40,204,149,0.30)'}}>
+              <section className={'bg-[#171717] border rounded-lg p-4'} style={{borderColor:'rgba(40,204,149,0.30)'}}>
                 <h3 className={'font-bold uppercase tracking-wide mb-3 text-xs'} style={{color:'rgba(40,204,149,0.95)'}}>☁ Cross-Device Sync (V8.6)</h3>
                 <div className="space-y-2 text-xs leading-relaxed text-[#EDEDED]/70">
                   <p>All 11 sync paths use atomic Firestore transactions with smart merge functions:</p>
@@ -48565,23 +48565,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               <section>
                 <h3 className={'text-indigo-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-indigo-500/20 pb-1'}>📊 Prediction States — What Each One Means</h3>
                 <div className="space-y-3">
-                  <div className={'bg-[#121212] rounded-lg p-3 border border-[#EDEDED]/5'}>
+                  <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">SCANNING...</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase'}>Do nothing</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>Tara's composite score is between 42–58% — a coin flip zone. No structural edge exists right now. Do not enter. Most tools show a number at all times to look busy — Tara shows nothing when there's genuinely nothing to show.</p>
                   </div>
-                  <div className={'bg-[#121212] rounded-lg p-3 border border-amber-500/15'}>
+                  <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-amber-500/15'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-amber-400 font-bold text-xs">UP (FORMING) or DOWN (FORMING)</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase'}>Get ready</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>Posterior has crossed 58%+ or below 42% — there's a lean — but not enough consecutive readings yet to commit. The forming progress bar shows how close she is to locking. You can enter here for more time in the trade, but it's higher risk than waiting for the lock.</p>
                   </div>
-                  <div className={'bg-[#121212] rounded-lg p-3 border border-emerald-500/20'}>
+                  <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-emerald-500/20'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-emerald-400 font-bold text-xs">UP — LOCKED 🔒</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase'}>Entry signal — act now</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>2 consecutive readings (15m) or 1 consecutive (5m) all above the regime-specific threshold (60-75 depending on regime). Tara has committed for the window. She will NOT change this prediction without a 25+ point posterior collapse or severe trajectory flip. The lock state machine is designed to commit and stay committed. This is the <strong className="text-white">primary state to enter on.</strong></p>
                   </div>
-                  <div className={'bg-[#121212] rounded-lg p-3 border border-rose-500/20'}>
+                  <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-rose-500/20'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-rose-400 font-bold text-xs">DOWN — LOCKED 🔒</span><span className={'text-[10px] text-[#EDEDED]/30 uppercase'}>Entry signal — act now</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}>Same as UP — LOCKED but bearish. Posterior consistently below the regime-specific DOWN threshold (20-36 depending on regime — V2.8 made these symmetric with UP-side thresholds in choppy regimes). If you missed the entry window and it's late, the advisor will say WINDOW CLOSING — don't chase it.</p>
                   </div>
-                  <div className={'bg-[#121212] rounded-lg p-3 border border-zinc-500/15'}>
+                  <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-zinc-500/15'}>
                     <div className="flex items-center gap-2 mb-1"><span className="text-zinc-400 font-bold text-xs">NO CALL — WINDOW CLOSED — LOCK RELEASED</span><span className="text-[10px] text-rose-400 uppercase">Sit out</span></div>
                     <p className={'text-xs leading-relaxed text-[#EDEDED]/60'}><strong className="text-white">NO CALL:</strong> Never reached threshold before endgame. Skip this round.<br/><strong className="text-white">WINDOW CLOSED:</strong> Last 90s (15m) or 45s (5m) with no lock. Too late to enter safely.<br/><strong className="text-white">LOCK RELEASED:</strong> Posterior collapsed 25+ points or trajectory/FGT flipped against direction. Tara released — respect it immediately.</p>
                   </div>
@@ -48591,7 +48591,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               {/* STRIKE PRICE */}
               <section>
                 <h3 className={'text-emerald-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-emerald-500/20 pb-1'}>🎯 Strike Price — Auto vs Manual</h3>
-                <div className={'bg-[#121212] rounded-lg p-3 border border-[#EDEDED]/5 space-y-2 text-xs leading-relaxed text-[#EDEDED]/60'}>
+                <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8 space-y-2 text-xs leading-relaxed text-[#EDEDED]/60'}>
                   <p>The strike is automatically set to the <strong className="text-white">opening price of each window candle</strong> — fetched directly from Coinbase at the start of every 5m or 15m period. This matches what the binary options platform uses as the strike.</p>
                   <p>The <strong className="text-emerald-400">AUTO</strong> badge means Tara is tracking window opens automatically. Click it to reset to auto after a manual override.</p>
                   <p>Type any price in the Strike input to switch to <strong className="text-amber-400">MANUAL</strong> mode — useful if your platform uses a slightly different strike. Manual mode resets to auto at each new window.</p>
@@ -48610,7 +48610,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     {name:'Technical (W:25)',desc:'RSI divergence, VWAP position, Bollinger Band squeeze, price channel. Prevents chasing overbought tops.'},
                     {name:'Funding & Regime (W:15)',desc:'Detects SHORT SQUEEZE (retail short + whales buying), LONG SQUEEZE, TRENDING, CHOP. Adjusts thresholds per regime.'},
                   ].map((s,i)=>(
-                    <div key={i} className={'bg-[#121212] rounded-lg p-2.5 border border-[#EDEDED]/5'}>
+                    <div key={i} className={'bg-[#0A0A0A] rounded-lg p-2.5 border border-[#EDEDED]/8'}>
                       <div className="text-indigo-300 font-bold mb-1">{s.name}</div>
                       <div className={'text-[#EDEDED]/50 leading-relaxed'}>{s.desc}</div>
                     </div>
@@ -48647,7 +48647,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     {label:'HOLD STRONG',color:'text-emerald-400',desc:'Winning + momentum aligned. Do nothing. This is the hardest discipline in trading.'},
                     {label:'RECOVERY IN PROGRESS',color:'text-amber-400',desc:'Losing but momentum just flipped toward you. Give it room — don\'t panic exit at the worst moment.'},
                   ].map((a,i)=>(
-                    <div key={i} className={'flex gap-3 bg-[#121212] rounded-lg p-2 border border-[#EDEDED]/5'}>
+                    <div key={i} className={'flex gap-3 bg-[#0A0A0A] rounded-lg p-2 border border-[#EDEDED]/8'}>
                       <span className={`${a.color} font-bold shrink-0 min-w-[140px] text-[10px] uppercase`}>{a.label}</span>
                       <span className={'text-[#EDEDED]/50 text-[11px] leading-snug'}>{a.desc}</span>
                     </div>
@@ -48657,7 +48657,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
               {/* BEST PRACTICES */}
               <section>
-                <h3 className={'text-white font-bold uppercase tracking-wide mb-3 text-xs border-b border-[#EDEDED]/10 pb-1'}>✅ Best Practices for Maximum Edge</h3>
+                <h3 className={'text-white font-bold uppercase tracking-wide mb-3 text-xs border-b border-[#EDEDED]/8 pb-1'}>✅ Best Practices for Maximum Edge</h3>
                 <div className={'space-y-2 text-xs leading-relaxed text-[#EDEDED]/60'}>
                   <p>🔒 <strong className="text-white">Only enter on LOCKED signals.</strong> Skip FORMING, skip SCANNING. The win rate difference between LOCKED and FORMING entries is significant.</p>
                   <p>⏰ <strong className="text-white">Enter immediately when the advisor fires ENTRY SIGNAL.</strong> The lock has been held for N consecutive samples — extra waiting only reduces your time in the trade.</p>
@@ -48673,7 +48673,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               {/* STRIKE + DISCORD */}
               <section>
                 <h3 className={'text-indigo-400 font-bold uppercase tracking-wide mb-3 text-xs border-b border-indigo-500/20 pb-1'}>🔗 Discord Integration</h3>
-                <div className={'bg-[#121212] rounded-lg p-3 border border-[#EDEDED]/5 text-xs leading-relaxed text-[#EDEDED]/60'}>
+                <div className={'bg-[#0A0A0A] rounded-lg p-3 border border-[#EDEDED]/8 text-xs leading-relaxed text-[#EDEDED]/60'}>
                   <p>Paste your Discord webhook URL in Settings (🔗 button). Tara will auto-broadcast:</p>
                   <ul className="mt-2 space-y-1 list-disc pl-4">
                     <li>Lock commits (with posterior, regime, gap, clock remaining)</li>
@@ -48860,7 +48860,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       try{
         const rootEl=document.getElementById('root');
         if(rootEl&&!rootEl.hasChildNodes()){
-          rootEl.innerHTML='<div style="min-height:100vh;background:#121212;color:#EDEDED;padding:32px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;display:flex;align-items:center;justify-content:center"><div style="max-width:520px"><h1 style="color:#C9A961;font-size:18px;margin:0 0 16px 0;font-weight:bold;letter-spacing:0.18em;text-transform:uppercase">Tara isn\'t loading</h1><p style="color:rgba(237,237,237,0.75);margin:0 0 16px 0;line-height:1.6;font-size:13px">React didn\'t mount within 5 seconds. The deployed bundle may be stuck behind a stale cache. Click below to clear everything and reload once.</p><button onclick="(async()=>{try{if(\'serviceWorker\' in navigator){const r=await navigator.serviceWorker.getRegistrations();await Promise.all(r.map(x=>x.unregister().catch(()=>{})));}}catch(_){}try{if(\'caches\' in window){const k=await caches.keys();await Promise.all(k.map(x=>caches.delete(x).catch(()=>{})));}}catch(_){}try{sessionStorage.clear();}catch(_){}window.location.reload();})()" style="background:#10b981;color:white;border:none;padding:12px 20px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px">Clear cache and reload</button><p style="color:rgba(237,237,237,0.4);margin:16px 0 0 0;font-size:11px">Your trade history, weights, and learning are safe — they live in Firestore and will repopulate on reload. This only clears the browser cache.</p></div></div>';
+          rootEl.innerHTML='<div style="min-height:100vh;background:#0A0A0A;color:#EDEDED;padding:32px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;display:flex;align-items:center;justify-content:center"><div style="max-width:520px"><h1 style="color:#C9A961;font-size:18px;margin:0 0 16px 0;font-weight:bold;letter-spacing:0.18em;text-transform:uppercase">Tara isn\'t loading</h1><p style="color:rgba(237,237,237,0.75);margin:0 0 16px 0;line-height:1.6;font-size:13px">React didn\'t mount within 5 seconds. The deployed bundle may be stuck behind a stale cache. Click below to clear everything and reload once.</p><button onclick="(async()=>{try{if(\'serviceWorker\' in navigator){const r=await navigator.serviceWorker.getRegistrations();await Promise.all(r.map(x=>x.unregister().catch(()=>{})));}}catch(_){}try{if(\'caches\' in window){const k=await caches.keys();await Promise.all(k.map(x=>caches.delete(x).catch(()=>{})));}}catch(_){}try{sessionStorage.clear();}catch(_){}window.location.reload();})()" style="background:#10b981;color:white;border:none;padding:12px 20px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px">Clear cache and reload</button><p style="color:rgba(237,237,237,0.4);margin:16px 0 0 0;font-size:11px">Your trade history, weights, and learning are safe — they live in Firestore and will repopulate on reload. This only clears the browser cache.</p></div></div>';
         }
       }catch(_){}
     },5000);
