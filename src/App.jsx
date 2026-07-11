@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.11-v13.4.42-meter-polish';
-const TARA_VERSION_DISPLAY='Tara 13.4.42';
+const BASELINE_VERSION='2026.07.11-v13.4.43-reconcile-locks-only';
+const TARA_VERSION_DISPLAY='Tara 13.4.43';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20812,6 +20812,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 const _incompleteBuckets=new Set();
                 for(const e of taraCallLog){
                   if(!e||!e.id)continue;
+                  if(e.betAmt==null)continue; // V13.4.43: only committed call locks, not engine predictor reads
                   if(e.dir!=='UP'&&e.dir!=='DOWN')continue;
                   const _wt=e.windowType||'15m';
                   const _wm=_winMsFor(_wt);
@@ -20971,6 +20972,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                 }
                 for(const e of taraCallLog){
                   if(!e||!e.id)continue;
+                  if(e.betAmt==null)continue; // V13.4.43: only committed call locks, not engine predictor reads
                   if(e.dir!=='UP'&&e.dir!=='DOWN')continue;
                   const _winMs=(e.windowType||'15m')==='5m'?300000:900000;
                   // Prefer windowId-derived close (exact bucket); fall back to ceil(id)
