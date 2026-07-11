@@ -4607,8 +4607,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.11-v13.4.43-reconcile-locks-only';
-const TARA_VERSION_DISPLAY='Tara 13.4.43';
+const BASELINE_VERSION='2026.07.11-v13.4.44-predictor-cleanup-tool';
+const TARA_VERSION_DISPLAY='Tara 13.4.44';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30406,6 +30406,25 @@ function TaraApp(){
     //   Fix: read localStorage directly, apply patches by id (no merge logic),
     //   write back, then set React state directly with the result.
     //   This is atomic, no timing issues, no merge collisions.
+    // V13.4.43: one-time cleanup of engine predictor reads that older reconcile
+    //   wrongly stamped WIN/LOSS onto. betAmt==null => never a committed lock.
+    //   DRY-RUN by default. Run _taraCleanPredictorReads({dryRun:false}) to apply.
+    window._taraCleanPredictorReads=async(opts)=>{
+      const dryRun=!(opts&&opts.dryRun===false);
+      let _log=null;
+      try{_log=await _idbRead('taraCallLog');}catch(_){}
+      if(!Array.isArray(_log)||!_log.length)_log=[...(taraCallLogRef.current||[])];
+      const _hits=_log.filter(e=>e&&e.betAmt==null&&(e.result==='WIN'||e.result==='LOSS'));
+      const _w=_hits.filter(e=>e.result==='WIN').length;
+      const _l=_hits.filter(e=>e.result==='LOSS').length;
+      console.log('[cleanPredictorReads] '+_hits.length+' predictor reads carry W/L ('+_w+'W / '+_l+'L).'+(dryRun?' DRY RUN - nothing changed. Run _taraCleanPredictorReads({dryRun:false}) to apply.':' Applying...'));
+      if(dryRun||!_hits.length)return _hits.length;
+      const _map=new Map();
+      for(const e of _hits)_map.set(e.id,{result:'NO_TRADE',outcomeDir:null,_wlWas:e.result,_predictorCleaned:true});
+      const _applied=(typeof window._taraApplyReconcile==='function')?await window._taraApplyReconcile(_map):0;
+      console.log('[cleanPredictorReads] cleared '+_applied+' entries. Tally now reflects committed call locks only.');
+      return _applied;
+    };
     window._taraApplyReconcile=async(updateMap)=>{
       // updateMap: Map of entryId → {result, strike, closingPrice, ...}
       if(!updateMap||!updateMap.size)return 0;
