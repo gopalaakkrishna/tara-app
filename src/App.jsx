@@ -1373,40 +1373,72 @@ if(typeof window!=='undefined'){
   else window.addEventListener('load',_acquire);
 })();
 
-// V13.4.47: silent-audio keep-alive so background desktop tabs are not
-//   timer-throttled (a tab playing audio is exempt). Started on first gesture.
+// V13.4.48: background keep-alive with a VISIBLE, verifiable status indicator.
+//   Desktop tabs are timer-throttled when hidden (~1/min after 5min), which was
+//   causing missed-backgrounded windows (63% of apparent sit-outs). A tab playing
+//   audio is exempt, so we loop a silent WAV. Autoplay rules require one user
+//   gesture to start; the pill makes that explicit and confirms it is live.
 (function(){
   if(typeof document==='undefined'||typeof window==='undefined')return;
-  let _el=null,_on=false;
-  const _silentWav=()=>{
+  var _el=null,_pill=null,_armed=false;
+  function _silentWav(){
     try{
-      const sr=8000,n=sr,tot=44+n*2,buf=new ArrayBuffer(tot),dv=new DataView(buf);
-      const w=(o,s)=>{for(let i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i));};
+      var sr=8000,n=sr,tot=44+n*2,buf=new ArrayBuffer(tot),dv=new DataView(buf);
+      function w(o,s){for(var i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i));}
       w(0,'RIFF');dv.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');
       dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);
       dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);
       dv.setUint16(34,16,true);w(36,'data');dv.setUint32(40,n*2,true);
-      const u8=new Uint8Array(buf);let bin='';
-      for(let i=0;i<u8.length;i++)bin+=String.fromCharCode(u8[i]);
+      var u8=new Uint8Array(buf),bin='';for(var i=0;i<u8.length;i++)bin+=String.fromCharCode(u8[i]);
       return 'data:audio/wav;base64,'+btoa(bin);
     }catch(_){return null;}
-  };
-  const _ensure=()=>{
+  }
+  function _render(){
+    if(!_pill)return;
+    if(_armed){
+      _pill.textContent='';
+      _pill.style.width='10px';_pill.style.height='10px';_pill.style.padding='0';
+      _pill.style.borderRadius='50%';_pill.style.background='#28CC95';
+      _pill.style.boxShadow='0 0 6px #28CC95';
+      _pill.title='Tara keep-alive ON: background windows protected while this tab stays open';
+    }else{
+      _pill.textContent='background locking OFF - click';
+      _pill.style.width='auto';_pill.style.height='auto';
+      _pill.style.padding='4px 8px';_pill.style.borderRadius='6px';
+      _pill.style.background='#FF4D6A';_pill.style.boxShadow='none';
+      _pill.title='Click to keep Tara scanning when this tab is in the background';
+    }
+  }
+  function _mkPill(){
+    if(_pill||!document.body)return;
+    _pill=document.createElement('div');
+    _pill.style.cssText='position:fixed;left:10px;bottom:10px;z-index:2147483647;'+
+      'font:600 11px system-ui,sans-serif;color:#0A0A0A;cursor:pointer;user-select:none;transition:all .2s;';
+    _pill.addEventListener('click',function(ev){ev.stopPropagation();_ensure();});
+    document.body.appendChild(_pill);_render();
+  }
+  function _ensure(){
     try{
       if(!_el){
-        const src=_silentWav();if(!src)return;
+        var src=_silentWav();if(!src)return;
         _el=document.createElement('audio');
         _el.loop=true;_el.volume=1;_el.src=src;
         _el.setAttribute('aria-hidden','true');_el.style.display='none';
         (document.body||document.documentElement).appendChild(_el);
+        _el.addEventListener('playing',function(){_armed=true;_render();});
+        _el.addEventListener('pause',function(){_armed=false;_render();});
       }
-      const p=_el.play();
-      if(p&&p.then)p.then(()=>{_on=true;}).catch(()=>{});
+      var p=_el.play();
+      if(p&&p.then)p.then(function(){_armed=true;_render();}).catch(function(){_armed=false;_render();});
     }catch(_){}
-  };
-  ['pointerdown','keydown','click','touchstart'].forEach(ev=>
-    window.addEventListener(ev,_ensure,{passive:true}));
-  document.addEventListener('visibilitychange',()=>{if(_on)_ensure();});
+  }
+  ['pointerdown','keydown','click','touchstart'].forEach(function(ev){
+    window.addEventListener(ev,_ensure,{passive:true});
+  });
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')_ensure();});
+  window.addEventListener('focus',_ensure);
+  if(document.body)_mkPill();else window.addEventListener('DOMContentLoaded',_mkPill);
+  window._taraKeepAlive={status:function(){return{armed:_armed,paused:_el?_el.paused:null};},arm:_ensure};
 })();
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4670,8 +4702,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.11-v13.4.47-keepalive-coinflip-loosen';
-const TARA_VERSION_DISPLAY='Tara 13.4.47';
+const BASELINE_VERSION='2026.07.11-v13.4.48-keepalive-visible-indicator';
+const TARA_VERSION_DISPLAY='Tara 13.4.48';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
