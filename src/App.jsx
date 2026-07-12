@@ -527,7 +527,12 @@ const _v11Gate=(snap)=>{
   else if(qs<20&&tier!=='no-go-edge'){qualityScore-=8;}
 
   // ── FINAL COIN-FLIP CHECK ────────────────────────────────────────────────
-  if(postDev<7){
+  // V13.4.47: high-WR tiers (tape-led 72.9%, no-go-edge 75.8%, super-confluence
+  //   75.0%, user-forced 70.0% per _V11_TIER_WR, corroborated by export would-win
+  //   data) carry real directional edge even when the posterior sits near 50, so
+  //   relax their coin-flip veto to 4pt (still blocks dead-center 50). Others keep 7.
+  const _cfFloor=(_V11_TIER_WR[tier]||55)>=70?4:7;
+  if(postDev<_cfFloor){
     return{allow:false,reason:`posterior ${post.toFixed(0)}% (${postDev.toFixed(0)}pt from 50) — too close to coin flip`,category:'v11-coinflip'};
   }
 
@@ -1366,6 +1371,42 @@ if(typeof window!=='undefined'){
   window.addEventListener('focus',_acquire);
   if(document.readyState==='complete')_acquire();
   else window.addEventListener('load',_acquire);
+})();
+
+// V13.4.47: silent-audio keep-alive so background desktop tabs are not
+//   timer-throttled (a tab playing audio is exempt). Started on first gesture.
+(function(){
+  if(typeof document==='undefined'||typeof window==='undefined')return;
+  let _el=null,_on=false;
+  const _silentWav=()=>{
+    try{
+      const sr=8000,n=sr,tot=44+n*2,buf=new ArrayBuffer(tot),dv=new DataView(buf);
+      const w=(o,s)=>{for(let i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i));};
+      w(0,'RIFF');dv.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');
+      dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);
+      dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);
+      dv.setUint16(34,16,true);w(36,'data');dv.setUint32(40,n*2,true);
+      const u8=new Uint8Array(buf);let bin='';
+      for(let i=0;i<u8.length;i++)bin+=String.fromCharCode(u8[i]);
+      return 'data:audio/wav;base64,'+btoa(bin);
+    }catch(_){return null;}
+  };
+  const _ensure=()=>{
+    try{
+      if(!_el){
+        const src=_silentWav();if(!src)return;
+        _el=document.createElement('audio');
+        _el.loop=true;_el.volume=1;_el.src=src;
+        _el.setAttribute('aria-hidden','true');_el.style.display='none';
+        (document.body||document.documentElement).appendChild(_el);
+      }
+      const p=_el.play();
+      if(p&&p.then)p.then(()=>{_on=true;}).catch(()=>{});
+    }catch(_){}
+  };
+  ['pointerdown','keydown','click','touchstart'].forEach(ev=>
+    window.addEventListener(ev,_ensure,{passive:true}));
+  document.addEventListener('visibilitychange',()=>{if(_on)_ensure();});
 })();
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4629,8 +4670,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.11-v13.4.46-wakelock-more-locks';
-const TARA_VERSION_DISPLAY='Tara 13.4.46';
+const BASELINE_VERSION='2026.07.11-v13.4.47-keepalive-coinflip-loosen';
+const TARA_VERSION_DISPLAY='Tara 13.4.47';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
