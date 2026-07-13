@@ -4708,8 +4708,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.13-v13.4.52-kalshi-pubbase-racer';
-const TARA_VERSION_DISPLAY='Tara 13.4.52';
+const BASELINE_VERSION='2026.07.13-v13.4.53-poll-8s';
+const TARA_VERSION_DISPLAY='Tara 13.4.53';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34914,7 +34914,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   halves staleness. This is a Vercel-proxy/Kalshi REST call (small JSON), NOT a
     //   Supabase read, so it does not touch the 5GB Supabase egress cap. True per-second
     //   live still needs the server-side authed WS proxy (separate build).
-    const iv=setInterval(fetchKalshi,15000);
+    const iv=setInterval(fetchKalshi,8000);/*V13.4.53: 15000->8000, halve feed staleness; helps starved slow-device feeds. Revert to 15000 if proxies rate-limit.*/
     // V5.0: Refetch when tab becomes visible again — background tabs can stall the interval
     const onVisible=()=>{if(document.visibilityState==='visible')fetchKalshi();};
     document.addEventListener('visibilitychange',onVisible);
