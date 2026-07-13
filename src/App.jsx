@@ -4708,8 +4708,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.12-v13.4.51-floors-and-schedule';
-const TARA_VERSION_DISPLAY='Tara 13.4.51';
+const BASELINE_VERSION='2026.07.13-v13.4.52-kalshi-pubbase-racer';
+const TARA_VERSION_DISPLAY='Tara 13.4.52';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34689,6 +34689,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   gets us the strike from whichever proxy responds first — typically 1-3s.
         // V7.10.7: 6 parallel racers now (added vercel rewrite path). _via tag shows which won.
         const _vercelPromise=fetchWithRetry(_vercelUrl,1).then(r=>{if(r.ok)return{...r,_via:'vercel'};throw new Error(r.reason||'vercel fail');});
+        // V13.4.52: first-party PUBLIC-base racer. The authed /api/kalshi vercel path
+        //   503s for unauth browser reads, so the only reliable racers were flaky free
+        //   CORS proxies -> stale yes-price -> Kalshi guards sit out. The public base
+        //   (external-api) needs no auth and egresses from Vercel's edge IP, dodging
+        //   Kalshi's browser-503s. Additive: if it fails it just loses Promise.any.
+        const _vercelPubUrl=`/api/kalshi-public/events?series_ticker=${_seriesTicker}&with_nested_markets=true&status=open&limit=50&min_close_ts=${_minCloseTs}`;
+        const _vercelPubPromise=fetchWithRetry(_vercelPubUrl,1).then(r=>{if(r.ok)return{...r,_via:'vercel-pub'};throw new Error(r.reason||'vercel-pub fail');});
         const _directPromise=fetchWithRetry(_eventsUrl,1).then(r=>{if(r.ok)return{...r,_via:'direct'};throw new Error(r.reason||'direct fail');});
         const _corsproxyPromise=fetchWithRetry(`https://corsproxy.io/?url=${encodeURIComponent(_eventsUrl)}`,1).then(r=>{if(r.ok)return{...r,_via:'corsproxy'};throw new Error(r.reason||'corsproxy fail');});
         const _allOriginsPromise=fetchWithRetry(`https://api.allorigins.win/get?url=${encodeURIComponent(_eventsUrl)}`,1).then(r=>{
@@ -34705,7 +34712,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _thingproxyPromise=fetchWithRetry(`https://thingproxy.freeboard.io/fetch/${_eventsUrl}`,1).then(r=>{if(r.ok)return{...r,_via:'thingproxy'};throw new Error(r.reason||'thingproxy fail');});
         let result;
         try{
-          result=await Promise.any([_vercelPromise,_directPromise,_corsproxyPromise,_allOriginsPromise,_codetabsPromise,_thingproxyPromise]);
+          result=await Promise.any([_vercelPubPromise,_vercelPromise,_directPromise,_corsproxyPromise,_allOriginsPromise,_codetabsPromise,_thingproxyPromise]);
         }catch(aggregateError){
           const _errMsgs=aggregateError?.errors?.map(e=>e?.message||String(e))||['unknown'];
           result={ok:false,reason:`all proxies failed: ${_errMsgs.join(' / ')}`.slice(0,180)};
