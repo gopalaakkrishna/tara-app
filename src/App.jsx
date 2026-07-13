@@ -1389,6 +1389,12 @@ if(typeof window!=='undefined'){
       dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);
       dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);
       dv.setUint16(34,16,true);w(36,'data');dv.setUint32(40,n*2,true);
+      // V13.4.49: fill with a 30Hz tone at ~-48dBFS. A laptop speaker cannot
+      //   reproduce 30Hz at this level (inaudible), but Chrome still counts the
+      //   tab as playing audio, which is what grants the background-throttle
+      //   exemption. Pure silence did not reliably trigger it.
+      var _amp=120,_st=2*Math.PI*30/sr;
+      for(var _s=0;_s<n;_s++){dv.setInt16(44+_s*2,Math.round(_amp*Math.sin(_st*_s)),true);}
       var u8=new Uint8Array(buf),bin='';for(var i=0;i<u8.length;i++)bin+=String.fromCharCode(u8[i]);
       return 'data:audio/wav;base64,'+btoa(bin);
     }catch(_){return null;}
@@ -2662,13 +2668,13 @@ const TARA_SCHEDULE_BY_EST_HOUR={
   9:{status:'TRADE',dial:50,wr:68,note:'US wake-up — real positioning'},
   10:{status:'TRADE',dial:50,wr:68,note:'US morning — best US window'},
   11:{status:'OBSERVE',dial:55,wr:58,note:'Pre-lunch transition'},
-  12:{status:'SKIP',dial:60,wr:31,note:'US lunch lull — algo noise dominates'},
-  13:{status:'SKIP',dial:60,wr:31,note:'US lunch — skip unless very confident'},
-  14:{status:'SKIP',dial:55,wr:55,note:'US afternoon chop'},
-  15:{status:'SKIP',dial:55,wr:55,note:'US afternoon — equity influence'},
-  16:{status:'SKIP',dial:55,wr:55,note:'US afternoon — liquidity gaps'},
-  17:{status:'SKIP',dial:55,wr:50,note:'US close transition'},
-  18:{status:'SKIP',dial:55,wr:50,note:'US close — false moves'},
+  12:{status:'TRADE',dial:50,wr:63,note:'US lunch — your data 63% WR (n=148), old 31% was stale'},
+  13:{status:'TRADE',dial:50,wr:63,note:'US lunch — actual 63% WR beats table'},
+  14:{status:'TRADE',dial:50,wr:67,note:'US afternoon actual 67% WR'},
+  15:{status:'TRADE',dial:50,wr:64,note:'US afternoon — actual 64% WR'},
+  16:{status:'OBSERVE',dial:52,wr:60,note:'US afternoon — actual 60% WR, light caution'},
+  17:{status:'TRADE',dial:50,wr:65,note:'US close actual 65% WR'},
+  18:{status:'TRADE',dial:50,wr:67,note:'US close — actual 67% WR'},
   19:{status:'OBSERVE',dial:55,wr:60,note:'Asia pre-open bridge'},
   20:{status:'TRADE',dial:50,wr:71,note:'Late US + Asia open'},
   21:{status:'TRADE',dial:50,wr:71,note:'Late evening — directional'},
@@ -4702,8 +4708,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.11-v13.4.48-keepalive-visible-indicator';
-const TARA_VERSION_DISPLAY='Tara 13.4.48';
+const BASELINE_VERSION='2026.07.12-v13.4.51-floors-and-schedule';
+const TARA_VERSION_DISPLAY='Tara 13.4.51';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -37846,7 +37852,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     // V6.2.6: SOFT HINT MODE — user pressed "Hint to Lock Faster" recently. Lower floors
     //   for 10 seconds. Tape-opposes, Kalshi-extreme, and edge-guard remain enforced.
     const _softHintActive=softHintRef.current>0&&(Date.now()-softHintRef.current)<10000;
-    const _qBase=_softHintActive?20:(30+_safety);
+    const _qBase=_softHintActive?20:(27+_safety);/*V13.4.51: 30->27, more chop locks*/
     const Q_FLOOR=Math.max(10,Math.round(_qBase*_speedMultEng));
     // V6.5.1: CONV_FLOOR 10 → 5. V6.5.7: also dial-aware. V7.2: base 5 → 7.
     //   V10.7.69: raised to 8. V10.7.75: regime-adaptive conviction floor.
@@ -37860,7 +37866,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       :_regimeForFloor==='LONG SQUEEZE'?10    // same as short squeeze
       :_regimeForFloor==='COMPRESSING'?12     // highest floor — direction unconfirmed
       :_regimeForFloor==='HIGH VOL CHOP'?6
-      :8; // RANGE-CHOP default
+      :7; // RANGE-CHOP default (V13.4.51: 8->7, coin-flip floor 6->5)
     const _convBase=_softHintActive?3:(_regimeConvBase+_safety);
     // V9.7.6: ADAPTIVE LOCK URGENCY — when Kalshi is moving fast in Tara's predicted
     //   direction, drop the conviction floor by 30%. Logic: if Kalshi YES moved ≥4¢ in
