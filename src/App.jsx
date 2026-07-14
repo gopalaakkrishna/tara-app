@@ -4708,8 +4708,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.13-v13.4.53-poll-8s';
-const TARA_VERSION_DISPLAY='Tara 13.4.53';
+const BASELINE_VERSION='2026.07.13-v13.4.54-feed-trace';
+const TARA_VERSION_DISPLAY='Tara 13.4.54';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -42513,6 +42513,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           if(snapshot)snapshot.kalshiPriceAgeMs=_v1126_priceAgeMs;
         }
       }catch(_v1126_age_err){}
+      // V13.4.54: FEED-SOURCE TRACE. Records which proxy delivered the price and whether
+      //   the picked market matched the current window. Diagnoses wrong-window reads that
+      //   fed extreme prices (1/98/99/100) into the Kalshi guards -> excess sit-outs.
+      //   feedMatchingClose 0 or >1 => window-match filter issue; feedVia => which source won.
+      try{
+        if(snapshot&&typeof window!=='undefined'&&window.__taraKalshiDebug){
+          const _v13454_fd=window.__taraKalshiDebug;
+          snapshot.feedVia=_v13454_fd.via!=null?_v13454_fd.via:null;
+          snapshot.feedMatchingClose=_v13454_fd.matchingClose!=null?_v13454_fd.matchingClose:null;
+          snapshot.feedTotalMarkets=_v13454_fd.totalMarkets!=null?_v13454_fd.totalMarkets:null;
+          snapshot.feedBestTicker=_v13454_fd.bestTicker!=null?_v13454_fd.bestTicker:null;
+          snapshot.feedBestStrike=_v13454_fd.bestStrike!=null?_v13454_fd.bestStrike:null;
+        }
+      }catch(_v13454_trace_err){}
       if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&(snapshot.wasOverriddenNoTrade!==true||_isEdgeWatchTier)){
         try{
           const _g_kal=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock):null;
