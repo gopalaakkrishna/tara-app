@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.14-v13.4.60-cheap-entry-scope-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.60';
+const BASELINE_VERSION='2026.07.14-v13.4.61-cheap-entry-off';
+const TARA_VERSION_DISPLAY='Tara 13.4.61';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -43695,7 +43695,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   edge (our read >= market price for our side), tape-not-opposing, and no-confluence
     //   (confluence still locks via its richer tier). Tagged cheap-entry for live EV tracking.
     //   CAVEAT: the <=70c read comes from the Kalshi feed; on a wrong-window feed this misfires.
-    if(taraCallSnapshotRef.current===null&&!_hasAnyConfluence&&_kPctNow!=null&&samples>0&&elapsedSec>=90){
+    if(false&&taraCallSnapshotRef.current===null&&!_hasAnyConfluence&&_kPctNow!=null&&samples>0&&elapsedSec>=90){/* V13.4.61: cheap-entry DISABLED - locked low-quality windows where Tara conf 76-80 but WR 33% (anti-calibrated); good cheap entries already lock via normal tiers. Reversible: remove false&& to re-enable. */
       const _cePost=Number(analysis?.rawProbAbove)||50;
       const _ceLean=_cePost>=50?'UP':'DOWN';
       const _ceDev=Math.abs(_cePost-50);
