@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.14-v13.4.58-cheap-entry-lock';
-const TARA_VERSION_DISPLAY='Tara 13.4.58';
+const BASELINE_VERSION='2026.07.14-v13.4.60-cheap-entry-scope-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.60';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34733,7 +34733,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _thingproxyPromise=fetchWithRetry(`https://thingproxy.freeboard.io/fetch/${_eventsUrl}`,1).then(r=>{if(r.ok)return{...r,_via:'thingproxy'};throw new Error(r.reason||'thingproxy fail');});
         let result;
         try{
-          result=await Promise.any([_vercelPubPromise,_vercelPromise,_directPromise,_corsproxyPromise,_allOriginsPromise,_codetabsPromise,_thingproxyPromise]);
+          // V13.4.59: TIERED race -- first-party edge paths win; flaky CORS proxies (cache ~10s,
+          //   were serving stale prior-window prices that poisoned the feed) demoted to a
+          //   last-resort fallback only if all first-party paths fail. All 7 promises already
+          //   fired in parallel above, so tiering adds zero latency.
+          try{
+            result=await Promise.any([_vercelPubPromise,_vercelPromise,_directPromise]);
+          }catch(_fpFail){
+            result=await Promise.any([_corsproxyPromise,_allOriginsPromise,_codetabsPromise,_thingproxyPromise]);
+          }
         }catch(aggregateError){
           const _errMsgs=aggregateError?.errors?.map(e=>e?.message||String(e))||['unknown'];
           result={ok:false,reason:`all proxies failed: ${_errMsgs.join(' / ')}`.slice(0,180)};
@@ -34903,7 +34911,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const yes=best.yes_ask??best.yes_bid??best.last_price??null;
           if(yes!=null)yesCents=Number(yes);
         }
-        if(yesCents!=null&&isFinite(yesCents))setKalshiYesPrice(yesCents);
+        // V13.4.59: TRUST GUARD -- accept the YES price only if the picked market is actually
+        //   at-the-money (strike within 1% of spot). Blind fallback picks (no spot) and
+        //   wrong-window / far-OTM markets surface as 0/4/99/100c poison; reject those so the
+        //   engine never locks or sits out on an off-window price. Last trusted price is kept.
+        {
+          const _spotNow=currentPriceRef.current||0;
+          const _strikeOffPct=(_spotNow>0&&bestStrike>0)?Math.abs(bestStrike-_spotNow)/_spotNow:1;
+          const _trustPrice=_spotNow>0&&bestStrike>0&&_strikeOffPct<=0.01;
+          if(yesCents!=null&&isFinite(yesCents)&&_trustPrice){
+            setKalshiYesPrice(yesCents);
+          }else if(yesCents!=null&&isFinite(yesCents)&&typeof window!=='undefined'&&window.__taraKalshiDebug){
+            window.__taraKalshiDebug.rejectedPrice=yesCents;
+            window.__taraKalshiDebug.rejectedStrikeOffPct=Math.round(_strikeOffPct*1000)/10;
+          }
+        }
         if(bestStrike!=null&&bestStrike>1000&&bestStrike<10000000){
           setKalshiStrike(bestStrike);
         }
@@ -43679,8 +43701,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _ceDev=Math.abs(_cePost-50);
       const _ceConf=_ceLean==='UP'?Math.round(_cePost):Math.round(100-_cePost);
       const _ceCost=_ceLean==='UP'?_kPctNow:(100-_kPctNow);
-      const _ceUpTape=_tapes.filter(p=>p>=60).length>=2;
-      const _ceDownTape=_tapes.filter(p=>p<=40).length>=2;
+      const _ceTw=analysis?.tapeWindows||{};
+      const _ceT=[_ceTw.w15?.buyPct,_ceTw.w30?.buyPct,_ceTw.w60?.buyPct].filter(v=>typeof v==='number');
+      const _ceUpTape=_ceT.filter(p=>p>=60).length>=2;
+      const _ceDownTape=_ceT.filter(p=>p<=40).length>=2;
       const _ceTapeOpposes=(_ceLean==='UP'&&_ceDownTape)||(_ceLean==='DOWN'&&_ceUpTape);
       if(_ceDev>=5&&_ceCost>=35&&_ceCost<=70&&!_ceTapeOpposes&&_ceConf>=_ceCost){
         const _ceSnap={
