@@ -187,7 +187,12 @@ const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 //   cloudWatch handler before making this change.
 //   ACTION NEEDED (user): resolve billing in the Supabase dashboard. Once fixed,
 //   confirm meters are healthy, then flip this back to false like V10.9.15 did.
-const _SB_PAUSED=true;
+// V13.4.55: UNPAUSED. Verified via Supabase API that the project is ACTIVE_HEALTHY
+//   (no more 402s), the anon key + URL in this file still match the live project,
+//   RLS policies are open, and tara_state holds cloud data through 2026-07-07.
+//   Limits reset per user, so re-enabling cloud sync. Receive side unions on merge,
+//   so no local entries are lost on resync. Flip back to true only if 402s return.
+const _SB_PAUSED=false;
 // Supabase client is initialized lazily below after the helper module loads.
 // During the parallel-write phase, _sbClient may be null if init fails — code
 // must check before calling. Failed Supabase init is non-fatal (Firestore
@@ -4708,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.13-v13.4.54-feed-trace';
-const TARA_VERSION_DISPLAY='Tara 13.4.54';
+const BASELINE_VERSION='2026.07.14-v13.4.55-supabase-unpause';
+const TARA_VERSION_DISPLAY='Tara 13.4.55';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
