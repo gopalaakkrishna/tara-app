@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.14-v13.4.61-cheap-entry-off';
-const TARA_VERSION_DISPLAY='Tara 13.4.61';
+const BASELINE_VERSION='2026.07.14-v13.4.62-wrong-window-guard';
+const TARA_VERSION_DISPLAY='Tara 13.4.62';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34918,12 +34918,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         {
           const _spotNow=currentPriceRef.current||0;
           const _strikeOffPct=(_spotNow>0&&bestStrike>0)?Math.abs(bestStrike-_spotNow)/_spotNow:1;
-          const _trustPrice=_spotNow>0&&bestStrike>0&&_strikeOffPct<=0.01;
+          const _secsLeft=(nextMs-Date.now())/1000;
+          const _priceExtreme=yesCents!=null&&(yesCents<=5||yesCents>=95);
+          // V13.4.62: reject (a) non-at-the-money picks (strike >1% off spot), and (b) prices that
+          //   are implausibly extreme with real time left -- an at-the-money 15m market cannot sit
+          //   at <=5 / >=95c with >3min to go (thin-book or stale wrong-window quote). Inside the
+          //   last 3min genuine extremes are allowed. Last trusted price is kept on reject.
+          const _strikeOK=_spotNow>0&&bestStrike>0&&_strikeOffPct<=0.01;
+          const _extremeTooEarly=_priceExtreme&&_secsLeft>180;
+          const _trustPrice=_strikeOK&&!_extremeTooEarly;
+          if(typeof window!=='undefined'&&window.__taraKalshiDebug){
+            window.__taraKalshiDebug.priceAccepted=_trustPrice;
+            window.__taraKalshiDebug.rejectedPrice=_trustPrice?null:yesCents;
+            window.__taraKalshiDebug.rejectReason=_trustPrice?null:(!_strikeOK?('strike-off-'+(Math.round(_strikeOffPct*1000)/10)+'pct'):'extreme-early');
+          }
           if(yesCents!=null&&isFinite(yesCents)&&_trustPrice){
             setKalshiYesPrice(yesCents);
-          }else if(yesCents!=null&&isFinite(yesCents)&&typeof window!=='undefined'&&window.__taraKalshiDebug){
-            window.__taraKalshiDebug.rejectedPrice=yesCents;
-            window.__taraKalshiDebug.rejectedStrikeOffPct=Math.round(_strikeOffPct*1000)/10;
           }
         }
         if(bestStrike!=null&&bestStrike>1000&&bestStrike<10000000){
@@ -42568,6 +42578,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         if(snapshot&&typeof window!=='undefined'&&window.__taraKalshiDebug){
           const _v13454_fd=window.__taraKalshiDebug;
           snapshot.feedVia=_v13454_fd.via!=null?_v13454_fd.via:null;
+          snapshot.feedRejectReason=_v13454_fd.rejectReason!=null?_v13454_fd.rejectReason:null;
+          snapshot.feedPriceAccepted=_v13454_fd.priceAccepted!=null?_v13454_fd.priceAccepted:null;
           snapshot.feedMatchingClose=_v13454_fd.matchingClose!=null?_v13454_fd.matchingClose:null;
           snapshot.feedTotalMarkets=_v13454_fd.totalMarkets!=null?_v13454_fd.totalMarkets:null;
           snapshot.feedBestTicker=_v13454_fd.bestTicker!=null?_v13454_fd.bestTicker:null;
