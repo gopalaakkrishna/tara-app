@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.14-v13.4.62-wrong-window-guard';
-const TARA_VERSION_DISPLAY='Tara 13.4.62';
+const BASELINE_VERSION='2026.07.14-v13.4.63-cache-noreinject';
+const TARA_VERSION_DISPLAY='Tara 13.4.63';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -34763,7 +34763,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             setKalshiDebug({ok:false,reason:`${result.reason} · using cached ${_curAsset} strike (${cacheAgeS.toFixed(0)}s old)`,totalMarkets:0,matchingClose:0,bestStrike:cache.strike,sampleFields:[]});
           } else {
             // No usable cache — user falls back to live spot
-            if(typeof window!=='undefined')window.__taraKalshiDebug={ok:false,...result};
+            if(typeof window!=='undefined')window.__taraKalshiDebug={ok:false,via:'failed',...result};/*V13.4.63: stamp via so feedVia shows fetch-failure instead of going silently null*/
             setKalshiDebug({ok:false,reason:result.reason,totalMarkets:0,matchingClose:0,bestStrike:null,sampleFields:[]});
           }
           return;
@@ -34915,6 +34915,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   at-the-money (strike within 1% of spot). Blind fallback picks (no spot) and
         //   wrong-window / far-OTM markets surface as 0/4/99/100c poison; reject those so the
         //   engine never locks or sits out on an off-window price. Last trusted price is kept.
+        let _kalshiPriceTrusted=false;
         {
           const _spotNow=currentPriceRef.current||0;
           const _strikeOffPct=(_spotNow>0&&bestStrike>0)?Math.abs(bestStrike-_spotNow)/_spotNow:1;
@@ -34927,6 +34928,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _strikeOK=_spotNow>0&&bestStrike>0&&_strikeOffPct<=0.01;
           const _extremeTooEarly=_priceExtreme&&_secsLeft>180;
           const _trustPrice=_strikeOK&&!_extremeTooEarly;
+          _kalshiPriceTrusted=_trustPrice;
           if(typeof window!=='undefined'&&window.__taraKalshiDebug){
             window.__taraKalshiDebug.priceAccepted=_trustPrice;
             window.__taraKalshiDebug.rejectedPrice=_trustPrice?null:yesCents;
@@ -34949,13 +34951,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           lastKalshiSuccessRef.current[_curAssetW]={
             at:Date.now(),
             strike:bestStrike,
-            yesPrice:yesCents!=null?yesCents:null,
+            yesPrice:(yesCents!=null&&_kalshiPriceTrusted)?yesCents:(lastKalshiSuccessRef.current[_curAssetW]?.yesPrice??null),/*V13.4.63: never cache a guard-rejected price; keep last trusted so fetch-failure fallback cannot re-inject poison*/
             activeMarket:_activeMarket,
             debug:null,
           };
         }
       }catch(e){
-        if(typeof window!=='undefined')window.__taraKalshiDebug={ok:false,error:e.message||String(e)};
+        if(typeof window!=='undefined')window.__taraKalshiDebug={ok:false,via:'error',error:e.message||String(e)};
         setKalshiDebug({ok:false,reason:`error: ${e.message||String(e).slice(0,40)}`,totalMarkets:0,matchingClose:0,bestStrike:null,sampleFields:[]});
       }
     };
