@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.14-v13.4.55-supabase-unpause';
-const TARA_VERSION_DISPLAY='Tara 13.4.55';
+const BASELINE_VERSION='2026.07.14-v13.4.56-log-hygiene';
+const TARA_VERSION_DISPLAY='Tara 13.4.56';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -20710,6 +20710,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
   const[reconcileBusy,setReconcileBusy]=React.useState(false);
   const filtered=React.useMemo(()=>{
     let arr=[...taraCallLog].reverse();
+    arr=arr.filter(e=>e&&e.result!=='MISSED'&&!e._missedWhileBackgrounded);/*V13.4.56: hide missed/backgrounded windows from the log display*/
     if(assetFilter==='BTC')arr=arr.filter(e=>(e.asset||'BTC')==='BTC');
     if(filter==='15m'||filter==='5m')arr=arr.filter(e=>e.windowType===filter);
     else if(filter==='wins')arr=arr.filter(e=>e.result==='WIN');
@@ -21236,20 +21237,35 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     //   -- dir is already correctly SIT_OUT -- just completing a status
                     //   stamp that should have happened automatically, so it's safe to
                     //   auto-apply.
-                    if(e.result===null){
-                      _issues.push({
-                        entryId:e.id,
-                        kind:'sitout-stuck-pending',
-                        detail:`${new Date(e.id).toISOString().slice(5,16).replace('T',' ')} - genuine sit-out stuck at pending (no Kalshi fill found). Finalizing as SITOUT.`,
-                        suggested:'SITOUT',
-                        suggestedField:'result',
-                        confident:true,
-                        fullUpdate:{
+                    // V13.4.56: genuine sit-out (no Kalshi fill). VERIFY against settled ground truth.
+                    //   A true sit-out is NEVER flipped to WIN/LOSS here - only a sit-out that
+                    //   turns out to have a real fill gets recovered (branch below, confident:false
+                    //   for user review). Here we only stamp what the window actually did so a
+                    //   pending or unverified sit-out becomes verified and analyzable.
+                    {
+                      const _wasAboveNF=_bestS.result==='yes';
+                      const _needsVerify=(e.result===null)||((e.result==='SITOUT')&&!e.outcomeDir);
+                      if(_needsVerify){
+                        const _u={
                           result:'SITOUT',
-                          resolvedAt:Date.now(),
-                          resolution:'reconcile-backfill-v13.4.13',
-                        },
-                      });
+                          outcomeDir:_wasAboveNF?'UP':'DOWN',
+                          kalshiAtClose:_wasAboveNF?100:0,
+                          resolvedAt:e.resolvedAt||Date.now(),
+                          resolution:(e.result===null)?'reconcile-verify-v13.4.56':(e.resolution||'reconcile-verify-v13.4.56'),
+                          sitoutVerified:true,
+                        };
+                        if(_bestS.floor_strike>0&&(!e.strike||Math.abs((e.strike||0)-_bestS.floor_strike)>0.5)){_u.strike=_bestS.floor_strike;_u.strikeAtLock=_bestS.floor_strike;}
+                        if(_bestS.expiration_value>0&&!e.closingPrice){_u.closingPrice=_bestS.expiration_value;}
+                        _issues.push({
+                          entryId:e.id,
+                          kind:(e.result===null)?'sitout-stuck-pending':'sitout-verify',
+                          detail:`${new Date(e.id).toISOString().slice(5,16).replace('T',' ')} - genuine sit-out verified vs settlement (window closed ${_wasAboveNF?'UP':'DOWN'}). Stays SITOUT.`,
+                          suggested:'SITOUT',
+                          suggestedField:'result',
+                          confident:true,
+                          fullUpdate:_u,
+                        });
+                      }
                     }
                     continue;
                   }
@@ -36126,6 +36142,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _winMs=()=>windowType==='15m'?900000:300000;
     const _onHidden=()=>{ if(document.visibilityState==='hidden'&&_hiddenAtRef.current===0)_hiddenAtRef.current=Date.now(); };
     const _scanMissed=()=>{
+      // V13.4.56: DISABLED - user does not want missed/backgrounded windows logged,
+      //   shown, or saved; empty timeline slots are fine. Detector left wired but inert.
+      //   Remove the next line to re-enable MISSED-marker backfill.
+      return;
       const _hiddenAt=_hiddenAtRef.current;
       _hiddenAtRef.current=0; // consume
       if(!_hiddenAt)return;
