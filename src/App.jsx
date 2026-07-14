@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.14-v13.4.56-log-hygiene';
-const TARA_VERSION_DISPLAY='Tara 13.4.56';
+const BASELINE_VERSION='2026.07.14-v13.4.57-no-fill-reconcile';
+const TARA_VERSION_DISPLAY='Tara 13.4.57';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -21163,7 +21163,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   }
 
                   // kalshiAtLock — from your actual fill price
-                  if(_fillYesPrice!==null&&_fillYesPrice>0&&!e.kalshiAtLock){
+                  if(false&&_fillYesPrice!==null&&_fillYesPrice>0&&!e.kalshiAtLock){/*V13.4.57: DISABLED - a Kalshi fill is the user manual trade, not Tara call-lock price; never backfill kalshiAtLock from fills*/
                     const _side=_fill.outcome_side||_fill.side||'yes';
                     // If you bought YES: your cost = yes_price. If you bought NO: your cost = 100-yes_price
                     _updates.kalshiAtLock=_side==='yes'?_fillYesPrice:(100-_fillYesPrice);
@@ -21230,7 +21230,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                   if(!_bestS||_bestDiffS>_maxTolS)continue;
                   if(!_bestS.result)continue;
                   const _fillS=fillsMap.get(_bestS.ticker);
-                  if(!_fillS){
+                  if(true){/*V13.4.57: sit-outs reconcile ONLY vs market settlement, never vs Kalshi fills (a fill is the user manual trade, not Tara call). Always verify and keep SITOUT; the fill-based recovery below is now unreachable/disabled.*/
                     // V13.4.13: no fill confirms this genuinely was a sit-out. If it's
                     //   still stuck at result:null (the pre-V13.4.12 resolution-lookup
                     //   regression), finalize it here. This is not a directional claim
