@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.14-v13.4.57-no-fill-reconcile';
-const TARA_VERSION_DISPLAY='Tara 13.4.57';
+const BASELINE_VERSION='2026.07.14-v13.4.58-cheap-entry-lock';
+const TARA_VERSION_DISPLAY='Tara 13.4.58';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -43664,6 +43664,52 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   This is the last resort — confluence windows lock much earlier via tiers.
     const _v1074_winLen=windowType==='15m'?900:300;
     const _v1074_sitoutMinSec=_v1074_winLen*0.33; // 5min for 15m, 1.65min for 5m
+        // V13.4.58: CHEAP-ENTRY AUTO-LOCK (user rule). Locks the leaned direction hands-off,
+    //   BEFORE mixed-sitout gives up, when our side is enterable at <=70c with non-negative
+    //   edge and the tape is not fighting it. Validated on the user own log: <=70c entries
+    //   are the most profitable bucket (+4.4c/contract vs +1.3c for >70c). DROPS the quality
+    //   and conviction floors (the gates that over-fire), KEEPS the guards that protect money:
+    //   min entry cost >=35c (adverse-selection floor), out-of-deadzone lean >=5pt, non-negative
+    //   edge (our read >= market price for our side), tape-not-opposing, and no-confluence
+    //   (confluence still locks via its richer tier). Tagged cheap-entry for live EV tracking.
+    //   CAVEAT: the <=70c read comes from the Kalshi feed; on a wrong-window feed this misfires.
+    if(taraCallSnapshotRef.current===null&&!_hasAnyConfluence&&_kPctNow!=null&&samples>0&&elapsedSec>=90){
+      const _cePost=Number(analysis?.rawProbAbove)||50;
+      const _ceLean=_cePost>=50?'UP':'DOWN';
+      const _ceDev=Math.abs(_cePost-50);
+      const _ceConf=_ceLean==='UP'?Math.round(_cePost):Math.round(100-_cePost);
+      const _ceCost=_ceLean==='UP'?_kPctNow:(100-_kPctNow);
+      const _ceUpTape=_tapes.filter(p=>p>=60).length>=2;
+      const _ceDownTape=_tapes.filter(p=>p<=40).length>=2;
+      const _ceTapeOpposes=(_ceLean==='UP'&&_ceDownTape)||(_ceLean==='DOWN'&&_ceUpTape);
+      if(_ceDev>=5&&_ceCost>=35&&_ceCost<=70&&!_ceTapeOpposes&&_ceConf>=_ceCost){
+        const _ceSnap={
+          call:_ceLean,direction:_ceLean,
+          confidence:_ceConf,
+          caution:`Cheap-entry lock - ${_ceLean} at ${Math.round(_ceCost)}c, edge +${Math.round(_ceConf-_ceCost)}pt, tape clear`,
+          reason:`V13.4.58 cheap-entry: side ${Math.round(_ceCost)}c (<=70c line), lean ${Math.round(_ceDev)}pt ${_ceLean}, edge +${Math.round(_ceConf-_ceCost)}pt - locking instead of sit-out`,
+          atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+          atPosterior:_cePost,
+          kalshiAtLock:_kPctNow,
+          locked:true,earlyLock:false,
+          isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+          samples,needSamples:0,
+          tier:'cheap-entry',
+          session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+          regime:analysis?.regime||'',
+          qScore:Math.round(_qFast),
+          fgt:analysis?.mtfAlignment,
+          _committedAt:Date.now(),
+          _v13458_cheapEntry:true,
+          _v13458_entryCost:Math.round(_ceCost),
+          _v13458_edge:Math.round(_ceConf-_ceCost),
+        };
+        taraCallSnapshotRef.current=_ceSnap;
+        _logSnapshotEntry(_ceSnap);
+        _persistLock();
+        return;
+      }
+    }
     if(elapsedSec>=_v1074_sitoutMinSec&&!_hasAnyConfluence&&_qFast<25&&taraCallSnapshotRef.current===null){
       const _v1074_post=Number(analysis?.rawProbAbove)||50;
       const _v1074_lean=_v1074_post>=50?'UP':'DOWN';
