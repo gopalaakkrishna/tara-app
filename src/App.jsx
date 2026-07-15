@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.14-v13.4.63-cache-noreinject';
-const TARA_VERSION_DISPLAY='Tara 13.4.63';
+const BASELINE_VERSION='2026.07.15-v13.4.64-opportunity-trace';
+const TARA_VERSION_DISPLAY='Tara 13.4.64';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30258,6 +30258,7 @@ function TaraApp(){
   // V10.4.1 Module A — delay gate state. Tracks per-window delay duration
   // and the conditions when delay first triggered (for telemetry).
   const _v104_1_delayStateRef=useRef(null);
+  const _v1364_oppRef=useRef(null);/*V13.4.64: per-window peak-opportunity tracker (conviction+entry+timing) to diagnose missed early locks. Additive, no behavior change.*/
   // V10.7.81: Flat-gap watch state. When gap=0 at lock time, instead of sitting out
   //   immediately, Tara enters WATCHING mode. She checks every 30s whether:
   //   (a) gap has developed to ≥8pt (real directional signal formed), AND
@@ -41902,6 +41903,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       // Expose live timing recommendation on taraCall for the card (during wait).
       try{tc._v112Timing=_v112Timing;tc._v112Why=_v112Why;tc._v112OddsCeil=_oddsCeil112;tc._v112KForDir=_kForDir;}catch(_){}
       _v112Live={timing:_v112Timing,why:_v112Why,oddsCeil:_oddsCeil112,kForDir:_kForDir,at:Date.now()};
+      // V13.4.64: OPPORTUNITY TRACE. Per window, best confidence while entry was actionable
+      //   (35-70c) and whether the timing engine ever said now early with time left. Answers
+      //   was there a lockable early moment we sat out. Additive, changes no behavior.
+      try{
+        const _oppWid=computeWindowId(windowType);
+        if(!_v1364_oppRef.current||_v1364_oppRef.current.windowId!==_oppWid){
+          _v1364_oppRef.current={windowId:_oppWid,peakConv:-1,peakEntry:null,peakSecsLeft:null,nowCount:0,firstNowConv:null,firstNowEntry:null,firstNowSecsLeft:null};
+        }
+        const _opp=_v1364_oppRef.current;
+        const _oppActionable=_kForDir!=null&&_kForDir>=35&&_kForDir<=70;
+        if(_oppActionable&&typeof _convNow==='number'&&_convNow>_opp.peakConv){
+          _opp.peakConv=_convNow;_opp.peakEntry=Math.round(_kForDir);_opp.peakSecsLeft=Math.round(_secsLeft);
+        }
+        if(_v112Timing==='now'&&_oppActionable&&_secsLeft>=120){
+          _opp.nowCount++;
+          if(_opp.firstNowConv==null){_opp.firstNowConv=Math.round(_convNow);_opp.firstNowEntry=Math.round(_kForDir);_opp.firstNowSecsLeft=Math.round(_secsLeft);}
+        }
+      }catch(_){}
       if(_v112Wait){
         // Track delay duration per window
         if(!_v104_1_delayStateRef.current||_v104_1_delayStateRef.current.windowId!==computeWindowId(windowType)){
@@ -42748,6 +42767,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           qScore:snapshot.qScore||Math.round(qualityGate?.score||0),
           fgt:snapshot.fgt||analysis?.mtfAlignment,
           tier:snapshot.tier||'unknown',
+          feedVia:snapshot.feedVia!=null?snapshot.feedVia:null,/*V13.4.64: persist feed trace; was stamped on snapshot but dropped by the hand-built entry*/
+          feedRejectReason:snapshot.feedRejectReason!=null?snapshot.feedRejectReason:null,
+          feedPriceAccepted:snapshot.feedPriceAccepted!=null?snapshot.feedPriceAccepted:null,
+          ...(()=>{const _o=_v1364_oppRef.current;if(!_o||_o.windowId!==_wid)return{peakConv:null,peakEntry:null,peakSecsLeft:null,oppNowCount:0,oppFirstNowConv:null,oppFirstNowEntry:null,oppFirstNowSecsLeft:null};return{peakConv:_o.peakConv>=0?Math.round(_o.peakConv):null,peakEntry:_o.peakEntry,peakSecsLeft:_o.peakSecsLeft,oppNowCount:_o.nowCount,oppFirstNowConv:_o.firstNowConv,oppFirstNowEntry:_o.firstNowEntry,oppFirstNowSecsLeft:_o.firstNowSecsLeft};})(),/*V13.4.64: per-window peak opportunity for missed-early-lock diagnosis*/
           // V7.10.6: stamp the current market phase on every entry. Future memory views
           //   show this as a context badge so each call carries the trading-environment
           //   context it was made in. Inference fallback for legacy entries via timestamp.
