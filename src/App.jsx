@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.15-v13.4.65-posterior-logging';
-const TARA_VERSION_DISPLAY='Tara 13.4.65';
+const BASELINE_VERSION='2026.07.15-v13.4.66-signal-logging';
+const TARA_VERSION_DISPLAY='Tara 13.4.66';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -42788,7 +42788,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           isStructuralLed:!!snapshot.isStructuralLed,
           rawPosteriorAtLock:analysis?.rawPosteriorUncalibrated??analysis?.rawProbAbove??null, /* V9.11.3: distinguish raw vs calibrated */
           calibratedPosteriorAtLock:analysis?.rawProbAbove??null, /* V9.11.2 fix: was reading analysis.posterior but useMemo exposes it as rawProbAbove */
-          signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
+          signalScoresAtLock:(typeof taraCall!=='undefined'&&taraCall&&taraCall.rawSignalScores)?{...taraCall.rawSignalScores}:(analysis?.rawSignalScores?{...analysis.rawSignalScores}:null),/*V13.4.66: prefer LIVE taraCall.rawSignalScores; analysis was stale so signals logged on only 3% of locks, blocking tape-weight backtest*/
           // V10.7.53: capture critical missing fields. Was: strikeAtLock/baselineVersion/reasoning not persisted on most entries.
           //   strikeAtLock — required for gap-at-lock vs gap-at-close audit; lets us understand losses.
           //   baselineVersion — required to filter analyses by engine version cleanly.
@@ -44433,7 +44433,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         calibratedPosteriorAtLock:analysis?.rawProbAbove??null, /* V9.11.2 fix: was reading analysis.posterior but useMemo exposes it as rawProbAbove */
         calSwingAtLock:analysis?.rawProbAbove!=null&&analysis?.posterior!=null?Math.round(analysis.posterior-analysis.rawProbAbove):null,
         // V6.3.5: full signal scores + tape consensus at lock for analysis exports
-        signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
+        signalScoresAtLock:(typeof taraCall!=='undefined'&&taraCall&&taraCall.rawSignalScores)?{...taraCall.rawSignalScores}:(analysis?.rawSignalScores?{...analysis.rawSignalScores}:null),/*V13.4.66: prefer LIVE taraCall.rawSignalScores; analysis was stale so signals logged on only 3% of locks, blocking tape-weight backtest*/
         // V10.7.53: persist strike, version, and engine reasoning for full audit trail
         strikeAtLock:Number(targetMargin)||0,
         baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null,
@@ -44603,7 +44603,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         calibratedPosteriorAtLock:analysis?.rawProbAbove??null, /* V9.11.2 fix: was reading analysis.posterior but useMemo exposes it as rawProbAbove */
         calSwingAtLock:analysis?.rawProbAbove!=null&&analysis?.posterior!=null?Math.round(analysis.posterior-analysis.rawProbAbove):null,
         // V6.3.5: capture full signal scores + tape consensus at lock for analysis exports
-        signalScoresAtLock:analysis?.rawSignalScores?{...analysis.rawSignalScores}:null,
+        signalScoresAtLock:(typeof taraCall!=='undefined'&&taraCall&&taraCall.rawSignalScores)?{...taraCall.rawSignalScores}:(analysis?.rawSignalScores?{...analysis.rawSignalScores}:null),/*V13.4.66: prefer LIVE taraCall.rawSignalScores; analysis was stale so signals logged on only 3% of locks, blocking tape-weight backtest*/
         // V10.7.53: persist strike, version, and engine reasoning for full audit trail
         strikeAtLock:Number(targetMargin)||0,
         baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null,
