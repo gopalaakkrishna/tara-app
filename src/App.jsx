@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.15-v13.4.64-opportunity-trace';
-const TARA_VERSION_DISPLAY='Tara 13.4.64';
+const BASELINE_VERSION='2026.07.15-v13.4.65-posterior-logging';
+const TARA_VERSION_DISPLAY='Tara 13.4.65';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -42763,7 +42763,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           regime:analysis?.regime||'',
           dir:snapshot.call==='NO_TRADE'?(snapshot.direction||'NO_TRADE'):snapshot.call,
           confidence:snapshot.confidence||0,
-          posterior:snapshot.atPosterior!=null?snapshot.atPosterior:analysis?.rawProbAbove,
+          posterior:(typeof taraCall!=='undefined'&&taraCall&&Number.isFinite(Number(taraCall.rawProbAbove)))?Number(taraCall.rawProbAbove):(Number.isFinite(Number(snapshot.atPosterior))?Number(snapshot.atPosterior):(Number.isFinite(Number(analysis?.rawProbAbove))?Number(analysis.rawProbAbove):null)),/*V13.4.65: log LIVE taraCall.rawProbAbove; snapshot.atPosterior was NaN from stale analysis so posterior logged null on every lock, starving calibration*/
           qScore:snapshot.qScore||Math.round(qualityGate?.score||0),
           fgt:snapshot.fgt||analysis?.mtfAlignment,
           tier:snapshot.tier||'unknown',
