@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.16-v13.4.67-persist-calibration-fields';
-const TARA_VERSION_DISPLAY='Tara 13.4.67';
+const BASELINE_VERSION='2026.07.16-v13.4.68-learner-live-signals';
+const TARA_VERSION_DISPLAY='Tara 13.4.68';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -45980,7 +45980,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         regime:lastRegimeRef.current,
         clockAtLock:timeState.minsRemaining*60+timeState.secsRemaining,
         hour:new Date().getHours(),session:getMarketSessions().dominant,windowType,
-        signals:analysis?.rawSignalScores||{},result:null,
+        signals:eng?.lockedSignals||analysis?.rawSignalScores||{},result:null,/*V13.4.68: feed learner the LIVE locked signal vector (eng.lockedSignals) not the stale analysis closure -- was writing all-zero signals so updateWeights hit the <3-nonzero gate and never learned*/
         betAmt:betAmount||0,maxPay:maxPayout||0,
         // V145 NEW FIELDS
         entryPrice:currentPrice||0,                              // BTC price when we entered
