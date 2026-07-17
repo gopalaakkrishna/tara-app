@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.17-v13.4.70-log-tape-strength';
-const TARA_VERSION_DISPLAY='Tara 13.4.70';
+const BASELINE_VERSION='2026.07.17-v13.4.71-decent-odds-gate';
+const TARA_VERSION_DISPLAY='Tara 13.4.71';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38524,6 +38524,29 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   if(_v10_6_8_forced&&_v10_6_8_forced!==taraCall){
     Object.keys(_v10_6_8_forced).forEach(k=>{taraCall[k]=_v10_6_8_forced[k];});
   }
+
+  // V13.4.71: DECENT-ODDS GATE -- sit out the coin-flip mush (Kalshi 40-60c without tape) + untradeable
+  //   price extremes (<15c / >=85c). Runs AFTER the V10.6.8 force-commit (the only SIT_OUT->lock
+  //   converter); every later post-processor guards on call==='UP'||'DOWN' so they respect this sit-out.
+  //   Backtest on 4035 locks: cuts low-edge volume, lifts WR 64->68%; held 52-63% vs 47-56% in cold regime.
+  //   Off-switch: localStorage 'taraDecentOddsGate'='off'.
+  try{
+    const _dogOn=(function(){try{return localStorage.getItem('taraDecentOddsGate')!=='off';}catch(_){return true;}})();
+    if(_dogOn&&taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')){
+      const _kEntry=(analysis&&typeof analysis.kalshiAtLock==='number')?analysis.kalshiAtLock:null;
+      const _tapeOk=!!(taraCall.isTapeLed||(taraCall._ctx&&taraCall._ctx.isTapeLed));
+      if(_kEntry!=null){
+        const _extreme=(_kEntry<15||_kEntry>=85);
+        const _coinFlipNoTape=(_kEntry>=40&&_kEntry<60&&!_tapeOk);
+        if(_extreme||_coinFlipNoTape){
+          taraCall.call='SIT_OUT';
+          taraCall.reason='[V13.4.71] decent-odds gate: '+(_extreme?('untradeable '+_kEntry.toFixed(0)+'c'):('coin-flip '+_kEntry.toFixed(0)+'c, no tape'))+' -- sitting out';
+          taraCall._decentOddsGated=true;
+          taraCall._decentOddsKEntry=_kEntry;
+        }
+      }
+    }
+  }catch(_){}
 
   // ═══════════════════════════════════════════════════════════════════════════
   // V10.7.4 — SIDE-FLIP LAYER
