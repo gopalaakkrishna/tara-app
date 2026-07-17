@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.17-v13.4.69-export-weights-snapshot';
-const TARA_VERSION_DISPLAY='Tara 13.4.69';
+const BASELINE_VERSION='2026.07.17-v13.4.70-log-tape-strength';
+const TARA_VERSION_DISPLAY='Tara 13.4.70';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30484,7 +30484,7 @@ function TaraApp(){
           //   count survives reload even if IndexedDB fails. Without this, reload
           //   fell back to the 1000-entry fast cache — the "base stayed at 500/1000"
           //   bug the user reported.
-          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','noGoCategory']);
+          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory']);
           const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
           for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
             try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -30597,7 +30597,7 @@ function TaraApp(){
         const _save=_patched.slice(-_cap);
         await _idbWrite('taraCallLog',_save).catch(()=>{});     // primary: FULL history
         localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
-        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','noGoCategory']);
+        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory']);
         const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
         for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
           try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -30808,7 +30808,7 @@ function TaraApp(){
     //   pending entry wholesale, wiping telemetry. Root cause of the 3/3596 stamp rate.
     //   Fix: whichever copy wins the tiebreak, backfill any sticky field it lacks from
     //   the loser. Once any copy carries telemetry, it survives every future merge.
-    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','_v10_5_1_brti','_diag_brtiRefLive'];
+    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','_v10_5_1_brti','_diag_brtiRefLive'];
     const _coalesceSticky=(winner,loser)=>{
       if(!winner||!loser)return winner;
       let _out=winner;
@@ -30896,7 +30896,7 @@ function TaraApp(){
       //   preserves a filtered version of this field; this just brings the
       //   fallback cache in line so the data survives regardless of which
       //   storage tier the app happens to hydrate from.
-      'posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted',/*V13.4.67: calibration+opp+feed fields were stripped by deep-cache minify, so posterior/qScore/fgt were lost on every reload -- same bug class as signalScoresAtLock*/
+      'posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted',/*V13.4.67: calibration+opp+feed fields were stripped by deep-cache minify, so posterior/qScore/fgt were lost on every reload -- same bug class as signalScoresAtLock*/'tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock',/*V13.4.70 tape internals*/
       'signalScoresAtLock']);
     const _minifyEntry=(e)=>{
       if(!e)return e;
@@ -42787,6 +42787,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           isSuperConfluent:!!snapshot.isSuperConfluent,
           isRisingConfluence:!!snapshot.isRisingConfluence,
           isTapeLed:!!snapshot.isTapeLed,
+          tapeSuperStrong:(typeof taraCall!=='undefined'&&taraCall&&taraCall._ctx)?!!taraCall._ctx.tapeSuperStrong:false,
+          tapeStronglyAgrees:(typeof taraCall!=='undefined'&&taraCall&&taraCall._ctx)?!!taraCall._ctx.tapeStronglyAgrees:false,
+          convictionAtLock:(typeof taraCall!=='undefined'&&taraCall&&taraCall._ctx&&Number.isFinite(taraCall._ctx.conviction))?taraCall._ctx.conviction:null,
+          qAtLock:(typeof taraCall!=='undefined'&&taraCall&&taraCall._ctx&&Number.isFinite(taraCall._ctx.q))?taraCall._ctx.q:null,/*V13.4.70: persist tape-strength internals (super vs strong, conviction, q) so we can backtest expanding the tape-led gate*/
           isStructuralLed:!!snapshot.isStructuralLed,
           rawPosteriorAtLock:analysis?.rawPosteriorUncalibrated??analysis?.rawProbAbove??null, /* V9.11.3: distinguish raw vs calibrated */
           calibratedPosteriorAtLock:analysis?.rawProbAbove??null, /* V9.11.2 fix: was reading analysis.posterior but useMemo exposes it as rawProbAbove */
