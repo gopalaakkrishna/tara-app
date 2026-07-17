@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.17-v13.4.71-decent-odds-gate';
-const TARA_VERSION_DISPLAY='Tara 13.4.71';
+const BASELINE_VERSION='2026.07.17-v13.4.72-symmetric-up-tape';
+const TARA_VERSION_DISPLAY='Tara 13.4.72';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38082,7 +38082,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   confirms pumps. For UP, additionally require tape ≥75% buy on the
     //   active windows AND conviction ≥8pt AND FGT magnitude ≥1.5/4.
     //   For DOWN, base check unchanged.
-    const _tapeLedUpExtra=dir!=='UP'||(tapeBuyPct>=75&&conviction>=8&&fgtAbs>=1.5);
+    const _tapeLedUpExtra=dir!=='UP'||conviction>=6;/*V13.4.72: UP was blocked by a triple bar (tapeBuyPct>=75 && conviction>=8 && fgtAbs>=1.5) while DOWN needed nothing. Data: UP wins as much as DOWN (63.8 vs 64.1) and UP tape-led wins MORE (75 vs 72), but only 4 UP vs 67 DOWN ever qualified. tapeSuperStrong in the base already ensures strong UP tape, so the triple was double-counting tape strength for UP. Relaxed to a light conviction>=6 hedge; the late-FOMO penalty still guards pump-chasing.*/
     const isTapeLed=_isTapeLedBase&&_tapeLedUpExtra;
     // V6.2.0: STRUCTURAL-LED TIER — primary fast-lock based on grand trend + trend channel.
     //   These are the user's preferred indicators: multi-hour structural context, looking
