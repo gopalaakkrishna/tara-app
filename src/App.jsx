@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.16-v13.4.68-learner-live-signals';
-const TARA_VERSION_DISPLAY='Tara 13.4.68';
+const BASELINE_VERSION='2026.07.17-v13.4.69-export-weights-snapshot';
+const TARA_VERSION_DISPLAY='Tara 13.4.69';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -21368,6 +21368,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
                     wins:counts.wins,losses:counts.losses,sitouts:counts.sitouts,pending:counts.pending,
                     winRate:_wr,
                   },
+                  weightsSnapshot:(function(){var o={};try{o.live=(typeof adaptiveWeights!=='undefined')?adaptiveWeights:null;}catch(_){o.live=null;}try{o.lsV110=JSON.parse(localStorage.getItem('taraWeightsV110')||'null');}catch(_){o.lsV110=null;}try{o.lsBTC=JSON.parse(localStorage.getItem('taraWeightsByAsset_BTC_v1')||'null');}catch(_){o.lsBTC=null;}try{o.regime=JSON.parse(localStorage.getItem('taraRegimeWeights_v1')||'null');}catch(_){o.regime=null;}try{o.defaults=(typeof DEFAULT_WEIGHTS!=='undefined')?DEFAULT_WEIGHTS:null;}catch(_){o.defaults=null;}return o;})(),/*V13.4.69: dump learner weights (live+localStorage+defaults) so we can verify updateWeights actually moved off V144 defaults*/
                   entries:taraCallLog,
                 };
                 const _json=JSON.stringify(_payload,null,2);
