@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.17-v13.4.72-symmetric-up-tape';
-const TARA_VERSION_DISPLAY='Tara 13.4.72';
+const BASELINE_VERSION='2026.07.19-v13.4.73-record-ratchet';
+const TARA_VERSION_DISPLAY='Tara 13.4.73';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30673,6 +30673,41 @@ function TaraApp(){
       else if(e.result==='LOSS')out[wt].losses++;
       else if(e.result==='SITOUT')out[wt].sitouts++;
     });
+    // V13.4.73: persistent all-time RATCHET so the displayed record never shrinks.
+    //   taraScorecards counted the in-memory log, which can hydrate a trimmed subset,
+    //   making the record visibly drop. This keeps a per-(asset,windowType) tally that
+    //   grows incrementally with each newly-settled window (id-gated, so old entries
+    //   trimming off never subtracts) and max-ratchets up if a fuller log ever loads.
+    //   Monotonic; display-only (no trading logic reads taraScorecards). ASCII-only.
+    try{
+      var _RK='taraAllTimeRecord_v2';var _store={};
+      try{_store=JSON.parse(localStorage.getItem(_RK)||'{}')||{};}catch(_e0){_store={};}
+      var _dirty=false;
+      ['15m','5m'].forEach(function(_wt){
+        var _ck=currentAsset+'|'+_wt;
+        var _cell=_store[_ck]||{wins:0,losses:0,sitouts:0,lastId:0};
+        var _prevLast=_cell.lastId||0;var _maxId=_prevLast;
+        (taraCallLog||[]).forEach(function(e){
+          if(!e||e.windowType!==_wt||!e.result)return;
+          if((e.asset||'BTC')!==currentAsset)return;
+          if(e.wasOverriddenNoTrade===true)return;
+          if(e.tier==='no-go-data'&&!e.closingPrice)return;
+          var _id=e.id||0;if(_id<=_prevLast)return;
+          if(e.result==='WIN')_cell.wins++;
+          else if(e.result==='LOSS')_cell.losses++;
+          else if(e.result==='SITOUT')_cell.sitouts++;
+          if(_id>_maxId)_maxId=_id;
+        });
+        _cell.lastId=_maxId;
+        var _f=out[_wt]||{wins:0,losses:0,sitouts:0};
+        if((_f.wins||0)>_cell.wins)_cell.wins=_f.wins;
+        if((_f.losses||0)>_cell.losses)_cell.losses=_f.losses;
+        if((_f.sitouts||0)>_cell.sitouts)_cell.sitouts=_f.sitouts;
+        _store[_ck]=_cell;_dirty=true;
+        out[_wt]={wins:_cell.wins,losses:_cell.losses,sitouts:_cell.sitouts};
+      });
+      if(_dirty){try{localStorage.setItem(_RK,JSON.stringify(_store));}catch(_e1){}}
+    }catch(_eR){}
     return out;
   },[taraCallLog,currentAsset]);
   // V9.1.9: scorecards (lifetime, all assets) — derived from taraCallLog.
