@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.19-v13.4.75-strip-autoexec-1';
-const TARA_VERSION_DISPLAY='Tara 13.4.75';
+const BASELINE_VERSION='2026.07.19-v13.4.76-auto-follow-lock';
+const TARA_VERSION_DISPLAY='Tara 13.4.76';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -39631,6 +39631,34 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   Refs read at render time — same data the lifecycle effect uses.
   taraCall.samples=taraCallSampleRef.current?.count||0;
   taraCall.snapshot=taraCallSnapshotRef.current||null;
+  // V13.4.76: AUTO-FOLLOW LOCK (advisory). When Tara locks a real UP/DOWN call, auto-copy
+  //   it into the tracked position so the live advisor + coach (hold / take-profit /
+  //   cut-loss / reversal alerts) start managing it immediately -- identical to tapping
+  //   'Got in on Tara's call', just automatic. PURELY ADVISORY: sets userPosition only,
+  //   never places a Kalshi order (that engine was removed in 13.4.75). One entry per
+  //   window; respects a manual exit (won't re-enter the same window) and the anti-tilt
+  //   cooldown. Off-switch: localStorage 'taraAutoFollowLock'='off'. ASCII-only.
+  const _autoFollowedWindowRef=React.useRef(null);
+  const _afSnap=taraCall&&taraCall.snapshot;
+  const _afLocked=!!(_afSnap&&_afSnap.locked===true);
+  const _afCall=_afSnap?_afSnap.call:null;
+  React.useEffect(()=>{
+    try{
+      var _on=(function(){try{return localStorage.getItem('taraAutoFollowLock')!=='off';}catch(_e){return true;}})();
+      if(!_on)return;
+      if(!_afLocked)return;
+      if(_afCall!=='UP'&&_afCall!=='DOWN')return;
+      if(_afSnap&&(_afSnap.wasOverriddenNoTrade===true||_afSnap.wasOverriddenSitOut===true))return;
+      var _wid=null;try{_wid=computeWindowId(windowType);}catch(_e2){_wid=null;}
+      if(!_wid)return;
+      if(_autoFollowedWindowRef.current===_wid)return;
+      if(userPosition!==null)return;
+      if(typeof tiltLockUntil!=='undefined'&&tiltLockUntil>Date.now())return;
+      if(typeof handleManualSync!=='function')return;
+      _autoFollowedWindowRef.current=_wid;
+      handleManualSync(_afCall);
+    }catch(_eR){}
+  },[_afLocked,_afCall,userPosition,windowType]);
   // V9.2.3: Expose widget data on window for the popup to read.
   useEffect(()=>{
     const _snap=taraCall?.snapshot;
