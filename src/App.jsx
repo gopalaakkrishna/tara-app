@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.19-v13.4.76-auto-follow-lock';
-const TARA_VERSION_DISPLAY='Tara 13.4.76';
+const BASELINE_VERSION='2026.07.21-v13.4.77-revert-ev-ceiling';
+const TARA_VERSION_DISPLAY='Tara 13.4.77';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38571,16 +38571,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _kEntry=(analysis&&typeof analysis.kalshiAtLock==='number')?analysis.kalshiAtLock:null;
       const _tapeOk=!!(taraCall.isTapeLed||(taraCall._ctx&&taraCall._ctx.isTapeLed));
       if(_kEntry!=null){
-        // V13.4.74: EV CEILING -- locks >=60c are net-negative money despite high WR.
-        //   Log evidence (3056 priced locks): >=60c = 841 locks, 67.1% WR, net -4470c;
-        //   92% of profit comes from <40c entries; one loss at 90c needs 9.4 wins back.
-        //   Ceiling via localStorage 'taraEvCeilingCents' (50..90, default 60; 85 = old).
-        var _ceil=60;try{var _cv=parseInt(localStorage.getItem('taraEvCeilingCents'),10);if(_cv>=50&&_cv<=90)_ceil=_cv;}catch(_e2){}
-        const _extreme=(_kEntry<15||_kEntry>=_ceil);
+        // V13.4.77: REVERTED the 13.4.74 EV ceiling -- it was a pricing bug. It gated on raw
+        //   kalshiAtLock (Kalshi YES price), which is the entry cost ONLY for UP locks; a DOWN
+        //   lock's cost is 100-kalshiAtLock. So the 60c ceiling blocked profitable cheap-DOWN
+        //   underdog bets and mid UP-favorite locks -- about -3209c of real profit removed.
+        //   The raw-kalshiAtLock EXTREMES are symmetric and correct: <15 or >=85 means one side
+        //   pays a <15c fill-mirage and the other an over-priced >=85c favorite (the only -EV
+        //   bucket). Direction-aware refinement can come later; this restores known-good 71.
+        const _extreme=(_kEntry<15||_kEntry>=85);
         const _coinFlipNoTape=(_kEntry>=40&&_kEntry<60&&!_tapeOk);
         if(_extreme||_coinFlipNoTape){
           taraCall.call='SIT_OUT';
-          taraCall.reason='[V13.4.74] decent-odds gate: '+(_extreme?((_kEntry<15?'untradeable ':'over EV ceiling ')+_kEntry.toFixed(0)+'c'):('coin-flip '+_kEntry.toFixed(0)+'c, no tape'))+' -- sitting out';
+          taraCall.reason='[V13.4.77] decent-odds gate: '+(_extreme?('untradeable extreme '+_kEntry.toFixed(0)+'c'):('coin-flip '+_kEntry.toFixed(0)+'c, no tape'))+' -- sitting out';
           taraCall._decentOddsGated=true;
           taraCall._decentOddsKEntry=_kEntry;
         }
