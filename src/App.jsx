@@ -4713,8 +4713,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.21-v13.4.77-revert-ev-ceiling';
-const TARA_VERSION_DISPLAY='Tara 13.4.77';
+const BASELINE_VERSION='2026.07.21-v13.4.78-drop-coinflip-gate';
+const TARA_VERSION_DISPLAY='Tara 13.4.78';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38579,7 +38579,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   pays a <15c fill-mirage and the other an over-priced >=85c favorite (the only -EV
         //   bucket). Direction-aware refinement can come later; this restores known-good 71.
         const _extreme=(_kEntry<15||_kEntry>=85);
-        const _coinFlipNoTape=(_kEntry>=40&&_kEntry<60&&!_tapeOk);
+        // V13.4.78: coin-flip gate now DEFAULT OFF. Correct-pricing backtest (1143 zone locks):
+        //   40-60c coin-flip is +3.6c/ct in EVERY regime (RANGE-CHOP +9.6, HIGH-VOL-CHOP +3.6),
+        //   max drawdown 7.6 contracts vs +41 profit. The old tape-allow caught only n=4, so the
+        //   gate was a blanket ban on 1139 profitable locks (-3960c). Dropping it lifts engine
+        //   P&L +5758c->+9718c for +0.5ct more drawdown. Opt back in: localStorage 'taraCoinFlipGate'='on'.
+        const _cfGateOn=(function(){try{return localStorage.getItem('taraCoinFlipGate')==='on';}catch(_e3){return false;}})();
+        const _coinFlipNoTape=_cfGateOn&&(_kEntry>=40&&_kEntry<60&&!_tapeOk);
         if(_extreme||_coinFlipNoTape){
           taraCall.call='SIT_OUT';
           taraCall.reason='[V13.4.77] decent-odds gate: '+(_extreme?('untradeable extreme '+_kEntry.toFixed(0)+'c'):('coin-flip '+_kEntry.toFixed(0)+'c, no tape'))+' -- sitting out';
