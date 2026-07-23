@@ -4730,8 +4730,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.22-v13.4.79-log-net-cents';
-const TARA_VERSION_DISPLAY='Tara 13.4.79';
+const BASELINE_VERSION='2026.07.23-v13.4.80-fix-idb-truncation';
+const TARA_VERSION_DISPLAY='Tara 13.4.80';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30976,7 +30976,36 @@ function TaraApp(){
       }
     }catch(_){_mergedForStorage=_stripped;}
     // V10.7.95: Write full log to IndexedDB (no size limit) — primary store
-    _idbWrite('taraCallLog',_mergedForStorage).catch(()=>{});
+    // V13.4.80: DATA-LOSS FIX. This write used to blindly overwrite IndexedDB (the full
+    //   archive) with the in-memory log, whose read-modify-write base was only the
+    //   1000-entry taraCallLog_v1 fast cache. So any reload that hydrated a short log
+    //   permanently truncated IDB: the export went 4536 -> 3696 entries in a day and the
+    //   oldest record moved 05-20 -> 06-05. Now the RMW base is IDB ITSELF, so history is
+    //   preserved and a short in-memory log heals from the archive instead of destroying it.
+    //   Falls back to the old direct write only if the IDB read fails. ASCII-only.
+    (async()=>{
+      try{
+        const _prevIdb=await _idbRead('taraCallLog').catch(()=>null);
+        let _final=_mergedForStorage;
+        if(Array.isArray(_prevIdb)&&_prevIdb.length){
+          try{
+            _final=_mergeCallLogEntries(_prevIdb,_mergedForStorage)
+              .filter(e=>!e||(e.asset||'BTC')==='BTC')
+              .slice(-TARA_CALL_LOG_CAP)
+              .map(_stripForStorage);
+          }catch(_eM){_final=_mergedForStorage;}
+          try{
+            if(_final.length<_prevIdb.length){
+              console.warn('[V13.4.80] IDB write would shrink archive '+_prevIdb.length+' -> '+_final.length+'; keeping archive');
+              _final=_prevIdb;
+            }
+          }catch(_eW){}
+        }
+        await _idbWrite('taraCallLog',_final).catch(()=>{});
+      }catch(_eA){
+        _idbWrite('taraCallLog',_mergedForStorage).catch(()=>{});
+      }
+    })();
     // V10.9.6: DEEP MINIFIED CACHE — up to TARA_CALL_LOG_CAP entries in localStorage.
     //   This is the resilient base: if IndexedDB fails/empties/was truncated, the
     //   full trade count still loads from here on reload instead of dropping to
