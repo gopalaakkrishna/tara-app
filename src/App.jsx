@@ -4656,9 +4656,23 @@ const evaluateTradeTimingV1=(inputs)=>{
   const _distBps=_num(window.distanceBps,null);
   const _distFav=!!window.distanceFavorable;
   // Less time remaining = lower chance of move materializing
-  if(_secsLeft<90)_bump('time-left',-4,`only ${Math.round(_secsLeft)}s left — limited move time`);
-  else if(_secsLeft<180)_bump('time-left',-1,`${Math.round(_secsLeft)}s left — tight`);
-  else if(_secsLeft>=600)_bump('time-left',+2,'plenty of time for move to develop');
+  // V13.4.81: TIME RAMP. The old ladder was inverted against measured edge. Direction-aware
+  //   EV/contract by time-left at lock (n=1161 timed locks, full archive):
+  //     <120s +9.84 | 120-300s +7.29 | 300-480s +3.48 | 480-700s +3.50 | >=700s +0.06
+  //   Old rungs PENALIZED the best zone (-4 under 90s) and REWARDED the dead one (+2 over
+  //   600s) on the theory that a move needs time to develop. What actually matters is how
+  //   much is already known: near expiry, distance-to-strike has largely resolved the
+  //   question. Tara gets exactly ONE lock per window (4186 locks / 4186 windows), so
+  //   spending it early burns the shot in the zone with no edge. Robustness: the gradient
+  //   holds in both chronological halves and inside a fixed 50-65c cost band, so it is not
+  //   a price artifact. Dial: localStorage 'taraTimeRampMult' 0..1 (default 0.5 = half
+  //   strength); 'taraTimeRamp'='off' disables entirely. ASCII-only except preserved dashes.
+  const _trMult=(()=>{try{if(localStorage.getItem('taraTimeRamp')==='off')return 0;const _v=parseFloat(localStorage.getItem('taraTimeRampMult'));return(Number.isFinite(_v)&&_v>=0&&_v<=1)?_v:0.5;}catch(_e){return 0.5;}})();
+  const _trBump=(_pts,_msg)=>{const _p=Math.round(_pts*_trMult);if(_p!==0&&Number.isFinite(_p))_bump('time-left',_p,_msg);};
+  if(_secsLeft<120)_trBump(+3,`${Math.round(_secsLeft)}s left — final stretch, outcome largely determined (+9.8c/ct zone)`);
+  else if(_secsLeft<300)_trBump(+2,`${Math.round(_secsLeft)}s left, late window -- distance to strike is informative (+7.3c/ct)`);
+  else if(_secsLeft>=700)_trBump(-4,`${Math.round(_secsLeft)}s left — first third has no measured edge (+0.1c/ct), needs more`);
+  else if(_secsLeft>=480)_trBump(-1,`${Math.round(_secsLeft)}s left, early-mid window -- slight discount`);
   // Distance from strike — favorable side is easier to settle right
   if(_distBps!=null){
     if(_distFav&&Math.abs(_distBps)<30)_bump('strike-dist',+4,`already ${Math.round(Math.abs(_distBps))}bps favorable from strike`);
@@ -4730,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.23-v13.4.80-fix-idb-truncation';
-const TARA_VERSION_DISPLAY='Tara 13.4.80';
+const BASELINE_VERSION='2026.07.23-v13.4.81-time-ramp';
+const TARA_VERSION_DISPLAY='Tara 13.4.81';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
