@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.23-v13.4.81-time-ramp';
-const TARA_VERSION_DISPLAY='Tara 13.4.81';
+const BASELINE_VERSION='2026.07.25-v13.4.82-log-spotperpdiv';
+const TARA_VERSION_DISPLAY='Tara 13.4.82';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -12120,6 +12120,21 @@ const computeV99Posterior=(params)=>{
     rawSignalScores.spotPerpDiv=_spdAdj;
     reasoning.push(`[SPOT-PERP] Perp ${spotPerpDiv.divBps>0?'premium':'discount'} ${Math.abs(spotPerpDiv.divBps).toFixed(0)}bps → ${_spdDir>0?'UP':'DOWN'} bias (${_spdAdj>0?'+':''}${_spdAdj.toFixed(1)})`);
   }
+  // V13.4.82: ALWAYS-LOG spotPerpDiv telemetry (instrumentation, ZERO trade-behavior change).
+  //   The scoring block above only writes rawSignalScores.spotPerpDiv when the feed is live
+  //   AND |divBps|>=30. Below that it wrote nothing, so the audit log could not tell 'signal
+  //   said ~neutral' apart from 'signal was dead'. This signal has run at weight 8 its whole
+  //   life with NO per-lock record, so it was impossible to audit for realized-EV value the
+  //   way tape/netCents were. We now stamp the raw divergence on every lock: the actual adj
+  //   if it fired, else 0 when live-but-subthreshold, else null when the feed is not live.
+  //   Mirrors the netCents instrumentation move: measure first, then decide the weight.
+  try{
+    if(!('spotPerpDiv' in rawSignalScores)){
+      rawSignalScores.spotPerpDiv=(spotPerpDiv&&spotPerpDiv.status==='live'&&Number.isFinite(spotPerpDiv.divBps))?0:null;
+    }
+    rawSignalScores._spdDivBps=(spotPerpDiv&&Number.isFinite(spotPerpDiv.divBps))?Math.round(spotPerpDiv.divBps*10)/10:null;
+    rawSignalScores._spdStatus=(spotPerpDiv&&spotPerpDiv.status)?String(spotPerpDiv.status):'none';
+  }catch(_eSpd){}
   // V9.2.2: ML MODEL SIGNAL — logistic regression trained on historical trades.
   //   Outputs a WIN probability (0-1). If model thinks this setup has high/low WIN
   //   chance, boost/penalize the posterior by up to ±10 pts.
@@ -30925,6 +30940,7 @@ function TaraApp(){
         Object.entries(_sss).filter(([k])=>{
           if(!k.startsWith('_'))return true; // keep scored signals (gap, flow, etc)
           if(/^_ml_/.test(k))return true;    // keep ML training fields
+          if(k==='_spdDivBps'||k==='_spdStatus')return true; // V13.4.82: keep spotPerpDiv telemetry
           return false;                       // drop all _v10_* telemetry inside signals
         })
       ):null;
