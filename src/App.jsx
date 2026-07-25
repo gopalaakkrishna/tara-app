@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.25-v13.4.82-log-spotperpdiv';
-const TARA_VERSION_DISPLAY='Tara 13.4.82';
+const BASELINE_VERSION='2026.07.25-v13.4.83-persist-kalshilead';
+const TARA_VERSION_DISPLAY='Tara 13.4.83';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30530,7 +30530,7 @@ function TaraApp(){
           //   count survives reload even if IndexedDB fails. Without this, reload
           //   fell back to the 1000-entry fast cache — the "base stayed at 500/1000"
           //   bug the user reported.
-          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents']);
+          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock']);
           const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
           for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
             try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -30643,7 +30643,7 @@ function TaraApp(){
         const _save=_patched.slice(-_cap);
         await _idbWrite('taraCallLog',_save).catch(()=>{});     // primary: FULL history
         localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
-        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents']);
+        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock']);
         const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
         for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
           try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -30889,7 +30889,7 @@ function TaraApp(){
     //   pending entry wholesale, wiping telemetry. Root cause of the 3/3596 stamp rate.
     //   Fix: whichever copy wins the tiebreak, backfill any sticky field it lacks from
     //   the loser. Once any copy carries telemetry, it survives every future merge.
-    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','netCents','_v10_5_1_brti','_diag_brtiRefLive'];
+    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','netCents','kalshiLeadAtLock','_v10_5_1_brti','_diag_brtiRefLive'];
     const _coalesceSticky=(winner,loser)=>{
       if(!winner||!loser)return winner;
       let _out=winner;
