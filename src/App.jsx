@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.26-v13.4.85-log-fairvalue-inputs';
-const TARA_VERSION_DISPLAY='Tara 13.4.85';
+const BASELINE_VERSION='2026.07.26-v13.4.86-hourly-barrier-prob';
+const TARA_VERSION_DISPLAY='Tara 13.4.86';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5089,6 +5089,58 @@ function computeDowHourShift(dowHourTable,now){
 //   limit comfortably. IndexedDB (unlimited) is the primary store; localStorage
 //   is a fast-read cache only.
 const TARA_CALL_LOG_CAP=10000;
+
+// V13.4.86: HOURLY BARRIER PROBABILITY -- empirically fitted, out-of-sample validated.
+//   Answers: P(BTC closes above `strike` when the window ends), given spot now and
+//   minutes remaining. This is the missing piece for fair-value / edge scanning: compare
+//   this probability against Kalshi's price to find windows the market has mispriced.
+//
+// HOW THE CONSTANTS WERE DERIVED (from 83 days of this app's own closingPrice history,
+// 5642 fifteen-minute closes, NOT assumed):
+//   1. Volatility scaling measured across 8 horizons (15m..4h): sd_bps(h) = 22.84*h^0.4786
+//      with R^2=0.9986. H=0.4786 vs the 0.50 that sqrt-t assumes, so BTC sub-diffuses only
+//      slightly -- sqrt-t overstates the 1h move by ~3%, NOT the 3x some models assume.
+//      Lag-1 autocorrelation of consecutive 15m returns: -0.0015 +/- 0.028 (no measurable
+//      mean reversion). So do NOT restructure around mean reversion at these horizons.
+//   2. The raw unconditional sd left the model UNDER-confident (probabilities compressed
+//      toward 50%). Grid-fitting a sharpening factor gave lam=0.68 and a small negative
+//      drift of -0.5 bps per 15m slot. Effective sd_bps(k) = 15.53*k^0.4786.
+//   3. Validation on 4424 hourly samples: Brier 0.1848 vs 0.2500 baseline, SKILL +0.0647.
+//      OUT-OF-SAMPLE (fit first half, test second): skill +0.0594 -- it HOLDS.
+//      Directional accuracy by time left: 45m 67.3% | 30m 76.9% | 15m 85.0%.
+//      On confident calls (>=70% or <=30%): 45m 76.8% | 30m 84.9% | 15m 92.1%.
+//
+// CRITICAL LIMITATION -- READ BEFORE TRUSTING ANY 'EDGE' NUMBER:
+//   Being well calibrated is NOT the same as beating the market. Kalshi's own price is
+//   probably about this accurate too. No historical Kalshi HOURLY prices exist in the log,
+//   so model-vs-market edge has NEVER been measured. Until it is, treat output as a
+//   second opinion, not an edge. Advisory only -- nothing here touches lock decisions.
+//
+//   At the exact window open, distance to strike is 0 so this returns ~50% and carries no
+//   information (measured skill at 60m left: -0.0000). It becomes useful ~45m in.
+const TARA_HOURLY_VOL_A=15.53;   // bps at k=1 slot, post-sharpening (22.84 raw * 0.68)
+const TARA_HOURLY_VOL_H=0.4786;  // measured scaling exponent (0.50 = random walk)
+const TARA_HOURLY_DRIFT_BPS=-0.5;// per 15m slot, fitted
+const _taraNormCdf=(z)=>{
+  // Abramowitz-Stegun 7.1.26 -- max abs error ~1.5e-7, far tighter than the logistic
+  // 1.702z approximation whose worst error sits in the tails where conviction lives.
+  if(!Number.isFinite(z))return 0.5;
+  const s=z<0?-1:1,x=Math.abs(z)/Math.SQRT2;
+  const t=1/(1+0.3275911*x);
+  const y=1-((((1.061405429*t-1.453152027)*t+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);
+  return 0.5*(1+s*y);
+};
+// spotNow, strike: prices. minsLeft: minutes until the window closes.
+// Returns probability in [0,1] that close > strike, or null if inputs unusable.
+const taraHourlyProb=(spotNow,strike,minsLeft)=>{
+  const s=Number(spotNow),k0=Number(strike),m=Number(minsLeft);
+  if(!(s>0)||!(k0>0)||!Number.isFinite(m)||m<0)return null;
+  const kSlots=Math.max(m/15,1/60);           // horizon in 15m slots, floored at ~1s
+  const distBps=Math.log(s/k0)*10000;
+  const sd=TARA_HOURLY_VOL_A*Math.pow(kSlots,TARA_HOURLY_VOL_H);
+  if(!(sd>0))return null;
+  return _taraNormCdf((distBps+TARA_HOURLY_DRIFT_BPS*kSlots)/sd);
+};
 // V13.2: Supabase EGRESS FIX. The cloud doc was the full 5000-entry log (~2.9MB, and
 //   bigger now that V13.1 telemetry enriched each entry). Every 60s RMW read+merge moved
 //   the whole doc -> ~52% of the 5GB egress cap. Cross-device sync only needs RECENT
