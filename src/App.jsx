@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.25-v13.4.83-persist-kalshilead';
-const TARA_VERSION_DISPLAY='Tara 13.4.83';
+const BASELINE_VERSION='2026.07.26-v13.4.85-log-fairvalue-inputs';
+const TARA_VERSION_DISPLAY='Tara 13.4.85';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30530,7 +30530,7 @@ function TaraApp(){
           //   count survives reload even if IndexedDB fails. Without this, reload
           //   fell back to the 1000-entry fast cache — the "base stayed at 500/1000"
           //   bug the user reported.
-          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock']);
+          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock']);
           const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
           for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
             try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -30643,7 +30643,7 @@ function TaraApp(){
         const _save=_patched.slice(-_cap);
         await _idbWrite('taraCallLog',_save).catch(()=>{});     // primary: FULL history
         localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
-        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock']);
+        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock']);
         const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
         for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
           try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -30889,7 +30889,7 @@ function TaraApp(){
     //   pending entry wholesale, wiping telemetry. Root cause of the 3/3596 stamp rate.
     //   Fix: whichever copy wins the tiebreak, backfill any sticky field it lacks from
     //   the loser. Once any copy carries telemetry, it survives every future merge.
-    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','netCents','kalshiLeadAtLock','_v10_5_1_brti','_diag_brtiRefLive'];
+    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','_v10_5_1_brti','_diag_brtiRefLive'];
     const _coalesceSticky=(winner,loser)=>{
       if(!winner||!loser)return winner;
       let _out=winner;
@@ -30979,7 +30979,14 @@ function TaraApp(){
       //   fallback cache in line so the data survives regardless of which
       //   storage tier the app happens to hydrate from.
       'posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted',/*V13.4.67: calibration+opp+feed fields were stripped by deep-cache minify, so posterior/qScore/fgt were lost on every reload -- same bug class as signalScoresAtLock*/'tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock',/*V13.4.70 tape internals*/
-      'signalScoresAtLock','netCents']);
+      // V13.4.84: kalshiLeadAtLock was added to _MK and _STICKY_TELEMETRY in 13.4.83 but
+      //   DELIBERATELY skipped here on the wrong theory that this set is an emergency
+      //   minimal cache where an object field would bloat. It is not -- it is the deep-cache
+      //   minifier that decides what survives a reload, and signalScoresAtLock (much larger)
+      //   already lives here. Result: 83 shipped and the field still persisted 0 times while
+      //   kalshiLead fired 3x. Same bug class the V13.4.31 and V13.4.67 comments above warn
+      //   about. ~80 bytes when present, null otherwise.
+      'signalScoresAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock']);
     const _minifyEntry=(e)=>{
       if(!e)return e;
       const o={};
@@ -40869,6 +40876,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //   baselineVersion — required to filter analyses by engine version cleanly.
           //   reasoning — capture engine log so we can see WHY each call was made post-hoc.
           strikeAtLock:Number(targetMargin)||0,
+          // V13.4.85: fair-value inputs (see note on the other lock paths).
+          spotAtLock:Number(currentPrice)||0,
+          distBpsAtLock:(Number(targetMargin)>0&&Number(currentPrice)>0)?Math.round(((Number(currentPrice)-Number(targetMargin))/Number(targetMargin))*1000000)/100:null,
+          volBpsAtLock:(typeof atrBps!=='undefined'&&Number.isFinite(atrBps))?Math.round(atrBps*10)/10:null,
           baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null,
           reasoning:Array.isArray(analysis?.reasoning)?analysis.reasoning.slice(0,40):null,
           // V10.7.50: Direction bias stamps — record recent UP/DOWN ratio and WR-per-direction
@@ -42511,6 +42522,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         signalScoresAtLock:(typeof taraCall!=='undefined'&&taraCall&&taraCall.rawSignalScores)?{...taraCall.rawSignalScores}:(analysis?.rawSignalScores?{...analysis.rawSignalScores}:null),/*V13.4.66: prefer LIVE taraCall.rawSignalScores; analysis was stale so signals logged on only 3% of locks, blocking tape-weight backtest*/
         // V10.7.53: persist strike, version, and engine reasoning for full audit trail
         strikeAtLock:Number(targetMargin)||0,
+        // V13.4.85: FAIR-VALUE INPUTS. The archive recorded strike and closingPrice but NEVER
+        //   where spot sat relative to strike AT LOCK, so no barrier-probability model could be
+        //   fitted or validated on history (gapAtEntry was stamped but never whitelisted, so it
+        //   persisted 0 times across 4320 settled locks). These are what a distance/vol/time
+        //   model needs: with them we can measure BTC's real scaling exponent H instead of
+        //   assuming sqrt-t, then price each window and compare against Kalshi. ASCII-only.
+        spotAtLock:Number(currentPrice)||0,
+        distBpsAtLock:(Number(targetMargin)>0&&Number(currentPrice)>0)?Math.round(((Number(currentPrice)-Number(targetMargin))/Number(targetMargin))*1000000)/100:null,
+        volBpsAtLock:(typeof atrBps!=='undefined'&&Number.isFinite(atrBps))?Math.round(atrBps*10)/10:null,
         baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null,
         reasoning:Array.isArray(analysis?.reasoning)?analysis.reasoning.slice(0,40):null,
         // V10.7.54: bias stamps now on ALL entry paths (was 59% coverage in V10.7.50 — only on _logSnapshotEntry path)
@@ -42681,6 +42701,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         signalScoresAtLock:(typeof taraCall!=='undefined'&&taraCall&&taraCall.rawSignalScores)?{...taraCall.rawSignalScores}:(analysis?.rawSignalScores?{...analysis.rawSignalScores}:null),/*V13.4.66: prefer LIVE taraCall.rawSignalScores; analysis was stale so signals logged on only 3% of locks, blocking tape-weight backtest*/
         // V10.7.53: persist strike, version, and engine reasoning for full audit trail
         strikeAtLock:Number(targetMargin)||0,
+        // V13.4.85: FAIR-VALUE INPUTS. The archive recorded strike and closingPrice but NEVER
+        //   where spot sat relative to strike AT LOCK, so no barrier-probability model could be
+        //   fitted or validated on history (gapAtEntry was stamped but never whitelisted, so it
+        //   persisted 0 times across 4320 settled locks). These are what a distance/vol/time
+        //   model needs: with them we can measure BTC's real scaling exponent H instead of
+        //   assuming sqrt-t, then price each window and compare against Kalshi. ASCII-only.
+        spotAtLock:Number(currentPrice)||0,
+        distBpsAtLock:(Number(targetMargin)>0&&Number(currentPrice)>0)?Math.round(((Number(currentPrice)-Number(targetMargin))/Number(targetMargin))*1000000)/100:null,
+        volBpsAtLock:(typeof atrBps!=='undefined'&&Number.isFinite(atrBps))?Math.round(atrBps*10)/10:null,
         baselineVersion:typeof BASELINE_VERSION!=='undefined'?BASELINE_VERSION:null,
         reasoning:Array.isArray(analysis?.reasoning)?analysis.reasoning.slice(0,40):null,
         // V10.7.54: bias stamps now on ALL entry paths (was 59% coverage in V10.7.50 — only on _logSnapshotEntry path)
