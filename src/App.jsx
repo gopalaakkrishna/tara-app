@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.26-v13.4.86-hourly-barrier-prob';
-const TARA_VERSION_DISPLAY='Tara 13.4.86';
+const BASELINE_VERSION='2026.07.26-v13.4.87-fix-bybit-cors';
+const TARA_VERSION_DISPLAY='Tara 13.4.87';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -8490,7 +8490,7 @@ const useMultiTFCandles=(asset,priceSource)=>{
         try{
           const ivMap={60:'1',180:'3',300:'5',900:'15'};
           const iv=ivMap[gran]||'1';
-          const r2=await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${_cfg.binance||'BTCUSDT'}&interval=${iv}&limit=300`);
+          const r2=await fetch(`/api/bybit/market/kline?category=linear&symbol=${_cfg.binance||'BTCUSDT'}&interval=${iv}&limit=300`);
           const j=await r2.json();
           if(j?.retCode!==0||!Array.isArray(j?.result?.list))throw new Error('bybit bad');
           return j.result.list.map(c=>({time:parseInt(c[0])/1000,o:parseFloat(c[1]),h:parseFloat(c[2]),l:parseFloat(c[3]),c:parseFloat(c[4]),v:parseFloat(c[5])})).reverse();
@@ -8577,10 +8577,18 @@ const useFuturesData=(asset)=>{
     let mounted=true;
     const _cfg=ASSET_CONFIG[asset]||ASSET_CONFIG.BTC;
     const _sym=_cfg.binance||(asset==='BTC'?'BTCUSDT':'ETHUSDT'); // Bybit uses same symbol convention as Binance
+    // V13.4.87: BYBIT REST WAS CORS-BLOCKED -- this starved the highest-weighted signal.
+    //   These calls used to hit the Bybit REST host directly from the browser, which the
+    //   browser refuses (no CORS header), and the catch below only records the error with NO
+    //   fallback -- so funding / open-interest / basis silently went stale. Measured effect:
+    //   the futures signal (weight 33 in DEFAULT_WEIGHTS, the largest) fired on only 27 of
+    //   302 logged locks = 8.9%, while gap/flow/vwap fire ~100%. Now routed through the
+    //   /api/bybit Vercel rewrite, same pattern as /api/okx and /api/deribit. Requires the
+    //   updated vercel.json to be deployed alongside this file.
     const fetchFutures=async()=>{
       try{
         // Bybit tickers: returns last price, mark price, index price, OI, funding rate all in one
-        const r=await fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${_sym}`);
+        const r=await fetch(`/api/bybit/market/tickers?category=linear&symbol=${_sym}`);
         if(!r.ok)throw new Error('bybit '+r.status);
         const j=await r.json();
         if(j?.retCode!==0||!Array.isArray(j?.result?.list)||j.result.list.length===0)throw new Error('bybit empty');
@@ -33569,7 +33577,7 @@ function TaraApp(){
         try{
           const ivMap={'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60'};
           const ivb=ivMap[chartRes]||'1';
-          const r2=await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${_bnSym}&interval=${ivb}&limit=200`);
+          const r2=await fetch(`/api/bybit/market/kline?category=linear&symbol=${_bnSym}&interval=${ivb}&limit=200`);
           const j=await r2.json();
           if(j?.retCode!==0||!Array.isArray(j?.result?.list))throw new Error('bybit bad');
           // Bybit returns newest-first; reverse to oldest-first for chart.
@@ -33642,7 +33650,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _cb=PRICE_SOURCES.coinbase;
       const _kr=PRICE_SOURCES.kraken;
       const _okx=PRICE_SOURCES.okx;
-      const _bybitUrl=`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${currentAsset==='BTC'?'BTCUSDT':'ETHUSDT'}`;
+      const _bybitUrl=`/api/bybit/market/tickers?category=linear&symbol=${currentAsset==='BTC'?'BTCUSDT':'ETHUSDT'}`;
       const _results=await Promise.all([
         _fetchOne(_cb.url(_cfg,currentAsset),_cb.parsePrice,'CB'),
         _fetchOne(_kr.url(_cfg,currentAsset),_kr.parsePrice,'KR'),
