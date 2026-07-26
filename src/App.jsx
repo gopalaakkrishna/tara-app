@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.26-v13.4.88-disable-dead-bybit-poll';
-const TARA_VERSION_DISPLAY='Tara 13.4.88';
+const BASELINE_VERSION='2026.07.26-v13.4.89-rti-effective-horizon';
+const TARA_VERSION_DISPLAY='Tara 13.4.89';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5135,7 +5135,16 @@ const _taraNormCdf=(z)=>{
 const taraHourlyProb=(spotNow,strike,minsLeft)=>{
   const s=Number(spotNow),k0=Number(strike),m=Number(minsLeft);
   if(!(s>0)||!(k0>0)||!Number.isFinite(m)||m<0)return null;
-  const kSlots=Math.max(m/15,1/60);           // horizon in 15m slots, floored at ~1s
+  // V13.4.89: RTI SETTLEMENT CORRECTION, taken from the Kalshi contract rules themselves:
+  //   'If the simple average of the sixty seconds of CF Benchmarks BRTI before <close> is at
+  //   least the simple average of the sixty seconds of BRTI before <open>, then Yes.'
+  //   Settlement is NOT the last tick -- it is the mean of the final 60 seconds, which centers
+  //   at close minus 30s, and averaging removes terminal variance. So the effective horizon is
+  //   (T - 30s), not T. A model using raw time-to-close OVERSTATES late-window uncertainty and
+  //   should be MORE decisive near expiry, not less. Small in absolute terms but it grows as a
+  //   share of the horizon: 3%% of a 15m window, 25%% at 2 minutes left, everything at 30s.
+  const _mEff=Math.max(Number(m)-0.5,0);
+  const kSlots=Math.max(_mEff/15,1/60);       // effective horizon in 15m slots, floored at ~1s
   const distBps=Math.log(s/k0)*10000;
   const sd=TARA_HOURLY_VOL_A*Math.pow(kSlots,TARA_HOURLY_VOL_H);
   if(!(sd>0))return null;
