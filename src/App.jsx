@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.26-v13.4.87-fix-bybit-cors';
-const TARA_VERSION_DISPLAY='Tara 13.4.87';
+const BASELINE_VERSION='2026.07.26-v13.4.88-disable-dead-bybit-poll';
+const TARA_VERSION_DISPLAY='Tara 13.4.88';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -8622,6 +8622,16 @@ const useFuturesData=(asset)=>{
         }
       }
     };
+    // V13.4.88: DISABLED -- this hook is documented dead code. The engine's futures
+    //   signal reads `bloomberg` (OKX funding/OI/basis via the working /api/okx proxy);
+    //   see the V9.8.7 note at the computeFuturesSignals call site, which states this
+    //   hook 'stays defined for compatibility but is no longer the source of truth'.
+    //   It hit Bybit REST, which CORS-fails from the browser AND 403s through a Vercel
+    //   rewrite (Bybit refuses datacenter IPs), yet it kept polling every 30s: roughly
+    //   2880 wasted proxy requests/day plus a 403 in the console every half minute.
+    //   Hook shape and return value are unchanged so no caller needs editing.
+    const _taraBybitFuturesDisabled=true;
+    if(_taraBybitFuturesDisabled){return()=>{mounted=false;};}
     fetchFutures();
     const iv=setInterval(fetchFutures,30000);
     return()=>{mounted=false;clearInterval(iv);};
