@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.27-v13.4.94-hourly-multi-lock';
-const TARA_VERSION_DISPLAY='Tara 13.4.94';
+const BASELINE_VERSION='2026.07.27-v13.4.95-record-and-status';
+const TARA_VERSION_DISPLAY='Tara 13.4.95';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14922,6 +14922,55 @@ function useHourlyLadder(activeMins){
   },[activeMins==null?'off':'on']);
   return state;
 }
+// V13.4.95: HOURLY RECORD. Persists every hourly lock and settles it against Kalshi's
+//   OWN result field, not a spot comparison -- settlement is the mean of the final 60
+//   seconds of BRTI, so eyeballing spot at the bell would quietly miscount the close ones.
+//   Pending locks live in localStorage so a reload or a closed tab never loses a result.
+//   Monotonic: a settled lock is never re-scored (same discipline as the 13.4.73 ratchet).
+const _HR_KEY='taraHourlyRecord_v1';
+const _hrLoad=()=>{try{const j=JSON.parse(localStorage.getItem(_HR_KEY)||'{}');return{w:j.w|0,l:j.l|0,pending:Array.isArray(j.pending)?j.pending:[],history:Array.isArray(j.history)?j.history:[]};}catch(_e){return{w:0,l:0,pending:[],history:[]};}};
+const _hrSave=(r)=>{try{localStorage.setItem(_HR_KEY,JSON.stringify({w:r.w,l:r.l,pending:r.pending.slice(-40),history:r.history.slice(-200)}));}catch(_e){}};
+function useHourlyRecord(){
+  const[rec,setRec]=React.useState(_hrLoad);
+  const addLock=React.useCallback((lk)=>{
+    setRec(prev=>{
+      if(prev.pending.some(x=>x.ticker===lk.ticker&&x.side===lk.side))return prev;
+      if(prev.history.some(x=>x.ticker===lk.ticker&&x.side===lk.side))return prev;
+      const next={...prev,pending:[...prev.pending,{ticker:lk.ticker,side:lk.side,strike:lk.strike,cost:lk.cost,at:lk.at,closeMs:lk.closeMs}]};
+      _hrSave(next);return next;
+    });
+  },[]);
+  React.useEffect(()=>{
+    let alive=true;
+    const settle=async()=>{
+      const cur=_hrLoad();
+      const due=cur.pending.filter(x=>x.ticker&&x.closeMs&&Date.now()>x.closeMs+45000);
+      if(!due.length)return;
+      let w=cur.w,l=cur.l;const hist=[...cur.history];const still=[...cur.pending];
+      for(const x of due){
+        try{
+          const r=await fetch('/api/kalshi-public/markets/'+encodeURIComponent(x.ticker));
+          if(!r.ok)continue;
+          const j=await r.json();
+          const res=j&&j.market&&j.market.result;
+          if(res!=='yes'&&res!=='no')continue;
+          const won=(x.side==='YES')?(res==='yes'):(res==='no');
+          if(won)w+=1;else l+=1;
+          hist.push({...x,result:res,won,netCents:won?(100-x.cost):-x.cost,settledAt:Date.now()});
+          const k=still.findIndex(y=>y.ticker===x.ticker&&y.side===x.side);
+          if(k>=0)still.splice(k,1);
+        }catch(_e){}
+      }
+      if(!alive)return;
+      const next={w,l,pending:still,history:hist};
+      _hrSave(next);setRec(next);
+    };
+    settle();
+    const iv=setInterval(settle,60000);
+    return()=>{alive=false;clearInterval(iv);};
+  },[]);
+  return{rec,addLock};
+}
 function HourlyLadderPanel({spot,taraCall}){
   const nowMs=Date.now();
   const minsToHour=(60-new Date(nowMs).getMinutes())-(new Date(nowMs).getSeconds()/60);
@@ -14937,7 +14986,8 @@ function HourlyLadderPanel({spot,taraCall}){
   //   testing the model read 59%% while Kalshi read 72c, i.e. the model runs wide in quiet
   //   markets and would make every cheap side look mispriced. Market price is displayed
   //   beside it so the disagreement is visible instead of hidden.
-  const lockRef=React.useRef({hourKey:null,dir:null,ticks:0,locked:null});
+  const lockRef=React.useRef({hourKey:null,dir:null,ticks:0,locks:[]});
+  const{rec,addLock}=useHourlyRecord();
   const hourKey=new Date(nowMs).toISOString().slice(0,13);
   const CONFIRM_TICKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyConfirmTicks'),10);return(Number.isFinite(v)&&v>=1&&v<=10)?v:3;}catch(_e){return 3;}})();
   const MIN_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMinCost'));return(Number.isFinite(v)&&v>0)?v:20;}catch(_e){return 20;}})();
@@ -14985,7 +15035,7 @@ function HourlyLadderPanel({spot,taraCall}){
       if(isNew){
         const band=minsLeft<=15?'85%':(minsLeft<=30?'77%':(minsLeft<=45?'67%':'~52% (coin flip this early)'));
         L.locks.unshift({ms:nowMs,dir,strike:pick.r.strike,cost:pick.cost,conf,
-          side:dir==='UP'?'YES':'NO',model:pick.r.modelPct,
+          side:dir==='UP'?'YES':'NO',model:pick.r.modelPct,ticker:pick.r.ticker,closeMs:lad.closeMs,
           mktPct:dir==='UP'?pick.r.ask:(100-pick.r.bid),
           at:new Date(nowMs).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),
           minsAtLock:minsLeft,band});
@@ -14993,11 +15043,33 @@ function HourlyLadderPanel({spot,taraCall}){
     }
   }
   const LOCKS=L.locks;
+  // V13.4.95: per-strike status. LOCKED = this exact strike+side is already held this hour.
+  //   WATCHING = it is the strike the lock machine would take right now if the direction
+  //   survives its remaining confirmations, so you can see the target BEFORE it fires.
+  const _lockedSet=new Set(LOCKS.map(x=>x.strike+'|'+x.side));
+  const _watchPick=(function(){
+    if(!dir)return null;
+    const el=tradeable.map(r=>({r,cost:dir==='UP'?r.ask:r.costNo}))
+      .filter(x=>Number.isFinite(x.cost)&&x.cost>=MIN_C&&x.cost<=MAX_C)
+      .sort((x,y)=>x.cost-y.cost);
+    for(const c of el){if(!_lockedSet.has(c.r.strike+'|'+(dir==='UP'?'YES':'NO')))return c.r.strike;}
+    return null;
+  })();
+  React.useEffect(()=>{const top=LOCKS[0];if(top&&top.ticker&&top.closeMs)addLock(top);},[LOCKS.length,addLock]);
   return(
     <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
       <div className="flex items-center justify-between mb-2">
         <div className="text-[11px] uppercase tracking-wider text-zinc-400">Hourly ladder <span className="text-zinc-600">KXBTCD</span></div>
-        <div className="text-[11px] text-zinc-400">{minsLeft.toFixed(1)}m left</div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] tabular-nums">
+            <span className="text-emerald-400 font-semibold">{rec.w}W</span>
+            <span className="text-zinc-600">-</span>
+            <span className="text-rose-400 font-semibold">{rec.l}L</span>
+            {(rec.w+rec.l)>0&&<span className="text-zinc-500"> ({Math.round(100*rec.w/(rec.w+rec.l))}%)</span>}
+            {rec.pending.length>0&&<span className="text-amber-400/70"> +{rec.pending.length} open</span>}
+          </span>
+          <span className="text-[11px] text-zinc-400">{minsLeft.toFixed(1)}m left</span>
+        </div>
       </div>
       {lad.err&&<div className="text-[11px] text-amber-400 mb-1">feed: {lad.err}</div>}
       {LOCKS.length>0&&(
@@ -15030,20 +15102,27 @@ function HourlyLadderPanel({spot,taraCall}){
       {!!tradeable.length&&(
         <div className="space-y-1">
           <div className="grid grid-cols-5 gap-2 text-[10px] uppercase tracking-wide text-zinc-500">
-            <div>Strike</div><div className="text-right">Model</div><div className="text-right">Yes</div><div className="text-right">No</div><div className="text-right">Vol</div>
+            <div>Strike</div><div className="text-right">Model</div><div className="text-right">Yes</div><div className="text-right">No</div><div className="text-right">Status</div>
           </div>
           {tradeable.map(r=>{
             const near=s>0&&Math.abs(r.strike-s)<=150;
             const side=dir==='UP'?'YES':(dir==='DOWN'?'NO':null);
             const cost=side==='YES'?r.costYes:(side==='NO'?r.costNo:null);
             const cheap=cost!=null&&cost<50;
+            const yesLocked=_lockedSet.has(r.strike+'|YES');
+            const noLocked=_lockedSet.has(r.strike+'|NO');
+            const isWatch=_watchPick===r.strike;
+            const stat=(yesLocked||noLocked)
+              ?{txt:(yesLocked?'YES':'NO')+' LOCKED',cls:(yesLocked?'text-emerald-400':'text-rose-400')+' font-semibold'}
+              :(isWatch?{txt:(side||'')+' WATCH '+L.ticks+'/'+CONFIRM_TICKS,cls:'text-amber-400'}
+                      :{txt:'',cls:'text-zinc-700'});
             return(
               <div key={r.ticker} className={'grid grid-cols-5 gap-2 text-[11px] py-0.5 '+(near?'text-zinc-100':'text-zinc-500')}>
                 <div className="tabular-nums">{r.strike.toFixed(0)}</div>
                 <div className="text-right tabular-nums">{r.modelPct.toFixed(0)}%</div>
-                <div className={'text-right tabular-nums '+(side==='YES'&&cheap?'text-emerald-400':'')}>{r.ask}c</div>
-                <div className={'text-right tabular-nums '+(side==='NO'&&cheap?'text-emerald-400':'')}>{r.costNo}c</div>
-                <div className="text-right tabular-nums text-zinc-600">{(r.vol/1000).toFixed(0)}k</div>
+                <div className={'text-right tabular-nums '+(yesLocked?'text-emerald-400 font-semibold':(side==='YES'&&cheap?'text-emerald-400':''))}>{r.ask}c</div>
+                <div className={'text-right tabular-nums '+(noLocked?'text-rose-400 font-semibold':(side==='NO'&&cheap?'text-emerald-400':''))}>{r.costNo}c</div>
+                <div className={'text-right text-[10px] '+stat.cls}>{stat.txt}</div>
               </div>);
           })}
           <div className="pt-1 text-[10px] leading-snug text-zinc-500">
