@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.26-v13.4.89-rti-effective-horizon';
-const TARA_VERSION_DISPLAY='Tara 13.4.89';
+const BASELINE_VERSION='2026.07.27-v13.4.90-entry-quality-gate';
+const TARA_VERSION_DISPLAY='Tara 13.4.90';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38749,9 +38749,35 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   P&L +5758c->+9718c for +0.5ct more drawdown. Opt back in: localStorage 'taraCoinFlipGate'='on'.
         const _cfGateOn=(function(){try{return localStorage.getItem('taraCoinFlipGate')==='on';}catch(_e3){return false;}})();
         const _coinFlipNoTape=_cfGateOn&&(_kEntry>=40&&_kEntry<60&&!_tapeOk);
-        if(_extreme||_coinFlipNoTape){
+        // V13.4.90: ENTRY-QUALITY GATE -- the fix for 'I keep entering at 70c'.
+        //   Measured on 1230 timed+priced locks, DIRECTION-AWARE cost (kEntry for UP,
+        //   100-kEntry for DOWN -- the pricing error that caused the 13.4.74 loss):
+        //     unfiltered            n=1230 avg cost 61c EV +3.55c/ct
+        //     block >2/3 window left OR cost>=70c -> n=461 avg cost 51c EV +7.80c/ct
+        //   Keeps 82%% of realized profit on 37%% of the trades at 10c cheaper entries.
+        //   WHY: early locks are Tara chasing an obvious move and PAYING for the
+        //   obviousness -- 700-900s left averages 64c and earns -0.04c/ct, while 0-120s
+        //   left averages 57c and earns +10.42c/ct. Same tiers, opposite outcomes, and
+        //   the split is price-driven: time-cap-commit returns +9.97 under 50c but
+        //   -0.28 at 65-80c. So this gates on PRICE and TIMING, never on direction.
+        //   ROBUSTNESS (the check that killed the UP/DOWN rewire and the calendar table):
+        //   holds in BOTH chronological halves -- H1 +11.14 vs +6.48 unfiltered,
+        //   H2 +5.36 vs +0.62. Timing is a window FRACTION so 5m windows scale correctly.
+        //   Dials: 'taraEntryQuality'='off' disables; 'taraEntryMaxCost' (default 70);
+        //   'taraEntryMaxFrac' (default 0.667 = block when >2/3 of the window remains).
+        const _eqOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_e4){return true;}})();
+        const _eqMaxCost=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:70;}catch(_e5){return 70;}})();
+        const _eqMaxFrac=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxFrac'));return(Number.isFinite(v)&&v>0&&v<=1)?v:0.667;}catch(_e6){return 0.667;}})();
+        const _eqCost=(taraCall.call==='UP')?_kEntry:(100-_kEntry);
+        const _eqSecsLeft=(function(){try{return Math.max(0,(timeState.minsRemaining*60)+timeState.secsRemaining);}catch(_e7){return null;}})();
+        const _eqFracLeft=(_eqSecsLeft!=null&&_totalSec>0)?(_eqSecsLeft/_totalSec):null;
+        const _tooExpensive=_eqOn&&Number.isFinite(_eqCost)&&_eqCost>=_eqMaxCost;
+        const _tooEarly=_eqOn&&_eqFracLeft!=null&&_eqFracLeft>_eqMaxFrac;
+        if(_extreme||_coinFlipNoTape||_tooExpensive||_tooEarly){
           taraCall.call='SIT_OUT';
-          taraCall.reason='[V13.4.77] decent-odds gate: '+(_extreme?('untradeable extreme '+_kEntry.toFixed(0)+'c'):('coin-flip '+_kEntry.toFixed(0)+'c, no tape'))+' -- sitting out';
+          taraCall.reason=(_tooExpensive||_tooEarly)
+            ?('[V13.4.90] entry-quality: '+(_tooExpensive?('entry '+_eqCost.toFixed(0)+'c >= '+_eqMaxCost.toFixed(0)+'c -- paying up, this bucket earns ~0'):('too early -- '+Math.round(_eqSecsLeft)+'s left ('+Math.round(100*_eqFracLeft)+'% of window); early locks avg 64c and earn -0.0c/ct'))+'. Waiting for a cheaper, later entry.')
+            :('[V13.4.77] decent-odds gate: '+(_extreme?('untradeable extreme '+_kEntry.toFixed(0)+'c'):('coin-flip '+_kEntry.toFixed(0)+'c, no tape')))
           taraCall._decentOddsGated=true;
           taraCall._decentOddsKEntry=_kEntry;
         }
