@@ -1,0 +1,17 @@
+# wrangler.toml
+# Goes at the REPO ROOT, sibling to package.json (same level as functions/, src/).
+#
+# WHY THIS FILE EXISTS: with no wrangler config present, Cloudflare's newer deploy
+# flow tries to auto-configure this as a Workers project via the Cloudflare Vite
+# plugin, and that path requires Vite >= 6.0.0. This repo is on Vite 5.4.21, so
+# that autoconfig step fails at the deploy stage even though `vite build` itself
+# succeeds. Setting `pages_build_output_dir` here tells Wrangler this is a classic
+# Pages project instead, which deploys via `wrangler pages deploy` and does not
+# go through the Vite-plugin autoconfig at all -- so the Vite 6 requirement never
+# applies. This is also the correct mode for functions/api/[[path]].js, which is
+# Pages Functions routing, not Workers routing.
+#
+# This does not change your app code, dependencies, or build output in any way.
+
+name = "tara-app"
+pages_build_output_dir = "./dist"
