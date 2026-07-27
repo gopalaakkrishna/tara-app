@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.27-v13.4.96-opposed-lock-warning';
-const TARA_VERSION_DISPLAY='Tara 13.4.96';
+const BASELINE_VERSION='2026.07.27-v13.4.97-no-conflicting-locks';
+const TARA_VERSION_DISPLAY='Tara 13.4.97';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15029,9 +15029,31 @@ function HourlyLadderPanel({spot,taraCall}){
       .sort((x,y)=>x.cost-y.cost);
     const last=L.locks.length?L.locks[0]:null;
     const coolOk=!last||((nowMs-last.ms)>COOLDOWN_MS);
-    if(dir&&L.ticks>=CONFIRM_TICKS&&eligible.length&&minsLeft>1.5&&coolOk&&L.locks.length<MAX_LOCKS){
-      const pick=eligible[0];
-      const isNew=!last||last.dir!==dir||last.strike!==pick.r.strike;
+    // V13.4.97: THREE FIXES after observing a live hour that held YES@65500 AND NO@65400
+    //   simultaneously -- mutually exclusive bets, so one was guaranteed to lose -- plus
+    //   YES@65500 locked twice (02:25 at 41c and 02:31 at 32c), four locks alternating
+    //   direction inside nine minutes.
+    //   (1) DEDUPE ACROSS ALL LOCKS. The old isNew compared only against L.locks[0], so
+    //       NO -> YES -> NO -> YES passed every time because each differed from the one
+    //       immediately before it. Now the whole hour's set is checked.
+    //   (2) FLIPPING COSTS MORE THAN OPENING. Reversing direction needs FLIP_TICKS (2x
+    //       CONFIRM_TICKS) of a stable read, not the same bar as a fresh entry. Cheap
+    //       reversals are how a scanner turns into a coin-flip generator.
+    //   (3) CONTRADICTION CHECK. YES@A wins if close>=A; NO@B wins if close<B. Both can
+    //       only win when A<B. So a new lock whose A>=B against any live opposite lock is
+    //       refused outright rather than quietly stacked on top of it.
+    const FLIP_TICKS=CONFIRM_TICKS*2;
+    const needTicks=(last&&last.dir!==dir)?FLIP_TICKS:CONFIRM_TICKS;
+    if(dir&&L.ticks>=needTicks&&eligible.length&&minsLeft>1.5&&coolOk&&L.locks.length<MAX_LOCKS){
+      const side=dir==='UP'?'YES':'NO';
+      const pick=eligible.find(c=>!L.locks.some(x=>x.strike===c.r.strike&&x.side===side))||null;
+      const contradicts=(k)=>L.locks.some(x=>{
+        if(x.side===side)return false;
+        const yesK=side==='YES'?k:x.strike;
+        const noK =side==='YES'?x.strike:k;
+        return yesK>=noK;   // no close price can satisfy both
+      });
+      const isNew=!!pick&&!contradicts(pick.r.strike);
       if(isNew){
         const band=minsLeft<=15?'85%':(minsLeft<=30?'77%':(minsLeft<=45?'67%':'~52% (coin flip this early)'));
         L.locks.unshift({ms:nowMs,dir,strike:pick.r.strike,cost:pick.cost,conf,
@@ -15043,6 +15065,14 @@ function HourlyLadderPanel({spot,taraCall}){
     }
   }
   const LOCKS=L.locks;
+  // Mark mutually exclusive pairs already on the board (from before 13.4.97) so the
+  //   conflict is labelled instead of looking like two healthy positions.
+  const _conflictKeys=new Set();
+  for(const a of LOCKS){for(const b of LOCKS){
+    if(a===b||a.side===b.side)continue;
+    const yesK=a.side==='YES'?a.strike:b.strike, noK=a.side==='YES'?b.strike:a.strike;
+    if(yesK>=noK){_conflictKeys.add(a.ms);_conflictKeys.add(b.ms);}
+  }}
   // V13.4.95: per-strike status. LOCKED = this exact strike+side is already held this hour.
   //   WATCHING = it is the strike the lock machine would take right now if the direction
   //   survives its remaining confirmations, so you can see the target BEFORE it fires.
@@ -15088,6 +15118,7 @@ function HourlyLadderPanel({spot,taraCall}){
               </div>
               <div className="mt-0.5 text-[10px] text-zinc-500">
                 {LK.at}, {LK.minsAtLock.toFixed(0)}m left -- model accuracy at this range: {LK.band}
+                {_conflictKeys.has(LK.ms)&&<span className="ml-1 text-amber-400 font-semibold">CONFLICTS with another lock -- both cannot win</span>}
               </div>
             </div>
           ))}
