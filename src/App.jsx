@@ -1378,6 +1378,29 @@ if(typeof window!=='undefined'){
   else window.addEventListener('load',_acquire);
 })();
 
+// V13.4.99: SHARED VISIBILITY-AWARE INTERVAL. Root cause of the Vercel pause (3M edge
+//   requests against a 1M free cap): the V13.4.46-49 wake-lock + silent-audio keep-alive
+//   defeats Chrome's background-tab throttle so Tara does not miss windows while
+//   minimized -- correct and NOT touched here -- but that means every proxied poll kept
+//   firing at full speed in a hidden tab with no cost signal. The single biggest offender
+//   was not the 8s Kalshi poll (13.4.98) but the OKX order-book poll at 2500ms = ~17,280
+//   req/tab/12h on its own, more than 3x the Kalshi poll. taraSetVizInterval() is a drop-in
+//   setInterval replacement: foreground keeps the caller's exact interval (zero behavior
+//   change while visible), hidden multiplies it by BACKOFF (default 4x) up to a MAX_MS
+//   ceiling, and it snaps back to full speed the instant the tab regains focus. Dial:
+//   localStorage 'taraVizBackoff' (default 4, 1 = disables backoff = old behavior).
+const taraSetVizInterval=(fn,ms,maxMs)=>{
+  const backoff=(function(){try{const v=parseFloat(localStorage.getItem('taraVizBackoff'));return(Number.isFinite(v)&&v>=1)?v:4;}catch(_e){return 4;}})();
+  const cap=Number.isFinite(maxMs)?maxMs:60000;
+  let cur=ms,id=setInterval(fn,cur);
+  const rearm=()=>{
+    const hidden=(typeof document!=='undefined'&&document.visibilityState==='hidden');
+    const want=hidden?Math.min(Math.round(ms*backoff),cap):ms;
+    if(want!==cur){clearInterval(id);cur=want;id=setInterval(fn,cur);}
+  };
+  if(typeof document!=='undefined')document.addEventListener('visibilitychange',rearm);
+  return{clear:()=>{clearInterval(id);if(typeof document!=='undefined')document.removeEventListener('visibilitychange',rearm);}};
+};
 // V13.4.48: background keep-alive with a VISIBLE, verifiable status indicator.
 //   Desktop tabs are timer-throttled when hidden (~1/min after 5min), which was
 //   causing missed-backgrounded windows (63% of apparent sit-outs). A tab playing
@@ -4744,8 +4767,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.27-v13.4.97-no-conflicting-locks';
-const TARA_VERSION_DISPLAY='Tara 13.4.97';
+const BASELINE_VERSION='2026.07.27-v13.4.99-shared-viz-backoff';
+const TARA_VERSION_DISPLAY='Tara 13.4.99';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -8749,8 +8772,8 @@ const useDepthFlash=()=>{
       }catch(e){/* silent fail */}
     };
     f();
-    const iv=setInterval(f,2500); // 2.5s polling
-    return()=>clearInterval(iv);
+    const _h=taraSetVizInterval(f,2500,45000); // was raw 2.5s always -- see V13.4.99
+    return()=>_h.clear();
   },[]);
   return depth;
 };
@@ -8921,8 +8944,8 @@ const useBloomberg=()=>{
       }
     };
     f();
-    const iv=setInterval(f,8000);
-    return()=>clearInterval(iv);
+    const _h=taraSetVizInterval(f,8000,60000);/*V13.4.99: was raw setInterval(f,8000)*/
+    return()=>_h.clear();
   },[]);
   return data;
 };
@@ -33854,7 +33877,7 @@ function TaraApp(){
         }catch(e2){console.warn('All chart APIs blocked');}
       }
     };
-    fetch_();const iv=setInterval(fetch_,10000);return()=>clearInterval(iv);
+    fetch_();const _h=taraSetVizInterval(fetch_,10000,60000);return()=>_h.clear();
   },[chartRes,currentAsset,priceSource]);
 
   // Live price — V9.8.4 source-aware (Coinbase / Kraken / Bitstamp via PRICE_SOURCES)
@@ -35419,7 +35442,45 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   halves staleness. This is a Vercel-proxy/Kalshi REST call (small JSON), NOT a
     //   Supabase read, so it does not touch the 5GB Supabase egress cap. True per-second
     //   live still needs the server-side authed WS proxy (separate build).
-    const iv=setInterval(fetchKalshi,8000);/*V13.4.53: 15000->8000, halve feed staleness; helps starved slow-device feeds. Revert to 15000 if proxies rate-limit.*/
+    // V13.4.98: BACKGROUND-TAB BILLING FIX. The V13.4.46-49 wake-lock + silent-audio
+    //   keep-alive was built specifically to defeat Chrome's background-tab throttle so
+    //   Tara would not miss windows while minimized -- it worked, backgrounded sit-outs
+    //   fell from 63%%. But that means EVERY proxied poll, including this 8s Kalshi fetch,
+    //   keeps firing at full speed in a minimized or forgotten tab, with no cost signal
+    //   until the Vercel account gets paused. Observed: 3M edge requests against a 1M
+    //   free cap -- 3x over, code-level estimate was only ~5-10%% of that. The keep-alive
+    //   mechanism is NOT touched; a hidden tab still gets fresh prices, just less often.
+    //   Foreground stays 8s. Hidden backs off to HIDDEN_POLL_MS (default 30s -- still far
+    //   under the 900s window, so lock pricing freshness is not meaningfully worse) and
+    //   snaps back to 8s the instant the tab regains focus (the existing onVisible refetch
+    //   below already forces one fetch on that transition). Dial: localStorage
+    //   'taraHiddenPollMs' (0 disables backoff = restores exact old behavior).
+    const HIDDEN_POLL_MS=(function(){try{const v=parseInt(localStorage.getItem('taraHiddenPollMs'),10);return(Number.isFinite(v)&&v>=0)?v:30000;}catch(_e){return 30000;}})();
+    let ivMs=8000,iv=setInterval(fetchKalshi,ivMs);
+    const _rearm=()=>{
+      const want=(HIDDEN_POLL_MS>0&&document.visibilityState==='hidden')?HIDDEN_POLL_MS:8000;
+      if(want!==ivMs){clearInterval(iv);ivMs=want;iv=setInterval(fetchKalshi,ivMs);}
+    };
+    document.addEventListener('visibilitychange',_rearm);
+    // V13.4.98: lightweight usage counter so proxy load is visible in devtools instead
+    //   of silent until the account gets paused. Read any time via localStorage.
+    try{
+      const _origFetch=window.fetch;
+      if(!window.__taraProxyCountInstalled){
+        window.__taraProxyCountInstalled=true;
+        window.fetch=function(u,...rest){
+          try{
+            const s=typeof u==='string'?u:(u&&u.url)||'';
+            if(s.startsWith('/api/')){
+              const key='taraProxyReqCount_'+new Date().toISOString().slice(0,10);
+              const n=(parseInt(localStorage.getItem(key)||'0',10)||0)+1;
+              localStorage.setItem(key,String(n));
+            }
+          }catch(_e){}
+          return _origFetch.apply(this,[u,...rest]);
+        };
+      }
+    }catch(_e){}
     // V5.0: Refetch when tab becomes visible again — background tabs can stall the interval
     const onVisible=()=>{if(document.visibilityState==='visible')fetchKalshi();};
     document.addEventListener('visibilitychange',onVisible);
