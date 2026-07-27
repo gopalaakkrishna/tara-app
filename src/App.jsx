@@ -1389,6 +1389,185 @@ if(typeof window!=='undefined'){
 //   change while visible), hidden multiplies it by BACKOFF (default 4x) up to a MAX_MS
 //   ceiling, and it snaps back to full speed the instant the tab regains focus. Dial:
 //   localStorage 'taraVizBackoff' (default 4, 1 = disables backoff = old behavior).
+// V13.4.100: V101 SHADOW POSTERIOR (uploaded file 'V101_-_GOAT.txt', internally named
+//   computeV99Posterior). User recalled this early build as a strong performer and asked
+//   how current Tara differs. Answer: it never touches Kalshi at all -- no entry price,
+//   no SIT_OUT, no gates, always produces a lean. That means any perceived edge could be
+//   real momentum-following skill, OR just an artifact of always having an opinion during
+//   a trending stretch with no memory of what it would have cost to act on. No logs exist
+//   from when it ran, so there is no way to check retroactively.
+//   This ports its exact 6-signal blend (gap/momentum/structure/flow/technical/regime,
+//   flat un-measured weights, no time-ramp, no vol-regime conditioning) as a SHADOW
+//   computation: it runs alongside the real engine on every window, gets logged next to
+//   the REAL Kalshi entry price and REAL settlement outcome, and controls NOTHING. After
+//   a few hundred windows this can be audited exactly like netCents/spotPerpDiv/kalshiLead
+//   were tonight: real WR, real EV/contract, split-half validated, against the current
+//   engine over the identical stretch. Logic below is otherwise UNCHANGED from the
+//   uploaded file (only renamed and made ASCII-only per project invariant).
+const V101_WEIGHTS={gap:35,momentum:30,structure:15,flow:20,technical:25,regime:15};
+const _v101RSI=(closes,period)=>{
+  if(!closes||closes.length<period+1)return null;
+  let gains=0,losses=0;
+  for(let i=closes.length-period;i<closes.length;i++){
+    const d=closes[i]-closes[i-1];
+    if(d>=0)gains+=d;else losses-=d;
+  }
+  const avgG=gains/period,avgL=losses/period;
+  if(avgL===0)return 100;
+  const rs=avgG/avgL;
+  return 100-(100/(1+rs));
+};
+const _v101ATR=(hist,period)=>{
+  if(!hist||hist.length<period+1)return null;
+  let sum=0,n=0;
+  for(let i=hist.length-period;i<hist.length;i++){
+    const h=hist[i].h??hist[i].c,l=hist[i].l??hist[i].c,pc=hist[i-1].c;
+    const tr=Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc));
+    sum+=tr;n++;
+  }
+  return n>0?sum/n:null;
+};
+const _v101VWAP=(hist)=>{
+  if(!hist||!hist.length)return null;
+  let pv=0,vv=0;
+  for(const c of hist){const v=c.v||1;pv+=(c.c||0)*v;vv+=v;}
+  return vv>0?pv/vv:null;
+};
+const _v101BB=(closesRev,period)=>{
+  if(!closesRev||closesRev.length<period)return{pctB:0.5};
+  const w=closesRev.slice(0,period);
+  const mean=w.reduce((a,b)=>a+b,0)/period;
+  const sd=Math.sqrt(w.reduce((a,b)=>a+(b-mean)*(b-mean),0)/period);
+  const upper=mean+2*sd,lower=mean-2*sd;
+  const last=w[0];
+  const pctB=(upper-lower)>0?(last-lower)/(upper-lower):0.5;
+  return{pctB,upper,lower,mean};
+};
+const _v101Consecutive=(hist)=>{
+  if(!hist||hist.length<2)return{green:0,red:0};
+  let green=0,red=0;
+  for(let i=hist.length-1;i>0;i--){
+    const up=hist[i].c>=hist[i-1].c;
+    if(up){if(red>0)break;green++;}else{if(green>0)break;red++;}
+  }
+  return{green,red};
+};
+const _v101VolRatio=(hist,fast,slow)=>{
+  if(!hist||hist.length<slow)return 1;
+  const f=hist.slice(-fast).reduce((a,c)=>a+(c.v||0),0)/fast;
+  const s=hist.slice(-slow).reduce((a,c)=>a+(c.v||0),0)/slow;
+  return s>0?f/s:1;
+};
+const _v101Channel=(hist,period)=>{
+  if(!hist||hist.length<period)return 0.5;
+  const w=hist.slice(-period);
+  const hi=Math.max(...w.map(c=>c.h??c.c)),lo=Math.min(...w.map(c=>c.l??c.c));
+  const last=w[w.length-1].c;
+  return(hi-lo)>0?(last-lo)/(hi-lo):0.5;
+};
+const _v101MomAlign=(d1,d5,d15)=>{
+  const sameSign=(Math.sign(d1)===Math.sign(d5))&&(Math.sign(d5)===Math.sign(d15))&&d1!==0;
+  const strong=sameSign&&Math.abs(d1)>3&&Math.abs(d5)>3;
+  return{aligned:sameSign,strong};
+};
+const computeV101ShadowPosterior=(p)=>{
+  try{
+    const{currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,velocityRef,priceMemoryRef,is15m,timeFraction}=p;
+    if(!currentPrice||!liveHistory||liveHistory.length<20||!targetMargin)return null;
+    const W=V101_WEIGHTS;
+    let totalScore=0;
+    const closes=liveHistory.map(x=>x.c);
+    const rsi=_v101RSI(closes,14)??50;
+    const atr=_v101ATR(liveHistory,14)??10;
+    const atrBps=atr>0&&currentPrice>0?(atr/currentPrice)*10000:15;
+    const vwap=_v101VWAP(liveHistory);
+    const bb=_v101BB([...closes].reverse(),20);
+    const realGapBps=targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0;
+    const vwapGapBps=vwap?((currentPrice-vwap)/vwap)*10000:0;
+    const vel=(velocityRef&&velocityRef.current)||{};
+    const{accel}=vel;
+    const getHP=(msAgo)=>{
+      const t=Date.now()-msAgo;const m=(priceMemoryRef&&priceMemoryRef.current)||[];
+      if(!m.length)return currentPrice;
+      let c=m[0];for(let i=m.length-1;i>=0;i--){if(m[i].time<=t){c=m[i];break;}}
+      return c.p;
+    };
+    const drift1m=((currentPrice-getHP(60000))/currentPrice)*10000;
+    const drift5m=((currentPrice-getHP(300000))/currentPrice)*10000;
+    const drift15m=((currentPrice-getHP(900000))/currentPrice)*10000;
+    const consecutive=_v101Consecutive(liveHistory);
+    const volRatio=_v101VolRatio(liveHistory,5,25);
+    const channel=_v101Channel(liveHistory,20);
+    const momentumAlign=_v101MomAlign(drift1m,drift5m,drift15m);
+    const aggrFlow=Math.max(-1,Math.min(1,(globalFlow&&globalFlow.imbalance||1)-1));
+    // gap
+    const timeDecay=Math.pow(timeFraction,is15m?1.8:1.3);
+    const isPostDecay=timeFraction>0.6;
+    const decayMult=isPostDecay?1.5:1.0;
+    let gapScore=realGapBps*(is15m?0.65:0.85)*(0.15+0.85*timeDecay)*decayMult;
+    const gapMag=Math.abs(realGapBps);
+    if(gapMag>15)gapScore+=Math.sign(realGapBps)*Math.pow(gapMag-10,1.3)*(is15m?0.45:0.65);
+    if(gapMag>50)gapScore*=0.7;
+    totalScore+=Math.max(-W.gap,Math.min(W.gap,gapScore));
+    // momentum
+    let momScore=is15m?(drift5m*0.6+drift1m*0.4):((vel.v30s||0)*(10000/currentPrice)*1.5+drift1m*1.0+drift5m*0.5);
+    if(momentumAlign.aligned&&momentumAlign.strong)momScore*=1.5;
+    else if(momentumAlign.aligned)momScore*=1.2;
+    totalScore+=Math.max(-W.momentum,Math.min(W.momentum,momScore*0.8));
+    // structure
+    let structScore=0;
+    if(consecutive.green>=3)structScore+=consecutive.green*3;
+    if(consecutive.red>=3)structScore-=consecutive.red*3;
+    if(volRatio>1.5&&consecutive.green>=2)structScore+=8;
+    if(volRatio>1.5&&consecutive.red>=2)structScore-=8;
+    totalScore+=Math.max(-W.structure,Math.min(W.structure,structScore));
+    // flow
+    let flowScore=aggrFlow*(is15m?W.flow:W.flow*1.5);
+    if(accel&&drift1m>0&&accel>0)flowScore+=8;
+    if(accel&&drift1m<0&&accel<0)flowScore-=8;
+    totalScore+=Math.max(-W.flow,Math.min(W.flow,flowScore));
+    // technical
+    let techScore=0;
+    if(rsi>70&&realGapBps>0)techScore-=15;
+    else if(rsi<30&&realGapBps<0)techScore+=15;
+    else if(rsi>60&&drift1m<0)techScore-=8;
+    else if(rsi<40&&drift1m>0)techScore+=8;
+    if(drift1m>0&&vwapGapBps<-5)techScore-=10;
+    if(drift1m<0&&vwapGapBps>5)techScore+=10;
+    if(bb.pctB>0.85&&realGapBps>0)techScore-=8;
+    if(bb.pctB<0.15&&realGapBps<0)techScore+=8;
+    if(channel>0.8&&drift1m>0)techScore-=5;
+    if(channel<0.2&&drift1m<0)techScore+=5;
+    totalScore+=Math.max(-W.technical,Math.min(W.technical,techScore));
+    // regime/funding
+    const funding=(bloomberg&&bloomberg.fundingRate)||0;
+    const fundingPrev=(bloomberg&&bloomberg.fundingRatePrev)||0;
+    const delta=(globalFlow&&globalFlow.deltaUSD)||0;
+    let regime='RANGE/CHOP',regimeBonus=0;
+    const isHighVol=atrBps>35;
+    const retailShorting=funding<0.005,retailLonging=funding>0.015;
+    const whalesBuying=delta>500000,whalesSelling=delta<-500000;
+    const isCleanUp=drift1m>5&&whalesBuying&&atrBps<30;
+    const isCleanDn=drift1m<-5&&whalesSelling&&atrBps<30;
+    const fundingAccel=(funding-fundingPrev);
+    if(retailShorting&&whalesBuying){regime='SHORT SQUEEZE';regimeBonus=W.regime;}
+    else if(retailLonging&&whalesSelling){regime='LONG SQUEEZE';regimeBonus=-W.regime;}
+    else if(isCleanUp){regime='TRENDING UP';}
+    else if(isCleanDn){regime='TRENDING DOWN';}
+    else if(isHighVol){regime='HIGH VOL CHOP';}
+    if(fundingAccel>0.0001)regimeBonus-=5;
+    if(fundingAccel<-0.0001)regimeBonus+=5;
+    totalScore+=Math.max(-W.regime,Math.min(W.regime,regimeBonus));
+    // convert + reality caps (unchanged from original)
+    const rawPosterior=50+totalScore*0.95;
+    let posterior=Math.max(1,Math.min(99,rawPosterior));
+    if(realGapBps<-40)posterior=Math.min(posterior,18);
+    else if(realGapBps<-18)posterior=Math.min(posterior,42);
+    else if(realGapBps>40)posterior=Math.max(posterior,82);
+    else if(realGapBps>18)posterior=Math.max(posterior,58);
+    return{posterior:Math.round(posterior*10)/10,regime,atrBps:Math.round(atrBps*10)/10};
+  }catch(_eV101){return null;}
+};
 const taraSetVizInterval=(fn,ms,maxMs)=>{
   const backoff=(function(){try{const v=parseFloat(localStorage.getItem('taraVizBackoff'));return(Number.isFinite(v)&&v>=1)?v:4;}catch(_e){return 4;}})();
   const cap=Number.isFinite(maxMs)?maxMs:60000;
@@ -4767,8 +4946,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.27-v13.4.99-shared-viz-backoff';
-const TARA_VERSION_DISPLAY='Tara 13.4.99';
+const BASELINE_VERSION='2026.07.27-v13.4.100-v101-shadow-posterior';
+const TARA_VERSION_DISPLAY='Tara 13.4.100';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -30882,7 +31061,7 @@ function TaraApp(){
           //   count survives reload even if IndexedDB fails. Without this, reload
           //   fell back to the 1000-entry fast cache — the "base stayed at 500/1000"
           //   bug the user reported.
-          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock']);
+          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock']);
           const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
           for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
             try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -30995,7 +31174,7 @@ function TaraApp(){
         const _save=_patched.slice(-_cap);
         await _idbWrite('taraCallLog',_save).catch(()=>{});     // primary: FULL history
         localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
-        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock']);
+        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock']);
         const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
         for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
           try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -31241,7 +31420,7 @@ function TaraApp(){
     //   pending entry wholesale, wiping telemetry. Root cause of the 3/3596 stamp rate.
     //   Fix: whichever copy wins the tiebreak, backfill any sticky field it lacks from
     //   the loser. Once any copy carries telemetry, it survives every future merge.
-    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','_v10_5_1_brti','_diag_brtiRefLive'];
+    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','_v10_5_1_brti','_diag_brtiRefLive'];
     const _coalesceSticky=(winner,loser)=>{
       if(!winner||!loser)return winner;
       let _out=winner;
@@ -31338,7 +31517,7 @@ function TaraApp(){
       //   already lives here. Result: 83 shipped and the field still persisted 0 times while
       //   kalshiLead fired 3x. Same bug class the V13.4.31 and V13.4.67 comments above warn
       //   about. ~80 bytes when present, null otherwise.
-      'signalScoresAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock']);
+      'signalScoresAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock']);
     const _minifyEntry=(e)=>{
       if(!e)return e;
       const o={};
@@ -36779,6 +36958,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   dead because my grep only checked local-scope readers, not the return
       //   object referencing it via shorthand. Caused MATH CRASH on the live UI.
       const isEarlyWindow=is15m?((intervalSeconds-clockSeconds)<300):((intervalSeconds-clockSeconds)<90);
+      // V13.4.100: compute the V101 shadow posterior here where all its inputs are in
+      //   scope; attached to the returned analysis object below as v101Shadow so it can
+      //   be stamped at lock time next to the real posterior. Read-only, decides nothing.
+      const _v101Shadow=computeV101ShadowPosterior({
+        currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,
+        velocityRef,priceMemoryRef,is15m,timeFraction,
+      });
 
       // V110 weighted posterior (adaptive)
       // V3.1.7: tapeRef and ticksRef passed for volume-flow signal computation
@@ -37953,6 +38139,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   referencing the out-of-scope local _refPrice — which would throw
         //   ReferenceError at runtime on every lock (caught here before ship).
         referencePrice:Number(_refPrice)||Number(currentPrice)||0,
+        // V13.4.100: V101 shadow posterior, computed above where its inputs are in scope.
+        v101Shadow:_v101Shadow,
         // V148.1: surface rawSignalScores and mtfAlignment to consumers (V147 Score Breakdown
         //         panel was reading these but they weren't in the return — every bar showed 0).
         mtfAlignment:eng.mtfAlignment,
@@ -44541,6 +44729,16 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           spotDeltaBps:analysis.kalshiLead.spotDeltaBps,
           score:analysis.kalshiLead.score,
           aligned:analysis.kalshiLead.dir===dir,
+        }:null,
+        // V13.4.100: V101 shadow posterior at lock time. dirAgree tells us, per lock,
+        //   whether the old approach would have called the same direction as the real
+        //   engine -- combined with netCents (already logged) this is enough to compute
+        //   V101's real EV/contract had it been trading, once enough locks accumulate.
+        v101ShadowAtLock:analysis?.v101Shadow?{
+          posterior:analysis.v101Shadow.posterior,
+          regime:analysis.v101Shadow.regime,
+          dir:analysis.v101Shadow.posterior>50?'UP':(analysis.v101Shadow.posterior<50?'DOWN':null),
+          dirAgree:(analysis.v101Shadow.posterior>50?'UP':(analysis.v101Shadow.posterior<50?'DOWN':null))===dir,
         }:null,
         // V9.7.0: mission info stamp from current auto-order (if mission was active at lock)
         missionInfo:autoOrderStateRef.current?.missionInfo||null,
