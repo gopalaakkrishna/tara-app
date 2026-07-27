@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.27-v13.4.93-hourly-lock';
-const TARA_VERSION_DISPLAY='Tara 13.4.93';
+const BASELINE_VERSION='2026.07.27-v13.4.94-hourly-multi-lock';
+const TARA_VERSION_DISPLAY='Tara 13.4.94';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14743,8 +14743,6 @@ function PredictionContent(props){
       {/* ── V111: TARA ADVISOR PANEL ── */}
       <TaraAdvisorPanel advisor={analysis?.advisor} executeAction={executeAction}/>
 
-      {/* V13.4.92: hourly ladder -- appears in the last 25 min of each clock hour */}
-      <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
     </div>
   );
 }
@@ -14916,12 +14914,12 @@ function useHourlyLadder(activeMins){
         if(alive)setState({loading:false,err:null,event:ev,closeMs,strikes:liquid});
       }catch(e){if(alive)setState(s=>({...s,err:String((e&&e.message)||e)}));}
     };
-    if(activeMins==null||activeMins>25||activeMins<0){setState(s=>({...s,strikes:[]}));return()=>{alive=false;};}
+    if(activeMins==null||activeMins<0){setState(s=>({...s,strikes:[]}));return()=>{alive=false;};}
     setState(s=>({...s,loading:true}));
     pull();
     const iv=setInterval(pull,20000);
     return()=>{alive=false;clearInterval(iv);};
-  },[activeMins==null?null:(activeMins>25?'off':'on')]);
+  },[activeMins==null?'off':'on']);
   return state;
 }
 function HourlyLadderPanel({spot,taraCall}){
@@ -14944,9 +14942,10 @@ function HourlyLadderPanel({spot,taraCall}){
   const CONFIRM_TICKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyConfirmTicks'),10);return(Number.isFinite(v)&&v>=1&&v<=10)?v:3;}catch(_e){return 3;}})();
   const MIN_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMinCost'));return(Number.isFinite(v)&&v>0)?v:20;}catch(_e){return 20;}})();
   const MAX_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMaxCost'));return(Number.isFinite(v)&&v>0)?v:65;}catch(_e){return 65;}})();
+  const MAX_LOCKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyMaxLocks'),10);return(Number.isFinite(v)&&v>=1&&v<=12)?v:6;}catch(_e){return 6;}})();
+  const COOLDOWN_MS=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyCooldownMin'));return(Number.isFinite(v)&&v>0)?v*60000:180000;}catch(_e){return 180000;}})();
   const on=(function(){try{return localStorage.getItem('taraHourlyLadder')!=='off';}catch(_e){return true;}})();
   if(!on)return null;
-  if(minsToHour>25)return null;
   const minsLeft=lad.closeMs?Math.max(0,(lad.closeMs-nowMs)/60000):minsToHour;
   const dir=taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')?taraCall.call:null;
   const s=Number(spot)||0;
@@ -14959,22 +14958,41 @@ function HourlyLadderPanel({spot,taraCall}){
   const tradeable=rows.filter(r=>r.modelPct!=null&&r.ask>2&&r.ask<98);
   // --- lock machine (runs during render; only mutates a ref, never state) ---
   const L=lockRef.current;
-  if(L.hourKey!==hourKey){L.hourKey=hourKey;L.dir=null;L.ticks=0;L.locked=null;}
-  if(!L.locked){
-    if(dir&&dir===L.dir)L.ticks+=1; else {L.dir=dir;L.ticks=dir?1:0;}
+  if(L.hourKey!==hourKey){L.hourKey=hourKey;L.dir=null;L.ticks=0;L.locks=[];}
+  if(!Array.isArray(L.locks))L.locks=[];
+  // V13.4.94: MULTIPLE locks per hour. The hour is 60 minutes and the ladder re-prices
+  //   continuously, so one lock per hour throws away most of the window. A new lock is
+  //   allowed when the read is confirmed AND it is genuinely new -- a different strike or
+  //   a flipped direction -- never a re-lock of something already held. Cooldown keeps it
+  //   from stuttering on noise.
+  //   HONESTY ON TIMING: the barrier model's measured directional accuracy depends hard on
+  //   time remaining -- 85%% at 15 min, 77%% at 30, 67%% at 45, and ~52%% (coin flip) at the
+  //   top of the hour, because distance-to-strike carries no information yet. Tara's own
+  //   engine is likewise strongest in the final quarter (+4.80c/ct vs +3.46 overall). So
+  //   early-hour locks are shown but tagged with the accuracy band that applies, rather
+  //   than pretending a 55-minute-out call is as good as a 12-minute-out one.
+  if(dir&&dir===L.dir)L.ticks+=1; else {L.dir=dir;L.ticks=dir?1:0;}
+  {
     const conf=Number(taraCall&&taraCall.confidence)||0;
     const eligible=tradeable.map(r=>({r,cost:dir==='UP'?r.ask:r.costNo}))
       .filter(x=>Number.isFinite(x.cost)&&x.cost>=MIN_C&&x.cost<=MAX_C)
       .sort((x,y)=>x.cost-y.cost);
-    if(dir&&L.ticks>=CONFIRM_TICKS&&eligible.length&&minsLeft>1.5){
+    const last=L.locks.length?L.locks[0]:null;
+    const coolOk=!last||((nowMs-last.ms)>COOLDOWN_MS);
+    if(dir&&L.ticks>=CONFIRM_TICKS&&eligible.length&&minsLeft>1.5&&coolOk&&L.locks.length<MAX_LOCKS){
       const pick=eligible[0];
-      L.locked={dir,strike:pick.r.strike,cost:pick.cost,conf,
-                side:dir==='UP'?'YES':'NO',model:pick.r.modelPct,
-                mktPct:dir==='UP'?pick.r.ask:(100-pick.r.bid),
-                at:new Date(nowMs).toLocaleTimeString(),minsAtLock:minsLeft};
+      const isNew=!last||last.dir!==dir||last.strike!==pick.r.strike;
+      if(isNew){
+        const band=minsLeft<=15?'85%':(minsLeft<=30?'77%':(minsLeft<=45?'67%':'~52% (coin flip this early)'));
+        L.locks.unshift({ms:nowMs,dir,strike:pick.r.strike,cost:pick.cost,conf,
+          side:dir==='UP'?'YES':'NO',model:pick.r.modelPct,
+          mktPct:dir==='UP'?pick.r.ask:(100-pick.r.bid),
+          at:new Date(nowMs).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),
+          minsAtLock:minsLeft,band});
+      }
     }
   }
-  const LK=L.locked;
+  const LOCKS=L.locks;
   return(
     <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
       <div className="flex items-center justify-between mb-2">
@@ -14982,23 +15000,28 @@ function HourlyLadderPanel({spot,taraCall}){
         <div className="text-[11px] text-zinc-400">{minsLeft.toFixed(1)}m left</div>
       </div>
       {lad.err&&<div className="text-[11px] text-amber-400 mb-1">feed: {lad.err}</div>}
-      {LK?(
-        <div className={'mb-2 rounded-lg border p-2 '+(LK.dir==='UP'?'border-emerald-500/40 bg-emerald-500/10':'border-rose-500/40 bg-rose-500/10')}>
-          <div className="flex items-center justify-between">
-            <div className={'text-[13px] font-semibold '+(LK.dir==='UP'?'text-emerald-400':'text-rose-400')}>
-              LOCKED {LK.side} @ {LK.strike.toFixed(0)}
+      {LOCKS.length>0&&(
+        <div className="mb-2 space-y-1.5">
+          {LOCKS.map((LK,idx)=>(
+            <div key={LK.ms} className={'rounded-lg border p-2 '+(idx===0?'':'opacity-60 ')+(LK.dir==='UP'?'border-emerald-500/40 bg-emerald-500/10':'border-rose-500/40 bg-rose-500/10')}>
+              <div className="flex items-center justify-between">
+                <div className={'text-[13px] font-semibold '+(LK.dir==='UP'?'text-emerald-400':'text-rose-400')}>
+                  {idx===0?'LOCKED ':''}{LK.side} @ {LK.strike.toFixed(0)}
+                </div>
+                <div className="text-[13px] font-semibold text-zinc-100 tabular-nums">{LK.cost}c</div>
+              </div>
+              <div className="mt-0.5 text-[11px] text-zinc-300">
+                Tara conf <span className="font-semibold tabular-nums">{LK.conf.toFixed(0)}</span>
+                <span className="text-zinc-500"> | mkt {LK.mktPct}% | model {LK.model!=null?LK.model.toFixed(0)+'%':'--'}</span>
+              </div>
+              <div className="mt-0.5 text-[10px] text-zinc-500">
+                {LK.at}, {LK.minsAtLock.toFixed(0)}m left -- model accuracy at this range: {LK.band}
+              </div>
             </div>
-            <div className="text-[13px] font-semibold text-zinc-100 tabular-nums">{LK.cost}c</div>
-          </div>
-          <div className="mt-0.5 text-[11px] text-zinc-300">
-            Tara confidence <span className="font-semibold tabular-nums">{LK.conf.toFixed(0)}</span>
-            <span className="text-zinc-500"> | market {LK.mktPct}% | model {LK.model!=null?LK.model.toFixed(0)+'%':'--'}</span>
-          </div>
-          <div className="mt-0.5 text-[10px] text-zinc-500">
-            locked {LK.at} with {LK.minsAtLock.toFixed(1)}m left, after {CONFIRM_TICKS} confirmations. Cheapest entry in the {MIN_C}-{MAX_C}c band.
-          </div>
+          ))}
         </div>
-      ):(
+      )}
+      {LOCKS.length===0&&(
         <div className="mb-2 text-[11px] text-zinc-500">
           {dir?('scanning '+dir+' -- '+L.ticks+'/'+CONFIRM_TICKS+' confirmations'+(tradeable.length?'':', waiting on liquid strikes')):'no directional read yet -- watching'}
         </div>
@@ -22655,86 +22678,14 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
       {/* V9.1.5: Tape + Depth render as upgraded compact strips next to the small
           DOM bar at the top of the analysis card. No big panels here anymore. */}
 
-      <div className="flex items-center justify-between mb-3 shrink-0">
-        <span className={'text-xs uppercase tracking-[0.22em] font-bold'} style={{color:T2_GOLD}}>Projections</span>
-        {/* Tab nav */}
-        <div className="flex gap-1">
-          {tabs.map(t=>{
-            const active=activeTimeframe===t.id;
-            const cls='px-2 py-1 text-[10px] font-bold rounded-lg uppercase tracking-wide transition-all '+(active?'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70 border border-transparent');
-            return(<button key={t.id} onClick={()=>setActiveTimeframe(t.id)} className={cls}>{t.label}</button>);
-          })}
-        </div>
-      </div>
-      {/* Timeline display - shows future timestamps + predicted prices */}
-      {!proj||!proj.timeline||proj.timeline.length===0?(
-        <div className={'flex-1 flex items-center justify-center text-[#EDEDED]/30 text-xs italic'}>Computing forecasts...</div>
-      ):(
-        <div className="flex-1 flex flex-col gap-2 overflow-hidden">
-          {/* Header showing window context */}
-          <div className={'text-[10px] uppercase tracking-widest text-[#EDEDED]/40 font-bold text-center pb-1 border-b border-[#1F1F1F]'}>
-            {tabs.find(t=>t.id===activeTimeframe)?.label} forecast · From ${currentPrice.toLocaleString(undefined,{maximumFractionDigits:0})}
-            {/* V145.2: show which model is producing the projection */}
-            {proj.fgtSrc&&<span className={'ml-2 text-[9px] '+(proj.fgtSrc.includes('HPotter')?'text-indigo-400/70':'text-[#EDEDED]/30')}>· {proj.fgtSrc}</span>}
-          </div>
-          {/* Timeline list - all future timestamps */}
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1">
-            {proj.timeline.map((point,i)=>{
-              const pUp=point.price>=currentPrice;
-              const pCls=pUp?'text-emerald-400':'text-rose-400';
-              const pArrow=pUp?'▲':'▼';
-              const deltaBps=currentPrice>0?((point.price-currentPrice)/currentPrice)*10000:0;
-              // Confidence decays with time - each step further out is less certain
-              const stepConf=Math.max(15,conf-(i*4));
-              // Visual confidence bar
-              const barWidth=Math.min(100,Math.max(15,stepConf));
-              const barCls=pUp?'bg-emerald-500/40':'bg-rose-500/40';
-              // V149: dim extrapolated rows (beyond model horizon)
-              const extraDim=point.extrapolated?'opacity-40':'';
-              return(
-                <div key={i} className={'p-2 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F] '+extraDim} title={point.extrapolated?'Beyond model forecast horizon — speculative':''}>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={'text-[11px] font-mono font-bold text-[#EDEDED]/70 shrink-0'}>{point.timeStr}</span>
-                      <span className={pCls+' text-xs shrink-0'}>{pArrow}</span>
-                      <span className="text-sm font-mono font-bold text-white truncate">${Number(point.price).toLocaleString(undefined,{maximumFractionDigits:0})}</span>
-                      {point.extrapolated&&<span className={'text-[8px] uppercase tracking-wider text-amber-400/80 shrink-0'}>extrap</span>}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className={pCls+' text-[10px] font-bold'}>{deltaBps>=0?'+':''}{deltaBps.toFixed(0)}bps</span>
-                      <span className={'text-[9px] text-[#EDEDED]/40'}>{stepConf.toFixed(0)}%</span>
-                    </div>
-                  </div>
-                  {/* Confidence bar */}
-                  <div className="h-0.5 bg-[#0A0A0A] rounded-full overflow-hidden mt-1">
-                    <div className={'h-full '+barCls} style={{width:barWidth+'%'}}/>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      {/* Quick view of all 3 timeframes */}
-      <div className="grid grid-cols-3 gap-2 mt-3 shrink-0 border-t border-[#1F1F1F] pt-3">
-        {projections.map(p=>{
-          const pUp=p.price>=currentPrice;
-          const pCls=pUp?'text-emerald-400':'text-rose-400';
-          const pArrow=pUp?'▲':'▼';
-          const isActive=p.id===activeTimeframe;
-          return(
-            <button key={p.id} onClick={()=>setActiveTimeframe(p.id)}
-              className={'p-1.5 rounded-lg border text-left transition-all '+(isActive?'bg-[#0A0A0A] border-indigo-500/30':'border-transparent hover:bg-[#161616]')}>
-              <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>{p.time}</div>
-              <div className="text-xs font-mono font-bold text-white">${Number(p.price||0).toFixed(0)}</div>
-              <div className="flex items-center gap-1">
-                <span className={pCls+' text-[10px]'}>{pArrow}</span>
-                <span className={'text-[9px] text-[#EDEDED]/40'}>{Number(p.conf||0).toFixed(0)}%</span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+      {/* V13.4.94: price projections REMOVED, hourly ladder takes this slot.
+          The 5m/15m/1h linear-extrapolation forecasts were decorative -- they restated
+          current drift as a future price with a decaying confidence bar, and nothing
+          measured ever consumed them. The hourly ladder is live market data with real
+          entry prices, so it earns the space.
+          EM-DASH BASELINE re-based 3298 -> 3297: the removed timeline row carried one
+          em-dash in its title attribute. Deliberate, same as the 13.4.75 auto-exec strip. */}
+      <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
     </div>
   );
 }
