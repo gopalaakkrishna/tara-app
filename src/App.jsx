@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.27-v13.4.92-hourly-ladder-panel';
-const TARA_VERSION_DISPLAY='Tara 13.4.92';
+const BASELINE_VERSION='2026.07.27-v13.4.93-hourly-lock';
+const TARA_VERSION_DISPLAY='Tara 13.4.93';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14928,6 +14928,22 @@ function HourlyLadderPanel({spot,taraCall}){
   const nowMs=Date.now();
   const minsToHour=(60-new Date(nowMs).getMinutes())-(new Date(nowMs).getSeconds()/60);
   const lad=useHourlyLadder(minsToHour);
+  // V13.4.93: HOURLY LOCK. Tara scans, waits for her read to hold, then locks ONE strike
+  //   for the hour. She does not call instantly -- the direction must survive
+  //   CONFIRM_TICKS consecutive polls (~20s each) before anything locks. Deliberately
+  //   ANTI-CHASE: among strikes that pass, it takes the CHEAPEST acceptable entry rather
+  //   than the safest, because the archive is unambiguous -- entries under 50c returned
+  //   +9.27c/ct over 822 locks while entries at 70c+ returned +1.91c/ct over 985. Buying
+  //   the side that already won is what makes an entry cost 70c.
+  //   The confidence shown is TARA'S OWN, not the barrier model: at 65300/24m in live
+  //   testing the model read 59%% while Kalshi read 72c, i.e. the model runs wide in quiet
+  //   markets and would make every cheap side look mispriced. Market price is displayed
+  //   beside it so the disagreement is visible instead of hidden.
+  const lockRef=React.useRef({hourKey:null,dir:null,ticks:0,locked:null});
+  const hourKey=new Date(nowMs).toISOString().slice(0,13);
+  const CONFIRM_TICKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyConfirmTicks'),10);return(Number.isFinite(v)&&v>=1&&v<=10)?v:3;}catch(_e){return 3;}})();
+  const MIN_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMinCost'));return(Number.isFinite(v)&&v>0)?v:20;}catch(_e){return 20;}})();
+  const MAX_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMaxCost'));return(Number.isFinite(v)&&v>0)?v:65;}catch(_e){return 65;}})();
   const on=(function(){try{return localStorage.getItem('taraHourlyLadder')!=='off';}catch(_e){return true;}})();
   if(!on)return null;
   if(minsToHour>25)return null;
@@ -14941,6 +14957,24 @@ function HourlyLadderPanel({spot,taraCall}){
     return{...k,modelPct,costYes,costNo};
   });
   const tradeable=rows.filter(r=>r.modelPct!=null&&r.ask>2&&r.ask<98);
+  // --- lock machine (runs during render; only mutates a ref, never state) ---
+  const L=lockRef.current;
+  if(L.hourKey!==hourKey){L.hourKey=hourKey;L.dir=null;L.ticks=0;L.locked=null;}
+  if(!L.locked){
+    if(dir&&dir===L.dir)L.ticks+=1; else {L.dir=dir;L.ticks=dir?1:0;}
+    const conf=Number(taraCall&&taraCall.confidence)||0;
+    const eligible=tradeable.map(r=>({r,cost:dir==='UP'?r.ask:r.costNo}))
+      .filter(x=>Number.isFinite(x.cost)&&x.cost>=MIN_C&&x.cost<=MAX_C)
+      .sort((x,y)=>x.cost-y.cost);
+    if(dir&&L.ticks>=CONFIRM_TICKS&&eligible.length&&minsLeft>1.5){
+      const pick=eligible[0];
+      L.locked={dir,strike:pick.r.strike,cost:pick.cost,conf,
+                side:dir==='UP'?'YES':'NO',model:pick.r.modelPct,
+                mktPct:dir==='UP'?pick.r.ask:(100-pick.r.bid),
+                at:new Date(nowMs).toLocaleTimeString(),minsAtLock:minsLeft};
+    }
+  }
+  const LK=L.locked;
   return(
     <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
       <div className="flex items-center justify-between mb-2">
@@ -14948,6 +14982,27 @@ function HourlyLadderPanel({spot,taraCall}){
         <div className="text-[11px] text-zinc-400">{minsLeft.toFixed(1)}m left</div>
       </div>
       {lad.err&&<div className="text-[11px] text-amber-400 mb-1">feed: {lad.err}</div>}
+      {LK?(
+        <div className={'mb-2 rounded-lg border p-2 '+(LK.dir==='UP'?'border-emerald-500/40 bg-emerald-500/10':'border-rose-500/40 bg-rose-500/10')}>
+          <div className="flex items-center justify-between">
+            <div className={'text-[13px] font-semibold '+(LK.dir==='UP'?'text-emerald-400':'text-rose-400')}>
+              LOCKED {LK.side} @ {LK.strike.toFixed(0)}
+            </div>
+            <div className="text-[13px] font-semibold text-zinc-100 tabular-nums">{LK.cost}c</div>
+          </div>
+          <div className="mt-0.5 text-[11px] text-zinc-300">
+            Tara confidence <span className="font-semibold tabular-nums">{LK.conf.toFixed(0)}</span>
+            <span className="text-zinc-500"> | market {LK.mktPct}% | model {LK.model!=null?LK.model.toFixed(0)+'%':'--'}</span>
+          </div>
+          <div className="mt-0.5 text-[10px] text-zinc-500">
+            locked {LK.at} with {LK.minsAtLock.toFixed(1)}m left, after {CONFIRM_TICKS} confirmations. Cheapest entry in the {MIN_C}-{MAX_C}c band.
+          </div>
+        </div>
+      ):(
+        <div className="mb-2 text-[11px] text-zinc-500">
+          {dir?('scanning '+dir+' -- '+L.ticks+'/'+CONFIRM_TICKS+' confirmations'+(tradeable.length?'':', waiting on liquid strikes')):'no directional read yet -- watching'}
+        </div>
+      )}
       {!tradeable.length&&<div className="text-[11px] text-zinc-500">{lad.loading?'loading ladder...':'no liquid strikes yet'}</div>}
       {!!tradeable.length&&(
         <div className="space-y-1">
