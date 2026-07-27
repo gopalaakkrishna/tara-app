@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.27-v13.4.95-record-and-status';
-const TARA_VERSION_DISPLAY='Tara 13.4.95';
+const BASELINE_VERSION='2026.07.27-v13.4.96-opposed-lock-warning';
+const TARA_VERSION_DISPLAY='Tara 13.4.96';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27505,6 +27505,19 @@ function ScalperAdvisorPanel({
   });
   const _taraDir=_taraDirRes.dir;
   const _taraLocked=!!_taraDir;
+  // V13.4.96: OPPOSED-LOCK WARNING. The ticket direction comes from the snapshot/engine
+  //   lock, while Tara's Call panel shows the LIVE lean. When a window locks one way and
+  //   the read later flips, the two disagree and nothing said so -- observed live as a
+  //   ticket reading 'long up @ 6c' while the call panel read LEANING DOWN and spot sat
+  //   8bps BELOW the strike (i.e. the lock was already losing). The comment above this
+  //   block warns about exactly this divergence class; it centralised the read but never
+  //   surfaced the conflict. Advisory only -- it changes no direction, places no order,
+  //   and never overrides the lock. It just refuses to let a stale lock look healthy.
+  //   Threshold of 5pt of live conviction keeps it off noise around a coin-flip posterior.
+  const _lkPost=Number(analysis?.rawProbAbove);
+  const _lkLiveDir=Number.isFinite(_lkPost)?(_lkPost>50?'UP':(_lkPost<50?'DOWN':null)):null;
+  const _lkConv=Number.isFinite(_lkPost)?Math.abs(_lkPost-50):0;
+  const _lockOpposed=!!(_taraDir&&_lkLiveDir&&_taraDir!==_lkLiveDir&&_lkConv>=5);
   // V9.17.18: snapshot tier is what flags "auto-exec may sit out" case (time-cap-commit etc).
   //   Use snapshot tier when engine lock isn't set (snapshot-only commit).
   const _snapTier=taraSnapshotForTicket?.tier||null;
@@ -28251,6 +28264,19 @@ ${_d.responseBody||'(empty)'}`;
             );
           }
           // Pre-trade (generic): just show Tara's direction
+          if(_lockOpposed){
+            return React.createElement('div',{className:'py-2'},
+              React.createElement('div',{className:'flex items-baseline justify-between'},
+                React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55',style:{letterSpacing:'0.02em'}},'tara says'),
+                React.createElement('span',{className:'text-base font-medium tabular-nums',style:{color:_taraDirColor,fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},_taraDirLabel)
+              ),
+              React.createElement('div',{className:'mt-1 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-1.5'},
+                React.createElement('div',{className:'text-[11px] font-semibold text-amber-400'},'LOCK OPPOSED'),
+                React.createElement('div',{className:'text-[10px] leading-snug text-[#EDEDED]/70'},
+                  `Ticket holds ${_taraDir}, but the live read is ${_lkLiveDir} at ${_lkConv.toFixed(0)}pt. This lock is on the wrong side of the current signal -- do not add, and consider cutting.`)
+              )
+            );
+          }
           return React.createElement('div',{className:'flex items-baseline justify-between py-2'},
             React.createElement('span',{className:'text-[11px] text-[#EDEDED]/55',style:{letterSpacing:'0.02em'}},'tara says'),
             React.createElement('span',{className:'text-base font-medium tabular-nums',style:{color:_taraDirColor,fontFamily:'IBM Plex Mono,ui-monospace,monospace'}},_taraDirLabel),
