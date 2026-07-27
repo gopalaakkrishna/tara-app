@@ -4744,8 +4744,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.27-v13.4.90-entry-quality-gate';
-const TARA_VERSION_DISPLAY='Tara 13.4.90';
+const BASELINE_VERSION='2026.07.27-v13.4.92-hourly-ladder-panel';
+const TARA_VERSION_DISPLAY='Tara 13.4.92';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -14742,6 +14742,9 @@ function PredictionContent(props){
 
       {/* ── V111: TARA ADVISOR PANEL ── */}
       <TaraAdvisorPanel advisor={analysis?.advisor} executeAction={executeAction}/>
+
+      {/* V13.4.92: hourly ladder -- appears in the last 25 min of each clock hour */}
+      <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
     </div>
   );
 }
@@ -14869,6 +14872,111 @@ function ManualKalshiEntryInput({userPosition,manualKalshiEntry,setManualKalshiE
 }
 
 // ── V111: TaraAdvisorPanel — shows current advisor recommendation with clickable action ──
+// V13.4.92: HOURLY LADDER PANEL.
+//   WHY THIS EXISTS. Kalshi's hourly BTC market (series KXBTCD) is a ~188-strike ladder
+//   at $100 spacing, of which only ~5 near-the-money strikes carry real volume. Its close
+//   coincides exactly with the :45-:00 fifteen-minute window, and settlement is identical
+//   (mean of the final 60 seconds of CF Benchmarks BRTI). Two measurements make this the
+//   right place to act:
+//     1. Tara's engine is at its BEST in that quarter: EV +4.80c/ct on 1026 locks vs
+//        +3.46 overall, and it holds in both chronological halves (+5.73 / +3.86).
+//     2. taraHourlyProb is calibrated there: directional accuracy 85%% at 15 min left,
+//        92%% on confident calls; Brier skill +0.065, out-of-sample +0.059.
+//   WHAT IT IS FOR. NOT finding mispricing -- Kalshi's pricing is calibrated to within ~2
+//   points at every price level (measured on 5383 windows), so there is no systematic wing
+//   edge to harvest. It is for STRIKE CHOICE: the 15m market offers one strike at whatever
+//   price it happens to be, which is why entries cluster at 70c. Here the same directional
+//   read can be expressed at 5 different prices. Cheaper strikes do not add EV against a
+//   fair market -- they change variance and payoff shape -- but they hand back control.
+//   Advisory only. Places no orders. Read-only public endpoint, no auth.
+function useHourlyLadder(activeMins){
+  const[state,setState]=React.useState({loading:false,err:null,event:null,closeMs:null,strikes:[]});
+  React.useEffect(()=>{
+    let alive=true;
+    const pull=async()=>{
+      try{
+        const evR=await fetch('/api/kalshi-public/events?series_ticker=KXBTCD&status=open&limit=20');
+        if(!evR.ok){if(alive)setState(s=>({...s,err:'events http '+evR.status}));return;}
+        const evJ=await evR.json();
+        const evs=((evJ&&evJ.events)||[]).map(x=>x.event_ticker).filter(Boolean).sort();
+        if(!evs.length){if(alive)setState(s=>({...s,err:'no open KXBTCD event'}));return;}
+        const ev=evs[0];
+        const mR=await fetch('/api/kalshi-public/markets?event_ticker='+encodeURIComponent(ev)+'&limit=1000');
+        if(!mR.ok){if(alive)setState(s=>({...s,err:'markets http '+mR.status}));return;}
+        const mJ=await mR.json();
+        const all=(mJ&&mJ.markets)||[];
+        const closeMs=all.length&&all[0].close_time?Date.parse(all[0].close_time):null;
+        const liquid=all.filter(x=>Number(x.volume_fp)>100&&Number.isFinite(Number(x.floor_strike)))
+          .map(x=>({strike:Number(x.floor_strike),
+                    bid:Math.round(Number(x.yes_bid_dollars)*100),
+                    ask:Math.round(Number(x.yes_ask_dollars)*100),
+                    vol:Math.round(Number(x.volume_fp)),
+                    ticker:x.ticker}))
+          .sort((a,b)=>a.strike-b.strike);
+        if(alive)setState({loading:false,err:null,event:ev,closeMs,strikes:liquid});
+      }catch(e){if(alive)setState(s=>({...s,err:String((e&&e.message)||e)}));}
+    };
+    if(activeMins==null||activeMins>25||activeMins<0){setState(s=>({...s,strikes:[]}));return()=>{alive=false;};}
+    setState(s=>({...s,loading:true}));
+    pull();
+    const iv=setInterval(pull,20000);
+    return()=>{alive=false;clearInterval(iv);};
+  },[activeMins==null?null:(activeMins>25?'off':'on')]);
+  return state;
+}
+function HourlyLadderPanel({spot,taraCall}){
+  const nowMs=Date.now();
+  const minsToHour=(60-new Date(nowMs).getMinutes())-(new Date(nowMs).getSeconds()/60);
+  const lad=useHourlyLadder(minsToHour);
+  const on=(function(){try{return localStorage.getItem('taraHourlyLadder')!=='off';}catch(_e){return true;}})();
+  if(!on)return null;
+  if(minsToHour>25)return null;
+  const minsLeft=lad.closeMs?Math.max(0,(lad.closeMs-nowMs)/60000):minsToHour;
+  const dir=taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')?taraCall.call:null;
+  const s=Number(spot)||0;
+  const rows=(lad.strikes||[]).map(k=>{
+    const pUp=(typeof taraHourlyProb==='function')?taraHourlyProb(s,k.strike,minsLeft):null;
+    const modelPct=pUp==null?null:Math.round(pUp*1000)/10;
+    const costYes=k.ask, costNo=100-k.bid;
+    return{...k,modelPct,costYes,costNo};
+  });
+  const tradeable=rows.filter(r=>r.modelPct!=null&&r.ask>2&&r.ask<98);
+  return(
+    <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[11px] uppercase tracking-wider text-zinc-400">Hourly ladder <span className="text-zinc-600">KXBTCD</span></div>
+        <div className="text-[11px] text-zinc-400">{minsLeft.toFixed(1)}m left</div>
+      </div>
+      {lad.err&&<div className="text-[11px] text-amber-400 mb-1">feed: {lad.err}</div>}
+      {!tradeable.length&&<div className="text-[11px] text-zinc-500">{lad.loading?'loading ladder...':'no liquid strikes yet'}</div>}
+      {!!tradeable.length&&(
+        <div className="space-y-1">
+          <div className="grid grid-cols-5 gap-2 text-[10px] uppercase tracking-wide text-zinc-500">
+            <div>Strike</div><div className="text-right">Model</div><div className="text-right">Yes</div><div className="text-right">No</div><div className="text-right">Vol</div>
+          </div>
+          {tradeable.map(r=>{
+            const near=s>0&&Math.abs(r.strike-s)<=150;
+            const side=dir==='UP'?'YES':(dir==='DOWN'?'NO':null);
+            const cost=side==='YES'?r.costYes:(side==='NO'?r.costNo:null);
+            const cheap=cost!=null&&cost<50;
+            return(
+              <div key={r.ticker} className={'grid grid-cols-5 gap-2 text-[11px] py-0.5 '+(near?'text-zinc-100':'text-zinc-500')}>
+                <div className="tabular-nums">{r.strike.toFixed(0)}</div>
+                <div className="text-right tabular-nums">{r.modelPct.toFixed(0)}%</div>
+                <div className={'text-right tabular-nums '+(side==='YES'&&cheap?'text-emerald-400':'')}>{r.ask}c</div>
+                <div className={'text-right tabular-nums '+(side==='NO'&&cheap?'text-emerald-400':'')}>{r.costNo}c</div>
+                <div className="text-right tabular-nums text-zinc-600">{(r.vol/1000).toFixed(0)}k</div>
+              </div>);
+          })}
+          <div className="pt-1 text-[10px] leading-snug text-zinc-500">
+            {dir
+              ?('Tara reads '+dir+'. Buy '+(dir==='UP'?'YES':'NO')+' at whichever strike gives the price you want -- green marks under 50c. Kalshi is well calibrated here, so a cheaper strike changes payoff shape and variance, not edge.')
+              :'No directional call right now -- ladder shown for reference only.'}
+          </div>
+        </div>
+      )}
+    </div>);
+}
 function TaraAdvisorPanel({advisor,executeAction}){
   if(!advisor||!advisor.label||advisor.label==='CONNECTING...')return null;
   const colorMap={
@@ -38765,9 +38873,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   H2 +5.36 vs +0.62. Timing is a window FRACTION so 5m windows scale correctly.
         //   Dials: 'taraEntryQuality'='off' disables; 'taraEntryMaxCost' (default 70);
         //   'taraEntryMaxFrac' (default 0.667 = block when >2/3 of the window remains).
+        // V13.4.91: DEFAULTS MADE INERT. The 13.4.90 defaults (70c / 0.667) doubled EV per
+        //   contract but cut lock count to 37%% and REDUCED total realized profit 4366c ->
+        //   3598c. Higher EV/ct on fewer trades only wins if you size up ~2.7x to hold
+        //   exposure constant -- that is a sizing decision, not a signal fix, so it must be
+        //   opt-in. Every volume-preserving variant (87-90%% kept) gained only ~+0.25c/ct and
+        //   FAILED split-half (H1 got worse). Defaults now match the known-good 13.4.77 gate
+        //   (85c extreme block, no timing block) = zero behavior change. Turn on when sizing
+        //   up: taraEntryMaxCost=70 and taraEntryMaxFrac=0.667.
         const _eqOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_e4){return true;}})();
-        const _eqMaxCost=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:70;}catch(_e5){return 70;}})();
-        const _eqMaxFrac=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxFrac'));return(Number.isFinite(v)&&v>0&&v<=1)?v:0.667;}catch(_e6){return 0.667;}})();
+        const _eqMaxCost=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:85;}catch(_e5){return 85;}})();
+        const _eqMaxFrac=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxFrac'));return(Number.isFinite(v)&&v>0&&v<=1)?v:1.0;}catch(_e6){return 1.0;}})();
         const _eqCost=(taraCall.call==='UP')?_kEntry:(100-_kEntry);
         const _eqSecsLeft=(function(){try{return Math.max(0,(timeState.minsRemaining*60)+timeState.secsRemaining);}catch(_e7){return null;}})();
         const _eqFracLeft=(_eqSecsLeft!=null&&_totalSec>0)?(_eqSecsLeft/_totalSec):null;
