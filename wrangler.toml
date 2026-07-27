@@ -1,17 +1,26 @@
 # wrangler.toml
-# Goes at the REPO ROOT, sibling to package.json (same level as functions/, src/).
+# Goes at the REPO ROOT, sibling to package.json.
+# REPLACES the previous version (pages_build_output_dir) -- that forced classic
+# Pages mode, and the auto-provisioned build token for this project is scoped
+# for Workers deploys only, not the separate Pages API. Every attempt to run
+# `wrangler pages deploy` with this token fails with "Authentication error
+# [code: 10000]" on the /pages/projects/... endpoint specifically, even though
+# the same token authenticates fine and shows full account access -- this is a
+# structural gap between two still-merging Cloudflare products, not a missing
+# permission checkbox.
 #
-# WHY THIS FILE EXISTS: with no wrangler config present, Cloudflare's newer deploy
-# flow tries to auto-configure this as a Workers project via the Cloudflare Vite
-# plugin, and that path requires Vite >= 6.0.0. This repo is on Vite 5.4.21, so
-# that autoconfig step fails at the deploy stage even though `vite build` itself
-# succeeds. Setting `pages_build_output_dir` here tells Wrangler this is a classic
-# Pages project instead, which deploys via `wrangler pages deploy` and does not
-# go through the Vite-plugin autoconfig at all -- so the Vite 6 requirement never
-# applies. This is also the correct mode for functions/api/[[path]].js, which is
-# Pages Functions routing, not Workers routing.
-#
-# This does not change your app code, dependencies, or build output in any way.
+# This config switches to "Workers with static assets" instead, which is what
+# this token IS scoped for. worker/index.js is the entry point: it proxies
+# /api/* to the real upstream APIs and serves everything else from the built
+# dist/ folder via the ASSETS binding. This subsumes what
+# functions/api/[[path]].js was doing under Pages' file-based routing -- that
+# file is no longer used and can be deleted from the repo (harmless either way,
+# since this project type doesn't read the functions/ folder).
 
 name = "tara-app"
-pages_build_output_dir = "./dist"
+compatibility_date = "2026-07-27"
+main = "worker/index.js"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
