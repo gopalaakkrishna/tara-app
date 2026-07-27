@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0A0A0A" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Tara</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // V13.4.29 design pass — STRICT black/white/gray + red/green/gold.
+      // Complete rewrite of the palette override on explicit direction: the
+      // app should read as a black-and-white theme with exactly three signal
+      // colors — green (win/positive), red (loss/negative), gold (signature
+      // accent/brand). Every OTHER Tailwind color family actually used in the
+      // app is collapsed into one of those three (or grayscale) here, so no
+      // stray hue can appear anywhere without a corresponding code change.
+      // This replaces the V13.4.18/28 muted-multi-hue approach entirely —
+      // that iteration tried to preserve categorical color variety (sage,
+      // oxblood, indigo, etc.); this one deliberately removes it in favor of
+      // stark simplicity, per direct feedback that the multi-hue version
+      // read as inconsistent rather than considered.
+      //
+      // Mapping:
+      //   green  <- emerald, teal        (win / UP / positive)
+      //   red    <- rose, red, pink      (loss / DOWN / negative)
+      //   gold   <- amber, orange, yellow (signature accent / warm / caution)
+      //   gray   <- indigo, sky, blue, purple, violet, cyan (everything else)
+      // zinc/gray/neutral/stone are already grayscale and untouched.
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              // V13.4.30: red/green re-sampled directly from Kalshi's own UI
+              // (pixel-sampled: red #FF4D6A, green #28CC95) per direct request
+              // to match Kalshi's reference exactly rather than an invented tone.
+              emerald: {
+                200: '#A8EDD4', 300: '#6EE0BC', 400: '#28CC95',
+                500: '#20A87A', 600: '#188060', 700: '#12604A', 900: '#093326',
+              },
+              teal: { 400: '#28CC95' },
+              rose: {
+                200: '#FFC1CC', 300: '#FF8FA3', 400: '#FF4D6A',
+                500: '#E8354F', 600: '#C22940',
+              },
+              red: { 400: '#FF4D6A' },
+              pink: { 400: '#FF4D6A' },
+              amber: { 300: '#E0B978', 400: '#D4A24C', 500: '#BD8A38' },
+              orange: { 400: '#D4A24C' },
+              yellow: { 400: '#D4A24C' },
+              indigo: { 100: '#E5E5E5', 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
+              sky: { 200: '#D4D4D4', 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
+              blue: { 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
+              purple: { 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
+              violet: { 200: '#D4D4D4', 300: '#B0B0B0', 400: '#8C8C8C', 500: '#6E6E6E' },
+              cyan: { 400: '#8C8C8C' },
+            },
+            fontFamily: {
+              sans: ['"Instrument Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+              mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      /* V13.4.19: base font for any text that isn't explicitly tagged with a
+         Tailwind font-sans/font-mono class — same webfont, applies globally
+         with zero component changes. */
+      html, body {
+        font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
+  </body>
+</html>
