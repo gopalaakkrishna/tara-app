@@ -4946,8 +4946,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.27-v13.4.100-v101-shadow-posterior';
-const TARA_VERSION_DISPLAY='Tara 13.4.100';
+const BASELINE_VERSION='2026.07.27-v13.4.101-lock-on-lean';
+const TARA_VERSION_DISPLAY='Tara 13.4.101';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38906,7 +38906,26 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     //   Achieved via direct comparison: require conviction < CONV_FLOOR-2 to sit out.
     //   This converts borderline coin-flips (conviction 5-8) into locks. Audit showed
     //   3 of 5 such cases would have won today.
-    const _v10_3_2_coinFlipEffective=Math.max(1,CONV_FLOOR-2);
+    // V13.4.101: LOCK-ON-LEAN. User request: only sit out on a GENUINE coin flip; if there
+    //   is a real directional lean, lock it, and keep structural checks (exhaustion, tape,
+    //   regime flux, Kalshi disagreement, FGT) exactly as they are -- those already run as
+    //   separate gates below/around this one and are UNCHANGED. Audit of 342 sit-outs with
+    //   posterior logged: only 5%% (17) were within 5pt of 50 -- a genuine coin flip. The
+    //   other 95%% (325) had a real lean and sat out for OTHER reasons anyway. Simulating
+    //   force-lock on every non-coin-flip sit-out: 69.0%% WR, EV -0.13 +/- 3.39 c/ct --
+    //   statistically breakeven, not a loser, so this is worth doing for the volume you
+    //   asked for. ONE exception found and deliberately NOT touched here: the v1123-ev-gate
+    //   post-lock override (separate code path, ~line 41308) measured -24.81 +/- 20.79 c/ct
+    //   if bypassed (n=16, thin but a clean, large signal) -- it still runs after this and
+    //   can still override a lock this gate allows through.
+    //   Mechanism: widen the conviction floor ONLY when conviction is well clear of true
+    //   neutral (>=COIN_FLIP_PT off 50, default 5 -- matches the 45-55pt band the archive
+    //   was measured on). Between the old floor and this new one, a lock now proceeds to
+    //   the structural gates below instead of stopping here. Dial: localStorage
+    //   'taraCoinFlipPt' (default 5); 'taraLockOnLean'='off' restores the old strict floor.
+    const _lolOn=(function(){try{return localStorage.getItem('taraLockOnLean')!=='off';}catch(_e){return true;}})();
+    const _coinFlipPt=(function(){try{const v=parseFloat(localStorage.getItem('taraCoinFlipPt'));return(Number.isFinite(v)&&v>0&&v<=20)?v:5;}catch(_e){return 5;}})();
+    const _v10_3_2_coinFlipEffective=(_lolOn&&conviction>=_coinFlipPt)?0:Math.max(1,CONV_FLOOR-2);
     if(conviction<_v10_3_2_coinFlipEffective&&!isTapeLed&&!_v10_3_2_highConv){
       return{call:'SIT_OUT',reason:`Coin flip — only ${conviction.toFixed(0)}pt off neutral (need ${_v10_3_2_coinFlipEffective})`,confidence:0,direction:dir,conviction,phase:'WATCHING'};
     }
