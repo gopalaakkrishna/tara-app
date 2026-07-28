@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.28-v13.4.105-traj-audit-log';
-const TARA_VERSION_DISPLAY='Tara 13.4.105';
+const BASELINE_VERSION='2026.07.28-v13.4.107-band-covers-deadline-commit';
+const TARA_VERSION_DISPLAY='Tara 13.4.107';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -31190,7 +31190,7 @@ function TaraApp(){
           //   count survives reload even if IndexedDB fails. Without this, reload
           //   fell back to the 1000-entry fast cache — the "base stayed at 500/1000"
           //   bug the user reported.
-          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock']);
+          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock']);
           const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
           for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
             try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -31303,7 +31303,7 @@ function TaraApp(){
         const _save=_patched.slice(-_cap);
         await _idbWrite('taraCallLog',_save).catch(()=>{});     // primary: FULL history
         localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
-        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock']);
+        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock']);
         const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
         for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
           try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -31549,7 +31549,7 @@ function TaraApp(){
     //   pending entry wholesale, wiping telemetry. Root cause of the 3/3596 stamp rate.
     //   Fix: whichever copy wins the tiebreak, backfill any sticky field it lacks from
     //   the loser. Once any copy carries telemetry, it survives every future merge.
-    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','_v10_5_1_brti','_diag_brtiRefLive'];
+    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock','_v10_5_1_brti','_diag_brtiRefLive'];
     const _coalesceSticky=(winner,loser)=>{
       if(!winner||!loser)return winner;
       let _out=winner;
@@ -31646,7 +31646,7 @@ function TaraApp(){
       //   already lives here. Result: 83 shipped and the field still persisted 0 times while
       //   kalshiLead fired 3x. Same bug class the V13.4.31 and V13.4.67 comments above warn
       //   about. ~80 bytes when present, null otherwise.
-      'signalScoresAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock']);
+      'signalScoresAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock']);
     const _minifyEntry=(e)=>{
       if(!e)return e;
       const o={};
@@ -42515,6 +42515,41 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           _persistLock();
           return;
         }
+        // V13.4.107: the entry-band gate (13.4.103, 30-60c default) never applied here --
+        //   this deadline-forced commit builds and persists its own snapshot directly,
+        //   bypassing every price gate including the original 13.4.77 extreme-price block.
+        //   Found from real data: two post-band locks landed at 78c and 83c, both from
+        //   this exact path (tier time-cap-commit / no-go-edge feeding into it). The clock
+        //   running out is a real reason to stop SCANNING, but it is not a reason to accept
+        //   any price -- if the deadline arrives and the only available price is outside
+        //   the band, sit out instead of forcing a bad-priced commit.
+        const _capKEntry=Number.isFinite(_kPctNow)?_kPctNow:null;
+        const _capCost=(_capKEntry!=null)?(_commitDir==='UP'?_capKEntry:(100-_capKEntry)):null;
+        const _capOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_e9){return true;}})();
+        const _capMin=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_e10){return 30;}})();
+        const _capMax=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e11){return 60;}})();
+        if(_capOn&&_capCost!=null&&(_capCost<_capMin||_capCost>=_capMax)){
+          const _capSitReason=`[V13.4.107] deadline hit but entry ${_capCost.toFixed(0)}c outside ${_capMin.toFixed(0)}-${_capMax.toFixed(0)}c band -- sitting out rather than forcing a bad price`;
+          const _capSitSnap={
+            call:'SIT_OUT',direction:null,confidence:0,
+            caution:null,reason:_capSitReason,
+            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+            atPosterior:_post,kalshiAtLock:_kPctNow,
+            locked:true,earlyLock:false,
+            isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+            samples:0,needSamples:0,
+            tier:'time-cap-band-sitout',
+            session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+            regime:analysis?.regime||'',
+            qScore:Math.round(_qFast),
+            fgt:analysis?.mtfAlignment,
+            _committedAt:Date.now(),
+          };
+          taraCallSnapshotRef.current=_capSitSnap;
+          _logSnapshotEntry(_capSitSnap);
+          _persistLock();
+          return;
+        }
         const _cautionLevel=_commitConf>=70?'firm':_commitConf>=60?'leaning':_commitConf>=55?'tentative':'low-confidence';
         const _cautionNote=_commitConf>=70?null:`${_cautionLevel} call — confidence ${_commitConf}% (commit by time cap)`;
         const _capSnap={
@@ -44944,6 +44979,28 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           agreesWithCall:(analysis.projectedGapBps>0?'UP':'DOWN')===dir,
           postAtLock:Number(taraCall?.confidence)||null,
           wasStrongOpposite:(Number(taraCall?.confidence)||0)>=70&&(analysis.projectedGapBps>0?'UP':'DOWN')!==dir,
+        }:null,
+        // V13.4.106: FLIP-OVERRIDE AUDIT LOG. Discovered while investigating a BRTI
+        //   contrarian-amplified flip (Coinbase -5.6bps vs 3-exchange mean, 'fighting
+        //   consensus 34%') that fired against TRAJ/Grand-Trend/Structure/Momentum/Gap all
+        //   reading DOWN. That one override has never had a single logged outcome despite
+        //   two tuning passes (V10.5.2, V10.7.20 amplifier). Checking further: SEVEN
+        //   separate override mechanisms all stamp _v10_7_11_flipType on their return
+        //   object (reversal-evidence, pump-reversion, dump-reversion, traj-priority,
+        //   strike-distance, bounce, brti-contrarian-amplified/brti-divergence) -- NONE
+        //   were ever whitelisted for persistence. The entire override layer has been
+        //   silently unauditable since V10.7.11. Also note: the 34%% posterior that
+        //   triggered 'strong consensus' amplification is only 16pt off center -- the
+        //   _wasStrongConsensus>=15 threshold may be firing the most aggressive amplifier
+        //   tier on what is itself a fairly weak underlying read. Cannot say whether that
+        //   matters without real outcomes -- this stamp is what makes that checkable.
+        flipAtLock:taraCall?._v10_7_11_universalFlipped?{
+          flipType:taraCall._v10_7_11_flipType||null,
+          originalDir:taraCall._v10_7_11_originalDir||null,
+          finalDir:dir,
+          postAtLock:Number(taraCall?.confidence)||null,
+          brtiDivBps:Number.isFinite(taraCall._v10_7_11_brtiDivBps)?taraCall._v10_7_11_brtiDivBps:null,
+          brtiAmplified:taraCall._v10_7_20_amplified===true,
         }:null,
         // V9.7.0: mission info stamp from current auto-order (if mission was active at lock)
         missionInfo:autoOrderStateRef.current?.missionInfo||null,
