@@ -1501,10 +1501,18 @@ const computeNoChaseATR=(currentPrice,targetMargin,atrVal,limitATR)=>{
 // Ported verbatim from readyUpCount/readyDnCount in the Pine file.
 const computeConfluenceScore=(p)=>{
   try{
-    const{liveHistory,currentPrice,targetMargin,atrVal,flowImbalance,dir}=p;
+    const{liveHistory,currentPrice,targetMargin,flowImbalance,dir}=p;
     // flowImbalance is globalFlow.imbalance (ratio, 1.0=neutral, >1=buy-dominant) -- convert
     //   to a 0-100 buy-percent so the tape check matches the Pine file's convention.
     const tapeBuyPct=Number.isFinite(flowImbalance)?Math.max(0,Math.min(100,50+(flowImbalance-1)*50)):50;
+    // V13.4.104 CRASH FIX: was atrVal:atr from the caller -- 'atr' at that call site was a
+    //   completely different scope's variable (a different hook, line ~9993), not visible
+    //   inside the analysis useMemo where this is wired. Caused 'ReferenceError: atr is not
+    //   defined' on every render, a full app crash. I checked the name existed SOMEWHERE in
+    //   the file and wrongly assumed that meant it was in scope here -- did not verify the
+    //   call site itself. Fix: compute ATR locally from liveHistory, same as Hull/HalfTrend
+    //   already do below, so this function has zero dependency on caller scope for ATR.
+    const atrVal=calcATR(liveHistory,14)||0;
     if(!liveHistory||liveHistory.length<40||!(atrVal>0)||!(targetMargin>0)||!dir)return null;
     const closes=liveHistory.slice().reverse().map(b=>b.c); // oldest->newest for Hull
     const hull=computeHull(closes,34);
@@ -5067,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.28-v13.4.102-confluence-shadow';
-const TARA_VERSION_DISPLAY='Tara 13.4.102';
+const BASELINE_VERSION='2026.07.28-v13.4.104-fix-atr-crash';
+const TARA_VERSION_DISPLAY='Tara 13.4.104';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -37091,7 +37099,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   runs after analysis). Computed only when a real lean exists.
       const _confDir=(_v101Shadow&&_v101Shadow.posterior>50)?'UP':(_v101Shadow&&_v101Shadow.posterior<50)?'DOWN':null;
       const _confluence=computeConfluenceScore({
-        liveHistory,currentPrice,targetMargin,atrVal:atr,
+        liveHistory,currentPrice,targetMargin,
         flowImbalance:globalFlow&&globalFlow.imbalance,dir:_confDir,
       });
 
@@ -39421,18 +39429,33 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   FAILED split-half (H1 got worse). Defaults now match the known-good 13.4.77 gate
         //   (85c extreme block, no timing block) = zero behavior change. Turn on when sizing
         //   up: taraEntryMaxCost=70 and taraEntryMaxFrac=0.667.
+        // V13.4.103: BAND MODE, ON BY DEFAULT per explicit user request. Restricting to
+        //   30-60c measured on 4246 locks: n=1764 (42%% of volume), EV +5.10 +/- 2.32 c/ct --
+        //   the best EV/contract of anything tested, holds in both chronological halves
+        //   (H1 +5.79, H2 +3.75). The honest tradeoff, stated plainly: total realized
+        //   profit drops from 14704c to 8999c (-39%%) because 58%% of volume is skipped.
+        //   This is a fewer-trades-higher-quality choice, not a free upgrade -- shipped
+        //   anyway because the user asked for it explicitly, twice, with that tradeoff
+        //   already stated. Reverse this (or widen the band) if the volume cut feels wrong
+        //   in practice: taraEntryQuality='off' fully restores pre-band behavior.
         const _eqOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_e4){return true;}})();
-        const _eqMaxCost=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:85;}catch(_e5){return 85;}})();
+        const _eqMinCost=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_e8){return 30;}})();
+        const _eqMaxCost=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e5){return 60;}})();
         const _eqMaxFrac=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxFrac'));return(Number.isFinite(v)&&v>0&&v<=1)?v:1.0;}catch(_e6){return 1.0;}})();
         const _eqCost=(taraCall.call==='UP')?_kEntry:(100-_kEntry);
         const _eqSecsLeft=(function(){try{return Math.max(0,(timeState.minsRemaining*60)+timeState.secsRemaining);}catch(_e7){return null;}})();
         const _eqFracLeft=(_eqSecsLeft!=null&&_totalSec>0)?(_eqSecsLeft/_totalSec):null;
         const _tooExpensive=_eqOn&&Number.isFinite(_eqCost)&&_eqCost>=_eqMaxCost;
+        const _tooCheap=_eqOn&&Number.isFinite(_eqCost)&&_eqCost<_eqMinCost;
         const _tooEarly=_eqOn&&_eqFracLeft!=null&&_eqFracLeft>_eqMaxFrac;
-        if(_extreme||_coinFlipNoTape||_tooExpensive||_tooEarly){
+        if(_extreme||_coinFlipNoTape||_tooExpensive||_tooCheap||_tooEarly){
           taraCall.call='SIT_OUT';
-          taraCall.reason=(_tooExpensive||_tooEarly)
-            ?('[V13.4.90] entry-quality: '+(_tooExpensive?('entry '+_eqCost.toFixed(0)+'c >= '+_eqMaxCost.toFixed(0)+'c -- paying up, this bucket earns ~0'):('too early -- '+Math.round(_eqSecsLeft)+'s left ('+Math.round(100*_eqFracLeft)+'% of window); early locks avg 64c and earn -0.0c/ct'))+'. Waiting for a cheaper, later entry.')
+          taraCall.reason=(_tooExpensive||_tooCheap||_tooEarly)
+            ?('[V13.4.103] entry band '+_eqMinCost.toFixed(0)+'-'+_eqMaxCost.toFixed(0)+'c: '+
+              (_tooExpensive?('entry '+_eqCost.toFixed(0)+'c >= '+_eqMaxCost.toFixed(0)+'c -- paying up, this bucket earns far less'):
+               _tooCheap?('entry '+_eqCost.toFixed(0)+'c < '+_eqMinCost.toFixed(0)+'c -- too cheap, low win-rate lottery zone'):
+               ('too early -- '+Math.round(_eqSecsLeft)+'s left ('+Math.round(100*_eqFracLeft)+'% of window)'))+
+              '. Waiting for a price inside the band.')
             :('[V13.4.77] decent-odds gate: '+(_extreme?('untradeable extreme '+_kEntry.toFixed(0)+'c'):('coin-flip '+_kEntry.toFixed(0)+'c, no tape')))
           taraCall._decentOddsGated=true;
           taraCall._decentOddsKEntry=_kEntry;
