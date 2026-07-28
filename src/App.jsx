@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.28-v13.4.107-band-covers-deadline-commit';
-const TARA_VERSION_DISPLAY='Tara 13.4.107';
+const BASELINE_VERSION='2026.07.28-v13.4.109-traj-early-lock-default-on';
+const TARA_VERSION_DISPLAY='Tara 13.4.109';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -39445,9 +39445,25 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _eqCost=(taraCall.call==='UP')?_kEntry:(100-_kEntry);
         const _eqSecsLeft=(function(){try{return Math.max(0,(timeState.minsRemaining*60)+timeState.secsRemaining);}catch(_e7){return null;}})();
         const _eqFracLeft=(_eqSecsLeft!=null&&_totalSec>0)?(_eqSecsLeft/_totalSec):null;
-        const _tooExpensive=_eqOn&&Number.isFinite(_eqCost)&&_eqCost>=_eqMaxCost;
-        const _tooCheap=_eqOn&&Number.isFinite(_eqCost)&&_eqCost<_eqMinCost;
-        const _tooEarly=_eqOn&&_eqFracLeft!=null&&_eqFracLeft>_eqMaxFrac;
+        // V13.4.108: TRAJ-EARLY BYPASS, explicit user request -- 'lock on the projected
+        //   side as early as possible, do not care about odds'. Off by default: this skips
+        //   the entry-band price check (not the extreme/coin-flip safety gates) ONLY when
+        //   Tara's own trajectory projection (analysis.projectedGapBps) agrees with the
+        //   call direction. It does not fire on price/tape alone -- there must be a real,
+        //   fresh trajectory read pointing the same way as the call, which is a materially
+        //   different bar than 'any lean'. UNMEASURED as a strategy: TRAJ itself only
+        //   started being logged in 13.4.105, so there is no realized-money track record
+        //   yet for trusting it enough to override price. V13.4.109: made ON BY DEFAULT
+        //   per explicit follow-up request -- no console/localStorage step should be
+        //   required. Off-switch preserved for if this needs to be walked back once real
+        //   outcomes accumulate: localStorage 'taraTrajEarlyLock'='off'.
+        const _trajEarlyOn=(function(){try{return localStorage.getItem('taraTrajEarlyLock')!=='off';}catch(_e12){return true;}})();
+        const _trajGapBps=Number(analysis?.projectedGapBps)||0;
+        const _trajDir=_trajGapBps>0?'UP':(_trajGapBps<0?'DOWN':null);
+        const _trajAgrees=_trajEarlyOn&&_trajDir===taraCall.call&&_trajGapBps!==0;
+        const _tooExpensive=_eqOn&&Number.isFinite(_eqCost)&&_eqCost>=_eqMaxCost&&!_trajAgrees;
+        const _tooCheap=_eqOn&&Number.isFinite(_eqCost)&&_eqCost<_eqMinCost&&!_trajAgrees;
+        const _tooEarly=_eqOn&&_eqFracLeft!=null&&_eqFracLeft>_eqMaxFrac&&!_trajAgrees;
         if(_extreme||_coinFlipNoTape||_tooExpensive||_tooCheap||_tooEarly){
           taraCall.call='SIT_OUT';
           taraCall.reason=(_tooExpensive||_tooCheap||_tooEarly)
@@ -42528,7 +42544,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _capOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_e9){return true;}})();
         const _capMin=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_e10){return 30;}})();
         const _capMax=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e11){return 60;}})();
-        if(_capOn&&_capCost!=null&&(_capCost<_capMin||_capCost>=_capMax)){
+        // V13.4.108: same TRAJ-early bypass as the main gate, applied here too so the
+        //   deadline path is consistent with the normal path.
+        const _capTrajOn=(function(){try{return localStorage.getItem('taraTrajEarlyLock')!=='off';}catch(_e13){return true;}})();
+        const _capTrajGap=Number(analysis?.projectedGapBps)||0;
+        const _capTrajDir=_capTrajGap>0?'UP':(_capTrajGap<0?'DOWN':null);
+        const _capTrajAgrees=_capTrajOn&&_capTrajDir===_commitDir&&_capTrajGap!==0;
+        if(_capOn&&_capCost!=null&&(_capCost<_capMin||_capCost>=_capMax)&&!_capTrajAgrees){
           const _capSitReason=`[V13.4.107] deadline hit but entry ${_capCost.toFixed(0)}c outside ${_capMin.toFixed(0)}-${_capMax.toFixed(0)}c band -- sitting out rather than forcing a bad price`;
           const _capSitSnap={
             call:'SIT_OUT',direction:null,confidence:0,
