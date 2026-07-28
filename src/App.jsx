@@ -1404,6 +1404,127 @@ if(typeof window!=='undefined'){
 //   were tonight: real WR, real EV/contract, split-half validated, against the current
 //   engine over the identical stretch. Logic below is otherwise UNCHANGED from the
 //   uploaded file (only renamed and made ASCII-only per project invariant).
+// V13.4.102: CONFLUENCE SHADOW MODULE. Ported directly from user-supplied Pine Script
+//   ('Kalshi Future Trend + FGT Companion v6.2' and 'Kalshi BTC Smart Call System v13').
+//   Read those files -- Tara's HalfTrend is explicitly commented as an approximation ('no
+//   full state'); this ports the real state-machine version. Hull (HMA) and doji/wick
+//   candle-quality did not exist in Tara at all. ATR-relative no-chase (0.75 ATR) matches
+//   a preference already on record but Tara's live no-chase gate is cents-based, not
+//   ATR-relative -- ported here as its own measurable quantity. CVD-from-candle-decomposition
+//   was in the Pine file too but Tara already has real trade-by-trade tape (Binance/Bybit
+//   aggTrade), which is strictly better than a candle-shape proxy -- skipped. The empirical
+//   H-exponent/RTI-settlement logic in the Pine file matches what 13.4.86/89 already built
+//   independently and validated on Tara's own archive -- confirms that work, no action.
+//
+//   THE ACTUAL ASK: user wants 'aligned -> lock early, tricky -> wait', naming this exact
+//   mechanism in the Pine file: readyUpCount/readyDnCount, a 3-of-4 confluence score across
+//   trend+candle+distance+tape. Ported verbatim as confluenceScore below.
+//
+//   SHADOW ONLY. Computed and logged on every window. Controls NO lock decision yet -- same
+//   discipline as the V101 shadow above. Needs real settled locks before it decides anything.
+const _wma=(vals,len)=>{
+  if(!vals||vals.length<len)return null;
+  const w=vals.slice(-len);let num=0,den=0;
+  for(let i=0;i<len;i++){const wt=i+1;num+=w[i]*wt;den+=wt;}
+  return den>0?num/den:null;
+};
+const computeHull=(closes,len)=>{
+  if(!closes||closes.length<len+Math.round(Math.sqrt(len)))return null;
+  const half=Math.max(1,Math.floor(len/2));
+  const sq=Math.max(1,Math.round(Math.sqrt(len)));
+  const series=[];
+  for(let end=sq;end<=closes.length;end++){
+    const w1=_wma(closes.slice(0,end),half),w2=_wma(closes.slice(0,end),len);
+    if(w1==null||w2==null){series.push(null);continue;}
+    series.push(2*w1-w2);
+  }
+  const valid=series.filter(x=>x!=null);
+  if(valid.length<sq)return null;
+  const hmaNow=_wma(valid,sq);
+  const hmaPrev=valid.length>sq?_wma(valid.slice(0,-1),sq):hmaNow;
+  if(hmaNow==null)return null;
+  return{value:hmaNow,up:hmaNow>hmaPrev};
+};
+const computeHalfTrendReal=(hist,amplitude,channelDevMult,atrVal)=>{
+  if(!hist||hist.length<amplitude+3||!(atrVal>0))return null;
+  const ob=hist.slice(0,60).slice().reverse();
+  const N=ob.length;
+  let trend=0,nextTrend=0;
+  let maxLowPrice=ob[0].l,minHighPrice=ob[0].h;
+  let upLine=0,downLine=0,flipIdx=0;
+  for(let i=amplitude;i<N;i++){
+    const win=ob.slice(i-amplitude+1,i+1);
+    const recentHigh=Math.max(...win.map(b=>b.h)),recentLow=Math.min(...win.map(b=>b.l));
+    const highAvg=win.reduce((a,b)=>a+b.h,0)/win.length,lowAvg=win.reduce((a,b)=>a+b.l,0)/win.length;
+    const prevTrend=trend;
+    if(nextTrend===1){
+      maxLowPrice=Math.max(recentLow,maxLowPrice);
+      if(highAvg<maxLowPrice&&ob[i].c<ob[i-1].l){trend=1;nextTrend=0;minHighPrice=recentHigh;}
+    }else{
+      minHighPrice=Math.min(recentHigh,minHighPrice);
+      if(lowAvg>minHighPrice&&ob[i].c>ob[i-1].h){trend=0;nextTrend=1;maxLowPrice=recentLow;}
+    }
+    if(trend===0){
+      upLine=(prevTrend===1)?downLine:Math.max(maxLowPrice,upLine);
+    }else{
+      downLine=(prevTrend===0)?upLine:Math.min(minHighPrice,downLine);
+    }
+    if(trend!==prevTrend)flipIdx=i;
+  }
+  return{up:trend===0,barsSinceFlip:N-1-flipIdx,line:trend===0?upLine:downLine};
+};
+const computeCandleQuality=(hist,dojiRatio,wickMult)=>{
+  if(!hist||!hist.length)return null;
+  const c=hist[0]; // newest bar
+  const range=Math.max(c.h-c.l,1e-9);
+  const body=Math.abs(c.c-c.o);
+  const upperWick=c.h-Math.max(c.c,c.o);
+  const lowerWick=Math.min(c.c,c.o)-c.l;
+  const isDoji=(body/range)<(dojiRatio??0.15);
+  const topReject=upperWick>body*(wickMult??1.5);
+  const botReject=lowerWick>body*(wickMult??1.5);
+  return{
+    confirmsUp:!isDoji&&c.c>c.o&&!topReject,
+    confirmsDown:!isDoji&&c.c<c.o&&!botReject,
+    isDoji,topReject,botReject,
+  };
+};
+// noChaseATR default 0.75, matches the on-record preference. Returns strike-distance in
+// ATR units and whether it exceeds the no-chase limit, for either direction.
+const computeNoChaseATR=(currentPrice,targetMargin,atrVal,limitATR)=>{
+  if(!(atrVal>0)||!(targetMargin>0))return null;
+  const distATR=(currentPrice-targetMargin)/atrVal;
+  const lim=limitATR??0.75;
+  return{distATR:Math.round(distATR*100)/100,noChaseUp:distATR>lim,noChaseDown:distATR<-lim};
+};
+// The actual mechanism the user asked for: 3-of-4 confluence (trend/candle/distance/tape).
+// Ported verbatim from readyUpCount/readyDnCount in the Pine file.
+const computeConfluenceScore=(p)=>{
+  try{
+    const{liveHistory,currentPrice,targetMargin,atrVal,flowImbalance,dir}=p;
+    // flowImbalance is globalFlow.imbalance (ratio, 1.0=neutral, >1=buy-dominant) -- convert
+    //   to a 0-100 buy-percent so the tape check matches the Pine file's convention.
+    const tapeBuyPct=Number.isFinite(flowImbalance)?Math.max(0,Math.min(100,50+(flowImbalance-1)*50)):50;
+    if(!liveHistory||liveHistory.length<40||!(atrVal>0)||!(targetMargin>0)||!dir)return null;
+    const closes=liveHistory.slice().reverse().map(b=>b.c); // oldest->newest for Hull
+    const hull=computeHull(closes,34);
+    const ht=computeHalfTrendReal(liveHistory,2,2,atrVal);
+    const cq=computeCandleQuality(liveHistory,0.15,1.5);
+    const nc=computeNoChaseATR(currentPrice,targetMargin,atrVal,0.75);
+    if(!hull||!ht||!cq||!nc)return null;
+    const trendReady=dir==='UP'?(hull.up&&ht.up):(!hull.up&&!ht.up);
+    const candleReady=dir==='UP'?cq.confirmsUp:cq.confirmsDown;
+    const distanceReady=dir==='UP'?!nc.noChaseUp:!nc.noChaseDown;
+    const tapeVal=Number.isFinite(tapeBuyPct)?tapeBuyPct:50;
+    const tapeReady=dir==='UP'?tapeVal>=50:tapeVal<=50;
+    const score=(trendReady?1:0)+(candleReady?1:0)+(distanceReady?1:0)+(tapeReady?1:0);
+    return{
+      score,trendReady,candleReady,distanceReady,tapeReady,
+      hullUp:hull.up,halfTrendUp:ht.up,noChaseDistATR:nc.distATR,
+      aligned:score>=3,
+    };
+  }catch(_eConf){return null;}
+};
 const V101_WEIGHTS={gap:35,momentum:30,structure:15,flow:20,technical:25,regime:15};
 const _v101RSI=(closes,period)=>{
   if(!closes||closes.length<period+1)return null;
@@ -4946,8 +5067,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.27-v13.4.101-lock-on-lean';
-const TARA_VERSION_DISPLAY='Tara 13.4.101';
+const BASELINE_VERSION='2026.07.28-v13.4.102-confluence-shadow';
+const TARA_VERSION_DISPLAY='Tara 13.4.102';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -31061,7 +31182,7 @@ function TaraApp(){
           //   count survives reload even if IndexedDB fails. Without this, reload
           //   fell back to the 1000-entry fast cache — the "base stayed at 500/1000"
           //   bug the user reported.
-          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock']);
+          const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock']);
           const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
           for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
             try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -31174,7 +31295,7 @@ function TaraApp(){
         const _save=_patched.slice(-_cap);
         await _idbWrite('taraCallLog',_save).catch(()=>{});     // primary: FULL history
         localStorage.setItem('taraCallLog_v1',JSON.stringify(_save.slice(-1000))); // fast cache
-        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock']);
+        const _MK=new Set(['id','windowId','windowType','asset','dir','call','result','strike','strikeAtLock','closingPrice','kalshiAtLock','kalshiAtClose','outcomeDir','resolvedAt','tier','isStructuralLed','isSuperConfluent','isConfluent','isTapeLed','isRisingConfluence','isUserForced','confidence','betAmt','maxPay','manualEdit','wasOverriddenNoTrade','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','noGoCategory','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock']);
         const _mini=_save.slice(-_cap).map(e=>{if(!e)return e;const o={};for(const k in e){if(_MK.has(k))o[k]=e[k];}return o;});
         for(let _c=_mini.length;_c>=200;_c=Math.floor(_c*0.8)){
           try{localStorage.setItem('taraCallLog_deep',JSON.stringify(_mini.slice(-_c)));localStorage.setItem('taraCallLog_deepCount',String(_mini.length));break;}catch(_e){if(_c<=200)break;}
@@ -31420,7 +31541,7 @@ function TaraApp(){
     //   pending entry wholesale, wiping telemetry. Root cause of the 3/3596 stamp rate.
     //   Fix: whichever copy wins the tiebreak, backfill any sticky field it lacks from
     //   the loser. Once any copy carries telemetry, it survives every future merge.
-    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','_v10_5_1_brti','_diag_brtiRefLive'];
+    const _STICKY_TELEMETRY=['signalScoresAtLock','regimeV12','adxAtLock','bbwRankAtLock','atrpAtLock','whipsawAtLock','isHighVolAtLock','isTrendAtLock','isChopAtLock','isCompressingAtLock','priceAboveMedianAtLock','secondsIntoWindow','atSecondsLeft','kalshiPriceAgeMs','last60sDriftBps','smcSweepScore','smcFvgScore','fastLockFired','earlyLockFired','earlyLockTier','taraVersion','device','htDir','stDir','trendAligned','trendConfirmScore','postLockEverAhead','postLockPeakBps','postLockPctCorrect','postLockReversed','reversalDamperApplied','reversalDamperMult','liveCoachReversalFired','liveCoachReversalPeakBps','liveCoachReversalDrawdownBps','posterior','qScore','qScoreV2','fgt','regime','rawPosteriorAtLock','calibratedPosteriorAtLock','oppNowCount','peakConv','peakEntry','peakSecsLeft','oppFirstNowConv','oppFirstNowEntry','oppFirstNowSecsLeft','feedVia','feedRejectReason','feedPriceAccepted','tapeSuperStrong','tapeStronglyAgrees','convictionAtLock','qAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','_v10_5_1_brti','_diag_brtiRefLive'];
     const _coalesceSticky=(winner,loser)=>{
       if(!winner||!loser)return winner;
       let _out=winner;
@@ -31517,7 +31638,7 @@ function TaraApp(){
       //   already lives here. Result: 83 shipped and the field still persisted 0 times while
       //   kalshiLead fired 3x. Same bug class the V13.4.31 and V13.4.67 comments above warn
       //   about. ~80 bytes when present, null otherwise.
-      'signalScoresAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock']);
+      'signalScoresAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock']);
     const _minifyEntry=(e)=>{
       if(!e)return e;
       const o={};
@@ -36965,6 +37086,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         currentPrice,liveHistory,targetMargin,globalFlow,bloomberg,
         velocityRef,priceMemoryRef,is15m,timeFraction,
       });
+      // V13.4.102: confluence shadow. Direction comes from the same posterior-derived lean
+      //   used elsewhere (>50=UP), NOT from taraCall's dir (not in scope here -- taraCall
+      //   runs after analysis). Computed only when a real lean exists.
+      const _confDir=(_v101Shadow&&_v101Shadow.posterior>50)?'UP':(_v101Shadow&&_v101Shadow.posterior<50)?'DOWN':null;
+      const _confluence=computeConfluenceScore({
+        liveHistory,currentPrice,targetMargin,atrVal:atr,
+        flowImbalance:globalFlow&&globalFlow.imbalance,dir:_confDir,
+      });
 
       // V110 weighted posterior (adaptive)
       // V3.1.7: tapeRef and ticksRef passed for volume-flow signal computation
@@ -38141,6 +38270,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         referencePrice:Number(_refPrice)||Number(currentPrice)||0,
         // V13.4.100: V101 shadow posterior, computed above where its inputs are in scope.
         v101Shadow:_v101Shadow,
+        confluence:_confluence,
         // V148.1: surface rawSignalScores and mtfAlignment to consumers (V147 Score Breakdown
         //         panel was reading these but they weren't in the return — every bar showed 0).
         mtfAlignment:eng.mtfAlignment,
@@ -44758,6 +44888,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           regime:analysis.v101Shadow.regime,
           dir:analysis.v101Shadow.posterior>50?'UP':(analysis.v101Shadow.posterior<50?'DOWN':null),
           dirAgree:(analysis.v101Shadow.posterior>50?'UP':(analysis.v101Shadow.posterior<50?'DOWN':null))===dir,
+        }:null,
+        // V13.4.102: confluence shadow at lock. score/aligned tells us, per settled lock,
+        //   whether the Pine-ported 3/4 confluence would have said 'lock now' or 'wait' --
+        //   combined with netCents this is enough to test the actual ask (aligned=fast,
+        //   tricky=wait) once enough locks accumulate.
+        confluenceAtLock:analysis?.confluence?{
+          score:analysis.confluence.score,
+          aligned:analysis.confluence.aligned,
+          trendReady:analysis.confluence.trendReady,
+          candleReady:analysis.confluence.candleReady,
+          distanceReady:analysis.confluence.distanceReady,
+          tapeReady:analysis.confluence.tapeReady,
+          noChaseDistATR:analysis.confluence.noChaseDistATR,
         }:null,
         // V9.7.0: mission info stamp from current auto-order (if mission was active at lock)
         missionInfo:autoOrderStateRef.current?.missionInfo||null,
