@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.119-coach-frozen-fields-plus-quality';
-const TARA_VERSION_DISPLAY='Tara 13.4.119';
+const BASELINE_VERSION='2026.07.29-v13.4.120-audit-fixes';
+const TARA_VERSION_DISPLAY='Tara 13.4.120';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15450,8 +15450,7 @@ function HourlyLadderPanel({spot,taraCall}){
   //   aggregate W-L, with no way to see individual settled locks without opening console.
   //   Fixed below by rendering real settlement history inline. Toggle: localStorage
   //   'taraHourlyLadder'='off' to hide.
-  const on=(function(){try{return localStorage.getItem('taraHourlyLadder')!=='off';}catch(_e){return true;}})();
-  if(!on)return null;
+  const on=(function(){try{return localStorage.getItem('taraHourlyLadder')!=='off';}catch(_e){return true;}})(); // V13.4.120 FIX: early-return moved below the useEffect call (was violating Rules of Hooks -- hook was skipped whenever this was off)
   const minsLeft=lad.closeMs?Math.max(0,(lad.closeMs-nowMs)/60000):minsToHour;
   const dir=taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')?taraCall.call:null;
   const s=Number(spot)||0;
@@ -15542,6 +15541,7 @@ function HourlyLadderPanel({spot,taraCall}){
     return null;
   })();
   React.useEffect(()=>{const top=LOCKS[0];if(top&&top.ticker&&top.closeMs)addLock(top);},[LOCKS.length,addLock]);
+  if(!on)return null; // V13.4.120 FIX: moved from above the useEffect (see note above) -- panel still hides the same way, hook now always runs
   return(
     <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
       <div className="flex items-center justify-between mb-2">
@@ -17483,15 +17483,15 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
 // Configure bet size, win payout, anti-tilt cooldown, Discord alert filter,
 // take-profit/cut-loss rules. All localStorage-only, per-device prefs.
 function TradingSettingsModal({open,onClose,settings,setSettings,kalshiCreds,saveKalshiCreds,autoExecSettings,setAutoExecSettings,killSwitchEngaged,setKillSwitchEngaged,kalshiPingState,setKalshiPingState,autoExecCooldownUntil,setAutoExecCooldownUntil,mission,setMission,regimeDirCalibration,scalperSettings,setScalperSettings,kalshiAgreeMode,setKalshiAgreeMode}){
-  if(!open)return null;
-  const _update=(k,v)=>setSettings(prev=>({...prev,[k]:v}));
-  const _num=(s,fallback)=>{const n=Number(s);return Number.isFinite(n)?n:fallback;};
   // V9.19.25: tap-to-reveal tooltip state. Each setting has a stable id; clicking
   //   the (?) icon opens its tooltip inline. Click again or click another to dismiss.
   const[_settingsTip,_setSettingsTip]=React.useState(null);
   // V10.4.1a: legacy presets hidden by default — clutter for choices that data
   //   shows aren't optimal in current market. Click to reveal if needed.
   const[_showLegacyPresets,_setShowLegacyPresets]=React.useState(false);
+  if(!open)return null; // V13.4.120 FIX: moved below the two useState calls above (was violating Rules of Hooks -- hooks were skipped whenever the modal was closed)
+  const _update=(k,v)=>setSettings(prev=>({...prev,[k]:v}));
+  const _num=(s,fallback)=>{const n=Number(s);return Number.isFinite(n)?n:fallback;};
   // V9.19.25: helper to render a label with hover-tooltip (desktop, via title)
   //   + tap-tooltip (mobile, via inline expansion). Used by settings rows that
   //   need more explanation than a 1-liner hint can give.
@@ -36854,9 +36854,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               return `5m-${new Date(_justClosedBucket).toISOString()}`;
             })();
             setTaraCallLog(prev=>{
-              let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.windowId===_capturedWindowId&&e.result===null&&(e.dir!=='SIT_OUT'||resultStr==='SITOUT'));
+              let idx=prev.map((e,i)=>({e,i})).find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.windowId===_capturedWindowId&&e.result===null&&(e.dir!=='SIT_OUT'||true)); // V13.4.120 FIX: resultStr was out of scope here (this branch always resolves to SITOUT), replaced with the literal it always evaluated as intending
               if(!idx){
-                idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.result===null&&e.windowType===_capturedWindowType&&(e.dir!=='SIT_OUT'||resultStr==='SITOUT'));
+                idx=[...prev].map((e,i)=>({e,i})).reverse().find(({e})=>e&&(e.asset||'BTC')===_tabAsset&&e.result===null&&e.windowType===_capturedWindowType&&(e.dir!=='SIT_OUT'||true)); // V13.4.120 FIX: same as above
               }
               if(!idx)return prev;
               if(idx.e.result!==null)return prev;
@@ -39625,6 +39625,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _eqMaxCost=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e5){return 60;}})();
         const _eqMaxFrac=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxFrac'));return(Number.isFinite(v)&&v>0&&v<=1)?v:1.0;}catch(_e6){return 1.0;}})();
         const _eqCost=(taraCall.call==='UP')?_kEntry:(100-_kEntry);
+        const _totalSec=windowType==='15m'?900:300; // V13.4.120 FIX: was undefined -- silently threw and swallowed the entire entry-quality/traj-bypass block below.
         const _eqSecsLeft=(function(){try{return Math.max(0,(timeState.minsRemaining*60)+timeState.secsRemaining);}catch(_e7){return null;}})();
         const _eqFracLeft=(_eqSecsLeft!=null&&_totalSec>0)?(_eqSecsLeft/_totalSec):null;
         // V13.4.108: TRAJ-EARLY BYPASS, explicit user request -- 'lock on the projected
@@ -42684,7 +42685,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             Math.abs(Number(analysis?.rawSignalScores?.liqSignal||0))
           );
           const _kForDir=_commitDir==='UP'?_kPctNow:(100-(_kPctNow||50));
-          const _isFlatGapTimeCap=_gapAtCap<5&&_extAtCap<8&&_kForDir!=null&&_kForDir>=44&&_kForDir<=65&&(_isChopRegime||analysis?.regime==='RANGE-CHOP');
+          const _isFlatGapTimeCap=_gapAtCap<5&&_extAtCap<8&&_kForDir!=null&&_kForDir>=44&&_kForDir<=65&&(analysis?.regime==='RANGE-CHOP'||analysis?.regime==='COMPRESSING'); // V13.4.120 FIX: _isChopRegime was out of scope here (undeclared, uncaught -- no enclosing try/catch), inlined the same check used at its point of declaration (L42387)
           // V10.8.1: GAP-OPPOSED GATE on time-cap-commit path.
           //   The directional-lock gate (V10.7.97) catches gap<10 aligned early.
           //   But the time-cap path bypasses it entirely — gap-opposed trades
