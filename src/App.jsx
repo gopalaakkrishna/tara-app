@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.120-audit-fixes';
-const TARA_VERSION_DISPLAY='Tara 13.4.120';
+const BASELINE_VERSION='2026.07.29-v13.4.121-early-lock-hourly-news-coach';
+const TARA_VERSION_DISPLAY='Tara 13.4.121';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15314,7 +15314,14 @@ function useHourlyRecord(){
 //   mistake that caused the 13.4.102 crash. This mounts as an independent, prominent panel
 //   instead; the old one can be found and removed later once its full dependency graph is
 //   traced properly.
-function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kalshiYesPrice,timeState,windowType}){
+function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kalshiYesPrice,timeState,windowType,userPosition}){
+  // V13.4.121: stability ref for the pre-lock LEANING display, declared before any
+  //   early return so the hook always runs (Rules of Hooks). User feedback: 'based on
+  //   price hike or dump it suggests that position and hold and switches instantly.
+  //   theres no lock to it.' The unlocked lean was reading the raw live posterior every
+  //   tick with zero debounce -- this holds a lean for a minimum stretch before the
+  //   DISPLAYED direction is allowed to flip, so the panel stops chasing every tick.
+  const _leanStickyRef=React.useRef({dir:null,since:0,displayed:null});
   // V13.4.115: FIXED PROPERLY, back on by default. Root cause traced: this panel read
   //   taraCall.call directly -- the raw, continuously-live posterior, which keeps
   //   recomputing every tick even AFTER a round locks. The 'tara says' ticket panel
@@ -15343,10 +15350,23 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
   //   existing reversalRisk prop on this same component.
   const _lockDirIn=analysis?.lockInfo?.dir||null;
   const _resolved=getTaraDirection({snapshot:{call:lockedSnapshotDir},lock:{dir:_lockDirIn},signalSource:'snapshot'});
-  const call=_resolved.dir||(taraCall&&taraCall.call==='SIT_OUT'?'SIT_OUT':null);
+  let call=_resolved.dir||(taraCall&&taraCall.call==='SIT_OUT'?'SIT_OUT':null);
+  const locked=!!(taraCall&&taraCall.locked);
+  // V13.4.121: apply the stability hold ONLY to the pre-lock lean -- once actually
+  //   locked, the direction is frozen already (that's the whole point of `locked`),
+  //   so there's nothing to debounce there.
+  if(!locked&&(call==='UP'||call==='DOWN')){
+    const _now121=Date.now();
+    const _sticky=_leanStickyRef.current;
+    if(_sticky.dir!==call){_sticky.dir=call;_sticky.since=_now121;}
+    const MIN_STABLE_MS=8000; // hold a lean for >=8s before letting the DISPLAYED side flip
+    if(_sticky.displayed==null||(_now121-_sticky.since)>=MIN_STABLE_MS){_sticky.displayed=call;}
+    call=_sticky.displayed;
+  }else if(locked){
+    _leanStickyRef.current.displayed=null; // reset so the next unlocked window starts fresh
+  }
   const isDir=call==='UP'||call==='DOWN';
   const isSitOut=call==='SIT_OUT'||!call;
-  const locked=!!(taraCall&&taraCall.locked);
   // V13.4.119: SAME live-vs-frozen bug as direction, now fixed for every field the panel
   //   shows. When locked, read confidence/reason/qScore from the FROZEN lockedSnapshot
   //   (taraCallSnapshotRef.current, captured at the moment of lock) instead of the live
@@ -15419,6 +15439,25 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
         secsLeft!=null&&React.createElement('span',{className:'ml-2',style:{color:'rgba(237,237,237,0.5)'}},Math.round(secsLeft)+'s left in window'),
       );
     })(),
+    // V13.4.121: POSITION AWARENESS. User feedback: coach 'not position aware or
+    //   smart' -- it always recommended a fresh direction with zero regard for a
+    //   position the user already marked themselves into (userPosition, set via the
+    //   manual ENTERED UP/DOWN button). This compares the current stabilized read
+    //   against that marked position so the coach actually reacts to what's already
+    //   held, not just what a fresh entry would look like.
+    userPosition&&(function(){
+      const _aligned=isDir&&call===userPosition;
+      const _conflicted=isDir&&call!==userPosition;
+      const _txt=_aligned
+        ?('\u2713 your marked '+userPosition+' position matches Tara\'s current read '+(locked?'(locked).':'(still forming -- not locked yet).'))
+        :_conflicted
+        ?('\u26a0 your marked '+userPosition+' position now conflicts with Tara\'s current read ('+call+') -- she is no longer confident in your side.')
+        :('\u26a0 your marked '+userPosition+' position has no supporting signal right now (Tara reads '+(isSitOut?'SIT OUT':'mixed')+').');
+      return React.createElement('div',{
+        className:'mt-2 pt-2 border-t text-[11px]',
+        style:{borderColor:'rgba(237,237,237,0.10)',color:_aligned?'#28CC95':'#FF4D6A'},
+      },_txt);
+    })(),
   );
 }
 function HourlyLadderPanel({spot,taraCall}){
@@ -15440,7 +15479,7 @@ function HourlyLadderPanel({spot,taraCall}){
   const{rec,addLock}=useHourlyRecord();
   const hourKey=new Date(nowMs).toISOString().slice(0,13);
   const CONFIRM_TICKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyConfirmTicks'),10);return(Number.isFinite(v)&&v>=1&&v<=10)?v:3;}catch(_e){return 3;}})();
-  const MIN_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMinCost'));return(Number.isFinite(v)&&v>0)?v:20;}catch(_e){return 20;}})();
+  const MIN_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMinCost'));return(Number.isFinite(v)&&v>0)?v:40;}catch(_e){return 40;}})(); // V13.4.121: 20->40 default -- user wants sure-shot locks at decent odds, not long shots; a 20c floor was letting through strikes priced at ~20% implied probability by definition. Still user-overridable via localStorage.
   const MAX_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMaxCost'));return(Number.isFinite(v)&&v>0)?v:65;}catch(_e){return 65;}})();
   const MAX_LOCKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyMaxLocks'),10);return(Number.isFinite(v)&&v>=1&&v<=12)?v:6;}catch(_e){return 6;}})();
   const COOLDOWN_MS=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyCooldownMin'));return(Number.isFinite(v)&&v>0)?v*60000:180000;}catch(_e){return 180000;}})();
@@ -15598,6 +15637,33 @@ function HourlyLadderPanel({spot,taraCall}){
           'theres no real logs to check and verify later' -- rec.history has always had this
           data (ticker, side, strike, cost, result, won, netCents, settledAt), it just was
           never rendered anywhere. Shows the last 8, newest first. */}
+      {/* V13.4.121: WR-by-cost-band summary, visible inline without exporting.
+          Directly answers 'sure-shot vs long-shot, at a glance' -- splits settled
+          history into <40c (long shot), 40-65c (target band), >65c (chased/expensive)
+          so it's obvious which band is actually dragging the win rate down. */}
+      {rec.history.length>=3&&(function(){
+        const _bands=[
+          {label:'<40c (long shot)',test:h=>h.cost<40},
+          {label:'40-65c (target)',test:h=>h.cost>=40&&h.cost<=65},
+          {label:'>65c (chased)',test:h=>h.cost>65},
+        ].map(b=>{
+          const _lst=rec.history.filter(b.test);
+          const _w=_lst.filter(h=>h.won).length;
+          const _net=_lst.reduce((s,h)=>s+(h.netCents||0),0);
+          return{...b,n:_lst.length,wr:_lst.length?Math.round(100*_w/_lst.length):null,net:_net};
+        });
+        return React.createElement('div',{className:'mb-2 grid grid-cols-3 gap-1.5'},
+          _bands.map(b=>React.createElement('div',{
+            key:b.label,
+            className:'rounded-lg px-2 py-1.5 text-center '+(b.n===0?'bg-zinc-800/40':(b.net>=0?'bg-emerald-500/10':'bg-rose-500/10')),
+          },
+            React.createElement('div',{className:'text-[9px] uppercase tracking-wide text-zinc-500'},b.label),
+            React.createElement('div',{className:'text-[13px] font-semibold tabular-nums '+(b.n===0?'text-zinc-600':(b.net>=0?'text-emerald-400':'text-rose-400'))},
+              b.n===0?'--':(b.wr+'% ('+b.n+')')),
+            b.n>0&&React.createElement('div',{className:'text-[9px] tabular-nums text-zinc-500'},(b.net>=0?'+':'')+b.net+'c'),
+          )),
+        );
+      })()}
       {rec.history.length>0&&(function(){
         const _recent=rec.history.slice(-8).reverse();
         return React.createElement('details',{className:'mb-2'},
@@ -23307,7 +23373,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
           entry prices, so it earns the space.
           EM-DASH BASELINE re-based 3298 -> 3297: the removed timeline row carried one
           em-dash in its title attribute. Deliberate, same as the 13.4.75 auto-exec strip. */}
-      <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType}/>
+      <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
       <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
     </div>
   );
@@ -40959,15 +41025,27 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         // Late: lock when direction is clear; accept higher odds. Only a true
         //   coin-flip into the final seconds is left to park (downstream sit-out).
         if(_convClear112&&_oddsOk112){_v112Timing=_isFinal112?'late':'now';_v112Why=`${_isFinal112?'Final':'Late'} lock: ${_convNow.toFixed(0)}% conviction, direction clear at ${_kForDir!=null?_kForDir.toFixed(0)+'c':'good'} odds`;}
-        else if(!_convClear112&&_isFinal112){_v112Wait=false;_v112Timing='now';_v112Why=`Undecided coin-flip into final ${_secsLeft}s — marginal`;}
+        else if(!_convClear112&&_isFinal112){_v112Wait=true;_v112Timing='wait';_v112Why=`V13.4.121: genuine coin-flip into final ${_secsLeft}s (${_convNow.toFixed(0)}% conviction) — sitting out rather than force-locking a marginal read`;}
         else{_v112Wait=true;_v112Timing='wait';_v112Why=`Patient (late): ${_convNow.toFixed(0)}% conviction, waiting for a clear swing`;}
       }else{
         // Middle: patient default. Lock only on strong conviction + acceptable odds.
         if(_convStrong112&&_oddsOk112){_v112Timing='now';_v112Why=`Mid lock: ${_convNow.toFixed(0)}% conviction at ${_kForDir!=null?_kForDir.toFixed(0)+'c':'good'} odds`;}
         else{_v112Wait=true;_v112Timing='wait';_v112Why=`Patient: letting tape/momentum decide (${_convNow.toFixed(0)}% conviction${_kForDir!=null&&!_oddsOk112?', '+_kForDir.toFixed(0)+'c rich':''})`;}
       }
-      // Hard deadline always wins — never wait past it.
-      if(!_hasTimeToWait){_v112Wait=false;if(_v112Timing==='wait'){_v112Timing='now';_v112Why=`Deadline lock (${_secsLeft}s left): committing at ${_convNow.toFixed(0)}% conviction`;}}
+      // Hard deadline always wins — never wait past it, UNLESS the read is a
+      //   genuine coin-flip (weak conviction). V13.4.121: forcing a lock on a coin-flip
+      //   at the deadline is exactly the time-cap-commit pattern that bled -457c over 84
+      //   trades in July 2026 archive data despite a 60.7% win rate -- many small wins,
+      //   a few expensive losses. Real conviction still always locks by the deadline;
+      //   a coin-flip now resolves as a genuine sit-out instead.
+      if(!_hasTimeToWait){
+        if(_convClear112){
+          _v112Wait=false;
+          if(_v112Timing==='wait'){_v112Timing='now';_v112Why=`Deadline lock (${_secsLeft}s left): committing at ${_convNow.toFixed(0)}% conviction`;}
+        }else{
+          _v112Wait=true;_v112Timing='wait';_v112Why=`V13.4.121: deadline reached (${_secsLeft}s left) with only ${_convNow.toFixed(0)}% conviction — sitting out rather than force-locking a coin flip`;
+        }
+      }
       // Expose live timing recommendation on taraCall for the card (during wait).
       try{tc._v112Timing=_v112Timing;tc._v112Why=_v112Why;tc._v112OddsCeil=_oddsCeil112;tc._v112KForDir=_kForDir;}catch(_){}
       _v112Live={timing:_v112Timing,why:_v112Why,oddsCeil:_oddsCeil112,kForDir:_kForDir,at:Date.now()};
@@ -41626,7 +41704,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   quality=0 passed through with no checks at all. Edge-watch tiers must still run
       //   through every guard — they just can't be blocked by the override flag alone.
       const _isEdgeWatchTier=snapshot?.tier==='no-go-edge'||snapshot?.tier==='no-go-coinflip-late';
-      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&(snapshot.wasOverriddenNoTrade!==true||_isEdgeWatchTier)&&snapshot.tier!=='no-go-data'){
+      // V13.4.121 FIX: the exemptions above (wasOverriddenNoTrade bypass + no-go-data
+      //   skip) let real trades slip through with no cost check at all. Real trade data
+      //   (July 2026) shows locks up to 100c and 90-98c LOSSES specifically tagged
+      //   no-go-data / kalshi-no-reset / mixed-sitout -- exactly the tiers this guard
+      //   was supposed to cover but didn't. Made genuinely universal: every tier, every
+      //   path, no exemptions except an already-decided SIT_OUT.
+      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'){
         const _snapKal=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock):null;
         const _snapDir=snapshot.call||snapshot.direction;
         if(_snapKal!=null&&_snapDir){
