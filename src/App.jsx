@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.112-band-covers-timer-commit';
-const TARA_VERSION_DISPLAY='Tara 13.4.112';
+const BASELINE_VERSION='2026.07.29-v13.4.113-trade-coach-call';
+const TARA_VERSION_DISPLAY='Tara 13.4.113';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15302,6 +15302,57 @@ function useHourlyRecord(){
   },[]);
   return{rec,addLock};
 }
+// V13.4.113: TRADE COACH CALL. User request: replace the confusing simulated-sizing
+//   preview ('will buy 200 contracts @ 5c', 'budget->cost', 'target/stop payout') with one
+//   clean, decisive directive per round: BUY UP / BUY DOWN / HOLD / SIT OUT. No dollar math,
+//   no hypothetical fills -- the old preview block was explicitly a simulation ('Tara sees
+//   you marked ENTERED but doesn't know your real fill price') and that ambiguity is exactly
+//   what was confusing. This reads taraCall directly, the same object every gate tonight
+//   (entry-band, coin-flip, TRAJ-early, all four commit-path fixes) already produces.
+//   Not removing the old preview panel -- it is a 340-line block (~L28709-29049) tangled
+//   with live-position tracking, and surgically extracting it risked the exact class of
+//   mistake that caused the 13.4.102 crash. This mounts as an independent, prominent panel
+//   instead; the old one can be found and removed later once its full dependency graph is
+//   traced properly.
+function TradeCoachCall({taraCall}){
+  const on=(function(){try{return localStorage.getItem('taraCoachCall')!=='off';}catch(_e){return true;}})();
+  if(!on)return null;
+  const call=taraCall&&taraCall.call;
+  const isDir=call==='UP'||call==='DOWN';
+  const isSitOut=call==='SIT_OUT'||!call;
+  const locked=!!(taraCall&&taraCall.locked);
+  const conf=Number(taraCall&&taraCall.confidence)||0;
+  const reason=(taraCall&&taraCall.reason)||'';
+  let label,sub,color,bg,border;
+  if(isDir&&locked){
+    label=(call==='UP'?'BUY UP':'BUY DOWN')+' -- LOCKED';
+    sub='Tara has committed this round. '+(reason?reason:'');
+    color=call==='UP'?'#28CC95':'#FF4D6A';
+    bg=call==='UP'?'rgba(40,204,149,0.10)':'rgba(255,77,106,0.10)';
+    border=call==='UP'?'rgba(40,204,149,0.35)':'rgba(255,77,106,0.35)';
+  }else if(isDir&&!locked){
+    label=(call==='UP'?'LEANING UP':'LEANING DOWN')+' -- HOLD';
+    sub='Real lean, not yet locked. Wait for Tara to commit before acting. '+(reason?reason:'');
+    color=call==='UP'?'#28CC95':'#FF4D6A';
+    bg='rgba(201,169,97,0.08)';
+    border='rgba(201,169,97,0.30)';
+  }else{
+    label='SIT OUT';
+    sub=reason||'No tradeable read this round -- genuinely mixed or a coin flip.';
+    color='#EDEDED';
+    bg='rgba(237,237,237,0.05)';
+    border='#1F1F1F';
+  }
+  return React.createElement('div',{
+    className:'mb-3 rounded-xl p-4 border',
+    style:{background:bg,borderColor:border},
+  },
+    React.createElement('div',{className:'text-[10px] uppercase tracking-wider mb-1',style:{color:'rgba(237,237,237,0.5)'}},'Trade Coach'),
+    React.createElement('div',{className:'text-2xl font-bold mb-1',style:{color}},label),
+    isDir&&React.createElement('div',{className:'text-[11px] mb-1',style:{color:'rgba(237,237,237,0.6)'}},'confidence '+conf.toFixed(0)+'%'),
+    React.createElement('div',{className:'text-[12px] leading-snug',style:{color:'rgba(237,237,237,0.75)'}},sub),
+  );
+}
 function HourlyLadderPanel({spot,taraCall}){
   const nowMs=Date.now();
   const minsToHour=(60-new Date(nowMs).getMinutes())-(new Date(nowMs).getSeconds()/60);
@@ -23126,6 +23177,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
           entry prices, so it earns the space.
           EM-DASH BASELINE re-based 3298 -> 3297: the removed timeline row carried one
           em-dash in its title attribute. Deliberate, same as the 13.4.75 auto-exec strip. */}
+      <TradeCoachCall taraCall={taraCall}/>
       <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
     </div>
   );
