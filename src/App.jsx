@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.126-fix-news-shape-mismatch';
-const TARA_VERSION_DISPLAY='Tara 13.4.126';
+const BASELINE_VERSION='2026.07.29-v13.4.127-flip-telemetry-todo';
+const TARA_VERSION_DISPLAY='Tara 13.4.127';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -39753,6 +39753,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   // ═══════════════════════════════════════════════════════════════════════════
   // V10.7.4 — SIDE-FLIP LAYER
   // ═══════════════════════════════════════════════════════════════════════════
+  // TODO (V13.4.127, explicit user decision 2026-07-29): currently UNCAPPED -- this
+  //   layer re-evaluates every tick with no counter and no lock-state check, so it can
+  //   flip back and forth repeatedly within one window right up until lock. Considered
+  //   capping at 1 flip per window (first flip is final) for the same decisiveness
+  //   reason as the Trade Coach stability fix, but there was no data to justify it --
+  //   flipAtLock/flipVotesAtLock/flipOriginalDirAtLock are now stamped on every locked
+  //   entry (previously reserved in _STICKY_TELEMETRY but never wired up). Revisit this
+  //   cap ONLY if a real export shows flipped locks losing more than non-flipped ones --
+  //   explicit user instruction: keep uncapped until there's evidence, not on a hunch.
   // User rule: never skip, never gate. ONLY way to convert losses → wins is to
   //   pick the BETTER SIDE more often. This layer runs after engine commits a
   //   direction (UP or DOWN) and checks 4 contradicting-evidence signals. If
@@ -41724,6 +41733,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     let _earlyLockTier=null;
     let _fastLockFired=false;
     const _logSnapshotEntry=(snapshot)=>{
+      // V13.4.127: wire up flipAtLock -- this field has been reserved in
+      //   _STICKY_TELEMETRY since V13.1 (protected from being wiped on merge) but
+      //   nothing ever actually SET it, so every entry logged it as empty. The V10.7.4
+      //   SIDE-FLIP LAYER already computes _v10_7_4_flipped/_v10_7_4_votes/
+      //   _v10_7_4_originalDir on taraCall every tick -- just never made it into the
+      //   log. User wants to keep the side-flip layer uncapped for now and revisit
+      //   later ONLY if real data shows flipped locks losing more -- this is what makes
+      //   that comparison possible on the next export. Additive only, changes no
+      //   trading behavior.
+      if(snapshot&&taraCall){
+        snapshot.flipAtLock=taraCall._v10_7_4_flipped===true;
+        if(taraCall._v10_7_4_flipped===true){
+          snapshot.flipVotesAtLock=taraCall._v10_7_4_votes||null;
+          snapshot.flipOriginalDirAtLock=taraCall._v10_7_4_originalDir||null;
+        }
+      }
       if(primaryDeviceIdRef.current&&primaryDeviceIdRef.current!==_taraDeviceId&&snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'){
         snapshot.call='SIT_OUT';
         snapshot.direction='SIT_OUT';
