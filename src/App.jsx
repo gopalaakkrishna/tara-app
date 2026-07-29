@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.123-lock-decent-early';
-const TARA_VERSION_DISPLAY='Tara 13.4.123';
+const BASELINE_VERSION='2026.07.29-v13.4.125-restore-edge-watch-exemption';
+const TARA_VERSION_DISPLAY='Tara 13.4.125';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -16054,6 +16054,14 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
         ?(effDir==='UP'?'rgba(52,211,153,0.04)':'rgba(255,77,106,0.04)')
         :isNoGoSnap?'rgba(255,77,106,0.10)'
         :isSatOutSnap?'rgba(212,162,76,0.06)':'rgba(201,169,97,0.05)';
+    // V13.4.124: DECISIVE EARLY SIT-OUT DISPLAY. User request: 'if its a sitout we
+    //   lock that early too' -- a genuinely weak window used to show bare 'SCANNING'
+    //   the whole time and only reveal SIT_OUT at window close. This reads the V11.2
+    //   timing controller's own live state (already stamped on taraCall every tick --
+    //   tc._v112Timing/_v112Why, no new tracking needed) to show 'LIKELY SIT OUT' as
+    //   soon as it's genuinely true, instead of leaving the user guessing. Purely a
+    //   display change -- does not touch taraCall.call or any trading decision.
+    const _isLikelySitOut=!snap&&!isWatching&&tc?._v112Timing==='wait'&&Number(tc?.confidence)<65&&typeof tc?._v112Why==='string'&&/coin-flip|coin flip/i.test(tc._v112Why);
     const callLabel=isOverrideSitOut
       ?'SITTING OUT'
       :isOverrideNoTrade
@@ -16063,6 +16071,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
       :isNoGoSnap?'NO TRADE'
       :isSatOutSnap?'SITTING OUT'
       :isWatching?(effDir==='UP'?'LEANING UP':'LEANING DOWN')
+      :_isLikelySitOut?'LIKELY SIT OUT'
       :'SCANNING';
     // V10.7.47: sublabel for override sit-out shows the "would have leaned" direction so user
     //   has a hint to override on if they disagree with Tara's sit-out call.
@@ -16078,7 +16087,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
     // V6.0.5: WATCHING gets its own phase label so user can see formation state.
     // V7.9: NO_TRADE label.
     // V10.7.47: phase reflects override state honestly.
-    const phaseLabel=snap?(isOverrideSitOut?'SITTING OUT':isOverrideNoTrade?'NO TRADE':isNoGoSnap?'NO TRADE':isSatOutSnap?'SITTING OUT':'LOCKED'):isWatching?'LEANING':'SCANNING';
+    const phaseLabel=snap?(isOverrideSitOut?'SITTING OUT':isOverrideNoTrade?'NO TRADE':isNoGoSnap?'NO TRADE':isSatOutSnap?'SITTING OUT':'LOCKED'):isWatching?'LEANING':_isLikelySitOut?'LIKELY SIT OUT':'SCANNING';
     const samplesLeft=Math.max(0,(tc.needSamples||180)-(tc.samples||0));
     // Window timing
     const _totalSec=windowType==='15m'?900:300;
@@ -41732,7 +41741,17 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   no-go-data / kalshi-no-reset / mixed-sitout -- exactly the tiers this guard
       //   was supposed to cover but didn't. Made genuinely universal: every tier, every
       //   path, no exemptions except an already-decided SIT_OUT.
-      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'){
+      // V13.4.125 REVERT (partial, explicit user request -- 'B, more locks always
+      //   preferred'): no-go-edge / no-go-coinflip-late are original-design 'override'
+      //   trades -- the intent (predates this session) was for them to lock anyway with
+      //   a pricing caution rather than sit out, even outside the 30-60c band. Making the
+      //   guard universal last session silently reversed that decision; restoring the
+      //   edge-watch exemption specifically. Stated cost, for the record: real archive
+      //   data has at least one no-go-edge LOSS at 98c -- this exemption reopens that
+      //   exposure. Every OTHER tier (no-go-data, kalshi-no-reset, mixed-sitout, and any
+      //   generic wasOverriddenNoTrade case) stays fully guarded -- those were never the
+      //   tier this exemption was meant to cover.
+      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&!_isEdgeWatchTier){
         const _snapKal=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock):null;
         const _snapDir=snapshot.call||snapshot.direction;
         if(_snapKal!=null&&_snapDir){
