@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.113-trade-coach-call';
-const TARA_VERSION_DISPLAY='Tara 13.4.113';
+const BASELINE_VERSION='2026.07.29-v13.4.114-disable-unproven-panels';
+const TARA_VERSION_DISPLAY='Tara 13.4.114';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15315,7 +15315,17 @@ function useHourlyRecord(){
 //   instead; the old one can be found and removed later once its full dependency graph is
 //   traced properly.
 function TradeCoachCall({taraCall}){
-  const on=(function(){try{return localStorage.getItem('taraCoachCall')!=='off';}catch(_e){return true;}})();
+  // V13.4.114: OFF BY DEFAULT. Real bug found -- this panel read taraCall.call directly,
+  //   a DIFFERENT value than the 'tara says' ticket display, which resolves direction
+  //   through getTaraDirection({snapshot,lock,signalSource}) specifically because raw
+  //   snapshot-vs-engine-lock divergence causes ticket/panel contradictions -- documented
+  //   in a comment already in this file from a PRIOR fix of the same class of bug. Result:
+  //   this panel showed 'LEANING DOWN' in the same screenshot where the ticket said 'long
+  //   up'. Not fixed tonight because doing it right means threading _snapDir/_engineLockDir/
+  //   autoExecSettings into this component, which only receives taraCall today -- guessing
+  //   at that wiring after tonight's crash is not worth the risk. Toggle: localStorage
+  //   'taraCoachCall'='on' to re-enable once this is properly fixed and re-verified.
+  const on=(function(){try{return localStorage.getItem('taraCoachCall')==='on';}catch(_e){return false;}})();
   if(!on)return null;
   const call=taraCall&&taraCall.call;
   const isDir=call==='UP'||call==='DOWN';
@@ -15376,7 +15386,14 @@ function HourlyLadderPanel({spot,taraCall}){
   const MAX_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMaxCost'));return(Number.isFinite(v)&&v>0)?v:65;}catch(_e){return 65;}})();
   const MAX_LOCKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyMaxLocks'),10);return(Number.isFinite(v)&&v>=1&&v<=12)?v:6;}catch(_e){return 6;}})();
   const COOLDOWN_MS=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyCooldownMin'));return(Number.isFinite(v)&&v>0)?v*60000:180000;}catch(_e){return 180000;}})();
-  const on=(function(){try{return localStorage.getItem('taraHourlyLadder')!=='off';}catch(_e){return true;}})();
+  // V13.4.114: OFF BY DEFAULT per direct user feedback: 'hourly locks are meaningless,
+  //   theres no real logs to check and verify later. and whatever ive seen it only got
+  //   them wrong so far.' The settlement code itself (fetches the real market, reads
+  //   Kalshi's own result field, only counts win/loss on a genuine yes/no) looks correct
+  //   on inspection -- this is NOT a confirmed bug, it is turned off because it has not
+  //   earned trust yet and should not keep locking real money while unproven. Toggle:
+  //   localStorage 'taraHourlyLadder'='on' to re-enable.
+  const on=(function(){try{return localStorage.getItem('taraHourlyLadder')==='on';}catch(_e){return false;}})();
   if(!on)return null;
   const minsLeft=lad.closeMs?Math.max(0,(lad.closeMs-nowMs)/60000):minsToHour;
   const dir=taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')?taraCall.call:null;
