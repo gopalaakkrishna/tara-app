@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.114-disable-unproven-panels';
-const TARA_VERSION_DISPLAY='Tara 13.4.114';
+const BASELINE_VERSION='2026.07.29-v13.4.116-coach-uses-real-snapshot';
+const TARA_VERSION_DISPLAY='Tara 13.4.116';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15314,20 +15314,36 @@ function useHourlyRecord(){
 //   mistake that caused the 13.4.102 crash. This mounts as an independent, prominent panel
 //   instead; the old one can be found and removed later once its full dependency graph is
 //   traced properly.
-function TradeCoachCall({taraCall}){
-  // V13.4.114: OFF BY DEFAULT. Real bug found -- this panel read taraCall.call directly,
-  //   a DIFFERENT value than the 'tara says' ticket display, which resolves direction
-  //   through getTaraDirection({snapshot,lock,signalSource}) specifically because raw
-  //   snapshot-vs-engine-lock divergence causes ticket/panel contradictions -- documented
-  //   in a comment already in this file from a PRIOR fix of the same class of bug. Result:
-  //   this panel showed 'LEANING DOWN' in the same screenshot where the ticket said 'long
-  //   up'. Not fixed tonight because doing it right means threading _snapDir/_engineLockDir/
-  //   autoExecSettings into this component, which only receives taraCall today -- guessing
-  //   at that wiring after tonight's crash is not worth the risk. Toggle: localStorage
-  //   'taraCoachCall'='on' to re-enable once this is properly fixed and re-verified.
-  const on=(function(){try{return localStorage.getItem('taraCoachCall')==='on';}catch(_e){return false;}})();
+function TradeCoachCall({taraCall,analysis,lockedSnapshotDir}){
+  // V13.4.115: FIXED PROPERLY, back on by default. Root cause traced: this panel read
+  //   taraCall.call directly -- the raw, continuously-live posterior, which keeps
+  //   recomputing every tick even AFTER a round locks. The 'tara says' ticket panel
+  //   instead resolves direction through getTaraDirection({snapshot,lock,signalSource}),
+  //   which gives precedence to the LOCKED decision (analysis.lockInfo.dir) once one
+  //   exists, rather than whatever the live signal has since drifted to. That is exactly
+  //   why the screenshot showed 'tara says: long up' (frozen at lock) next to this panel's
+  //   'LEANING DOWN' (live posterior, drifted after lock). Fix: call the SAME top-level
+  //   getTaraDirection function with the SAME kind of inputs -- analysis was already a
+  //   ProjectionsCard prop, so analysis.lockInfo.dir is reachable with zero new plumbing;
+  //   taraCall.call substitutes for the snapshot input, which is the same role
+  //   taraSnapshotForTicket plays for the ticket panel. signalSource defaults to
+  //   'snapshot' either way (autoExecSettings is not reachable here, but that IS the
+  //   function's own default when signalSource is omitted, so this matches the common
+  //   case exactly). Toggle: localStorage 'taraCoachCall'='off' to hide.
+  const on=(function(){try{return localStorage.getItem('taraCoachCall')!=='off';}catch(_e){return true;}})();
   if(!on)return null;
-  const call=taraCall&&taraCall.call;
+  // V13.4.116: SECOND fix needed -- the 115 fix fed taraCall.call (a FRESH live
+  //   computation from analysis.rawProbAbove on every render, confirmed by reading its own
+  //   definition at ~L38782) into the snapshot slot. getTaraDirection in snapshot mode
+  //   PREFERS the snapshot input over the lock input -- so that fed the exact same live-
+  //   drifting value the bug was about, just routed through an extra function call. The
+  //   REAL frozen decision lives in taraCallSnapshotRef.current, only written when an
+  //   actual lock/sitout/commit happens (confirmed: every commit-path fix tonight writes
+  //   to this exact ref). Threaded through as lockedSnapshotDir, same pattern as the
+  //   existing reversalRisk prop on this same component.
+  const _lockDirIn=analysis?.lockInfo?.dir||null;
+  const _resolved=getTaraDirection({snapshot:{call:lockedSnapshotDir},lock:{dir:_lockDirIn},signalSource:'snapshot'});
+  const call=_resolved.dir||(taraCall&&taraCall.call==='SIT_OUT'?'SIT_OUT':null);
   const isDir=call==='UP'||call==='DOWN';
   const isSitOut=call==='SIT_OUT'||!call;
   const locked=!!(taraCall&&taraCall.locked);
@@ -15386,14 +15402,13 @@ function HourlyLadderPanel({spot,taraCall}){
   const MAX_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMaxCost'));return(Number.isFinite(v)&&v>0)?v:65;}catch(_e){return 65;}})();
   const MAX_LOCKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyMaxLocks'),10);return(Number.isFinite(v)&&v>=1&&v<=12)?v:6;}catch(_e){return 6;}})();
   const COOLDOWN_MS=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyCooldownMin'));return(Number.isFinite(v)&&v>0)?v*60000:180000;}catch(_e){return 180000;}})();
-  // V13.4.114: OFF BY DEFAULT per direct user feedback: 'hourly locks are meaningless,
-  //   theres no real logs to check and verify later. and whatever ive seen it only got
-  //   them wrong so far.' The settlement code itself (fetches the real market, reads
-  //   Kalshi's own result field, only counts win/loss on a genuine yes/no) looks correct
-  //   on inspection -- this is NOT a confirmed bug, it is turned off because it has not
-  //   earned trust yet and should not keep locking real money while unproven. Toggle:
-  //   localStorage 'taraHourlyLadder'='on' to re-enable.
-  const on=(function(){try{return localStorage.getItem('taraHourlyLadder')==='on';}catch(_e){return false;}})();
+  // V13.4.115: back ON by default. User wants this fixed/verifiable, not removed. Settlement
+  //   code (fetches real Kalshi market, reads Kalshi's own result field) still looks correct
+  //   on inspection -- what was actually missing was VISIBILITY: the panel showed only
+  //   aggregate W-L, with no way to see individual settled locks without opening console.
+  //   Fixed below by rendering real settlement history inline. Toggle: localStorage
+  //   'taraHourlyLadder'='off' to hide.
+  const on=(function(){try{return localStorage.getItem('taraHourlyLadder')!=='off';}catch(_e){return true;}})();
   if(!on)return null;
   const minsLeft=lad.closeMs?Math.max(0,(lad.closeMs-nowMs)/60000):minsToHour;
   const dir=taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN')?taraCall.call:null;
@@ -15501,6 +15516,26 @@ function HourlyLadderPanel({spot,taraCall}){
         </div>
       </div>
       {lad.err&&<div className="text-[11px] text-amber-400 mb-1">feed: {lad.err}</div>}
+      {/* V13.4.115: real settlement history, inline, no console needed. Directly answers
+          'theres no real logs to check and verify later' -- rec.history has always had this
+          data (ticker, side, strike, cost, result, won, netCents, settledAt), it just was
+          never rendered anywhere. Shows the last 8, newest first. */}
+      {rec.history.length>0&&(function(){
+        const _recent=rec.history.slice(-8).reverse();
+        return React.createElement('details',{className:'mb-2'},
+          React.createElement('summary',{className:'text-[10px] text-zinc-500 cursor-pointer select-none'},'settled history ('+rec.history.length+' total, showing last '+_recent.length+')'),
+          React.createElement('div',{className:'mt-1.5 space-y-1'},
+            _recent.map((h,i)=>React.createElement('div',{
+              key:h.ticker+i,
+              className:'flex items-center justify-between text-[11px] rounded px-2 py-1 '+(h.won?'bg-emerald-500/10 text-emerald-300':'bg-rose-500/10 text-rose-300'),
+            },
+              React.createElement('span',null,(h.won?'WIN ':'LOSS ')+h.side+' @ '+(h.strike!=null?Number(h.strike).toFixed(0):'?')),
+              React.createElement('span',{className:'tabular-nums'},h.cost+'c -> '+(h.won?'+':'')+(h.netCents!=null?h.netCents:'?')+'c'),
+              React.createElement('span',{className:'text-zinc-500'},h.settledAt?new Date(h.settledAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''),
+            )),
+          ),
+        );
+      })()}
       {LOCKS.length>0&&(
         <div className="mb-2 space-y-1.5">
           {LOCKS.map((LK,idx)=>(
@@ -23168,7 +23203,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk,lockedSnapshotDir}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -23194,7 +23229,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
           entry prices, so it earns the space.
           EM-DASH BASELINE re-based 3298 -> 3297: the removed timeline row carried one
           em-dash in its title attribute. Deliberate, same as the 13.4.75 auto-exec strip. */}
-      <TradeCoachCall taraCall={taraCall}/>
+      <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir}/>
       <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
     </div>
   );
@@ -46681,6 +46716,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           onUrgentCoachAlert={(payload)=>broadcastToDiscord('COACH_ALERT',payload)}
           liveCoachReversalRef={liveCoachReversalRef}
           reversalRisk={lockedCallRef.current?.reversalRisk||null}
+          lockedSnapshotDir={(taraCallSnapshotRef.current?.call==='UP'||taraCallSnapshotRef.current?.call==='DOWN')?taraCallSnapshotRef.current.call:null}
           onClearAutoOrder={()=>setAutoOrderState(null)}
         />
 
