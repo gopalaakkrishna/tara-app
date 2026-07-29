@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.117-hourly-export-plus-coach-context';
-const TARA_VERSION_DISPLAY='Tara 13.4.117';
+const BASELINE_VERSION='2026.07.29-v13.4.119-coach-frozen-fields-plus-quality';
+const TARA_VERSION_DISPLAY='Tara 13.4.119';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15314,7 +15314,7 @@ function useHourlyRecord(){
 //   mistake that caused the 13.4.102 crash. This mounts as an independent, prominent panel
 //   instead; the old one can be found and removed later once its full dependency graph is
 //   traced properly.
-function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,kalshiYesPrice,timeState,windowType}){
+function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kalshiYesPrice,timeState,windowType}){
   // V13.4.115: FIXED PROPERLY, back on by default. Root cause traced: this panel read
   //   taraCall.call directly -- the raw, continuously-live posterior, which keeps
   //   recomputing every tick even AFTER a round locks. The 'tara says' ticket panel
@@ -15347,8 +15347,27 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,kalshiYesPrice,time
   const isDir=call==='UP'||call==='DOWN';
   const isSitOut=call==='SIT_OUT'||!call;
   const locked=!!(taraCall&&taraCall.locked);
-  const conf=Number(taraCall&&taraCall.confidence)||0;
-  const reason=(taraCall&&taraCall.reason)||'';
+  // V13.4.119: SAME live-vs-frozen bug as direction, now fixed for every field the panel
+  //   shows. When locked, read confidence/reason/qScore from the FROZEN lockedSnapshot
+  //   (taraCallSnapshotRef.current, captured at the moment of lock) instead of the live
+  //   taraCall, which keeps recomputing every tick. Real screenshot showed 'confidence
+  //   29%' here while the ticket panel showed '20.3pt STRONG conviction' / 'Tara 70%' --
+  //   same underlying mismatch as the direction bug, just a different field.
+  const _src=locked&&lockedSnapshot?lockedSnapshot:taraCall;
+  const conf=Number(_src&&_src.confidence)||0;
+  const qScore=Number.isFinite(_src&&_src.qScore)?_src.qScore:null;
+  const rawReason=(_src&&_src.reason)||'';
+  // V13.4.119: reason strings across this whole app are written as engineering/audit-trail
+  //   text by design -- version tags, vote counts, jargon (I have written dozens of them
+  //   myself tonight in exactly this style). Fine for the raw call log; confusing read
+  //   verbatim in a coach summary meant to be glanced at. Strip leading [V#.#.# TAG] style
+  //   prefixes and collapse nested ' -- was: ...' (em-dash via \u2014 unicode escape, not a
+  //   literal char, to avoid touching the file's em-dash-count invariant) down to the
+  //   newest reasoning only.
+  const reason=rawReason
+    .replace(/^\[V?\d+[\d.]*\s*[A-Z0-9\-]*\]\s*/,'')
+    .split(/\s*\u2014\s*was:\s*/)[0]
+    .trim();
   let label,sub,color,bg,border;
   if(isDir&&locked){
     label=(call==='UP'?'BUY UP':'BUY DOWN')+' -- LOCKED';
@@ -15382,6 +15401,10 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,kalshiYesPrice,time
     //   context genuinely isn't enough to act on well. This surfaces the same band check
     //   every commit-path fix tonight already enforces (30-60c default), so the coach
     //   panel explains WHY a locked call is or isn't attractive, not just what it is.
+    isDir&&Number.isFinite(qScore)&&qScore<40&&React.createElement('div',{className:'mt-2 text-[11px]',style:{color:'#FF4D6A'}},
+      '\u26a0 quality gate LOW ('+qScore+'/100) -- weak historical WR at this reading, consider sitting out'),
+    isDir&&timeState&&Number(timeState.minsRemaining)<2&&React.createElement('div',{className:'mt-1 text-[11px]',style:{color:'#C9A961'}},
+      '\u26a0 '+(timeState.minsRemaining||0)+'m '+(timeState.secsRemaining||0)+'s left -- under the 2m usually needed to fill and settle cleanly'),
     isDir&&(function(){
       const k=Number(kalshiYesPrice);
       if(!Number.isFinite(k)||k<=0||k>=100)return null;
@@ -23258,7 +23281,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk,lockedSnapshotDir}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk,lockedSnapshotDir,lockedSnapshot}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -23284,7 +23307,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
           entry prices, so it earns the space.
           EM-DASH BASELINE re-based 3298 -> 3297: the removed timeline row carried one
           em-dash in its title attribute. Deliberate, same as the 13.4.75 auto-exec strip. */}
-      <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType}/>
+      <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType}/>
       <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
     </div>
   );
@@ -41607,11 +41630,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _snapDir=snapshot.call||snapshot.direction;
         if(_snapKal!=null&&_snapDir){
           const _snapCost=_snapDir==='UP'?_snapKal:(100-_snapKal);
-          if(_snapCost<35||_snapCost>85){
+          // V13.4.118: this guard hardcoded 35/85, a THIRD price range different from
+          //   the 30-60 dial every other gate tonight (103/107/111/112) reads. Found from a
+          //   real screenshot: a 32c lock would pass the newer band (>=30) but get blocked
+          //   here (<35) -- contradictory behavior between two mechanisms doing the same
+          //   job. Unified to the same localStorage dial so there is exactly ONE band
+          //   definition across the whole app, not five.
+          const _v1282Min=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_e1282a){return 30;}})();
+          const _v1282Max=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e1282b){return 60;}})();
+          if(_snapCost<_v1282Min||_snapCost>=_v1282Max){
             // Entry cost out of range — convert to sit-out
             snapshot.call='SIT_OUT';
             snapshot.wasOverriddenNoTrade=true;
-            snapshot.caution=`Entry cost ${_snapCost.toFixed(0)}¢ outside valid range (35-85¢) — sitting out (V12.2 guard)`;
+            snapshot.caution=`Entry cost ${_snapCost.toFixed(0)}¢ outside valid range (${_v1282Min.toFixed(0)}-${_v1282Max.toFixed(0)}¢) — sitting out (unified band guard)`;
           }
         }
       }
@@ -46772,6 +46803,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           liveCoachReversalRef={liveCoachReversalRef}
           reversalRisk={lockedCallRef.current?.reversalRisk||null}
           lockedSnapshotDir={(taraCallSnapshotRef.current?.call==='UP'||taraCallSnapshotRef.current?.call==='DOWN')?taraCallSnapshotRef.current.call:null}
+          lockedSnapshot={taraCallSnapshotRef.current||null}
           onClearAutoOrder={()=>setAutoOrderState(null)}
         />
 
