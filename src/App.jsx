@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.28-v13.4.109-traj-early-lock-default-on';
-const TARA_VERSION_DISPLAY='Tara 13.4.109';
+const BASELINE_VERSION='2026.07.29-v13.4.110-fix-stale-traj-bypass';
+const TARA_VERSION_DISPLAY='Tara 13.4.110';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -39461,6 +39461,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _trajGapBps=Number(analysis?.projectedGapBps)||0;
         const _trajDir=_trajGapBps>0?'UP':(_trajGapBps<0?'DOWN':null);
         const _trajAgrees=_trajEarlyOn&&_trajDir===taraCall.call&&_trajGapBps!==0;
+        // V13.4.110: stash what direction TRAJ actually agreed with, and whether the
+        //   bypass fired, on the OBJECT ITSELF (survives the taraCall[k]=... merges every
+        //   override below does, since they copy whatever keys exist onto taraCall in
+        //   place -- confirmed by reading V10.7.4/19/11's own merge code, all three use
+        //   Object.keys(result).forEach(k=>taraCall[k]=result[k])). See the correction
+        //   check right before persistence for why this matters.
+        if(_trajAgrees){taraCall._trajBypassDir=taraCall.call;taraCall._trajBypassFired=true;}
         const _tooExpensive=_eqOn&&Number.isFinite(_eqCost)&&_eqCost>=_eqMaxCost&&!_trajAgrees;
         const _tooCheap=_eqOn&&Number.isFinite(_eqCost)&&_eqCost<_eqMinCost&&!_trajAgrees;
         const _tooEarly=_eqOn&&_eqFracLeft!=null&&_eqFracLeft>_eqMaxFrac&&!_trajAgrees;
@@ -44914,6 +44921,36 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //       (only resolution-time strike was kept), Kalshi context (so we can verify edge),
       //       FGT alignment (the primary signal!), raw vs calibrated posterior split.
       const eng=lockedCallRef.current;
+      // V13.4.110: STALE-BYPASS CORRECTION. Found via code audit, not a live report -- the
+      //   entry-band TRAJ-early bypass (13.4.108) reads taraCall.call BEFORE seven separate
+      //   override mechanisms (BRTI, TRAJ-priority, bounce, pump/dump-reversion, reversal-
+      //   evidence, direction-balance-floor) get a chance to flip it. Those overrides mutate
+      //   taraCall in place via Object.keys(result).forEach(k=>taraCall[k]=result[k]), so by
+      //   the time execution reaches HERE, taraCall.call may be a DIFFERENT direction than
+      //   whichever one TRAJ actually agreed with. If so, the price-band exemption no longer
+      //   applies to what actually locked -- re-check it here rather than let a stale bypass
+      //   slip a bad-priced flipped call through. Does not relocate the 40-line override
+      //   chain (too risky to restructure blind after the 13.4.102 crash); corrects the
+      //   outcome at this point instead, which runs after every override has landed and
+      //   before the trade snapshot below reads taraCall.call as final.
+      //   NOTE (self-caught): the first version of this fix put the correction INSIDE the
+      //   object literal below as a bare IIFE statement -- invalid syntax (object literals
+      //   only take key:value pairs). Caught by the real vite build before shipping, not
+      //   after -- exactly the check this session adopted after the 13.4.102 crash.
+      try{
+        if(taraCall._trajBypassFired&&taraCall._trajBypassDir!==taraCall.call&&(taraCall.call==='UP'||taraCall.call==='DOWN')){
+          const _finalK=Number(taraCall.kalshiAtLock);
+          const _finalCost=Number.isFinite(_finalK)?(taraCall.call==='UP'?_finalK:(100-_finalK)):null;
+          const _bMin=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_eb1){return 30;}})();
+          const _bMax=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_eb2){return 60;}})();
+          const _bOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_eb3){return true;}})();
+          if(_bOn&&_finalCost!=null&&(_finalCost<_bMin||_finalCost>=_bMax)){
+            taraCall.call='SIT_OUT';
+            taraCall.direction=null;
+            taraCall.reason=`[V13.4.110] stale bypass corrected -- direction flipped to ${taraCall._trajBypassDir==='UP'?'DOWN':'UP'} after TRAJ-early cleared the band for ${taraCall._trajBypassDir}, and the new direction prices at ${_finalCost.toFixed(0)}c (outside ${_bMin.toFixed(0)}-${_bMax.toFixed(0)}c). Sitting out rather than lock a flipped call the bypass never actually approved.`;
+          }
+        }
+      }catch(_eb4){}
       pendingTradeRef.current={
         id:Date.now(),dir,
         // V7.1: tag every trade with the asset (BTC or ETH) so calibration, weights, and
