@@ -73,6 +73,7 @@ const tryRssFeed = async (url, sourceName, diag) => {
     const xml = await r.text();
     const items = parseRss(xml).slice(0, 15).map(it => ({
       title: it.title,
+      url: it.url || null,
       time: it.time,
       source: sourceName.toLowerCase().replace(/\s/g, ''),
       sentiment: 'neutral',
@@ -99,6 +100,7 @@ const tryRss2Json = async (feedUrl, sourceName, diag) => {
     }
     const items = d.items.slice(0, 15).map(it => ({
       title: it.title,
+      url: it.link || null,
       time: it.pubDate ? new Date(it.pubDate).getTime() : Date.now(),
       source: sourceName.toLowerCase(),
       sentiment: 'neutral',
@@ -170,6 +172,7 @@ export default async function handler(req, res) {
     const d = await r.json();
     const cpItems = (d?.results || []).slice(0, 15).map(p => ({
       title: p.title || '',
+      url: p.url || null,
       time: p.published_at ? new Date(p.published_at).getTime() : Date.now(),
       source: 'cryptopanic',
       // Pre-computed from community votes — Tara uses these directly
@@ -214,7 +217,7 @@ export default async function handler(req, res) {
           +sd.slice(8,10), +sd.slice(10,12), +sd.slice(12,14)
         );
       }
-      return { title: a.title || '', time, source: 'gdelt', sentiment: 'neutral', isImportant: false };
+      return { title: a.title || '', url: a.url || null, time, source: 'gdelt', sentiment: 'neutral', isImportant: false };
     });
     diag.gdelt = { ok: gdItems.length > 0, count: gdItems.length, error: gdItems.length ? null : 'parsed 0 articles' };
     if (gdItems.length > 0) {
