@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.125-restore-edge-watch-exemption';
-const TARA_VERSION_DISPLAY='Tara 13.4.125';
+const BASELINE_VERSION='2026.07.29-v13.4.126-fix-news-shape-mismatch';
+const TARA_VERSION_DISPLAY='Tara 13.4.126';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -24621,18 +24621,23 @@ function NewsFeedCard({timeFormat,pushToast}={}){
         clearTimeout(timer);
         if(r.ok){
           const data=await r.json();
-          // V9.8.3: /api/news is now a Vercel rewrite to rss2json+CoinDesk RSS.
-          //   Response is rss2json's format: {status:'ok', items:[{title,link,pubDate,...}], feed:{...}}
-          //   Map directly into Tara's expected shape. Single source — if rss2json
-          //   or CoinDesk is down, news fails (no fallback chain). Trade-off for
-          //   avoiding Vercel Serverless Function configuration entirely.
-          if(data?.status==='ok'&&Array.isArray(data.items)&&data.items.length>0){
+          // V13.4.126 FIX: this was checking data?.status==='ok' against a shape
+          //   (rss2json: {status:'ok', items:[{link,pubDate,categories}], feed:{title}})
+          //   that api/news.js has never actually returned -- that comment describes an
+          //   architecture (Vercel rewrite to rss2json) that isn't what's in vercel.json
+          //   or api/news.js today. The real shape is {items:[{title,url,time,source,
+          //   sentiment,isImportant}], sources:[], diagnostics:{}} -- the multi-source
+          //   RSS+CryptoPanic+GDELT function actually deployed. Since data.status was
+          //   never present, this condition was NEVER true -- every fetch, even a fully
+          //   successful one with real items, fell through to 'bad shape' and eventually
+          //   'News API offline'. Fixed to match the real contract.
+          if(Array.isArray(data?.items)&&data.items.length>0){
             const items=data.items.slice(0,15).map(it=>({
               title:it.title,
-              source:data.feed?.title||'CoinDesk',
-              url:it.link,
-              time:it.pubDate?new Date(it.pubDate).getTime():Date.now(),
-              categories:Array.isArray(it.categories)?it.categories.slice(0,3):[],
+              source:it.source||'news',
+              url:it.url||null,
+              time:it.time||Date.now(),
+              categories:[],
             }));
             setNews(items);
             setErr(null);
@@ -24640,7 +24645,7 @@ function NewsFeedCard({timeFormat,pushToast}={}){
             _writeCache(items);
             return;
           }
-          try{console.warn('[Tara news] /api/news bad shape:',data?.status||'no status');}catch(_){}
+          try{console.warn('[Tara news] /api/news returned no items. diagnostics:',data?.diagnostics||'(none)');}catch(_){}
         }else{
           try{console.warn('[Tara news] /api/news returned',r.status);}catch(_){}
         }
