@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.110-fix-stale-traj-bypass';
-const TARA_VERSION_DISPLAY='Tara 13.4.110';
+const BASELINE_VERSION='2026.07.29-v13.4.112-band-covers-timer-commit';
+const TARA_VERSION_DISPLAY='Tara 13.4.112';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -42359,6 +42359,48 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         // V8.9.2: REMOVED no-trade gating for cases (a)+(b). User mandate: every round
         //   Tara picks a direction; the original no-go reason becomes a CAUTION badge
         //   so the user knows to be skeptical, but they get the call.
+        //
+        // V13.4.111: this commit path (no-go-edge / directional-lock / etc) is COMPLETELY
+        //   SEPARATE from the entry-band gate at ~L39463 -- different function, _commitDir/
+        //   _commitConf defined at L41412, never passes through _eqOn/_tooExpensive/
+        //   _tooCheap at all. Confirmed from real data: 10 of 12 locks stamped 13.4.107-110
+        //   landed here at 61-85c, all tagged no-go-edge/time-cap-commit/directional-lock,
+        //   none carrying _trajBypassFired -- this is not the TRAJ-early bypass firing as
+        //   intended, it is a second lock path the band was never wired to. The V8.9.2
+        //   'always commit' mandate is preserved -- only the PRICE is now checked, same
+        //   band/dials as the main gate, same TRAJ-early exemption if that is genuinely why
+        //   the price is being accepted.
+        const _ngK=Number(_kPctNow);
+        const _ngCost=Number.isFinite(_ngK)?(_commitDir==='UP'?_ngK:(100-_ngK)):null;
+        const _ngOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_eng1){return true;}})();
+        const _ngMin=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_eng2){return 30;}})();
+        const _ngMax=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_eng3){return 60;}})();
+        const _ngTrajOn=(function(){try{return localStorage.getItem('taraTrajEarlyLock')!=='off';}catch(_eng4){return true;}})();
+        const _ngTrajGap=Number(analysis?.projectedGapBps)||0;
+        const _ngTrajDir=_ngTrajGap>0?'UP':(_ngTrajGap<0?'DOWN':null);
+        const _ngTrajAgrees=_ngTrajOn&&_ngTrajDir===_commitDir&&_ngTrajGap!==0;
+        if(_ngOn&&_ngCost!=null&&(_ngCost<_ngMin||_ngCost>=_ngMax)&&!_ngTrajAgrees){
+          const _ngSitSnap={
+            call:'SIT_OUT',direction:null,confidence:0,
+            caution:null,
+            reason:`[V13.4.111] ${_commitDir} ${_commitConf}% wanted to lock at ${_ngCost.toFixed(0)}c -- outside ${_ngMin.toFixed(0)}-${_ngMax.toFixed(0)}c band (orig: ${_noGoReason}). Sitting out rather than commit at a bad price.`,
+            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+            atPosterior:_post,kalshiAtLock:_kPctNow,
+            locked:true,earlyLock:false,
+            isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+            samples:0,needSamples:0,
+            tier:'no-go-edge-band-sitout',
+            session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+            regime:analysis?.regime||'',
+            qScore:Math.round(_qFast),
+            fgt:analysis?.mtfAlignment,
+            _committedAt:Date.now(),
+          };
+          taraCallSnapshotRef.current=_ngSitSnap;
+          _logSnapshotEntry(_ngSitSnap);
+          _persistLock();
+          return;
+        }
         const _ngSnap={
           call:_commitDir,direction:_commitDir,
           confidence:_commitConf,
@@ -42610,6 +42652,43 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       const _etaNeed=tc?._ctx?.needSamples;
       const _etaExpired=_etaSec!=null&&_etaSec<=0&&_etaSamples!=null&&_etaNeed!=null&&_etaSamples<_etaNeed;
       if(_etaExpired&&!_isCoinFlip&&_cloudRestoreCompletedRef.current){
+        // V13.4.112: FOURTH separate commit path found -- 'Path B: timer commit', triggered
+        //   by sample-count ETA expiry rather than the hard elapsedSec deadline (that was
+        //   Path A, patched in 107). Same problem: builds and persists _timerSnap directly,
+        //   no price gate at all. Found by re-auditing this exact region after a user report
+        //   of a 72c UP lock (tier time-cap-commit reported, but this sibling path shares
+        //   the same lack of protection and was worth closing regardless of which one fired).
+        const _tmK=Number.isFinite(_kPctNow)?_kPctNow:null;
+        const _tmCost=(_tmK!=null)?(_commitDir==='UP'?_tmK:(100-_tmK)):null;
+        const _tmOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_etm1){return true;}})();
+        const _tmMin=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_etm2){return 30;}})();
+        const _tmMax=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_etm3){return 60;}})();
+        const _tmTrajOn=(function(){try{return localStorage.getItem('taraTrajEarlyLock')!=='off';}catch(_etm4){return true;}})();
+        const _tmTrajGap=Number(analysis?.projectedGapBps)||0;
+        const _tmTrajDir=_tmTrajGap>0?'UP':(_tmTrajGap<0?'DOWN':null);
+        const _tmTrajAgrees=_tmTrajOn&&_tmTrajDir===_commitDir&&_tmTrajGap!==0;
+        if(_tmOn&&_tmCost!=null&&(_tmCost<_tmMin||_tmCost>=_tmMax)&&!_tmTrajAgrees){
+          const _tmSitSnap={
+            call:'SIT_OUT',direction:null,confidence:0,
+            caution:null,
+            reason:`[V13.4.112] timer commit hit but entry ${_tmCost.toFixed(0)}c outside ${_tmMin.toFixed(0)}-${_tmMax.toFixed(0)}c band -- sitting out rather than forcing a bad price`,
+            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+            atPosterior:_post,kalshiAtLock:_kPctNow,
+            locked:true,earlyLock:false,
+            isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+            samples:_etaSamples,needSamples:_etaNeed,
+            tier:'timer-commit-band-sitout',
+            session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+            regime:analysis?.regime||'',
+            qScore:Math.round(_qFast),
+            fgt:analysis?.mtfAlignment,
+            _committedAt:Date.now(),
+          };
+          taraCallSnapshotRef.current=_tmSitSnap;
+          _logSnapshotEntry(_tmSitSnap);
+          _persistLock();
+          return;
+        }
         const _cautionLevel=_commitConf>=70?'firm':_commitConf>=60?'leaning':'tentative';
         const _cautionNote=_commitConf>=70?null:`${_cautionLevel} call — confidence ${_commitConf}%`;
         const _timerSnap={
