@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.121-early-lock-hourly-news-coach';
-const TARA_VERSION_DISPLAY='Tara 13.4.121';
+const BASELINE_VERSION='2026.07.29-v13.4.122-unify-odds-ceiling';
+const TARA_VERSION_DISPLAY='Tara 13.4.122';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -41013,8 +41013,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       // Conviction bands (confidence is Tara's fused tape+momentum+posterior read)
       const _convStrong112=_convNow>=75;
       const _convClear112=_convNow>=62;   // 'momentum clear enough to act'
-      // Odds ceiling by phase — accept worse odds later only when direction is clear
-      const _oddsCeil112=_isFinal112?80:_isLate112?72:_isEarly112?63:68;
+      // V13.4.122 FIX: this used to escalate the allowed price as the window closed
+      //   (63/68/72/80c by phase) -- but the universal entry-cost guard in
+      //   _logSnapshotEntry (made genuinely universal in V13.4.121) enforces a SINGLE
+      //   flat band (default 30-60c) with no phase exception. Real data the next
+      //   morning: 5 of 20 windows had this controller approve a 61-65c lock at 72-75%
+      //   conviction, only to have the guard immediately veto it to SIT_OUT -- two
+      //   mechanisms fighting, 90% sitout rate, zero trades where there should have
+      //   been real ones. Reading the SAME dial the guard uses removes the
+      //   contradiction: if this controller says lock, the guard will agree, every
+      //   time. Also directly matches the user's own ask (no late-window price
+      //   creep, no chasing an already-decided side into a reversal).
+      const _v13422_bandMax=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e13422){return 60;}})();
+      const _oddsCeil112=_v13422_bandMax;
       const _oddsOk112=_kForDir==null||_kForDir<=_oddsCeil112;
       let _v112Wait=false,_v112Timing='now',_v112Why='';
       if(_isEarly112){
