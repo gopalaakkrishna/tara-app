@@ -1,4 +1,4 @@
-// /api/news.js — Vercel serverless function (V10.7.65)
+// /api/news.js — Vercel serverless function (V10.7.65, fixed V13.4.121)
 // Merged: original RSS reliability (CoinDesk/Decrypt/CT) + new CryptoPanic sentiment + GDELT macro
 // Returns items in format Tara's useNewsSentiment hook expects:
 //   { items: [{title, time, source, sentiment, isImportant}], sources: [] }
@@ -6,6 +6,20 @@
 // CryptoPanic items: sentiment pre-computed from votes (bullish/bearish/neutral)
 // RSS items: keyword scoring done client-side in useNewsSentiment
 // GDELT items: macro/geo stories, keyword scored client-side
+//
+// V13.4.121 FIX: CryptoPanic's "free" public endpoint requires an auth_token as of
+//   their 2024/2025 API changes — this had never sent one, so every CryptoPanic call
+//   was almost certainly returning 401/403 and getting swallowed by the empty catch
+//   below, silently. Two changes:
+//   1. auth_token support via CRYPTOPANIC_API_KEY env var (get a free key at
+//      cryptopanic.com/developers/api/ and add it in Vercel > Settings > Environment
+//      Variables). Falls back to the old unauthenticated call if no key is set, since
+//      some endpoints/tiers still allow it — but expect that to keep failing until a
+//      key is added.
+//   2. `diagnostics` field added to every response: per-source ok/error/httpStatus, so
+//      a failure is visible in the JSON instead of silently vanishing into `sources: []`.
+//      Check this first before assuming "the news API is broken" — it'll say exactly
+//      which source failed and why.
 
 const CACHE_TTL_MS = 45000; // 45s — matches client polling interval
 let _cache = null;
@@ -22,7 +36,11 @@ const tryFetch = async (url, timeoutMs = 6000) => {
       },
     });
     clearTimeout(timer);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) {
+      const err = new Error(`HTTP ${r.status}`);
+      err.httpStatus = r.status;
+      throw err;
+    }
     return r;
   } catch (e) {
     clearTimeout(timer);
@@ -49,38 +67,47 @@ const parseRss = (xml) => {
   return items;
 };
 
-const tryRssFeed = async (url, sourceName) => {
+const tryRssFeed = async (url, sourceName, diag) => {
   try {
     const r = await tryFetch(url, 6000);
     const xml = await r.text();
-    return parseRss(xml).slice(0, 15).map(it => ({
+    const items = parseRss(xml).slice(0, 15).map(it => ({
       title: it.title,
       time: it.time,
       source: sourceName.toLowerCase().replace(/\s/g, ''),
       sentiment: 'neutral',
       isImportant: false,
     }));
+    diag[sourceName] = { ok: items.length > 0, count: items.length, error: items.length ? null : 'parsed 0 items — feed format may have changed' };
+    return items;
   } catch (e) {
+    diag[sourceName] = { ok: false, count: 0, error: e.message || String(e), httpStatus: e.httpStatus || null };
     return [];
   }
 };
 
-const tryRss2Json = async (feedUrl, sourceName) => {
+const tryRss2Json = async (feedUrl, sourceName, diag) => {
   try {
     const r = await tryFetch(
       `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feedUrl)}`,
       6000
     );
     const d = await r.json();
-    if (d?.status !== 'ok' || !Array.isArray(d.items)) return [];
-    return d.items.slice(0, 15).map(it => ({
+    if (d?.status !== 'ok' || !Array.isArray(d.items)) {
+      diag[`rss2json-${sourceName}`] = { ok: false, count: 0, error: `unexpected response status: ${d?.status || 'unknown'}` };
+      return [];
+    }
+    const items = d.items.slice(0, 15).map(it => ({
       title: it.title,
       time: it.pubDate ? new Date(it.pubDate).getTime() : Date.now(),
       source: sourceName.toLowerCase(),
       sentiment: 'neutral',
       isImportant: false,
     }));
+    diag[`rss2json-${sourceName}`] = { ok: true, count: items.length, error: null };
+    return items;
   } catch (e) {
+    diag[`rss2json-${sourceName}`] = { ok: false, count: 0, error: e.message || String(e), httpStatus: e.httpStatus || null };
     return [];
   }
 };
@@ -100,11 +127,12 @@ export default async function handler(req, res) {
 
   // Cache hit
   if (_cache && Date.now() - _cache.at < CACHE_TTL_MS) {
-    return respond(res, { items: _cache.items, sources: _cache.sources, cached: true });
+    return respond(res, { items: _cache.items, sources: _cache.sources, diagnostics: _cache.diagnostics, cached: true });
   }
 
   const allItems = [];
   const activeSources = [];
+  const diag = {};
 
   // ── TIER 1: RSS feeds (parallel) ──────────────────────────────────────────
   const rssFeeds = [
@@ -112,7 +140,7 @@ export default async function handler(req, res) {
     { url: 'https://decrypt.co/feed', name: 'Decrypt' },
     { url: 'https://cointelegraph.com/rss', name: 'CoinTelegraph' },
   ];
-  const rssResults = await Promise.allSettled(rssFeeds.map(f => tryRssFeed(f.url, f.name)));
+  const rssResults = await Promise.allSettled(rssFeeds.map(f => tryRssFeed(f.url, f.name, diag)));
   for (let i = 0; i < rssResults.length; i++) {
     if (rssResults[i].status === 'fulfilled' && rssResults[i].value.length > 0) {
       allItems.push(...rssResults[i].value);
@@ -123,7 +151,7 @@ export default async function handler(req, res) {
   // ── TIER 2: rss2json fallback for any RSS feeds that failed ───────────────
   if (activeSources.length === 0) {
     for (const f of rssFeeds) {
-      const items = await tryRss2Json(f.url, f.name);
+      const items = await tryRss2Json(f.url, f.name, diag);
       if (items.length > 0) {
         allItems.push(...items);
         activeSources.push(`rss2json-${f.name}`);
@@ -134,10 +162,11 @@ export default async function handler(req, res) {
 
   // ── TIER 3: CryptoPanic (pre-computed sentiment, always run) ──────────────
   try {
-    const r = await tryFetch(
-      'https://cryptopanic.com/api/free/v1/posts/?public=true&currencies=BTC&filter=hot',
-      5000
-    );
+    const _cpKey = process.env.CRYPTOPANIC_API_KEY || '';
+    const _cpUrl = _cpKey
+      ? `https://cryptopanic.com/api/free/v1/posts/?auth_token=${encodeURIComponent(_cpKey)}&public=true&currencies=BTC&filter=hot`
+      : 'https://cryptopanic.com/api/free/v1/posts/?public=true&currencies=BTC&filter=hot';
+    const r = await tryFetch(_cpUrl, 5000);
     const d = await r.json();
     const cpItems = (d?.results || []).slice(0, 15).map(p => ({
       title: p.title || '',
@@ -150,11 +179,21 @@ export default async function handler(req, res) {
         : 'neutral',
       isImportant: (p.kind === 'news' && (p.votes?.important || 0) > 2),
     }));
+    diag.cryptopanic = { ok: cpItems.length > 0, count: cpItems.length, error: cpItems.length ? null : 'parsed 0 items — check response shape', usedAuthToken: !!_cpKey };
     if (cpItems.length > 0) {
       allItems.push(...cpItems);
       activeSources.push('cryptopanic');
     }
-  } catch (e) { /* silent */ }
+  } catch (e) {
+    diag.cryptopanic = {
+      ok: false, count: 0,
+      error: e.httpStatus === 401 || e.httpStatus === 403
+        ? `${e.message} — CryptoPanic now requires auth_token; set CRYPTOPANIC_API_KEY in Vercel env vars (free key at cryptopanic.com/developers/api/)`
+        : (e.message || String(e)),
+      httpStatus: e.httpStatus || null,
+      usedAuthToken: !!process.env.CRYPTOPANIC_API_KEY,
+    };
+  }
 
   // ── TIER 4: GDELT macro/geopolitical (server-side — no 429 from Vercel) ──
   try {
@@ -177,11 +216,14 @@ export default async function handler(req, res) {
       }
       return { title: a.title || '', time, source: 'gdelt', sentiment: 'neutral', isImportant: false };
     });
+    diag.gdelt = { ok: gdItems.length > 0, count: gdItems.length, error: gdItems.length ? null : 'parsed 0 articles' };
     if (gdItems.length > 0) {
       allItems.push(...gdItems);
       activeSources.push('gdelt');
     }
-  } catch (e) { /* silent */ }
+  } catch (e) {
+    diag.gdelt = { ok: false, count: 0, error: e.message || String(e), httpStatus: e.httpStatus || null };
+  }
 
   // Sort by recency, dedupe by title
   const seen = new Set();
@@ -191,14 +233,14 @@ export default async function handler(req, res) {
     .slice(0, 50);
 
   if (deduped.length > 0) {
-    _cache = { at: Date.now(), items: deduped, sources: activeSources };
-    return respond(res, { items: deduped, sources: activeSources });
+    _cache = { at: Date.now(), items: deduped, sources: activeSources, diagnostics: diag };
+    return respond(res, { items: deduped, sources: activeSources, diagnostics: diag });
   }
 
   // Stale cache fallback
   if (_cache) {
-    return respond(res, { items: _cache.items, sources: _cache.sources, stale: true });
+    return respond(res, { items: _cache.items, sources: _cache.sources, diagnostics: diag, stale: true });
   }
 
-  return respond(res, { error: 'All news sources unavailable', items: [], sources: [] }, 503);
+  return respond(res, { error: 'All news sources unavailable', items: [], sources: [], diagnostics: diag }, 503);
 }
