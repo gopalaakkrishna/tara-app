@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.116-coach-uses-real-snapshot';
-const TARA_VERSION_DISPLAY='Tara 13.4.116';
+const BASELINE_VERSION='2026.07.29-v13.4.117-hourly-export-plus-coach-context';
+const TARA_VERSION_DISPLAY='Tara 13.4.117';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15314,7 +15314,7 @@ function useHourlyRecord(){
 //   mistake that caused the 13.4.102 crash. This mounts as an independent, prominent panel
 //   instead; the old one can be found and removed later once its full dependency graph is
 //   traced properly.
-function TradeCoachCall({taraCall,analysis,lockedSnapshotDir}){
+function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,kalshiYesPrice,timeState,windowType}){
   // V13.4.115: FIXED PROPERLY, back on by default. Root cause traced: this panel read
   //   taraCall.call directly -- the raw, continuously-live posterior, which keeps
   //   recomputing every tick even AFTER a round locks. The 'tara says' ticket panel
@@ -15377,6 +15377,25 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir}){
     React.createElement('div',{className:'text-2xl font-bold mb-1',style:{color}},label),
     isDir&&React.createElement('div',{className:'text-[11px] mb-1',style:{color:'rgba(237,237,237,0.6)'}},'confidence '+conf.toFixed(0)+'%'),
     React.createElement('div',{className:'text-[12px] leading-snug',style:{color:'rgba(237,237,237,0.75)'}},sub),
+    // V13.4.117: SITUATION AWARENESS. User feedback: coach 'not aware of position and
+    //   situation to win max money' -- a bare UP/DOWN direction with no price or time
+    //   context genuinely isn't enough to act on well. This surfaces the same band check
+    //   every commit-path fix tonight already enforces (30-60c default), so the coach
+    //   panel explains WHY a locked call is or isn't attractive, not just what it is.
+    isDir&&(function(){
+      const k=Number(kalshiYesPrice);
+      if(!Number.isFinite(k)||k<=0||k>=100)return null;
+      const cost=call==='UP'?k:(100-k);
+      const min=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_e){return 30;}})();
+      const max=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e){return 60;}})();
+      const inBand=cost>=min&&cost<max;
+      const secsLeft=timeState?((timeState.minsRemaining||0)*60+(timeState.secsRemaining||0)):null;
+      return React.createElement('div',{className:'mt-2 pt-2 border-t text-[11px]',style:{borderColor:'rgba(237,237,237,0.10)'}},
+        React.createElement('span',{style:{color:inBand?'#28CC95':'#C9A961'}},
+          'entry '+cost.toFixed(0)+'c'+(inBand?' -- in the '+min.toFixed(0)+'-'+max.toFixed(0)+'c band, good price':' -- OUTSIDE '+min.toFixed(0)+'-'+max.toFixed(0)+'c band, paying up')),
+        secsLeft!=null&&React.createElement('span',{className:'ml-2',style:{color:'rgba(237,237,237,0.5)'}},Math.round(secsLeft)+'s left in window'),
+      );
+    })(),
   );
 }
 function HourlyLadderPanel({spot,taraCall}){
@@ -15515,6 +15534,42 @@ function HourlyLadderPanel({spot,taraCall}){
           <span className="text-[11px] text-zinc-400">{minsLeft.toFixed(1)}m left</span>
         </div>
       </div>
+      {/* V13.4.117: real, exportable hourly log -- mirrors the exact JSON-download pattern
+          the main 15m call log already uses (Blob + createObjectURL + click), so the same
+          upload-and-audit workflow works here: export, send it over, I run the same kind
+          of real analysis on it that the 15m archive has had all night. */}
+      <button
+        className="mb-2 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold transition-colors"
+        style={{background:'rgba(124,93,250,0.08)',color:'rgba(196,181,253,0.9)',border:'1px solid rgba(196,181,253,0.25)'}}
+        onClick={()=>{
+          try{
+            const _full=_hrLoad();
+            const _payload={
+              exportedAt:new Date().toISOString(),
+              baselineVersion:(typeof BASELINE_VERSION!=='undefined')?BASELINE_VERSION:'unknown',
+              kind:'hourly-ladder-log',
+              totalSettled:_full.history.length,
+              wins:_full.w,losses:_full.l,
+              winRate:(_full.w+_full.l)>0?Math.round(100*_full.w/(_full.w+_full.l)):null,
+              pending:_full.pending,
+              history:_full.history,
+            };
+            const _json=JSON.stringify(_payload,null,2);
+            const _blob=new Blob([_json],{type:'application/json'});
+            const _url=URL.createObjectURL(_blob);
+            const _a=document.createElement('a');
+            const _ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+            _a.href=_url;
+            _a.download=`tara-hourly-log-${_ts}.json`;
+            document.body.appendChild(_a);
+            _a.click();
+            document.body.removeChild(_a);
+            setTimeout(()=>URL.revokeObjectURL(_url),100);
+          }catch(e){
+            alert('Export failed: '+(e.message||String(e)));
+          }
+        }}
+      >Export Hourly Log</button>
       {lad.err&&<div className="text-[11px] text-amber-400 mb-1">feed: {lad.err}</div>}
       {/* V13.4.115: real settlement history, inline, no console needed. Directly answers
           'theres no real logs to check and verify later' -- rec.history has always had this
@@ -23229,7 +23284,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
           entry prices, so it earns the space.
           EM-DASH BASELINE re-based 3298 -> 3297: the removed timeline row carried one
           em-dash in its title attribute. Deliberate, same as the 13.4.75 auto-exec strip. */}
-      <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir}/>
+      <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType}/>
       <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
     </div>
   );
