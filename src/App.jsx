@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.29-v13.4.127-flip-telemetry-todo';
-const TARA_VERSION_DISPLAY='Tara 13.4.127';
+const BASELINE_VERSION='2026.07.30-v13.4.128-band-25-75-consolidated';
+const TARA_VERSION_DISPLAY='Tara 13.4.128';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5107,6 +5107,18 @@ const USE_V104_1_DELAY_GATE=true;
 const V104_1_KALSHI_EXPENSIVE_THRESHOLD=55; // V10.6.4: was 50 — only truly expensive entries trigger
 const V104_1_CONVICTION_STRONG_THRESHOLD=80; // V10.6.4: was 85 — 80%+ skips the delay
 const V104_1_DEADLINE_SECONDS_LEFT=150; // V11.2: was 240 — more patient runway, hard-lock by 2.5min remaining
+// V13.4.128: SHARED entry-band getters. Previously this exact
+//   parseFloat(localStorage...)||default pattern was copy-pasted independently 15
+//   times across the file (TradeCoachCall, the entry-quality gate, the V11.2
+//   controller, the universal cost guard, the no-go-edge band check, the
+//   time-cap-commit band check, and the manual-close band check) -- exactly the
+//   kind of duplication that let the V11.2 ceiling silently drift from the guard
+//   earlier tonight. One shared source now; every call site below reads this.
+//   Widened per explicit user direction 2026-07-29: 30-60c was rejecting decent
+//   65-75c reads (real data: a no-go-edge lock at 100c won same session) --
+//   default is now 25-75c.
+const getEntryMinCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:25;}catch(_e13428a){return 25;}};
+const getEntryMaxCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:75;}catch(_e13428b){return 75;}};
 
 // V10.6.3 — SLIPPAGE-AWARE EV
 //   Real Kalshi fills cost ~1¢ more than the lock-time YES mid price due to
@@ -15429,8 +15441,8 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
       const k=Number(kalshiYesPrice);
       if(!Number.isFinite(k)||k<=0||k>=100)return null;
       const cost=call==='UP'?k:(100-k);
-      const min=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_e){return 30;}})();
-      const max=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e){return 60;}})();
+      const min=getEntryMinCost();
+      const max=getEntryMaxCost();
       const inBand=cost>=min&&cost<max;
       const secsLeft=timeState?((timeState.minsRemaining||0)*60+(timeState.secsRemaining||0)):null;
       return React.createElement('div',{className:'mt-2 pt-2 border-t text-[11px]',style:{borderColor:'rgba(237,237,237,0.10)'}},
@@ -39701,8 +39713,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   already stated. Reverse this (or widen the band) if the volume cut feels wrong
         //   in practice: taraEntryQuality='off' fully restores pre-band behavior.
         const _eqOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_e4){return true;}})();
-        const _eqMinCost=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_e8){return 30;}})();
-        const _eqMaxCost=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e5){return 60;}})();
+        const _eqMinCost=getEntryMinCost();
+        const _eqMaxCost=getEntryMaxCost();
         const _eqMaxFrac=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxFrac'));return(Number.isFinite(v)&&v>0&&v<=1)?v:1.0;}catch(_e6){return 1.0;}})();
         const _eqCost=(taraCall.call==='UP')?_kEntry:(100-_kEntry);
         const _totalSec=windowType==='15m'?900:300; // V13.4.120 FIX: was undefined -- silently threw and swallowed the entire entry-quality/traj-bypass block below.
@@ -41058,7 +41070,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   contradiction: if this controller says lock, the guard will agree, every
       //   time. Also directly matches the user's own ask (no late-window price
       //   creep, no chasing an already-decided side into a reversal).
-      const _v13422_bandMax=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e13422){return 60;}})();
+      const _v13422_bandMax=getEntryMaxCost();
       const _oddsCeil112=_v13422_bandMax;
       const _oddsOk112=_kForDir==null||_kForDir<=_oddsCeil112;
       let _v112Wait=false,_v112Timing='now',_v112Why='';
@@ -41792,8 +41804,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //   here (<35) -- contradictory behavior between two mechanisms doing the same
           //   job. Unified to the same localStorage dial so there is exactly ONE band
           //   definition across the whole app, not five.
-          const _v1282Min=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_e1282a){return 30;}})();
-          const _v1282Max=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e1282b){return 60;}})();
+          const _v1282Min=getEntryMinCost();
+          const _v1282Max=getEntryMaxCost();
           if(_snapCost<_v1282Min||_snapCost>=_v1282Max){
             // Entry cost out of range — convert to sit-out
             snapshot.call='SIT_OUT';
@@ -42719,8 +42731,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _ngK=Number(_kPctNow);
         const _ngCost=Number.isFinite(_ngK)?(_commitDir==='UP'?_ngK:(100-_ngK)):null;
         const _ngOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_eng1){return true;}})();
-        const _ngMin=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_eng2){return 30;}})();
-        const _ngMax=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_eng3){return 60;}})();
+        const _ngMin=getEntryMinCost();
+        const _ngMax=getEntryMaxCost();
         const _ngTrajOn=(function(){try{return localStorage.getItem('taraTrajEarlyLock')!=='off';}catch(_eng4){return true;}})();
         const _ngTrajGap=Number(analysis?.projectedGapBps)||0;
         const _ngTrajDir=_ngTrajGap>0?'UP':(_ngTrajGap<0?'DOWN':null);
@@ -42937,8 +42949,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _capKEntry=Number.isFinite(_kPctNow)?_kPctNow:null;
         const _capCost=(_capKEntry!=null)?(_commitDir==='UP'?_capKEntry:(100-_capKEntry)):null;
         const _capOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_e9){return true;}})();
-        const _capMin=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_e10){return 30;}})();
-        const _capMax=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_e11){return 60;}})();
+        const _capMin=getEntryMinCost();
+        const _capMax=getEntryMaxCost();
         // V13.4.108: same TRAJ-early bypass as the main gate, applied here too so the
         //   deadline path is consistent with the normal path.
         const _capTrajOn=(function(){try{return localStorage.getItem('taraTrajEarlyLock')!=='off';}catch(_e13){return true;}})();
@@ -43007,8 +43019,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _tmK=Number.isFinite(_kPctNow)?_kPctNow:null;
         const _tmCost=(_tmK!=null)?(_commitDir==='UP'?_tmK:(100-_tmK)):null;
         const _tmOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_etm1){return true;}})();
-        const _tmMin=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_etm2){return 30;}})();
-        const _tmMax=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_etm3){return 60;}})();
+        const _tmMin=getEntryMinCost();
+        const _tmMax=getEntryMaxCost();
         const _tmTrajOn=(function(){try{return localStorage.getItem('taraTrajEarlyLock')!=='off';}catch(_etm4){return true;}})();
         const _tmTrajGap=Number(analysis?.projectedGapBps)||0;
         const _tmTrajDir=_tmTrajGap>0?'UP':(_tmTrajGap<0?'DOWN':null);
@@ -45366,8 +45378,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         if(taraCall._trajBypassFired&&taraCall._trajBypassDir!==taraCall.call&&(taraCall.call==='UP'||taraCall.call==='DOWN')){
           const _finalK=Number(taraCall.kalshiAtLock);
           const _finalCost=Number.isFinite(_finalK)?(taraCall.call==='UP'?_finalK:(100-_finalK)):null;
-          const _bMin=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:30;}catch(_eb1){return 30;}})();
-          const _bMax=(function(){try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:60;}catch(_eb2){return 60;}})();
+          const _bMin=getEntryMinCost();
+          const _bMax=getEntryMaxCost();
           const _bOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_eb3){return true;}})();
           if(_bOn&&_finalCost!=null&&(_finalCost<_bMin||_finalCost>=_bMax)){
             taraCall.call='SIT_OUT';
