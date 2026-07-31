@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.30-v13.4.128-band-25-75-consolidated';
-const TARA_VERSION_DISPLAY='Tara 13.4.128';
+const BASELINE_VERSION='2026.07.31-v13.4.129-timecap-tighter-ceiling';
+const TARA_VERSION_DISPLAY='Tara 13.4.129';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -41805,7 +41805,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //   job. Unified to the same localStorage dial so there is exactly ONE band
           //   definition across the whole app, not five.
           const _v1282Min=getEntryMinCost();
-          const _v1282Max=getEntryMaxCost();
+          // V13.4.129: time-cap-commit gets its own tighter ceiling. Real data (37
+          //   trades on the 25-75c band, two checks 24h apart): split by whether the
+          //   price was reachable under the OLD 60c ceiling --
+          //     <65c (old-band range):        n=10  WR=80%  net +97c
+          //     >=65c (widened-band-only):     n=5  WR=40%  net -260c
+          //   The tier's overall 67% WR looked fine but was propped up entirely by easy
+          //   cheap wins -- the high-price bucket the widening specifically unlocked is
+          //   what's losing. Control check: directional-lock's >=65c trades over the same
+          //   window were 100% WR, +159c -- so this is NOT 'high price is risky' in
+          //   general, it's specific to time-cap-commit, where a high price means 'ran
+          //   out of patience,' not 'strong signal.' Every other tier keeps the full
+          //   25-75c band earned by directional-lock/no-go-edge's real performance.
+          const _v1282Max=snapshot?.tier==='time-cap-commit'?Math.min(65,getEntryMaxCost()):getEntryMaxCost();
           if(_snapCost<_v1282Min||_snapCost>=_v1282Max){
             // Entry cost out of range — convert to sit-out
             snapshot.call='SIT_OUT';
