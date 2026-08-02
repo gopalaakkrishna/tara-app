@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.07.31-v13.4.129-timecap-tighter-ceiling';
-const TARA_VERSION_DISPLAY='Tara 13.4.129';
+const BASELINE_VERSION='2026.08.02-v13.4.130-edge-tailcap-flip-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.130';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -39774,6 +39774,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
   //   entry (previously reserved in _STICKY_TELEMETRY but never wired up). Revisit this
   //   cap ONLY if a real export shows flipped locks losing more than non-flipped ones --
   //   explicit user instruction: keep uncapped until there's evidence, not on a hunch.
+  //   V13.4.130 correction: use the _v10_7_4_flipped field on logged entries for this
+  //   comparison, not flipAtLock -- that one turned out to be dead (see _logSnapshotEntry
+  //   top-of-function comment). First real sample (Aug 2): n=3 resolved, 2W/1L -- nowhere
+  //   near enough yet.
   // User rule: never skip, never gate. ONLY way to convert losses → wins is to
   //   pick the BETTER SIDE more often. This layer runs after engine commits a
   //   direction (UP or DOWN) and checks 4 contradicting-evidence signals. If
@@ -41745,22 +41749,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     let _earlyLockTier=null;
     let _fastLockFired=false;
     const _logSnapshotEntry=(snapshot)=>{
-      // V13.4.127: wire up flipAtLock -- this field has been reserved in
-      //   _STICKY_TELEMETRY since V13.1 (protected from being wiped on merge) but
-      //   nothing ever actually SET it, so every entry logged it as empty. The V10.7.4
-      //   SIDE-FLIP LAYER already computes _v10_7_4_flipped/_v10_7_4_votes/
-      //   _v10_7_4_originalDir on taraCall every tick -- just never made it into the
-      //   log. User wants to keep the side-flip layer uncapped for now and revisit
-      //   later ONLY if real data shows flipped locks losing more -- this is what makes
-      //   that comparison possible on the next export. Additive only, changes no
-      //   trading behavior.
-      if(snapshot&&taraCall){
-        snapshot.flipAtLock=taraCall._v10_7_4_flipped===true;
-        if(taraCall._v10_7_4_flipped===true){
-          snapshot.flipVotesAtLock=taraCall._v10_7_4_votes||null;
-          snapshot.flipOriginalDirAtLock=taraCall._v10_7_4_originalDir||null;
-        }
-      }
+      // V13.4.127 attempted to wire up flipAtLock here -- turned out to be dead code.
+      //   A separate, later object-literal construction site (the main automatic
+      //   pipeline's entry builder, ~L42160) ALREADY captures this same data under a
+      //   different, pre-existing field name -- _v10_7_4_flipped (with originalDir,
+      //   votes, reasons) -- and that field wins, silently overwriting whatever this
+      //   mutation set. V13.4.130: removed the dead mutation. Use _v10_7_4_flipped on
+      //   logged entries for flip analysis, not flipAtLock (that field is fed by an
+      //   older, apparently-inert mechanism, _v10_7_11_universalFlipped, and is a
+      //   separate, still-unresolved issue from the one this comment used to describe).
       if(primaryDeviceIdRef.current&&primaryDeviceIdRef.current!==_taraDeviceId&&snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'){
         snapshot.call='SIT_OUT';
         snapshot.direction='SIT_OUT';
@@ -41823,6 +41820,27 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             snapshot.call='SIT_OUT';
             snapshot.wasOverriddenNoTrade=true;
             snapshot.caution=`Entry cost ${_snapCost.toFixed(0)}¢ outside valid range (${_v1282Min.toFixed(0)}-${_v1282Max.toFixed(0)}¢) — sitting out (unified band guard)`;
+          }
+        }
+      }
+      // V13.4.130: no-go-edge/no-go-coinflip-late TAIL CAP ONLY -- explicit user
+      //   instruction was 'B, more locks always preferred,' so this does NOT reinstate
+      //   the full band guard for these tiers. But real data (Aug 2, n=37 no-go-edge):
+      //   70% WR yet net -135c -- wins averaged 88.7c cost (paying 0-15c margin), losses
+      //   averaged 60.3c (including one 100c LOSS, near-total stake). At the extreme end
+      //   the payoff math is hopeless regardless of win rate: a win at 95c+ pays under 5c,
+      //   a loss at 95c+ costs the entire stake -- needs >95% WR just to break even, which
+      //   nothing here is claiming. This blocks ONLY that unwinnable tail (outside 5-95c);
+      //   everything from 5c to 95c still locks freely, same as before this fix.
+      if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&_isEdgeWatchTier){
+        const _ewKal=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock):null;
+        const _ewDir=snapshot.call||snapshot.direction;
+        if(_ewKal!=null&&_ewDir){
+          const _ewCost=_ewDir==='UP'?_ewKal:(100-_ewKal);
+          if(_ewCost<5||_ewCost>=95){
+            snapshot.call='SIT_OUT';
+            snapshot.wasOverriddenNoTrade=true;
+            snapshot.caution=`Entry cost ${_ewCost.toFixed(0)}¢ in the unwinnable tail (outside 5-95¢) — sitting out even though this is an edge-watch tier (V13.4.130 tail cap)`;
           }
         }
       }
