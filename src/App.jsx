@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.04-v13.4.131-chop-volume-reversal-warning';
-const TARA_VERSION_DISPLAY='Tara 13.4.131';
+const BASELINE_VERSION='2026.08.04-v13.4.132-null-price-guard-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.132';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -41821,7 +41821,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       if(snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'&&!_isEdgeWatchTier){
         const _snapKal=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock):null;
         const _snapDir=snapshot.call||snapshot.direction;
-        if(_snapKal!=null&&_snapDir){
+        // V13.4.132 FIX: when the price feed is down (_snapKal null), this whole block
+        //   used to just get skipped -- no price check at all, trade locks anyway. Real
+        //   data: 157 no-go-data trades in the archive, ALL of them tier='no-go-data'
+        //   ('Data integrity issue -- Kalshi feed unavailable' is literally the reason
+        //   text), and not one of them ever sat out -- 89W/68L placed blind, with no
+        //   reference price to even know what was paid. A missing price isn't a reason
+        //   to skip the gate, it's the strongest possible reason to trigger it.
+        if(_snapKal==null&&_snapDir){
+          snapshot.call='SIT_OUT';
+          snapshot.wasOverriddenNoTrade=true;
+          snapshot.caution=`No Kalshi price at lock (feed unavailable) — sitting out, can't safely price an entry blind (V13.4.132)`;
+        }else if(_snapKal!=null&&_snapDir){
           const _snapCost=_snapDir==='UP'?_snapKal:(100-_snapKal);
           // V13.4.118: this guard hardcoded 35/85, a THIRD price range different from
           //   the 30-60 dial every other gate tonight (103/107/111/112) reads. Found from a
