@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.02-v13.4.130-edge-tailcap-flip-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.130';
+const BASELINE_VERSION='2026.08.04-v13.4.131-chop-volume-reversal-warning';
+const TARA_VERSION_DISPLAY='Tara 13.4.131';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17188,6 +17188,28 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     const _last60sWhales=(Array.isArray(whaleLog)?whaleLog:[]).filter(w=>w&&w.time>_now-60000&&w.side===_contrarySide&&(w.usd||0)>=200000);
     const _bigContraryWhale=_last60sWhales.length>0;
     const _largestContraryUsd=_bigContraryWhale?(Number(_last60sWhales[0]?.usd)||0):0;
+    // V13.4.131: live volume ratio + chop flag, feeding the drawdown-from-peak card
+    //   below. Built from real trade-log analysis: of all LOSS trades that were correct
+    //   for most of the post-lock window before reversing, 100% (25/25) were in
+    //   RANGE-CHOP. Volume is tracked elsewhere in the app (spike detection, OBV,
+    //   VPOC) but had never been connected to live in-trade risk warnings -- this is
+    //   that connection. Same tick-size-sum style as the existing volume-spike scorer
+    //   (~L7715), applied here to tickHistoryRef directly since that's what this
+    //   component already receives as a prop.
+    const _liveVolRatio=(function(){
+      try{
+        const _ticks=tickHistoryRef?.current;
+        if(!Array.isArray(_ticks)||_ticks.length<10)return 1;
+        const _recentTicks=_ticks.filter(t=>t&&t.time>_now-30000);
+        const _baselineTicks=_ticks.filter(t=>t&&t.time>_now-300000&&t.time<=_now-30000);
+        const _recentSum=_recentTicks.reduce((s,t)=>s+(Number(t.s)||0),0);
+        const _baselineSum=_baselineTicks.reduce((s,t)=>s+(Number(t.s)||0),0);
+        const _baselineAvgPer30s=_baselineSum>0?_baselineSum/9:0; // 270s of baseline / 30s windows
+        return _baselineAvgPer30s>0?_recentSum/_baselineAvgPer30s:1;
+      }catch(_e13431){return 1;}
+    })();
+    const _isChopRegimeLive=analysis?.regime==='RANGE-CHOP';
+    const _thinVolInChop=_isChopRegimeLive&&_liveVolRatio<0.6;
     // Risk
     const _riskLevel=movementRisk?.level||'CALM';
     const _riskExtreme=_riskLevel==='EXTREME';
@@ -17210,9 +17232,15 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
     }
 
     // V9.1.7: 📉 DRAWDOWN FROM PEAK — caught winning, now bleeding back to entry.
-    if(_peak>=15&&_drawdownFromPeak>=10&&_winning&&_drawdownFromPeak/Math.abs(_peak)>=0.5){
-      cards.push({tone:'urgent',icon:'📉',title:`Drawing down from +${Math.round(_peak)}bps peak`,
-        body:`You hit +${Math.round(_peak)}bps but you're now at +${Math.round(_favoredGap)}bps — gave back ${Math.round(_drawdownFromPeak)}bps. ${_offerVal>=0.65?'Offer $'+_offerVal.toFixed(2)+' is still strong — take it before more reversal.':'Watch the next 30s carefully — this is reversal territory.'}`});
+    // V13.4.131: in thin-volume RANGE-CHOP -- the exact condition behind 100% of the
+    //   'right till the end, reversed hard' losses -- fire this card earlier and more
+    //   sensitively than the general case. Same underlying signal, lower bar to speak up.
+    const _peakDDThresh=_thinVolInChop?10:15;
+    const _drawdownThresh=_thinVolInChop?6:10;
+    const _giveBackRatioThresh=_thinVolInChop?0.35:0.5;
+    if(_peak>=_peakDDThresh&&_drawdownFromPeak>=_drawdownThresh&&_winning&&_drawdownFromPeak/Math.abs(_peak)>=_giveBackRatioThresh){
+      cards.push({tone:'urgent',icon:'📉',title:`Drawing down from +${Math.round(_peak)}bps peak${_thinVolInChop?' — thin-volume chop':''}`,
+        body:`You hit +${Math.round(_peak)}bps but you're now at +${Math.round(_favoredGap)}bps — gave back ${Math.round(_drawdownFromPeak)}bps.${_thinVolInChop?` This is RANGE-CHOP with volume at ${_liveVolRatio.toFixed(1)}x normal — exactly the condition behind most late reversals in the archive. Weight this warning more than usual.`:''} ${_offerVal>=0.65?'Offer $'+_offerVal.toFixed(2)+' is still strong — take it before more reversal.':'Watch the next 30s carefully — this is reversal territory.'}`});
       try{if(liveCoachReversalRef&&liveCoachReversalRef.current){var _lcr=liveCoachReversalRef.current;_lcr.fired=true;if(_peak>_lcr.peakBps)_lcr.peakBps=_peak;if(_drawdownFromPeak>_lcr.drawdownBps)_lcr.drawdownBps=_drawdownFromPeak;}}catch(_){}
     }
 
