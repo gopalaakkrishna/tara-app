@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.05-v13.4.137-hourly-memory-hour-window-grouped';
-const TARA_VERSION_DISPLAY='Tara 13.4.137';
+const BASELINE_VERSION='2026.08.05-v13.4.138-hourly-contradiction-rehydrate-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.138';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15711,7 +15711,25 @@ function HourlyLadderPanel({spot,taraCall}){
   const tradeable=rows.filter(r=>r.modelPct!=null&&r.ask>2&&r.ask<98);
   // --- lock machine (runs during render; only mutates a ref, never state) ---
   const L=lockRef.current;
-  if(L.hourKey!==hourKey){L.hourKey=hourKey;L.dir=null;L.ticks=0;L.locks=[];}
+  if(L.hourKey!==hourKey){
+    // V13.4.138 FIX: this used to reset L.locks=[] unconditionally on every hourKey
+    //   change -- including the FIRST render after a page reload or tab
+    //   background/foreground cycle, which also resets hourKey from null. That wiped
+    //   the contradiction-check's memory of what's already locked THIS hour, even
+    //   though the real locks were still sitting in rec.pending (localStorage-backed,
+    //   survives reloads). Real result: a NO@$64299.99 lock at 02:00 AM, then a
+    //   directly-contradicting YES@$64299.99 lock at 02:38 AM -- same strike, same
+    //   ticker, opposite sides, impossible for both to win -- because by 02:38 the
+    //   in-memory L.locks had no record the NO lock ever happened. The math in
+    //   contradicts() below was always correct; it just had nothing to check against.
+    //   Rehydrating from rec.pending for the current window closes that gap.
+    L.hourKey=hourKey;L.dir=null;L.ticks=0;
+    const _curCloseMs=lad.closeMs;
+    L.locks=(Array.isArray(rec.pending)?rec.pending:[])
+      .filter(p=>p&&_curCloseMs&&p.closeMs===_curCloseMs)
+      .map(p=>({ms:0,dir:p.side==='YES'?'UP':'DOWN',strike:p.strike,cost:p.cost,conf:0,
+        side:p.side,model:null,ticker:p.ticker,closeMs:p.closeMs,mktPct:null,at:p.at,minsAtLock:null,band:null}));
+  }
   if(!Array.isArray(L.locks))L.locks=[];
   // V13.4.94: MULTIPLE locks per hour. The hour is 60 minutes and the ladder re-prices
   //   continuously, so one lock per hour throws away most of the window. A new lock is
