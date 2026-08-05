@@ -441,28 +441,27 @@ const _v11KalshiEdge=(posterior,kalshiAtLock,direction)=>{
   // kalshiAtLock is the YES price (0-100). For DOWN calls, edge uses the NO side.
   const mktProb=direction==='UP'?Number(kalshiAtLock):(100-Number(kalshiAtLock));
   const edge=posterior-mktProb;
-  // V13.4.140 AUDIT (2026-08-05, n=4557 resolved 15m trades w/ dir+kalshiAtLock):
-  //   mktProb (market's own implied probability OF OUR SIDE) is a strong, near-monotonic
-  //   predictor by itself -- mktProb<50% (market thinks our side is the underdog)
-  //   converted at only 47.1% (n=854, BELOW a coin flip), climbing to 66.6% at 60-70%,
-  //   84.9% at 80-90%, 92-96% above 90%. The mktProb<50 band is NOT rescuable by tier
-  //   (77% of it isn't already caught by an existing hard-gated tier) or by our own
-  //   confidence (even conf>=80 only hit 52.8% within this band, n=36). Sit out outright
-  //   when the market disagrees with our direction -- "the market thinks we're wrong" is
-  //   itself the strongest signal in this dataset, regardless of our own posterior.
-  if(mktProb<50)return{edge,label:`mkt favors OPPOSITE side (${mktProb.toFixed(0)}% for us) — 47.1% hist WR when mkt disagrees w/ our dir (n=854)`,sit:true,warn:false,boost:false};
+  // ─────────────────────────────────────────────────────────────────────────
+  // V13.4.141 REVERT of the V13.4.140 "mktProb<50 = sit out" gate. DO NOT re-add
+  //   that gate on win-rate evidence. It was justified by a WIN-RATE audit, and on
+  //   a binary market win rate is NOT profit: EV = WR − entryCost. Re-audit of the
+  //   same 15m export on an EV basis (n=3238 real-traded, excl. counterfactual
+  //   sitout tiers, incl. est. Kalshi fees) showed the gate removed the single most
+  //   profitable band and kept the least profitable one:
+  //     entry cost <50c : WR 48.6% → netEV +5.07c/ct → +$31.55   ← was GATED OUT
+  //     entry cost >=50c: WR 65.1% → netEV +0.46c/ct → +$12.11   ← was KEPT
+  //   Cheap entries lose more often but pay ~2:1 when they hit; expensive entries
+  //   win often and pay almost nothing. The cheap band also survives execution cost
+  //   (+3c slippage → still +2.04c/ct) while the expensive band goes NEGATIVE at
+  //   just +1c slippage (−0.52c/ct). Optimizing win rate here actively destroys EV.
+  //   CAVEAT for whoever tunes this next: the cheap band's edge is concentrated in
+  //   2026-05 (+8.66c/ct, n=395); 2026-06 onward is roughly flat (−0.71c/ct, n=204).
+  //   So this is "do not blanket-ban cheap entries", NOT "always buy cheap".
+  // ─────────────────────────────────────────────────────────────────────────
   // If market disagrees strongly: sit out (market has info we don't)
   if(edge<=-12)return{edge,label:`mkt prices ${mktProb.toFixed(0)}%, our post=${posterior.toFixed(0)}% (-${Math.abs(edge).toFixed(0)}pp edge deficit)`,sit:true,warn:false,boost:false};
   if(edge<=-6)return{edge,label:`weak Kalshi edge (${edge.toFixed(0)}pp vs market)`,sit:false,warn:true,boost:false};
-  // V13.4.140 AUDIT: edge>=10 ("mkt mispriced") used to BOOST quality/size. Same audit:
-  //   edge>=12pp converts at only 58% WR excluding already-gated tiers (n=1396) — below
-  //   the 64.6% dataset baseline, dragged down by time-cap-commit (990 @ 59.2%) and
-  //   directional-lock (75 @ 45.3%). Large disagreement with the market, in OUR favor,
-  //   usually means our model is wrong, not the market. Some tiers inside this band
-  //   (tape-led 75.6%, super-confluence 71.4%) are still genuinely good, but they already
-  //   get credited via _V11_TIER_WR below — so this signal is downgraded from an
-  //   automatic boost to neutral rather than flipped into a blanket penalty.
-  if(edge>=12)return{edge,label:`large disagreement w/ mkt +${edge.toFixed(0)}pp — 58% hist WR ex-gated (n=1396), not a green light`,sit:false,warn:false,boost:false};
+  if(edge>=10)return{edge,label:`strong Kalshi edge +${edge.toFixed(0)}pp (mkt mispriced)`,sit:false,warn:false,boost:true};
   return{edge,label:`Kalshi edge ${edge>=0?'+':''}${edge.toFixed(0)}pp`,sit:false,warn:false,boost:false};
 };
 
@@ -5093,8 +5092,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.05-v13.4.140-kalshi-edge-gate-retune-15m-audit';
-const TARA_VERSION_DISPLAY='Tara 13.4.140';
+const BASELINE_VERSION='2026.08.05-v13.4.141-revert-140-winrate-gate-ev-audit';
+const TARA_VERSION_DISPLAY='Tara 13.4.141';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
