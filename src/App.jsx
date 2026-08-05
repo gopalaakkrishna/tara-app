@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.05-v13.4.133-hourly-memory-band-gate';
-const TARA_VERSION_DISPLAY='Tara 13.4.133';
+const BASELINE_VERSION='2026.08.05-v13.4.135-weather-removed';
+const TARA_VERSION_DISPLAY='Tara 13.4.135';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15485,33 +15485,65 @@ function HourlyMemoryModal({onClose}){
   const{rec}=useHourlyRecord();
   const[filter,setFilter]=React.useState('all');
   const history=Array.isArray(rec.history)?rec.history:[];
+  // V13.4.134 FIX: `won` is the real, computed win/loss (h.won boolean, set at
+  //   settlement time). `h.result` is Kalshi's RAW settlement string ('yes'/'no') --
+  //   using it as if it were a WIN/LOSS label was the bug behind the confusing 'yes'/
+  //   'no' text in the list (a NO side that settles 'no' is a WIN, but the raw string
+  //   said 'no', reading like a loss). Centralized here so every consumer below agrees.
+  const isWin=(h)=>h.won===true;
+  const isLoss=(h)=>h.won===false;
   const filtered=React.useMemo(()=>{
     let arr=[...history].reverse();
-    if(filter==='wins')arr=arr.filter(h=>h.result==='WIN'||h.won===true);
-    else if(filter==='losses')arr=arr.filter(h=>h.result==='LOSS'||h.won===false);
+    if(filter==='wins')arr=arr.filter(isWin);
+    else if(filter==='losses')arr=arr.filter(isLoss);
     return arr;
   },[history,filter]);
-  const totalSettled=rec.w+rec.l;
-  const wr=totalSettled>0?Math.round(100*rec.w/totalSettled):null;
+  // V13.4.134 FIX: 'Total calls' was showing history.length, which _hrSave caps at
+  //   the last 200 (storage limit) -- so it could never match Wins+Losses, which read
+  //   the real uncapped lifetime counters (rec.w/rec.l). Total now reflects the same
+  //   lifetime source those numbers come from; the browsable list below is still
+  //   capped to the last 200 settled (that's a storage limit, not a lie, so it's
+  //   labeled as such instead of pretending to be the whole history).
   const pendingN=Array.isArray(rec.pending)?rec.pending.length:0;
-  // Band breakdown -- the real story for the hourly ladder specifically. Older
-  //   entries (pre-V13.4.133) may not carry a `band` field; grouped as 'unbanded'.
-  const bandStats=React.useMemo(()=>{
-    const order=['85%','77%','67%','~52% (coin flip this early)','unbanded'];
+  const totalSettled=rec.w+rec.l;
+  const totalLifetime=totalSettled+pendingN;
+  const wr=totalSettled>0?Math.round(100*rec.w/totalSettled):null;
+  // Two categorization dimensions, not one: by time-left-at-lock band (the ladder's
+  //   own real lever, see MAX_MINS_LEFT_TO_LOCK) and by side (YES vs NO -- cheap to
+  //   compute, and a real question: does this engine call UP-equivalent (YES) locks
+  //   better than DOWN-equivalent (NO) ones, independent of timing).
+  const _groupBy=(keyFn,order)=>{
     const groups={};
     for(const h of history){
-      const key=h.band||'unbanded';
+      const key=keyFn(h);
       if(!groups[key])groups[key]={w:0,l:0,net:0};
-      if(h.result==='WIN'||h.won===true)groups[key].w+=1;
-      else if(h.result==='LOSS'||h.won===false)groups[key].l+=1;
+      if(isWin(h))groups[key].w+=1;
+      else if(isLoss(h))groups[key].l+=1;
       groups[key].net+=Number(h.netCents)||0;
     }
-    return order.filter(k=>groups[k]).map(k=>({label:k,...groups[k]}));
-  },[history]);
-  const resultColor=(h)=>{
-    const w=h.result==='WIN'||h.won===true;
-    const l=h.result==='LOSS'||h.won===false;
-    return w?'rgba(40,204,149,0.95)':l?'rgba(255,77,106,0.95)':'rgba(237,237,237,0.4)';
+    const keys=order?order.filter(k=>groups[k]):Object.keys(groups);
+    return keys.map(k=>({label:k,...groups[k]}));
+  };
+  const bandStats=React.useMemo(()=>_groupBy(
+    h=>h.band||'before time-band tracking (V13.4.133+)',
+    ['85%','77%','67%','~52% (coin flip this early)','before time-band tracking (V13.4.133+)'],
+  ),[history]);
+  const sideStats=React.useMemo(()=>_groupBy(
+    h=>h.side==='YES'?'YES (UP-equiv)':h.side==='NO'?'NO (DOWN-equiv)':'unknown',
+    ['YES (UP-equiv)','NO (DOWN-equiv)','unknown'],
+  ),[history]);
+  const resultColor=(h)=>isWin(h)?'rgba(40,204,149,0.95)':isLoss(h)?'rgba(255,77,106,0.95)':'rgba(237,237,237,0.4)';
+  const resultLabel=(h)=>isWin(h)?'WIN':isLoss(h)?'LOSS':'--';
+  const _catCard=(c)=>{
+    const n=c.w+c.l;
+    const bwr=n>0?Math.round(100*c.w/n):null;
+    return(
+      <div key={c.label} className="rounded-xl p-3" style={{background:'rgba(237,237,237,0.03)',border:'1px solid rgba(237,237,237,0.08)'}}>
+        <div className="text-[10px] text-[#EDEDED]/45">{c.label}</div>
+        <div className="text-lg font-mono font-semibold mt-0.5" style={{color:bwr==null?'#EDEDED':bwr>=60?'#28CC95':bwr>=45?'#D4A24C':'#FF4D6A'}}>{bwr!=null?bwr+'%':'--'}</div>
+        <div className="text-[10px] text-[#EDEDED]/40">{c.w}W&middot;{c.l}L{c.net?(' · '+(c.net>=0?'+':'')+c.net+'c'):''}</div>
+      </div>
+    );
   };
   return(
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4" onClick={onClose}>
@@ -15525,7 +15557,7 @@ function HourlyMemoryModal({onClose}){
         </div>
         <div className="p-5 grid grid-cols-2 sm:grid-cols-5 gap-2">
           {[
-            {label:'Total calls',value:history.length,color:'#EDEDED'},
+            {label:'Total calls',value:totalLifetime,color:'#EDEDED'},
             {label:'Win rate',value:wr!=null?wr+'%':'--',color:'#28CC95'},
             {label:'Wins',value:rec.w,color:'#28CC95'},
             {label:'Losses',value:rec.l,color:'#FF4D6A'},
@@ -15537,22 +15569,17 @@ function HourlyMemoryModal({onClose}){
             </div>
           ))}
         </div>
+        <div className="px-5 pb-1 text-[10px] text-[#EDEDED]/35">List below shows the most recent {Math.min(200,history.length)} settled (storage keeps the last 200; the totals above are the real lifetime count).</div>
         {bandStats.length>0&&(
-          <div className="px-5 pb-4">
+          <div className="px-5 pt-3 pb-2">
             <div className="text-[10px] text-[#EDEDED]/45 mb-1.5">Win rate by time-left-at-lock band</div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {bandStats.map(b=>{
-                const n=b.w+b.l;
-                const bwr=n>0?Math.round(100*b.w/n):null;
-                return(
-                  <div key={b.label} className="rounded-xl p-3" style={{background:'rgba(237,237,237,0.03)',border:'1px solid rgba(237,237,237,0.08)'}}>
-                    <div className="text-[10px] text-[#EDEDED]/45">{b.label}</div>
-                    <div className="text-lg font-mono font-semibold mt-0.5" style={{color:bwr==null?'#EDEDED':bwr>=60?'#28CC95':bwr>=45?'#D4A24C':'#FF4D6A'}}>{bwr!=null?bwr+'%':'--'}</div>
-                    <div className="text-[10px] text-[#EDEDED]/40">{b.w}W&middot;{b.l}L{b.net?(' · '+(b.net>=0?'+':'')+b.net+'c'):''}</div>
-                  </div>
-                );
-              })}
-            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{bandStats.map(_catCard)}</div>
+          </div>
+        )}
+        {sideStats.length>0&&(
+          <div className="px-5 pb-4">
+            <div className="text-[10px] text-[#EDEDED]/45 mb-1.5">Win rate by side</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{sideStats.map(_catCard)}</div>
           </div>
         )}
         <div className="px-5 pb-3 flex gap-2">
@@ -15575,7 +15602,7 @@ function HourlyMemoryModal({onClose}){
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[#EDEDED]/40">{h.at||''}</span>
-                <span className="font-semibold" style={{color:resultColor(h)}}>{h.result||(h.won===true?'WIN':h.won===false?'LOSS':'--')}</span>
+                <span className="font-semibold" style={{color:resultColor(h)}}>{resultLabel(h)}</span>
               </div>
             </div>
           ))}
@@ -25839,474 +25866,6 @@ function ChartBottomCard({mobileTab,resolution,setResolution,asset,priceSource})
 
 // ── V111: MobileTabBar - 4 tabs: signal/projections/logs/chart ──
 
-// ── V11.2.5 WEATHER ENGINE ────────────────────────────────────────────────────
-//   Fixes: CORS → all fetches via /api/kalshi-public + /api/openmeteo + /api/nws
-//   Adds:  NWS station history, climatology normals, multi-category market discovery
-//   Signal stack per bracket: Open-Meteo GFS ensemble + NWS hourly obs + climatology
-//
-//   Proxy routes (vercel.json):
-//     /api/kalshi-public/* → external-api.kalshi.com/trade-api/v2/*  (no auth)
-//     /api/openmeteo/*     → api.open-meteo.com/v1/*
-//     /api/nws/*           → api.weather.gov/*
-
-// City config — all series Kalshi runs
-const WEATHER_CITIES=[
-  {name:'NYC',  series:['KXHIGHNY','KXLOWNY'],  lat:40.7128, lon:-74.0060, tz:'America/New_York',   nwsStation:'KNYC', label:'New York City'},
-  {name:'CHI',  series:['KXHIGHCHI','KXLOWCHI'], lat:41.8781, lon:-87.6298, tz:'America/Chicago',    nwsStation:'KORD', label:'Chicago'},
-  {name:'MIA',  series:['KXHIGHMIA','KXLOWMIA'], lat:25.7617, lon:-80.1918, tz:'America/New_York',   nwsStation:'KMIA', label:'Miami'},
-  {name:'LA',   series:['KXHIGHLAX','KXLOWLAX'], lat:34.0522, lon:-118.2437,tz:'America/Los_Angeles',nwsStation:'KLAX', label:'Los Angeles'},
-  {name:'DEN',  series:['KXHIGHDEN'],             lat:39.7392, lon:-104.9903,tz:'America/Denver',     nwsStation:'KDEN', label:'Denver'},
-];
-
-// Additional non-temp market series (snow/rain/hurricanes/tornadoes)
-const EXTRA_SERIES=[
-  {series:'KXSNOWNYC',  label:'NYC Snowfall',     cat:'snow'},
-  {series:'KXRAINHOU',  label:'Houston Rain',     cat:'precip'},
-  {series:'KXRAINCHI',  label:'Chicago Rain',     cat:'precip'},
-  {series:'KXTORNADO',  label:'Tornadoes/month',  cat:'storm'},
-  {series:'KXHURRICANE',label:'Hurricanes',       cat:'storm'},
-];
-
-// Parse Kalshi bracket subtitle → numeric range
-function parseBracket(subtitle){
-  if(!subtitle)return null;
-  // "85° to 86°" or "85 to 86"
-  const rng=subtitle.match(/(-?\d+(?:\.\d+)?)\s*[°℉]?\s*to\s*(-?\d+(?:\.\d+)?)/i);
-  if(rng)return{lo:parseFloat(rng[1]),hi:parseFloat(rng[2])};
-  // "Above 275" or "> 85°"
-  const abv=subtitle.match(/(?:above|>)\s*(-?\d+(?:\.\d+)?)/i);
-  if(abv)return{lo:parseFloat(abv[1]),hi:Infinity};
-  // "Below 85°" or "< 85"
-  const blw=subtitle.match(/(?:below|<)\s*(-?\d+(?:\.\d+)?)/i);
-  if(blw)return{lo:-Infinity,hi:parseFloat(blw[1])};
-  return null;
-}
-
-// Normal CDF approx (Abramowitz & Stegun)
-function normCDF(z){
-  if(z>6)return 1; if(z<-6)return 0;
-  const t=1/(1+0.2316419*Math.abs(z));
-  const d=0.3989423*Math.exp(-0.5*z*z);
-  const p=d*t*(0.319381530+t*(-0.356563782+t*(1.781477937+t*(-1.821255978+t*1.330274429))));
-  return z>=0?1-p:p;
-}
-
-// P(lo <= X <= hi) where X ~ N(mean, sigma)
-function bracketProb(lo,hi,mean,sigma){
-  const pHi=hi===Infinity?1:normCDF((hi+0.5-mean)/sigma);
-  const pLo=lo===-Infinity?0:normCDF((lo-0.5-mean)/sigma);
-  return Math.max(0,Math.min(1,pHi-pLo));
-}
-
-// Score all brackets for a city given forecast inputs
-// Returns sorted by |edge| descending
-function scoreAllBrackets(markets, forecastHi, sigma, climatologyHi){
-  if(!markets?.length||!forecastHi)return[];
-  // Blend: 70% GFS forecast, 30% climatology if available
-  const blended=climatologyHi?0.7*forecastHi+0.3*climatologyHi:forecastHi;
-  return markets.map(m=>{
-    const br=parseBracket(m.subtitle);
-    if(!br)return{...m,forecastProb:null,edge:null,call:null};
-    const prob=bracketProb(br.lo,br.hi,blended,sigma);
-    const mktYesCents=(m.yes_bid!=null&&m.yes_ask!=null)
-      ?Math.round((m.yes_bid+m.yes_ask)/2)
-      :(m.last_price||50);
-    const mktProb=mktYesCents/100;
-    const edge=prob-mktProb;
-    const call=Math.abs(edge)>=0.07?(edge>0?'YES':'NO'):null;
-    return{
-      ticker:m.ticker, subtitle:m.subtitle,
-      volume:m.volume||0, volume24h:m.volume_24h||0,
-      mktYes:mktYesCents,
-      forecastProb:Math.round(prob*100),
-      blendedForecast:Math.round(blended*10)/10,
-      edge:Math.round(edge*100),
-      call,
-    };
-  }).filter(m=>m.forecastProb!=null)
-    .sort((a,b)=>Math.abs(b.edge||0)-Math.abs(a.edge||0));
-}
-
-// ManualWeatherEntry — for non-temp markets (precip, hurricane, etc.)
-function ManualWeatherEntry({onLock}){
-  const[draft,setDraft]=React.useState({market:'',yesPrice:'',myRead:'',notes:''});
-  const lock=()=>{
-    if(!draft.market.trim()||!draft.myRead)return;
-    onLock({
-      id:Date.now(), market:draft.market.trim(),
-      yesPrice:parseFloat(draft.yesPrice)||null,
-      myRead:draft.myRead, notes:draft.notes.trim(),
-      lockedAt:Date.now(), result:null, settledAt:null,
-      source:'manual',
-    });
-    setDraft({market:'',yesPrice:'',myRead:'',notes:''});
-  };
-  return React.createElement('div',{className:'flex flex-col gap-2'},
-    React.createElement('div',{className:'flex gap-2'},
-      React.createElement('input',{value:draft.market,onChange:e=>setDraft(p=>({...p,market:e.target.value})),
-        placeholder:'Market name e.g. "Rain in Seattle this month · Above 2 inches"',
-        className:'flex-1 bg-[#0A0A0A] border border-[#2A2A2A] rounded-lg px-3 py-2 text-sm text-[#EDEDED] placeholder-[#EDEDED]/20 focus:outline-none focus:border-sky-500/40'}),
-      React.createElement('input',{value:draft.yesPrice,onChange:e=>setDraft(p=>({...p,yesPrice:e.target.value})),
-        type:'number',min:1,max:99,placeholder:'YES ¢',
-        className:'w-24 bg-[#0A0A0A] border border-[#2A2A2A] rounded-lg px-3 py-2 text-sm text-[#EDEDED] placeholder-[#EDEDED]/20 focus:outline-none focus:border-sky-500/40'})
-    ),
-    React.createElement('div',{className:'flex items-center gap-2'},
-      React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40 font-bold uppercase tracking-wider'},'My read:'),
-      ['YES','NO'].map(r=>React.createElement('button',{key:r,onClick:()=>setDraft(p=>({...p,myRead:r})),
-        className:'px-4 py-1.5 rounded-lg text-sm font-bold border transition-all '+(draft.myRead===r
-          ?(r==='YES'?'bg-emerald-500/25 text-emerald-300 border-emerald-500/50':'bg-rose-500/25 text-rose-300 border-rose-500/50')
-          :'border-[#2A2A2A] text-[#EDEDED]/40')},r)),
-      React.createElement('input',{value:draft.notes,onChange:e=>setDraft(p=>({...p,notes:e.target.value})),
-        placeholder:'Why (optional)',
-        className:'flex-1 bg-[#0A0A0A] border border-[#2A2A2A] rounded-lg px-3 py-2 text-sm text-[#EDEDED] placeholder-[#EDEDED]/20 focus:outline-none focus:border-sky-500/40'}),
-      React.createElement('button',{onClick:lock,
-        disabled:!draft.market.trim()||!draft.myRead,
-        className:'px-4 py-2 rounded-lg text-sm font-bold border transition-all disabled:opacity-30',
-        style:{background:'rgba(212,175,55,0.15)',color:'#C9A961',border:'1px solid rgba(212,175,55,0.35)'}
-      },'\uD83D\uDD12 LOCK')
-    )
-  );
-}
-
-function WeatherTab({weatherLog,setWeatherLog}){
-  const[cityData,setCityData]=React.useState({}); // name → {markets,forecast,nwsObs,climatology,scored,loading,err}
-  const[extraData,setExtraData]=React.useState({}); // series → {markets,loading,err}
-  const[activeCity,setActiveCity]=React.useState('NYC');
-  const[activeView,setActiveView]=React.useState('temp'); // 'temp' | 'extra' | 'log'
-  const[filter,setFilter]=React.useState('all');
-  const[lastFetch,setLastFetch]=React.useState(0);
-  const fetchingRef=React.useRef(false);
-
-  const resolved=weatherLog.filter(e=>e.result==='WIN'||e.result==='LOSS');
-  const pending=weatherLog.filter(e=>!e.result);
-  const wr=resolved.length?Math.round(100*resolved.filter(e=>e.result==='WIN').length/resolved.length):null;
-
-  const fetchCity=React.useCallback(async(city)=>{
-    setCityData(prev=>({...prev,[city.name]:{...prev[city.name],loading:true,err:null}}));
-    try{
-      // ── 1. Kalshi markets (HIGH + LOW series) via proxy ──
-      const allMkts=[];
-      for(const ser of city.series){
-        try{
-          const r=await fetch(`/api/kalshi-public/markets?series_ticker=${ser}&status=open&limit=20`);
-          if(r.ok){const d=await r.json();(d.markets||[]).forEach(m=>{if(m.status==='open')allMkts.push(m);});}
-        }catch(_){}
-      }
-
-      // ── 2. Open-Meteo GFS ensemble (free, via proxy) ──
-      let forecastHi=null,forecastLo=null,precipProb=null,sigma=3.5;
-      try{
-        const omr=await fetch(
-          `/api/openmeteo/forecast?latitude=${city.lat}&longitude=${city.lon}`+
-          `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max`+
-          `&hourly=temperature_2m`+
-          `&temperature_unit=fahrenheit&forecast_days=3&timezone=${encodeURIComponent(city.tz)}`
-        );
-        if(omr.ok){
-          const om=await omr.json();
-          forecastHi=om.daily?.temperature_2m_max?.[0]?Math.round(om.daily.temperature_2m_max[0]):null;
-          forecastLo=om.daily?.temperature_2m_min?.[0]?Math.round(om.daily.temperature_2m_min[0]):null;
-          precipProb=om.daily?.precipitation_probability_max?.[0]??null;
-          // Sigma from diurnal range: wider range = more uncertainty in peak timing
-          if(forecastHi&&forecastLo){
-            const range=forecastHi-forecastLo;
-            sigma=Math.max(2.0,Math.min(5.5,range*0.22));
-          }
-        }
-      }catch(_){}
-
-      // ── 3. NWS hourly observation (latest actual temp) ──
-      let nwsObs=null;
-      try{
-        const nr=await fetch(`/api/nws/stations/${city.nwsStation}/observations/latest`);
-        if(nr.ok){
-          const nd=await nr.json();
-          const tC=nd.properties?.temperature?.value;
-          if(tC!=null)nwsObs={tempF:Math.round(tC*9/5+32),time:nd.properties?.timestamp};
-        }
-      }catch(_){}
-
-      // ── 4. Score brackets ──
-      const scored=scoreAllBrackets(allMkts,forecastHi,sigma,null);
-
-      setCityData(prev=>({...prev,[city.name]:{
-        markets:allMkts,
-        forecast:{hi:forecastHi,lo:forecastLo,precipProb,sigma:Math.round(sigma*10)/10},
-        nwsObs,
-        scored,
-        loading:false,err:null,
-        updatedAt:Date.now(),
-      }}));
-    }catch(e){
-      setCityData(prev=>({...prev,[city.name]:{...prev[city.name],loading:false,err:e.message||String(e)}}));
-    }
-  },[]);
-
-  const fetchExtra=React.useCallback(async()=>{
-    for(const s of EXTRA_SERIES){
-      setExtraData(prev=>({...prev,[s.series]:{...prev[s.series],loading:true,err:null,label:s.label,cat:s.cat}}));
-      try{
-        const r=await fetch(`/api/kalshi-public/markets?series_ticker=${s.series}&status=open&limit=30`);
-        if(r.ok){
-          const d=await r.json();
-          setExtraData(prev=>({...prev,[s.series]:{markets:d.markets||[],loading:false,err:null,label:s.label,cat:s.cat}}));
-        }else{setExtraData(prev=>({...prev,[s.series]:{...prev[s.series],loading:false,err:'HTTP '+r.status}}));}
-      }catch(e){setExtraData(prev=>({...prev,[s.series]:{...prev[s.series],loading:false,err:e.message}}));}
-    }
-  },[]);
-
-  const fetchAll=React.useCallback(async(force)=>{
-    if(fetchingRef.current&&!force)return;
-    if(!force&&Date.now()-lastFetch<120000)return;
-    fetchingRef.current=true;
-    setLastFetch(Date.now());
-    await Promise.all([
-      ...WEATHER_CITIES.map(c=>fetchCity(c)),
-      fetchExtra(),
-    ]);
-    fetchingRef.current=false;
-  },[lastFetch,fetchCity,fetchExtra]);
-
-  React.useEffect(()=>{fetchAll(true);},[]);
-
-  const lockCall=(market,city,call)=>{
-    const cd=cityData[city.name];
-    const entry={
-      id:Date.now(),
-      market:`${city.name}: ${market.subtitle}`,
-      series:city.series[0], ticker:market.ticker,
-      yesPrice:market.mktYes,
-      myRead:call,
-      forecastProb:market.forecastProb,
-      edge:market.edge,
-      notes:`GFS ${cd?.forecast?.hi??'?'}°F ± ${cd?.forecast?.sigma??'?'}°F`+
-            (cd?.nwsObs?` · NWS now: ${cd.nwsObs.tempF}°F`:''),
-      lockedAt:Date.now(), result:null, settledAt:null,
-      source:'tara-engine',
-    };
-    const next=[entry,...weatherLog].slice(0,500);
-    setWeatherLog(next);
-    try{localStorage.setItem('taraWeatherLog_v1',JSON.stringify(next));}catch(_){}
-  };
-
-  const settle=(id,result)=>{
-    const next=weatherLog.map(e=>e.id===id?{...e,result,settledAt:Date.now()}:e);
-    setWeatherLog(next);
-    try{localStorage.setItem('taraWeatherLog_v1',JSON.stringify(next));}catch(_){}
-  };
-
-  const del=(id)=>{
-    const next=weatherLog.filter(e=>e.id!==id);
-    setWeatherLog(next);
-    try{localStorage.setItem('taraWeatherLog_v1',JSON.stringify(next));}catch(_){}
-  };
-
-  const curCity=WEATHER_CITIES.find(c=>c.name===activeCity);
-  const curCityData=cityData[activeCity];
-  const displayLog=filter==='pending'?pending:filter==='resolved'?resolved:weatherLog;
-
-  // ── render ──────────────────────────────────────────────────────────────────
-  return React.createElement('div',{className:'flex flex-col gap-3 w-full'},
-
-    // top stats
-    React.createElement('div',{className:'flex flex-wrap items-center gap-2 shrink-0'},
-      React.createElement('div',{className:'flex items-center gap-2 bg-[#171717] border border-[#1F1F1F] rounded-xl px-3 py-2'},
-        React.createElement('span',{className:'text-[10px] text-[#EDEDED]/40 font-bold uppercase tracking-wider'},'WR'),
-        React.createElement('span',{className:'text-lg font-serif font-bold',style:{color:wr===null?'rgba(237,237,237,0.4)':wr>=60?'rgb(40,204,149)':'rgb(255,77,106)'}},wr===null?'—':wr+'%'),
-        React.createElement('span',{className:'text-[10px] text-[#EDEDED]/25'},resolved.length+' settled · '+pending.length+' pending')
-      ),
-      // best call badge
-      curCityData?.scored?.find(s=>s.call)&&React.createElement('div',{
-        className:'flex items-center gap-2 bg-[#171717] border border-sky-500/30 rounded-xl px-3 py-2'},
-        React.createElement('span',{className:'text-[9px] text-sky-400 font-bold uppercase tracking-wider'},'TARA EDGE'),
-        React.createElement('span',{className:'text-sm font-bold text-[#EDEDED]'},
-          activeCity+' '+curCityData.scored.find(s=>s.call).subtitle),
-        React.createElement('span',{
-          className:'text-xs font-bold px-2 py-0.5 rounded-lg',
-          style:{background:curCityData.scored.find(s=>s.call).call==='YES'?'rgba(40,204,149,0.2)':'rgba(255,77,106,0.2)',
-                 color:curCityData.scored.find(s=>s.call).call==='YES'?'rgb(40,204,149)':'rgb(255,77,106)'}},
-          curCityData.scored.find(s=>s.call).call+' '+Math.abs(curCityData.scored.find(s=>s.call).edge)+'pt edge')
-      ),
-      React.createElement('button',{onClick:()=>fetchAll(true),
-        className:'ml-auto flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider border border-[#1F1F1F] text-[#EDEDED]/40 hover:text-sky-300 hover:border-sky-500/30 transition-all'},
-        '\u27F3 Refresh')
-    ),
-
-    // view switcher
-    React.createElement('div',{className:'flex gap-1.5 shrink-0'},
-      [['temp','Daily Temp'],['extra','Snow/Rain/Storms'],['log','My Log ('+weatherLog.length+')']].map(([v,l])=>
-        React.createElement('button',{key:v,onClick:()=>setActiveView(v),
-          className:'px-3 py-1.5 rounded-lg text-xs font-bold border transition-all '+(activeView===v?'bg-sky-500/20 text-sky-200 border-sky-500/40':'border-[#1F1F1F] text-[#EDEDED]/40 hover:text-sky-300')
-        },l)
-      )
-    ),
-
-    // ── TEMP VIEW ──
-    activeView==='temp'&&React.createElement('div',{className:'flex flex-col gap-3'},
-      // city tabs
-      React.createElement('div',{className:'flex gap-1.5 flex-wrap'},
-        WEATHER_CITIES.map(city=>{
-          const cd=cityData[city.name];
-          const best=cd?.scored?.find(s=>s.call);
-          return React.createElement('button',{key:city.name,onClick:()=>setActiveCity(city.name),
-            className:'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all '+(activeCity===city.name?'bg-sky-500/20 text-sky-200 border-sky-500/40':'border-[#1F1F1F] text-[#EDEDED]/50 hover:border-sky-500/20 hover:text-sky-300')
-          },
-            city.name,
-            cd?.forecast?.hi!=null&&React.createElement('span',{className:'text-[10px] font-mono opacity-70'},cd.forecast.hi+'°F'),
-            best&&React.createElement('span',{className:'text-[8px] font-bold px-1 py-0.5 rounded-lg',
-              style:{background:best.call==='YES'?'rgba(40,204,149,0.2)':'rgba(255,77,106,0.2)',
-                     color:best.call==='YES'?'rgb(40,204,149)':'rgb(255,77,106)'}},best.call),
-            cd?.loading&&React.createElement('span',{className:'text-[8px] opacity-40 animate-pulse'},'…')
-          );
-        })
-      ),
-
-      // forecast header
-      curCityData&&React.createElement('div',{className:'bg-[#171717] border border-[#1F1F1F] rounded-xl p-3'},
-        React.createElement('div',{className:'flex flex-wrap items-center gap-3 mb-3'},
-          React.createElement('span',{className:'text-xs font-bold text-[#EDEDED]/70'},curCity?.label||activeCity),
-          curCityData.forecast?.hi!=null&&React.createElement('span',{className:'text-xs text-sky-300'},
-            'GFS: '+curCityData.forecast.hi+'°F high (±'+curCityData.forecast.sigma+'°F)'),
-          curCityData.forecast?.lo!=null&&React.createElement('span',{className:'text-xs text-[#EDEDED]/40'},
-            'Low: '+curCityData.forecast.lo+'°F'),
-          curCityData.forecast?.precipProb!=null&&React.createElement('span',{className:'text-xs text-blue-400'},
-            'Precip: '+curCityData.forecast.precipProb+'%'),
-          curCityData.nwsObs&&React.createElement('span',{className:'text-xs text-amber-400'},
-            'NWS now: '+curCityData.nwsObs.tempF+'°F'),
-          curCityData.loading&&React.createElement('span',{className:'text-[10px] text-[#EDEDED]/30 animate-pulse'},'fetching…'),
-          curCityData.err&&React.createElement('span',{className:'text-[10px] text-rose-400'},'⚠ '+curCityData.err)
-        ),
-
-        // brackets table
-        !curCityData.scored?.length&&!curCityData.loading&&React.createElement('div',{className:'text-center py-6 text-[#EDEDED]/25 text-sm'},
-          curCityData.err?'Could not fetch Kalshi markets — check proxy config':'No open markets for '+activeCity+' today'),
-
-        curCityData.scored?.length>0&&React.createElement('div',{className:'flex flex-col gap-1'},
-          // header row
-          React.createElement('div',{className:'flex items-center gap-3 px-2 pb-1 border-b border-[#1F1F1F]'},
-            React.createElement('span',{className:'flex-1 text-[9px] text-[#EDEDED]/30 font-bold uppercase'},'Bracket'),
-            React.createElement('span',{className:'w-12 text-right text-[9px] text-[#EDEDED]/30 font-bold uppercase'},'MKT'),
-            React.createElement('span',{className:'w-12 text-right text-[9px] text-[#EDEDED]/30 font-bold uppercase'},'GFS'),
-            React.createElement('span',{className:'w-16 text-right text-[9px] text-[#EDEDED]/30 font-bold uppercase'},'EDGE'),
-            React.createElement('span',{className:'w-16 text-right text-[9px] text-[#EDEDED]/30 font-bold uppercase'},'')
-          ),
-          ...curCityData.scored.map(m=>{
-            const hasEdge=Math.abs(m.edge||0)>=7;
-            const edgeColor=m.edge>0?'rgb(40,204,149)':'rgb(255,77,106)';
-            return React.createElement('div',{key:m.ticker,
-              className:'flex items-center gap-3 px-2 py-1.5 rounded-lg transition-all '+(hasEdge?'bg-[#EDEDED]/3':''),
-              style:{borderLeft:hasEdge?`2px solid ${edgeColor}`:'2px solid transparent'}},
-              React.createElement('span',{className:'flex-1 text-sm font-bold text-[#EDEDED]'},m.subtitle),
-              React.createElement('span',{className:'w-12 text-right text-sm font-mono text-[#EDEDED]/60'},m.mktYes+'¢'),
-              React.createElement('span',{className:'w-12 text-right text-sm font-mono',
-                style:{color:m.forecastProb>m.mktYes?'rgb(40,204,149)':'rgb(255,77,106)'}},
-                m.forecastProb+'%'),
-              React.createElement('span',{className:'w-16 text-right text-sm font-mono font-bold',style:{color:edgeColor}},
-                m.edge!=null?(m.edge>0?'+':'')+m.edge+'pt':'—'),
-              m.call
-                ?React.createElement('button',{
-                    onClick:()=>lockCall(m,curCity||WEATHER_CITIES[0],m.call),
-                    className:'w-16 text-xs font-bold px-2 py-1 rounded-lg border transition-all text-right',
-                    style:{background:m.call==='YES'?'rgba(40,204,149,0.15)':'rgba(255,77,106,0.15)',
-                           color:m.call==='YES'?'rgb(40,204,149)':'rgb(255,77,106)',
-                           borderColor:m.call==='YES'?'rgba(40,204,149,0.3)':'rgba(255,77,106,0.3)'}
-                  },'\uD83D\uDD12 '+m.call)
-                :React.createElement('span',{className:'w-16'})
-            );
-          })
-        )
-      )
-    ),
-
-    // ── EXTRA (snow/rain/storm) VIEW ──
-    activeView==='extra'&&React.createElement('div',{className:'flex flex-col gap-3'},
-      EXTRA_SERIES.map(s=>{
-        const ed=extraData[s.series];
-        const CAT_COLOR={snow:'rgb(186,230,253)',precip:'rgb(96,165,250)',storm:'rgb(251,146,60)'};
-        const col=CAT_COLOR[s.cat]||'rgb(237,237,237)';
-        return React.createElement('div',{key:s.series,className:'bg-[#171717] border border-[#1F1F1F] rounded-xl p-4'},
-          React.createElement('div',{className:'flex items-center gap-2 mb-3'},
-            React.createElement('span',{className:'text-xs font-bold px-2 py-0.5 rounded-lg',
-              style:{background:col+'22',color:col,border:'1px solid '+col+'44'}},s.cat.toUpperCase()),
-            React.createElement('span',{className:'text-sm font-bold text-[#EDEDED]'},s.label),
-            ed?.loading&&React.createElement('span',{className:'text-[9px] text-[#EDEDED]/30 animate-pulse'},'fetching…'),
-            ed?.err&&React.createElement('span',{className:'text-[10px] text-rose-400'},'⚠ '+ed.err)
-          ),
-          (!ed?.markets?.length&&!ed?.loading)&&React.createElement('div',{className:'text-[#EDEDED]/25 text-sm py-2'},'No open markets'),
-          ed?.markets?.length>0&&React.createElement('div',{className:'flex flex-col gap-1.5'},
-            ...ed.markets.slice(0,6).map(m=>
-              React.createElement('div',{key:m.ticker,className:'flex items-center gap-3 px-2 py-1.5 rounded-lg bg-[#EDEDED]/2'},
-                React.createElement('span',{className:'flex-1 text-sm text-[#EDEDED]/80'},m.subtitle||m.title||m.ticker),
-                React.createElement('span',{className:'text-xs font-mono text-[#EDEDED]/50'},
-                  'YES: '+Math.round((m.yes_bid||m.yes_ask||0))+'¢'),
-                m.volume>0&&React.createElement('span',{className:'text-[9px] text-[#EDEDED]/25'},'vol '+m.volume)
-              )
-            )
-          ),
-          // manual lock for non-temp
-          React.createElement('div',{className:'mt-3 pt-3 border-t border-[#1F1F1F]'},
-            React.createElement(ManualWeatherEntry,{onLock:(entry)=>{
-              const next=[{...entry,market:s.label+' · '+entry.market},...weatherLog].slice(0,500);
-              setWeatherLog(next);
-              try{localStorage.setItem('taraWeatherLog_v1',JSON.stringify(next));}catch(_){}
-            }})
-          )
-        );
-      })
-    ),
-
-    // ── LOG VIEW ──
-    activeView==='log'&&React.createElement('div',{className:'flex flex-col gap-2'},
-      React.createElement('div',{className:'flex gap-2 shrink-0'},
-        ['all','pending','resolved'].map(f=>
-          React.createElement('button',{key:f,onClick:()=>setFilter(f),
-            className:'px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border transition-all '+(filter===f?'bg-sky-500/20 text-sky-200 border-sky-500/40':'text-[#EDEDED]/30 border-[#1F1F1F]')
-          },f==='all'?'ALL ('+weatherLog.length+')':f==='pending'?'PENDING ('+pending.length+')':'SETTLED ('+resolved.length+')')
-        )
-      ),
-      displayLog.length===0&&React.createElement('div',{className:'text-center py-10 text-[#EDEDED]/20 text-sm'},'No predictions yet — lock a call from the markets above'),
-      ...displayLog.map(e=>{
-        const isPending=!e.result; const isWin=e.result==='WIN';
-        const cost=e.myRead==='YES'?e.yesPrice:(e.yesPrice!=null?100-e.yesPrice:null);
-        const ev=e.result&&cost!=null?(isWin?100-cost:-cost):null;
-        return React.createElement('div',{key:e.id,
-          className:'rounded-xl border p-3 flex flex-col sm:flex-row sm:items-center gap-3',
-          style:{borderColor:isPending?'rgba(237,237,237,0.1)':isWin?'rgba(40,204,149,0.3)':'rgba(255,77,106,0.3)',
-                 background:isPending?'#171717':isWin?'rgba(40,204,149,0.04)':'rgba(255,77,106,0.04)'}},
-          React.createElement('div',{className:'flex-1 min-w-0'},
-            React.createElement('div',{className:'text-sm font-bold text-[#EDEDED] truncate'},e.market),
-            React.createElement('div',{className:'text-[10px] text-[#EDEDED]/35 mt-0.5'},
-              e.notes||'—',
-              e.lockedAt?' · '+new Date(e.lockedAt).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''
-            )
-          ),
-          React.createElement('div',{className:'flex items-center gap-2 shrink-0'},
-            React.createElement('span',{className:'text-xs font-bold px-2.5 py-1 rounded-lg border',
-              style:{background:e.myRead==='YES'?'rgba(40,204,149,0.15)':'rgba(255,77,106,0.15)',
-                     color:e.myRead==='YES'?'rgb(40,204,149)':'rgb(255,77,106)',
-                     borderColor:e.myRead==='YES'?'rgba(40,204,149,0.3)':'rgba(255,77,106,0.3)'}
-            },e.myRead+(cost!=null?' · '+cost+'¢':'')),
-            ev!=null&&React.createElement('span',{className:'text-xs font-bold',style:{color:ev>0?'rgb(40,204,149)':'rgb(255,77,106)'}},(ev>0?'+':'')+ev.toFixed(0)+'c')
-          ),
-          isPending
-            ?React.createElement('div',{className:'flex gap-1.5 shrink-0'},
-                React.createElement('button',{onClick:()=>settle(e.id,'WIN'),className:'px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/40 text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 transition-all'},'WIN'),
-                React.createElement('button',{onClick:()=>settle(e.id,'LOSS'),className:'px-3 py-1.5 rounded-lg text-xs font-bold border border-rose-500/40 text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 transition-all'},'LOSS'),
-                React.createElement('button',{onClick:()=>del(e.id),className:'px-2 py-1.5 text-[#EDEDED]/20 hover:text-rose-400 border border-[#1F1F1F] rounded-lg text-xs'},'\u00d7')
-              )
-            :React.createElement('div',{className:'flex gap-1.5 shrink-0'},
-                React.createElement('span',{className:'px-3 py-1 rounded-lg text-xs font-bold border',
-                  style:{background:isWin?'rgba(40,204,149,0.2)':'rgba(255,77,106,0.2)',
-                         color:isWin?'rgb(40,204,149)':'rgb(255,77,106)',
-                         borderColor:isWin?'rgba(40,204,149,0.4)':'rgba(255,77,106,0.4)'}},e.result),
-                React.createElement('button',{onClick:()=>del(e.id),className:'px-2 py-1.5 text-[#EDEDED]/20 hover:text-rose-400 border border-[#1F1F1F] rounded-lg text-xs'},'\u00d7')
-              )
-        );
-      })
-    )
-  );
-}
-
 const MobileTabBar=React.memo(function MobileTabBar({mobileTab,setMobileTab,setShowBrain,setShowStats}){
   const tabs=[
     {id:'signal',label:'SIGNAL'},
@@ -30851,13 +30410,6 @@ function TaraApp(){
   // V138: Clean up stale Premium Mode localStorage entry from previous installs
   useEffect(()=>{try{localStorage.removeItem('taraPremiumMode');}catch(e){}},[]);
   const[mobileTab,setMobileTab]=useState('signal'); // signal | chart | logs
-  const[activeMode,setActiveMode]=useState('trading'); // 'trading' | 'weather'
-  const[weatherLog,setWeatherLog]=useState(()=>{
-    try{const r=localStorage.getItem('taraWeatherLog_v1');return r?JSON.parse(r):[]; }catch(_){return[];}
-  });
-  const[weatherDraft,setWeatherDraft]=useState({
-    market:'',yesPrice:'',myRead:'',notes:''
-  });
   // V9.16: New simplified default layout. simpleMode=true shows the new
   //   Overview layout (call + coach + chart + session bar). simpleMode=false
   //   shows the V9.15 legacy layout exactly as before — failsafe during the
@@ -46230,14 +45782,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               })}
             </div>
 
-            {/* WEATHER TAB TOGGLE */}
-            <button onClick={()=>setActiveMode(m=>m==='weather'?'trading':'weather')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wide border transition-all ${activeMode==='weather'?'bg-sky-500/20 text-sky-300 border-sky-500/40':'border-[#2A2A2A] text-[#EDEDED]/40 hover:text-sky-300 hover:border-sky-500/30'}`}
-              title='Weather prediction markets'
-            >
-              <span>⛅</span>
-              <span className='hidden sm:inline'>WEATHER</span>
-            </button>
             {/* window fixed at 15m, 5m removed v13.3.0 */}
 
             {/* Sound */}
@@ -46732,8 +46276,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         className="flex-1 w-full max-w-[1600px] mx-auto px-2 sm:px-3 lg:px-4 py-2 sm:py-3 flex flex-col gap-3 min-h-0 min-w-0 overflow-x-hidden"
       >
         
-        {/* V7.10.6: Market context strip — hidden in weather mode */}
-        {activeMode==='trading'&&<MarketContextStrip
+        {/* V7.10.6: Market context strip */}
+        <MarketContextStrip
           useLocalTime={useLocalTime}
           timeFormat={timeFormat}
           taraLearnings={taraLearnings}
@@ -46741,21 +46285,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           currentAsset={currentAsset}
           analysis={analysis}
           currentStreak={currentStreak}
-        />}
+        />
 
-        {/* V9.10.2: Unified Today card — hidden in weather mode */}
-        {activeMode==='trading'&&<UnifiedTodayCard
+        {/* V9.10.2: Unified Today card */}
+        <UnifiedTodayCard
           todayData={todayData}
           bestWindowsToday={bestWindowsToday}
           tickHistoryRef={tickHistoryRef}
           upcomingMacro={getUpcomingMacroEvents(new Date(),24)}
           timeFormat={timeFormat}
           settings={tradingSettings}
-        />}
+        />
 
 
-        {/* STATS BAR — hidden in weather mode */}
-        <div className={'bg-[#171717] rounded-xl border border-[#1F1F1F] shadow-md relative overflow-hidden shrink-0'} style={{display:activeMode==='weather'?'none':''}}>
+        {/* STATS BAR */}
+        <div className={'bg-[#171717] rounded-xl border border-[#1F1F1F] shadow-md relative overflow-hidden shrink-0'}>
           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-emerald-500 via-indigo-500 to-purple-500 opacity-70"></div>
           <div className="p-2 sm:p-3 flex flex-wrap lg:flex-nowrap lg:flex-row lg:items-center gap-2 sm:gap-3 overflow-x-hidden">
             
@@ -47279,25 +46823,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   with no awkward intermediate stage. Tablet users get cleaner stacked layout. */}
         {/* V8.4: min-w-0 on grid + columns prevents content overflow from forcing
             the grid to stretch wider than viewport. auto-rows-fr keeps cols same height. */}
-        {/* V11.2.3b: WEATHER MODE — replaces main grid when active */}
-        {activeMode==='weather'&&(
-          <div className='flex flex-col gap-3 flex-1 min-h-0'>
-            <div className='flex items-center gap-2 shrink-0'>
-              <span className='text-base font-serif text-[#EDEDED]/80'>⛅ Weather Markets</span>
-              <span className='text-[10px] text-[#EDEDED]/30 font-bold uppercase tracking-wider'>Kalshi prediction tracker</span>
-              <button onClick={()=>setActiveMode('trading')} className='ml-auto text-[10px] text-[#EDEDED]/30 hover:text-[#EDEDED]/70 border border-[#1F1F1F] px-2 py-1 rounded-lg transition-all'>
-                ← back to BTC
-              </button>
-            </div>
-            <WeatherTab
-              weatherLog={weatherLog}
-              setWeatherLog={setWeatherLog}
-              weatherDraft={weatherDraft}
-              setWeatherDraft={setWeatherDraft}
-            />
-          </div>
-        )}
-        {activeMode==='trading'&&(
         <>
         <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr] gap-3 shrink-0 lg:auto-rows-fr min-w-0 pb-16 lg:pb-0">
           
@@ -47607,7 +47132,6 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
         <ChartBottomCard mobileTab={mobileTab} resolution={resolution} setResolution={setResolution} asset={currentAsset} priceSource={priceSource}/>
         </>
-        )}
 
       {/* ── FLOW INTELLIGENCE PANEL ── */}
       <FlowPanel showWhaleLog={showWhaleLog} setShowWhaleLog={setShowWhaleLog} flowSignal={flowSignal} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} timeState={timeState} timeFormat={timeFormat}/>
