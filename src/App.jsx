@@ -5131,8 +5131,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.05-v13.4.142-exec-cost-bidask-logging';
-const TARA_VERSION_DISPLAY='Tara 13.4.142';
+const BASELINE_VERSION='2026.08.05-v13.4.143-signal-ev-panel';
+const TARA_VERSION_DISPLAY='Tara 13.4.143';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -25485,6 +25485,95 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
     });
     return Object.entries(m).map(([k,v])=>{const[regime,dir]=k.split('|');const n=v.W+v.L;return{regime,dir,W:v.W,L:v.L,n,wr:n>0?v.W/n:0};}).filter(r=>r.n>=3).sort((a,b)=>b.n-a.n);
   },[resolved]);
+  // ── V13.4.143: SIGNAL EV — does each signal actually earn its keep? ──────────
+  //   For every signal stamped in signalScoresAtLock, split the resolved trades by
+  //   whether that signal AGREED with the direction actually taken (sign match), and
+  //   compare net EV per contract between the agree and disagree groups.
+  //
+  //   Why EV and not win rate: on a binary market the price already encodes the win
+  //   rate, so WR alone says nothing about profit. EV = (WR × 100) − entryCost − fee.
+  //   A signal carries real information only if EV is HIGHER when it agreed. A large
+  //   negative edge means the signal is anti-predictive and should be cut or inverted.
+  //
+  //   Entry cost prefers execCostAtLock (the true tradeable ask/bid recorded from
+  //   V13.4.142); it falls back to the kalshiAtLock MID, which is optimistic by about
+  //   half the spread. `usingExec` reports which basis the numbers are actually on.
+  const signalEV=React.useMemo(()=>{
+    const rows=[];
+    const pool=(resolved||[]).filter(e=>
+      e&&e.signalScoresAtLock&&typeof e.signalScoresAtLock==='object'&&
+      (e.result==='WIN'||e.result==='LOSS')&&(e.dir==='UP'||e.dir==='DOWN'));
+    if(!pool.length)return{rows:[],n:0,coverage:0,regimes:[],usingExec:0};
+
+    // Entry cost in cents for a trade (true exec price if we have it, else mid).
+    const costOf=(e)=>{
+      if(typeof e.execCostAtLock==='number'&&isFinite(e.execCostAtLock)&&e.execCostAtLock>0&&e.execCostAtLock<100)return e.execCostAtLock;
+      const k=Number(e.kalshiAtLock);
+      if(!isFinite(k)||k<=0||k>=100)return null;
+      return e.dir==='UP'?k:(100-k);
+    };
+    const feeOf=(c)=>0.07*(c/100)*(1-c/100)*100;
+    const group=(list)=>{
+      const n=list.length; if(!n)return null;
+      const w=list.filter(e=>e.result==='WIN').length;
+      const priced=list.map(e=>({e,c:costOf(e)})).filter(x=>x.c!=null);
+      let g=0,f=0;
+      for(const {e,c} of priced){g+=(e.result==='WIN')?(100-c):(-c);f+=feeOf(c);}
+      return{n,wr:100*w/n,nPriced:priced.length,ev:priced.length?(g-f)/priced.length:null};
+    };
+
+    // Only sign-bearing directional scores. Excludes internal diagnostics (_prefixed)
+    //   and absolute levels like vwap, where a positive value means nothing directional.
+    const NOT_DIR=new Set(['vwap','timeOfDay']);
+    const range={};
+    for(const e of pool)for(const [k,v] of Object.entries(e.signalScoresAtLock)){
+      if(typeof v!=='number'||!isFinite(v))continue;
+      if(k.startsWith('_')||NOT_DIR.has(k))continue;
+      const r=range[k]=range[k]||{min:v,max:v,n:0};
+      r.min=Math.min(r.min,v);r.max=Math.max(r.max,v);r.n++;
+    }
+    for(const k of Object.keys(range)){
+      const r=range[k];
+      if(Math.abs(r.max)>1000||Math.abs(r.min)>1000)continue; // price-like, not a score
+      const agree=[],dis=[];
+      for(const e of pool){
+        const v=e.signalScoresAtLock[k];
+        if(typeof v!=='number'||!isFinite(v)||v===0)continue;
+        ((v>0)===(e.dir==='UP')?agree:dis).push(e);
+      }
+      const A=group(agree),D=group(dis);
+      const nonZero=(A?A.n:0)+(D?D.n:0);
+      // INERT means the signal is (near) ALWAYS ZERO — a ratio, never a raw count.
+      //   An inert signal that still carries a real weight is itself the finding
+      //   (e.g. structure/technical/regime are zeroed inside CHOP regimes, so their
+      //   weight of 35 multiplies nothing). Judging this needs a usable pool: with a
+      //   handful of trades "4 non-zero of 4" is a small sample, NOT an inert signal.
+      const ratio=pool.length?nonZero/pool.length:0;
+      if(ratio<0.10){rows.push({k,kind:'inert',nonZero,total:pool.length});continue;}
+      // Non-zero, but every trade fell on one side — no contrast, nothing to compare.
+      if(!A||!D||A.nPriced===0||D.nPriced===0){
+        rows.push({k,kind:'nocontrast',nonZero,total:pool.length,
+          side:(!D||D.nPriced===0)?'always agreed':'always disagreed'});
+        continue;
+      }
+      rows.push({k,kind:'live',A,D,edge:(A.ev!=null&&D.ev!=null)?A.ev-D.ev:null,
+        thin:Math.min(A.nPriced,D.nPriced)<30});
+    }
+    const order={live:0,nocontrast:1,inert:2};
+    rows.sort((a,b)=>{
+      if(order[a.kind]!==order[b.kind])return order[a.kind]-order[b.kind];
+      return (b.edge??-9999)-(a.edge??-9999);
+    });
+    const regs={};
+    for(const e of pool){const r=e.regimeV12||e.regime||'?';regs[r]=(regs[r]||0)+1;}
+    return{
+      rows,n:pool.length,
+      coverage:(resolved||[]).length?100*pool.length/(resolved||[]).length:0,
+      regimes:Object.entries(regs).sort((a,b)=>b[1]-a[1]),
+      usingExec:pool.filter(e=>typeof e.execCostAtLock==='number'&&isFinite(e.execCostAtLock)).length,
+    };
+  },[resolved]);
+
   // ── P&L by asset ──
   const pnlByAsset=React.useMemo(()=>{
     const out={BTC:{trades:0,pnl:0,curve:[]}};
@@ -25561,6 +25650,91 @@ function TaraAnalyticsPage({taraCallLog,taraMLModel,onClose,timeFormat}){
                 ))
               )
             )
+          )
+        ),
+        // ═══ SIGNAL EV (V13.4.143) ═══
+        React.createElement('div',null,
+          React.createElement('div',{className:'flex items-baseline justify-between mb-1'},
+            React.createElement('div',{className:'text-[10px] uppercase tracking-[0.18em] font-bold text-[#EDEDED]/50'},'Signal EV · does each signal earn its keep'),
+            React.createElement('span',{className:'text-[9px] tabular-nums text-[#EDEDED]/35'},
+              `${signalEV.n} of ${resolved.length} trades carry signal data (${signalEV.coverage.toFixed(1)}%)`)
+          ),
+          React.createElement('div',{className:'text-[10px] text-[#EDEDED]/40 mb-2 leading-relaxed'},
+            'Net EV per contract when a signal AGREED with the direction taken, vs when it disagreed. Win rate alone is meaningless here — the price already encodes it. A signal only carries information if EV is higher when it agreed.',
+            signalEV.usingExec>0
+              ?React.createElement('span',{style:{color:'rgb(40,204,149)'}},` · ${signalEV.usingExec} priced on true exec cost`)
+              :React.createElement('span',{style:{color:'rgba(212,162,76,0.9)'}},' · priced on MID (optimistic by ~½ spread until exec data accrues)')
+          ),
+          signalEV.regimes.length>0&&React.createElement('div',{className:'text-[9px] text-[#EDEDED]/35 mb-2'},
+            'regime mix: ',signalEV.regimes.map(([r,c])=>`${r} ${Math.round(100*c/signalEV.n)}%`).join(' · ')
+          ),
+          signalEV.rows.length===0||signalEV.n<20
+            ?React.createElement('div',{className:'text-[11px] text-[#EDEDED]/45 italic p-3 rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'},
+              signalEV.n===0
+                ?'No signal data yet — signalScoresAtLock stamps on each new lock. Check back after more windows resolve.'
+                :`Only ${signalEV.n} trade${signalEV.n===1?'':'s'} carry signal data so far — too few to judge any signal. Needs ~20+ to show a first read, ~200+ to be trustworthy.`)
+            :React.createElement('div',{className:'overflow-x-auto rounded-lg bg-[#0A0A0A] border border-[#1F1F1F]'},
+              React.createElement('table',{className:'w-full text-[10px] tabular-nums',style:{minWidth:560}},
+                React.createElement('thead',null,
+                  React.createElement('tr',{style:{borderBottom:'1px solid #1F1F1F'}},
+                    React.createElement('th',{className:'text-left text-[#EDEDED]/40 px-2 py-1.5 font-bold'},'signal'),
+                    React.createElement('th',{className:'text-right text-[#EDEDED]/40 px-1 py-1.5'},'n·agree'),
+                    React.createElement('th',{className:'text-right text-[#EDEDED]/40 px-1 py-1.5'},'WR'),
+                    React.createElement('th',{className:'text-right text-[#EDEDED]/40 px-1 py-1.5'},'EV'),
+                    React.createElement('th',{className:'text-right text-[#EDEDED]/40 px-1 py-1.5'},'n·dis'),
+                    React.createElement('th',{className:'text-right text-[#EDEDED]/40 px-1 py-1.5'},'WR'),
+                    React.createElement('th',{className:'text-right text-[#EDEDED]/40 px-1 py-1.5'},'EV'),
+                    React.createElement('th',{className:'text-right text-[#EDEDED]/40 px-2 py-1.5 font-bold'},'EV edge'),
+                    React.createElement('th',{className:'text-left text-[#EDEDED]/40 px-2 py-1.5'},'verdict')
+                  )
+                ),
+                React.createElement('tbody',null,
+                  signalEV.rows.map(r=>{
+                    if(r.kind==='inert'){
+                      return React.createElement('tr',{key:r.k,style:{borderBottom:'1px solid rgba(31,31,31,0.6)'}},
+                        React.createElement('td',{className:'px-2 py-1 text-[#EDEDED]/45'},r.k),
+                        React.createElement('td',{className:'px-1 py-1 text-center text-[#EDEDED]/25',colSpan:7},
+                          `zero on ${r.total-r.nonZero} of ${r.total} trades`),
+                        React.createElement('td',{className:'px-2 py-1 text-left',style:{color:'rgba(212,162,76,0.9)'}},'INERT — carries weight, contributes ~0')
+                      );
+                    }
+                    if(r.kind==='nocontrast'){
+                      return React.createElement('tr',{key:r.k,style:{borderBottom:'1px solid rgba(31,31,31,0.6)'}},
+                        React.createElement('td',{className:'px-2 py-1 text-[#EDEDED]/45'},r.k),
+                        React.createElement('td',{className:'px-1 py-1 text-center text-[#EDEDED]/25',colSpan:7},
+                          `${r.side} on all ${r.nonZero} non-zero trades`),
+                        React.createElement('td',{className:'px-2 py-1 text-left text-[#EDEDED]/35'},'no contrast yet — cannot compare')
+                      );
+                    }
+                    const e=r.edge;
+                    const col=e==null?'rgba(237,237,237,0.5)':e>=4?'rgb(40,204,149)':e>=1.5?'rgba(40,204,149,0.75)':e<=-4?'rgb(255,77,106)':e<=-1.5?'rgba(255,77,106,0.75)':'rgba(237,237,237,0.5)';
+                    const verdict=e==null?'—'
+                      :e>=4?'strong — real information'
+                      :e>=1.5?'positive'
+                      :e<=-4?'ANTI-PREDICTIVE — cut or invert'
+                      :e<=-1.5?'negative'
+                      :'noise — weight toward zero';
+                    const evCell=(v)=>React.createElement('td',{className:'px-1 py-1 text-right',style:{color:v==null?'rgba(237,237,237,0.3)':v>=0?'rgba(40,204,149,0.9)':'rgba(255,77,106,0.9)'}},
+                      v==null?'—':`${v>=0?'+':''}${v.toFixed(2)}`);
+                    return React.createElement('tr',{key:r.k,style:{borderBottom:'1px solid rgba(31,31,31,0.6)'}},
+                      React.createElement('td',{className:'px-2 py-1 text-[#EDEDED]/80 font-bold'},r.k),
+                      React.createElement('td',{className:'px-1 py-1 text-right text-[#EDEDED]/50'},r.A.n),
+                      React.createElement('td',{className:'px-1 py-1 text-right text-[#EDEDED]/60'},`${r.A.wr.toFixed(0)}%`),
+                      evCell(r.A.ev),
+                      React.createElement('td',{className:'px-1 py-1 text-right text-[#EDEDED]/50'},r.D.n),
+                      React.createElement('td',{className:'px-1 py-1 text-right text-[#EDEDED]/60'},`${r.D.wr.toFixed(0)}%`),
+                      evCell(r.D.ev),
+                      React.createElement('td',{className:'px-2 py-1 text-right font-bold',style:{color:col}},
+                        e==null?'—':`${e>=0?'+':''}${e.toFixed(2)}¢`),
+                      React.createElement('td',{className:'px-2 py-1 text-left text-[10px]',style:{color:col}},
+                        verdict,r.thin?React.createElement('span',{className:'text-[#EDEDED]/30'},' (thin)'):null)
+                    );
+                  })
+                )
+              )
+            ),
+          React.createElement('div',{className:'text-[9px] text-[#EDEDED]/30 mt-1.5 leading-relaxed'},
+            'Caveats: samples flagged (thin) have <30 priced trades on one side and are unreliable. Many signals are tested at once, so some edge appears by chance. Signals zeroed by regime rules (e.g. technical/bos in CHOP) show as INERT — that is a weighting finding, not a bug.'
           )
         ),
         // ═══ P&L BY ASSET ═══
