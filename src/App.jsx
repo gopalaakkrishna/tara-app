@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.05-v13.4.135-weather-removed';
-const TARA_VERSION_DISPLAY='Tara 13.4.135';
+const BASELINE_VERSION='2026.08.05-v13.4.136-hourly-memory-day-grouped';
+const TARA_VERSION_DISPLAY='Tara 13.4.136';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15592,20 +15592,62 @@ function HourlyMemoryModal({onClose}){
         </div>
         <div className="px-5 pb-5 max-h-[50vh] overflow-y-auto">
           {filtered.length===0&&<div className="text-[12px] text-[#EDEDED]/40 py-6 text-center">No hourly locks logged yet.</div>}
-          {filtered.map((h,i)=>(
-            <div key={i} className="py-2 border-b flex items-center justify-between text-[12px]" style={{borderColor:'rgba(237,237,237,0.06)'}}>
-              <div className="flex items-center gap-2">
-                <span style={{color:h.side==='YES'?'#28CC95':'#FF4D6A'}}>{h.side==='YES'?'▲':'▼'} {h.side}</span>
-                <span className="text-[#EDEDED]/70">strike ${h.strike}</span>
-                <span className="text-[#EDEDED]/40">{h.cost}c</span>
-                {h.band&&<span className="text-[10px] text-[#EDEDED]/30">{h.band}</span>}
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[#EDEDED]/40">{h.at||''}</span>
-                <span className="font-semibold" style={{color:resultColor(h)}}>{resultLabel(h)}</span>
-              </div>
-            </div>
-          ))}
+          {/* V13.4.136: day-grouped with sticky headers + per-day WR, matching the 15m
+              TARA MEMORY page's pattern -- explicit user request: 'saved into each hourly
+              window... like how do we for 15 mins windows'. Groups by settledAt (the real
+              settlement timestamp every history entry carries); pending locks have no
+              settledAt yet so they group under 'In progress' at the top. */}
+          {(()=>{
+            const _dayKeyFor=(ms)=>{try{return new Date(ms).toLocaleDateString('en-US',{year:'numeric',month:'2-digit',day:'2-digit'});}catch(_e){return'unknown';}};
+            const _byDay=new Map();
+            filtered.forEach(h=>{
+              const k=h.settledAt?_dayKeyFor(h.settledAt):'pending';
+              if(!_byDay.has(k))_byDay.set(k,[]);
+              _byDay.get(k).push(h);
+            });
+            const _days=Array.from(_byDay.entries());
+            return _days.map(([dayKey,entries])=>{
+              const isPendingGroup=dayKey==='pending';
+              const dayLabel=isPendingGroup?'In progress':new Date(entries[0].settledAt).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+              const w=entries.filter(isWin).length;
+              const l=entries.filter(isLoss).length;
+              const resolved=w+l;
+              const dayWr=resolved>0?Math.round(100*w/resolved):null;
+              const wrColor=dayWr==null?'rgba(237,237,237,0.4)':dayWr>=70?'rgb(40,204,149)':dayWr>=55?'rgba(237,237,237,0.85)':dayWr>=45?'rgba(201,169,97,0.85)':'rgb(255,77,106)';
+              return(
+                <div key={dayKey}>
+                  <div className="sticky top-0 z-10 py-2 flex items-baseline justify-between gap-2 backdrop-blur-md" style={{background:'#0A0A0A',borderBottom:'1px solid rgba(237,237,237,0.10)'}}>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[11px] uppercase font-bold tracking-[0.14em]" style={{color:'#D4A24C'}}>{dayLabel}</span>
+                      <span className="text-[9px] tabular-nums text-[#EDEDED]/35">{entries.length} lock{entries.length===1?'':'s'}</span>
+                    </div>
+                    {dayWr!=null&&(
+                      <div className="flex items-baseline gap-2 text-[10px] tabular-nums">
+                        <span style={{color:wrColor}} className="font-bold">{dayWr}% WR</span>
+                        <span className="text-[#EDEDED]/35">{w}W&middot;{l}L</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="divide-y" style={{borderColor:'rgba(237,237,237,0.06)'}}>
+                    {entries.map((h,i)=>(
+                      <div key={i} className="py-2 flex items-center justify-between text-[12px]">
+                        <div className="flex items-center gap-2">
+                          <span style={{color:h.side==='YES'?'#28CC95':'#FF4D6A'}}>{h.side==='YES'?'▲':'▼'} {h.side}</span>
+                          <span className="text-[#EDEDED]/70">strike ${h.strike}</span>
+                          <span className="text-[#EDEDED]/40">{h.cost}c</span>
+                          {h.band&&<span className="text-[10px] text-[#EDEDED]/30">{h.band}</span>}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[#EDEDED]/40">{h.at||''}</span>
+                          <span className="font-semibold" style={{color:resultColor(h)}}>{resultLabel(h)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            });
+          })()}
         </div>
       </div>
     </div>
