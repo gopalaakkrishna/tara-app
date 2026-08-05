@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.04-v13.4.132-null-price-guard-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.132';
+const BASELINE_VERSION='2026.08.05-v13.4.133-hourly-memory-band-gate';
+const TARA_VERSION_DISPLAY='Tara 13.4.133';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15472,7 +15472,121 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
     })(),
   );
 }
+// V13.4.133: HOURLY MEMORY MODAL. Explicit user request: 'i want hourlys to have a
+//   log memory section like [the 15m TARA MEMORY page] too.' Mirrors that page's
+//   visual language (stat cards, win rate, chronological list) but scoped to the
+//   hourly ladder's own data (rec.history from useHourlyRecord) and its own real
+//   dimension of interest -- accuracy BAND (85/77/67%/coin-flip), not tier, since
+//   the hourly ladder borrows its direction from the main engine and its own
+//   variable is purely how much time was left on the clock at lock (see the
+//   MAX_MINS_LEFT_TO_LOCK fix a few lines below in HourlyLadderPanel -- this modal is
+//   what makes that fix's effect visible over time instead of just trusted blind).
+function HourlyMemoryModal({onClose}){
+  const{rec}=useHourlyRecord();
+  const[filter,setFilter]=React.useState('all');
+  const history=Array.isArray(rec.history)?rec.history:[];
+  const filtered=React.useMemo(()=>{
+    let arr=[...history].reverse();
+    if(filter==='wins')arr=arr.filter(h=>h.result==='WIN'||h.won===true);
+    else if(filter==='losses')arr=arr.filter(h=>h.result==='LOSS'||h.won===false);
+    return arr;
+  },[history,filter]);
+  const totalSettled=rec.w+rec.l;
+  const wr=totalSettled>0?Math.round(100*rec.w/totalSettled):null;
+  const pendingN=Array.isArray(rec.pending)?rec.pending.length:0;
+  // Band breakdown -- the real story for the hourly ladder specifically. Older
+  //   entries (pre-V13.4.133) may not carry a `band` field; grouped as 'unbanded'.
+  const bandStats=React.useMemo(()=>{
+    const order=['85%','77%','67%','~52% (coin flip this early)','unbanded'];
+    const groups={};
+    for(const h of history){
+      const key=h.band||'unbanded';
+      if(!groups[key])groups[key]={w:0,l:0,net:0};
+      if(h.result==='WIN'||h.won===true)groups[key].w+=1;
+      else if(h.result==='LOSS'||h.won===false)groups[key].l+=1;
+      groups[key].net+=Number(h.netCents)||0;
+    }
+    return order.filter(k=>groups[k]).map(k=>({label:k,...groups[k]}));
+  },[history]);
+  const resultColor=(h)=>{
+    const w=h.result==='WIN'||h.won===true;
+    const l=h.result==='LOSS'||h.won===false;
+    return w?'rgba(40,204,149,0.95)':l?'rgba(255,77,106,0.95)':'rgba(237,237,237,0.4)';
+  };
+  return(
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4" onClick={onClose}>
+      <div className="w-full max-w-3xl rounded-2xl border mt-8 mb-8" style={{background:'#0A0A0A',borderColor:'rgba(237,237,237,0.10)'}} onClick={e=>e.stopPropagation()}>
+        <div className="p-5 border-b flex items-start justify-between" style={{borderColor:'rgba(237,237,237,0.10)'}}>
+          <div>
+            <div className="text-[10px] uppercase tracking-wide" style={{color:'rgba(212,162,76,0.8)'}}>TARA &middot; HOURLY MEMORY</div>
+            <div className="text-xl font-semibold text-[#EDEDED] mt-1">Every hourly lock &middot; her record</div>
+          </div>
+          <button onClick={onClose} className="text-[#EDEDED]/50 hover:text-[#EDEDED] text-xl leading-none">&times;</button>
+        </div>
+        <div className="p-5 grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {[
+            {label:'Total calls',value:history.length,color:'#EDEDED'},
+            {label:'Win rate',value:wr!=null?wr+'%':'--',color:'#28CC95'},
+            {label:'Wins',value:rec.w,color:'#28CC95'},
+            {label:'Losses',value:rec.l,color:'#FF4D6A'},
+            {label:'Open',value:pendingN,color:'#D4A24C'},
+          ].map(c=>(
+            <div key={c.label} className="rounded-xl p-3" style={{background:'rgba(237,237,237,0.03)',border:'1px solid rgba(237,237,237,0.08)'}}>
+              <div className="text-[10px] text-[#EDEDED]/45">{c.label}</div>
+              <div className="text-xl font-mono font-semibold mt-0.5" style={{color:c.color}}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+        {bandStats.length>0&&(
+          <div className="px-5 pb-4">
+            <div className="text-[10px] text-[#EDEDED]/45 mb-1.5">Win rate by time-left-at-lock band</div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {bandStats.map(b=>{
+                const n=b.w+b.l;
+                const bwr=n>0?Math.round(100*b.w/n):null;
+                return(
+                  <div key={b.label} className="rounded-xl p-3" style={{background:'rgba(237,237,237,0.03)',border:'1px solid rgba(237,237,237,0.08)'}}>
+                    <div className="text-[10px] text-[#EDEDED]/45">{b.label}</div>
+                    <div className="text-lg font-mono font-semibold mt-0.5" style={{color:bwr==null?'#EDEDED':bwr>=60?'#28CC95':bwr>=45?'#D4A24C':'#FF4D6A'}}>{bwr!=null?bwr+'%':'--'}</div>
+                    <div className="text-[10px] text-[#EDEDED]/40">{b.w}W&middot;{b.l}L{b.net?(' · '+(b.net>=0?'+':'')+b.net+'c'):''}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        <div className="px-5 pb-3 flex gap-2">
+          {[['all','all'],['wins','wins'],['losses','losses']].map(([k,label])=>(
+            <button key={k} onClick={()=>setFilter(k)}
+              className="text-[11px] px-2.5 py-1 rounded-lg capitalize"
+              style={filter===k?{background:'rgba(212,162,76,0.15)',color:'#D4A24C',border:'1px solid rgba(212,162,76,0.35)'}:{background:'rgba(237,237,237,0.04)',color:'rgba(237,237,237,0.5)',border:'1px solid rgba(237,237,237,0.08)'}}
+            >{label}</button>
+          ))}
+        </div>
+        <div className="px-5 pb-5 max-h-[50vh] overflow-y-auto">
+          {filtered.length===0&&<div className="text-[12px] text-[#EDEDED]/40 py-6 text-center">No hourly locks logged yet.</div>}
+          {filtered.map((h,i)=>(
+            <div key={i} className="py-2 border-b flex items-center justify-between text-[12px]" style={{borderColor:'rgba(237,237,237,0.06)'}}>
+              <div className="flex items-center gap-2">
+                <span style={{color:h.side==='YES'?'#28CC95':'#FF4D6A'}}>{h.side==='YES'?'▲':'▼'} {h.side}</span>
+                <span className="text-[#EDEDED]/70">strike ${h.strike}</span>
+                <span className="text-[#EDEDED]/40">{h.cost}c</span>
+                {h.band&&<span className="text-[10px] text-[#EDEDED]/30">{h.band}</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[#EDEDED]/40">{h.at||''}</span>
+                <span className="font-semibold" style={{color:resultColor(h)}}>{h.result||(h.won===true?'WIN':h.won===false?'LOSS':'--')}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 function HourlyLadderPanel({spot,taraCall}){
+  // V13.4.133: hourly memory modal toggle, added alongside the export button.
+  const[_hourlyMemOpen,_setHourlyMemOpen]=React.useState(false);
   const nowMs=Date.now();
   const minsToHour=(60-new Date(nowMs).getMinutes())-(new Date(nowMs).getSeconds()/60);
   const lad=useHourlyLadder(minsToHour);
@@ -15550,7 +15664,15 @@ function HourlyLadderPanel({spot,taraCall}){
     //       refused outright rather than quietly stacked on top of it.
     const FLIP_TICKS=CONFIRM_TICKS*2;
     const needTicks=(last&&last.dir!==dir)?FLIP_TICKS:CONFIRM_TICKS;
-    if(dir&&L.ticks>=needTicks&&eligible.length&&minsLeft>1.5&&coolOk&&L.locks.length<MAX_LOCKS){
+    // V13.4.133 FIX: the barrier model's own documented accuracy (comment above --
+    //   85% at 15min, 77% at 30, 67% at 45, ~52%/coin-flip beyond that) was being
+    //   tagged on every lock but never actually GATED -- the only time restriction was
+    //   minsLeft>1.5, meaning the ~52% coin-flip zone locked exactly as freely as the
+    //   85% zone. Real aggregate result: 194W-188L, 51% -- almost exactly what blending
+    //   a genuinely strong late-hour signal with a genuinely random early-hour one would
+    //   produce. Cutting the coin-flip band entirely; keeping 67/77/85%.
+    const MAX_MINS_LEFT_TO_LOCK=45;
+    if(dir&&L.ticks>=needTicks&&eligible.length&&minsLeft>1.5&&minsLeft<=MAX_MINS_LEFT_TO_LOCK&&coolOk&&L.locks.length<MAX_LOCKS){
       const side=dir==='UP'?'YES':'NO';
       const pick=eligible.find(c=>!L.locks.some(x=>x.strike===c.r.strike&&x.side===side))||null;
       const contradicts=(k)=>L.locks.some(x=>{
@@ -15644,6 +15766,15 @@ function HourlyLadderPanel({spot,taraCall}){
           }
         }}
       >Export Hourly Log</button>
+      {/* V13.4.133: memory button, matching the 15m TARA MEMORY page's role for
+          the hourly ladder -- explicit user request, 'i want hourlys to have a log
+          memory section too.' */}
+      <button
+        className="ml-2 text-[11px] px-2.5 py-1 rounded-lg"
+        style={{background:'rgba(212,162,76,0.08)',color:'rgba(212,162,76,0.9)',border:'1px solid rgba(212,162,76,0.25)'}}
+        onClick={()=>_setHourlyMemOpen(true)}
+      >Memory</button>
+      {_hourlyMemOpen&&React.createElement(HourlyMemoryModal,{onClose:()=>_setHourlyMemOpen(false)})}
       {lad.err&&<div className="text-[11px] text-amber-400 mb-1">feed: {lad.err}</div>}
       {/* V13.4.115: real settlement history, inline, no console needed. Directly answers
           'theres no real logs to check and verify later' -- rec.history has always had this
