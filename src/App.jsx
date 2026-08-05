@@ -409,6 +409,45 @@ const _sigMax=(a,b)=>({
 let _v112Live={timing:'now',why:'',oddsCeil:null,kForDir:null,at:0};
 
 // ═══════════════════════════════════════════════════════════════════════════
+// V13.4.142 — LIVE KALSHI QUOTE (bid/ask), for true executable-cost logging.
+//
+// WHY THIS EXISTS: `kalshiAtLock` is the MID of yes_bid/yes_ask (see the price
+//   extraction in the Kalshi fetch effect). A mid is NOT a price you can trade at.
+//   Buying YES costs the ASK; buying NO costs (100 − BID). So every EV figure
+//   computed from kalshiAtLock is optimistic by roughly half the spread, on every
+//   single trade, in a compounding way.
+//
+// WHY IT MATTERS: an EV audit of the 2026-08-05 export (n=3238 real-traded 15m
+//   calls) put the whole strategy at +1.35c/contract before execution cost — and
+//   a mere +2c of slippage flips the book to NEGATIVE (-$3.22 vs +$43.66 at zero
+//   slippage). Execution cost is therefore the single largest unknown in the
+//   system, and it was entirely unmeasured: across 6,541 logged entries,
+//   entrySlippageBps / kalshiAtFill / entryFairValue were populated ZERO times,
+//   and every populated entryPrice traced back to the kalshi-at-lock fallback
+//   (entrySource was never once 'auto-exec-filled' or 'manual-logged').
+//
+// WHAT THIS GIVES US: stamping bid/ask at lock makes executable cost knowable
+//   immediately, from paper calls alone, without waiting for real fills to exist.
+//   execCostAtLock is what the trade would ACTUALLY have cost to enter.
+//   True EV per contract = (WR × 100) − execCostAtLock − fees.
+//
+// Written by the Kalshi poll; read by _logSnapshotEntry. Module-level (not state)
+//   so it never participates in hook ordering or triggers a re-render.
+let _kalshiQuote={bid:null,ask:null,mid:null,spread:null,at:0,ticker:null};
+
+// Executable entry cost in cents for a given direction, from the live quote.
+//   UP   → we buy YES → we pay the YES ask.
+//   DOWN → we buy NO  → we pay (100 − YES bid).
+// Returns null when the quote is missing/stale so callers can fall back to mid.
+const _execCostCents=(dir,maxAgeMs=60000)=>{
+  const q=_kalshiQuote;
+  if(!q||!q.at||(Date.now()-q.at)>maxAgeMs)return null;
+  if(dir==='UP')  return (q.ask!=null&&isFinite(q.ask))?q.ask:null;
+  if(dir==='DOWN')return (q.bid!=null&&isFinite(q.bid))?(100-q.bid):null;
+  return null;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
 // V11 SELECTIVITY ENGINE — data-driven gate on all directional snap commits.
 //   Basis: 2,736 resolved forward-test trades (live Kalshi, Jun 2026).
 //   Philosophy: remove verified drains, boost confirmed edges, add Kalshi edge
@@ -5092,8 +5131,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.05-v13.4.141-revert-140-winrate-gate-ev-audit';
-const TARA_VERSION_DISPLAY='Tara 13.4.141';
+const BASELINE_VERSION='2026.08.05-v13.4.142-exec-cost-bidask-logging';
+const TARA_VERSION_DISPLAY='Tara 13.4.142';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -35768,6 +35807,25 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const yes=best.yes_ask??best.yes_bid??best.last_price??null;
           if(yes!=null)yesCents=Number(yes);
         }
+        // V13.4.142: record the raw bid/ask behind that mid, so executable entry cost
+        //   (ask for YES, 100-bid for NO) is knowable at lock time. See _kalshiQuote.
+        //   Legacy integer-cent fields are accepted as a fallback for older payloads.
+        try{
+          const _bidC=yesBidDollars!=null?Math.round(parseFloat(yesBidDollars)*100)
+                     :(best.yes_bid!=null?Number(best.yes_bid):null);
+          const _askC=yesAskDollars!=null?Math.round(parseFloat(yesAskDollars)*100)
+                     :(best.yes_ask!=null?Number(best.yes_ask):null);
+          const _bidOK=_bidC!=null&&isFinite(_bidC)&&_bidC>=0&&_bidC<=100;
+          const _askOK=_askC!=null&&isFinite(_askC)&&_askC>=0&&_askC<=100;
+          _kalshiQuote={
+            bid:_bidOK?_bidC:null,
+            ask:_askOK?_askC:null,
+            mid:(yesCents!=null&&isFinite(yesCents))?yesCents:null,
+            spread:(_bidOK&&_askOK)?(_askC-_bidC):null,
+            at:Date.now(),
+            ticker:best.ticker||null,
+          };
+        }catch(_e){/* quote capture must never break the price feed */}
         // V13.4.59: TRUST GUARD -- accept the YES price only if the picked market is actually
         //   at-the-money (strike within 1% of spot). Blind fallback picks (no spot) and
         //   wrong-window / far-OTM markets surface as 0/4/99/100c poison; reject those so the
@@ -41916,6 +41974,37 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }:null,
           atrBpsAtLock:analysis?.atrBps??null,
           kalshiAtLock:snapshot.kalshiAtLock!=null?snapshot.kalshiAtLock:(typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null),
+          // V13.4.142: executable-cost fields. kalshiAtLock above is a MID and is NOT
+          //   tradeable; these record what entry would actually have cost. See the
+          //   _kalshiQuote block near the top of this file for the full rationale.
+          //   execCostAtLock is the number to use for EV work:
+          //     true EV/contract = (winRate × 100) − execCostAtLock − Kalshi fee
+          //   All null-safe: null simply means no fresh quote, and consumers should
+          //   fall back to the mid-derived cost (and know it is optimistic).
+          ...(()=>{
+            try{
+              const _dirNow=snapshot.call||snapshot.direction||null;
+              const _q=_kalshiQuote;
+              const _fresh=!!(_q&&_q.at&&(Date.now()-_q.at)<60000);
+              const _exec=_execCostCents(_dirNow);
+              const _midCost=(()=>{
+                const _m=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock)
+                        :(typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null);
+                if(_m==null||!isFinite(_m))return null;
+                return _dirNow==='UP'?_m:(_dirNow==='DOWN'?(100-_m):null);
+              })();
+              return{
+                kalshiBidAtLock:_fresh?_q.bid:null,
+                kalshiAskAtLock:_fresh?_q.ask:null,
+                kalshiSpreadAtLock:_fresh?_q.spread:null,
+                kalshiQuoteAgeMs:_fresh?(Date.now()-_q.at):null,
+                execCostAtLock:_exec,
+                // How much the tradeable price is worse than the mid we score on.
+                //   This is the per-trade execution drag, in cents.
+                midToExecCents:(_exec!=null&&_midCost!=null)?Math.round((_exec-_midCost)*100)/100:null,
+              };
+            }catch(_e){return{};}
+          })(),
           // Strike at lock — needed by V7.5 cross-asset rollover scoring
           strike:_strike,
           asset:_assetTag,
