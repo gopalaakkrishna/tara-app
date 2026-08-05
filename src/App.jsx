@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.05-v13.4.136-hourly-memory-day-grouped';
-const TARA_VERSION_DISPLAY='Tara 13.4.136';
+const BASELINE_VERSION='2026.08.05-v13.4.137-hourly-memory-hour-window-grouped';
+const TARA_VERSION_DISPLAY='Tara 13.4.137';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15591,39 +15591,51 @@ function HourlyMemoryModal({onClose}){
           ))}
         </div>
         <div className="px-5 pb-5 max-h-[50vh] overflow-y-auto">
-          {filtered.length===0&&<div className="text-[12px] text-[#EDEDED]/40 py-6 text-center">No hourly locks logged yet.</div>}
-          {/* V13.4.136: day-grouped with sticky headers + per-day WR, matching the 15m
-              TARA MEMORY page's pattern -- explicit user request: 'saved into each hourly
-              window... like how do we for 15 mins windows'. Groups by settledAt (the real
-              settlement timestamp every history entry carries); pending locks have no
-              settledAt yet so they group under 'In progress' at the top. */}
+          {/* V13.4.137: grouped by the actual HOURLY WINDOW (closeMs -- every entry,
+              settled or pending, already carries the exact close time of the hourly
+              market it belongs to), not calendar day. Explicit user request: 'all 4pm
+              hourly calls go into it, same like 5pm, 6pm... main window time shows that
+              hourly and inside we show the price and time it locked.' Pending locks are
+              merged in by the same key so an hour still in progress shows everything
+              locked into it so far, settled or not. */}
           {(()=>{
-            const _dayKeyFor=(ms)=>{try{return new Date(ms).toLocaleDateString('en-US',{year:'numeric',month:'2-digit',day:'2-digit'});}catch(_e){return'unknown';}};
-            const _byDay=new Map();
-            filtered.forEach(h=>{
-              const k=h.settledAt?_dayKeyFor(h.settledAt):'pending';
-              if(!_byDay.has(k))_byDay.set(k,[]);
-              _byDay.get(k).push(h);
+            const filterOk=(h)=>filter==='all'||(filter==='wins'&&isWin(h))||(filter==='losses'&&isLoss(h));
+            const pendingTagged=(Array.isArray(rec.pending)?rec.pending:[]).map(p=>({...p,_pending:true}));
+            const combined=[...history.filter(filterOk),...(filter==='all'?pendingTagged:[])];
+            if(combined.length===0)return<div className="text-[12px] text-[#EDEDED]/40 py-6 text-center">No hourly locks logged yet.</div>;
+            const _hourKeyFor=(closeMs)=>closeMs?Math.floor(closeMs/3600000):'unknown';
+            const _byHour=new Map();
+            combined.forEach(h=>{
+              const k=_hourKeyFor(h.closeMs);
+              if(!_byHour.has(k))_byHour.set(k,[]);
+              _byHour.get(k).push(h);
             });
-            const _days=Array.from(_byDay.entries());
-            return _days.map(([dayKey,entries])=>{
-              const isPendingGroup=dayKey==='pending';
-              const dayLabel=isPendingGroup?'In progress':new Date(entries[0].settledAt).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
-              const w=entries.filter(isWin).length;
-              const l=entries.filter(isLoss).length;
+            const _hours=Array.from(_byHour.entries()).sort((a,b)=>(b[0]==='unknown'?0:b[0])-(a[0]==='unknown'?0:a[0]));
+            return _hours.map(([hourKey,entries])=>{
+              const anyClose=entries.find(h=>h.closeMs)?.closeMs;
+              const hourStart=anyClose?new Date(anyClose-3600000):null;
+              const hourEnd=anyClose?new Date(anyClose):null;
+              const hasPending=entries.some(h=>h._pending);
+              const hourLabel=hourStart&&hourEnd
+                ?hourStart.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})+' \xe2\x80\x93 '+hourEnd.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})
+                :'Unknown window';
+              const settled=entries.filter(h=>!h._pending);
+              const w=settled.filter(isWin).length;
+              const l=settled.filter(isLoss).length;
               const resolved=w+l;
-              const dayWr=resolved>0?Math.round(100*w/resolved):null;
-              const wrColor=dayWr==null?'rgba(237,237,237,0.4)':dayWr>=70?'rgb(40,204,149)':dayWr>=55?'rgba(237,237,237,0.85)':dayWr>=45?'rgba(201,169,97,0.85)':'rgb(255,77,106)';
+              const hourWr=resolved>0?Math.round(100*w/resolved):null;
+              const wrColor=hourWr==null?'rgba(237,237,237,0.4)':hourWr>=70?'rgb(40,204,149)':hourWr>=55?'rgba(237,237,237,0.85)':hourWr>=45?'rgba(201,169,97,0.85)':'rgb(255,77,106)';
               return(
-                <div key={dayKey}>
+                <div key={hourKey}>
                   <div className="sticky top-0 z-10 py-2 flex items-baseline justify-between gap-2 backdrop-blur-md" style={{background:'#0A0A0A',borderBottom:'1px solid rgba(237,237,237,0.10)'}}>
                     <div className="flex items-baseline gap-2">
-                      <span className="text-[11px] uppercase font-bold tracking-[0.14em]" style={{color:'#D4A24C'}}>{dayLabel}</span>
+                      <span className="text-[11px] uppercase font-bold tracking-[0.14em]" style={{color:'#D4A24C'}}>{hourLabel}</span>
+                      {hasPending&&<span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded" style={{background:'rgba(212,162,76,0.15)',color:'#D4A24C'}}>live</span>}
                       <span className="text-[9px] tabular-nums text-[#EDEDED]/35">{entries.length} lock{entries.length===1?'':'s'}</span>
                     </div>
-                    {dayWr!=null&&(
+                    {hourWr!=null&&(
                       <div className="flex items-baseline gap-2 text-[10px] tabular-nums">
-                        <span style={{color:wrColor}} className="font-bold">{dayWr}% WR</span>
+                        <span style={{color:wrColor}} className="font-bold">{hourWr}% WR</span>
                         <span className="text-[#EDEDED]/35">{w}W&middot;{l}L</span>
                       </div>
                     )}
@@ -15639,7 +15651,9 @@ function HourlyMemoryModal({onClose}){
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-[#EDEDED]/40">{h.at||''}</span>
-                          <span className="font-semibold" style={{color:resultColor(h)}}>{resultLabel(h)}</span>
+                          {h._pending
+                            ?<span className="font-semibold text-[10px] uppercase" style={{color:'#D4A24C'}}>pending</span>
+                            :<span className="font-semibold" style={{color:resultColor(h)}}>{resultLabel(h)}</span>}
                         </div>
                       </div>
                     ))}
