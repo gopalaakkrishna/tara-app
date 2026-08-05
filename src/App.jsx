@@ -5075,8 +5075,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.05-v13.4.138-hourly-contradiction-rehydrate-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.138';
+const BASELINE_VERSION='2026.08.05-v13.4.139-hourly-ladder-minsatlock-null-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.139';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15939,7 +15939,7 @@ function HourlyLadderPanel({spot,taraCall}){
                 <span className="text-zinc-500"> | mkt {LK.mktPct}% | model {LK.model!=null?LK.model.toFixed(0)+'%':'--'}</span>
               </div>
               <div className="mt-0.5 text-[10px] text-zinc-500">
-                {LK.at}, {LK.minsAtLock.toFixed(0)}m left -- model accuracy at this range: {LK.band}
+                {LK.at}, {LK.minsAtLock!=null?LK.minsAtLock.toFixed(0)+'m left':'--'} -- model accuracy at this range: {LK.band||'--'}
                 {_conflictKeys.has(LK.ms)&&<span className="ml-1 text-amber-400 font-semibold">CONFLICTS with another lock -- both cannot win</span>}
               </div>
             </div>
