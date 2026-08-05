@@ -9,14 +9,6 @@
       "destination": "https://external-api.kalshi.com/trade-api/v2/:path*"
     },
     {
-      "source": "/api/openmeteo/:path*",
-      "destination": "https://api.open-meteo.com/v1/:path*"
-    },
-    {
-      "source": "/api/nws/:path*",
-      "destination": "https://api.weather.gov/:path*"
-    },
-    {
       "source": "/api/okx/:path*",
       "destination": "https://www.okx.com/api/v5/:path*"
     },
