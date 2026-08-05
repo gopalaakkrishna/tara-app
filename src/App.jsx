@@ -572,6 +572,48 @@ const _v11Gate=(snap)=>{
   if(ke.warn){qualityScore-=12;reasons.push(ke.label);}
   else if(ke.boost){qualityScore+=10;reasons.push(ke.label);}
 
+  // ── V13.4.144: COIN-FLIP PRICE DEAD ZONE (50-55c entry) ──────────────────
+  //   Distinct from the posterior coin-flip floor below: that one asks whether
+  //   OUR read is decisive, this asks whether the MARKET thinks the outcome is
+  //   decided. When entry costs 50-55c the market is pricing a coin flip, and
+  //   Kalshi's fee curve peaks at exactly 50c (0.07*p*(1-p) = 1.75c/contract),
+  //   so breakeven at a 52c entry is 53.8% WR. Measured performance in that band
+  //   was 51.4% -- structurally short of its own breakeven.
+  //
+  //   EV audit, 2026-08-05 export, n=3238 real-traded (sitout tiers excluded),
+  //   priced on the kalshiAtLock MID and net of estimated fees:
+  //     50-52c : n=179  WR 49.7%  netEV -2.62c
+  //     52-55c : n=276  WR 51.4%  netEV -3.19c
+  //     -> whole band n=455, -2.96c/contract, -$13.47
+  //   Removing exactly this band lifts the book +$43.66 -> +$57.13.
+  //
+  //   Robustness (this is the bar V13.4.140 failed and had to be reverted):
+  //     * negative in ALL four months (May -1.63, Jun -2.68, Jul -13.81, Aug -3.91)
+  //     * negative in BOTH directions (UP -5.61, DOWN -1.52)
+  //     * negative in ALL four tiers present (patient/structural-led/
+  //       time-cap-commit/directional-lock)
+  //     * a clean optimum: widening the cut to 45-58c LOSES $5.48 vs no cut,
+  //       so this is a real local trough rather than an overfit wide net
+  //     * adjacent bands are healthy (48-50c +4.35c, 55-58c +3.64c)
+  //
+  //   BASIS CAVEAT: calibrated on the MID (kalshiAtLock), because that is the
+  //   basis the audit used and what every historical row carries. True entry is
+  //   the ask, ~half a spread higher, so in exec terms this band sits nearer
+  //   52-57c. Once execCostAtLock (V13.4.142) has accumulated, RECALIBRATE these
+  //   bounds on exec cost rather than widening them by guess.
+  //   Dial: localStorage 'taraDeadZoneOff'='1' disables.
+  {
+    const _dzOff=(()=>{try{return localStorage.getItem('taraDeadZoneOff')==='1';}catch(_e){return false;}})();
+    const _entryMid=(kLock!=null&&isFinite(Number(kLock)))
+      ?(dir==='UP'?Number(kLock):(dir==='DOWN'?(100-Number(kLock)):null))
+      :null;
+    if(!_dzOff&&_entryMid!=null&&_entryMid>=50&&_entryMid<55){
+      return{allow:false,
+        reason:`entry ${_entryMid.toFixed(0)}c is the coin-flip dead zone (50-55c): mkt prices a toss-up and Kalshi fees peak at 50c — measured -2.96c/contract over n=455, negative every month`,
+        category:'v11-deadzone-price'};
+    }
+  }
+
   // ── REGIME ADJUSTMENT ────────────────────────────────────────────────────
   if(regime==='RANGE-CHOP'||regime==='CHOP'){qualityScore-=6;reasons.push('RANGE-CHOP (-6 quality)');}
   else if(regime==='TRENDING'||regime==='STRONG_TREND'){qualityScore+=5;reasons.push(`${regime} (+5 quality)`);}
@@ -5131,8 +5173,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.05-v13.4.143-signal-ev-panel';
-const TARA_VERSION_DISPLAY='Tara 13.4.143';
+const BASELINE_VERSION='2026.08.05-v13.4.144-coinflip-price-deadzone-gate';
+const TARA_VERSION_DISPLAY='Tara 13.4.144';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
