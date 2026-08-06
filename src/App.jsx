@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.06-v13.4.152-sports-inline-view-swap';
-const TARA_VERSION_DISPLAY='Tara 13.4.152';
+const BASELINE_VERSION='2026.08.06-v13.4.153-news-feeds-under-call-responsive';
+const TARA_VERSION_DISPLAY='Tara 13.4.153';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26173,12 +26173,12 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
   );
 }
 
-// ── V111: RightPanel - Engine Log + Live Feeds + News (col 3) ──
-function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,taraCallLog,currentAsset,timeFormat,pushToast,
-                     taraCall,lockedSnapshotDir,lockedSnapshot,kalshiYesPrice,timeState,windowType,userPosition}){
-  // V9.1.1: full-schedule popup state
-  const[scheduleModalOpen,setScheduleModalOpen]=React.useState(false);
-  const reasoning=analysis?.reasoning||[];
+// ── v13.4.153: LiveFeedsCard — flow metrics + whale prints.
+//   Lifted out of RightPanel so it can sit under Tara's Call. Same markup, same
+//   data; it reads tapeRef/bloomberg/whaleLog exactly as before, so moving it
+//   adds no new fetches, sockets or cloud reads — it is a relocation, not a
+//   second copy of the feed.
+function LiveFeedsCard({tapeRef,bloomberg,whaleLog,timeFormat}){
   const tape=tapeRef?.current||{};
   const cb=tape.coinbase||{buys:0,sells:0};
   const bf=tape.binanceFutures||{buys:0,sells:0};
@@ -26190,6 +26190,59 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
   const oi=bloomberg?.oiChange5m||0;
   const fr=(bloomberg?.fundingRate||0)*100;
   const ls=bloomberg?.longShortRatio||1;
+  return(
+    <div>
+      <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2'} style={{color:T2_GOLD}}>Live Feeds</div>
+      {/* 2-up at every width. A 4-up variant was tried and measured: this column
+          is ~420-470px on desktop, so four tiles land at 79px at 1280 and clip
+          the "Funding" label. Two tiles give ~205px and read cleanly everywhere,
+          including the full-width mobile card. */}
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <div className={'p-1.5 rounded-lg bg-[#0A0A0A] min-w-0'}>
+          <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>Buy Flow</div>
+          <div className="text-emerald-400 text-xs font-bold">{buyPct.toFixed(0)}%</div>
+        </div>
+        <div className={'p-1.5 rounded-lg bg-[#0A0A0A] min-w-0'}>
+          <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>OI 5m</div>
+          <div className={'text-xs font-bold '+(oi>=0?'text-emerald-400':'text-rose-400')}>{oi>=0?'+':''}{oi.toFixed(2)}%</div>
+        </div>
+        <div className={'p-1.5 rounded-lg bg-[#0A0A0A] min-w-0'}>
+          <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>Funding</div>
+          <div className={'text-xs font-bold '+(fr>=0?'text-emerald-400':'text-rose-400')}>{fr>=0?'+':''}{fr.toFixed(4)}%</div>
+        </div>
+        <div className={'p-1.5 rounded-lg bg-[#0A0A0A] min-w-0'}>
+          <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>L/S</div>
+          <div className={'text-xs font-bold '+(ls>=1?'text-emerald-400':'text-rose-400')}>{ls.toFixed(2)}</div>
+        </div>
+      </div>
+      <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-1'}>Recent Whales ($100K+)</div>
+      <div className="max-h-28 overflow-y-auto space-y-0.5 text-[10px] font-mono">
+        {whaleLog.length===0?(
+          <div className={'text-[#EDEDED]/30 italic'}>No prints yet</div>
+        ):whaleLog.slice(0,8).map((w,i)=>{
+          const sideCls=w.side==='BUY'?'text-emerald-400':'text-rose-400';
+          const t=new Date(w.time);
+          const ts=_fmtTimeTz(t,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+          return(
+            <div key={i} className="flex justify-between gap-1.5">
+              <span className={'text-[#EDEDED]/40 shrink-0'}>{ts}</span>
+              <span className={sideCls+' font-bold shrink-0'}>{w.side}</span>
+              <span className="text-white shrink-0">${(w.usd/1000).toFixed(0)}K</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── V111: RightPanel - Engine Log (col 3) ──
+function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,taraCallLog,currentAsset,timeFormat,pushToast,
+                     taraCall,lockedSnapshotDir,lockedSnapshot,kalshiYesPrice,timeState,windowType,userPosition}){
+  // V9.1.1: full-schedule popup state
+  const[scheduleModalOpen,setScheduleModalOpen]=React.useState(false);
+  const reasoning=analysis?.reasoning||[];
+  // v13.4.153: tape/bloomberg/whale derivations moved with the Live Feeds card.
 
   return(
     <div className={'bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#1F1F1F] shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
@@ -26342,11 +26395,9 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
           })}
         </div>
       </div>
-      {/* V9.2.0: News & Macro — swapped with Schedule per user feedback.
-          "put news section in the schedule place." */}
-      <div className="shrink-0 pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
-        <NewsFeedCard timeFormat={timeFormat} pushToast={pushToast}/>
-      </div>
+      {/* v13.4.153: News & Live Feeds moved out of this panel and down under
+          Tara's Call (the projections column). This panel keeps the engine
+          internals — coach, score breakdown, reasoning log. */}
       {/* V9.2.0: Schedule on mobile only — desktop schedule moved to projections column */}
       {taraCallLog&&(
         <div className="shrink-0 pt-3 lg:hidden" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
@@ -26366,48 +26417,8 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
           />
         </div>
       )}
-      {/* Live Feeds metrics */}
-      <div className="shrink-0 pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
-        <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2'} style={{color:T2_GOLD}}>Live Feeds</div>
-        <div className="grid grid-cols-2 gap-2 mb-2">
-          <div className={'p-1.5 rounded-lg bg-[#0A0A0A]'}>
-            <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>Buy Flow</div>
-            <div className="text-emerald-400 text-xs font-bold">{buyPct.toFixed(0)}%</div>
-          </div>
-          <div className={'p-1.5 rounded-lg bg-[#0A0A0A]'}>
-            <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>OI 5m</div>
-            <div className={'text-xs font-bold '+(oi>=0?'text-emerald-400':'text-rose-400')}>{oi>=0?'+':''}{oi.toFixed(2)}%</div>
-          </div>
-          <div className={'p-1.5 rounded-lg bg-[#0A0A0A]'}>
-            <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>Funding</div>
-            <div className={'text-xs font-bold '+(fr>=0?'text-emerald-400':'text-rose-400')}>{fr>=0?'+':''}{fr.toFixed(4)}%</div>
-          </div>
-          <div className={'p-1.5 rounded-lg bg-[#0A0A0A]'}>
-            <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold'}>L/S</div>
-            <div className={'text-xs font-bold '+(ls>=1?'text-emerald-400':'text-rose-400')}>{ls.toFixed(2)}</div>
-          </div>
-        </div>
-        {/* Recent whales */}
-        <div className={'text-[9px] uppercase tracking-wide text-[#EDEDED]/40 font-bold mb-1'}>Recent Whales ($100K+)</div>
-        <div className="max-h-28 overflow-y-auto space-y-0.5 text-[10px] font-mono">
-          {whaleLog.length===0?(
-            <div className={'text-[#EDEDED]/30 italic'}>No prints yet</div>
-          ):whaleLog.slice(0,8).map((w,i)=>{
-            const sideCls=w.side==='BUY'?'text-emerald-400':'text-rose-400';
-            const t=new Date(w.time);
-            const ts=_fmtTimeTz(t,timeFormat,{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
-            return(
-              <div key={i} className="flex justify-between gap-1.5">
-                <span className={'text-[#EDEDED]/40 shrink-0'}>{ts}</span>
-                <span className={sideCls+' font-bold shrink-0'}>{w.side}</span>
-                <span className="text-white shrink-0">${(w.usd/1000).toFixed(0)}K</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      {/* V9.2.0: News now renders above (in right panel) for all screen sizes.
-          Schedule modal still accessible via ⊕ button on the schedule strip in projections column. */}
+      {/* v13.4.153: Live Feeds relocated — see LiveFeedsCard, rendered under
+          Tara's Call in the projections column. */}
       {/* V9.1.1: Full-schedule modal — opens via ⊕ on schedule strip header */}
       {scheduleModalOpen&&taraCallLog&&(
         <TradeScheduleModal
@@ -26469,6 +26480,12 @@ const SPORT_EMOJI={soccer:'⚽',baseball:'⚾',basketball:'🏀',nfl:'🏈',cric
 // different meaning.
 const SPORTS_GREEN='rgb(40,204,149)';
 const SPORTS_RED='rgb(255,77,106)';
+
+// Module-level cache for the ~41KB static payload. Survives closing and
+// reopening the view; 5 minutes is well under how often export_tara.py runs,
+// and a hard reload clears it anyway.
+let _sportsCache={data:null,at:0};
+const _SPORTS_TTL_MS=5*60*1000;
 
 function SportsAdviceChip({advice}){
   const a=String(advice||'');
@@ -26599,11 +26616,17 @@ function SportsView({onClose}){
 
   React.useEffect(()=>{
     let alive=true;
-    // Cache-bust: the file is replaced on every export and a stale copy would
-    // silently show yesterday's slate as though it were today's.
-    fetch('/sports.json?t='+Date.now())
+    // Served from a module-level cache for _SPORTS_TTL_MS. The payload is ~41KB
+    // and the toggle invites flicking between boards, so an uncached open would
+    // re-pull it every trip for a file that only changes when export_tara.py is
+    // re-run. Nothing here touches Supabase — sports.json is a static asset.
+    const now=Date.now();
+    if(_sportsCache.data&&now-_sportsCache.at<_SPORTS_TTL_MS){setData(_sportsCache.data);return;}
+    // Bust the HTTP cache on the miss: a stale copy would silently present
+    // yesterday's slate as today's.
+    fetch('/sports.json?t='+now)
       .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
-      .then(j=>{if(alive)setData(j);})
+      .then(j=>{_sportsCache={data:j,at:Date.now()};if(alive)setData(j);})
       .catch(e=>{if(alive)setErr(String(e.message||e));});
     return()=>{alive=false;};
   },[]);
@@ -48196,7 +48219,11 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             <div className="mt-auto pt-3 min-w-0"/>
           </div>
 
-          {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ── */}
+          {/* ── V111: PROJECTIONS CARD (col 2 - 5m/15m/1h tabs) ──
+              v13.4.153: wrapped so News + Live Feeds can sit directly beneath
+              Tara's Call. The wrapper is the grid child now, so the column
+              count is unchanged and auto-rows-fr still matches heights. */}
+          <div className="flex flex-col gap-3 min-w-0">
           <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
             // V9.9.3: dual-axis edit. field === 'direction' edits e.dir, 'result' edits e.result.
             //   Default field is 'result' for backward compat. Both axes mark manualEdit + timestamp.
@@ -48240,7 +48267,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             });
           }}/>
 
-          {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
+          {/* v13.4.153: News + Live Feeds, directly under Tara's Call.
+              Desktop: bottom of the projections column, where Tara's Call is.
+              Mobile: the SIGNAL tab — on phones ProjectionsCard suppresses its
+              own Tara's Call block (the prediction card already carries it), so
+              gating this to 'projections' would have parked News under a tab
+              that has no Tara's Call on it. DOM order puts this right after the
+              prediction card once the grid collapses to one column. */}
+          <div className={'bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#1F1F1F] shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='signal'?'hidden lg:flex':'')}>
+            <T2Stamp code="FEED · 016"/>
+            <NewsFeedCard timeFormat={timeFormat} pushToast={pushToast}/>
+            <div className="pt-3" style={{borderTop:'1px solid '+T2_GOLD_GLOW}}>
+              <LiveFeedsCard tapeRef={tapeRef} bloomberg={bloomberg} whaleLog={whaleLog} timeFormat={timeFormat}/>
+            </div>
+          </div>
+          </div>{/* /Tara's Call column */}
+
+          {/* ── V111: RIGHT PANEL - Engine Log (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} pushToast={pushToast}
             taraCall={taraCall} lockedSnapshotDir={lockedCallRef.current?.dir||null} lockedSnapshot={taraCallSnapshotRef.current} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
         </div>
