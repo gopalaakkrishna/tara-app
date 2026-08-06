@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.06-v13.4.148-coach-contradiction-fix-right-column';
-const TARA_VERSION_DISPLAY='Tara 13.4.148';
+const BASELINE_VERSION='2026.08.06-v13.4.149-sports-prediction-record';
+const TARA_VERSION_DISPLAY='Tara 13.4.149';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26444,7 +26444,287 @@ function ChartBottomCard({mobileTab,resolution,setResolution,asset,priceSource})
 
 // ── V111: MobileTabBar - 4 tabs: signal/projections/logs/chart ──
 
-const MobileTabBar=React.memo(function MobileTabBar({mobileTab,setMobileTab,setShowBrain,setShowStats}){
+// ══════════════════════════════════════════════════════════════════════════
+// SportsView — the sports prediction record, alongside Tara's BTC work.
+//
+// Data comes from /sports.json, a static file written by the sports-model repo
+// (src/export_tara.py). Static rather than live because the models run locally
+// and Vercel cannot reach that machine; the trade-off is staleness, which is
+// why `generated` is always shown rather than hidden.
+//
+// Two things this view refuses to do, both learned the hard way:
+//
+//   1. It never shows HOME/AWAY as the pick. A row reading
+//      "Detroit @ Seattle ... HOME" was once acted on as a Detroit bet. The
+//      side being backed is always the team name, first and in capitals.
+//   2. It never treats a large model-vs-market gap as opportunity. Measured
+//      over the backtest, big disagreement is the model being wrong (1.0373
+//      log loss vs the market's 0.9641), so those rows are SKIP, not value.
+// ══════════════════════════════════════════════════════════════════════════
+const SPORT_EMOJI={soccer:'⚽',baseball:'⚾',basketball:'🏀',nfl:'🏈',cricket:'🏏',motorsports:'🏎️'};
+
+function SportsAdviceChip({advice}){
+  const a=String(advice||'');
+  const key=a.split(' ')[0];
+  const col=key==='TAKE'?'#34D399':key==='CAUTION'?'#D9A441':'#EDEDED';
+  const op=key==='TAKE'||key==='CAUTION'?1:0.35;
+  return(<span className="inline-block text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded border whitespace-nowrap" style={{color:col,borderColor:col,opacity:op}}>{a}</span>);
+}
+
+// The in-game panel. `grid` is keyed "inning|lead" -> [homeWinRate, n].
+function SportsInPlay({grid}){
+  const[inn,setInn]=React.useState(9);
+  const[lead,setLead]=React.useState(2);
+  const g=grid&&grid[inn+'|'+lead];
+  let body;
+  if(!g){
+    body=(<div className="text-[#EDEDED]/40">Not enough historical games at that exact state to quote a rate. Reporting nothing rather than a number built on a handful of games.</div>);
+  }else if(lead===0){
+    body=(<div><span className="text-white font-bold">Level.</span> Home win rate here is {Math.round(g[0]*100)}% across {g[1].toLocaleString()} games.</div>);
+  }else{
+    const p=lead>0?g[0]:1-g[0];
+    const blown=1/Math.max(1-p,1e-9);
+    const risk=p/Math.max(1-p,1e-9);
+    body=(<div>
+      <div className="text-white"><span className="font-bold">{lead>0?'Home':'Away'} leading by {Math.abs(lead)} entering inning {inn} wins {Math.round(p*100)}%</span> of {g[1].toLocaleString()} such games — blown roughly 1 in {blown.toFixed(0)}.</div>
+      <div className="mt-2 text-[#EDEDED]/50 text-[11px] leading-relaxed">At a price of {Math.round(p*100)}c you are risking <span style={{color:T2_GOLD}}>{risk.toFixed(1)} to win 1</span> on the remaining move. Price is your own expected value either way, so holding and selling have the same EV — what changes is the shape. Kalshi's fee is 0.07·p·(1−p), so the exit is cheapest exactly when the position is already won.</div>
+    </div>);
+  }
+  const sel='bg-[#0F0F0F] border border-[#2A2A2A] rounded px-2 py-1 text-[11px] text-white';
+  return(
+    <div className="bg-[#101010] border border-[#232323] rounded-lg p-3 mt-1.5">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <span className="text-[9px] uppercase tracking-[0.14em] text-[#EDEDED]/40 font-bold">Entering inning</span>
+        <select className={sel} value={inn} onChange={e=>setInn(+e.target.value)}>
+          {[1,2,3,4,5,6,7,8,9].map(i=><option key={i} value={i}>{i}</option>)}
+        </select>
+        <span className="text-[9px] uppercase tracking-[0.14em] text-[#EDEDED]/40 font-bold">Score</span>
+        <select className={sel} value={lead} onChange={e=>setLead(+e.target.value)}>
+          {[-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6].map(l=><option key={l} value={l}>{l>0?'home +'+l:l<0?'away +'+(-l):'level'}</option>)}
+        </select>
+      </div>
+      <div className="text-[11.5px] leading-relaxed">{body}</div>
+    </div>
+  );
+}
+
+function SportsRow({r,grid,showResult}){
+  const[open,setOpen]=React.useState(false);
+  const isBall=r.sport==='baseball';
+  const pct=v=>(v===null||v===undefined)?'—':Math.round(v*100)+'%';
+  const when=(()=>{
+    if(!r.start)return '—';
+    const s=String(r.start);
+    // A start with no timezone is a DATE, not an instant. Converting it would
+    // land it on the previous evening, which is exactly what happened before.
+    const dateOnly=!/[+Z]/.test(s.slice(10));
+    const d=new Date(dateOnly?s.slice(0,10)+'T12:00:00Z':s);
+    if(isNaN(d))return '—';
+    const o={weekday:'short',day:'2-digit',month:'short',timeZone:'America/New_York'};
+    if(!dateOnly){o.hour='numeric';o.minute='2-digit';}
+    return d.toLocaleString('en-US',o).replace(',','');
+  })();
+  const tierCol=r.tier==='HIGH'?'#34D399':r.tier==='MEDIUM'?'#D9A441':'#EDEDED';
+  return(
+    <div className="border-b border-[#1C1C1C] last:border-b-0 py-2">
+      <div className="flex items-start gap-2 flex-wrap">
+        <div className="text-[10px] text-[#EDEDED]/35 w-[92px] shrink-0 pt-0.5" style={T2_MONO_STYLE}>{when}</div>
+        {showResult
+          ?<span className={'text-[10px] font-bold uppercase tracking-wider '+(r.won?'text-emerald-400':'text-rose-400')}>{r.won?'WON':'LOST'}</span>
+          :<SportsAdviceChip advice={r.advice}/>}
+        <span className="text-[9px] font-bold uppercase tracking-wider shrink-0 pt-0.5" style={{color:tierCol,opacity:r.tier==='HIGH'?1:0.5}}>{r.tier}</span>
+        <div className="flex-1 min-w-[180px]">
+          <div className="text-[13px] font-bold text-white tracking-tight uppercase">{r.pick}</div>
+          {/* The ledger appends "(YYYY-MM-DD)" to events; the date column
+              already carries it, so drop it rather than print it twice. */}
+          <div className="text-[10.5px] text-[#EDEDED]/40">{String(r.event||r.match||'').replace(/\s*\(\d{4}-\d{2}-\d{2}\)\s*$/,'')}</div>
+        </div>
+        <div className="text-right shrink-0" style={T2_MONO_STYLE}>
+          <div className="text-[12px] text-white">{pct(r.model)}</div>
+          <div className="text-[10px] text-[#EDEDED]/35">mkt {pct(r.mkt)}</div>
+        </div>
+      </div>
+      {isBall&&grid&&(
+        <div className="mt-1">
+          <button onClick={()=>setOpen(o=>!o)} className="text-[10px] hover:underline" style={{color:T2_GOLD}}>
+            {open?'▾':'▸'} live situation — what is this lead worth?
+          </button>
+          {open&&<SportsInPlay grid={grid}/>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SportsView({onClose}){
+  const[data,setData]=React.useState(null);
+  const[err,setErr]=React.useState(null);
+  const[tab,setTab]=React.useState('upcoming');
+  const[onlyTake,setOnlyTake]=React.useState(true);
+
+  React.useEffect(()=>{
+    let alive=true;
+    // Cache-bust: the file is replaced on every export and a stale copy would
+    // silently show yesterday's slate as though it were today's.
+    fetch('/sports.json?t='+Date.now())
+      .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+      .then(j=>{if(alive)setData(j);})
+      .catch(e=>{if(alive)setErr(String(e.message||e));});
+    return()=>{alive=false;};
+  },[]);
+
+  const rows=React.useMemo(()=>{
+    if(!data)return[];
+    const src=tab==='upcoming'?data.upcoming:tab==='open'?data.open:data.settled;
+    const list=(src||[]);
+    if(tab==='upcoming'&&onlyTake)return list.filter(r=>r.advice==='TAKE');
+    return list;
+  },[data,tab,onlyTake]);
+
+  // Group sport -> league, preserving the chronological order they arrive in.
+  const grouped=React.useMemo(()=>{
+    const out=[];
+    const idx={};
+    rows.forEach(r=>{
+      const sp=r.sport||'other';
+      if(idx[sp]===undefined){idx[sp]=out.length;out.push({sport:sp,label:r.sport_label||sp,leagues:[],lidx:{}});}
+      const s=out[idx[sp]];
+      const lg=r.league||'Unclassified';
+      if(s.lidx[lg]===undefined){s.lidx[lg]=s.leagues.length;s.leagues.push({league:lg,rows:[]});}
+      s.leagues[s.lidx[lg]].rows.push(r);
+    });
+    return out;
+  },[rows]);
+
+  const rec=data&&data.record;
+  const card='bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] relative';
+
+  return(
+    <div className="fixed inset-0 z-50 bg-[#0A0A0A] backdrop-blur-md overflow-y-auto" onClick={(e)=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="max-w-[1200px] mx-auto px-4 py-6 sm:py-8">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <div className="flex items-baseline gap-2 mb-1">
+              <span className="text-[10px] uppercase font-bold tracking-[0.18em]" style={{color:T2_GOLD}}>Sports</span>
+              <span className="text-[9px] uppercase tracking-wider text-[#EDEDED]/30">
+                {data&&data.generated?'updated '+new Date(data.generated).toLocaleString('en-US',{day:'2-digit',month:'short',hour:'numeric',minute:'2-digit',timeZone:'America/New_York'})+' ET':'prediction record'}
+              </span>
+            </div>
+            <h2 className="font-serif text-3xl text-white tracking-tight">Picks <span style={{color:T2_GOLD}}>·</span> Record</h2>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-[#EDEDED]/5 text-[#EDEDED]/60 hover:text-white transition-colors text-xl">✕</button>
+        </div>
+
+        {err&&<div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 text-[12px] text-rose-300 mb-5">Could not load /sports.json ({err}). Run <span className="font-mono">python src/export_tara.py</span> in sports-model and redeploy.</div>}
+        {!data&&!err&&<div className="text-[#EDEDED]/40 text-sm">Loading…</div>}
+
+        {data&&(<>
+          {rec&&(
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-4">
+              <div className={card}><T2Stamp code="REC · 001"/>
+                <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Record</div>
+                <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{rec.wins}–{rec.losses}</div>
+                <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">{Math.round((rec.win_rate||0)*100)}% win rate</div>
+              </div>
+              <div className={card}><T2Stamp code="LL · 002"/>
+                <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Model log loss</div>
+                <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{rec.ll==null?'—':rec.ll.toFixed(3)}</div>
+                <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">lower is better</div>
+              </div>
+              <div className={card}><T2Stamp code="MKT · 003"/>
+                <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">Market log loss</div>
+                <div className="text-2xl sm:text-3xl font-bold text-white" style={T2_MONO_STYLE}>{rec.mkt_ll==null?'—':rec.mkt_ll.toFixed(3)}</div>
+                <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">on the {rec.n_mkt||0} with a price</div>
+              </div>
+              <div className={card}><T2Stamp code="VS · 004"/>
+                <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">vs market</div>
+                <div className={'text-2xl sm:text-3xl font-bold '+((rec.vs_market||0)<0?'text-emerald-400':'text-rose-400')} style={T2_MONO_STYLE}>{rec.vs_market==null?'—':(rec.vs_market>0?'+':'')+rec.vs_market.toFixed(3)}</div>
+                <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">{(rec.vs_market||0)<0?'beating market':'losing to market'}</div>
+              </div>
+            </div>
+          )}
+
+          {rec&&rec.n<100&&(
+            <div className="rounded-xl border border-[#2A2A2A] border-l-2 bg-[#141414] p-3 mb-5 text-[11.5px] leading-relaxed text-[#EDEDED]/50" style={{borderLeftColor:'#D9A441'}}>
+              <span className="text-white font-bold">{rec.n} settled predictions is far too few to conclude anything.</span> Separating a real 2% edge from noise takes on the order of 1,000 bets. This is bookkeeping, not evidence. Log loss against the market is the number that will eventually matter; win rate never will.
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-1 mb-4">
+            <div className="flex gap-1 p-1 rounded-lg bg-[#171717] w-fit border border-[#1F1F1F]">
+              {[['upcoming','Upcoming'],['open','Open'],['record','Record']].map(([id,lab])=>(
+                <button key={id} onClick={()=>setTab(id)} className={'px-3 py-1.5 text-xs uppercase font-bold tracking-wider rounded-lg transition-colors '+(tab===id?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70')} style={tab===id?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>{lab}</button>
+              ))}
+            </div>
+            {tab==='upcoming'&&(
+              <button onClick={()=>setOnlyTake(v=>!v)} className="ml-1 px-3 py-1.5 text-[10px] uppercase font-bold tracking-wider rounded-lg border transition-colors" style={onlyTake?{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}:{color:'rgba(237,237,237,0.4)',borderColor:'#1F1F1F'}}>
+                {onlyTake?'TAKE only':'showing all'}
+              </button>
+            )}
+          </div>
+
+          {tab==='record'&&data.by_league&&data.by_league.length>0&&(
+            <div className="mb-5">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-2">By league</div>
+              <div className="space-y-1">
+                {data.by_league.map((b,i)=>(
+                  <div key={i} className="flex items-center gap-2 text-[12px] bg-[#141414] border border-[#1F1F1F] rounded-lg px-3 py-2">
+                    <span className="w-5">{SPORT_EMOJI[b.sport]||'•'}</span>
+                    <span className="flex-1 text-white/80">{b.label}</span>
+                    <span className="text-white font-bold" style={T2_MONO_STYLE}>{b.wins}–{b.losses}</span>
+                    <span className="w-16 text-right text-[#EDEDED]/40" style={T2_MONO_STYLE}>{b.ll==null?'—':b.ll.toFixed(3)}</span>
+                    <span className={'w-16 text-right '+((b.vs_market||0)<0?'text-emerald-400':'text-rose-400')} style={T2_MONO_STYLE}>{b.vs_market==null?'—':(b.vs_market>0?'+':'')+b.vs_market.toFixed(3)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {grouped.length===0&&<div className="text-[#EDEDED]/40 text-sm py-6">Nothing here. {tab==='upcoming'&&onlyTake?'No TAKE-grade calls in the current slate — reporting none rather than promoting weaker ones.':''}</div>}
+
+          {grouped.map(s=>(
+            <div key={s.sport} className="mb-6">
+              <div className="flex items-baseline gap-2 mb-1">
+                <span className="text-[17px]">{SPORT_EMOJI[s.sport]||'•'}</span>
+                <span className="text-[16px] font-bold text-white tracking-tight">{s.label}</span>
+                <span className="text-[10px] uppercase tracking-wider text-[#EDEDED]/35">{s.leagues.reduce((a,l)=>a+l.rows.length,0)}</span>
+              </div>
+              {s.leagues.map(l=>(
+                <div key={l.league} className="mb-2">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#EDEDED]/40 pl-2 my-1.5" style={{borderLeft:'2px solid '+T2_GOLD_BORDER}}>{l.league} · {l.rows.length}</div>
+                  <div className="bg-[#141414] border border-[#1F1F1F] rounded-xl px-3">
+                    {l.rows.map((r,i)=><SportsRow key={(r.id||r.match)+'-'+i} r={r} grid={data.inplay_grid} showResult={tab==='record'}/>)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+
+          <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-3 text-[11px] leading-relaxed text-[#EDEDED]/45 mt-2">
+            <span className="text-white/70 font-bold">TAKE</span> = model within 3 points of the market — the band where it measurably matches the closing line.
+            <span className="text-white/70 font-bold"> CAUTION</span> = 3–7 points apart, shown but never tallied.
+            <span className="text-white/70 font-bold"> SKIP</span> = more than 7 points apart, thin data, or illiquid. Large disagreement backtested at 1.0373 log loss against the market's 0.9641, so it is model error rather than edge.
+          </div>
+
+          {data.disclosures&&data.disclosures.length>0&&(
+            <div className="mt-4">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-2">Excluded, corrected and backfilled</div>
+              <div className="space-y-1">
+                {data.disclosures.map((d,i)=>(
+                  <div key={i} className="text-[11px] text-[#EDEDED]/40 bg-[#111] border border-[#1C1C1C] rounded-lg px-3 py-2">
+                    <span className="font-bold text-[#EDEDED]/70">#{d.id} {d.kind}</span> · {d.event} — {d.reason}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>)}
+      </div>
+    </div>
+  );
+}
+
+const MobileTabBar=React.memo(function MobileTabBar({mobileTab,setMobileTab,setShowBrain,setShowStats,setShowSports}){
   const tabs=[
     {id:'signal',label:'SIGNAL'},
     {id:'projections',label:'TARGETS'},
@@ -26462,6 +26742,7 @@ const MobileTabBar=React.memo(function MobileTabBar({mobileTab,setMobileTab,setS
       {/* V3.2.2: Brain + Stats access on mobile — header buttons hidden at this width */}
       <button onClick={()=>setShowBrain&&setShowBrain(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}} title="Tara's Brain">🧠</button>
       <button onClick={()=>setShowStats&&setShowStats(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}} title="Stats">📊</button>
+      <button onClick={()=>setShowSports&&setShowSports(true)} className={'shrink-0 px-2 py-2 text-xs rounded-lg border transition-all'} style={{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER,boxShadow:'0 3px 10px rgba(0,0,0,0.3)'}} title="Sports picks">🏆</button>
     </div>
   );
 })
@@ -29912,6 +30193,7 @@ const KalshiBalancePill=React.memo(function KalshiBalancePill({kalshiBalance}){
 function TaraApp(){
   const[isMounted,setIsMounted]=useState(false);
   const[showStats,setShowStats]=useState(false); // V2.7: full stats analytics modal
+  const[showSports,setShowSports]=useState(false); // v13.4.149: sports prediction record
   const[showBrain,setShowBrain]=useState(false); // V3.1.12: Tara's Brain — synthesized reasoning view
   const[syncState,setSyncState]=useState({active:false,stage:'',progress:0,complete:false,error:null}); // V134: sync progress overlay
   const[baselineDrift,setBaselineDrift]=useState(()=>{
@@ -46228,6 +46510,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           pulsing 📋 button (also removed). Component definition retained in the file
           but unused; can be cleaned up in a follow-up. */}
       {showStats&&<StatsView tradeLog={tradeLog} scorecards={scorecards} taraCallLog={displayedCallLog} onClose={()=>setShowStats(false)} timeFormat={timeFormat}/>}
+      {showSports&&<SportsView onClose={()=>setShowSports(false)}/>}
       {/* V9.2.2: Dedicated Analytics Page */}
       {analyticsPageOpen&&<TaraAnalyticsPage taraCallLog={taraCallLog} taraMLModel={taraMLModel} onClose={()=>setAnalyticsPageOpen(false)} timeFormat={timeFormat}/>}
       {showBrain&&<BrainView analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>setShowBrain(false)}/>}
@@ -46581,6 +46864,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     <div className="text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 mb-1.5">Tools</div>
                     <div className="flex flex-wrap gap-1.5">
                       <button onClick={()=>{setShowStats(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Performance Stats">📊 Stats</button>
+                      <button onClick={()=>{setShowSports(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Sports picks and record">🏆 Sports</button>
                       <button onClick={()=>{setShowBrain(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Tara's Brain">🧠 Brain</button>
                       <button onClick={()=>{setShowBestPractices(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Best Practices">📖 Guide</button>
                       <button onClick={()=>{setShowGuide(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors text-xs" title="How Tara Works">? Help</button>
@@ -47501,7 +47785,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         )}
 
         {/* ── V111: MOBILE TAB NAV ── */}
-        <MobileTabBar mobileTab={mobileTab} setMobileTab={setMobileTab} setShowBrain={setShowBrain} setShowStats={setShowStats}/>
+        <MobileTabBar mobileTab={mobileTab} setMobileTab={setMobileTab} setShowBrain={setShowBrain} setShowStats={setShowStats} setShowSports={setShowSports}/>
 
         {/* V2.1: Grid changed from equal 3-col to 1.25fr/1fr/1fr at lg+ — prediction card promoted as hero.
                   V2.2.1: tightened from 1.5fr → 1.25fr (1.5 was overshooting visually). auto-rows-fr restored
