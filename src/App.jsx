@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.06-v13.4.151-sports-date-groups-sport-filter';
-const TARA_VERSION_DISPLAY='Tara 13.4.151';
+const BASELINE_VERSION='2026.08.06-v13.4.152-sports-inline-view-swap';
+const TARA_VERSION_DISPLAY='Tara 13.4.152';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26672,9 +26672,9 @@ function SportsView({onClose}){
   const card='bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] relative';
 
   return(
-    <div className="fixed inset-0 z-50 bg-[#0A0A0A] backdrop-blur-md overflow-y-auto" onClick={(e)=>{if(e.target===e.currentTarget)onClose();}}>
-      <div className="max-w-[1200px] mx-auto px-4 py-6 sm:py-8">
-        <div className="flex items-center justify-between mb-6">
+    <div className="w-full min-h-0">
+      <div className="max-w-[1200px] mx-auto">
+        <div className="flex items-center justify-between mb-5">
           <div>
             <div className="flex items-baseline gap-2 mb-1">
               <span className="text-[10px] uppercase font-bold tracking-[0.18em]" style={{color:T2_GOLD}}>Sports</span>
@@ -26684,7 +26684,8 @@ function SportsView({onClose}){
             </div>
             <h2 className="font-serif text-3xl text-white tracking-tight">Picks <span style={{color:T2_GOLD}}>·</span> Record</h2>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-[#EDEDED]/5 text-[#EDEDED]/60 hover:text-white transition-colors text-xl">✕</button>
+          {/* Returns to the BTC board — same thing the header toggle does. */}
+          <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold tracking-wider border transition-colors" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER,background:T2_GOLD_GLOW}}>← Back to BTC</button>
         </div>
 
         {err&&<div className="rounded-xl border p-4 text-[12px] mb-5" style={{borderColor:'rgba(255,77,106,0.3)',background:'rgba(255,77,106,0.06)',color:SPORTS_RED}}>Could not load /sports.json ({err}). Run <span className="font-mono">python src/export_tara.py</span> in sports-model and redeploy.</div>}
@@ -46627,7 +46628,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           pulsing 📋 button (also removed). Component definition retained in the file
           but unused; can be cleaned up in a follow-up. */}
       {showStats&&<StatsView tradeLog={tradeLog} scorecards={scorecards} taraCallLog={displayedCallLog} onClose={()=>setShowStats(false)} timeFormat={timeFormat}/>}
-      {showSports&&<SportsView onClose={()=>setShowSports(false)}/>}
+      {/* v13.4.152: SportsView is rendered inside <main> as a view swap, not
+          here as an overlay. */}
       {/* V9.2.2: Dedicated Analytics Page */}
       {analyticsPageOpen&&<TaraAnalyticsPage taraCallLog={taraCallLog} taraMLModel={taraMLModel} onClose={()=>setAnalyticsPageOpen(false)} timeFormat={timeFormat}/>}
       {showBrain&&<BrainView analysis={analysis} qualityGate={qualityGate} scorecards={scorecards} baseline={BASELINE_RECORD} kalshiDebug={kalshiDebug} strikeSource={strikeSource} strikeMode={strikeMode} taraCall={taraCall} taraScorecards={taraScorecards} windowType={windowType} onClose={()=>setShowBrain(false)}/>}
@@ -47380,7 +47382,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       <main
         className="flex-1 w-full max-w-[1600px] mx-auto px-2 sm:px-3 lg:px-4 py-2 sm:py-3 flex flex-col gap-3 min-h-0 min-w-0 overflow-x-hidden"
       >
-        
+
+        {/* v13.4.152: SPORTS is a view swap, not an overlay — the header toggle
+            changes what <main> shows, the same way the asset button changes the
+            board. The BTC tree below stays MOUNTED and merely hidden: unmounting
+            it would tear down the price feeds, websocket tape and tick history
+            and re-initialise them on every trip to Sports and back. */}
+        {showSports&&<SportsView onClose={()=>setShowSports(false)}/>}
+        <div className={showSports?'hidden':'contents'}>
+
         {/* V7.10.6: Market context strip */}
         <MarketContextStrip
           useLocalTime={useLocalTime}
@@ -49428,6 +49438,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         </div>
       </div>
 
+        </div>{/* /BTC view — hidden while Sports is showing */}
     </main>
     </>
     </div>
