@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.06-v13.4.149-sports-prediction-record';
-const TARA_VERSION_DISPLAY='Tara 13.4.149';
+const BASELINE_VERSION='2026.08.06-v13.4.150-sports-header-toggle-theme';
+const TARA_VERSION_DISPLAY='Tara 13.4.150';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26463,12 +26463,20 @@ function ChartBottomCard({mobileTab,resolution,setResolution,asset,priceSource})
 // ══════════════════════════════════════════════════════════════════════════
 const SPORT_EMOJI={soccer:'⚽',baseball:'⚾',basketball:'🏀',nfl:'🏈',cricket:'🏏',motorsports:'🏎️'};
 
+// Reuse the app's existing semantic colours rather than inventing new ones —
+// the same green/red Tara already uses for UP/DOWN and WIN/LOSS, and T2_GOLD
+// for anything provisional. A second green in the same product reads as a
+// different meaning.
+const SPORTS_GREEN='rgb(40,204,149)';
+const SPORTS_RED='rgb(255,77,106)';
+
 function SportsAdviceChip({advice}){
   const a=String(advice||'');
   const key=a.split(' ')[0];
-  const col=key==='TAKE'?'#34D399':key==='CAUTION'?'#D9A441':'#EDEDED';
-  const op=key==='TAKE'||key==='CAUTION'?1:0.35;
-  return(<span className="inline-block text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded border whitespace-nowrap" style={{color:col,borderColor:col,opacity:op}}>{a}</span>);
+  const col=key==='TAKE'?SPORTS_GREEN:key==='CAUTION'?T2_GOLD:'#EDEDED';
+  const op=key==='TAKE'||key==='CAUTION'?1:0.32;
+  const bg=key==='TAKE'?'rgba(40,204,149,0.12)':key==='CAUTION'?T2_GOLD_GLOW:'transparent';
+  return(<span className="inline-block text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded border whitespace-nowrap shrink-0" style={{color:col,borderColor:col,background:bg,opacity:op}}>{a}</span>);
 }
 
 // The in-game panel. `grid` is keyed "inning|lead" -> [homeWinRate, n].
@@ -26524,13 +26532,13 @@ function SportsRow({r,grid,showResult}){
     if(!dateOnly){o.hour='numeric';o.minute='2-digit';}
     return d.toLocaleString('en-US',o).replace(',','');
   })();
-  const tierCol=r.tier==='HIGH'?'#34D399':r.tier==='MEDIUM'?'#D9A441':'#EDEDED';
+  const tierCol=r.tier==='HIGH'?SPORTS_GREEN:r.tier==='MEDIUM'?T2_GOLD:'#EDEDED';
   return(
     <div className="border-b border-[#1C1C1C] last:border-b-0 py-2">
       <div className="flex items-start gap-2 flex-wrap">
         <div className="text-[10px] text-[#EDEDED]/35 w-[92px] shrink-0 pt-0.5" style={T2_MONO_STYLE}>{when}</div>
         {showResult
-          ?<span className={'text-[10px] font-bold uppercase tracking-wider '+(r.won?'text-emerald-400':'text-rose-400')}>{r.won?'WON':'LOST'}</span>
+          ?<span className="text-[10px] font-bold uppercase tracking-wider shrink-0 pt-0.5" style={{color:r.won?SPORTS_GREEN:SPORTS_RED}}>{r.won?'WON':'LOST'}</span>
           :<SportsAdviceChip advice={r.advice}/>}
         <span className="text-[9px] font-bold uppercase tracking-wider shrink-0 pt-0.5" style={{color:tierCol,opacity:r.tier==='HIGH'?1:0.5}}>{r.tier}</span>
         <div className="flex-1 min-w-[180px]">
@@ -26615,7 +26623,7 @@ function SportsView({onClose}){
           <button onClick={onClose} className="p-2 rounded-lg hover:bg-[#EDEDED]/5 text-[#EDEDED]/60 hover:text-white transition-colors text-xl">✕</button>
         </div>
 
-        {err&&<div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 text-[12px] text-rose-300 mb-5">Could not load /sports.json ({err}). Run <span className="font-mono">python src/export_tara.py</span> in sports-model and redeploy.</div>}
+        {err&&<div className="rounded-xl border p-4 text-[12px] mb-5" style={{borderColor:'rgba(255,77,106,0.3)',background:'rgba(255,77,106,0.06)',color:SPORTS_RED}}>Could not load /sports.json ({err}). Run <span className="font-mono">python src/export_tara.py</span> in sports-model and redeploy.</div>}
         {!data&&!err&&<div className="text-[#EDEDED]/40 text-sm">Loading…</div>}
 
         {data&&(<>
@@ -26638,14 +26646,14 @@ function SportsView({onClose}){
               </div>
               <div className={card}><T2Stamp code="VS · 004"/>
                 <div className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-1.5">vs market</div>
-                <div className={'text-2xl sm:text-3xl font-bold '+((rec.vs_market||0)<0?'text-emerald-400':'text-rose-400')} style={T2_MONO_STYLE}>{rec.vs_market==null?'—':(rec.vs_market>0?'+':'')+rec.vs_market.toFixed(3)}</div>
+                <div className="text-2xl sm:text-3xl font-bold" style={{...T2_MONO_STYLE,color:(rec.vs_market||0)<0?SPORTS_GREEN:SPORTS_RED}}>{rec.vs_market==null?'—':(rec.vs_market>0?'+':'')+rec.vs_market.toFixed(3)}</div>
                 <div className="text-[10px] text-[#EDEDED]/35 mt-0.5">{(rec.vs_market||0)<0?'beating market':'losing to market'}</div>
               </div>
             </div>
           )}
 
           {rec&&rec.n<100&&(
-            <div className="rounded-xl border border-[#2A2A2A] border-l-2 bg-[#141414] p-3 mb-5 text-[11.5px] leading-relaxed text-[#EDEDED]/50" style={{borderLeftColor:'#D9A441'}}>
+            <div className="rounded-xl border border-[#2A2A2A] border-l-2 bg-[#141414] p-3 mb-5 text-[11.5px] leading-relaxed text-[#EDEDED]/50" style={{borderLeftColor:T2_GOLD}}>
               <span className="text-white font-bold">{rec.n} settled predictions is far too few to conclude anything.</span> Separating a real 2% edge from noise takes on the order of 1,000 bets. This is bookkeeping, not evidence. Log loss against the market is the number that will eventually matter; win rate never will.
             </div>
           )}
@@ -26673,7 +26681,7 @@ function SportsView({onClose}){
                     <span className="flex-1 text-white/80">{b.label}</span>
                     <span className="text-white font-bold" style={T2_MONO_STYLE}>{b.wins}–{b.losses}</span>
                     <span className="w-16 text-right text-[#EDEDED]/40" style={T2_MONO_STYLE}>{b.ll==null?'—':b.ll.toFixed(3)}</span>
-                    <span className={'w-16 text-right '+((b.vs_market||0)<0?'text-emerald-400':'text-rose-400')} style={T2_MONO_STYLE}>{b.vs_market==null?'—':(b.vs_market>0?'+':'')+b.vs_market.toFixed(3)}</span>
+                    <span className="w-16 text-right" style={{...T2_MONO_STYLE,color:(b.vs_market||0)<0?SPORTS_GREEN:SPORTS_RED}}>{b.vs_market==null?'—':(b.vs_market>0?'+':'')+b.vs_market.toFixed(3)}</span>
                   </div>
                 ))}
               </div>
@@ -26701,8 +26709,8 @@ function SportsView({onClose}){
           ))}
 
           <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-3 text-[11px] leading-relaxed text-[#EDEDED]/45 mt-2">
-            <span className="text-white/70 font-bold">TAKE</span> = model within 3 points of the market — the band where it measurably matches the closing line.
-            <span className="text-white/70 font-bold"> CAUTION</span> = 3–7 points apart, shown but never tallied.
+            <span className="font-bold" style={{color:SPORTS_GREEN}}>TAKE</span> = model within 3 points of the market — the band where it measurably matches the closing line.
+            <span className="font-bold" style={{color:T2_GOLD}}> CAUTION</span> = 3–7 points apart, shown but never tallied.
             <span className="text-white/70 font-bold"> SKIP</span> = more than 7 points apart, thin data, or illiquid. Large disagreement backtested at 1.0373 log loss against the market's 0.9641, so it is model error rather than edge.
           </div>
 
@@ -46752,6 +46760,20 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                   </button>
                 );
               })}
+
+              {/* v13.4.150: SPORTS sits in the same pill as BTC so the two read
+                  as one toggle — the two things Tara actually tracks. BTC is a
+                  mode (currentAsset), Sports is an overlay, but from the user's
+                  side both are just "which board am I looking at". */}
+              <div className="w-px my-1 bg-[#2A2A2A] mx-0.5"/>
+              <button onClick={()=>setShowSports(v=>!v)}
+                className={`px-2 sm:px-2.5 py-1 text-xs uppercase font-bold tracking-wide rounded-lg transition-all flex items-center gap-1 ${showSports?'shadow-md':'text-[#EDEDED]/40 hover:text-[#EDEDED]/80'}`}
+                style={showSports?{background:T2_GOLD+'22',color:T2_GOLD,border:'1px solid '+T2_GOLD+'66'}:{}}
+                title="Sports picks and record"
+              >
+                <span className="text-sm leading-none" style={{color:showSports?T2_GOLD:'inherit'}}>🏆</span>
+                <span className="hidden sm:inline text-[10px]">Sports</span>
+              </button>
             </div>
 
             {/* window fixed at 15m, 5m removed v13.3.0 */}
@@ -46864,7 +46886,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     <div className="text-[9px] uppercase tracking-[0.15em] text-[#EDEDED]/30 mb-1.5">Tools</div>
                     <div className="flex flex-wrap gap-1.5">
                       <button onClick={()=>{setShowStats(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Performance Stats">📊 Stats</button>
-                      <button onClick={()=>{setShowSports(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Sports picks and record">🏆 Sports</button>
+                      {/* v13.4.150: Sports moved out of the overflow menu and
+                          into the header pill next to BTC. */}
                       <button onClick={()=>{setShowBrain(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Tara's Brain">🧠 Brain</button>
                       <button onClick={()=>{setShowBestPractices(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg text-xs font-bold transition-colors" style={{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}} title="Best Practices">📖 Guide</button>
                       <button onClick={()=>{setShowGuide(true);setShowHeaderOverflow(false);}} className="p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-colors text-xs" title="How Tara Works">? Help</button>
