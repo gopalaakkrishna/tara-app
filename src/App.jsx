@@ -543,20 +543,42 @@ const _v11Gate=(snap)=>{
     return{allow:false,reason:`${tier} gated (${(_V11_TIER_WR[tier]||55).toFixed(1)}% WR hist, n≥100 — below threshold)`,category:'v11-tier-gate'};
   }
 
-  // ── STRUCTURAL-LED: soft gate — only high conviction survives ────────────
+  // ═══════════════════════════════════════════════════════════════════════
+  // V13.4.145 — THREE SUB-GATES REMOVED AFTER REPLAY ON REAL OUTCOMES
+  //
+  // This whole function was DEAD CODE until V13.4.145 (defined, never called),
+  // so none of it had ever been validated against a real outcome. Replaying it
+  // over the call log (n=3,255 real-traded, priced net of fees) showed it was a
+  // MIX: some sub-gates blocked losing trades, three blocked WINNING ones.
+  // Wiring it up unchanged would have cut the book from +$41.78 to +$33.09.
+  //
+  // Measured EV of the trades each sub-gate BLOCKED (blocking is only correct
+  // when that number is negative):
+  //     dlq-gate      n=658  +2.69c   <- REMOVED, was the single worst offender
+  //     struct-gate   n= 79  +0.12c   <- REMOVED as a hard block
+  //     timecap-gate  n= 15 +16.50c   <- REMOVED (small n, but wrong direction)
+  //     tier-gate     n=312  -1.14c   <- kept
+  //     kalshi-edge   n=255  -0.77c   <- kept
+  //     deadzone      n=226  -1.97c   <- kept (V13.4.144, now validated)
+  //     session-gate  n=  4 -23.04c   <- kept
+  //     coinflip      n=  1 -64.63c   <- kept
+  //
+  // Keeping only the five that test negative:
+  //     baseline           n=3255  netEV +0.40c/contract  (on exec cost)
+  //     good-components    n=1888  netEV +1.97c/contract  <- ~5x better
+  // and it still leaves ~20 trades/day rather than throttling to under one.
+  //
+  // The three removed gates all shared a shape: they blocked on LOW CONVICTION
+  // (low qScore, low confidence, posterior near 50). That intuition is wrong on
+  // a binary market, because price already reflects conviction — a low-
+  // conviction call bought cheap can be perfectly good EV. This is the same
+  // error that killed V13.4.140. Do not re-add them on conviction reasoning
+  // without an EV replay showing the blocked trades are actually negative.
+  // ═══════════════════════════════════════════════════════════════════════
   if(tier==='structural-led'){
-    if(conf<70)return{allow:false,reason:`structural-led conf ${conf}% < 70% threshold (53.8% WR tier — only high-conf survives)`,category:'v11-struct-gate'};
+    // Retained as a QUALITY penalty (it is a genuinely weak tier at 53.8% WR)
+    //   but no longer a hard block: the trades it blocked were EV-positive.
     qualityScore-=10; reasons.push('structural-led (53.8% WR hist)');
-  }
-
-  // ── TIME-CAP-COMMIT: gate on coin-flip posterior ─────────────────────────
-  if(tier==='time-cap-commit'&&postDev<10){
-    return{allow:false,reason:`time-cap coin-flip: post ${post.toFixed(0)}% (only ${postDev.toFixed(0)}pt from 50) — marginal EV`,category:'v11-timecap-gate'};
-  }
-
-  // ── DIRECTIONAL-LOCK: require qScore OR conf signal ──────────────────────
-  if(tier==='directional-lock'&&qs<25&&conf<60){
-    return{allow:false,reason:`directional-lock: qScore ${qs}<25 AND conf ${conf}%<60% — signal quality below threshold`,category:'v11-dlq-gate'};
   }
 
   // ── SESSION BLACKOUT / ADJUSTMENT ────────────────────────────────────────
@@ -639,9 +661,42 @@ const _v11Gate=(snap)=>{
     return{allow:false,reason:`posterior ${post.toFixed(0)}% (${postDev.toFixed(0)}pt from 50) — too close to coin flip`,category:'v11-coinflip'};
   }
 
+  // ── V13.4.145: TIMING + VOLATILITY AS SIZE BOOSTS (not gates) ────────────
+  //   Two conditions carry by far the highest measured EV, but on samples too
+  //   small to justify blocking trades with. Used to SCALE SIZE instead, so a
+  //   wrong read costs less than a hard gate would.
+  //
+  //     GOOD-gate baseline            n=1888  +1.97c/contract (on exec cost)
+  //     GOOD + late (<=420s left)     n=  68  +9.24c
+  //     GOOD + late (<=300s left)     n=  47 +11.97c
+  //     GOOD + late + vol expansion   n=  28 +17.60c
+  //
+  //   Late-entry is the better-supported of the two: it is independently
+  //   corroborated by the hourly-ladder data (85% directional accuracy at
+  //   <=15min to close, decaying to ~52% at the top of the hour) and it has a
+  //   mechanism — less time remaining means less variance left, so the current
+  //   price carries more information about the outcome.
+  //
+  //   TWO CAVEATS, both real:
+  //   1. n=28-68, no out-of-sample window (atSecondsLeft/bbwRankAtLock only
+  //      began stamping recently, so a first-half/second-half split returns
+  //      n=0 in the first half). These are promising, NOT proven.
+  //   2. Selection: those locks may be late BECAUSE they were high-conviction
+  //      setups that took time to confirm. Forcing lateness may not reproduce
+  //      the effect. Boosting size is safe under that risk; gating is not.
+  const _secsLeft=Number(snap?.atSecondsLeft);
+  const _bbw=Number(snap?.bbwRankAtLock);
+  const _isLate=Number.isFinite(_secsLeft)&&_secsLeft<=420;
+  const _isVeryLate=Number.isFinite(_secsLeft)&&_secsLeft<=300;
+  const _isExpanding=Number.isFinite(_bbw)&&_bbw>=80;
+  if(_isVeryLate){qualityScore+=18;reasons.push(`<=5min left (+12.0c hist EV, n=47)`);}
+  else if(_isLate){qualityScore+=12;reasons.push(`<=7min left (+9.2c hist EV, n=68)`);}
+  if(_isExpanding){qualityScore+=8;reasons.push(`vol expanding (BBW ${_bbw.toFixed(0)})`);}
+
   // ── SIZE GUIDANCE ────────────────────────────────────────────────────────
   const qClamped=Math.max(0,Math.min(100,qualityScore));
   const sizeGuidance=qClamped>=72?'FULL':qClamped>=52?'STANDARD':qClamped>=35?'HALF':'QUARTER';
+  const primeSetup=_isLate&&_isExpanding;
 
   // ── WHY STRING ───────────────────────────────────────────────────────────
   const tierLabel=tier==='no-go-edge'?'PRIME':tier==='tape-led'?'STRONG':tier==='super-confluence'?'PRIME':tier==='time-cap-commit'?'LATE':'STD';
@@ -652,7 +707,8 @@ const _v11Gate=(snap)=>{
     ...reasons.filter(r=>!r.includes(ke.label)&&r!==sessAdj.label),
   ].filter(Boolean).slice(0,3).join(' · ');
 
-  return{allow:true,qualityScore:qClamped,sizeGuidance,why,kalshiEdge:ke,reasons,tier};
+  return{allow:true,qualityScore:qClamped,sizeGuidance,why,kalshiEdge:ke,reasons,tier,
+    primeSetup,isLate:_isLate,isExpanding:_isExpanding};
 };
 
 const cloudSupabaseWatch=(path,callback)=>{
@@ -5173,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.05-v13.4.144-coinflip-price-deadzone-gate';
-const TARA_VERSION_DISPLAY='Tara 13.4.144';
+const BASELINE_VERSION='2026.08.06-v13.4.145-wire-up-v11-selectivity-gate';
+const TARA_VERSION_DISPLAY='Tara 13.4.145';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -41839,6 +41895,67 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         snapshot.direction='SIT_OUT';
         snapshot.wasOverriddenNoTrade=true;
         snapshot.caution='Secondary device guard (V13.4.7)';
+      }
+      // ═══════════════════════════════════════════════════════════════════
+      // V13.4.145 — WIRE UP THE V11 SELECTIVITY ENGINE.
+      //
+      // _v11Gate has existed since V11 and was NEVER CALLED — 130 lines of
+      // tier gates, session blackouts, Kalshi-edge checks, quality scoring and
+      // size guidance that had never influenced a single trade. The V13.4.144
+      // dead-zone gate shipped into it earlier today was, for the same reason,
+      // a no-op.
+      //
+      // Applied HERE because this is the one universal commit point every
+      // snapshot passes through (made genuinely universal in V13.4.121), and
+      // because the secondary-device guard directly above already establishes
+      // that mutating a snapshot to SIT_OUT at this point is safe: the object
+      // is the same one taraCallSnapshotRef.current holds, so the UI, the
+      // persisted lock and the log all see the same decision.
+      //
+      // Replayed over n=3,255 real-traded calls, priced net of fees and of the
+      // measured mid->exec drag, keeping only the sub-gates whose blocked
+      // trades were genuinely EV-negative (see the note in _v11Gate):
+      //     before  n=3255  netEV +0.40c/contract
+      //     after   n=1888  netEV +1.97c/contract   (~5x, ~20 trades/day)
+      //
+      // KILL SWITCH: localStorage 'taraV11Gate' = '0' disables entirely and
+      // restores exactly the old behaviour. Set it if anything looks wrong —
+      // this is the first time this code has ever executed against real money.
+      // ═══════════════════════════════════════════════════════════════════
+      try{
+        const _v11On=(()=>{try{return localStorage.getItem('taraV11Gate')!=='0';}catch(_e){return true;}})();
+        if(_v11On&&snapshot&&!snapshot._v11Checked&&
+           (snapshot.call==='UP'||snapshot.call==='DOWN')){
+          snapshot._v11Checked=true;
+          const _g=_v11Gate(snapshot);
+          if(_g&&_g.allow){
+            // Passed: attach quality + size guidance so the card and any sizing
+            //   logic can use it. No behavioural change to the call itself.
+            snapshot.v11Quality=_g.qualityScore;
+            snapshot.v11Size=_g.sizeGuidance;
+            snapshot.v11Why=_g.why;
+            snapshot.v11Prime=!!_g.primeSetup;
+            snapshot.v11Late=!!_g.isLate;
+            snapshot.v11Expanding=!!_g.isExpanding;
+          }else if(_g){
+            // Blocked: convert to a sit-out shaped like every other sit-out in
+            //   this file (see the V10.7.97 weak-gap sitout for the template),
+            //   preserving the intended direction for analytics.
+            snapshot._intendedDir=snapshot._intendedDir||snapshot.call;
+            snapshot.call='SIT_OUT';
+            snapshot.direction='SIT_OUT';
+            snapshot.dir='SIT_OUT';
+            snapshot.wasOverriddenNoTrade=true;
+            snapshot.noGoCategory=_g.category||'v11-gate';
+            snapshot.tier='v11-sitout';
+            snapshot.v11Blocked=_g.category||'v11-gate';
+            snapshot.caution=`V11 gate: ${_g.reason||'blocked'}`;
+            snapshot.reason=`V11 selectivity gate — ${_g.reason||'blocked'}`;
+          }
+        }
+      }catch(_e){
+        // A gate failure must never stop a call being logged.
+        try{console.warn('[V13.4.145] v11 gate error:',_e?.message);}catch(_){}
       }
       // V10.7.82: Universal entry cost guard — block entries outside valid range
       //   regardless of which code path created the snapshot.
