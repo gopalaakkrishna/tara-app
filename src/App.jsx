@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.06-v13.4.147-decision-clock';
-const TARA_VERSION_DISPLAY='Tara 13.4.147';
+const BASELINE_VERSION='2026.08.06-v13.4.148-coach-contradiction-fix-right-column';
+const TARA_VERSION_DISPLAY='Tara 13.4.148';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15521,6 +15521,12 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
   // V13.4.121: apply the stability hold ONLY to the pre-lock lean -- once actually
   //   locked, the direction is frozen already (that's the whole point of `locked`),
   //   so there's nothing to debounce there.
+  // V13.4.148: keep the pre-debounce direction. The stability hold below freezes the
+  //   DISPLAYED side for 8s, but the reason string is regenerated live every tick, so
+  //   during a flip the header and the body describe OPPOSITE directions -- a real
+  //   screenshot showed "LEANING DOWN -- HOLD" above "TRAJ-priority lock·UP·projection
+  //   +13bps to strike". Both were "correct"; they were just reading different clocks.
+  const _liveDir=call;
   if(!locked&&(call==='UP'||call==='DOWN')){
     const _now121=Date.now();
     const _sticky=_leanStickyRef.current;
@@ -15531,6 +15537,8 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
   }else if(locked){
     _leanStickyRef.current.displayed=null; // reset so the next unlocked window starts fresh
   }
+  // True when the debounce is actively holding a side the live engine has left.
+  const _leanFlipping=!locked&&(call==='UP'||call==='DOWN')&&(_liveDir==='UP'||_liveDir==='DOWN')&&_liveDir!==call;
   const isDir=call==='UP'||call==='DOWN';
   const isSitOut=call==='SIT_OUT'||!call;
   // V13.4.119: SAME live-vs-frozen bug as direction, now fixed for every field the panel
@@ -15563,10 +15571,23 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
     border=call==='UP'?'rgba(40,204,149,0.35)':'rgba(255,77,106,0.35)';
   }else if(isDir&&!locked){
     label=(call==='UP'?'LEANING UP':'LEANING DOWN')+' -- HOLD';
-    sub='Real lean, not yet locked. Wait for Tara to commit before acting. '+(reason?reason:'');
-    color=call==='UP'?'#28CC95':'#FF4D6A';
-    bg='rgba(201,169,97,0.08)';
-    border='rgba(201,169,97,0.30)';
+    // V13.4.148: while the debounce is holding a side the live engine has left, the
+    //   live `reason` describes the OTHER direction. Showing it under a header that
+    //   says the opposite is worse than showing nothing -- it reads as the app
+    //   contradicting itself, and it is the specific thing that makes this panel look
+    //   untrustworthy. Say plainly that the read is unstable instead.
+    if(_leanFlipping){
+      sub=`Signal is flipping -- live read just moved to ${_liveDir}, holding ${call} for stability. `
+        +`This is exactly when NOT to act: wait for the Decision Clock.`;
+      color='rgba(212,162,76,0.95)';
+      bg='rgba(212,162,76,0.10)';
+      border='rgba(212,162,76,0.35)';
+    }else{
+      sub='Real lean, not yet locked. Wait for Tara to commit before acting. '+(reason?reason:'');
+      color=call==='UP'?'#28CC95':'#FF4D6A';
+      bg='rgba(201,169,97,0.08)';
+      border='rgba(201,169,97,0.30)';
+    }
   }else{
     label='SIT OUT';
     sub=reason||'No tradeable read this round -- genuinely mixed or a coin flip.';
@@ -16171,10 +16192,31 @@ function HourlyLadderPanel({spot,taraCall}){
                 <div className={'text-right text-[10px] '+stat.cls}>{stat.txt}</div>
               </div>);
           })}
+          {/* V13.4.148: this line used to read "Tara reads UP. Buy YES ..." straight off
+              the LIVE direction, directly beneath locks that may be the opposite side --
+              a real screenshot showed it under "LOCKED NO @ 64500". Both were accurate
+              (a live read now, a lock taken earlier) but side by side it reads as the
+              panel contradicting itself. Now it says WHEN the read is from, and calls
+              out a conflict with open locks instead of quietly implying one. */}
           <div className="pt-1 text-[10px] leading-snug text-zinc-500">
-            {dir
-              ?('Tara reads '+dir+'. Buy '+(dir==='UP'?'YES':'NO')+' at whichever strike gives the price you want -- green marks under 50c. Kalshi is well calibrated here, so a cheaper strike changes payoff shape and variance, not edge.')
-              :'No directional call right now -- ladder shown for reference only.'}
+            {(()=>{
+              if(!dir)return 'No directional call right now -- ladder shown for reference only.';
+              const _openOpp=LOCKS.filter(x=>x.side!==(dir==='UP'?'YES':'NO'));
+              const _base='Tara reads '+dir+' RIGHT NOW. Buy '+(dir==='UP'?'YES':'NO')
+                +' at whichever strike gives the price you want -- green marks under 50c. Kalshi is'
+                +' well calibrated here, so a cheaper strike changes payoff shape and variance, not edge.';
+              if(_openOpp.length){
+                return React.createElement(React.Fragment,null,
+                  React.createElement('span',{className:'text-amber-400/90'},
+                    `Heads up: ${_openOpp.length} open lock${_openOpp.length>1?'s are':' is'} on the OTHER side `
+                    +`(${_openOpp.map(x=>x.side+'@'+Math.round(x.strike)).join(', ')}), taken earlier this hour. `
+                    +`Tara's live read has since moved to ${dir}. The locks are not wrong -- they were taken on `
+                    +`a different read -- but do not add to this side without deciding which one you believe. `),
+                  React.createElement('span',null,_base),
+                );
+              }
+              return _base;
+            })()}
           </div>
         </div>
       )}
@@ -23922,8 +23964,18 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
           entry prices, so it earns the space.
           EM-DASH BASELINE re-based 3298 -> 3297: the removed timeline row carried one
           em-dash in its title attribute. Deliberate, same as the 13.4.75 auto-exec strip. */}
-      <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
-      <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
+      {/* V13.4.148: Trade Coach + Hourly ladder MOVED to the right column (RightPanel).
+          They are the two things read while a window is live, and stacking them at the
+          top of the middle column pushed the score breakdown and engine log off-screen,
+          forcing a scroll at exactly the moment there is no time to scroll. Rendered in
+          RightPanel now so coach, ladder, score and log are all visible at once.
+          Set localStorage 'taraCoachLeft'='1' to render them here again instead. */}
+      {(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch(_e){return false;}})()&&(
+        <>
+          <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
+          <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
+        </>
+      )}
     </div>
   );
 }
@@ -26122,7 +26174,8 @@ function NewsExpandModal({news,macroEvents,onClose,formatAge,timeFormat}){
 }
 
 // ── V111: RightPanel - Engine Log + Live Feeds + News (col 3) ──
-function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,taraCallLog,currentAsset,timeFormat,pushToast}){
+function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,taraCallLog,currentAsset,timeFormat,pushToast,
+                     taraCall,lockedSnapshotDir,lockedSnapshot,kalshiYesPrice,timeState,windowType,userPosition}){
   // V9.1.1: full-schedule popup state
   const[scheduleModalOpen,setScheduleModalOpen]=React.useState(false);
   const reasoning=analysis?.reasoning||[];
@@ -26141,6 +26194,15 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
   return(
     <div className={'bg-[#171717] p-3 sm:p-4 rounded-xl border border-[#1F1F1F] shadow-md flex flex-col gap-3 relative min-w-0 '+(mobileTab!=='logs'?'hidden lg:flex':'')}>
       <T2Stamp code="SCR · 008"/>
+      {/* V13.4.148: Trade Coach + Hourly ladder relocated here from the middle column
+          so everything read during a live window sits in one place, no scrolling.
+          Hidden when localStorage 'taraCoachLeft'='1' (they render in ProjectionsCard). */}
+      {!(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch(_e){return false;}})()&&(
+        <div className="shrink-0">
+          <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
+          <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
+        </div>
+      )}
       {/* V146.1 Fix B: Score Breakdown — per-signal contribution to current posterior */}
       <div className="shrink-0">
         <div className={'text-xs uppercase tracking-[0.22em] font-bold mb-2'} style={{color:T2_GOLD}}>Score Breakdown</div>
@@ -47753,7 +47815,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           }}/>
 
           {/* ── V111: RIGHT PANEL - Engine Log + Live Feeds + News (col 3) ── */}
-          <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} pushToast={pushToast}/>
+          <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} pushToast={pushToast}
+            taraCall={taraCall} lockedSnapshotDir={lockedCallRef.current?.dir||null} lockedSnapshot={taraCallSnapshotRef.current} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
