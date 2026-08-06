@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.06-v13.4.150-sports-header-toggle-theme';
-const TARA_VERSION_DISPLAY='Tara 13.4.150';
+const BASELINE_VERSION='2026.08.06-v13.4.151-sports-date-groups-sport-filter';
+const TARA_VERSION_DISPLAY='Tara 13.4.151';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26516,27 +26516,48 @@ function SportsInPlay({grid}){
   );
 }
 
+// A start with no timezone is a DATE, not an instant. Converting it would land
+// it on the previous evening — that bug shipped twice, so the parse lives in
+// one place and every caller goes through it.
+function sportsParseStart(start){
+  if(!start)return{d:null,dateOnly:true};
+  const s=String(start);
+  const dateOnly=!/[+Z]/.test(s.slice(10));
+  const d=new Date(dateOnly?s.slice(0,10)+'T12:00:00Z':s);
+  return isNaN(d)?{d:null,dateOnly:true}:{d,dateOnly};
+}
+// 'YYYY-MM-DD' in Eastern — the bucket key for the date grouping.
+function sportsDateKey(start){
+  const{d}=sportsParseStart(start);
+  if(!d)return null;
+  const p=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
+  return p;
+}
+function sportsDateLabel(key){
+  if(!key)return'Date TBC';
+  const d=new Date(key+'T12:00:00Z');
+  const today=sportsDateKey(new Date().toISOString());
+  const tmr=sportsDateKey(new Date(Date.now()+86400000).toISOString());
+  const base=d.toLocaleString('en-US',{weekday:'short',day:'2-digit',month:'short',timeZone:'UTC'}).replace(',','');
+  return key===today?base+' · Today':key===tmr?base+' · Tomorrow':base;
+}
+
 function SportsRow({r,grid,showResult}){
   const[open,setOpen]=React.useState(false);
   const isBall=r.sport==='baseball';
   const pct=v=>(v===null||v===undefined)?'—':Math.round(v*100)+'%';
+  // Rows sit inside a date group, so only the clock is needed here.
   const when=(()=>{
-    if(!r.start)return '—';
-    const s=String(r.start);
-    // A start with no timezone is a DATE, not an instant. Converting it would
-    // land it on the previous evening, which is exactly what happened before.
-    const dateOnly=!/[+Z]/.test(s.slice(10));
-    const d=new Date(dateOnly?s.slice(0,10)+'T12:00:00Z':s);
-    if(isNaN(d))return '—';
-    const o={weekday:'short',day:'2-digit',month:'short',timeZone:'America/New_York'};
-    if(!dateOnly){o.hour='numeric';o.minute='2-digit';}
-    return d.toLocaleString('en-US',o).replace(',','');
+    const{d,dateOnly}=sportsParseStart(r.start);
+    if(!d)return'—';
+    if(dateOnly)return'all day';
+    return d.toLocaleString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/New_York'});
   })();
   const tierCol=r.tier==='HIGH'?SPORTS_GREEN:r.tier==='MEDIUM'?T2_GOLD:'#EDEDED';
   return(
     <div className="border-b border-[#1C1C1C] last:border-b-0 py-2">
       <div className="flex items-start gap-2 flex-wrap">
-        <div className="text-[10px] text-[#EDEDED]/35 w-[92px] shrink-0 pt-0.5" style={T2_MONO_STYLE}>{when}</div>
+        <div className="text-[10px] text-[#EDEDED]/35 w-[58px] shrink-0 pt-0.5" style={T2_MONO_STYLE}>{when}</div>
         {showResult
           ?<span className="text-[10px] font-bold uppercase tracking-wider shrink-0 pt-0.5" style={{color:r.won?SPORTS_GREEN:SPORTS_RED}}>{r.won?'WON':'LOST'}</span>
           :<SportsAdviceChip advice={r.advice}/>}
@@ -26569,6 +26590,12 @@ function SportsView({onClose}){
   const[err,setErr]=React.useState(null);
   const[tab,setTab]=React.useState('upcoming');
   const[onlyTake,setOnlyTake]=React.useState(true);
+  const[sportFilter,setSportFilter]=React.useState('all');
+  // Which date groups the user has explicitly opened or closed. Anything not
+  // in here falls back to the default (nearest few open) — so changing tab or
+  // filter re-applies the default instead of stranding a stale open/closed set.
+  const[dateOverrides,setDateOverrides]=React.useState({});
+  React.useEffect(()=>{setDateOverrides({});},[tab,onlyTake,sportFilter]);
 
   React.useEffect(()=>{
     let alive=true;
@@ -26581,7 +26608,10 @@ function SportsView({onClose}){
     return()=>{alive=false;};
   },[]);
 
-  const rows=React.useMemo(()=>{
+  // Everything for the current tab, before the sport filter — this is what the
+  // sport buttons count, so their numbers do not change as you click between
+  // them.
+  const tabRows=React.useMemo(()=>{
     if(!data)return[];
     const src=tab==='upcoming'?data.upcoming:tab==='open'?data.open:data.settled;
     const list=(src||[]);
@@ -26589,20 +26619,54 @@ function SportsView({onClose}){
     return list;
   },[data,tab,onlyTake]);
 
-  // Group sport -> league, preserving the chronological order they arrive in.
+  const sportCounts=React.useMemo(()=>{
+    const m={};
+    tabRows.forEach(r=>{const k=r.sport||'other';m[k]=m[k]||{n:0,label:r.sport_label||k};m[k].n++;});
+    return Object.entries(m).sort((a,b)=>b[1].n-a[1].n);
+  },[tabRows]);
+
+  // A filter that selects a sport with nothing in it would show an empty list
+  // with no clue why, so fall back to 'all' when the selection disappears.
+  React.useEffect(()=>{
+    if(sportFilter!=='all'&&!sportCounts.some(([k])=>k===sportFilter))setSportFilter('all');
+  },[sportCounts,sportFilter]);
+
+  const rows=React.useMemo(()=>(
+    sportFilter==='all'?tabRows:tabRows.filter(r=>(r.sport||'other')===sportFilter)
+  ),[tabRows,sportFilter]);
+
+  // DATE first, then sport, then league. Rows arrive already in chronological
+  // order, so insertion order is the display order; settled results read
+  // newest-first instead.
   const grouped=React.useMemo(()=>{
-    const out=[];
-    const idx={};
+    const days=[];const didx={};
     rows.forEach(r=>{
+      const dk=sportsDateKey(r.start);
+      const key=dk||'tbc';
+      if(didx[key]===undefined){didx[key]=days.length;days.push({key,dateKey:dk,sports:[],sidx:{},n:0,takes:0});}
+      const day=days[didx[key]];
+      day.n++;
+      if(r.advice==='TAKE')day.takes++;
       const sp=r.sport||'other';
-      if(idx[sp]===undefined){idx[sp]=out.length;out.push({sport:sp,label:r.sport_label||sp,leagues:[],lidx:{}});}
-      const s=out[idx[sp]];
+      if(day.sidx[sp]===undefined){day.sidx[sp]=day.sports.length;day.sports.push({sport:sp,label:r.sport_label||sp,leagues:[],lidx:{}});}
+      const s=day.sports[day.sidx[sp]];
       const lg=r.league||'Unclassified';
       if(s.lidx[lg]===undefined){s.lidx[lg]=s.leagues.length;s.leagues.push({league:lg,rows:[]});}
       s.leagues[s.lidx[lg]].rows.push(r);
     });
-    return out;
+    // Undated rows last regardless of where they appeared in the source.
+    days.sort((a,b)=>(a.key==='tbc')-(b.key==='tbc'));
+    return days;
   },[rows]);
+
+  // Default: the two nearest dates open. Opening 30 days of soccer at once
+  // buries the near-term slate the view exists to surface.
+  const isDayOpen=(key,idx)=>dateOverrides[key]!==undefined?dateOverrides[key]:idx<2;
+  // Takes the CURRENT state rather than re-deriving it — the default depends on
+  // the group's index, which this helper has no way to know, and assuming
+  // "closed" would make the first click on an open group do nothing.
+  const toggleDay=(key,openNow)=>setDateOverrides(o=>({...o,[key]:!openNow}));
+  const setAllDays=open=>{const m={};grouped.forEach(d=>{m[d.key]=open;});setDateOverrides(m);};
 
   const rec=data&&data.record;
   const card='bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)] relative';
@@ -26688,25 +26752,70 @@ function SportsView({onClose}){
             </div>
           )}
 
+          {/* Sport filter. Counts come from the unfiltered tab, so they stay
+              put as you click between them. */}
+          {sportCounts.length>1&&(
+            <div className="flex flex-wrap items-center gap-1 mb-4">
+              <button onClick={()=>setSportFilter('all')} className="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg border transition-colors" style={sportFilter==='all'?{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}:{color:'rgba(237,237,237,0.4)',borderColor:'#1F1F1F'}}>
+                All <span className="opacity-60">{tabRows.length}</span>
+              </button>
+              {sportCounts.map(([k,v])=>(
+                <button key={k} onClick={()=>setSportFilter(k)} className="px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg border transition-colors flex items-center gap-1" style={sportFilter===k?{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}:{color:'rgba(237,237,237,0.4)',borderColor:'#1F1F1F'}}>
+                  <span className="text-[12px] leading-none">{SPORT_EMOJI[k]||'•'}</span>
+                  <span className="hidden sm:inline">{v.label}</span>
+                  <span className="opacity-60">{v.n}</span>
+                </button>
+              ))}
+              {grouped.length>1&&(
+                <span className="ml-auto flex gap-1">
+                  <button onClick={()=>setAllDays(true)} className="px-2 py-1 text-[9px] uppercase font-bold tracking-wider rounded-lg border border-[#1F1F1F] text-[#EDEDED]/35 hover:text-[#EDEDED]/70">Expand all</button>
+                  <button onClick={()=>setAllDays(false)} className="px-2 py-1 text-[9px] uppercase font-bold tracking-wider rounded-lg border border-[#1F1F1F] text-[#EDEDED]/35 hover:text-[#EDEDED]/70">Collapse</button>
+                </span>
+              )}
+            </div>
+          )}
+
           {grouped.length===0&&<div className="text-[#EDEDED]/40 text-sm py-6">Nothing here. {tab==='upcoming'&&onlyTake?'No TAKE-grade calls in the current slate — reporting none rather than promoting weaker ones.':''}</div>}
 
-          {grouped.map(s=>(
-            <div key={s.sport} className="mb-6">
-              <div className="flex items-baseline gap-2 mb-1">
-                <span className="text-[17px]">{SPORT_EMOJI[s.sport]||'•'}</span>
-                <span className="text-[16px] font-bold text-white tracking-tight">{s.label}</span>
-                <span className="text-[10px] uppercase tracking-wider text-[#EDEDED]/35">{s.leagues.reduce((a,l)=>a+l.rows.length,0)}</span>
-              </div>
-              {s.leagues.map(l=>(
-                <div key={l.league} className="mb-2">
-                  <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#EDEDED]/40 pl-2 my-1.5" style={{borderLeft:'2px solid '+T2_GOLD_BORDER}}>{l.league} · {l.rows.length}</div>
-                  <div className="bg-[#141414] border border-[#1F1F1F] rounded-xl px-3">
-                    {l.rows.map((r,i)=><SportsRow key={(r.id||r.match)+'-'+i} r={r} grid={data.inplay_grid} showResult={tab==='record'}/>)}
+          {grouped.map((day,di)=>{
+            const open=isDayOpen(day.key,di);
+            return(
+              <div key={day.key} className="mb-2.5">
+                <button onClick={()=>toggleDay(day.key,open)} className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#141414] border border-[#1F1F1F] hover:border-[#2A2A2A] transition-colors text-left">
+                  <span className="text-[10px] w-3 shrink-0" style={{color:T2_GOLD}}>{open?'▾':'▸'}</span>
+                  <span className="text-[13px] font-bold text-white tracking-tight">{sportsDateLabel(day.dateKey)}</span>
+                  <span className="text-[10px] uppercase tracking-wider text-[#EDEDED]/35">{day.n} {day.n===1?'pick':'picks'}</span>
+                  {day.takes>0&&tab!=='record'&&(
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border" style={{color:SPORTS_GREEN,borderColor:SPORTS_GREEN,background:'rgba(40,204,149,0.12)'}}>{day.takes} take</span>
+                  )}
+                  <span className="ml-auto flex gap-1 shrink-0">
+                    {day.sports.map(s=><span key={s.sport} className="text-[12px] leading-none opacity-60">{SPORT_EMOJI[s.sport]||'•'}</span>)}
+                  </span>
+                </button>
+                {open&&(
+                  <div className="pl-2 sm:pl-3 mt-1.5">
+                    {day.sports.map(s=>(
+                      <div key={s.sport} className="mb-3">
+                        <div className="flex items-baseline gap-2 mb-1">
+                          <span className="text-[14px]">{SPORT_EMOJI[s.sport]||'•'}</span>
+                          <span className="text-[13px] font-bold text-white/90 tracking-tight">{s.label}</span>
+                          <span className="text-[10px] uppercase tracking-wider text-[#EDEDED]/30">{s.leagues.reduce((a,l)=>a+l.rows.length,0)}</span>
+                        </div>
+                        {s.leagues.map(l=>(
+                          <div key={l.league} className="mb-1.5">
+                            <div className="text-[9.5px] font-bold uppercase tracking-[0.1em] text-[#EDEDED]/35 pl-2 my-1" style={{borderLeft:'2px solid '+T2_GOLD_BORDER}}>{l.league} · {l.rows.length}</div>
+                            <div className="bg-[#141414] border border-[#1F1F1F] rounded-xl px-3">
+                              {l.rows.map((r,i)=><SportsRow key={(r.id||r.match)+'-'+i} r={r} grid={data.inplay_grid} showResult={tab==='record'}/>)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
                   </div>
-                </div>
-              ))}
-            </div>
-          ))}
+                )}
+              </div>
+            );
+          })}
 
           <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-3 text-[11px] leading-relaxed text-[#EDEDED]/45 mt-2">
             <span className="font-bold" style={{color:SPORTS_GREEN}}>TAKE</span> = model within 3 points of the market — the band where it measurably matches the closing line.
