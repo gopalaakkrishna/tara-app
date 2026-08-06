@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.06-v13.4.146-hourly-min-cost-floor';
-const TARA_VERSION_DISPLAY='Tara 13.4.146';
+const BASELINE_VERSION='2026.08.06-v13.4.147-decision-clock';
+const TARA_VERSION_DISPLAY='Tara 13.4.147';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17155,7 +17155,81 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             _etaStr=_etaNum<=0?'now':_etaNum<60?`~${Math.round(_etaNum)}s`:`~${Math.floor(_etaNum/60)}m ${Math.round(_etaNum%60)}s`;
           }
           const _color='rgb(40,204,149)';
+          // ═══════════════════════════════════════════════════════════════
+          // V13.4.147 — DECISION CLOCK
+          //
+          // Lock ETA above is derived from the SAMPLE ACCUMULATION RATE, so it
+          // cannot name a time: it reads "stalled" whenever conviction is not
+          // building, which is most of a quiet window. That leaves no answer to
+          // the only question that matters when you are sitting in front of it --
+          // "when will she actually decide?" -- so the window gets entered on a
+          // guess instead.
+          //
+          // That guess is the single most expensive thing in the account.
+          // Kalshi settlements joined to Tara's log (n=1,996 matched windows):
+          //     traded WITH Tara's direction : n=1038  WR 73.9%  +4.48c/ct  +$5,791
+          //     traded AGAINST her direction : n= 529  WR 61.6%  -8.44c/ct  -$7,147
+          // Opposing her is over half the total loss, and it holds separately in
+          // both 15m (-$3,518) and hourly (-$3,493).
+          //
+          // So this is deliberately NOT another conviction estimate. It is a
+          // fixed, announced schedule, known the moment the window opens:
+          //     15m     decide T-10min -> final answer by T-7min
+          //     hourly  decide T-20min -> final answer by T-10min
+          // Those bounds are the measured best-EV entry zones on real fills
+          // (15m 7-10min +6.87c/ct n=235; hourly 10-20min +5.00 to +11.54c),
+          // not arbitrary. Entering earlier means paying up for a read the
+          // market has already priced -- at 1-2min left the win rate is the same
+          // 73% but the contract costs 75c instead of 64c, which is -14c/ct.
+          //
+          // States: WAIT (do not enter yet) -> DECIDING -> LOCKED or NO CALL.
+          // ═══════════════════════════════════════════════════════════════
+          const _dcTotal=windowType==='15m'?900:3600;
+          const _dcLeft=_minsR*60+_secsR;
+          const _dcOpen=windowType==='15m'?600:1200;   // start deciding
+          const _dcClose=windowType==='15m'?420:600;   // must have answered
+          const _fmt=(s)=>{s=Math.max(0,Math.round(s));const m=Math.floor(s/60);return m>0?`${m}m ${String(s%60).padStart(2,'0')}s`:`${s}s`;};
+          const _clockAt=(secsFromNow)=>{
+            try{
+              const d=new Date(Date.now()+Math.max(0,secsFromNow)*1000);
+              return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+            }catch(_e){return '--';}
+          };
+          const _hasCall=!!(taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN'));
+          let _dcState,_dcMain,_dcSub,_dcCol;
+          if(_hasCall){
+            _dcState='LOCKED';
+            _dcCol=taraCall.call==='UP'?'rgb(40,204,149)':'rgba(255,77,106,0.95)';
+            _dcMain=`LOCKED ${taraCall.call}`;
+            _dcSub='call is in — do not trade against it';
+          }else if(_dcLeft>_dcOpen){
+            _dcState='WAIT';
+            _dcCol='rgba(212,162,76,0.95)';
+            _dcMain=`decides at ${_clockAt(_dcLeft-_dcOpen)}`;
+            _dcSub=`in ${_fmt(_dcLeft-_dcOpen)} · too early to enter — the price has not moved in your favour yet`;
+          }else if(_dcLeft>_dcClose){
+            _dcState='DECIDING';
+            _dcCol='rgb(40,204,149)';
+            _dcMain=`deciding now`;
+            _dcSub=`final answer within ${_fmt(_dcLeft-_dcClose)} · best entry zone`;
+          }else{
+            _dcState='NO CALL';
+            _dcCol='rgba(237,237,237,0.45)';
+            _dcMain='no call this window';
+            _dcSub='decision window passed with no lock — sit this one out';
+          }
           return(
+            <>
+            <div className="border-t border-[#1F1F1F] pt-2.5 mt-2.5">
+              <div className="px-2.5 py-2 rounded-lg" style={{background:'#141414',border:`1px solid ${_dcCol.replace('rgb','rgba').replace(')',',0.35)').replace('rgba(','rgba(')}`}}>
+                <div className="flex items-baseline justify-between gap-2 mb-0.5">
+                  <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/55 font-bold">Decision Clock</span>
+                  <span className="text-[9px] uppercase tracking-wide tabular-nums" style={{color:_dcCol}}>{_dcState}</span>
+                </div>
+                <div className="text-[18px] font-bold tabular-nums tracking-tight leading-tight" style={{color:_dcCol}}>{_dcMain}</div>
+                <div className="text-[9px] text-[#EDEDED]/50 mt-0.5 leading-snug">{_dcSub}</div>
+              </div>
+            </div>
             <div className="border-t border-[#1F1F1F] pt-2.5 mt-2.5">
               <div className="px-2.5 py-2 rounded-lg" style={{background:'#141414',border:'1px solid #1F1F1F'}}>
                 <div className="flex items-baseline justify-between gap-2 mb-0.5">
@@ -17166,6 +17240,7 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
                 {_blockerLine&&<div className="text-[9px] text-[#EDEDED]/45 italic mt-0.5 tabular-nums">{_blockerLine}</div>}
               </div>
             </div>
+            </>
           );
         })()}
         {!isCommittedSnap&&(onSoftHint||onHardForce)&&(
