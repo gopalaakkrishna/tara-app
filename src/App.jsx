@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.06-v13.4.145-wire-up-v11-selectivity-gate';
-const TARA_VERSION_DISPLAY='Tara 13.4.145';
+const BASELINE_VERSION='2026.08.06-v13.4.146-hourly-min-cost-floor';
+const TARA_VERSION_DISPLAY='Tara 13.4.146';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15842,7 +15842,22 @@ function HourlyLadderPanel({spot,taraCall}){
   const{rec,addLock}=useHourlyRecord();
   const hourKey=new Date(nowMs).toISOString().slice(0,13);
   const CONFIRM_TICKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyConfirmTicks'),10);return(Number.isFinite(v)&&v>=1&&v<=10)?v:3;}catch(_e){return 3;}})();
-  const MIN_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMinCost'));return(Number.isFinite(v)&&v>0)?v:40;}catch(_e){return 40;}})(); // V13.4.121: 20->40 default -- user wants sure-shot locks at decent odds, not long shots; a 20c floor was letting through strikes priced at ~20% implied probability by definition. Still user-overridable via localStorage.
+  // V13.4.146: 40 -> 45. EV audit of the 200 settled hourly locks in the
+  //   2026-08-05 export found the 40-45c band is the single worst thing this
+  //   ladder does:
+  //       cost 40-45c : n=19  WR 10.5%  netEV -30.89c/contract  (-$5.87)
+  //       cost 45-50c : n=25  WR 60.0%  netEV +13.04c
+  //       cost 50-55c : n=25  WR 68.0%  netEV +15.64c
+  //   A 41c contract implies ~41% and won 10.5%. That is not variance at n=19;
+  //   it is the anti-chase rule below ("take the CHEAPEST acceptable entry")
+  //   deliberately hunting the bottom of the allowed band, where the strikes
+  //   are furthest from spot and the barrier model is least reliable.
+  //   NOTE the V13.4.93 comment below claims sub-50c entries returned +9.27c
+  //   over 822 locks. This sample contradicts that for the 40-45c slice
+  //   specifically; 45-55c remains strongly positive, so the floor is raised
+  //   rather than the anti-chase logic removed. Revisit if a larger archive
+  //   disagrees. Still user-overridable via localStorage.
+  const MIN_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMinCost'));return(Number.isFinite(v)&&v>0)?v:45;}catch(_e){return 45;}})();
   const MAX_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMaxCost'));return(Number.isFinite(v)&&v>0)?v:65;}catch(_e){return 65;}})();
   const MAX_LOCKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyMaxLocks'),10);return(Number.isFinite(v)&&v>=1&&v<=12)?v:6;}catch(_e){return 6;}})();
   const COOLDOWN_MS=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyCooldownMin'));return(Number.isFinite(v)&&v>0)?v*60000:180000;}catch(_e){return 180000;}})();
@@ -15926,7 +15941,31 @@ function HourlyLadderPanel({spot,taraCall}){
     //   85% zone. Real aggregate result: 194W-188L, 51% -- almost exactly what blending
     //   a genuinely strong late-hour signal with a genuinely random early-hour one would
     //   produce. Cutting the coin-flip band entirely; keeping 67/77/85%.
-    const MAX_MINS_LEFT_TO_LOCK=45;
+    // V13.4.146: STAYS AT 45. A tightening to 20min was built and then REJECTED
+    //   by its own replay, recorded here so it is not proposed again.
+    //   EV by minutes-left at lock, over the 196 settled locks with a derivable
+    //   lock time:
+    //       <=20 min : n= 21  WR 76.2%  netEV +18.38c/contract
+    //       20-30min : n= 18  WR 44.4%  netEV -14.50c
+    //       30-45min : n= 45  WR 62.2%  netEV  +5.11c
+    //       45-61min : n=113  WR 53.1%  netEV  -2.89c   <- already blocked by 45
+    //   The <=20min bucket is much the best per contract, but cutting to 20
+    //   removes n=162 whose aggregate EV is POSITIVE (+1.17c), and the surviving
+    //   book is SMALLER than leaving the cap alone:
+    //       MIN_C=45 alone        n=181  netEV  +3.10c  book +$5.62
+    //       MIN_C=45 + <=20min    n= 19  netEV +19.58c  book +$3.72
+    //   Blocking profitable trades to raise per-contract EV is the same error as
+    //   the dlq-gate removed in V13.4.145. The 20-45min region is also not
+    //   monotonic (20-30 is sharply negative, 30-45 positive), so there is no
+    //   clean boundary to cut on. The existing 45 cap is doing the right job:
+    //   it already removes the genuinely negative 45-61min band.
+    //   Lateness is instead used to SIZE UP (see the V11 gate's late-window
+    //   boost), which captures the effect without discarding good volume.
+    //   Override if wanted: localStorage 'taraHourlyMaxMinsLeft'.
+    const MAX_MINS_LEFT_TO_LOCK=(function(){
+      try{const v=parseFloat(localStorage.getItem('taraHourlyMaxMinsLeft'));
+        return(Number.isFinite(v)&&v>0&&v<=60)?v:45;}catch(_e){return 45;}
+    })();
     if(dir&&L.ticks>=needTicks&&eligible.length&&minsLeft>1.5&&minsLeft<=MAX_MINS_LEFT_TO_LOCK&&coolOk&&L.locks.length<MAX_LOCKS){
       const side=dir==='UP'?'YES':'NO';
       const pick=eligible.find(c=>!L.locks.some(x=>x.strike===c.r.strike&&x.side===side))||null;
