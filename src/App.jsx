@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.06-v13.4.154-sports-started-marking-tab-meaning';
-const TARA_VERSION_DISPLAY='Tara 13.4.154';
+const BASELINE_VERSION='2026.08.07-v13.4.155-aligned-not-take-verdict-surfaced';
+const TARA_VERSION_DISPLAY='Tara 13.4.155';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26487,12 +26487,17 @@ const SPORTS_RED='rgb(255,77,106)';
 let _sportsCache={data:null,at:0};
 const _SPORTS_TTL_MS=5*60*1000;
 
+// ALIGNED is deliberately NOT green. Green reads as "go", and this label means
+// the model agrees with the market — which is the absence of an edge, not the
+// presence of one. The live record has the model significantly WORSE than the
+// market, so colouring agreement as a buy signal was the least accurate thing
+// on the board. Neutral blue: informative, not an instruction.
 function SportsAdviceChip({advice}){
   const a=String(advice||'');
   const key=a.split(' ')[0];
-  const col=key==='TAKE'?SPORTS_GREEN:key==='CAUTION'?T2_GOLD:key==='STARTED'?'#7CA6E8':'#EDEDED';
-  const op=key==='TAKE'||key==='CAUTION'||key==='STARTED'?1:0.32;
-  const bg=key==='TAKE'?'rgba(40,204,149,0.12)':key==='CAUTION'?T2_GOLD_GLOW:key==='STARTED'?'rgba(124,166,232,0.12)':'transparent';
+  const col=key==='ALIGNED'?'#7CA6E8':key==='WIDE'?T2_GOLD:key==='STARTED'?'#8A8A84':'#EDEDED';
+  const op=key==='ALIGNED'||key==='WIDE'||key==='STARTED'?1:0.32;
+  const bg=key==='ALIGNED'?'rgba(124,166,232,0.12)':key==='WIDE'?T2_GOLD_GLOW:'transparent';
   return(<span className="inline-block text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded border whitespace-nowrap shrink-0" style={{color:col,borderColor:col,background:bg,opacity:op}}>{a}</span>);
 }
 
@@ -26662,7 +26667,7 @@ function SportsView({onClose}){
       list=list.map(r=>sportsHasStarted(r.start,nowMs)&&r.advice!=='STARTED'
         ?{...r,advice:'STARTED',_wasAdvice:r.advice}:r);
     }
-    if(tab==='upcoming'&&onlyTake)return list.filter(r=>r.advice==='TAKE');
+    if(tab==='upcoming'&&onlyTake)return list.filter(r=>r.advice==='ALIGNED');
     return list;
   },[data,tab,onlyTake,nowMs]);
 
@@ -26690,10 +26695,10 @@ function SportsView({onClose}){
     rows.forEach(r=>{
       const dk=sportsDateKey(r.start);
       const key=dk||'tbc';
-      if(didx[key]===undefined){didx[key]=days.length;days.push({key,dateKey:dk,sports:[],sidx:{},n:0,takes:0});}
+      if(didx[key]===undefined){didx[key]=days.length;days.push({key,dateKey:dk,sports:[],sidx:{},n:0,aligned:0});}
       const day=days[didx[key]];
       day.n++;
-      if(r.advice==='TAKE')day.takes++;
+      if(r.advice==='ALIGNED')day.aligned++;
       const sp=r.sport||'other';
       if(day.sidx[sp]===undefined){day.sidx[sp]=day.sports.length;day.sports.push({sport:sp,label:r.sport_label||sp,leagues:[],lidx:{}});}
       const s=day.sports[day.sidx[sp]];
@@ -26788,6 +26793,21 @@ function SportsView({onClose}){
             );
           })()}
 
+          {/* The verdict, stated once and plainly. A bootstrap CI on the
+              model-minus-market log loss whose LOWER bound is above zero is
+              not "early days" — it is a measured deficit. Burying that under a
+              generic small-sample caveat would be the flattering read. */}
+          {data.verdict&&(
+            <div className="rounded-xl border p-3 mb-3 text-[11.5px] leading-relaxed"
+              style={{borderColor:data.verdict.significant_worse?'rgba(255,77,106,0.35)':'#1F1F1F',
+                      background:data.verdict.significant_worse?'rgba(255,77,106,0.06)':'#111'}}>
+              <span className="font-bold" style={{color:data.verdict.significant_worse?SPORTS_RED:'#EDEDED'}}>
+                {data.verdict.headline}
+              </span>
+              <span className="text-[#EDEDED]/50"> {data.verdict.detail}</span>
+            </div>
+          )}
+
           {rec&&rec.n<100&&(
             <div className="rounded-xl border border-[#2A2A2A] border-l-2 bg-[#141414] p-3 mb-5 text-[11.5px] leading-relaxed text-[#EDEDED]/50" style={{borderLeftColor:T2_GOLD}}>
               <span className="text-white font-bold">{rec.n} settled predictions is far too few to conclude anything.</span> Separating a real 2% edge from noise takes on the order of 1,000 bets. This is bookkeeping, not evidence. Log loss against the market is the number that will eventually matter; win rate never will.
@@ -26802,7 +26822,7 @@ function SportsView({onClose}){
             </div>
             {tab==='upcoming'&&(
               <button onClick={()=>setOnlyTake(v=>!v)} className="ml-1 px-3 py-1.5 text-[10px] uppercase font-bold tracking-wider rounded-lg border transition-colors" style={onlyTake?{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}:{color:'rgba(237,237,237,0.4)',borderColor:'#1F1F1F'}}>
-                {onlyTake?'TAKE only':'showing all'}
+                {onlyTake?'ALIGNED only':'showing all'}
               </button>
             )}
           </div>
@@ -26810,7 +26830,7 @@ function SportsView({onClose}){
               was not obvious: a TAKE call could sit in Upcoming and be absent
               from Open, which is exactly how two picks went untracked. */}
           <div className="text-[11px] text-[#EDEDED]/40 mb-4 leading-relaxed">
-            {tab==='upcoming'&&<span><b className="text-white/70">Upcoming</b> is raw model output. A TAKE call is committed to the record automatically once it is within 36h of kick-off — until then it is a forecast, not a tracked pick.</span>}
+            {tab==='upcoming'&&<span><b className="text-white/70">Upcoming</b> is raw model output. An ALIGNED call is committed to the record automatically once it is within 36h of kick-off — until then it is a forecast, not a tracked pick.</span>}
             {tab==='open'&&<span><b className="text-white/70">Open</b> is the tracked record: locked with the market price as it stood at lock time, awaiting a result. These are the ones that count.</span>}
             {tab==='record'&&<span><b className="text-white/70">Record</b> is settled picks only. Scored by log loss against the market price captured at lock time, not by win rate.</span>}
           </div>
@@ -26855,7 +26875,7 @@ function SportsView({onClose}){
             </div>
           )}
 
-          {grouped.length===0&&<div className="text-[#EDEDED]/40 text-sm py-6">Nothing here. {tab==='upcoming'&&onlyTake?'No TAKE-grade calls in the current slate — reporting none rather than promoting weaker ones.':''}</div>}
+          {grouped.length===0&&<div className="text-[#EDEDED]/40 text-sm py-6">Nothing here. {tab==='upcoming'&&onlyTake?'No ALIGNED calls in the current slate — reporting none rather than promoting weaker ones.':''}</div>}
 
           {grouped.map((day,di)=>{
             const open=isDayOpen(day.key,di);
@@ -26865,8 +26885,8 @@ function SportsView({onClose}){
                   <span className="text-[10px] w-3 shrink-0" style={{color:T2_GOLD}}>{open?'▾':'▸'}</span>
                   <span className="text-[13px] font-bold text-white tracking-tight">{sportsDateLabel(day.dateKey)}</span>
                   <span className="text-[10px] uppercase tracking-wider text-[#EDEDED]/35">{day.n} {day.n===1?'pick':'picks'}</span>
-                  {day.takes>0&&tab!=='record'&&(
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border" style={{color:SPORTS_GREEN,borderColor:SPORTS_GREEN,background:'rgba(40,204,149,0.12)'}}>{day.takes} take</span>
+                  {day.aligned>0&&tab!=='record'&&(
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border" style={{color:SPORTS_GREEN,borderColor:SPORTS_GREEN,background:'rgba(40,204,149,0.12)'}}>{day.aligned} aligned</span>
                   )}
                   <span className="ml-auto flex gap-1 shrink-0">
                     {day.sports.map(s=><span key={s.sport} className="text-[12px] leading-none opacity-60">{SPORT_EMOJI[s.sport]||'•'}</span>)}
@@ -26898,10 +26918,7 @@ function SportsView({onClose}){
           })}
 
           <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-3 text-[11px] leading-relaxed text-[#EDEDED]/45 mt-2">
-            <span className="font-bold" style={{color:SPORTS_GREEN}}>TAKE</span> = model within 3 points of the market — the band where it measurably matches the closing line.
-            <span className="font-bold" style={{color:T2_GOLD}}> CAUTION</span> = 3–7 points apart, shown but never tallied.
-            <span className="text-white/70 font-bold"> SKIP</span> = more than 7 points apart, thin data, or illiquid. Large disagreement backtested at 1.0373 log loss against the market's 0.9641, so it is model error rather than edge.
-          </div>
+            <span className="font-bold" style={{color:'#7CA6E8'}}>ALIGNED</span> = the model is within 3 points of the market. That is where it has measurably matched the closing line — and it is the <b className="text-white/70">absence of an edge</b>, not the presence of one. After Kalshi's ~1.7c fee near 50c, an aligned position is negative EV.<span className="font-bold" style={{color:T2_GOLD}}> WIDE</span> = 3–7 points apart, shown but never tallied.<span className="text-white/70 font-bold"> OFF</span> = more than 7 points apart, thin data, or illiquid. Large disagreement backtested at 1.0373 log loss against the market's 0.9641, so it is model error rather than edge.</div>
 
           {data.disclosures&&data.disclosures.length>0&&(
             <div className="mt-4">
