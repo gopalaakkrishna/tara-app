@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.07-v13.4.159-v11-gate-off-honest-lock-window';
-const TARA_VERSION_DISPLAY='Tara 13.4.159';
+const BASELINE_VERSION='2026.08.07-v13.4.160-hourly-better-odds-ceiling';
+const TARA_VERSION_DISPLAY='Tara 13.4.160';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15879,7 +15879,27 @@ function HourlyLadderPanel({spot,taraCall}){
   //   rather than the anti-chase logic removed. Revisit if a larger archive
   //   disagrees. Still user-overridable via localStorage.
   const MIN_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMinCost'));return(Number.isFinite(v)&&v>0)?v:45;}catch(_e){return 45;}})();
-  const MAX_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMaxCost'));return(Number.isFinite(v)&&v>0)?v:65;}catch(_e){return 65;}})();
+  // V13.4.160: 65 -> 60. The ask is "locks at better odds", and on the hourly
+  //   ladder that is actually selectable -- KXBTCD trades up to 6 strikes on the
+  //   same hour (26% of hours are multi-strike), unlike KXBTC15M which is
+  //   single-strike and offers no cheaper contract at all.
+  //   EV by entry cost over the 200 settled hourly locks:
+  //       45-50c : n=25  WR 60.0%  netEV +13.04c
+  //       50-55c : n=25  WR 68.0%  netEV +15.64c
+  //       55-60c : n=35  WR 60.0%  netEV  +2.94c
+  //       60-65c : n=70  WR 58.6%  netEV  -3.83c   <- largest bucket, only loser
+  //       65c+   : n=26  WR 65.4%  netEV  +0.38c
+  //   A 62c contract needs ~63.7% just to break even and got 58.6%. Dropping the
+  //   ceiling to 60 pushes the "cheapest acceptable" pick toward 45-60c, which is
+  //   where every positive bucket lives. Replayed on the settled record:
+  //       ceiling 65 (now): book +$5.62
+  //       ceiling 60      : book +$8.20
+  //   This buys BETTER ODDS rather than fewer trades -- the ladder still locks,
+  //   it just stops reaching for the expensive end of the ladder where the
+  //   implied probability already exceeds the model's own accuracy.
+  //   CAVEAT: n=70 in the excluded bucket, one export. Widen via localStorage
+  //   'taraHourlyMaxCost' if live results disagree.
+  const MAX_C=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyMaxCost'));return(Number.isFinite(v)&&v>0)?v:60;}catch(_e){return 60;}})();
   const MAX_LOCKS=(function(){try{const v=parseInt(localStorage.getItem('taraHourlyMaxLocks'),10);return(Number.isFinite(v)&&v>=1&&v<=12)?v:6;}catch(_e){return 6;}})();
   const COOLDOWN_MS=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyCooldownMin'));return(Number.isFinite(v)&&v>0)?v*60000:180000;}catch(_e){return 180000;}})();
   // V13.4.115: back ON by default. User wants this fixed/verifiable, not removed. Settlement
