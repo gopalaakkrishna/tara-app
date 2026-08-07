@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.07-v13.4.155-aligned-not-take-verdict-surfaced';
-const TARA_VERSION_DISPLAY='Tara 13.4.155';
+const BASELINE_VERSION='2026.08.07-v13.4.156-basketball-settler-awaiting-result';
+const TARA_VERSION_DISPLAY='Tara 13.4.156';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26598,7 +26598,19 @@ function SportsRow({r,grid,showResult}){
           :<SportsAdviceChip advice={r.advice}/>}
         <span className="text-[9px] font-bold uppercase tracking-wider shrink-0 pt-0.5" style={{color:tierCol,opacity:r.tier==='HIGH'?1:0.5}}>{r.tier}</span>
         <div className="flex-1 min-w-[180px]">
-          <div className="text-[13px] font-bold text-white tracking-tight uppercase">{r.pick}</div>
+          <div className="text-[13px] font-bold text-white tracking-tight uppercase">
+            {r.pick}
+            {/* A fixture in the past that is still unsettled is waiting on a
+                results feed, not on the game. Boca v Estudiantes sat in Open
+                for two days looking like a live call because
+                football-data.co.uk had not published that date yet. */}
+            {r.stale_days>0&&(
+              <span className="ml-2 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border align-middle normal-case" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER,background:T2_GOLD_GLOW}}
+                title="The fixture is in the past. This is waiting on the results feed, not on the game.">
+                awaiting result · {r.stale_days}d
+              </span>
+            )}
+          </div>
           {/* The ledger appends "(YYYY-MM-DD)" to events; the date column
               already carries it, so drop it rather than print it twice. */}
           <div className="text-[10.5px] text-[#EDEDED]/40">{String(r.event||r.match||'').replace(/\s*\(\d{4}-\d{2}-\d{2}\)\s*$/,'')}</div>
