@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.07-v13.4.156-basketball-settler-awaiting-result';
-const TARA_VERSION_DISPLAY='Tara 13.4.156';
+const BASELINE_VERSION='2026.08.07-v13.4.157-one-board-settlers-all-sports';
+const TARA_VERSION_DISPLAY='Tara 13.4.157';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26604,6 +26604,14 @@ function SportsRow({r,grid,showResult}){
                 results feed, not on the game. Boca v Estudiantes sat in Open
                 for two days looking like a live call because
                 football-data.co.uk had not published that date yet. */}
+            {/* Tracked is a property of a row, not a separate tab. This badge
+                is what replaced the old Open list. */}
+            {r.tracked&&!showResult&&(
+              <span className="ml-2 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border align-middle normal-case" style={{color:SPORTS_GREEN,borderColor:SPORTS_GREEN,background:'rgba(40,204,149,0.10)'}}
+                title={'Committed to the record'+(r.ledger_id?' as #'+r.ledger_id:'')+'. Counts win or lose.'}>
+                tracked{r.ledger_id?' #'+r.ledger_id:''}
+              </span>
+            )}
             {r.stale_days>0&&(
               <span className="ml-2 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border align-middle normal-case" style={{color:T2_GOLD,borderColor:T2_GOLD_BORDER,background:T2_GOLD_GLOW}}
                 title="The fixture is in the past. This is waiting on the results feed, not on the game.">
@@ -26635,14 +26643,15 @@ function SportsRow({r,grid,showResult}){
 function SportsView({onClose}){
   const[data,setData]=React.useState(null);
   const[err,setErr]=React.useState(null);
-  const[tab,setTab]=React.useState('upcoming');
-  const[onlyTake,setOnlyTake]=React.useState(true);
+  const[tab,setTab]=React.useState('board');
+  // all | aligned | tracked — replaces the old Upcoming/Open split
+  const[filter,setFilter]=React.useState('all');
   const[sportFilter,setSportFilter]=React.useState('all');
   // Which date groups the user has explicitly opened or closed. Anything not
   // in here falls back to the default (nearest few open) — so changing tab or
   // filter re-applies the default instead of stranding a stale open/closed set.
   const[dateOverrides,setDateOverrides]=React.useState({});
-  React.useEffect(()=>{setDateOverrides({});},[tab,onlyTake,sportFilter]);
+  React.useEffect(()=>{setDateOverrides({});},[tab,filter,sportFilter]);
   // Local clock tick. 30s, no network, no cloud read — the only thing it does
   // is re-evaluate which fixtures have kicked off since the payload was built.
   const[nowMs,setNowMs]=React.useState(()=>Date.now());
@@ -26670,8 +26679,14 @@ function SportsView({onClose}){
   // them.
   const tabRows=React.useMemo(()=>{
     if(!data)return[];
-    const src=tab==='upcoming'?data.upcoming:tab==='open'?data.open:data.settled;
+    // ONE board of everything unresolved, plus the settled record. "Upcoming"
+    // and "Open" were 94% the same rows — 17 of 18 open predictions also sat in
+    // upcoming, the same pick twice with two framings. Tracked-or-not is a
+    // property of a row, so it is a badge now, and `filter` selects on it.
+    const src=tab==='board'?(data.board||data.upcoming):data.settled;
     let list=(src||[]);
+    if(tab==='board'&&filter==='aligned')list=list.filter(r=>r.advice==='ALIGNED');
+    if(tab==='board'&&filter==='tracked')list=list.filter(r=>r.tracked);
     if(tab!=='record'){
       // Re-stamp advice from the CURRENT time before anything filters on it.
       // The export said TAKE at 19:23; by 19:50 two of those had first pitch
@@ -26679,9 +26694,8 @@ function SportsView({onClose}){
       list=list.map(r=>sportsHasStarted(r.start,nowMs)&&r.advice!=='STARTED'
         ?{...r,advice:'STARTED',_wasAdvice:r.advice}:r);
     }
-    if(tab==='upcoming'&&onlyTake)return list.filter(r=>r.advice==='ALIGNED');
-    return list;
-  },[data,tab,onlyTake,nowMs]);
+        return list;
+  },[data,tab,filter,nowMs]);
 
   const sportCounts=React.useMemo(()=>{
     const m={};
@@ -26828,24 +26842,24 @@ function SportsView({onClose}){
 
           <div className="flex flex-wrap items-center gap-1 mb-4">
             <div className="flex gap-1 p-1 rounded-lg bg-[#171717] w-fit border border-[#1F1F1F]">
-              {[['upcoming','Upcoming'],['open','Open'],['record','Record']].map(([id,lab])=>(
+              {[['board','Board'],['record','Record']].map(([id,lab])=>(
                 <button key={id} onClick={()=>setTab(id)} className={'px-3 py-1.5 text-xs uppercase font-bold tracking-wider rounded-lg transition-colors '+(tab===id?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70')} style={tab===id?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>{lab}</button>
               ))}
             </div>
-            {tab==='upcoming'&&(
-              <button onClick={()=>setOnlyTake(v=>!v)} className="ml-1 px-3 py-1.5 text-[10px] uppercase font-bold tracking-wider rounded-lg border transition-colors" style={onlyTake?{background:T2_GOLD_GLOW,color:T2_GOLD,borderColor:T2_GOLD_BORDER}:{color:'rgba(237,237,237,0.4)',borderColor:'#1F1F1F'}}>
-                {onlyTake?'ALIGNED only':'showing all'}
-              </button>
+            {tab==='board'&&(
+              <div className="flex gap-1 ml-1 p-1 rounded-lg bg-[#171717] w-fit border border-[#1F1F1F]">
+                {[['all','All'],['aligned','Aligned'],['tracked','Tracked']].map(([id,lab])=>(
+                  <button key={id} onClick={()=>setFilter(id)} className={'px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg transition-colors '+(filter===id?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70')} style={filter===id?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>{lab}</button>
+                ))}
+              </div>
             )}
           </div>
           {/* These three tabs are not the same list at three stages, and that
               was not obvious: a TAKE call could sit in Upcoming and be absent
               from Open, which is exactly how two picks went untracked. */}
           <div className="text-[11px] text-[#EDEDED]/40 mb-4 leading-relaxed">
-            {tab==='upcoming'&&<span><b className="text-white/70">Upcoming</b> is raw model output. An ALIGNED call is committed to the record automatically once it is within 36h of kick-off — until then it is a forecast, not a tracked pick.</span>}
-            {tab==='open'&&<span><b className="text-white/70">Open</b> is the tracked record: locked with the market price as it stood at lock time, awaiting a result. These are the ones that count.</span>}
-            {tab==='record'&&<span><b className="text-white/70">Record</b> is settled picks only. Scored by log loss against the market price captured at lock time, not by win rate.</span>}
-          </div>
+            {tab==='board'&&<span><b className="text-white/70">Board</b> is everything not yet resolved. <b className="text-white/70">Tracked</b> rows are committed to the record — an ALIGNED call is committed automatically once it is within 36h of kick-off. Everything else is a forecast the record does not count.</span>}
+            {tab==='record'&&<span><b className="text-white/70">Record</b> is settled picks only. Scored by log loss against the market price captured at lock time, not by win rate.</span>}</div>
 
           {tab==='record'&&data.by_league&&data.by_league.length>0&&(
             <div className="mb-5">
@@ -26887,7 +26901,7 @@ function SportsView({onClose}){
             </div>
           )}
 
-          {grouped.length===0&&<div className="text-[#EDEDED]/40 text-sm py-6">Nothing here. {tab==='upcoming'&&onlyTake?'No ALIGNED calls in the current slate — reporting none rather than promoting weaker ones.':''}</div>}
+          {grouped.length===0&&<div className="text-[#EDEDED]/40 text-sm py-6">Nothing here. {tab==='board'&&filter!=='all'?'Nothing matches this filter.':''}</div>}
 
           {grouped.map((day,di)=>{
             const open=isDayOpen(day.key,di);
