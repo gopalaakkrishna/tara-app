@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.07-v13.4.160-hourly-better-odds-ceiling';
-const TARA_VERSION_DISPLAY='Tara 13.4.160';
+const BASELINE_VERSION='2026.08.07-v13.4.161-fix-100c-sentinel-and-coach-source-mismatch';
+const TARA_VERSION_DISPLAY='Tara 13.4.161';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15514,10 +15514,31 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
   //   actual lock/sitout/commit happens (confirmed: every commit-path fix tonight writes
   //   to this exact ref). Threaded through as lockedSnapshotDir, same pattern as the
   //   existing reversalRisk prop on this same component.
-  const _lockDirIn=analysis?.lockInfo?.dir||null;
-  const _resolved=getTaraDirection({snapshot:{call:lockedSnapshotDir},lock:{dir:_lockDirIn},signalSource:'snapshot'});
-  let call=_resolved.dir||(taraCall&&taraCall.call==='SIT_OUT'?'SIT_OUT':null);
   const locked=!!(taraCall&&taraCall.locked);
+  // V13.4.161 FIX: the REAL cause of the header/reason contradiction, which the
+  //   V13.4.148 debounce-lag fix did not catch (confirmed by a fresh screenshot
+  //   showing "LEANING DOWN -- HOLD" over "TRAJ-priority lock·UP" with NO active
+  //   flip in progress). Below, `rawReason` reads _src.reason, and _src is
+  //   `taraCall` whenever NOT locked (see _src a few lines down). But `call`
+  //   (the header) was ALWAYS routed through getTaraDirection/lockedSnapshotDir --
+  //   a pipeline meant to prefer the FROZEN lock snapshot once locked, so a live-
+  //   drifting taraCall.call can't disagree with a frozen ticket (V13.4.116's
+  //   actual, narrower purpose). Pre-lock there IS no frozen snapshot to prefer;
+  //   lockedSnapshotDir there is just whatever the PREVIOUS lock happened to be,
+  //   unrelated to the live lean. So header and body were reading two different
+  //   objects at every unlocked tick, not just during an 8s debounce window.
+  //   Fix: use the frozen-snapshot pipeline ONLY once actually locked; pre-lock,
+  //   read taraCall.call directly -- the exact same object `_src` already uses
+  //   for the reason text -- so header and body can never disagree pre-lock.
+  let call;
+  if(locked){
+    const _lockDirIn=analysis?.lockInfo?.dir||null;
+    const _resolved=getTaraDirection({snapshot:{call:lockedSnapshotDir},lock:{dir:_lockDirIn},signalSource:'snapshot'});
+    call=_resolved.dir||(taraCall&&taraCall.call==='SIT_OUT'?'SIT_OUT':null);
+  }else{
+    call=(taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN'))?taraCall.call
+      :(taraCall&&taraCall.call==='SIT_OUT'?'SIT_OUT':null);
+  }
   // V13.4.121: apply the stability hold ONLY to the pre-lock lean -- once actually
   //   locked, the direction is frozen already (that's the whole point of `locked`),
   //   so there's nothing to debounce there.
@@ -43752,7 +43773,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   'always commit' mandate is preserved -- only the PRICE is now checked, same
         //   band/dials as the main gate, same TRAJ-early exemption if that is genuinely why
         //   the price is being accepted.
-        const _ngK=Number(_kPctNow);
+        // V13.4.161 FIX: Number(null) is 0, not NaN, so a genuinely MISSING price
+        //   (_kPctNow===null, the exact case that sets _noGoReason to "Kalshi feed
+        //   unavailable" a few lines above) was passing Number.isFinite() as if it
+        //   were a real 0c quote, then converting to 100c for a DOWN call. Real
+        //   screenshot: "[V13.4.111] DOWN 63% wanted to lock at 100c -- outside
+        //   25-75c band (orig: Data integrity issue -- Kalshi feed unavailable)" --
+        //   there was no 100c quote; there was no quote at all. Require _kPctNow to
+        //   actually be a number before deriving a cost from it.
+        const _ngK=(typeof _kPctNow==='number')?_kPctNow:NaN;
         const _ngCost=Number.isFinite(_ngK)?(_commitDir==='UP'?_ngK:(100-_ngK)):null;
         const _ngOn=(function(){try{return localStorage.getItem('taraEntryQuality')!=='off';}catch(_eng1){return true;}})();
         const _ngMin=getEntryMinCost();
@@ -43761,6 +43790,35 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _ngTrajGap=Number(analysis?.projectedGapBps)||0;
         const _ngTrajDir=_ngTrajGap>0?'UP':(_ngTrajGap<0?'DOWN':null);
         const _ngTrajAgrees=_ngTrajOn&&_ngTrajDir===_commitDir&&_ngTrajGap!==0;
+        // V13.4.161: a genuinely missing price (_ngCost null because _kPctNow was
+        //   null, not because the guard is off) is the SAME "missing price" case
+        //   V13.4.132 already sits out for on the universal cost guard above --
+        //   "a missing price isn't a reason to skip the gate, it's the strongest
+        //   reason to trigger it". This path previously fell through to a BLIND
+        //   commit (real direction, kalshiAtLock:null, no idea what it costs) any
+        //   time the band check couldn't run. Match the established precedent.
+        if(_ngOn&&_ngCost==null&&_kPctNow==null){
+          const _ngNoDataSnap={
+            call:'SIT_OUT',direction:null,confidence:0,
+            caution:null,
+            reason:`${_commitDir} ${_commitConf}% wanted to lock but no Kalshi price is available -- sitting out rather than commit blind (V13.4.161)`,
+            atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
+            atPosterior:_post,kalshiAtLock:null,
+            locked:true,earlyLock:false,
+            isConfluent:false,isSuperConfluent:false,isRisingConfluence:false,isTapeLed:false,isStructuralLed:false,
+            samples:0,needSamples:0,
+            tier:'no-go-price-unavailable-sitout',
+            session:(typeof getMarketSessions==='function'?getMarketSessions():{}).dominant||'UNKNOWN',
+            regime:analysis?.regime||'',
+            qScore:Math.round(_qFast),
+            fgt:analysis?.mtfAlignment,
+            _committedAt:Date.now(),
+          };
+          taraCallSnapshotRef.current=_ngNoDataSnap;
+          _logSnapshotEntry(_ngNoDataSnap);
+          _persistLock();
+          return;
+        }
         if(_ngOn&&_ngCost!=null&&(_ngCost<_ngMin||_ngCost>=_ngMax)&&!_ngTrajAgrees){
           const _ngSitSnap={
             call:'SIT_OUT',direction:null,confidence:0,
