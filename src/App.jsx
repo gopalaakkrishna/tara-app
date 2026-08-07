@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.06-v13.4.153-news-feeds-under-call-responsive';
-const TARA_VERSION_DISPLAY='Tara 13.4.153';
+const BASELINE_VERSION='2026.08.06-v13.4.154-sports-started-marking-tab-meaning';
+const TARA_VERSION_DISPLAY='Tara 13.4.154';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26490,10 +26490,23 @@ const _SPORTS_TTL_MS=5*60*1000;
 function SportsAdviceChip({advice}){
   const a=String(advice||'');
   const key=a.split(' ')[0];
-  const col=key==='TAKE'?SPORTS_GREEN:key==='CAUTION'?T2_GOLD:'#EDEDED';
-  const op=key==='TAKE'||key==='CAUTION'?1:0.32;
-  const bg=key==='TAKE'?'rgba(40,204,149,0.12)':key==='CAUTION'?T2_GOLD_GLOW:'transparent';
+  const col=key==='TAKE'?SPORTS_GREEN:key==='CAUTION'?T2_GOLD:key==='STARTED'?'#7CA6E8':'#EDEDED';
+  const op=key==='TAKE'||key==='CAUTION'||key==='STARTED'?1:0.32;
+  const bg=key==='TAKE'?'rgba(40,204,149,0.12)':key==='CAUTION'?T2_GOLD_GLOW:key==='STARTED'?'rgba(124,166,232,0.12)':'transparent';
   return(<span className="inline-block text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded border whitespace-nowrap shrink-0" style={{color:col,borderColor:col,background:bg,opacity:op}}>{a}</span>);
+}
+
+// A pre-game model probability compared against an in-play market price
+// invents enormous edges — the scoreboard talking, not a disagreement. The
+// export cannot know this, because whether a game has started depends on when
+// you LOOK, not on when the file was written. So the client decides, from its
+// own clock, on every tick.
+function sportsHasStarted(start,nowMs){
+  if(!start)return false;
+  const s=String(start);
+  if(!/[+Z]/.test(s.slice(10)))return false;   // date-only: no clock to compare
+  const t=Date.parse(s);
+  return !isNaN(t)&&t<=nowMs;
 }
 
 // The in-game panel. `grid` is keyed "inning|lead" -> [homeWinRate, n].
@@ -26613,6 +26626,10 @@ function SportsView({onClose}){
   // filter re-applies the default instead of stranding a stale open/closed set.
   const[dateOverrides,setDateOverrides]=React.useState({});
   React.useEffect(()=>{setDateOverrides({});},[tab,onlyTake,sportFilter]);
+  // Local clock tick. 30s, no network, no cloud read — the only thing it does
+  // is re-evaluate which fixtures have kicked off since the payload was built.
+  const[nowMs,setNowMs]=React.useState(()=>Date.now());
+  React.useEffect(()=>{const iv=setInterval(()=>setNowMs(Date.now()),30000);return()=>clearInterval(iv);},[]);
 
   React.useEffect(()=>{
     let alive=true;
@@ -26637,10 +26654,17 @@ function SportsView({onClose}){
   const tabRows=React.useMemo(()=>{
     if(!data)return[];
     const src=tab==='upcoming'?data.upcoming:tab==='open'?data.open:data.settled;
-    const list=(src||[]);
+    let list=(src||[]);
+    if(tab!=='record'){
+      // Re-stamp advice from the CURRENT time before anything filters on it.
+      // The export said TAKE at 19:23; by 19:50 two of those had first pitch
+      // behind them, and the app was still presenting them as actionable.
+      list=list.map(r=>sportsHasStarted(r.start,nowMs)&&r.advice!=='STARTED'
+        ?{...r,advice:'STARTED',_wasAdvice:r.advice}:r);
+    }
     if(tab==='upcoming'&&onlyTake)return list.filter(r=>r.advice==='TAKE');
     return list;
-  },[data,tab,onlyTake]);
+  },[data,tab,onlyTake,nowMs]);
 
   const sportCounts=React.useMemo(()=>{
     const m={};
@@ -26740,6 +26764,30 @@ function SportsView({onClose}){
             </div>
           )}
 
+          {/* Freshness. This board is a snapshot written by export_tara.py, not
+              a live feed — the prices below are whatever Kalshi showed when the
+              model last ran. Saying so plainly beats letting a 3-hour-old price
+              look current because it is rendered in the same style as Tara's
+              live BTC numbers. */}
+          {(()=>{
+            if(!data.generated)return null;
+            const ageMin=Math.max(0,Math.round((nowMs-Date.parse(data.generated))/60000));
+            const stale=ageMin>=60;
+            const started=(data.upcoming||[]).filter(r=>sportsHasStarted(r.start,nowMs)).length;
+            return(
+              <div className="rounded-xl border p-3 mb-3 text-[11.5px] leading-relaxed flex flex-wrap items-center gap-x-2 gap-y-1"
+                style={{borderColor:stale?'rgba(255,77,106,0.3)':'#1F1F1F',background:stale?'rgba(255,77,106,0.05)':'#111'}}>
+                <span className="font-bold" style={{color:stale?SPORTS_RED:'#EDEDED'}}>
+                  Snapshot · {ageMin<1?'just now':ageMin<60?ageMin+' min old':(ageMin/60).toFixed(1)+' h old'}
+                </span>
+                <span className="text-[#EDEDED]/45">
+                  Prices are from the last model run, not live. This board does not
+                  re-price itself{started>0?<span> — <span style={{color:'#7CA6E8'}}>{started} fixture{started===1?' has':'s have'} already started</span> and {started===1?'is':'are'} marked STARTED rather than actionable</span>:null}.
+                </span>
+              </div>
+            );
+          })()}
+
           {rec&&rec.n<100&&(
             <div className="rounded-xl border border-[#2A2A2A] border-l-2 bg-[#141414] p-3 mb-5 text-[11.5px] leading-relaxed text-[#EDEDED]/50" style={{borderLeftColor:T2_GOLD}}>
               <span className="text-white font-bold">{rec.n} settled predictions is far too few to conclude anything.</span> Separating a real 2% edge from noise takes on the order of 1,000 bets. This is bookkeeping, not evidence. Log loss against the market is the number that will eventually matter; win rate never will.
@@ -26757,6 +26805,14 @@ function SportsView({onClose}){
                 {onlyTake?'TAKE only':'showing all'}
               </button>
             )}
+          </div>
+          {/* These three tabs are not the same list at three stages, and that
+              was not obvious: a TAKE call could sit in Upcoming and be absent
+              from Open, which is exactly how two picks went untracked. */}
+          <div className="text-[11px] text-[#EDEDED]/40 mb-4 leading-relaxed">
+            {tab==='upcoming'&&<span><b className="text-white/70">Upcoming</b> is raw model output. A TAKE call is committed to the record automatically once it is within 36h of kick-off — until then it is a forecast, not a tracked pick.</span>}
+            {tab==='open'&&<span><b className="text-white/70">Open</b> is the tracked record: locked with the market price as it stood at lock time, awaiting a result. These are the ones that count.</span>}
+            {tab==='record'&&<span><b className="text-white/70">Record</b> is settled picks only. Scored by log loss against the market price captured at lock time, not by win rate.</span>}
           </div>
 
           {tab==='record'&&data.by_league&&data.by_league.length>0&&(
