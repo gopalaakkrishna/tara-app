@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.07-v13.4.157-one-board-settlers-all-sports';
-const TARA_VERSION_DISPLAY='Tara 13.4.157';
+const BASELINE_VERSION='2026.08.07-v13.4.158-plain-labels-tracked-shows-locked-side';
+const TARA_VERSION_DISPLAY='Tara 13.4.158';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -26492,13 +26492,22 @@ const _SPORTS_TTL_MS=5*60*1000;
 // presence of one. The live record has the model significantly WORSE than the
 // market, so colouring agreement as a buy signal was the least accurate thing
 // on the board. Neutral blue: informative, not an instruction.
-function SportsAdviceChip({advice}){
+// The chip says the thing itself rather than a band name. ALIGNED / WIDE / OFF
+// were three words you had to learn in order to read one number — how far the
+// model sits from the market. "off by 13" says what "OFF" meant and also says
+// how far, which is the part that actually varies between rows.
+//
+// It is also NOT green. Green reads as "go", and the closest band means the
+// model agrees with the market, which is the absence of an edge. The live
+// record has the model measurably worse than the market.
+function SportsAdviceChip({advice,label}){
   const a=String(advice||'');
   const key=a.split(' ')[0];
+  const text=label||a;
   const col=key==='ALIGNED'?'#7CA6E8':key==='WIDE'?T2_GOLD:key==='STARTED'?'#8A8A84':'#EDEDED';
-  const op=key==='ALIGNED'||key==='WIDE'||key==='STARTED'?1:0.32;
+  const op=key==='ALIGNED'||key==='WIDE'||key==='STARTED'?1:0.34;
   const bg=key==='ALIGNED'?'rgba(124,166,232,0.12)':key==='WIDE'?T2_GOLD_GLOW:'transparent';
-  return(<span className="inline-block text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded border whitespace-nowrap shrink-0" style={{color:col,borderColor:col,background:bg,opacity:op}}>{a}</span>);
+  return(<span className="inline-block text-[9px] font-bold uppercase tracking-[0.06em] px-1.5 py-0.5 rounded border whitespace-nowrap shrink-0" style={{color:col,borderColor:col,background:bg,opacity:op}}>{key==='STARTED'?'started':text}</span>);
 }
 
 // A pre-game model probability compared against an in-play market price
@@ -26595,8 +26604,10 @@ function SportsRow({r,grid,showResult}){
         <div className="text-[10px] text-[#EDEDED]/35 w-[58px] shrink-0 pt-0.5" style={T2_MONO_STYLE}>{when}</div>
         {showResult
           ?<span className="text-[10px] font-bold uppercase tracking-wider shrink-0 pt-0.5" style={{color:r.won?SPORTS_GREEN:SPORTS_RED}}>{r.won?'WON':'LOST'}</span>
-          :<SportsAdviceChip advice={r.advice}/>}
-        <span className="text-[9px] font-bold uppercase tracking-wider shrink-0 pt-0.5" style={{color:tierCol,opacity:r.tier==='HIGH'?1:0.5}}>{r.tier}</span>
+          :<SportsAdviceChip advice={r.advice} label={r.label}/>}
+        {/* The tier word (HIGH/MEDIUM/LOW) was a second name for the same gap
+            the chip now states in points. Two labels for one number is exactly
+            what made this hard to read. */}
         <div className="flex-1 min-w-[180px]">
           <div className="text-[13px] font-bold text-white tracking-tight uppercase">
             {r.pick}
@@ -26625,7 +26636,13 @@ function SportsRow({r,grid,showResult}){
         </div>
         <div className="text-right shrink-0" style={T2_MONO_STYLE}>
           <div className="text-[12px] text-white">{pct(r.model)}</div>
-          <div className="text-[10px] text-[#EDEDED]/35">mkt {pct(r.mkt)}</div>
+          {/* A tracked row shows the price AT LOCK, because that is what the
+              record is scored against. When the live price has moved away from
+              it, say so rather than silently swapping one for the other. */}
+          <div className="text-[10px] text-[#EDEDED]/35">mkt {pct(r.mkt)}{r.tracked?' @ lock':''}</div>
+          {r.tracked&&r.mkt_now!=null&&r.mkt!=null&&Math.abs(r.mkt_now-r.mkt)>=0.03&&(
+            <div className="text-[10px]" style={{color:'#7CA6E8'}}>now {pct(r.mkt_now)}</div>
+          )}
         </div>
       </div>
       {isBall&&grid&&(
@@ -26944,7 +26961,7 @@ function SportsView({onClose}){
           })}
 
           <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-3 text-[11px] leading-relaxed text-[#EDEDED]/45 mt-2">
-            <span className="font-bold" style={{color:'#7CA6E8'}}>ALIGNED</span> = the model is within 3 points of the market. That is where it has measurably matched the closing line — and it is the <b className="text-white/70">absence of an edge</b>, not the presence of one. After Kalshi's ~1.7c fee near 50c, an aligned position is negative EV.<span className="font-bold" style={{color:T2_GOLD}}> WIDE</span> = 3–7 points apart, shown but never tallied.<span className="text-white/70 font-bold"> OFF</span> = more than 7 points apart, thin data, or illiquid. Large disagreement backtested at 1.0373 log loss against the market's 0.9641, so it is model error rather than edge.</div>
+            Every chip is one number: how far the model sits from the market on that pick. <span className="font-bold" style={{color:'#7CA6E8'}}>Matches market</span> means within 3 points — that is where the model has tracked the closing line, and it is the <b className="text-white/70">absence of an edge</b>, not the presence of one. After Kalshi's ~1.7c fee near 50c, a matching position is negative EV. <span className="font-bold" style={{color:T2_GOLD}}>Off by 3–7</span> is shown but never tallied. <span className="text-white/70 font-bold">Off by 8+</span> backtested at 1.0373 log loss against the market's 0.9641 — that is the model being wrong, not an edge worth taking.</div>
 
           {data.disclosures&&data.disclosures.length>0&&(
             <div className="mt-4">
