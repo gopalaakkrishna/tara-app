@@ -5229,8 +5229,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.07-v13.4.158-plain-labels-tracked-shows-locked-side';
-const TARA_VERSION_DISPLAY='Tara 13.4.158';
+const BASELINE_VERSION='2026.08.07-v13.4.159-v11-gate-off-honest-lock-window';
+const TARA_VERSION_DISPLAY='Tara 13.4.159';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -17226,10 +17226,22 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
           //
           // States: WAIT (do not enter yet) -> DECIDING -> LOCKED or NO CALL.
           // ═══════════════════════════════════════════════════════════════
+          // V13.4.159 CORRECTION: the V13.4.147 window (T-10 -> T-7) was a
+          //   PRESCRIPTION taken from best-EV entry buckets, but nothing makes the
+          //   engine obey it. Measured against 5 days of live locks it was simply
+          //   wrong about its own app:
+          //       locked BEFORE the promised window (>600s): 64%
+          //       locked INSIDE it                         : 19%
+          //       locked AFTER it (<=420s)                 : 18%
+          //   So it told the user to wait for a decision that had usually already
+          //   happened -- worse than showing nothing, because it was trusted.
+          //   Now describes what she ACTUALLY does: the observed inter-quartile
+          //   lock range (p25 516s, p50 686s, p75 793s on 15m). Labelled as
+          //   'typically', because it is a description, not a promise.
           const _dcTotal=windowType==='15m'?900:3600;
           const _dcLeft=_minsR*60+_secsR;
-          const _dcOpen=windowType==='15m'?600:1200;   // start deciding
-          const _dcClose=windowType==='15m'?420:600;   // must have answered
+          const _dcOpen=windowType==='15m'?793:1200;   // p75 - locks usually start here
+          const _dcClose=windowType==='15m'?516:600;   // p25 - usually decided by here
           const _fmt=(s)=>{s=Math.max(0,Math.round(s));const m=Math.floor(s/60);return m>0?`${m}m ${String(s%60).padStart(2,'0')}s`:`${s}s`;};
           const _clockAt=(secsFromNow)=>{
             try{
@@ -17245,20 +17257,20 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
             _dcMain=`LOCKED ${taraCall.call}`;
             _dcSub='call is in — do not trade against it';
           }else if(_dcLeft>_dcOpen){
-            _dcState='WAIT';
+            _dcState='EARLY';
             _dcCol='rgba(212,162,76,0.95)';
-            _dcMain=`decides at ${_clockAt(_dcLeft-_dcOpen)}`;
-            _dcSub=`in ${_fmt(_dcLeft-_dcOpen)} · too early to enter — the price has not moved in your favour yet`;
+            _dcMain=`usually locks from ${_clockAt(_dcLeft-_dcOpen)}`;
+            _dcSub=`~${_fmt(_dcLeft-_dcOpen)} away · she can still lock sooner — this is her typical range, not a schedule`;
           }else if(_dcLeft>_dcClose){
-            _dcState='DECIDING';
+            _dcState='LOCK WINDOW';
             _dcCol='rgb(40,204,149)';
-            _dcMain=`deciding now`;
-            _dcSub=`final answer within ${_fmt(_dcLeft-_dcClose)} · best entry zone`;
+            _dcMain=`in her usual lock range`;
+            _dcSub=`most locks land by ${_clockAt(_dcLeft-_dcClose)} · watch for the call now`;
           }else{
-            _dcState='NO CALL';
+            _dcState='PAST USUAL';
             _dcCol='rgba(237,237,237,0.45)';
-            _dcMain='no call this window';
-            _dcSub='decision window passed with no lock — sit this one out';
+            _dcMain='past her usual lock range';
+            _dcSub='she can still lock late, but most windows are decided by now';
           }
           return(
             <>
@@ -42633,12 +42645,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //     before  n=3255  netEV +0.40c/contract
       //     after   n=1888  netEV +1.97c/contract   (~5x, ~20 trades/day)
       //
-      // KILL SWITCH: localStorage 'taraV11Gate' = '0' disables entirely and
-      // restores exactly the old behaviour. Set it if anything looks wrong —
-      // this is the first time this code has ever executed against real money.
+      // ── V13.4.159: NOW OFF BY DEFAULT ───────────────────────────────────
+      // Turned on in V13.4.145 on the strength of a replay. Three days of live
+      // Supabase data do not justify keeping it on:
+      //   * it fired 30 times, ALL of them 'v11-kalshi-edge', and ZERO of those
+      //     30 carry a recorded would-be outcome -- so its value is literally
+      //     unmeasurable from what we log. A gate that cannot be scored should
+      //     not be running against real money.
+      //   * sit-out rate over the same period went 50% -> 77%.
+      //   * the user's read of it, which the above supports: it blocks calls
+      //     they want to see and it has not earned that.
+      // The replay that justified it used mid-priced log rows and could not see
+      // the exits or the real fills, so it was never the strong evidence it
+      // looked like. Left in place, defaulted OFF, so it can be re-enabled and
+      // measured properly once blocked sit-outs record outcomes.
+      // ENABLE: localStorage 'taraV11Gate' = '1'.
       // ═══════════════════════════════════════════════════════════════════
       try{
-        const _v11On=(()=>{try{return localStorage.getItem('taraV11Gate')!=='0';}catch(_e){return true;}})();
+        const _v11On=(()=>{try{return localStorage.getItem('taraV11Gate')==='1';}catch(_e){return false;}})();
         if(_v11On&&snapshot&&!snapshot._v11Checked&&
            (snapshot.call==='UP'||snapshot.call==='DOWN')){
           snapshot._v11Checked=true;
