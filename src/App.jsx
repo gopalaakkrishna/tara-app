@@ -26835,8 +26835,13 @@ function SportsView({onClose}){
   const[data,setData]=React.useState(null);
   const[err,setErr]=React.useState(null);
   const[tab,setTab]=React.useState('board');
-  // all | aligned | tracked — replaces the old Upcoming/Open split
-  const[filter,setFilter]=React.useState('all');
+  // high | all | tracked. Defaults to HIGH CONVICTION because that is the set
+  // actually worth reading each day — model agrees with the market AND clears
+  // the coin-flip floor. On the settled record so far, that subset ran 13-8
+  // (62%) against 23-20 (53%) for everything, almost entirely by excluding a
+  // 50-55% band that went 1-7. See export_tara.autolock for why that floor
+  // exists (chiefly Kalshi's fee peaking at a coin flip).
+  const[filter,setFilter]=React.useState('high');
   const[sportFilter,setSportFilter]=React.useState('all');
   // Which date groups the user has explicitly opened or closed. Anything not
   // in here falls back to the default (nearest few open) — so changing tab or
@@ -26927,6 +26932,18 @@ function SportsView({onClose}){
     // property of a row, so it is a badge now, and `filter` selects on it.
     const src=tab==='board'?(data.board||data.upcoming):data.settled;
     let list=(src||[]);
+    // `high_conviction` is computed in the export so the app shows exactly the
+    // set the pipeline tracks. But the app and the data now deploy
+    // independently — the board is fetched live from the sports-model repo —
+    // so a freshly deployed app can meet a payload written before the field
+    // existed. Falling back to the same rule locally keeps the filter working
+    // instead of silently rendering an empty board, which is exactly what
+    // happened the first time this shipped.
+    const floor=(data&&data.min_conviction)||0.55;
+    const isHigh=(r)=>r.high_conviction!==undefined
+      ? r.high_conviction
+      : (r.advice==='ALIGNED'&&(r.model||0)>=floor);
+    if(tab==='board'&&filter==='high')list=list.filter(isHigh);
     if(tab==='board'&&filter==='aligned')list=list.filter(r=>r.advice==='ALIGNED');
     if(tab==='board'&&filter==='tracked')list=list.filter(r=>r.tracked);
     if(tab!=='record'){
@@ -27090,7 +27107,7 @@ function SportsView({onClose}){
             </div>
             {tab==='board'&&(
               <div className="flex gap-1 ml-1 p-1 rounded-lg bg-[#171717] w-fit border border-[#1F1F1F]">
-                {[['all','All'],['aligned','Aligned'],['tracked','Tracked']].map(([id,lab])=>(
+                {[['high','High conviction'],['all','All'],['tracked','Tracked']].map(([id,lab])=>(
                   <button key={id} onClick={()=>setFilter(id)} className={'px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-lg transition-colors '+(filter===id?'':'text-[#EDEDED]/40 hover:text-[#EDEDED]/70')} style={filter===id?{background:T2_GOLD_GLOW,color:T2_GOLD,border:'0.5px solid '+T2_GOLD_BORDER}:{}}>{lab}</button>
                 ))}
               </div>
@@ -27100,7 +27117,7 @@ function SportsView({onClose}){
               was not obvious: a TAKE call could sit in Upcoming and be absent
               from Open, which is exactly how two picks went untracked. */}
           <div className="text-[11px] text-[#EDEDED]/40 mb-4 leading-relaxed">
-            {tab==='board'&&<span><b className="text-white/70">Board</b> is everything not yet resolved. <b className="text-white/70">Tracked</b> rows are committed to the record — an ALIGNED call is committed automatically once it is within 36h of kick-off. Everything else is a forecast the record does not count.</span>}
+            {tab==='board'&&<span><b className="text-white/70">High conviction</b> is the day's actual picks: the model agrees with the market <i>and</i> the call clears {data.min_conviction?Math.round(data.min_conviction*100):55}% — below that is a coin flip where Kalshi's fee peaks and the model has nothing to say. Those are committed to the record automatically within 36h of kick-off (<b className="text-white/70">Tracked</b>). <b className="text-white/70">All</b> shows every fixture the model priced, most of which are not picks.</span>}
             {tab==='record'&&<span><b className="text-white/70">Record</b> is settled picks only. Scored by log loss against the market price captured at lock time, not by win rate.</span>}</div>
 
           {tab==='record'&&data.by_league&&data.by_league.length>0&&(
