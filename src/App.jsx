@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.10-v13.4.163-remove-localstorage-record-ratchet';
-const TARA_VERSION_DISPLAY='Tara 13.4.163';
+const BASELINE_VERSION='2026.08.10-v13.4.164-fix-hourly-contradiction-hydration-race';
+const TARA_VERSION_DISPLAY='Tara 13.4.164';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -16054,14 +16054,29 @@ function HourlyLadderPanel({spot,taraCall}){
     //   in-memory L.locks had no record the NO lock ever happened. The math in
     //   contradicts() below was always correct; it just had nothing to check against.
     //   Rehydrating from rec.pending for the current window closes that gap.
-    L.hourKey=hourKey;L.dir=null;L.ticks=0;
-    const _curCloseMs=lad.closeMs;
-    L.locks=(Array.isArray(rec.pending)?rec.pending:[])
-      .filter(p=>p&&_curCloseMs&&p.closeMs===_curCloseMs)
-      .map(p=>({ms:0,dir:p.side==='YES'?'UP':'DOWN',strike:p.strike,cost:p.cost,conf:0,
-        side:p.side,model:null,ticker:p.ticker,closeMs:p.closeMs,mktPct:null,at:p.at,minsAtLock:null,band:null}));
+    // V13.4.164 FIX: the V13.4.138 rehydrate had a race that reproduced the exact
+    //   bug it was written to prevent -- a live NO@$64999.99 at 01:30 followed by a
+    //   directly-contradicting YES@$64999.99 at 01:37, same strike, both PENDING.
+    //   Cause: `L.hourKey=hourKey` was consumed FIRST and unconditionally, while the
+    //   rehydrate itself was gated on `_curCloseMs` being truthy. On the first render
+    //   after a remount (reload, tab foreground) the ladder fetch has NOT resolved yet,
+    //   so lad.closeMs is null, the filter drops every pending lock, and L.locks=[].
+    //   Because hourKey was already marked as handled, the rehydrate never ran again --
+    //   so contradicts() below spent the rest of the hour checking against an empty
+    //   array. The math was never wrong; it had nothing to check against, again.
+    //   Now the hour-change reset and the hydration are SEPARATE steps: hydration
+    //   retries every render until the ladder actually has a closeMs to match on.
+    L.hourKey=hourKey;L.dir=null;L.ticks=0;L.locks=[];L.hydrated=false;
   }
   if(!Array.isArray(L.locks))L.locks=[];
+  if(!L.hydrated&&lad.closeMs){
+    const _curCloseMs=lad.closeMs;
+    L.locks=(Array.isArray(rec.pending)?rec.pending:[])
+      .filter(p=>p&&p.closeMs===_curCloseMs)
+      .map(p=>({ms:0,dir:p.side==='YES'?'UP':'DOWN',strike:p.strike,cost:p.cost,conf:0,
+        side:p.side,model:null,ticker:p.ticker,closeMs:p.closeMs,mktPct:null,at:p.at,minsAtLock:null,band:null}));
+    L.hydrated=true;
+  }
   // V13.4.94: MULTIPLE locks per hour. The hour is 60 minutes and the ladder re-prices
   //   continuously, so one lock per hour throws away most of the window. A new lock is
   //   allowed when the read is confirmed AND it is genuinely new -- a different strike or
@@ -16128,10 +16143,26 @@ function HourlyLadderPanel({spot,taraCall}){
       try{const v=parseFloat(localStorage.getItem('taraHourlyMaxMinsLeft'));
         return(Number.isFinite(v)&&v>0&&v<=60)?v:45;}catch(_e){return 45;}
     })();
-    if(dir&&L.ticks>=needTicks&&eligible.length&&minsLeft>1.5&&minsLeft<=MAX_MINS_LEFT_TO_LOCK&&coolOk&&L.locks.length<MAX_LOCKS){
+    // V13.4.164: require hydration before taking a NEW lock. Locking while L.locks is
+    //   still empty-but-unhydrated is precisely how the contradicting pair got through.
+    if(dir&&L.hydrated&&L.ticks>=needTicks&&eligible.length&&minsLeft>1.5&&minsLeft<=MAX_MINS_LEFT_TO_LOCK&&coolOk&&L.locks.length<MAX_LOCKS){
       const side=dir==='UP'?'YES':'NO';
-      const pick=eligible.find(c=>!L.locks.some(x=>x.strike===c.r.strike&&x.side===side))||null;
-      const contradicts=(k)=>L.locks.some(x=>{
+      // V13.4.164: check the PERSISTED record too, not just the in-memory mirror.
+      //   L.locks is a cache of rec.pending; rec.pending is the thing that actually
+      //   survives a reload. Twice now (V13.4.138, and the race it left behind) the
+      //   cache has been empty while the record was correct, and both times the guard
+      //   silently passed. Taking the union means a stale/missing cache can no longer
+      //   defeat either the dedupe or the contradiction check.
+      const _liveOpen=(()=>{
+        const _seen=new Set(L.locks.map(x=>x.strike+'|'+x.side));
+        const _extra=(Array.isArray(rec.pending)?rec.pending:[])
+          .filter(p=>p&&lad.closeMs&&p.closeMs===lad.closeMs
+            &&!_seen.has(p.strike+'|'+p.side))
+          .map(p=>({strike:p.strike,side:p.side}));
+        return L.locks.map(x=>({strike:x.strike,side:x.side})).concat(_extra);
+      })();
+      const pick=eligible.find(c=>!_liveOpen.some(x=>x.strike===c.r.strike&&x.side===side))||null;
+      const contradicts=(k)=>_liveOpen.some(x=>{
         if(x.side===side)return false;
         const yesK=side==='YES'?k:x.strike;
         const noK =side==='YES'?x.strike:k;
