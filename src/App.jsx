@@ -26856,10 +26856,27 @@ function SportsView({onClose}){
     // re-run. Nothing here touches Supabase — sports.json is a static asset.
     const now=Date.now();
     if(_sportsCache.data&&now-_sportsCache.at<_SPORTS_TTL_MS){setData(_sportsCache.data);return;}
-    // Bust the HTTP cache on the miss: a stale copy would silently present
-    // yesterday's slate as today's.
-    fetch('/sports.json?t='+now)
-      .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+    // LIVE source first, bundled copy as fallback.
+    //
+    // The board is regenerated every 15 minutes by a GitHub Actions job and
+    // committed to the public sports-model repo, which raw.githubusercontent
+    // serves with `Access-Control-Allow-Origin: *`. Reading it there means an
+    // update reaches every viewer within one CDN window (~5 min) instead of
+    // waiting on a Vercel redeploy — the app is no longer shipping a snapshot
+    // frozen at build time.
+    //
+    // The bundled /sports.json is kept as a fallback so the board still
+    // renders if GitHub is unreachable or rate-limits. It may be older; the
+    // "Snapshot · N min old" header is computed from the payload's own
+    // `generated` field either way, so a stale fallback announces itself
+    // rather than passing as current.
+    // Cache-bust on the miss: a stale copy would silently present yesterday's
+    // slate as today's.
+    const LIVE='https://raw.githubusercontent.com/gopalaakkrishna/sports-model/main/public/sports.json';
+    const get=(url)=>fetch(url+'?t='+now)
+      .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();});
+    get(LIVE)
+      .catch(()=>get('/sports.json'))
       .then(j=>{_sportsCache={data:j,at:Date.now()};if(alive)setData(j);})
       .catch(e=>{if(alive)setErr(String(e.message||e));});
     return()=>{alive=false;};
