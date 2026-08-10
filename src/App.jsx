@@ -351,7 +351,10 @@ const cloudSupabaseRead=async(path)=>{
 //   For memory/taraCallLog (~2.6MB) that was ~157MB/day of pure egress just echoing
 //   our own writes back to us. These big docs sync on load + on explicit pull/import
 //   instead; small fast docs (lock state, pnl) keep realtime for cross-device awareness.
-const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','history/pastWindows']);
+// V13.4.162: 'memory/hourlyRecord' added. Same reasoning as the 15m log -- it is a
+//   six-figure doc, and echoing those over realtime is exactly what produced the
+//   ~157MB/day egress incident. Hourly rides the same heartbeat + catch-up path.
+const _NO_REALTIME_PATHS=new Set(['memory/taraCallLog','memory/log_audit','history/pastWindows','memory/hourlyRecord']);
 
 // V12.8: MULTI-DEVICE SYNC HEARTBEAT ──────────────────────────────────────────
 //   Problem this solves: memory/taraCallLog is in _NO_REALTIME_PATHS (the 2.6MB doc
@@ -5229,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.07-v13.4.161-fix-100c-sentinel-and-coach-source-mismatch';
-const TARA_VERSION_DISPLAY='Tara 13.4.161';
+const BASELINE_VERSION='2026.08.10-v13.4.162-cloud-only-caps-hourly-sync-record-labels';
+const TARA_VERSION_DISPLAY='Tara 13.4.162';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5652,7 +5655,19 @@ const taraHourlyProb=(spotNow,strike,minsLeft)=>{
 //   the whole doc -> ~52% of the 5GB egress cap. Cross-device sync only needs RECENT
 //   windows; resolved old windows never change and live in each device's IndexedDB.
 //   Cap the CLOUD copy to the last 1200 (~10 days of 15m windows) -> ~3x less egress.
-const _TARA_CLOUD_LOG_CAP=1200;
+// V13.4.162: 1200 -> 1000. Measured against the live project (egress 2.698/5GB,
+//   54% of the monthly allowance) rather than estimated. The doc is 287KB at 1200
+//   entries (~245B/entry after the V10.7.58 strip), and EVERY RMW write reads the
+//   whole doc back first, so doc size multiplies directly into egress.
+//   1000 entries ~= 245KB, about a 15% cut on the single hottest path.
+//   Storage was never the constraint: the DB is 14MB of the 500MB allowance (2.8%).
+//   Egress is. Keep that in mind before raising this.
+const _TARA_CLOUD_LOG_CAP=1000;
+// V13.4.162: what the cloud/scorecard numbers ACTUALLY cover. Displayed everywhere a
+//   record is shown so "3016 wins" can never again read as an all-time count when it
+//   is really a rolling window. Derived from the cap so the label cannot drift from
+//   the number.
+const _TARA_RECORD_WINDOW_LABEL=`last ${_TARA_CLOUD_LOG_CAP.toLocaleString()}`;
 
 // V9.10.9: Stable device label computed once at module load. Used as the canonical
 //   identifier for tagging locally-created entries (so the personal scorecard can filter
@@ -15426,9 +15441,94 @@ function useHourlyLadder(activeMins){
 //   Monotonic: a settled lock is never re-scored (same discipline as the 13.4.73 ratchet).
 const _HR_KEY='taraHourlyRecord_v1';
 const _hrLoad=()=>{try{const j=JSON.parse(localStorage.getItem(_HR_KEY)||'{}');return{w:j.w|0,l:j.l|0,pending:Array.isArray(j.pending)?j.pending:[],history:Array.isArray(j.history)?j.history:[]};}catch(_e){return{w:0,l:0,pending:[],history:[]};}};
-const _hrSave=(r)=>{try{localStorage.setItem(_HR_KEY,JSON.stringify({w:r.w,l:r.l,pending:r.pending.slice(-40),history:r.history.slice(-200)}));}catch(_e){}};
+// V13.4.162: HOURLY GOES TO THE CLOUD.
+//   Until now the hourly ladder's entire record lived ONLY in localStorage, so it
+//   died with a browser reset and never existed anywhere but one machine -- the
+//   biggest hole in "nothing local". It now mirrors to Supabase alongside the 15m log.
+//
+//   SIZING (my call, per the egress budget rather than a round number):
+//     measured ~150-220B per settled hourly entry, call it 200B.
+//     500 history + 40 pending ~= 110KB.
+//   That is deliberately half the 15m doc. Hourly changes far less often (a few locks
+//   an hour vs a window every 15 min), so its RMW read cost is small -- but it is NOT
+//   free, and the whole point of this pass is to spend the egress budget on purpose.
+//   500 settled locks is ~3-4 weeks of hourly history at current volume, which is more
+//   than enough for the EV work; the full run stays in exports.
+//
+//   Added to _NO_REALTIME_PATHS (below) for the same reason the 15m log is: echoing a
+//   six-figure doc over realtime is what caused the ~157MB/day incident.
+const _HR_CLOUD_PATH='memory/hourlyRecord';
+const _HR_HISTORY_CAP=500;
+const _HR_PENDING_CAP=40;
+const _hrSave=(r)=>{
+  const _payload={w:r.w,l:r.l,pending:r.pending.slice(-_HR_PENDING_CAP),history:r.history.slice(-_HR_HISTORY_CAP)};
+  try{localStorage.setItem(_HR_KEY,JSON.stringify(_payload));}catch(_e){}
+  // Cloud mirror. Debounced hard (60s, same as the 15m log) because settlement can
+  //   resolve several pending locks in one burst and each would otherwise be a write.
+  try{
+    if(typeof cloudWriteDebounced==='function')cloudWriteDebounced(_HR_CLOUD_PATH,_payload,60000);
+  }catch(_e){}
+};
+// V13.4.162: merge a cloud hourly doc into a local one. Union by ticker|side.
+//   Resolved beats pending (a settled result is strictly more information than an
+//   open lock), and w/l are RECOUNTED from the merged history rather than summed --
+//   summing two devices' counters is how you get phantom totals that match neither.
+const _hrMerge=(a,b)=>{
+  const _key=x=>`${x&&x.ticker}|${x&&x.side}`;
+  const byKey=new Map();
+  for(const src of [a,b]){
+    for(const h of (src&&Array.isArray(src.history)?src.history:[])){
+      if(!h||!h.ticker)continue;
+      byKey.set(_key(h),h); // later source wins; both are settled so either is fine
+    }
+  }
+  const history=Array.from(byKey.values())
+    .sort((x,y)=>(x.settledAt||0)-(y.settledAt||0))
+    .slice(-_HR_HISTORY_CAP);
+  const settled=new Set(history.map(_key));
+  const pend=new Map();
+  for(const src of [a,b]){
+    for(const p of (src&&Array.isArray(src.pending)?src.pending:[])){
+      if(!p||!p.ticker)continue;
+      if(settled.has(_key(p)))continue; // resolved beats pending
+      pend.set(_key(p),p);
+    }
+  }
+  return{
+    w:history.filter(h=>h.won).length,
+    l:history.filter(h=>h.won===false).length,
+    pending:Array.from(pend.values()).slice(-_HR_PENDING_CAP),
+    history,
+  };
+};
 function useHourlyRecord(){
   const[rec,setRec]=React.useState(_hrLoad);
+  // V13.4.162: hydrate from Supabase once on mount. Without this the cloud mirror is
+  //   write-only -- a fresh browser or a second device would still start empty, which
+  //   is the exact "depends on my PC" problem this is meant to remove. One read of a
+  //   ~110KB doc per app load is a deliberate, bounded egress cost.
+  React.useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      try{
+        if(typeof cloudSupabaseRead!=='function')return;
+        const _cloud=await cloudSupabaseRead(_HR_CLOUD_PATH);
+        if(!alive||!_cloud)return;
+        setRec(prev=>{
+          const _merged=_hrMerge(prev,_cloud);
+          // Only commit if something actually changed, so this cannot loop with the
+          //   write path (setRec -> _hrSave -> cloudWrite -> ...).
+          if(_merged.history.length===prev.history.length&&_merged.pending.length===prev.pending.length)return prev;
+          try{localStorage.setItem(_HR_KEY,JSON.stringify(_merged));}catch(_e){}
+          try{console.info('[V13.4.162] hourly cloud hydrate: '+prev.history.length+' -> '+_merged.history.length+' settled');}catch(_e){}
+          return _merged;
+        });
+      }catch(_e){
+        try{console.warn('[V13.4.162] hourly cloud hydrate failed',_e&&_e.message);}catch(_){}
+      }
+    })();
+    return()=>{alive=false;};
+  },[]);
   const addLock=React.useCallback((lk)=>{
     setRec(prev=>{
       if(prev.pending.some(x=>x.ticker===lk.ticker&&x.side===lk.side))return prev;
@@ -17144,7 +17244,13 @@ function TaraCallCard({taraCall,taraScorecards,taraCallLog,windowType,timeState,
         {/* V4.3: Scorecard — visible, larger numbers, color-coded. */}
         <div className="border-t border-[#1F1F1F] pt-2.5">
           <div className="flex justify-between items-baseline mb-1.5">
-            <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/45 font-bold">Tara's Record</span>
+            {/* V13.4.162: was "Tara's Record", which read as an all-time count. The
+                numbers are a ROLLING WINDOW (the cloud log is capped at
+                _TARA_CLOUD_LOG_CAP), so the label now says so. Today's record is a
+                separate, genuinely-daily figure and is untouched. */}
+            <span className="text-[9px] uppercase tracking-[0.18em] text-[#EDEDED]/45 font-bold">
+              Tara's Record <span className="text-[#EDEDED]/30">· {_TARA_RECORD_WINDOW_LABEL}</span>
+            </span>
             {wr!==null&&<span className="text-[10px] tabular-nums text-[#EDEDED]/60">{wr}% win rate</span>}
             {wr===null&&<span className="text-[10px] text-[#EDEDED]/35">no calls yet</span>}
           </div>
@@ -36121,7 +36227,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Window',value:data.windowAmp||'—',inline:true},
           {name:'Clock',value:data.clock||'—',inline:true},
-          {name:'Record',value:data.taraRecord||'—',inline:false},
+          {name:`Record · ${_TARA_RECORD_WINDOW_LABEL}`,value:data.taraRecord||'—',inline:false},
         ],
         footer:{text:`${TARA_VERSION_DISPLAY}  |  scanning`},
         timestamp:new Date().toISOString(),
@@ -36141,7 +36247,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {name:'Strike',value:`$${(data.strike||0).toFixed(2)}`,inline:true},
           {name:'Price',value:`$${(data.price||0).toFixed(2)}`,inline:true},
           {name:'Clock',value:data.clock||'—',inline:true},
-          {name:'Record',value:data.taraRecord||'—',inline:false},
+          {name:`Record · ${_TARA_RECORD_WINDOW_LABEL}`,value:data.taraRecord||'—',inline:false},
         ],
         footer:{text:`${TARA_VERSION_DISPLAY}  |  signal`},
         timestamp:new Date().toISOString(),
@@ -36260,7 +36366,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             {name:'Regime',value:data.regime||'—',inline:true},
             {name:'Quality',value:`${data.quality||0}/100`,inline:true},
             {name:'FGT',value:`${(Number(data.fgtAbs)||0).toFixed(1)}/4 ${data.fgtDir||''}`,inline:true},
-            {name:'Record',value:data.taraRecord||'—',inline:false},
+            {name:`Record · ${_TARA_RECORD_WINDOW_LABEL}`,value:data.taraRecord||'—',inline:false},
           ],
           footer:{text:`${TARA_VERSION_DISPLAY}  |  tier-1 skip`},
           timestamp:new Date().toISOString(),
@@ -36278,7 +36384,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {name:'Regime',value:data.regime||'—',inline:true},
           {name:'Window',value:data.windowAmp||'—',inline:true},
           {name:'Clock',value:data.clock||'—',inline:true},
-          {name:'Record',value:data.taraRecord||'—',inline:false},
+          {name:`Record · ${_TARA_RECORD_WINDOW_LABEL}`,value:data.taraRecord||'—',inline:false},
         ],
         footer:{text:`${TARA_VERSION_DISPLAY}  |  sit-out`},
         timestamp:new Date().toISOString(),
@@ -36300,7 +36406,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             {name:'Strike',value:`$${(data.strike||0).toFixed(2)}`,inline:true},
             {name:'Close',value:`$${(data.price||0).toFixed(2)}`,inline:true},
             {name:'Gap',value:`${(data.gap||0).toFixed(1)} bps`,inline:true},
-            {name:'Record',value:data.taraRecord||'—',inline:false},
+            {name:`Record · ${_TARA_RECORD_WINDOW_LABEL}`,value:data.taraRecord||'—',inline:false},
           ],
           footer:{text:`${TARA_VERSION_DISPLAY}  |  result`},
           timestamp:new Date().toISOString(),
