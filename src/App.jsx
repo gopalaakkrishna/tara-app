@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.10-v13.4.164-fix-hourly-contradiction-hydration-race';
-const TARA_VERSION_DISPLAY='Tara 13.4.164';
+const BASELINE_VERSION='2026.08.10-v13.4.165-one-shared-live-call-remove-device-guard';
+const TARA_VERSION_DISPLAY='Tara 13.4.165';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -25600,24 +25600,9 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
     }
   },[]);
   React.useEffect(()=>{_runDiag();},[_runDiag]);
-  const[_primaryDevice,_setPrimaryDeviceLocal]=React.useState(undefined);
-  const[_primaryBusy,_setPrimaryBusy]=React.useState(false);
-  React.useEffect(()=>{
-    let _live=true;
-    cloudRead('settings/primaryDevice').then(d=>{if(_live)_setPrimaryDeviceLocal(d?.deviceId||null);});
-    return()=>{_live=false;};
-  },[]);
-  const _isMyDevicePrimary=_primaryDevice===_taraDeviceId;
-  const _handleSetPrimary=React.useCallback(async()=>{
-    _setPrimaryBusy(true);
-    try{
-      const _next=_isMyDevicePrimary?null:_taraDeviceId;
-      const _ok=await cloudWrite('settings/primaryDevice',{deviceId:_next,setAt:Date.now()});
-      if(_ok)_setPrimaryDeviceLocal(_next);
-    }finally{
-      _setPrimaryBusy(false);
-    }
-  },[_isMyDevicePrimary]);
+  // V13.4.165: the primary-device state, its cloudRead and its setter are removed with
+  //   the guard and the Sync-menu control they served. One shared live call; no device
+  //   designation to read or write.
   React.useEffect(()=>{
     const onKey=(e)=>{if(e.key==='Escape')onClose();};
     window.addEventListener('keydown',onKey);
@@ -25658,22 +25643,21 @@ function SyncMenuModal({onClose,onForceResync,onSaveBaseline,onApplyBaseline,onC
         },'✕')
       ),
       React.createElement('div',{className:'px-5 py-4 space-y-3'},
-        React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'#141414',border:`1px solid ${_isMyDevicePrimary?'rgba(40,204,149,0.30)':'rgba(237,237,237,0.08)'}`}},
+        // V13.4.165: the "Trading device" designation is retired along with the
+        //   secondary-device guard it drove. Tara is one shared live decision; every
+        //   device shows the same lock at the same time via first-write-wins on
+        //   state/currentLock_<asset>_<windowType>. Nothing to designate any more.
+        React.createElement('div',{className:'p-3 rounded-lg text-xs',style:{background:'#141414',border:'1px solid rgba(40,204,149,0.30)'}},
           React.createElement('div',{className:'flex items-baseline justify-between mb-2'},
             React.createElement('span',{className:'text-[9px] uppercase tracking-[0.16em] font-bold',style:{color:'rgba(237,237,237,0.55)'}},'Trading device'),
+            React.createElement('span',{className:'text-[9px] uppercase tracking-[0.14em] font-bold',style:{color:'rgba(40,204,149,0.85)'}},'ALL DEVICES LIVE'),
           ),
-          React.createElement('div',{className:'text-[11px] text-[#EDEDED]/70 mb-2'},
-            _primaryDevice===undefined?'Checking...':
-            _primaryDevice===null?'No trading device designated. Every device can commit trades.':
-            _isMyDevicePrimary?'This device is your designated trading device.':
-            'Another device is designated. This device will sit out live signals.'
+          React.createElement('div',{className:'text-[11px] text-[#EDEDED]/70'},
+            'Every device runs the same live call. Whichever device commits a lock first wins, and all others adopt that exact lock within about a second, so the direction is identical everywhere.'
           ),
-          React.createElement('button',{
-            onClick:_handleSetPrimary,
-            disabled:_primaryBusy||_primaryDevice===undefined,
-            className:'text-[10px] uppercase tracking-[0.14em] font-bold px-2 py-1 rounded-lg border transition-colors hover:bg-[#EDEDED]/5 disabled:opacity-50',
-            style:{color:'rgba(201,169,97,0.85)',border:'1px solid rgba(201,169,97,0.25)'},
-          },_isMyDevicePrimary?'Release':'Make this the trading device')
+          React.createElement('div',{className:'text-[10px] text-[#EDEDED]/40 mt-1.5'},
+            'The old per-device designation is retired (V13.4.165) - it silently muted locks on any device that was not the designated one.'
+          )
         ),
         // V9.2.0: SIDE-BY-SIDE diagnostic — shared (cloud) vs local (this device only).
         //   Tara's calls + memory are SHARED across all devices/users via Firestore.
@@ -31909,13 +31893,12 @@ function TaraApp(){
   //   {t: elapsed_ms, cushionBps: (spot-strike)/strike*10000, spotPrice}
   const _windowCushionHistoryRef=useRef([]);
   const _postLockTrajRef=useRef({}); // V13.4.0: post-lock cushion trajectory {windowId:{ticks,correct,peakBps,everAhead,reversed,wasAhead}} for reversal-vs-wrong-from-start
-  const primaryDeviceIdRef=useRef(null);
+  // V13.4.165: primaryDeviceIdRef + its cloudWatch removed with the secondary-device
+  //   guard. Nothing reads settings/primaryDevice any more, and an unused realtime
+  //   subscription is not free -- it held a live channel and burned egress to keep a
+  //   value nothing consumed.
   const _syncLatencyRef=useRef([]);
   const _syncLatencySeenRef=useRef(new Set());
-  useEffect(()=>{
-    const unsub=cloudWatch('settings/primaryDevice',(data)=>{primaryDeviceIdRef.current=data?.deviceId||null;});
-    return unsub;
-  },[]);
   const _cushionLastPushedRef=useRef(0);
   // V3.1.7+: Window amplitude tracking — high/low since window open. Reset on rollover.
   //         Powers the "is this a wild window or a dead window" classification.
@@ -42783,12 +42766,30 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   logged entries for flip analysis, not flipAtLock (that field is fed by an
       //   older, apparently-inert mechanism, _v10_7_11_universalFlipped, and is a
       //   separate, still-unresolved issue from the one this comment used to describe).
-      if(primaryDeviceIdRef.current&&primaryDeviceIdRef.current!==_taraDeviceId&&snapshot&&snapshot.locked&&snapshot.call!=='SIT_OUT'){
-        snapshot.call='SIT_OUT';
-        snapshot.direction='SIT_OUT';
-        snapshot.wasOverriddenNoTrade=true;
-        snapshot.caution='Secondary device guard (V13.4.7)';
-      }
+      // V13.4.165: SECONDARY-DEVICE GUARD REMOVED.
+      //   It rewrote any committed lock to SIT_OUT on every device whose id did not
+      //   match settings/primaryDevice, leaving tier and reason intact -- so the log
+      //   read "Directional lock - DOWN -16pt - structural momentum" on an entry that
+      //   displayed as a sit-out. Live cost: a full day of muted 15m locks (last real
+      //   lock 08-10 01:02) because the registered primary (dev-nv198o-nmu4, set
+      //   08-09 03:22) was a browser no longer in use.
+      //
+      //   It also fails silently -- the only trace was a `caution` field buried in the
+      //   call log, no banner, nothing in the main UI -- and the device id lives in
+      //   localStorage, so clearing browser data or opening a private window silently
+      //   demotes you to "secondary" and mutes every lock.
+      //
+      //   Removed rather than made visible, because it contradicts the product rule:
+      //   Tara is ONE shared, live decision -- if she locks a direction, every device
+      //   shows that same direction at the same time. Per-device divergence is the bug.
+      //
+      //   The problem it was built for (two browsers committing conflicting locks) is
+      //   already solved, better, by the FIRST-WRITE-WINS convergence on
+      //   state/currentLock_<asset>_<windowType> (see the cloudWatch adopt logic):
+      //   whichever device commits first wins, every other device adopts that exact
+      //   snapshot within ~1s, and _persistLock defers instead of re-writing. That
+      //   yields one identical lock everywhere WITHOUT muting any device.
+      //   settings/primaryDevice is now inert; the Sync menu control is retired too.
       // ═══════════════════════════════════════════════════════════════════
       // V13.4.145 — WIRE UP THE V11 SELECTIVITY ENGINE.
       //
