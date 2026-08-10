@@ -26848,38 +26848,72 @@ function SportsView({onClose}){
   const[nowMs,setNowMs]=React.useState(()=>Date.now());
   React.useEffect(()=>{const iv=setInterval(()=>setNowMs(Date.now()),30000);return()=>clearInterval(iv);},[]);
 
+  // LIVE source first, bundled copy as fallback.
+  //
+  // The board is regenerated every 15 minutes by a GitHub Actions job and
+  // committed to the public sports-model repo, which raw.githubusercontent
+  // serves with `Access-Control-Allow-Origin: *`. Reading it there means an
+  // update reaches every viewer within one CDN window (~5 min) instead of
+  // waiting on a Vercel redeploy — the app is no longer shipping a snapshot
+  // frozen at build time.
+  //
+  // The bundled /sports.json is the fallback if GitHub is unreachable or
+  // rate-limits. It may be older; the "Snapshot · N min old" header is
+  // computed from the payload's own `generated` field either way, so a stale
+  // fallback announces itself rather than passing as current.
+  const LIVE_URL='https://raw.githubusercontent.com/gopalaakkrishna/sports-model/main/public/sports.json';
+
   React.useEffect(()=>{
     let alive=true;
-    // Served from a module-level cache for _SPORTS_TTL_MS. The payload is ~41KB
-    // and the toggle invites flicking between boards, so an uncached open would
-    // re-pull it every trip for a file that only changes when export_tara.py is
-    // re-run. Nothing here touches Supabase — sports.json is a static asset.
-    const now=Date.now();
-    if(_sportsCache.data&&now-_sportsCache.at<_SPORTS_TTL_MS){setData(_sportsCache.data);return;}
-    // LIVE source first, bundled copy as fallback.
+    let timer=null;
+
+    const load=(force)=>{
+      const now=Date.now();
+      // Module cache serves repeat opens without a refetch. `force` skips it
+      // for the poll below, which exists precisely to get newer data.
+      if(!force&&_sportsCache.data&&now-_sportsCache.at<_SPORTS_TTL_MS){
+        setData(_sportsCache.data);
+        return Promise.resolve();
+      }
+      // Cache-bust: a stale copy would silently present yesterday's slate as
+      // today's.
+      const get=(url)=>fetch(url+'?t='+now)
+        .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();});
+      return get(LIVE_URL)
+        .catch(()=>get('/sports.json'))
+        .then(j=>{
+          _sportsCache={data:j,at:Date.now()};
+          if(alive){setData(j);setErr(null);}
+        })
+        // A failed REFRESH must not blank a board that is already on screen —
+        // only report the error if there is nothing to show.
+        .catch(e=>{if(alive&&!_sportsCache.data)setErr(String(e.message||e));});
+    };
+
+    load(false);
+
+    // Keep it current without the user touching anything. 5 minutes matches
+    // raw.githubusercontent's own CDN cache (max-age=300), so polling faster
+    // would return the identical bytes and just burn bandwidth.
     //
-    // The board is regenerated every 15 minutes by a GitHub Actions job and
-    // committed to the public sports-model repo, which raw.githubusercontent
-    // serves with `Access-Control-Allow-Origin: *`. Reading it there means an
-    // update reaches every viewer within one CDN window (~5 min) instead of
-    // waiting on a Vercel redeploy — the app is no longer shipping a snapshot
-    // frozen at build time.
-    //
-    // The bundled /sports.json is kept as a fallback so the board still
-    // renders if GitHub is unreachable or rate-limits. It may be older; the
-    // "Snapshot · N min old" header is computed from the payload's own
-    // `generated` field either way, so a stale fallback announces itself
-    // rather than passing as current.
-    // Cache-bust on the miss: a stale copy would silently present yesterday's
-    // slate as today's.
-    const LIVE='https://raw.githubusercontent.com/gopalaakkrishna/sports-model/main/public/sports.json';
-    const get=(url)=>fetch(url+'?t='+now)
-      .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();});
-    get(LIVE)
-      .catch(()=>get('/sports.json'))
-      .then(j=>{_sportsCache={data:j,at:Date.now()};if(alive)setData(j);})
-      .catch(e=>{if(alive)setErr(String(e.message||e));});
-    return()=>{alive=false;};
+    // Paused while the tab is hidden: a board nobody is looking at does not
+    // need refreshing, and this app is often left open for hours. Refetch on
+    // becoming visible again so returning to the tab shows current data
+    // rather than whatever was there when you left.
+    const POLL_MS=5*60*1000;
+    const start=()=>{if(!timer)timer=setInterval(()=>load(true),POLL_MS);};
+    const stop=()=>{if(timer){clearInterval(timer);timer=null;}};
+    const onVis=()=>{
+      if(document.hidden){stop();}
+      else{
+        start();
+        if(Date.now()-_sportsCache.at>POLL_MS)load(true);
+      }
+    };
+    if(!document.hidden)start();
+    document.addEventListener('visibilitychange',onVis);
+
+    return()=>{alive=false;stop();document.removeEventListener('visibilitychange',onVis);};
   },[]);
 
   // Everything for the current tab, before the sport filter — this is what the
