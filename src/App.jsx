@@ -27120,6 +27120,40 @@ function SportsView({onClose}){
             {tab==='board'&&<span><b className="text-white/70">High conviction</b> is the day's actual picks: the model agrees with the market <i>and</i> the call clears {data.min_conviction?Math.round(data.min_conviction*100):55}% — below that is a coin flip where Kalshi's fee peaks and the model has nothing to say. Those are committed to the record automatically within 36h of kick-off (<b className="text-white/70">Tracked</b>). <b className="text-white/70">All</b> shows every fixture the model priced, most of which are not picks.</span>}
             {tab==='record'&&<span><b className="text-white/70">Record</b> is settled picks only. Scored by log loss against the market price captured at lock time, not by win rate.</span>}</div>
 
+          {/* Split by strategy. The headline record was hiding two different
+              experiments: an early value-betting run that deliberately backed
+              underdogs against the market (the hypothesis the 68k-match
+              backtest disproved) and the current system, which only picks
+              where the model agrees with the market. Those losing experiment
+              picks are labelled, not deleted — removing picks because they
+              lost is exactly what makes a record worthless. */}
+          {tab==='record'&&data.by_strategy&&data.by_strategy.length>1&&(
+            <div className="mb-5">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-2">By strategy</div>
+              <div className="space-y-1">
+                {data.by_strategy.map((s,i)=>(
+                  <div key={i} className="flex items-center gap-2 text-[12px] bg-[#141414] border rounded-lg px-3 py-2"
+                    style={{borderColor:s.current?T2_GOLD_BORDER:'#1F1F1F'}}>
+                    <span className="flex-1" style={{color:s.current?'#fff':'rgba(237,237,237,0.45)'}}>
+                      {s.label}
+                    </span>
+                    <span className="font-bold" style={{...T2_MONO_STYLE,color:s.current?'#fff':'rgba(237,237,237,0.5)'}}>
+                      {s.wins}–{s.losses}
+                    </span>
+                    <span className="w-14 text-right text-[#EDEDED]/40" style={T2_MONO_STYLE}>
+                      {s.win_rate==null?'—':Math.round(s.win_rate*100)+'%'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="text-[11px] text-[#EDEDED]/40 mt-2 leading-relaxed">
+                Only the highlighted row is what the system does now. The other is kept
+                because deleting losing picks is what makes a record meaningless — but it
+                is not a fair read of the current approach.
+              </div>
+            </div>
+          )}
+
           {tab==='record'&&data.by_league&&data.by_league.length>0&&(
             <div className="mb-5">
               <div className="text-[10px] uppercase tracking-[0.18em] text-[#EDEDED]/40 font-bold mb-2">By league</div>
