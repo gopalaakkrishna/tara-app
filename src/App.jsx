@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.10-v13.4.168-hourly-memory-polish-endash-fix';
-const TARA_VERSION_DISPLAY='Tara 13.4.168';
+const BASELINE_VERSION='2026.08.10-v13.4.169-persist-full-lock-coach-embed-dashes';
+const TARA_VERSION_DISPLAY='Tara 13.4.169';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15566,7 +15566,21 @@ function useHourlyRecord(){
     setRec(prev=>{
       if(prev.pending.some(x=>x.ticker===lk.ticker&&x.side===lk.side))return prev;
       if(prev.history.some(x=>x.ticker===lk.ticker&&x.side===lk.side))return prev;
-      const next={...prev,pending:[...prev.pending,{ticker:lk.ticker,side:lk.side,strike:lk.strike,cost:lk.cost,at:lk.at,closeMs:lk.closeMs}]};
+      // V13.4.169: persist the WHOLE lock, not six fields of it. The old shape dropped
+      //   conf / model / mktPct / minsAtLock / band, so the moment a lock was rehydrated
+      //   from storage (any reload, any tab foreground -- see the V13.4.164 hydration
+      //   path) the card rendered "Tara conf 0 | mkt % | model --" and
+      //   "02:15 PM, -- -- model accuracy at this range: --". Those values were never
+      //   recoverable because they were never written down. They are cheap ints; there
+      //   was no reason to drop them.
+      const next={...prev,pending:[...prev.pending,{
+        ticker:lk.ticker,side:lk.side,strike:lk.strike,cost:lk.cost,at:lk.at,closeMs:lk.closeMs,
+        conf:Number(lk.conf)||0,
+        model:(lk.model==null?null:Number(lk.model)),
+        mktPct:(lk.mktPct==null?null:Number(lk.mktPct)),
+        minsAtLock:(lk.minsAtLock==null?null:Number(lk.minsAtLock)),
+        band:lk.band||null,
+      }]};
       _hrSave(next);return next;
     });
   },[]);
@@ -15718,20 +15732,21 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
     .trim();
   let label,sub,color,bg,border;
   if(isDir&&locked){
-    label=(call==='UP'?'BUY UP':'BUY DOWN')+' -- LOCKED';
+    // V13.4.169: en dash, not a double hyphen. "BUY DOWN -- LOCKED" read as raw text.
+    label=(call==='UP'?'BUY UP':'BUY DOWN')+' – LOCKED';
     sub='Tara has committed this round. '+(reason?reason:'');
     color=call==='UP'?'#28CC95':'#FF4D6A';
     bg=call==='UP'?'rgba(40,204,149,0.10)':'rgba(255,77,106,0.10)';
     border=call==='UP'?'rgba(40,204,149,0.35)':'rgba(255,77,106,0.35)';
   }else if(isDir&&!locked){
-    label=(call==='UP'?'LEANING UP':'LEANING DOWN')+' -- HOLD';
+    label=(call==='UP'?'LEANING UP':'LEANING DOWN')+' – HOLD';
     // V13.4.148: while the debounce is holding a side the live engine has left, the
     //   live `reason` describes the OTHER direction. Showing it under a header that
     //   says the opposite is worse than showing nothing -- it reads as the app
     //   contradicting itself, and it is the specific thing that makes this panel look
     //   untrustworthy. Say plainly that the read is unstable instead.
     if(_leanFlipping){
-      sub=`Signal is flipping -- live read just moved to ${_liveDir}, holding ${call} for stability. `
+      sub=`Signal is flipping – live read just moved to ${_liveDir}, holding ${call} for stability. `
         +`This is exactly when NOT to act: wait for the Decision Clock.`;
       color='rgba(212,162,76,0.95)';
       bg='rgba(212,162,76,0.10)';
@@ -15765,7 +15780,7 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
     isDir&&Number.isFinite(qScore)&&qScore<40&&React.createElement('div',{className:'mt-2 text-[11px]',style:{color:'#FF4D6A'}},
       '\u26a0 quality gate LOW ('+qScore+'/100) -- weak historical WR at this reading, consider sitting out'),
     isDir&&timeState&&Number(timeState.minsRemaining)<2&&React.createElement('div',{className:'mt-1 text-[11px]',style:{color:'#C9A961'}},
-      '\u26a0 '+(timeState.minsRemaining||0)+'m '+(timeState.secsRemaining||0)+'s left -- under the 2m usually needed to fill and settle cleanly'),
+      '\u26a0 '+(timeState.minsRemaining||0)+'m '+(timeState.secsRemaining||0)+'s left \u2013 under the 2m usually needed to fill and settle cleanly'),
     isDir&&(function(){
       const k=Number(kalshiYesPrice);
       if(!Number.isFinite(k)||k<=0||k>=100)return null;
@@ -15776,7 +15791,7 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
       const secsLeft=timeState?((timeState.minsRemaining||0)*60+(timeState.secsRemaining||0)):null;
       return React.createElement('div',{className:'mt-2 pt-2 border-t text-[11px]',style:{borderColor:'rgba(237,237,237,0.10)'}},
         React.createElement('span',{style:{color:inBand?'#28CC95':'#C9A961'}},
-          'entry '+cost.toFixed(0)+'c'+(inBand?' -- in the '+min.toFixed(0)+'-'+max.toFixed(0)+'c band, good price':' -- OUTSIDE '+min.toFixed(0)+'-'+max.toFixed(0)+'c band, paying up')),
+          'entry '+cost.toFixed(0)+'c'+(inBand?' – in the '+min.toFixed(0)+'-'+max.toFixed(0)+'c band, good price':' – OUTSIDE the '+min.toFixed(0)+'-'+max.toFixed(0)+'c band, paying up')),
         secsLeft!=null&&React.createElement('span',{className:'ml-2',style:{color:'rgba(237,237,237,0.5)'}},Math.round(secsLeft)+'s left in window'),
       );
     })(),
@@ -16148,8 +16163,13 @@ function HourlyLadderPanel({spot,taraCall}){
     const _curCloseMs=lad.closeMs;
     L.locks=(Array.isArray(rec.pending)?rec.pending:[])
       .filter(p=>p&&p.closeMs===_curCloseMs)
-      .map(p=>({ms:0,dir:p.side==='YES'?'UP':'DOWN',strike:p.strike,cost:p.cost,conf:0,
-        side:p.side,model:null,ticker:p.ticker,closeMs:p.closeMs,mktPct:null,at:p.at,minsAtLock:null,band:null}));
+      .map(p=>({ms:0,dir:p.side==='YES'?'UP':'DOWN',strike:p.strike,cost:p.cost,conf:Number(p.conf)||0,
+        // V13.4.169: read the persisted values back instead of hardcoding nulls.
+        //   These were null here because addLock never stored them; now it does, so a
+        //   rehydrated lock renders identically to a fresh one. Older pending rows
+        //   written before this ship still have no conf/model, hence the ?? fallbacks.
+        side:p.side,model:p.model??null,ticker:p.ticker,closeMs:p.closeMs,
+        mktPct:p.mktPct??null,at:p.at,minsAtLock:p.minsAtLock??null,band:p.band??null}));
     L.hydrated=true;
   }
   // V13.4.94: MULTIPLE locks per hour. The hour is 60 minutes and the ladder re-prices
@@ -16390,18 +16410,33 @@ function HourlyLadderPanel({spot,taraCall}){
           {LOCKS.map((LK,idx)=>(
             <div key={LK.ms} className={'rounded-lg border p-2 '+(idx===0?'':'opacity-60 ')+(LK.dir==='UP'?'border-emerald-500/40 bg-emerald-500/10':'border-rose-500/40 bg-rose-500/10')}>
               <div className="flex items-center justify-between">
+                {/* V13.4.169: every open lock is locked -- only the newest said so,
+                    which made the older one look like a pending suggestion. */}
                 <div className={'text-[13px] font-semibold '+(LK.dir==='UP'?'text-emerald-400':'text-rose-400')}>
-                  {idx===0?'LOCKED ':''}{LK.side} @ {LK.strike.toFixed(0)}
+                  LOCKED {LK.side} @ {Number(LK.strike).toLocaleString('en-US')}
                 </div>
                 <div className="text-[13px] font-semibold text-zinc-100 tabular-nums">{LK.cost}c</div>
               </div>
-              <div className="mt-0.5 text-[11px] text-zinc-300">
-                Tara conf <span className="font-semibold tabular-nums">{LK.conf.toFixed(0)}</span>
-                <span className="text-zinc-500"> | mkt {LK.mktPct}% | model {LK.model!=null?LK.model.toFixed(0)+'%':'--'}</span>
-              </div>
+              {/* V13.4.169: omit what we do not have instead of printing "--". Locks
+                  written before this ship carry no conf/model/mktPct, and rendering
+                  "Tara conf 0 | mkt % | model --" stated a confidence of zero as if it
+                  were real. Each stat now appears only when it exists. */}
+              {(()=>{
+                const _bits=[];
+                if(Number(LK.conf)>0)_bits.push(`Tara ${Number(LK.conf).toFixed(0)}%`);
+                if(LK.mktPct!=null&&Number.isFinite(Number(LK.mktPct)))_bits.push(`mkt ${Number(LK.mktPct).toFixed(0)}%`);
+                if(LK.model!=null&&Number.isFinite(Number(LK.model)))_bits.push(`model ${Number(LK.model).toFixed(0)}%`);
+                return _bits.length
+                  ?<div className="mt-0.5 text-[11px] text-zinc-400 tabular-nums">{_bits.join('  ·  ')}</div>
+                  :null;
+              })()}
               <div className="mt-0.5 text-[10px] text-zinc-500">
-                {LK.at}, {LK.minsAtLock!=null?LK.minsAtLock.toFixed(0)+'m left':'--'} -- model accuracy at this range: {LK.band||'--'}
-                {_conflictKeys.has(LK.ms)&&<span className="ml-1 text-amber-400 font-semibold">CONFLICTS with another lock -- both cannot win</span>}
+                {[
+                  LK.at||null,
+                  LK.minsAtLock!=null?`${Number(LK.minsAtLock).toFixed(0)}m left`:null,
+                  LK.band?`model accuracy here ${LK.band}`:null,
+                ].filter(Boolean).join('  ·  ')}
+                {_conflictKeys.has(LK.ms)&&<span className="ml-1 text-amber-400 font-semibold">— CONFLICTS with another lock, both cannot win</span>}
               </div>
             </div>
           ))}
@@ -16409,7 +16444,7 @@ function HourlyLadderPanel({spot,taraCall}){
       )}
       {LOCKS.length===0&&(
         <div className="mb-2 text-[11px] text-zinc-500">
-          {dir?('scanning '+dir+' -- '+L.ticks+'/'+CONFIRM_TICKS+' confirmations'+(tradeable.length?'':', waiting on liquid strikes')):'no directional read yet -- watching'}
+          {dir?('scanning '+dir+' – '+L.ticks+'/'+CONFIRM_TICKS+' confirmations'+(tradeable.length?'':', waiting on liquid strikes')):'no directional read yet – watching'}
         </div>
       )}
       {!tradeable.length&&<div className="text-[11px] text-zinc-500">{lad.loading?'loading ladder...':'no liquid strikes yet'}</div>}
@@ -18059,7 +18094,15 @@ function LiveTradeCoach({userPosition,positionStatus,taraCall,analysis,movementR
       cards.push({tone:'urgent',icon:'⚠',title:`Tara flipped to ${_taraDir} (${Math.round(_taraConf)}%)`,body:`Conditions inverted. Your read at entry is now contrary to model. Strongly consider exit unless you have specific reason to disagree.`});
     }
     if(_riskExtreme&&_riskDirBias&&_riskDirBias!==userPosition){
-      cards.push({tone:'urgent',icon:'⚡',title:'Extreme risk · contrary direction',body:`Movement risk score ${_riskScore}/100, leaning ${_riskDirBias}. ${_riskPredictive} You're on the wrong side of the surge.`});
+      // V13.4.169: `_riskPredictive` is a full sentence of its own, so interpolating it
+      //   bare produced a run-on: "DOWN move likely next 30-60s You're on the wrong
+      //   side of the surge." Terminate it before continuing.
+      cards.push({tone:'urgent',icon:'⚡',title:'Extreme risk · contrary direction',
+        body:[
+          `Risk ${_riskScore}/100, leaning ${_riskDirBias} against your ${userPosition}.`,
+          String(_riskPredictive||'').trim().replace(/[.\s]*$/,'')+(String(_riskPredictive||'').trim()?'.':''),
+          `You are on the wrong side of the surge.`,
+        ].filter(Boolean).join(' ')});
     }
     if(_bigContraryWhale&&_last90s){
       cards.push({tone:'urgent',icon:'🐋',title:'Late-window contrary whale',body:`$${Math.round(_largestContraryUsd/1000)}K ${_contrarySide} print just hit. Late whale spikes are the #1 cause of last-minute reversals. If you're up, take it; if you're flat or down, exit.`});
@@ -36699,18 +36742,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   English (the improved coach body). No fields — just the key context line up top.
         //   Before: 6-field grid + raw reason string = hard to scan on phone in < 2 sec.
         //   After: two lines. First line = position + gap + clock. Second = what to do and why.
-        const _color12=data.tone==='urgent'?16478549:data.tone==='watch'?15974710:9807270;
-        const _gapStr12=data.gap!=null?`${data.gap>=0?'+':''}${data.gap.toFixed(1)} bps`:'—';
-        const _ctxLine=[
-          data.position?`${data.position} position`:null,
-          data.clock?`${data.clock} left`:null,
-          data.gap!=null?_gapStr12:null,
-          (data.price!=null&&data.strike!=null)?`BTC $${Math.round(data.price).toLocaleString()} · strike $${Math.round(data.strike).toLocaleString()}`:null,
-        ].filter(Boolean).join('  ·  ');
+        // V13.4.169: brought in line with the LOCK/WHALE embeds restyled in V13.4.167 --
+        //   this one was missed, so a coach alert still ran its context together as one
+        //   prose line while the others used aligned monospace columns.
+        const _color12=data.tone==='urgent'?_DC_DOWN:data.tone==='watch'?_DC_GOLD:_DC_DIM;
+        const _posArrow=data.position==='UP'?'▲':data.position==='DOWN'?'▼':'·';
+        const _gapNum=data.gap!=null?Number(data.gap):null;
+        const _block=[
+          data.position?_dcRow('POSITION',`${_posArrow} ${data.position}`):null,
+          data.price!=null?_dcRow('BTC',Number(data.price).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})):null,
+          data.strike!=null?_dcRow('STRIKE',Number(data.strike).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),
+            _gapNum!=null?`${_gapNum>=0?'▲':'▼'} ${Math.abs(_gapNum).toFixed(1)}bps`:undefined):null,
+          data.clock?_dcRow('LEFT',data.clock):null,
+        ].filter(Boolean).join('\n');
         embed={
-          title:data.title||'COACH ALERT',
+          title:`${data.tone==='urgent'?'⚠':'·'}  ${data.title||'COACH ALERT'}`,
           color:_color12,
-          description:[_ctxLine,data.body||''].filter(Boolean).join('\n'),
+          description:(_block?'```\n'+_block+'\n```':'')+(data.body||''),
           fields:[],
           footer:{text:`${TARA_VERSION_DISPLAY} · coach`},
           timestamp:new Date().toISOString(),
@@ -44196,7 +44244,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           const _ngSitSnap={
             call:'SIT_OUT',direction:null,confidence:0,
             caution:null,
-            reason:`[V13.4.111] ${_commitDir} ${_commitConf}% wanted to lock at ${_ngCost.toFixed(0)}c -- outside ${_ngMin.toFixed(0)}-${_ngMax.toFixed(0)}c band (orig: ${_noGoReason}). Sitting out rather than commit at a bad price.`,
+            // V13.4.169: this string is user-facing (it renders in the call card and the
+            //   log), so it drops the version tag and the double hyphen.
+            reason:`${_commitDir} ${_commitConf}% wanted to lock at ${_ngCost.toFixed(0)}c – outside the ${_ngMin.toFixed(0)}-${_ngMax.toFixed(0)}c band. Sitting out rather than pay a bad price. (${_noGoReason})`,
             atSecondsLeft:timeState.minsRemaining*60+timeState.secsRemaining,
             atPosterior:_post,kalshiAtLock:_kPctNow,
             locked:true,earlyLock:false,
