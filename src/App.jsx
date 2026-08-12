@@ -27082,6 +27082,57 @@ function SportsView({onClose}){
               model-minus-market log loss whose LOWER bound is above zero is
               not "early days" — it is a measured deficit. Burying that under a
               generic small-sample caveat would be the flattering read. */}
+          {/* READY TO BET? — deliberately above the win-rate cards.
+              Win rate alone is gameable: picking bigger favourites raises it
+              and raises the price you pay by the same amount, so a 70% win
+              rate on 70c favourites still loses after fees. The bar that
+              matters is win rate minus breakeven, and a point estimate is not
+              evidence — at n=11 an 82% run carries a ±23% interval. */}
+          {data.readiness&&(()=>{
+            const r=data.readiness;
+            const pct=Math.min(100,Math.round(100*r.n/Math.max(r.needed||r.n,1)));
+            return(
+              <div className="rounded-xl border p-3 mb-3"
+                style={{borderColor:r.clears?SPORTS_GREEN:T2_GOLD_BORDER,
+                        background:r.clears?'rgba(40,204,149,0.06)':T2_GOLD_GLOW}}>
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
+                  <span className="text-[11px] uppercase tracking-[0.16em] font-bold"
+                    style={{color:r.clears?SPORTS_GREEN:T2_GOLD}}>
+                    {r.clears?'Evidence threshold met':'Not enough evidence yet'}
+                  </span>
+                  <span className="text-[11px] text-[#EDEDED]/45">
+                    {r.wins}–{r.losses} at the {Math.round(r.floor*100)}% floor
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px]" style={T2_MONO_STYLE}>
+                  <span>win rate <b className="text-white">{Math.round(r.win_rate*100)}%</b></span>
+                  <span className="text-[#EDEDED]/55">breakeven {Math.round(r.breakeven*100)}%</span>
+                  <span style={{color:r.edge>0?SPORTS_GREEN:SPORTS_RED}}>
+                    edge {r.edge>0?'+':''}{Math.round(r.edge*100)}%
+                  </span>
+                  <span className="text-[#EDEDED]/55">95% low {Math.round(r.ci_low*100)}%</span>
+                </div>
+                {r.needed&&!r.clears&&(
+                  <div className="mt-2">
+                    <div className="bar" style={{height:6,background:'#1F1F1F',borderRadius:4,overflow:'hidden'}}>
+                      <div style={{width:pct+'%',height:'100%',background:T2_GOLD}}/>
+                    </div>
+                    <div className="text-[11px] text-[#EDEDED]/45 mt-1">
+                      {r.n} of ~{r.needed} settled picks needed before this edge could
+                      be told apart from luck.
+                    </div>
+                  </div>
+                )}
+                <div className="text-[11px] text-[#EDEDED]/40 mt-2 leading-relaxed">
+                  Breakeven is the average price paid plus Kalshi's fee. Winning more
+                  than that is profit; winning less is a loss no matter how high the
+                  raw win rate looks — which is why the win rate on its own is not the
+                  number to watch.
+                </div>
+              </div>
+            );
+          })()}
+
           {data.verdict&&(
             <div className="rounded-xl border p-3 mb-3 text-[11.5px] leading-relaxed"
               style={{borderColor:data.verdict.significant_worse?'rgba(255,77,106,0.35)':'#1F1F1F',
