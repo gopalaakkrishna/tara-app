@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.10-v13.4.167-discord-embeds-match-app-theme';
-const TARA_VERSION_DISPLAY='Tara 13.4.167';
+const BASELINE_VERSION='2026.08.10-v13.4.168-hourly-memory-polish-endash-fix';
+const TARA_VERSION_DISPLAY='Tara 13.4.168';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15853,16 +15853,35 @@ function HourlyMemoryModal({onClose}){
     const keys=order?order.filter(k=>groups[k]):Object.keys(groups);
     return keys.map(k=>({label:k,...groups[k]}));
   };
+  // V13.4.168: the fallback bucket used to be labelled "before time-band tracking
+  //   (V13.4.133+)" -- an internal version tag surfacing in the UI, and on a log where
+  //   almost nothing carries a band it was the ONLY card shown, so a whole section
+  //   rendered to say "61%" under a developer note. Plain label now, and the section
+  //   hides itself below unless at least one REAL band is present.
+  const _BAND_NA='not tracked yet';
   const bandStats=React.useMemo(()=>_groupBy(
-    h=>h.band||'before time-band tracking (V13.4.133+)',
-    ['85%','77%','67%','~52% (coin flip this early)','before time-band tracking (V13.4.133+)'],
+    h=>h.band||_BAND_NA,
+    ['85%','77%','67%','~52% (coin flip this early)',_BAND_NA],
   ),[history]);
+  const _hasRealBands=React.useMemo(()=>bandStats.some(b=>b.label!==_BAND_NA),[bandStats]);
   const sideStats=React.useMemo(()=>_groupBy(
     h=>h.side==='YES'?'YES (UP-equiv)':h.side==='NO'?'NO (DOWN-equiv)':'unknown',
     ['YES (UP-equiv)','NO (DOWN-equiv)','unknown'],
   ),[history]);
   const resultColor=(h)=>isWin(h)?'rgba(40,204,149,0.95)':isLoss(h)?'rgba(255,77,106,0.95)':'rgba(237,237,237,0.4)';
   const resultLabel=(h)=>isWin(h)?'WIN':isLoss(h)?'LOSS':'--';
+  // V13.4.168: lock times were stored with toLocaleTimeString([],...), i.e. whatever
+  //   the machine's locale produced -- so the same list mixed "06:15 a.m." and
+  //   "12:18 PM". Normalise on DISPLAY (the stored strings can't be retro-fixed):
+  //   strip the periods and upper-case the meridiem so every row reads "06:15 AM".
+  const _fmtAt=(s)=>String(s||'').replace(/\s*([ap])\.?\s*m\.?/i,(_m,p)=>` ${p.toUpperCase()}M`).trim();
+  // Strike with thousands separators -- "$63,399.99" instead of "$63399.99".
+  const _fmtStrike=(v)=>{
+    const n=Number(v);
+    return Number.isFinite(n)
+      ?'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})
+      :`$${v}`;
+  };
   const _catCard=(c)=>{
     const n=c.w+c.l;
     const bwr=n>0?Math.round(100*c.w/n):null;
@@ -15884,24 +15903,30 @@ function HourlyMemoryModal({onClose}){
           </div>
           <button onClick={onClose} className="text-[#EDEDED]/50 hover:text-[#EDEDED] text-xl leading-none">&times;</button>
         </div>
-        <div className="p-5 grid grid-cols-2 sm:grid-cols-5 gap-2">
+        {/* V13.4.168: win rate leads (it is the question this modal answers), then the
+            W/L that produce it, then open. "Total calls" is dropped from the tiles --
+            it duplicated wins+losses+open and forced a 5-up grid that wrapped badly. */}
+        <div className="p-5 pb-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
           {[
-            {label:'Total calls',value:totalLifetime,color:'#EDEDED'},
-            {label:'Win rate',value:wr!=null?wr+'%':'--',color:'#28CC95'},
+            {label:'Win rate',value:wr!=null?wr+'%':'--',color:wr==null?'#EDEDED':wr>=60?'#28CC95':wr>=45?'#D4A24C':'#FF4D6A'},
             {label:'Wins',value:rec.w,color:'#28CC95'},
             {label:'Losses',value:rec.l,color:'#FF4D6A'},
             {label:'Open',value:pendingN,color:'#D4A24C'},
           ].map(c=>(
             <div key={c.label} className="rounded-xl p-3" style={{background:'rgba(237,237,237,0.03)',border:'1px solid rgba(237,237,237,0.08)'}}>
-              <div className="text-[10px] text-[#EDEDED]/45">{c.label}</div>
+              <div className="text-[10px] uppercase tracking-[0.12em] text-[#EDEDED]/45">{c.label}</div>
               <div className="text-xl font-mono font-semibold mt-0.5" style={{color:c.color}}>{c.value}</div>
             </div>
           ))}
         </div>
-        <div className="px-5 pb-1 text-[10px] text-[#EDEDED]/35">List below shows the most recent {Math.min(200,history.length)} settled (storage keeps the last 200; the totals above are the real lifetime count).</div>
-        {bandStats.length>0&&(
+        {/* V13.4.168: was a two-clause parenthetical explaining storage internals. The
+            only fact that matters is how many locks the number covers. */}
+        <div className="px-5 pb-1 text-[10px] text-[#EDEDED]/35">
+          {totalLifetime} hourly lock{totalLifetime===1?'':'s'} all-time{history.length<totalSettled?` · showing the most recent ${history.length}`:''}
+        </div>
+        {_hasRealBands&&(
           <div className="px-5 pt-3 pb-2">
-            <div className="text-[10px] text-[#EDEDED]/45 mb-1.5">Win rate by time-left-at-lock band</div>
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[#EDEDED]/45 mb-1.5">By time left at lock</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{bandStats.map(_catCard)}</div>
           </div>
         )}
@@ -15945,8 +15970,12 @@ function HourlyMemoryModal({onClose}){
               const hourStart=anyClose?new Date(anyClose-3600000):null;
               const hourEnd=anyClose?new Date(anyClose):null;
               const hasPending=entries.some(h=>h._pending);
+              // V13.4.168 FIX: this printed "2:00 PM â□□ 3:00 PM". '\xe2\x80\x93' is the
+              //   UTF-8 BYTE sequence for an en dash, but in a JS string each \xNN is its
+              //   own character, so it produced three garbage chars instead of one dash.
+              //   The correct escape for an en dash is the code point, '–'.
               const hourLabel=hourStart&&hourEnd
-                ?hourStart.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})+' \xe2\x80\x93 '+hourEnd.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})
+                ?hourStart.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})+' – '+hourEnd.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})
                 :'Unknown window';
               const settled=entries.filter(h=>!h._pending);
               const w=settled.filter(isWin).length;
@@ -15962,27 +15991,40 @@ function HourlyMemoryModal({onClose}){
                       {hasPending&&<span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded" style={{background:'rgba(212,162,76,0.15)',color:'#D4A24C'}}>live</span>}
                       <span className="text-[9px] tabular-nums text-[#EDEDED]/35">{entries.length} lock{entries.length===1?'':'s'}</span>
                     </div>
-                    {hourWr!=null&&(
+                    {/* V13.4.168: a percentage on ONE lock is noise -- the old header
+                        printed "0% WR 0W·1L" and "100% WR 1W·0L", which look like
+                        findings and are not. Show the raw W/L until there are at least
+                        two resolved locks in the hour. */}
+                    {resolved>0&&(
                       <div className="flex items-baseline gap-2 text-[10px] tabular-nums">
-                        <span style={{color:wrColor}} className="font-bold">{hourWr}% WR</span>
-                        <span className="text-[#EDEDED]/35">{w}W&middot;{l}L</span>
+                        {resolved>=2&&<span style={{color:wrColor}} className="font-bold">{hourWr}%</span>}
+                        <span style={{color:resolved>=2?'rgba(237,237,237,0.35)':wrColor}}>{w}W&middot;{l}L</span>
                       </div>
                     )}
                   </div>
                   <div className="divide-y" style={{borderColor:'rgba(237,237,237,0.06)'}}>
+                    {/* V13.4.168: fixed-width side/cost/time columns so rows line up
+                        instead of each one wrapping to its own content width, and the
+                        strike carries thousands separators. Net cents surfaced on
+                        settled rows -- the actual outcome in money, which the list
+                        previously omitted entirely. */}
                     {entries.map((h,i)=>(
-                      <div key={i} className="py-2 flex items-center justify-between text-[12px]">
-                        <div className="flex items-center gap-2">
-                          <span style={{color:h.side==='YES'?'#28CC95':'#FF4D6A'}}>{h.side==='YES'?'▲':'▼'} {h.side}</span>
-                          <span className="text-[#EDEDED]/70">strike ${h.strike}</span>
-                          <span className="text-[#EDEDED]/40">{h.cost}c</span>
-                          {h.band&&<span className="text-[10px] text-[#EDEDED]/30">{h.band}</span>}
+                      <div key={i} className="py-2 flex items-center justify-between gap-3 text-[12px]">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="w-[54px] shrink-0 font-semibold tabular-nums" style={{color:h.side==='YES'?'#28CC95':'#FF4D6A'}}>{h.side==='YES'?'▲':'▼'} {h.side}</span>
+                          <span className="text-[#EDEDED]/75 tabular-nums truncate">{_fmtStrike(h.strike)}</span>
+                          <span className="text-[#EDEDED]/40 tabular-nums shrink-0">{h.cost}c</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[#EDEDED]/40">{h.at||''}</span>
+                        <div className="flex items-center gap-3 shrink-0">
+                          {!h._pending&&Number.isFinite(Number(h.netCents))&&(
+                            <span className="text-[11px] tabular-nums" style={{color:Number(h.netCents)>=0?'rgba(40,204,149,0.75)':'rgba(255,77,106,0.75)'}}>
+                              {Number(h.netCents)>=0?'+':''}{Number(h.netCents)}c
+                            </span>
+                          )}
+                          <span className="text-[#EDEDED]/40 tabular-nums w-[64px] text-right">{_fmtAt(h.at)}</span>
                           {h._pending
-                            ?<span className="font-semibold text-[10px] uppercase" style={{color:'#D4A24C'}}>pending</span>
-                            :<span className="font-semibold" style={{color:resultColor(h)}}>{resultLabel(h)}</span>}
+                            ?<span className="font-semibold text-[10px] uppercase w-[42px] text-right" style={{color:'#D4A24C'}}>open</span>
+                            :<span className="font-semibold text-[11px] w-[42px] text-right" style={{color:resultColor(h)}}>{resultLabel(h)}</span>}
                         </div>
                       </div>
                     ))}
