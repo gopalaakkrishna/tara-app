@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.10-v13.4.165-one-shared-live-call-remove-device-guard';
-const TARA_VERSION_DISPLAY='Tara 13.4.165';
+const BASELINE_VERSION='2026.08.10-v13.4.166-unify-log-cap-to-cloud-window';
+const TARA_VERSION_DISPLAY='Tara 13.4.166';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5588,7 +5588,17 @@ function computeDowHourShift(dowHourTable,now){
 //   At 1.2KB avg, 4000 entries = ~4.8MB which fits within Chrome's 10MB localStorage
 //   limit comfortably. IndexedDB (unlimited) is the primary store; localStorage
 //   is a fast-read cache only.
-const TARA_CALL_LOG_CAP=10000;
+// V13.4.166: the working log IS the cloud window now. Previously 10000, which meant
+//   the in-memory log (and therefore every surface reading it) could hold far more
+//   than Supabase does -- the Memory modal showed "Total calls 2977" and Discord
+//   reported an "All-time" record while the cloud held 1000. Patching each display
+//   separately is exactly how those drifted apart in the first place, so the cap is
+//   unified instead: one number, one window, every surface agrees by construction.
+//   Set to _TARA_CLOUD_LOG_CAP just below its definition (see the assignment there);
+//   this const stays for the many existing references.
+//   NOTE: full history is NOT lost -- it lives in the JSON/CSV exports, and older
+//   entries are simply outside the window the app displays and syncs.
+const TARA_CALL_LOG_CAP=1000;
 
 // V13.4.86: HOURLY BARRIER PROBABILITY -- empirically fitted, out-of-sample validated.
 //   Answers: P(BTC closes above `strike` when the window ends), given spot now and
@@ -23387,7 +23397,9 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
       ),
       React.createElement('div',{className:'grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-5 gap-2 mb-4'},
         React.createElement('div',{className:'bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
-          React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},'Total calls'),
+          // V13.4.166: say which window these totals cover. The log is capped to the
+          //   cloud window, so an unqualified "Total calls" read as a lifetime count.
+          React.createElement('div',{className:'text-[9px] uppercase tracking-wider text-[#EDEDED]/40 font-bold mb-1'},`Calls · ${_TARA_RECORD_WINDOW_LABEL}`),
           React.createElement('div',{className:'text-2xl font-bold text-white tabular-nums',style:{fontFamily:'"IBM Plex Mono",monospace'}},counts.total),
         ),
         React.createElement('div',{className:'bg-[#171717] border border-[#2A2A2A] rounded-xl p-3 shadow-[0_3px_10px_rgba(0,0,0,0.3)]'},
@@ -36484,7 +36496,9 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           {name:'Gap',value:`${_gapDir}${Math.abs(_gapBps).toFixed(1)}bps`,inline:true},
           {name:'Regime',value:(data.regime||'—').replace('RANGE-CHOP','CHOP').replace('SHORT SQUEEZE','SQUEEZE').replace('TRENDING ','TR-'),inline:true},
           {name:'Quality',value:`${data.quality||0}/100`,inline:true},
-          {name:'Record',value:`Today ${data.todayRecord||'—'} · All-time ${data.taraRecord||'—'}`,inline:false},
+          // V13.4.166: was "All-time", which was never true -- the log is capped, so
+          //   this reported a windowed count under a lifetime label. Today stays as-is.
+          {name:'Record',value:`Today ${data.todayRecord||'—'} · ${_TARA_RECORD_WINDOW_LABEL} ${data.taraRecord||'—'}`,inline:false},
         ];
         // Only add reversal risk row when EXPECTED or WATCH (worth the space)
         if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
