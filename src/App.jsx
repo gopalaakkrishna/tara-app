@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.10-v13.4.166-unify-log-cap-to-cloud-window';
-const TARA_VERSION_DISPLAY='Tara 13.4.166';
+const BASELINE_VERSION='2026.08.10-v13.4.167-discord-embeds-match-app-theme';
+const TARA_VERSION_DISPLAY='Tara 13.4.167';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5879,6 +5879,29 @@ const PRICE_SOURCE_DEFAULT='coinbase';
 //   These coexist — copper sits between green and red as a "watch but don't alarm" tier.
 const T2_GOLD='#C9A961';
 const T2_COPPER='#C97D4A';
+
+// V13.4.167: Discord embed palette + formatters, so alerts match the app instead of
+//   inventing their own look. Decimal ints are what the Discord API wants; these are
+//   the SAME hexes used on screen, so a DOWN lock is the same rose in both places.
+const _DC_UP=0x28CC95;      // emerald  — UP / buying
+const _DC_DOWN=0xFF4D6A;    // rose     — DOWN / selling
+const _DC_GOLD=0xC9A961;    // gold     — caution / skipped / watch
+const _DC_DIM=0x6B6B6B;     // grey     — informational
+// Compact money: 1_022_000 -> "$1.0M", 506_000 -> "$506K". Keeps columns narrow so the
+//   monospace blocks below stay aligned on a phone.
+const _compactMoney=(v)=>{
+  const n=Math.abs(Number(v)||0);
+  if(n>=1e9)return `$${(n/1e9).toFixed(1)}B`;
+  if(n>=1e6)return `$${(n/1e6).toFixed(1)}M`;
+  if(n>=1e3)return `$${Math.round(n/1e3)}K`;
+  return `$${Math.round(n)}`;
+};
+const _signedMoney=(v)=>`${(Number(v)||0)>=0?'+':'-'}${_compactMoney(v)}`;
+// One row of a Discord monospace block: label left, value RIGHT-aligned so the numbers
+//   form a clean column, optional note after. Every embed uses this, so a lock and a
+//   whale alert line up identically instead of each padding its own way.
+const _dcRow=(label,value,note)=>
+  (String(label).padEnd(8)+String(value).padStart(11)+(note?`   ${note}`:'')).replace(/\s+$/,'');
 const T2_GOLD_GLOW='rgba(201,169,97,0.18)';
 const T2_GOLD_BORDER='rgba(201,169,97,0.35)';
 const T2_GOLD_DIM='rgba(201,169,97,0.45)';
@@ -36313,8 +36336,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //   reversalRisk.flag is added as an inline field with top signals so the user
         //   reading on phone gets the same heads-up the dashboard chip shows.
         const _rr=data.reversalRisk;
-        const _baseColor=data.dir==='UP'?3404125:16478549;
-        const _embedColor=_rr?.flag==='EXPECTED'?16478549:_rr?.flag==='WATCH'?16498744:_baseColor;
+        // V13.4.167: on-screen palette, so a DOWN lock is the same rose in Discord as
+        //   in the app and a WATCH is the same gold.
+        const _baseColor=data.dir==='UP'?_DC_UP:_DC_DOWN;
+        const _embedColor=_rr?.flag==='EXPECTED'?_DC_DOWN:_rr?.flag==='WATCH'?_DC_GOLD:_baseColor;
         // V9.9.1: null-safe field values — previously `data.price.toFixed(2)` would
         //   throw if data.price was undefined, killing the whole broadcast silently.
         const _fields=[
@@ -36431,8 +36456,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         //     • Today's streak surfaced ("4W in a row" or "2L streak")
         //     • Tier-3/override calls explicitly labeled so user can skip on phone
         const _rr=data.reversalRisk;
-        const _baseColor=data.dir==='UP'?3404125:16478549;
-        const _embedColor=_rr?.flag==='EXPECTED'?16478549:_rr?.flag==='WATCH'?16498744:_baseColor;
+        // V13.4.167: on-screen palette, so a DOWN lock is the same rose in Discord as
+        //   in the app and a WATCH is the same gold.
+        const _baseColor=data.dir==='UP'?_DC_UP:_DC_DOWN;
+        const _embedColor=_rr?.flag==='EXPECTED'?_DC_DOWN:_rr?.flag==='WATCH'?_DC_GOLD:_baseColor;
         // V10.9.8: no-go-edge is now a NORMAL lock with an edge-caution note, not an
         //   "OVERRIDE (no-trade)". The user wants these alerted like any directional
         //   call — Tara has a real read, the market is just priced ahead. Only
@@ -36477,29 +36504,35 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _kalshiRaw=data.kalshiAtLock!=null?Number(data.kalshiAtLock):null;
         const _kalshiCost=_kalshiRaw!=null?(data.dir==='UP'?_kalshiRaw:(100-_kalshiRaw)):null;
         const _kalshiC=_kalshiCost!=null?`${Math.round(_kalshiCost)}¢`:null;
-        // Title: TARA ▼ DOWN · 84% (or with edge/override flag)
-        const _title=_isOverrideCall
-          ?`TARA ${_arrow} ${data.dir} · skipped (no edge)`
-          :_isEdgeCaution
-          ?`TARA ${_arrow} ${data.dir} · ${data.confidence||0}% · ⚠ priced ahead`
-          :`TARA ${_arrow} ${data.dir} · ${data.confidence||0}%`;
-        // Description: plain-language sentence + tier + streak
-        const _plain=`BTC $${_priceFull} · $${Math.abs(_dollarsFromLine).toFixed(2)} ${_aboveBelow} the $${_strikeFull} line${_kalshiC?` · entry ${_kalshiC}`:''}`;
-        const _desc=_isOverrideCall
-          ?`Skipped — ${data.caution||data.reason||'Kalshi already priced this move'}\n${_plain}`
-          :_isEdgeCaution
-          ?`${_plain} · ${_tierLabel}${_streakLine}\n⚠ Trade carefully — better when odds swing back`
-          :`${_plain} · ${_tierLabel}${_streakLine}`;
-        // Fields: trimmed. Regime + Quality on one row, Record below.
+        // V13.4.167: restyled to match the app. Title carries the call and nothing
+        //   else; the numbers move into a monospace block so BTC / LINE / ENTRY line
+        //   up in a column instead of running together in one long sentence. The
+        //   caveat that used to be a loose "⚠ Trade carefully" line is now a named
+        //   field, so the description is purely the numbers.
         const _gapDir=_gapBps>0?'▲':_gapBps<0?'▼':'·';
+        const _pad=(s,n)=>String(s).padEnd(n);
+        const _title=_isOverrideCall
+          ?`·  ${data.dir} · SKIPPED`
+          :`${_arrow}  ${data.dir} · ${data.confidence||0}%${_isEdgeCaution?' · PRICED AHEAD':''}`;
+        const _lineArrow=_dollarsFromLine>=0?'▲':'▼';
+        const _block=[
+          _dcRow('BTC',_priceFull),
+          _dcRow('LINE',_strikeFull,`${_lineArrow} ${Math.abs(_dollarsFromLine).toFixed(2)}`),
+          _dcRow('ENTRY',_kalshiC||'—',_tierLabel.replace(/^[⚠★]\s*/,'')),
+          _dcRow('GAP',`${_gapDir}${Math.abs(_gapBps).toFixed(1)}bps`,
+            `${(data.regime||'—').replace('RANGE-CHOP','CHOP').replace('SHORT SQUEEZE','SQUEEZE').replace('TRENDING ','TR-')} · Q${data.quality||0}`),
+        ].join('\n');
+        const _desc='```\n'+_block+'\n```'+(_streakLine?`\n${_streakLine.replace(/^\s*·\s*/,'')}`:'');
         const _fields=[
-          {name:'Gap',value:`${_gapDir}${Math.abs(_gapBps).toFixed(1)}bps`,inline:true},
-          {name:'Regime',value:(data.regime||'—').replace('RANGE-CHOP','CHOP').replace('SHORT SQUEEZE','SQUEEZE').replace('TRENDING ','TR-'),inline:true},
-          {name:'Quality',value:`${data.quality||0}/100`,inline:true},
           // V13.4.166: was "All-time", which was never true -- the log is capped, so
           //   this reported a windowed count under a lifetime label. Today stays as-is.
-          {name:'Record',value:`Today ${data.todayRecord||'—'} · ${_TARA_RECORD_WINDOW_LABEL} ${data.taraRecord||'—'}`,inline:false},
+          {name:'Record',value:`Today ${data.todayRecord||'—'}  ·  ${_TARA_RECORD_WINDOW_LABEL} ${data.taraRecord||'—'}`,inline:false},
         ];
+        if(_isOverrideCall){
+          _fields.unshift({name:'Why skipped',value:data.caution||data.reason||'Kalshi already priced this move',inline:false});
+        }else if(_isEdgeCaution){
+          _fields.unshift({name:'Caution',value:'Market is priced ahead of the read — better when the odds swing back.',inline:false});
+        }
         // Only add reversal risk row when EXPECTED or WATCH (worth the space)
         if(_rr&&_rr.flag&&_rr.flag!=='NONE'){
           const _topSig=(_rr.signals||[]).filter(s=>s&&s.fired).sort((a,b)=>(b.weight||0)-(a.weight||0)).slice(0,2);
@@ -36665,48 +36698,53 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       }
 
       else if(type==='WHALE'){
+        // V13.4.167: restyled to the app's own visual language -- monospace block,
+        //   the same ▲/▼/· arrows and gold/emerald/rose palette used on screen.
+        //   The old version stated the same figure three different ways ("$1022K in
+        //   whale selling" / "Net flow -$2435K" / "Bybit sold $2435K"), which read as
+        //   three conflicting numbers. Now: NET is the headline, per-venue is the
+        //   breakdown, and the 60s gross only appears if it differs from net.
         const isBuy=data.netFlow>0;
         const netAbs=Math.abs(data.netFlow);
-        // V10.9.18: plain-language + full-precision to match the lock embed.
-        //   Helpers: pluralize cleanly (no "1 prints"), full BTC price with cents.
-        const _plur=(n,word)=>`${n} ${word}${Number(n)===1?'':'s'}`;
-        const _k=(v)=>`$${(Math.abs(v)/1000).toFixed(0)}K`;
         const _exCount=data.exchangeCount||1;
+        const _plur=(n,w)=>`${n} ${w}${Number(n)===1?'':'s'}`;
         const _priceFull=(Number(data.price)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-        // Per-exchange detail as a plain sentence list (e.g. "Binance bought $111K (1 print)")
-        const exLines=Object.entries(data.exchanges||{})
-          .map(([ex,v])=>`${ex} ${v>0?'bought':'sold'} ${_k(v)} (${_plur(data.exchangeCounts?.[ex]||0,'print')})`)
+        const _pad=(s,n)=>String(s).padEnd(n);
+        const _venue=Object.entries(data.exchanges||{})
+          .sort((a,b)=>Math.abs(b[1])-Math.abs(a[1]))
+          .map(([ex,v])=>_dcRow(ex.toUpperCase(),_signedMoney(v),_plur(data.exchangeCounts?.[ex]||0,'print')))
           .join('\n');
-        const reliabilityNote=data.spotAligned
-          ? '✅ Spot and futures aligned — elevated reliability.'
-          : _exCount===1
-          ? '⚠️ Single exchange — treat as unconfirmed, could be noise.'
-          : '⚠️ Futures only — possible hedging or basis trade.';
-        // V3.2.4: position-aware advisory line
-        let advisoryLine='';
+        const _gross=Math.abs(Number(data.totalVol)||0);
+        const _showGross=_gross>0&&Math.abs(_gross-netAbs)/Math.max(netAbs,1)>0.05;
+        const _block=[
+          _dcRow('NET',_signedMoney(data.netFlow),`${isBuy?'buyers':'sellers'} in control`),
+          _showGross?_dcRow('60s VOL',_compactMoney(_gross),_plur(data.tradeCount||0,'trade')):null,
+          ``,
+          _venue||'—',
+          ``,
+          _dcRow('BTC',_priceFull),
+          _dcRow('WINDOW',data.clock||'—'),
+        ].filter(v=>v!==null).join('\n');
+        const _conf=data.spotAligned
+          ?'Spot and futures agree — higher confidence.'
+          :_exCount===1
+          ?`Single venue only — unconfirmed, may be noise.`
+          :'Futures only — could be hedging, not direction.';
+        let _advisory=null;
         if(data.whaleAdvisory){
           const a=data.whaleAdvisory;
-          const tag=a.action==='HOLD'?'🟢 HOLD':a.action==='CASH OUT'?'🔴 CASH OUT':'🟡 WATCH';
-          advisoryLine=`\n**${tag}** · your ${data.userPosition} position\n${a.reason}`;
+          const _mark=a.action==='HOLD'?'▲ HOLD':a.action==='CASH OUT'?'▼ CASH OUT':'· WATCH';
+          _advisory={name:`${_mark} · your ${data.userPosition} position`,value:a.reason||'—',inline:false};
         }
-        // Plain headline sentence: "$111K in buys hit Binance in the last 60s"
-        const _side=isBuy?'buying':'selling';
-        const _lead=`${_k(data.totalVol)} in whale ${_side} across ${_plur(_exCount,'exchange')} in the last 60s · ${_plur(data.tradeCount||0,'trade')}.`;
-        const _netLine=`Net flow ${isBuy?'+':'-'}${_k(netAbs)} (${isBuy?'buyers':'sellers'} dominating)`;
         embed={
-          title:`TARA — ${isBuy?'🐂 Big money BUYING':'🐻 Big money SELLING'}`,
-          color:isBuy?3404125:16478549,
-          description:[
-            _lead,
-            _netLine,
-            ``,
-            exLines||'—',
-            ``,
-            `BTC $${_priceFull} · window closes in ${data.clock||'—'}`,
-            reliabilityNote,
-            advisoryLine,
-          ].filter(Boolean).join('\n'),
-          footer:{text:`${TARA_VERSION_DISPLAY} · whale watch · not financial advice`},
+          title:`${isBuy?'▲':'▼'}  WHALE ${isBuy?'BUYING':'SELLING'} · ${_compactMoney(netAbs)}`,
+          color:isBuy?_DC_UP:_DC_DOWN,
+          description:'```\n'+_block+'\n```',
+          fields:[
+            {name:'Read',value:_conf,inline:false},
+            ...(_advisory?[_advisory]:[]),
+          ],
+          footer:{text:`${TARA_VERSION_DISPLAY} · whale`},
           timestamp:new Date().toISOString(),
         };
       }
