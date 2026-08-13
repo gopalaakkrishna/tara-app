@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.10-v13.4.173-lock-eta-window-aware';
-const TARA_VERSION_DISPLAY='Tara 13.4.173';
+const BASELINE_VERSION='2026.08.13-v13.4.174-hourly-lock-time-from-epoch';
+const TARA_VERSION_DISPLAY='Tara 13.4.174';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15575,6 +15575,7 @@ function useHourlyRecord(){
       //   was no reason to drop them.
       const next={...prev,pending:[...prev.pending,{
         ticker:lk.ticker,side:lk.side,strike:lk.strike,cost:lk.cost,at:lk.at,closeMs:lk.closeMs,
+        ms:(Number.isFinite(Number(lk.ms))&&Number(lk.ms)>0)?Number(lk.ms):null,
         conf:Number(lk.conf)||0,
         model:(lk.model==null?null:Number(lk.model)),
         mktPct:(lk.mktPct==null?null:Number(lk.mktPct)),
@@ -15931,7 +15932,25 @@ function HourlyMemoryModal({onClose}){
   //   the machine's locale produced -- so the same list mixed "06:15 a.m." and
   //   "12:18 PM". Normalise on DISPLAY (the stored strings can't be retro-fixed):
   //   strip the periods and upper-case the meridiem so every row reads "06:15 AM".
-  const _fmtAt=(s)=>String(s||'').replace(/\s*([ap])\.?\s*m\.?/i,(_m,p)=>` ${p.toUpperCase()}M`).trim();
+  const _fmtAtStr=(s)=>String(s||'').replace(/\s*([ap])\.?\s*m\.?/i,(_m,p)=>` ${p.toUpperCase()}M`).trim();
+  // V13.4.174 FIX: a lock's "at" was stored ONLY as a pre-formatted local-time
+  //   string, baked in by whichever device fired the lock at that instant. Found
+  //   via live data: three same-day locks (12:36/12:39/12:47 PM by their own
+  //   minsAtLock/closeMs math -- verified against the Kalshi ticker's own close
+  //   time) were all stored as "11:36/11:39/11:47 AM", exactly 60 minutes early --
+  //   a one-off clock/timezone hiccup on the locking device (e.g. a tab resuming
+  //   from sleep with a stale local-time cache) that silently poisoned the string
+  //   forever, since nothing else records when a lock actually happened.
+  //   The fix: every NEW lock also persists its raw epoch (`ms`). Display now
+  //   reformats from that epoch using the VIEWING device's own clock, so a bad
+  //   clock on one device can no longer leave a permanently wrong timestamp that
+  //   no other device can correct. Rows written before this ship have no `ms`
+  //   and fall back to the old (unverifiable) string.
+  const _fmtAt=(h)=>{
+    const ms=Number(h&&h.ms);
+    if(Number.isFinite(ms)&&ms>0)return new Date(ms).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    return _fmtAtStr(h&&h.at);
+  };
   // Strike with thousands separators -- "$63,399.99" instead of "$63399.99".
   const _fmtStrike=(v)=>{
     const n=Number(v);
@@ -16078,7 +16097,7 @@ function HourlyMemoryModal({onClose}){
                               {Number(h.netCents)>=0?'+':''}{Number(h.netCents)}c
                             </span>
                           )}
-                          <span className="text-[#EDEDED]/40 tabular-nums w-[64px] text-right">{_fmtAt(h.at)}</span>
+                          <span className="text-[#EDEDED]/40 tabular-nums w-[64px] text-right">{_fmtAt(h)}</span>
                           {h._pending
                             ?<span className="font-semibold text-[10px] uppercase w-[42px] text-right" style={{color:'#D4A24C'}}>open</span>
                             :<span className="font-semibold text-[11px] w-[42px] text-right" style={{color:resultColor(h)}}>{resultLabel(h)}</span>}
