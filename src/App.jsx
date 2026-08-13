@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.10-v13.4.172-coach-never-knew-tara-locked';
-const TARA_VERSION_DISPLAY='Tara 13.4.172';
+const BASELINE_VERSION='2026.08.10-v13.4.173-lock-eta-window-aware';
+const TARA_VERSION_DISPLAY='Tara 13.4.173';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -48834,6 +48834,13 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                     countdownText='waiting for stronger signal';
                   } else if(tc.lockEtaSec===0){
                     countdownText='committing this tick';
+                  } else if(tc.lockEtaSec>remSec){
+                    // V13.4.173: the ETA is derived purely from the sample-accumulation
+                    //   rate and was never compared against the window clock, so at a
+                    //   low rate late in a window it would print e.g. "decision in ~2m 0s"
+                    //   with 40s left -- promising a decision that cannot arrive. The
+                    //   number is honest; the framing was not.
+                    countdownText=`unlikely to lock this window (~${formatDuration(tc.lockEtaSec)} needed, ${formatDuration(remSec)} left)`;
                   } else {
                     countdownText=`decision in ~${formatDuration(tc.lockEtaSec)}`;
                   }
