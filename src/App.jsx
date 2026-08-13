@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.13-v13.4.174-hourly-lock-time-from-epoch';
-const TARA_VERSION_DISPLAY='Tara 13.4.174';
+const BASELINE_VERSION='2026.08.13-v13.4.175-audit-fixes';
+const TARA_VERSION_DISPLAY='Tara 13.4.175';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15494,7 +15494,27 @@ const _HR_CLOUD_PATH='memory/hourlyRecord';
 const _HR_HISTORY_CAP=500;
 const _HR_PENDING_CAP=40;
 const _hrSave=(r)=>{
-  const _payload={w:r.w,l:r.l,pending:r.pending.slice(-_HR_PENDING_CAP),history:r.history.slice(-_HR_HISTORY_CAP)};
+  // V13.4.175 FIX: this used to be a blind pending.slice(-CAP) -- newest 40 kept,
+  //   oldest silently dropped. settle() retries forever on a failed/void market with
+  //   no upper bound on time, so a permanently-stuck lock (delisted ticker, dead
+  //   settlement endpoint) just sat in `pending` until enough newer locks pushed it
+  //   past the cap -- at which point it vanished with NO history entry ever written.
+  //   Not a win, not a loss: gone from the record entirely.
+  //   Fix: separate "genuinely stuck" (past 6h -- the settlement grace window is 45s,
+  //   so 6h is an enormous margin) from "still legitimately open," log the stuck ones
+  //   loudly instead of losing them silently, and only cap-evict from what's left --
+  //   which under normal load is never more than a handful of truly recent opens.
+  const _staleCutoff=Date.now()-6*3600000;
+  const _stuckPending=r.pending.filter(p=>p&&p.closeMs&&p.closeMs<_staleCutoff);
+  if(_stuckPending.length){
+    try{console.warn('[hourly] '+_stuckPending.length+' pending lock(s) never settled after 6h+ -- dropping from record (likely voided/delisted market):',_stuckPending.map(p=>p&&p.ticker));}catch(_e){}
+  }
+  const _openPending=r.pending.filter(p=>!(p&&p.closeMs&&p.closeMs<_staleCutoff));
+  const _cappedPending=_openPending.slice(-_HR_PENDING_CAP);
+  if(_cappedPending.length<_openPending.length){
+    try{console.warn('[hourly] pending cap ('+_HR_PENDING_CAP+') evicted '+(_openPending.length-_cappedPending.length)+' still-open lock(s) from the record.');}catch(_e){}
+  }
+  const _payload={w:r.w,l:r.l,pending:_cappedPending,history:r.history.slice(-_HR_HISTORY_CAP)};
   try{localStorage.setItem(_HR_KEY,JSON.stringify(_payload));}catch(_e){}
   // Cloud mirror. Debounced hard (60s, same as the 15m log) because settlement can
   //   resolve several pending locks in one burst and each would otherwise be a write.
@@ -33068,6 +33088,14 @@ function TaraApp(){
       // Device filter: skip entries created on a different device. Untagged (legacy)
       //   entries fall through and count, so existing totals aren't lost on upgrade.
       if(e.device&&e.device!==TARA_DEVICE_LABEL)return;
+      // V13.4.175 FIX: this panel never got the V10.7.57/V10.7.84b exclusions that
+      //   taraScorecards ("Tara's Record") already has, so it counted
+      //   wasOverriddenNoTrade entries (Tara flagged "no edge, would not trade this")
+      //   and unresolved no-go-data entries as real wins/losses. Two panels on the
+      //   same screen, same underlying window, showing different W-L for it — one
+      //   inflated by trades that were never actually taken.
+      if(e.wasOverriddenNoTrade===true)return;
+      if(e.tier==='no-go-data'&&!e.closingPrice)return;
       const wt=e.windowType;
       if(!out[wt])out[wt]={wins:0,losses:0};
       if(e.result==='WIN')out[wt].wins++;
@@ -46086,7 +46114,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           dir:snap.call,
           confidence:snap.confidence,
           reason:snap.reason,
-          gap:targetMargin>0?((currentPrice-targetMargin)/targetMargin)*10000:0,
+          // V13.4.175 FIX: every other field here (price, strike, quality, regime) is
+          //   already overridden to the frozen lock-time snapshot in _lockBaseData
+          //   above, specifically per the V6.5.7 comment on that block, to avoid this
+          //   exact class of bug. gap alone still read live currentPrice/targetMargin --
+          //   which can have moved by the time this fires (broadcastToDiscord is
+          //   deliberately delayed 2s+ post-lock) -- so the embed could show a BTC/LINE
+          //   pair from the lock next to a GAP computed from a different price/strike.
+          //   Use the same resolved values _lockBaseData already carries.
+          gap:_lockBaseData.strike>0?((_lockBaseData.price-_lockBaseData.strike)/_lockBaseData.strike)*10000:0,
           reversalRisk:lockedCallRef.current?.reversalRisk||null,
           // V10.7.57: pass override + caution + streak so embed can render the truth
           wasOverriddenNoTrade:snap?.wasOverriddenNoTrade===true,
@@ -46963,7 +46999,18 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         });
       }
     }catch(_e){}
-    try{pushToast&&pushToast(`Hourly lock: ${lk.side} @ ${Number(lk.strike).toLocaleString('en-US')} · ${Math.round(Number(lk.cost)||0)}c`,'gold');}catch(_e){}
+    // V13.4.175 FIX: pushToast is (kind,title,body,options) -- this was calling it as
+    //   (title,kind), so 'gold' landed in the `title` slot and rendered on screen
+    //   literally, while `body` was left undefined. The one in-app channel of the
+    //   three (Discord/Notification/toast) silently showed the word "gold" instead of
+    //   the actual lock. `kind` must also be stable across a lock's own re-renders --
+    //   used as-is here since ticker+side is already unique per lock.
+    try{pushToast&&pushToast(
+      `hourly-lock-${lk.ticker}-${lk.side}`,
+      `Hourly lock: ${lk.side} @ ${Number(lk.strike).toLocaleString('en-US')}`,
+      `${Math.round(Number(lk.cost)||0)}c entry${lk.minsAtLock!=null?` · ${Math.round(Number(lk.minsAtLock))}m left`:''}`,
+      {color:'#D4A24C',durationMs:6000}
+    );}catch(_e){}
   },[]);
 
   const handleManualSync=(dir,opts)=>{
