@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.10-v13.4.171-maker-vs-taker-entry-guidance';
-const TARA_VERSION_DISPLAY='Tara 13.4.171';
+const BASELINE_VERSION='2026.08.10-v13.4.172-coach-never-knew-tara-locked';
+const TARA_VERSION_DISPLAY='Tara 13.4.172';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15661,7 +15661,23 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
   //   actual lock/sitout/commit happens (confirmed: every commit-path fix tonight writes
   //   to this exact ref). Threaded through as lockedSnapshotDir, same pattern as the
   //   existing reversalRisk prop on this same component.
-  const locked=!!(taraCall&&taraCall.locked);
+  // V13.4.172 FIX: `locked` was read off taraCall.locked -- but taraCall is a LIVE
+  //   recomputation built fresh on every render (see its builder), and nothing in that
+  //   builder ever sets `locked`. So this was ALWAYS false, and every "when locked"
+  //   branch below was dead code: the panel could never show "BUY x – LOCKED", never
+  //   read the frozen snapshot for confidence/reason (the V13.4.119 fix), and never
+  //   released the 8s lean debounce (the V13.4.121/148 fixes).
+  //   Real screenshot: Tara's Call read "LOCKED DOWN" while this panel read
+  //   "LEANING UP – HOLD ... your marked DOWN position now conflicts with Tara's
+  //   current read (UP)" -- it was warning the user off a position that MATCHED the
+  //   actual locked call, because it did not know a lock had happened and was still
+  //   holding a stale pre-lock lean.
+  //   The real lock lives in the committed snapshot (taraCallSnapshotRef.current,
+  //   passed in as lockedSnapshot). Sit-out snapshots also carry locked:true, so a
+  //   DIRECTIONAL call is required -- otherwise a sit-out would read as a locked trade.
+  const _lockedDir=(lockedSnapshot&&lockedSnapshot.locked
+    &&(lockedSnapshot.call==='UP'||lockedSnapshot.call==='DOWN'))?lockedSnapshot.call:null;
+  const locked=!!_lockedDir;
   // V13.4.161 FIX: the REAL cause of the header/reason contradiction, which the
   //   V13.4.148 debounce-lag fix did not catch (confirmed by a fresh screenshot
   //   showing "LEANING DOWN -- HOLD" over "TRAJ-priority lock·UP" with NO active
@@ -15679,9 +15695,12 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
   //   for the reason text -- so header and body can never disagree pre-lock.
   let call;
   if(locked){
+    // V13.4.172: the committed snapshot IS the decision -- prefer it directly. The
+    //   getTaraDirection/lockedSnapshotDir route stays as a fallback for the case where
+    //   a lock exists but the snapshot prop has not propagated yet.
     const _lockDirIn=analysis?.lockInfo?.dir||null;
     const _resolved=getTaraDirection({snapshot:{call:lockedSnapshotDir},lock:{dir:_lockDirIn},signalSource:'snapshot'});
-    call=_resolved.dir||(taraCall&&taraCall.call==='SIT_OUT'?'SIT_OUT':null);
+    call=_lockedDir||_resolved.dir||(taraCall&&taraCall.call==='SIT_OUT'?'SIT_OUT':null);
   }else{
     call=(taraCall&&(taraCall.call==='UP'||taraCall.call==='DOWN'))?taraCall.call
       :(taraCall&&taraCall.call==='SIT_OUT'?'SIT_OUT':null);
@@ -15828,9 +15847,9 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
       const _aligned=isDir&&call===userPosition;
       const _conflicted=isDir&&call!==userPosition;
       const _txt=_aligned
-        ?('\u2713 your marked '+userPosition+' position matches Tara\'s current read '+(locked?'(locked).':'(still forming -- not locked yet).'))
+        ?('\u2713 your marked '+userPosition+' position matches Tara\'s '+(locked?'LOCKED call.':'current read (still forming, not locked yet).'))
         :_conflicted
-        ?('\u26a0 your marked '+userPosition+' position now conflicts with Tara\'s current read ('+call+') -- she is no longer confident in your side.')
+        ?('\u26a0 your marked '+userPosition+' position conflicts with Tara\'s '+(locked?'LOCKED '+call+' call':'current read ('+call+')')+' \u2013 she is not on your side.')
         :('\u26a0 your marked '+userPosition+' position has no supporting signal right now (Tara reads '+(isSitOut?'SIT OUT':'mixed')+').');
       return React.createElement('div',{
         className:'mt-2 pt-2 border-t text-[11px]',
