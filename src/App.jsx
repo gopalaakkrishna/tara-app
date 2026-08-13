@@ -808,6 +808,14 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
           .select('data,updated_at').eq('doc_path',path).maybeSingle();
         if(_readErr&&_readErr.code!=='PGRST116'){
           console.warn('[Supabase] RMW read failed',path,_readErr.message);
+          // V13.4.176 FIX: RMW is the write path for the highest-value data (call
+          //   log, weights, learnings) and every failure branch here used to be
+          //   console.warn-only -- no _setCloudStatus call, unlike plain cloudWrite.
+          //   The visible sync health indicator kept reading "ok" from the last
+          //   UNRELATED successful op while this path failed silently underneath it.
+          //   An RLS change, a dropped connection, or a quota trip could break every
+          //   RMW write from that point on with nothing on screen to show it.
+          _setCloudStatus({state:'error',lastError:{path,message:_readErr.message,at:Date.now()}});
           return;
         }
         const _cloudData=_cur?.data||null;
@@ -827,15 +835,21 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
             .eq('updated_at',_cloudUpdatedAt);
           if(_updateErr){
             console.warn('[Supabase] RMW update failed',path,_updateErr.message);
+            _setCloudStatus({state:'error',lastError:{path,message:_updateErr.message,at:Date.now()}});
             return;
           }
           if(count===0){
             // Conflict — someone else wrote. Retry from the top.
-            if(_attempts>=5){console.warn('[Supabase] RMW gave up after 5 attempts',path);return;}
+            if(_attempts>=5){
+              console.warn('[Supabase] RMW gave up after 5 attempts',path);
+              _setCloudStatus({state:'error',lastError:{path,message:'RMW gave up after 5 attempts (repeated write conflicts)',at:Date.now()}});
+              return;
+            }
             await new Promise(r=>setTimeout(r,50*_attempts));
             continue;
           }
           if(_sbPendingSig.has(path))_sbLastSyncSig.set(path,_sbPendingSig.get(path)); // V10.9.29
+          _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
           return; // success
         } else {
           // No existing row — plain insert. If it conflicts (race with another
@@ -845,17 +859,24 @@ const cloudSupabaseWriteDebouncedRMW=(path,getLocalData,mergeFn,delayMs=400)=>{
           if(_insertErr){
             // 23505 = unique violation = someone else inserted first. Retry.
             if(_insertErr.code==='23505'){
-              if(_attempts>=5){console.warn('[Supabase] RMW insert gave up',path);return;}
+              if(_attempts>=5){
+                console.warn('[Supabase] RMW insert gave up',path);
+                _setCloudStatus({state:'error',lastError:{path,message:'RMW insert gave up after 5 attempts',at:Date.now()}});
+                return;
+              }
               await new Promise(r=>setTimeout(r,50*_attempts));
               continue;
             }
             console.warn('[Supabase] RMW insert failed',path,_insertErr.message);
+            _setCloudStatus({state:'error',lastError:{path,message:_insertErr.message,at:Date.now()}});
             return;
           }
+          _setCloudStatus({state:'ok',lastOk:Date.now(),writes:_cloudSyncStatus.writes+1});
           return; // success
         }
       } catch(e){
         console.warn('[Supabase] RMW threw',path,e?.message);
+        _setCloudStatus({state:'error',lastError:{path,message:e?.message||'RMW threw',at:Date.now()}});
         return;
       }
     }
@@ -5232,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.13-v13.4.175-audit-fixes';
-const TARA_VERSION_DISPLAY='Tara 13.4.175';
+const BASELINE_VERSION='2026.08.13-v13.4.176-persistence-audit-fixes';
+const TARA_VERSION_DISPLAY='Tara 13.4.176';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15560,28 +15581,39 @@ function useHourlyRecord(){
   //   write-only -- a fresh browser or a second device would still start empty, which
   //   is the exact "depends on my PC" problem this is meant to remove. One read of a
   //   ~110KB doc per app load is a deliberate, bounded egress cost.
-  React.useEffect(()=>{
-    let alive=true;
-    (async()=>{
-      try{
-        if(typeof cloudSupabaseRead!=='function')return;
-        const _cloud=await cloudSupabaseRead(_HR_CLOUD_PATH);
-        if(!alive||!_cloud)return;
-        setRec(prev=>{
-          const _merged=_hrMerge(prev,_cloud);
-          // Only commit if something actually changed, so this cannot loop with the
-          //   write path (setRec -> _hrSave -> cloudWrite -> ...).
-          if(_merged.history.length===prev.history.length&&_merged.pending.length===prev.pending.length)return prev;
-          try{localStorage.setItem(_HR_KEY,JSON.stringify(_merged));}catch(_e){}
-          try{console.info('[V13.4.162] hourly cloud hydrate: '+prev.history.length+' -> '+_merged.history.length+' settled');}catch(_e){}
-          return _merged;
-        });
-      }catch(_e){
-        try{console.warn('[V13.4.162] hourly cloud hydrate failed',_e&&_e.message);}catch(_){}
-      }
-    })();
-    return()=>{alive=false;};
+  // V13.4.176 FIX: this hydrate used to run ONCE per mount ([] deps). The hourly lock
+  //   engine's own contradiction guard and MAX_LOCKS cap (HourlyLadderPanel, further
+  //   below) only check L.locks + rec.pending -- both fed by THIS state -- so a tab
+  //   left open for hours never sees another device's locks made after its own mount.
+  //   Two devices open across the same hour could each independently lock a
+  //   contradicting position, blind to each other, because each was only ever told
+  //   about the other's state at its own load time. Re-running this on an interval
+  //   (not realtime -- memory/hourlyRecord is deliberately excluded from realtime
+  //   subscriptions per the prior ~157MB/day echo incident) closes that gap with a
+  //   bounded, predictable egress cost instead of an unbounded one.
+  const _hrHydrate=React.useCallback(async()=>{
+    try{
+      if(typeof cloudSupabaseRead!=='function')return;
+      const _cloud=await cloudSupabaseRead(_HR_CLOUD_PATH);
+      if(!_cloud)return;
+      setRec(prev=>{
+        const _merged=_hrMerge(prev,_cloud);
+        // Only commit if something actually changed, so this cannot loop with the
+        //   write path (setRec -> _hrSave -> cloudWrite -> ...).
+        if(_merged.history.length===prev.history.length&&_merged.pending.length===prev.pending.length)return prev;
+        try{localStorage.setItem(_HR_KEY,JSON.stringify(_merged));}catch(_e){}
+        try{console.info('[V13.4.162] hourly cloud hydrate: '+prev.history.length+' -> '+_merged.history.length+' settled');}catch(_e){}
+        return _merged;
+      });
+    }catch(_e){
+      try{console.warn('[V13.4.162] hourly cloud hydrate failed',_e&&_e.message);}catch(_){}
+    }
   },[]);
+  React.useEffect(()=>{
+    _hrHydrate();
+    const iv=setInterval(_hrHydrate,5*60000); // V13.4.176: re-pull every 5 min, not just at mount
+    return()=>clearInterval(iv);
+  },[_hrHydrate]);
   const addLock=React.useCallback((lk)=>{
     setRec(prev=>{
       if(prev.pending.some(x=>x.ticker===lk.ticker&&x.side===lk.side))return prev;
@@ -33962,6 +33994,17 @@ function TaraApp(){
           const existing=byKey.get(k);
           if(!existing){byKey.set(k,e);changed=true;}
           else if(_shouldReplace(existing,e)){byKey.set(k,e);changed=true;}
+          // V13.4.176 FIX: _shouldReplace's "local resolved -> NEVER replace" rule
+          //   (V10.7.60) is deliberate and stays -- it exists specifically to stop a
+          //   stale cloud read from clobbering a fresher local resolution. But it also
+          //   means a genuine cloud-side correction (e.g. a manual Supabase fix after
+          //   a bad local auto-resolve) can NEVER reach this device, forever, with no
+          //   visibility that it's being refused. Surface the disagreement instead of
+          //   silently swallowing it, so a real correction doesn't just vanish.
+          else if(existing.result&&e.result&&existing.result!==e.result&&
+              (existing.result==='WIN'||existing.result==='LOSS')&&(e.result==='WIN'||e.result==='LOSS')){
+            try{console.warn('[V13.4.176] call-log entry '+k+' resolved differently on cloud ('+e.result+') than local ('+existing.result+') -- local kept per V10.7.60, cloud version discarded. If cloud is the correction, this device will not see it.');}catch(_w){}
+          }
         });
         // Detect if prev itself had duplicates that backfill would now collapse
         if(!changed&&Array.from(byKey.values()).length!==prev.length)changed=true;
