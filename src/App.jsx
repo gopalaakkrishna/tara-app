@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.10-v13.4.170-hourly-locks-alert-and-hoist';
-const TARA_VERSION_DISPLAY='Tara 13.4.170';
+const BASELINE_VERSION='2026.08.10-v13.4.171-maker-vs-taker-entry-guidance';
+const TARA_VERSION_DISPLAY='Tara 13.4.171';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15789,10 +15789,33 @@ function TradeCoachCall({taraCall,analysis,lockedSnapshotDir,lockedSnapshot,kals
       const max=getEntryMaxCost();
       const inBand=cost>=min&&cost<max;
       const secsLeft=timeState?((timeState.minsRemaining||0)*60+(timeState.secsRemaining||0)):null;
+      // V13.4.171: MAKER vs TAKER. Measured on the real Kalshi account: 90.6% of BTC
+      //   fills were TAKER, and taker fees came to $6,055 while the 957 maker fills paid
+      //   $0.01 total -- Kalshi's maker fee is zero. Against a 15m gross edge of +0.61%
+      //   of staked, fees at 2.11% are ~3.5x the entire edge. Crossing the spread is the
+      //   single largest cost in the account, larger than any gate tuned so far.
+      //   So the panel now says what to actually DO: the ask is what you pay if you hit
+      //   it now, the bid is what you pay if you rest and wait. Advisory only -- Tara
+      //   places nothing; you still choose.
+      const _q=(typeof _kalshiQuote!=='undefined')?_kalshiQuote:null;
+      const _qFresh=!!(_q&&_q.at&&(Date.now()-_q.at)<60000&&_q.bid!=null&&_q.ask!=null);
+      // Cost of OUR side: UP buys YES (pay ask, rest at bid). DOWN buys NO, whose
+      //   ask is (100 - yesBid) and whose bid is (100 - yesAsk).
+      const _takeC=_qFresh?(call==='UP'?_q.ask:(100-_q.bid)):null;
+      const _restC=_qFresh?(call==='UP'?_q.bid:(100-_q.ask)):null;
+      const _saveC=(_takeC!=null&&_restC!=null)?(_takeC-_restC):null;
+      const _fee=(c)=>0.07*(c/100)*(1-c/100)*100; // Kalshi fee, peaks ~1.75c at 50c
       return React.createElement('div',{className:'mt-2 pt-2 border-t text-[11px]',style:{borderColor:'rgba(237,237,237,0.10)'}},
         React.createElement('span',{style:{color:inBand?'#28CC95':'#C9A961'}},
           'entry '+cost.toFixed(0)+'c'+(inBand?' – in the '+min.toFixed(0)+'-'+max.toFixed(0)+'c band, good price':' – OUTSIDE the '+min.toFixed(0)+'-'+max.toFixed(0)+'c band, paying up')),
         secsLeft!=null&&React.createElement('span',{className:'ml-2',style:{color:'rgba(237,237,237,0.5)'}},Math.round(secsLeft)+'s left in window'),
+        _qFresh&&_saveC!=null&&_saveC>0&&React.createElement('div',{className:'mt-1.5 leading-relaxed'},
+          React.createElement('span',{style:{color:'rgba(255,77,106,0.9)'}},`take now ${_takeC.toFixed(0)}c`),
+          React.createElement('span',{style:{color:'rgba(237,237,237,0.35)'}},'  ·  '),
+          React.createElement('span',{style:{color:'#28CC95'}},`rest at ${_restC.toFixed(0)}c`),
+          React.createElement('div',{className:'text-[10px] mt-0.5',style:{color:'rgba(237,237,237,0.45)'}},
+            `resting saves ${_saveC.toFixed(0)}c spread + ${_fee(_takeC).toFixed(1)}c fee (maker is free) = ${(_saveC+_fee(_takeC)).toFixed(1)}c/contract. May not fill.`),
+        ),
       );
     })(),
     // V13.4.121: POSITION AWARENESS. User feedback: coach 'not position aware or
@@ -36636,13 +36659,24 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           ?`·  ${data.dir} · SKIPPED`
           :`${_arrow}  ${data.dir} · ${data.confidence||0}%${_isEdgeCaution?' · PRICED AHEAD':''}`;
         const _lineArrow=_dollarsFromLine>=0?'▲':'▼';
+        // V13.4.171: surface the maker price in the alert too. 90.6% of real BTC fills
+        //   were taker and taker fees ran ~3.5x the gross edge, so "what do I actually
+        //   pay" is the most decision-relevant line here. _kalshiQuote is module-level
+        //   and already carries the live bid/ask (V13.4.142).
+        const _lq=(typeof _kalshiQuote!=='undefined')?_kalshiQuote:null;
+        const _lqFresh=!!(_lq&&_lq.at&&(Date.now()-_lq.at)<60000&&_lq.bid!=null&&_lq.ask!=null);
+        const _takeC=_lqFresh?(data.dir==='UP'?_lq.ask:(100-_lq.bid)):null;
+        const _restC=_lqFresh?(data.dir==='UP'?_lq.bid:(100-_lq.ask)):null;
         const _block=[
           _dcRow('BTC',_priceFull),
           _dcRow('LINE',_strikeFull,`${_lineArrow} ${Math.abs(_dollarsFromLine).toFixed(2)}`),
           _dcRow('ENTRY',_kalshiC||'—',_tierLabel.replace(/^[⚠★]\s*/,'')),
+          (_takeC!=null&&_restC!=null&&_takeC>_restC)
+            ?_dcRow('REST AT',`${_restC.toFixed(0)}c`,`vs ${_takeC.toFixed(0)}c taking · saves ${(_takeC-_restC).toFixed(0)}c + fee`)
+            :null,
           _dcRow('GAP',`${_gapDir}${Math.abs(_gapBps).toFixed(1)}bps`,
             `${(data.regime||'—').replace('RANGE-CHOP','CHOP').replace('SHORT SQUEEZE','SQUEEZE').replace('TRENDING ','TR-')} · Q${data.quality||0}`),
-        ].join('\n');
+        ].filter(Boolean).join('\n');
         const _desc='```\n'+_block+'\n```'+(_streakLine?`\n${_streakLine.replace(/^\s*·\s*/,'')}`:'');
         const _fields=[
           // V13.4.166: was "All-time", which was never true -- the log is capped, so
