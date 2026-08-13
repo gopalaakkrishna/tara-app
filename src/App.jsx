@@ -5232,8 +5232,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.10-v13.4.169-persist-full-lock-coach-embed-dashes';
-const TARA_VERSION_DISPLAY='Tara 13.4.169';
+const BASELINE_VERSION='2026.08.10-v13.4.170-hourly-locks-alert-and-hoist';
+const TARA_VERSION_DISPLAY='Tara 13.4.170';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -16053,7 +16053,7 @@ function HourlyMemoryModal({onClose}){
     </div>
   );
 }
-function HourlyLadderPanel({spot,taraCall}){
+function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
   // V13.4.133: hourly memory modal toggle, added alongside the export button.
   const[_hourlyMemOpen,_setHourlyMemOpen]=React.useState(false);
   const nowMs=Date.now();
@@ -16295,7 +16295,31 @@ function HourlyLadderPanel({spot,taraCall}){
     for(const c of el){if(!_lockedSet.has(c.r.strike+'|'+(dir==='UP'?'YES':'NO')))return c.r.strike;}
     return null;
   })();
-  React.useEffect(()=>{const top=LOCKS[0];if(top&&top.ticker&&top.closeMs)addLock(top);},[LOCKS.length,addLock]);
+  // V13.4.170: hourly locks now ALSO fire a Discord alert. They never did -- there was
+  //   no broadcast call anywhere in this component, so an hourly lock existed only as a
+  //   card on a page you had to be looking at. That is the whole reason they get missed.
+  //   Guarded by a ref so a re-render cannot re-send the same lock: keyed on
+  //   ticker|side, which is exactly the uniqueness addLock already enforces.
+  const _hrSentRef=React.useRef(new Set());
+  React.useEffect(()=>{
+    const top=LOCKS[0];
+    if(!top||!top.ticker||!top.closeMs)return;
+    addLock(top);
+    const _key=top.ticker+'|'+top.side;
+    if(_hrSentRef.current.has(_key))return;
+    _hrSentRef.current.add(_key);
+    if(typeof onHourlyLock==='function'){
+      try{
+        onHourlyLock({
+          side:top.side,dir:top.dir,strike:top.strike,cost:top.cost,
+          conf:top.conf,model:top.model,mktPct:top.mktPct,
+          minsAtLock:top.minsAtLock,band:top.band,ticker:top.ticker,
+          closeMs:top.closeMs,spot:Number(spot)||null,
+          record:{w:rec.w,l:rec.l,open:(Array.isArray(rec.pending)?rec.pending.length:0)},
+        });
+      }catch(_e){/* an alert must never break the lock machine */}
+    }
+  },[LOCKS.length,addLock,onHourlyLock,spot,rec.w,rec.l]);
   if(!on)return null; // V13.4.120 FIX: moved from above the useEffect (see note above) -- panel still hides the same way, hook now always runs
   return(
     <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
@@ -16357,6 +16381,55 @@ function HourlyLadderPanel({spot,taraCall}){
         onClick={()=>_setHourlyMemOpen(true)}
       >Memory</button>
       {_hourlyMemOpen&&React.createElement(HourlyMemoryModal,{onClose:()=>_setHourlyMemOpen(false)})}
+      {/* V13.4.170: OPEN LOCKS HOISTED. They used to render below the cost-band summary
+          AND the collapsible settled history, i.e. two blocks down the card, which is a
+          large part of "I keep missing hourly locks". The live position is the single
+          most important thing on this panel, so it sits directly under the header now;
+          the historical summaries follow. */}
+      {LOCKS.length>0&&(
+        <div className="mb-3 space-y-1.5">
+          <div className="text-[9px] uppercase tracking-[0.16em] font-bold" style={{color:'rgba(212,162,76,0.9)'}}>
+            {LOCKS.length} open lock{LOCKS.length===1?'':'s'} this hour
+          </div>
+          {/* V13.4.170: open locks no longer fade. The old `idx===0?'':'opacity-60'`
+              dimmed every lock except the newest, so a still-open position looked
+              half-cancelled -- part of why these get missed. Every open lock is a real
+              position and renders at full strength. */}
+          {LOCKS.map((LK)=>(
+            <div key={LK.ms} className={'rounded-lg border p-2 '+(LK.dir==='UP'?'border-emerald-500/60 bg-emerald-500/10':'border-rose-500/60 bg-rose-500/10')}>
+              <div className="flex items-center justify-between">
+                {/* V13.4.169: every open lock is locked -- only the newest said so,
+                    which made the older one look like a pending suggestion. */}
+                <div className={'text-[13px] font-semibold '+(LK.dir==='UP'?'text-emerald-400':'text-rose-400')}>
+                  LOCKED {LK.side} @ {Number(LK.strike).toLocaleString('en-US')}
+                </div>
+                <div className="text-[13px] font-semibold text-zinc-100 tabular-nums">{LK.cost}c</div>
+              </div>
+              {/* V13.4.169: omit what we do not have instead of printing "--". Locks
+                  written before this ship carry no conf/model/mktPct, and rendering
+                  "Tara conf 0 | mkt % | model --" stated a confidence of zero as if it
+                  were real. Each stat now appears only when it exists. */}
+              {(()=>{
+                const _bits=[];
+                if(Number(LK.conf)>0)_bits.push(`Tara ${Number(LK.conf).toFixed(0)}%`);
+                if(LK.mktPct!=null&&Number.isFinite(Number(LK.mktPct)))_bits.push(`mkt ${Number(LK.mktPct).toFixed(0)}%`);
+                if(LK.model!=null&&Number.isFinite(Number(LK.model)))_bits.push(`model ${Number(LK.model).toFixed(0)}%`);
+                return _bits.length
+                  ?<div className="mt-0.5 text-[11px] text-zinc-400 tabular-nums">{_bits.join('  ·  ')}</div>
+                  :null;
+              })()}
+              <div className="mt-0.5 text-[10px] text-zinc-500">
+                {[
+                  LK.at||null,
+                  LK.minsAtLock!=null?`${Number(LK.minsAtLock).toFixed(0)}m left`:null,
+                  LK.band?`model accuracy here ${LK.band}`:null,
+                ].filter(Boolean).join('  ·  ')}
+                {_conflictKeys.has(LK.ms)&&<span className="ml-1 text-amber-400 font-semibold">— CONFLICTS with another lock, both cannot win</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {lad.err&&<div className="text-[11px] text-amber-400 mb-1">feed: {lad.err}</div>}
       {/* V13.4.115: real settlement history, inline, no console needed. Directly answers
           'theres no real logs to check and verify later' -- rec.history has always had this
@@ -16405,43 +16478,6 @@ function HourlyLadderPanel({spot,taraCall}){
           ),
         );
       })()}
-      {LOCKS.length>0&&(
-        <div className="mb-2 space-y-1.5">
-          {LOCKS.map((LK,idx)=>(
-            <div key={LK.ms} className={'rounded-lg border p-2 '+(idx===0?'':'opacity-60 ')+(LK.dir==='UP'?'border-emerald-500/40 bg-emerald-500/10':'border-rose-500/40 bg-rose-500/10')}>
-              <div className="flex items-center justify-between">
-                {/* V13.4.169: every open lock is locked -- only the newest said so,
-                    which made the older one look like a pending suggestion. */}
-                <div className={'text-[13px] font-semibold '+(LK.dir==='UP'?'text-emerald-400':'text-rose-400')}>
-                  LOCKED {LK.side} @ {Number(LK.strike).toLocaleString('en-US')}
-                </div>
-                <div className="text-[13px] font-semibold text-zinc-100 tabular-nums">{LK.cost}c</div>
-              </div>
-              {/* V13.4.169: omit what we do not have instead of printing "--". Locks
-                  written before this ship carry no conf/model/mktPct, and rendering
-                  "Tara conf 0 | mkt % | model --" stated a confidence of zero as if it
-                  were real. Each stat now appears only when it exists. */}
-              {(()=>{
-                const _bits=[];
-                if(Number(LK.conf)>0)_bits.push(`Tara ${Number(LK.conf).toFixed(0)}%`);
-                if(LK.mktPct!=null&&Number.isFinite(Number(LK.mktPct)))_bits.push(`mkt ${Number(LK.mktPct).toFixed(0)}%`);
-                if(LK.model!=null&&Number.isFinite(Number(LK.model)))_bits.push(`model ${Number(LK.model).toFixed(0)}%`);
-                return _bits.length
-                  ?<div className="mt-0.5 text-[11px] text-zinc-400 tabular-nums">{_bits.join('  ·  ')}</div>
-                  :null;
-              })()}
-              <div className="mt-0.5 text-[10px] text-zinc-500">
-                {[
-                  LK.at||null,
-                  LK.minsAtLock!=null?`${Number(LK.minsAtLock).toFixed(0)}m left`:null,
-                  LK.band?`model accuracy here ${LK.band}`:null,
-                ].filter(Boolean).join('  ·  ')}
-                {_conflictKeys.has(LK.ms)&&<span className="ml-1 text-amber-400 font-semibold">— CONFLICTS with another lock, both cannot win</span>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
       {LOCKS.length===0&&(
         <div className="mb-2 text-[11px] text-zinc-500">
           {dir?('scanning '+dir+' – '+L.ticks+'/'+CONFIRM_TICKS+' confirmations'+(tradeable.length?'':', waiting on liquid strikes')):'no directional read yet – watching'}
@@ -24248,7 +24284,7 @@ function TaraMemoryModal({taraCallLog,onClose,useLocalTime,timeFormat,onEditEntr
 
 // ── V111: ProjectionsCard with clickable timeframe tabs ──
 // V4.2: Now also renders Tara's Call at the top of the column.
-function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk,lockedSnapshotDir,lockedSnapshot}){
+function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog,windowType,timeState,taraLearnings,onSoftHint,onHardForce,kalshiYesPrice,useLocalTime,timeFormat,onEditEntry,onDeleteEntry,convictionTrajectory,todayData,movementRisk,bestWindowsToday,handleManualSync,userPosition,tapeWindows,whaleLog,orderBook,targetMargin,reversalRisk,lockedSnapshotDir,lockedSnapshot,onHourlyLock}){
   const[activeTimeframe,setActiveTimeframe]=React.useState('5m');
   const projections=analysis?.projections||[];
   const proj=projections.find(p=>p.id===activeTimeframe)||projections[0];
@@ -24283,7 +24319,7 @@ function ProjectionsCard({analysis,mobileTab,taraCall,taraScorecards,taraCallLog
       {(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch(_e){return false;}})()&&(
         <>
           <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
-          <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
+          <HourlyLadderPanel spot={currentPrice} taraCall={taraCall} onHourlyLock={onHourlyLock}/>
         </>
       )}
     </div>
@@ -26532,7 +26568,7 @@ function LiveFeedsCard({tapeRef,bloomberg,whaleLog,timeFormat}){
 
 // ── V111: RightPanel - Engine Log (col 3) ──
 function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,taraCallLog,currentAsset,timeFormat,pushToast,
-                     taraCall,lockedSnapshotDir,lockedSnapshot,kalshiYesPrice,timeState,windowType,userPosition}){
+                     taraCall,lockedSnapshotDir,lockedSnapshot,kalshiYesPrice,timeState,windowType,userPosition,onHourlyLock}){
   // V9.1.1: full-schedule popup state
   const[scheduleModalOpen,setScheduleModalOpen]=React.useState(false);
   const reasoning=analysis?.reasoning||[];
@@ -26547,7 +26583,7 @@ function RightPanel({analysis,tapeRef,whaleLog,bloomberg,currentPrice,mobileTab,
       {!(()=>{try{return localStorage.getItem('taraCoachLeft')==='1';}catch(_e){return false;}})()&&(
         <div className="shrink-0">
           <TradeCoachCall taraCall={taraCall} analysis={analysis} lockedSnapshotDir={lockedSnapshotDir} lockedSnapshot={lockedSnapshot} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
-          <HourlyLadderPanel spot={currentPrice} taraCall={taraCall}/>
+          <HourlyLadderPanel spot={currentPrice} taraCall={taraCall} onHourlyLock={onHourlyLock}/>
         </div>
       )}
       {/* V146.1 Fix B: Score Breakdown — per-signal contribution to current posterior */}
@@ -36787,6 +36823,42 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         };
       }
 
+      // V13.4.170: hourly ladder lock. These never reached Discord at all -- the panel
+      //   had no broadcast call -- so a lock only existed as a card on an open tab.
+      //   Same monospace/palette treatment as TARA_LOCK so both read identically.
+      else if(type==='HOURLY_LOCK'){
+        const _isYes=data.side==='YES';
+        const _strike=Number(data.strike)||0;
+        const _block=[
+          _dcRow('SIDE',`${_isYes?'▲':'▼'} ${data.side}`,`strike ${_strike.toLocaleString('en-US')}`),
+          _dcRow('ENTRY',`${Math.round(Number(data.cost)||0)}c`,
+            (Number(data.cost)||0)<50?'under 50c':undefined),
+          data.spot!=null?_dcRow('BTC',Number(data.spot).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})):null,
+          data.minsAtLock!=null?_dcRow('LEFT',`${Math.round(Number(data.minsAtLock))}m`,data.band?`model ${data.band} here`:undefined):null,
+        ].filter(Boolean).join('\n');
+        const _stats=[
+          Number(data.conf)>0?`Tara ${Math.round(Number(data.conf))}%`:null,
+          data.mktPct!=null?`mkt ${Math.round(Number(data.mktPct))}%`:null,
+          data.model!=null?`model ${Math.round(Number(data.model))}%`:null,
+        ].filter(Boolean).join('  ·  ');
+        const _r=data.record||{};
+        const _rTot=(Number(_r.w)||0)+(Number(_r.l)||0);
+        embed={
+          title:`${_isYes?'▲':'▼'}  HOURLY ${data.side} · ${Math.round(Number(data.cost)||0)}c`,
+          color:_isYes?_DC_UP:_DC_DOWN,
+          description:'```\n'+_block+'\n```'+(_stats?_stats:''),
+          fields:[
+            {name:'Hourly record',
+             value:_rTot>0
+               ?`${_r.w||0}W-${_r.l||0}L (${Math.round(100*(Number(_r.w)||0)/_rTot)}%)${_r.open?` · ${_r.open} open`:''}`
+               :'no settled hourly locks yet',
+             inline:false},
+          ],
+          footer:{text:`${TARA_VERSION_DISPLAY} · hourly`},
+          timestamp:new Date().toISOString(),
+        };
+      }
+
       else if(type==='WHALE'){
         // V13.4.167: restyled to the app's own visual language -- monospace block,
         //   the same ▲/▼/· arrows and gold/emerald/rose palette used on screen.
@@ -46805,6 +46877,23 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     }
   };
 
+  // V13.4.170: hourly locks were invisible unless you happened to be looking at the
+  //   ladder card -- no Discord alert, no notification, no sound. That is why they get
+  //   missed. Same three channels the 15m lock already uses.
+  const _onHourlyLock=React.useCallback((lk)=>{
+    if(!lk||!lk.side)return;
+    try{broadcastToDiscord('HOURLY_LOCK',lk);}catch(_e){}
+    try{
+      if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
+        new Notification(`Tara hourly · ${lk.side} @ ${Number(lk.strike).toLocaleString('en-US')}`,{
+          body:`${Math.round(Number(lk.cost)||0)}c entry${lk.minsAtLock!=null?` · ${Math.round(Number(lk.minsAtLock))}m left`:''}`,
+          tag:`tara-hourly-${lk.ticker}-${lk.side}`,
+        });
+      }
+    }catch(_e){}
+    try{pushToast&&pushToast(`Hourly lock: ${lk.side} @ ${Number(lk.strike).toLocaleString('en-US')} · ${Math.round(Number(lk.cost)||0)}c`,'gold');}catch(_e){}
+  },[]);
+
   const handleManualSync=(dir,opts)=>{
     // V9.3.0: opts={autoExec, force}. autoExec=true tags the resulting trade entry so
     // the auto-exec daily-P&L and loss-streak cooldown can attribute it. force=true
@@ -48865,7 +48954,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
               Tara's Call. The wrapper is the grid child now, so the column
               count is unchanged and auto-rows-fr still matches heights. */}
           <div className="flex flex-col gap-3 min-w-0">
-          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
+          <ProjectionsCard analysis={analysis} mobileTab={mobileTab} taraCall={taraCall} taraScorecards={taraScorecards} taraCallLog={displayedCallLog} windowType={windowType} timeState={timeState} taraLearnings={taraLearnings} kalshiYesPrice={kalshiYesPrice} useLocalTime={useLocalTime} timeFormat={timeFormat} convictionTrajectory={convictionTrajectory} todayData={todayData} movementRisk={movementRisk} bestWindowsToday={bestWindowsToday} handleManualSync={handleManualSync} userPosition={userPosition} tapeWindows={tapeWindows} whaleLog={whaleLog} orderBook={orderBook} targetMargin={targetMargin} reversalRisk={lockedCallRef.current?.reversalRisk||null} onHourlyLock={_onHourlyLock} onSoftHint={()=>{softHintRef.current=Date.now();setForceRender(p=>p+1);}} onHardForce={()=>{hardForceRef.current=Date.now();setForceRender(p=>p+1);}} onEditEntry={(entryId,newValue,field)=>{
             // V9.9.3: dual-axis edit. field === 'direction' edits e.dir, 'result' edits e.result.
             //   Default field is 'result' for backward compat. Both axes mark manualEdit + timestamp.
             //   Direction edit recomputes the result automatically if we have closing price + strike,
@@ -48926,7 +49015,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
 
           {/* ── V111: RIGHT PANEL - Engine Log (col 3) ── */}
           <RightPanel analysis={analysis} tapeRef={tapeRef} whaleLog={whaleLog} bloomberg={bloomberg} currentPrice={currentPrice} mobileTab={mobileTab} taraCallLog={taraCallLog} currentAsset={currentAsset} timeFormat={timeFormat} pushToast={pushToast}
-            taraCall={taraCall} lockedSnapshotDir={lockedCallRef.current?.dir||null} lockedSnapshot={taraCallSnapshotRef.current} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}/>
+            taraCall={taraCall} lockedSnapshotDir={lockedCallRef.current?.dir||null} lockedSnapshot={taraCallSnapshotRef.current} kalshiYesPrice={kalshiYesPrice} timeState={timeState} windowType={windowType} userPosition={userPosition}
+            onHourlyLock={_onHourlyLock}/>
         </div>
 
         {/* ── V111: TRADINGVIEW CHART (full-width bottom row) ── */}
