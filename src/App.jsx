@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.13-v13.4.176-persistence-audit-fixes';
-const TARA_VERSION_DISPLAY='Tara 13.4.176';
+const BASELINE_VERSION='2026.08.14-v13.4.177-lock-reversal-visible';
+const TARA_VERSION_DISPLAY='Tara 13.4.177';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -38678,7 +38678,30 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       //   timestamp and local doesn't.
       if(d.taraSnapshot&&_shouldAdoptCloud(d.taraSnapshot,taraCallSnapshotRef.current)){
         const _wasOverride=!!taraCallSnapshotRef.current;
+        // V13.4.177: SILENT DIRECTION REVERSAL. first-write-wins can replace an
+        //   already-COMMITTED local snapshot with an earlier cloud one. When those two
+        //   disagree on direction, the on-screen call silently flips to the opposite
+        //   side of what was already broadcast and logged -- and it cannot re-alert,
+        //   because sentLock is one-shot per window (set at L46110, reset only on
+        //   window rollover at L46016). Observed live: Discord alerted DOWN at 3:26 on
+        //   the 3:15-3:30 window while the card read LOCKED UP a minute later.
+        //   The convergence rule itself is left alone (it exists so two devices agree
+        //   on the earliest commit) -- but a reversal of a LOCKED directional call is
+        //   never allowed to be silent again.
+        const _prevSnap=taraCallSnapshotRef.current;
+        const _prevDir=(_prevSnap&&(_prevSnap.call==='UP'||_prevSnap.call==='DOWN'))?_prevSnap.call:null;
+        const _newDir=(d.taraSnapshot.call==='UP'||d.taraSnapshot.call==='DOWN')?d.taraSnapshot.call:null;
+        const _isReversal=!!(_prevDir&&_newDir&&_prevDir!==_newDir&&_prevSnap.locked);
         taraCallSnapshotRef.current={...d.taraSnapshot};
+        if(_isReversal){
+          try{console.warn('[V13.4.177] LOCKED CALL REVERSED BY CLOUD: '+_prevDir+' -> '+_newDir+' on '+(d.windowId||'this window')+'. Discord/Notification already alerted '+_prevDir+' and will NOT re-alert this window.');}catch(_w){}
+          try{if(typeof pushToast==='function')pushToast(
+            'lock-reversed-'+(d.windowId||'w'),
+            `Call reversed: ${_prevDir} → ${_newDir}`,
+            `Another device committed ${_newDir} earlier. Discord alerted ${_prevDir} and will not re-alert this window.`,
+            {color:'#D4A24C',durationMs:12000,cooldown:0}
+          );}catch(_t){}
+        }
         adopted.push(_wasOverride?`tara ${d.taraSnapshot.call} (override · cloud authoritative)`:`tara ${d.taraSnapshot.call}${d.taraSnapshot.locked?' LOCKED':''}`);
       }
       // Mid-formation sample progress
@@ -38750,7 +38773,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           adopted=true;
         }
         if(d.taraSnapshot&&_shouldAdopt(d.taraSnapshot,taraCallSnapshotRef.current)){
+          // V13.4.177: same silent-reversal guard as the realtime watch above.
+          const _pSnap=taraCallSnapshotRef.current;
+          const _pDir=(_pSnap&&(_pSnap.call==='UP'||_pSnap.call==='DOWN'))?_pSnap.call:null;
+          const _nDir=(d.taraSnapshot.call==='UP'||d.taraSnapshot.call==='DOWN')?d.taraSnapshot.call:null;
+          const _rev=!!(_pDir&&_nDir&&_pDir!==_nDir&&_pSnap.locked);
           taraCallSnapshotRef.current={...d.taraSnapshot};
+          if(_rev){
+            try{console.warn('[V13.4.177] LOCKED CALL REVERSED BY CLOUD (wake-resync): '+_pDir+' -> '+_nDir+' on '+(d.windowId||'this window')+'. Discord already alerted '+_pDir+' and will NOT re-alert this window.');}catch(_w){}
+            try{if(typeof pushToast==='function')pushToast(
+              'lock-reversed-'+(d.windowId||'w'),
+              `Call reversed: ${_pDir} → ${_nDir}`,
+              `Another device committed ${_nDir} earlier. Discord alerted ${_pDir} and will not re-alert this window.`,
+              {color:'#D4A24C',durationMs:12000,cooldown:0}
+            );}catch(_t){}
+          }
           adopted=true;
         }
         if(d.taraSamples&&taraCallSampleRef.current&&taraCallSampleRef.current.dir===null&&d.taraSamples.dir){
