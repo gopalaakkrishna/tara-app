@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.14-v13.4.180-patience-floor-and-signal-history';
-const TARA_VERSION_DISPLAY='Tara 13.4.180';
+const BASELINE_VERSION='2026.08.14-v13.4.181-edge-lab-panel';
+const TARA_VERSION_DISPLAY='Tara 13.4.181';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -27428,6 +27428,46 @@ function SportsView({onClose}){
                   than that is profit; winning less is a loss no matter how high the
                   raw win rate looks — which is why the win rate on its own is not the
                   number to watch.
+                </div>
+              </div>
+            );
+          })()}
+
+          {data.edge_lab&&(()=>{
+            const e=data.edge_lab;
+            const pct=Math.min(100,Math.round(100*(e.settled||0)/(e.target||150)));
+            return(
+              <div className="rounded-xl border border-[#1F1F1F] bg-[#111] p-3 mb-3">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-2">
+                  <span className="text-[11px] uppercase tracking-[0.16em] font-bold text-[#7DB8FF]">
+                    Edge lab · Kalshi vs bookmaker
+                  </span>
+                  <span className="text-[11px] text-[#EDEDED]/45">
+                    prices captured at the same instant
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px]" style={T2_MONO_STYLE}>
+                  <span>legs <b className="text-white">{e.legs}</b></span>
+                  <span className="text-[#EDEDED]/55">games {e.games}</span>
+                  <span className="text-[#EDEDED]/55">settled {e.settled||0}/{e.target||150}</span>
+                  {e.mean_gap!=null&&<span className="text-[#EDEDED]/55">avg gap {(e.mean_gap*100).toFixed(1)}c</span>}
+                  <span style={{color:e.tradeable_now>0?SPORTS_GREEN:'#EDEDED60'}}>
+                    tradeable now {e.tradeable_now}
+                  </span>
+                  {e.paper_units!=null&&(
+                    <span style={{color:e.paper_units>=0?SPORTS_GREEN:SPORTS_RED}}>
+                      paper {e.paper_units>=0?'+':''}{e.paper_units.toFixed(2)}u
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2">
+                  <div style={{height:6,background:'#1F1F1F',borderRadius:4,overflow:'hidden'}}>
+                    <div style={{width:pct+'%',height:'100%',background:'#7DB8FF'}}/>
+                  </div>
+                  <div className="text-[11px] text-[#EDEDED]/40 mt-1 leading-relaxed">
+                    {e.note} Underdog value picks unlock only if this experiment
+                    proves the gap is real.
+                  </div>
                 </div>
               </div>
             );
