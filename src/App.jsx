@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.14-v13.4.177-lock-reversal-visible';
-const TARA_VERSION_DISPLAY='Tara 13.4.177';
+const BASELINE_VERSION='2026.08.14-v13.4.178-ev-band-realignment';
+const TARA_VERSION_DISPLAY='Tara 13.4.178';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5295,8 +5295,21 @@ const V104_1_DEADLINE_SECONDS_LEFT=150; // V11.2: was 240 — more patient runwa
 //   Widened per explicit user direction 2026-07-29: 30-60c was rejecting decent
 //   65-75c reads (real data: a no-go-edge lock at 100c won same session) --
 //   default is now 25-75c.
-const getEntryMinCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:25;}catch(_e13428a){return 25;}};
-const getEntryMaxCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:75;}catch(_e13428b){return 75;}};
+// V13.4.178: DEFAULTS MOVED 25-75 -> 55-70, from the live cloud log (last-1000
+//   window, resolved directional calls, EV per contract at kalshiAtLock cost):
+//     <55c   n=44   WR 22-43%   -12.5c/ct   (-548c total; anti-calibrated, confirms V13.4.61)
+//     55-69c n=206  WR 59-71%   +1.5..+6.7  (+1,079c -- the entire profit engine lives here)
+//     70-74c n=106  WR 61%      -10.6c/ct   (-1,127c -- the single biggest leak, and the old
+//                                            75c ceiling let ALL of it through)
+//     75-84c n=52   WR 76-79%   ~-1..-3     (slow bleed; mostly no-go-edge exempt anyway)
+//     85-94c n=44   WR 95-100%  +7.7c/ct    (+339c -- ALL no-go-edge late confirms; the
+//                                            edge-watch banding below keeps this island open)
+//     95c+   n=13   WR 85%      -15.1c/ct   (needs >95% WR to break even -- unwinnable)
+//   At 72c you need 72% WR to break even and the book wins 61% there. EV tracks COST,
+//   not win rate -- the same lesson as every EV-vs-WR fix in this file, now applied to
+//   the band itself. localStorage dials still win over these defaults if set.
+const getEntryMinCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:55;}catch(_e13428a){return 55;}};
+const getEntryMaxCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:70;}catch(_e13428b){return 70;}};
 
 // V10.6.3 — SLIPPAGE-AWARE EV
 //   Real Kalshi fills cost ~1¢ more than the lock-time YES mid price due to
@@ -43471,7 +43484,15 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //   general, it's specific to time-cap-commit, where a high price means 'ran
           //   out of patience,' not 'strong signal.' Every other tier keeps the full
           //   25-75c band earned by directional-lock/no-go-edge's real performance.
-          const _v1282Max=snapshot?.tier==='time-cap-commit'?Math.min(65,getEntryMaxCost()):getEntryMaxCost();
+          // V13.4.178: the V13.4.129 time-cap clamp (65c) is REMOVED. It was set from
+          //   n=5 real trades (>=65c under the old 75c band -- a range whose worst part,
+          //   70-74c, the new global 70c ceiling now removes for every tier anyway).
+          //   The clamp's actual effect, measured on the cloud log: 48 time-cap windows
+          //   converted to SIT_OUT at 65-69c whose posterior lean went on to win 70.8%
+          //   (+3.75c/ct hypothetical). That is exactly the "less sitouts" volume the
+          //   user keeps asking for, in the proven-profitable band. Time-cap now uses
+          //   the same 55-70c band as every other normal tier.
+          const _v1282Max=getEntryMaxCost();
           if(_snapCost<_v1282Min||_snapCost>=_v1282Max){
             // Entry cost out of range — convert to sit-out
             snapshot.call='SIT_OUT';
@@ -43494,10 +43515,27 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         const _ewDir=snapshot.call||snapshot.direction;
         if(_ewKal!=null&&_ewDir){
           const _ewCost=_ewDir==='UP'?_ewKal:(100-_ewKal);
-          if(_ewCost<5||_ewCost>=95){
+          // V13.4.178: edge-watch banding replaces the flat 5-95 tail cap. This
+          //   DELIBERATELY narrows the V13.4.125 "B, more locks always preferred"
+          //   exemption, on the user's newer standing instruction ("get me wins
+          //   overall at decent odds"). The no-go-edge book, measured (n=207,
+          //   -4.03c/ct overall = the single worst tier total at -834c):
+          //     <55c   n=22  WR 22.7%  -14.5c/ct   blocked now
+          //     55-69c n=36  WR 61.1%   -2.6c/ct   still allowed (near-breakeven;
+          //                                        blocking ~breakeven volume is the
+          //                                        V13.4.146 mistake, not repeated)
+          //     70-84c n=92  WR 61-77%  -11.1/-1.7 blocked now (the dead zone)
+          //     85-94c n=44  WR 97.7%   +7.7c/ct   KEPT OPEN -- the one island the
+          //                                        plain 55-70 band would have killed;
+          //                                        this is why edge-watch keeps its own
+          //                                        banding instead of the global dial
+          //     95c+   n=13  WR 84.6%  -15.1c/ct   blocked (was already, via tail cap)
+          const _ewBlocked=_ewCost<55||(_ewCost>=70&&_ewCost<85)||_ewCost>=95;
+          if(_ewBlocked){
+            const _ewZone=_ewCost<55?'below 55c (22.7% WR, -14.5c/ct measured)':(_ewCost>=95?'95c+ (needs >95% WR to break even)':'the 70-84c dead zone (-11.1c/ct measured at 70-74)');
             snapshot.call='SIT_OUT';
             snapshot.wasOverriddenNoTrade=true;
-            snapshot.caution=`Entry cost ${_ewCost.toFixed(0)}¢ in the unwinnable tail (outside 5-95¢) — sitting out even though this is an edge-watch tier (V13.4.130 tail cap)`;
+            snapshot.caution=`Entry cost ${_ewCost.toFixed(0)}¢ in ${_ewZone} — sitting out (V13.4.178 edge-watch banding; 55-69c and 85-94c stay open)`;
           }
         }
       }
