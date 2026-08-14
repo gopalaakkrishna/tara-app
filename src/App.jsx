@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.14-v13.4.179-signal-audit-fixes';
-const TARA_VERSION_DISPLAY='Tara 13.4.179';
+const BASELINE_VERSION='2026.08.14-v13.4.180-patience-floor-and-signal-history';
+const TARA_VERSION_DISPLAY='Tara 13.4.180';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -5310,6 +5310,24 @@ const V104_1_DEADLINE_SECONDS_LEFT=150; // V11.2: was 240 — more patient runwa
 //   the band itself. localStorage dials still win over these defaults if set.
 const getEntryMinCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMinCost'));return(Number.isFinite(v)&&v>=0&&v<100)?v:55;}catch(_e13428a){return 55;}};
 const getEntryMaxCost=()=>{try{const v=parseFloat(localStorage.getItem('taraEntryMaxCost'));return(Number.isFinite(v)&&v>0&&v<=100)?v:70;}catch(_e13428b){return 70;}};
+// V13.4.180: SLIM signal telemetry for cloud sync. The V10.7.58 egress fix stripped
+//   signalScoresAtLock from cloud writes entirely ("analysis reads from local") --
+//   which made the learning loop's raw material localStorage-only: the V13.4.179
+//   signal audit found the field on ZERO of 475 resolved cloud entries, and had to
+//   run half-blind on V12 context fields instead. One browser reset = the entire
+//   per-signal history gone. This keeps the 6 signals that have ever mattered
+//   (weights audit V10.7.91: gap is primary, flow secondary; the rest for context),
+//   rounded, ~60-90 bytes/entry vs the ~1KB the full object cost -- a deliberate,
+//   bounded egress spend so future audits can measure the actual weighted signals.
+const _slimSigsForCloud=(s)=>{
+  if(!s||typeof s!=='object')return undefined;
+  const o={};let any=false;
+  for(const k of ['gap','flow','momentum','structure','technical','regime']){
+    const v=Number(s[k]);
+    if(Number.isFinite(v)&&v!==0){o[k]=Math.round(v*10)/10;any=true;}
+  }
+  return any?o:undefined;
+};
 
 // V10.6.3 — SLIPPAGE-AWARE EV
 //   Real Kalshi fills cost ~1¢ more than the lock-time YES mid price due to
@@ -33491,7 +33509,11 @@ function TaraApp(){
           //   This alone cuts per-entry size from ~3KB → ~0.8KB → 2.5x smaller payload.
           const _stripForCloud=(e)=>{
             if(!e)return e;
-            const{signalScoresAtLock:_,reasoning:__,...rest}=e;
+            const{signalScoresAtLock:_sig,reasoning:__,...rest}=e;
+            // V13.4.180: keep a 6-signal slim instead of dropping the whole object --
+            //   see _slimSigsForCloud. Verbose reasoning stays stripped.
+            const _slim=_slimSigsForCloud(_sig);
+            if(_slim)rest.signalScoresAtLock=_slim;
             return rest;
           };
           return{entries:_cloudSlice.map(_stripForCloud),_strippedAt:Date.now()};
@@ -43302,7 +43324,27 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
     const _commitDir=_postKnown?(_post>=50?'UP':'DOWN'):(claimedDir||null);
     const _commitConf=_postKnown?Math.round(_commitDir==='UP'?_post:(100-_post)):50;
     const _isCoinFlip=_postKnown&&_post>=45&&_post<=55;
-    const _hardCapElapsed=elapsedSec>=90; // 90s = 1.5min, in the 1-2min range user wants
+    // V13.4.180: PATIENCE FLOOR 90s -> 210s on 15m. The old 90s ("1-2min range user
+    //   wants") predates the timing data; measured on the cloud log, in-band (55-69c)
+    //   EV by lock time on 15m:
+    //     locked with 12-15m left (elapsed <180s):  n=89  +0.26c/ct  (breakeven)
+    //     locked with  9-12m left (180-360s):       n=55  +11.84c/ct
+    //     locked with   6-9m left (360-540s):       n=18  +19.17c/ct
+    //   Same prices, 12-19c/ct apart purely on timing. The self-selected early locks
+    //   (gap+tape+odds -> V12.5 tiers at 90/120/180s) earned their speed and keep it;
+    //   what moves is the CLOCK-FORCED commit -- "time's up" 10% into a 15-minute
+    //   window is not patience running out, it's patience never existing. At 210s the
+    //   forced commits land inside the measured-good 9-12m bucket. Worst case a lean
+    //   committable at 90s is priced ahead by 210s -- then the V13.4.178 band turns it
+    //   into a sit-out, which costs ~nothing (that volume measured +0.26).
+    //   5m windows keep 90s: the timing table above is 15m-only, don't extrapolate.
+    //   Override: localStorage 'taraTimeCapSec' (seconds).
+    const _hardCapFloorSec=(function(){
+      try{const v=parseFloat(localStorage.getItem('taraTimeCapSec'));
+        if(Number.isFinite(v)&&v>=30&&v<=600)return v;}catch(_e){}
+      return windowType==='15m'?210:90;
+    })();
+    const _hardCapElapsed=elapsedSec>=_hardCapFloorSec;
     // V7.10.1: CRITICAL FIX. Helper to write a Tara-call log entry whenever any of the
     //   V7.8/V7.9 snapshot paths fire. Without this, NO_TRADE / time-cap-commit / timer-
     //   commit / kalshi-window-closed all set snapshot ref but never wrote to taraCallLog.
@@ -46875,7 +46917,10 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
       // V9.2.0: scorecards removed from baseline payload — personal data, local only.
       const _stripForCloud=(e)=>{
         if(!e)return e;
-        const{signalScoresAtLock:_,reasoning:__,...rest}=e;
+        const{signalScoresAtLock:_sig,reasoning:__,...rest}=e;
+        // V13.4.180: same slim-keep as the RMW sync path -- see _slimSigsForCloud.
+        const _slim=_slimSigsForCloud(_sig);
+        if(_slim)rest.signalScoresAtLock=_slim;
         return rest;
       };
       // V10.7.58: strip verbose fields before baseline save to avoid Supabase payload limit.
