@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.14-v13.4.178-ev-band-realignment';
-const TARA_VERSION_DISPLAY='Tara 13.4.178';
+const BASELINE_VERSION='2026.08.14-v13.4.179-signal-audit-fixes';
+const TARA_VERSION_DISPLAY='Tara 13.4.179';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -43531,11 +43531,22 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //                                        banding instead of the global dial
           //     95c+   n=13  WR 84.6%  -15.1c/ct   blocked (was already, via tail cap)
           const _ewBlocked=_ewCost<55||(_ewCost>=70&&_ewCost<85)||_ewCost>=95;
-          if(_ewBlocked){
-            const _ewZone=_ewCost<55?'below 55c (22.7% WR, -14.5c/ct measured)':(_ewCost>=95?'95c+ (needs >95% WR to break even)':'the 70-84c dead zone (-11.1c/ct measured at 70-74)');
+          // V13.4.179: GAP-OPPOSED GUARD, edge-watch edition. Every other commit path
+          //   has one (V10.7.97 directional-lock, V10.8.1 time-cap) -- edge-watch was
+          //   the one tier exempt, and it shows: the cloud log's gap-opposed locks are
+          //   16/25 no-go-edge, at 25% WR / -15.5c/ct. Locking a direction while price
+          //   sits on the WRONG side of the strike loses 3 times out of 4 regardless
+          //   of what Kalshi charges for it. Computed the same way distBpsAtLock is
+          //   measured: aligned gap <= 0 means price at-or-past the strike against us.
+          const _ewGapAligned=(Number(targetMargin)>0&&Number(currentPrice)>0)
+            ?(((_ewDir==='UP'?(currentPrice-targetMargin):(targetMargin-currentPrice))/targetMargin)*10000)
+            :null;
+          const _ewGapOpposed=_ewGapAligned!=null&&_ewGapAligned<=0;
+          if(_ewBlocked||_ewGapOpposed){
+            const _ewZone=_ewGapOpposed?`gap-opposed (price ${Math.abs(_ewGapAligned).toFixed(0)}bps on the wrong side of the strike — 25% WR measured)`:_ewCost<55?'below 55c (22.7% WR, -14.5c/ct measured)':(_ewCost>=95?'95c+ (needs >95% WR to break even)':'the 70-84c dead zone (-11.1c/ct measured at 70-74)');
             snapshot.call='SIT_OUT';
             snapshot.wasOverriddenNoTrade=true;
-            snapshot.caution=`Entry cost ${_ewCost.toFixed(0)}¢ in ${_ewZone} — sitting out (V13.4.178 edge-watch banding; 55-69c and 85-94c stay open)`;
+            snapshot.caution=`Entry ${_ewGapOpposed?'':'cost '+_ewCost.toFixed(0)+'¢ '}in ${_ewZone} — sitting out (V13.4.${_ewGapOpposed?'179 gap guard':'178 edge-watch banding'})`;
           }
         }
       }
@@ -45322,7 +45333,19 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             _elGapBps>=12&&
             _elKalDir>=62&&_elKalDir<=78&&
             _elIsTrending&&
-            (_elTapeWith||_tcStrongWith)&&  // V12.7: strong HT+ST alignment can stand in for tape
+            // V13.4.179: _tcStrongWith REMOVED as a tape substitute. Signal audit on the
+            //   cloud log (n=432 resolved with trendConfirm data), cost-controlled to the
+            //   55-69c band so this is not the pricing story again:
+            //     HT+ST both agree with call:  n=80   WR 60.0%  EV -2.43c/ct
+            //     not both agreeing:           n=106  WR 73.6%  EV +10.52c/ct
+            //   Same avg cost (62.4 vs 63.1c), 13.6pt WR gap. By the time both lagging
+            //   trend indicators confirm a 15m call, the move is spent -- the same
+            //   inversion that got htfPatterns zeroed (V10.8.1), one timescale down.
+            //   Tape agreement stays as the T1 trigger: it measures +8.45c/ct (n=99,
+            //   75.8% WR) -- genuinely predictive. Trend-agree trades are NOT blocked
+            //   anywhere (in-band they're ~breakeven; V13.4.146 lesson) -- the engine
+            //   just no longer ACCELERATES into them on the strongest early-lock tier.
+            _elTapeWith&&
             !_tcAgainst&&                   // V12.7: never fire T1 when both trend indicators oppose
             elapsedSec>=90
           ){
