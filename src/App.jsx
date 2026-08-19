@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.191-type-system';
-const TARA_VERSION_DISPLAY='Tara 13.4.191';
+const BASELINE_VERSION='2026.08.19-v13.4.193-section-headers';
+const TARA_VERSION_DISPLAY='Tara 13.4.193';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -48620,14 +48620,25 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         }
 
         /* ── CARD REFINEMENT — NO BORDERS, TONE-SHIFT ───────── */
+        /* V13.4.192 CARD SYSTEM. Seen on screen: every panel was the same flat
+           grey block, so nothing led the eye and the app read as a data dump.
+           Three things fix that, none of which touch layout:
+             1. a top-lit gradient, so the card reads as a lit surface;
+             2. a 1px gold top edge (inset shadow, not a pseudo-element, so no
+                position:relative and therefore no risk of shifting absolutely
+                positioned children) -- this is the only place the signature
+                colour appears at scale, and it is what gives the app an
+                identity instead of "generic dark dashboard";
+             3. a real ambient drop, so cards sit ON the page rather than in it. */
         [data-tara-theme="simple"] .bg-\\[\\#101014\\] {
-          /* V13.4.190: a top-lit gradient over the fill. A flat fill on a black
-             page reads as a rectangle; the gradient is what makes it read as a
-             surface with an edge catching light. */
           background:
-            linear-gradient(180deg, rgba(255,255,255,0.055) 0%, rgba(255,255,255,0.012) 38%, rgba(255,255,255,0) 100%),
+            linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.015) 34%, rgba(255,255,255,0) 100%),
             var(--tara-bg-card) !important;
           border: 1px solid var(--tara-border) !important;
+          box-shadow:
+            inset 0 1px 0 rgba(229,192,123,0.16),
+            0 10px 28px rgba(0,0,0,0.55),
+            0 2px 6px rgba(0,0,0,0.4) !important;
         }
         [data-tara-theme="simple"] .bg-\\[\\#050508\\]\\/95 { background: var(--tara-bg-header) !important; }
         [data-tara-theme="simple"] .bg-\\[\\#050508\\]\\/95 { background: var(--tara-bg-header) !important; }
@@ -48716,27 +48727,74 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         [data-tara-theme="simple"] .text-\\[9px\\],
         [data-tara-theme="simple"] .text-\\[8px\\],
         [data-tara-theme="simple"] .text-\\[7px\\] {
-          font-weight: 500 !important;
+          font-weight: 600 !important;
+          letter-spacing: 0.075em !important;
+        }
+        /* V13.4.192: micro-labels were the same grey as the values they label,
+           so every card read as one undifferentiated wash. Dimming the labels is
+           what lets the eye find the numbers. */
+        /* Non-header micro-labels stay dim, so the section headers above are the
+           only gold on screen and keep their meaning. :not() keeps these two
+           rules from fighting over the same elements. */
+        [data-tara-theme="simple"] .text-\\[9px\\].uppercase:not([class*="tracking-["]),
+        [data-tara-theme="simple"] .text-\\[10px\\].uppercase:not([class*="tracking-["]),
+        [data-tara-theme="simple"] .text-\\[8px\\].uppercase:not([class*="tracking-["]) {
+          color: var(--ink-3) !important;
+        }
+        /* (Section-header colour is owned by the V13.4.193 rule further down --
+           a second, weaker rule here only created a specificity fight.) */
+        /* Buttons stop being flat text and become objects. */
+        [data-tara-theme="simple"] button.rounded-lg,
+        [data-tara-theme="simple"] button.rounded-xl {
+          background-image: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0));
+          border-color: var(--tara-border-strong) !important;
+        }
+        @media (hover:hover) and (pointer:fine) {
+          [data-tara-theme="simple"] button.rounded-lg:hover,
+          [data-tara-theme="simple"] button.rounded-xl:hover {
+            background-image: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02));
+            border-color: var(--accent-border) !important;
+          }
         }
         /* Cards breathe. Dense data needs margin more than it needs small type. */
         [data-tara-theme="simple"] .p-3 { padding: 15px !important; }
         [data-tara-theme="simple"] .p-4 { padding: 19px !important; }
         [data-tara-theme="simple"] .px-5 { padding-left: 22px !important; padding-right: 22px !important; }
-        /* Soften all-caps labels — sentence case-ish */
+        /* V13.4.193 SECTION HEADERS. This rule previously did the opposite of
+           its name: it removed text-transform and crushed 0.22em tracking down
+           to 0.02em, so every card header in the app rendered as plain grey body
+           text. Verified on the live page -- computed letter-spacing was 0.22px
+           where the class asks for ~2.4px.
+           Restored as real headers: uppercase, generous tracking (which is what
+           makes small caps legible rather than cramped), and the signature
+           colour. Together with the card top-edge from V13.4.192 this is where
+           the app's identity actually comes from -- one accent, used in exactly
+           two structural places, rather than sprinkled around. */
         [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.22em\\],
         [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.20em\\],
         [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.2em\\],
         [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.18em\\],
         [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.16em\\],
         [data-tara-theme="simple"] .uppercase.tracking-\\[0\\.14em\\] {
-          text-transform: none !important;
-          letter-spacing: 0.02em !important;
-          font-weight: 500 !important;
+          text-transform: uppercase !important;
+          letter-spacing: 0.12em !important;
+          font-weight: 600 !important;
+          color: var(--accent) !important;
+          opacity: 0.72;
         }
+        /* V13.4.193: the same softening applied to Tailwind's NAMED tracking
+           utilities, so headers using tracking-wide/wider (Depth of Market, Tape
+           Flow, Loss recap, ...) stayed grey lowercase while the arbitrary-value
+           ones became headers. Brought in line so the header treatment is
+           consistent no matter which utility a component happened to use. */
         [data-tara-theme="simple"] .uppercase.tracking-wider,
+        [data-tara-theme="simple"] .uppercase.tracking-widest,
         [data-tara-theme="simple"] .uppercase.tracking-wide {
-          text-transform: none !important;
-          letter-spacing: 0.02em !important;
+          text-transform: uppercase !important;
+          letter-spacing: 0.12em !important;
+          font-weight: 600 !important;
+          color: var(--accent) !important;
+          opacity: 0.72;
         }
 
         /* ── ACCENT COLORS — KNOCK BACK 8-12% ─────────────── */
