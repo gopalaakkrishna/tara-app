@@ -5257,8 +5257,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.210-execution-panel';
-const TARA_VERSION_DISPLAY='Tara 13.4.210';
+const BASELINE_VERSION='2026.08.19-v13.4.211-quote-coverage';
+const TARA_VERSION_DISPLAY='Tara 13.4.211';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -33837,6 +33837,7 @@ function TaraApp(){
       //   already lives here. Result: 83 shipped and the field still persisted 0 times while
       //   kalshiLead fired 3x. Same bug class the V13.4.31 and V13.4.67 comments above warn
       //   about. ~80 bytes when present, null otherwise.
+      /*V13.4.211: the execution quote fields were NEVER in this whitelist, so any entry rehydrated from the deep-cache fallback lost its bid/ask/spread and dropped out of the Execution panel's cohort. Same bug class as the V13.4.31/67/84 notes above -- fourth time a field set has been added at lock time and forgotten here.*/'kalshiBidAtLock','kalshiAskAtLock','kalshiSpreadAtLock','kalshiQuoteAgeMs','execCostAtLock','midToExecCents',
       'signalScoresAtLock','netCents','kalshiLeadAtLock','spotAtLock','distBpsAtLock','volBpsAtLock','v101ShadowAtLock','confluenceAtLock','trajAtLock','flipAtLock']);
     const _minifyEntry=(e)=>{
       if(!e)return e;
@@ -44406,29 +44407,39 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //     true EV/contract = (winRate × 100) − execCostAtLock − Kalshi fee
           //   All null-safe: null simply means no fresh quote, and consumers should
           //   fall back to the mid-derived cost (and know it is optimistic).
+          // V13.4.211: was one try/catch around the whole block with
+          //   catch(_e){return{};} -- so a throw anywhere (most likely
+          //   _execCostCents) discarded EVERY field and the entry carried no
+          //   quote keys at all. Measured effect: 27 of 100 recent resolved
+          //   trades had no key, and the 'patient' (0/6) and 'structural-led'
+          //   (0/2) tiers never had one, while 'directional-lock' was 7/7.
+          //   Each piece is now computed independently and the keys are ALWAYS
+          //   emitted. A null now honestly means "no quote at that moment"
+          //   rather than "the stamp crashed" -- which is the distinction the
+          //   Execution panel relies on to report its excluded count truthfully.
           ...(()=>{
+            const _dirNow=(()=>{try{return snapshot.call||snapshot.direction||null;}catch(_e){return null;}})();
+            const _q=(()=>{try{return (typeof _kalshiQuote!=='undefined')?_kalshiQuote:null;}catch(_e){return null;}})();
+            const _fresh=!!(_q&&_q.at&&(Date.now()-_q.at)<60000);
+            const _num=(v)=>{const n=Number(v);return Number.isFinite(n)?n:null;};
+            let _exec=null;
+            try{_exec=_execCostCents(_dirNow);}catch(_e){_exec=null;}
+            let _midCost=null;
             try{
-              const _dirNow=snapshot.call||snapshot.direction||null;
-              const _q=_kalshiQuote;
-              const _fresh=!!(_q&&_q.at&&(Date.now()-_q.at)<60000);
-              const _exec=_execCostCents(_dirNow);
-              const _midCost=(()=>{
-                const _m=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock)
-                        :(typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null);
-                if(_m==null||!isFinite(_m))return null;
-                return _dirNow==='UP'?_m:(_dirNow==='DOWN'?(100-_m):null);
-              })();
-              return{
-                kalshiBidAtLock:_fresh?_q.bid:null,
-                kalshiAskAtLock:_fresh?_q.ask:null,
-                kalshiSpreadAtLock:_fresh?_q.spread:null,
-                kalshiQuoteAgeMs:_fresh?(Date.now()-_q.at):null,
-                execCostAtLock:_exec,
-                // How much the tradeable price is worse than the mid we score on.
-                //   This is the per-trade execution drag, in cents.
-                midToExecCents:(_exec!=null&&_midCost!=null)?Math.round((_exec-_midCost)*100)/100:null,
-              };
-            }catch(_e){return{};}
+              const _m=snapshot.kalshiAtLock!=null?Number(snapshot.kalshiAtLock)
+                      :(typeof kalshiYesPrice!=='undefined'&&kalshiYesPrice!=null?Number(kalshiYesPrice):null);
+              if(_m!=null&&isFinite(_m))_midCost=_dirNow==='UP'?_m:(_dirNow==='DOWN'?(100-_m):null);
+            }catch(_e){_midCost=null;}
+            return{
+              kalshiBidAtLock:_fresh?_num(_q.bid):null,
+              kalshiAskAtLock:_fresh?_num(_q.ask):null,
+              kalshiSpreadAtLock:_fresh?_num(_q.spread):null,
+              kalshiQuoteAgeMs:_fresh?(Date.now()-_q.at):null,
+              execCostAtLock:_num(_exec),
+              // How much the tradeable price is worse than the mid we score on.
+              //   This is the per-trade execution drag, in cents.
+              midToExecCents:(_exec!=null&&_midCost!=null)?Math.round((_exec-_midCost)*100)/100:null,
+            };
           })(),
           // Strike at lock — needed by V7.5 cross-asset rollover scoring
           strike:_strike,
