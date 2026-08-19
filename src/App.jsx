@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.187-one-cloud-stripper';
-const TARA_VERSION_DISPLAY='Tara 13.4.187';
+const BASELINE_VERSION='2026.08.19-v13.4.188-window-clock';
+const TARA_VERSION_DISPLAY='Tara 13.4.188';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -24911,6 +24911,130 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
 //   Plus an insights surface that pulls 3-5 actionable findings from the data.
 //
 //   Filters out PENDING-VERIFY trades (they aren't truly resolved yet).
+// V13.4.188: WINDOW CLOCK -- "which hours are actually tradeable, and which feel rigged".
+//   Answers a direct user question: show the windows where movement is unnatural --
+//   dead and slow, or flip-flopping right at the strike. Every number here was ALREADY
+//   in the call log and had simply never been surfaced:
+//     closingGapBps -> how far from the strike the window actually finished.
+//     atrpAtLock    -> how much the tape was moving at all. Near zero = dead window.
+//   Rated over ALL windows, not just traded ones: a window Tara sat out is still
+//   evidence about that hour.
+//
+//   CALIBRATION NOTE, because the obvious version of this metric is useless.
+//   Measured over the 601 logged windows that carry a closing gap: median gap to the
+//   strike is 5.6bps and 72% finish inside 10bps. Finishing near the line is the
+//   NORMAL state of a 15-minute BTC window, not an anomaly -- so an absolute "within
+//   10bps = pinned" test tags almost every hour and tells you nothing. (Checked that
+//   this is real and not a default-zero artifact: exactly zero entries have gap==0.)
+//   So the flag here is RELATIVE -- an hour is only called out when it sticks to the
+//   line materially more than the all-hours baseline. EV leads the verdict, because
+//   that is the part that is actually actionable; pinning is the explanation.
+//
+//   Wording is deliberately plain -- no posterior, no FGT, no qScore.
+function WindowClockPanel({taraCallLog}){
+  const data=React.useMemo(()=>{
+    const B=Array.from({length:24},(_,i)=>({h:i,n:0,traded:0,wins:0,ev:0,pin:0,pinN:0,quiet:0,quietN:0,sit:0}));
+    let gPin=0,gPinN=0;
+    (taraCallLog||[]).forEach(e=>{
+      if(!e)return;
+      const ts=Number(e.id)||0; if(!ts)return;
+      const h=new Date(ts).getHours(); if(!(h>=0&&h<=23))return;
+      const b=B[h]; b.n++;
+      if(e.result==='SITOUT')b.sit++;
+      const gap=Math.abs(Number(e.closingGapBps));
+      if(Number.isFinite(gap)){b.pinN++;gPinN++;if(gap<10){b.pin++;gPin++;}}
+      const atrp=Number(e.atrpAtLock);
+      if(Number.isFinite(atrp)){b.quietN++;if(Math.abs(atrp)<0.02)b.quiet++;}
+      const k=Number(e.kalshiAtLock);
+      if((e.dir==='UP'||e.dir==='DOWN')&&(e.result==='WIN'||e.result==='LOSS')
+        &&Number.isFinite(k)&&k>0&&k<100&&e.wasOverriddenNoTrade!==true){
+        const cost=e.dir==='UP'?k:(100-k);
+        b.traded++;
+        if(e.result==='WIN'){b.wins++;b.ev+=(100-cost);}else{b.ev-=cost;}
+      }
+    });
+    const rows=B.map(b=>({...b,
+      wr:b.traded>0?100*b.wins/b.traded:null,
+      evc:b.traded>0?b.ev/b.traded:null,
+      pinPct:b.pinN>=5?100*b.pin/b.pinN:null,
+      quietPct:b.quietN>=5?100*b.quiet/b.quietN:null}));
+    return{rows,basePin:gPinN>=30?100*gPin/gPinN:null};
+  },[taraCallLog]);
+  const rows=data.rows, basePin=data.basePin;
+
+  const label=(h)=>((h%12)||12)+(h<12?'am':'pm');
+  const verdict=(r)=>{
+    if(r.traded<4)return{tag:'not rated',tone:'idle',why:'fewer than 4 finished trades this hour -- not enough to judge'};
+    const stickier=(r.pinPct!=null&&basePin!=null&&r.pinPct>=basePin+12);
+    if(r.evc!=null&&r.evc<=-5)return{tag:'loses money',tone:'bad',
+      why:'about '+Math.abs(r.evc).toFixed(0)+'c lost per contract'+(stickier?', and it sticks to the strike more than most hours':'')};
+    if(stickier)return{tag:'sticks to the line',tone:'warn',
+      why:'ends on top of the strike '+Math.round(r.pinPct)+'% of the time vs '+Math.round(basePin)+'% normally -- more coin-flip than most hours'};
+    if(r.quietPct!=null&&r.quietPct>=60)return{tag:'barely moves',tone:'warn',
+      why:'tape is nearly flat, so price often never travels far enough to clear the strike'};
+    if(r.evc!=null&&r.evc>=5)return{tag:'strong',tone:'good',
+      why:'about '+r.evc.toFixed(0)+'c made per contract'};
+    return{tag:'ordinary',tone:'mid',why:'nothing unusual -- roughly breaks even'};
+  };
+  const tone=(t)=>t==='good'?{c:'#28CC95',b:'rgba(40,204,149,0.30)',g:'rgba(40,204,149,0.10)'}
+    :t==='bad'?{c:'#FF4D6A',b:'rgba(255,77,106,0.30)',g:'rgba(255,77,106,0.10)'}
+    :t==='warn'?{c:'#C9A961',b:'rgba(201,169,97,0.30)',g:'rgba(201,169,97,0.10)'}
+    :t==='mid'?{c:'rgba(237,237,237,0.65)',b:'rgba(237,237,237,0.12)',g:'rgba(237,237,237,0.04)'}
+    :{c:'rgba(237,237,237,0.28)',b:'rgba(237,237,237,0.08)',g:'transparent'};
+
+  const judged=rows.filter(r=>r.traded>=4);
+  const worst=[...judged].sort((a,b)=>(a.evc==null?0:a.evc)-(b.evc==null?0:b.evc)).slice(0,3);
+  const best=[...judged].sort((a,b)=>(b.evc==null?0:b.evc)-(a.evc==null?0:a.evc)).slice(0,3);
+  const maxAbs=Math.max(10,...judged.map(r=>Math.abs(r.evc||0)));
+
+  return (
+    <div className="bg-[#171717] border border-[#2A2A2A] rounded-xl p-4 sm:p-5 mb-5">
+      <div className="text-xs uppercase tracking-[0.22em] font-bold mb-1" style={{color:T2_GOLD}}>
+        Window Clock <span className="text-[10px] tracking-wider text-[#EDEDED]/30 ml-1 font-normal normal-case">your local time · every window, not just traded ones</span>
+      </div>
+      <div className="text-[11px] text-[#EDEDED]/45 mb-3 leading-relaxed">
+        Which hours behave normally and which do not. Most 15-minute windows finish close to the strike anyway{basePin!=null?' (about '+Math.round(basePin)+'% of them)':''} — that is just how this market is, so an hour is only flagged <span style={{color:'#C9A961'}}>sticks to the line</span> when it does it markedly more than that, which makes those windows closer to a coin flip than the signal suggests.
+      </div>
+      {judged.length===0?(
+        <div className="text-xs text-[#EDEDED]/40 italic py-4 text-center">Not enough finished trades yet to rate any hour.</div>
+      ):(
+        <div>
+          <div className="flex flex-wrap gap-2 mb-4 text-[11px]">
+            <span className="px-2 py-1 rounded-lg" style={{background:'rgba(255,77,106,0.10)',border:'0.5px solid rgba(255,77,106,0.30)',color:'#FF4D6A'}}>
+              worst hours: {worst.map(r=>label(r.h)).join(' · ')}
+            </span>
+            <span className="px-2 py-1 rounded-lg" style={{background:'rgba(40,204,149,0.10)',border:'0.5px solid rgba(40,204,149,0.30)',color:'#28CC95'}}>
+              best hours: {best.map(r=>label(r.h)).join(' · ')}
+            </span>
+          </div>
+          <div>
+            {rows.map(r=>{
+              const v=verdict(r);const t=tone(v.tone);
+              const pct=r.evc!=null?Math.min(100,Math.abs(r.evc)/maxAbs*100):0;
+              return (
+                <div key={r.h} className="flex items-center gap-2 sm:gap-3 py-[3px]">
+                  <span className="w-[38px] shrink-0 text-[11px] tabular-nums text-right" style={{color:t.c}}>{label(r.h)}</span>
+                  <div className="w-[60px] sm:w-[100px] shrink-0 h-[6px] rounded-full overflow-hidden flex" style={{background:'rgba(237,237,237,0.05)'}}>
+                    <div className="h-full w-1/2 flex justify-end">{r.evc!=null&&r.evc<0?<div style={{width:pct+'%',background:t.c,opacity:0.8}}/>:null}</div>
+                    <div className="h-full w-1/2">{r.evc!=null&&r.evc>=0?<div style={{width:pct+'%',background:t.c,opacity:0.8}}/>:null}</div>
+                  </div>
+                  <span className="w-[44px] shrink-0 text-[11px] tabular-nums text-right" style={{color:t.c}}>{r.evc!=null?(r.evc>=0?'+':'')+r.evc.toFixed(0)+'c':'--'}</span>
+                  <span className="w-[46px] shrink-0 text-[10px] tabular-nums text-right text-[#EDEDED]/35 hidden sm:block">{r.pinPct!=null?Math.round(r.pinPct)+'% line':''}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] shrink-0 whitespace-nowrap" style={{background:t.g,border:'0.5px solid '+t.b,color:t.c}}>{v.tag}</span>
+                  <span className="text-[10px] text-[#EDEDED]/40 truncate hidden md:block">{v.why}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-3 text-[10px] text-[#EDEDED]/30 leading-relaxed">
+            Bar is average cents won or lost per contract that hour — left of centre is a loss, right is a profit. &ldquo;% line&rdquo; is how often that hour finishes within a whisker of the strike. Hours with fewer than 4 finished trades are left unrated rather than guessed at.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
   const[tab,setTab]=React.useState('today'); // 'today' | 'week' | 'all'
   const[selectedHour,setSelectedHour]=React.useState(null);
@@ -25163,6 +25287,8 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
             })}
           </div>
         </div>
+
+        <WindowClockPanel taraCallLog={taraCallLog}/>
 
         {/* Hourly heatmap */}
         <div className="bg-[#171717] border border-[#1F1F1F] rounded-xl p-4 sm:p-5 mb-5 relative">
