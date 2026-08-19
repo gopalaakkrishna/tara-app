@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#07070F" />
+    <meta name="theme-color" content="#0A0C0F" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -65,9 +65,9 @@
               red: { 400: '#FF4D6A' },
               pink: { 400: '#FF4D6A' },
               // Signature accent — unified + brightened.
-              amber: { 300: '#CDBBFF', 400: '#A78BFA', 500: '#8B6DF0' },
-              orange: { 400: '#A78BFA' },
-              yellow: { 400: '#A78BFA' },
+              amber: { 300: '#7EE0BF', 400: '#28CC95', 500: '#1FA277' },
+              orange: { 400: '#28CC95' },
+              yellow: { 400: '#28CC95' },
               // Everything else collapses to the cool grayscale ramp.
               indigo: { 100: '#E8E8ED', 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
               sky: { 200: '#D6D6DE', 300: '#B4B4BE', 400: '#8E8E9A', 500: '#6C6C78' },
@@ -100,35 +100,37 @@
         /* V13.4.197: the base is now INDIGO, not neutral black. A hue in the
            ground plane is what separates the reference dashboards from a plain
            dark theme -- neutral greys read as "unstyled dark mode". */
-        --bg-0: #07070F;   /* page  — deep indigo ground */
-        --bg-1: #161624;   /* card  — clearly lifted off the page */
-        --bg-2: #1E1E2E;   /* raised card / hover */
-        --bg-3: #282840;   /* overlay / popover */
+        /* V13.4.198: sampled from kalshi.com's live tokens so the app sits in
+           the same colour world as the exchange it trades on. */
+        --bg-0: #0A0C0F;   /* = Kalshi --surface-x10 (their page background) */
+        --bg-1: #151A21;   /* card — between their page and --surface-x30 */
+        --bg-2: #1B2029;   /* = Kalshi --surface-x30 (their elevated surface) */
+        --bg-3: #242C38;   /* overlay / popover */
 
         /* Hairlines — visible edges, not 4% ghosts */
-        --line-1: rgba(173,160,255,0.11);
-        --line-2: rgba(173,160,255,0.20);
-        --line-3: rgba(173,160,255,0.30);
+        --line-1: rgba(255,255,255,0.08);
+        --line-2: rgba(255,255,255,0.15);
+        --line-3: rgba(255,255,255,0.24);
 
         /* Ink */
-        --ink-1: #EDEDED;
-        --ink-2: rgba(237, 237, 237, 0.66);
-        --ink-3: rgba(237, 237, 237, 0.42);
-        --ink-4: rgba(237, 237, 237, 0.26);
+        --ink-1: rgba(255,255,255,0.90);  /* = Kalshi --text-x10 */
+        --ink-2: rgba(255,255,255,0.62);
+        --ink-3: rgba(255,255,255,0.42);  /* ~ Kalshi --text-x30 */
+        --ink-4: rgba(255,255,255,0.26);
 
         /* Signals + signature */
         --up: #28CC95;
         --down: #FF4D6A;
-        --accent: #A78BFA;      /* violet signature — unmistakable against mint/rose */
-        --accent-hi: #CDBBFF;
-        --accent-glow: rgba(167, 139, 250, 0.22);
-        --accent-border: rgba(167, 139, 250, 0.52);
+        --accent: #28CC95;      /* = Kalshi --brand-primary */
+        --accent-hi: #5CD8AE;   /* = Kalshi --green-x40 */
+        --accent-glow: rgba(40, 204, 149, 0.16);
+        --accent-border: rgba(40, 204, 149, 0.42);
 
         /* Elevation */
         --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
         --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.5);
         --shadow-3: 0 12px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.5);
-        --glow-accent: 0 0 26px rgba(167, 139, 250, 0.20);
+        --glow-accent: 0 0 26px rgba(40, 204, 149, 0.18);
 
         /* Motion — one language, used everywhere */
         --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -157,8 +159,8 @@
         pointer-events: none;
         z-index: 0;
         background:
-          radial-gradient(1100px 560px at 50% -12%, rgba(167, 139, 250, 0.10), transparent 68%),
-          radial-gradient(900px 700px at 100% 100%, rgba(88, 200, 220, 0.045), transparent 70%);
+          radial-gradient(1100px 560px at 50% -12%, rgba(40, 204, 149, 0.06), transparent 68%),
+          radial-gradient(900px 700px at 100% 100%, rgba(120, 150, 190, 0.05), transparent 70%);
       }
 
       /* Film grain — kills banding on large dark gradients. Very low opacity. */
