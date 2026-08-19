@@ -5257,8 +5257,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.209-scoreboard';
-const TARA_VERSION_DISPLAY='Tara 13.4.209';
+const BASELINE_VERSION='2026.08.19-v13.4.210-execution-panel';
+const TARA_VERSION_DISPLAY='Tara 13.4.210';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -25018,6 +25018,83 @@ function BrainView({analysis,qualityGate,scorecards,baseline,kalshiDebug,strikeS
 //   that is the part that is actually actionable; pinning is the explanation.
 //
 //   Wording is deliberately plain -- no posterior, no FGT, no qScore.
+// V13.4.210: EXECUTION panel. The v178-209 gate work moved EV by fractions of
+//   a cent; measured on the 107 resolved trades that carry a quote, crossing
+//   the spread costs 2.31c/contract -- more than the entire measured edge. That
+//   is invisible today because the cost never appears anywhere: you see the
+//   entry price you paid, never the price you could have rested at.
+//   Everything here comes from fields already logged at lock time
+//   (kalshiSpreadAtLock + kalshiAtLock); nothing new is collected.
+//   Honest framing in the copy: resting is NOT free -- an unfilled rest means
+//   no trade, and a window Tara liked goes untraded. The panel states that.
+function ExecutionPanel({taraCallLog}){
+  const d=React.useMemo(()=>{
+    let n=0,spread=0,fee=0,ev=0,cost=0,noSpread=0;
+    (taraCallLog||[]).forEach(e=>{
+      if(!e||(e.result!=='WIN'&&e.result!=='LOSS'))return;
+      if(e.dir!=='UP'&&e.dir!=='DOWN')return;
+      if(e.wasOverriddenNoTrade===true)return;
+      const k=Number(e.kalshiAtLock);
+      if(!Number.isFinite(k)||k<=0||k>=100)return;
+      const sp=Number(e.kalshiSpreadAtLock);
+      if(!Number.isFinite(sp)){noSpread++;return;}
+      const c=e.dir==='UP'?k:(100-k);
+      const f=0.07*(c/100)*(1-c/100)*100;
+      n++;spread+=sp;fee+=f;cost+=c;
+      ev+=(e.result==='WIN')?(100-c):-c;
+    });
+    if(n===0)return null;
+    const saving=(spread+fee)/n;
+    return{n,noSpread,
+      avgSpread:spread/n, avgFee:fee/n, avgCost:cost/n,
+      evNow:ev/n, evRested:ev/n+saving, saving,
+      totalLeft:spread+fee};
+  },[taraCallLog]);
+
+  if(!d)return null;
+  const money=(c)=>(c>=0?'+':'')+c.toFixed(2)+'c';
+  const Row=({label,value,tone,note})=>(
+    <div className="flex items-baseline justify-between py-[5px]">
+      <span className="text-[11px]" style={{color:'rgba(255,255,255,0.62)'}}>{label}</span>
+      <span className="flex items-baseline gap-2">
+        {note?<span className="text-[10px]" style={{color:'rgba(255,255,255,0.34)'}}>{note}</span>:null}
+        <span className="text-[12px] tabular-nums font-bold" style={{color:tone||'rgba(255,255,255,0.92)'}}>{value}</span>
+      </span>
+    </div>
+  );
+  const mult=d.evNow>0?(d.evRested/d.evNow):null;
+
+  return (
+    <div className="bg-[#101014] border border-[#24242E] rounded-xl p-4 sm:p-5 mb-5">
+      <div className="text-xs uppercase tracking-[0.22em] font-bold mb-1" style={{color:'rgba(255,255,255,0.85)'}}>
+        Execution <span className="text-[10px] tracking-wider ml-1 font-normal normal-case" style={{color:'rgba(255,255,255,0.34)'}}>what crossing the spread costs</span>
+      </div>
+      <div className="text-[11px] mb-3 leading-relaxed" style={{color:'rgba(255,255,255,0.5)'}}>
+        Measured on the {d.n} resolved trades that recorded a live quote. Hitting the ask pays the spread <em>and</em> Kalshi&rsquo;s taker fee; resting at the bid pays neither, because the maker fee is zero.
+      </div>
+
+      <div style={{borderTop:'1px solid rgba(255,255,255,0.08)'}}>
+        <Row label="average entry" value={d.avgCost.toFixed(1)+'c'}/>
+        <Row label="spread paid" value={d.avgSpread.toFixed(2)+'c'} note="per contract"/>
+        <Row label="taker fee paid" value={d.avgFee.toFixed(2)+'c'} note="maker would be 0"/>
+      </div>
+
+      <div className="mt-3 pt-3" style={{borderTop:'1px solid rgba(255,255,255,0.08)'}}>
+        <Row label="edge as traded" value={money(d.evNow)} tone={d.evNow>=0?'#28CC95':'#FF4D6A'} note="per contract"/>
+        <Row label="edge if rested" value={money(d.evRested)} tone={d.evRested>=0?'#28CC95':'#FF4D6A'} note="per contract"/>
+        <Row label="difference" value={money(d.saving)} tone="#E8B44C"
+             note={mult&&mult>1?(mult.toFixed(1)+'x the edge'):null}/>
+      </div>
+
+      <div className="mt-3 text-[10px] leading-relaxed" style={{color:'rgba(255,255,255,0.38)'}}>
+        Across those {d.n} trades that is <span style={{color:'#E8B44C'}}>{d.totalLeft.toFixed(0)}c per contract traded</span> given up to cross the spread.
+        {d.noSpread>0?<span> {d.noSpread} other resolved trades had no quote recorded and are excluded.</span>:null}
+        <div className="mt-1">Resting is not free: an order that never fills means the window goes untraded, so this is the ceiling, not a promise. It is still the largest single lever measured — bigger than the entire entry-band edge.</div>
+      </div>
+    </div>
+  );
+}
+
 function WindowClockPanel({taraCallLog}){
   const data=React.useMemo(()=>{
     const B=Array.from({length:24},(_,i)=>({h:i,n:0,traded:0,wins:0,ev:0,pin:0,pinN:0,quiet:0,quietN:0,sit:0}));
@@ -25374,6 +25451,8 @@ function StatsView({tradeLog,scorecards,taraCallLog,onClose,timeFormat}){
             })}
           </div>
         </div>
+
+        <ExecutionPanel taraCallLog={taraCallLog}/>
 
         <WindowClockPanel taraCallLog={taraCallLog}/>
 
