@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.194-reference-language';
-const TARA_VERSION_DISPLAY='Tara 13.4.194';
+const BASELINE_VERSION='2026.08.19-v13.4.196-hierarchy';
+const TARA_VERSION_DISPLAY='Tara 13.4.196';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -48772,10 +48772,83 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
             border-color: var(--accent-border) !important;
           }
         }
+        /* ── V13.4.195 COMPOSITION ──────────────────────────────────────
+           Measured on the live page: <main> was gap:12px / padding:12px, while
+           every reference dashboard separates its blocks by 24-32px. That
+           tightness -- not the palette -- is what made the app read as a
+           terminal dump. Nothing is hidden and no data is removed; the eye is
+           simply given grouping. */
+        [data-tara-theme="simple"] main {
+          gap: 26px !important;
+          padding: 22px 26px !important;
+        }
+        /* Major blocks get real separation from each other. */
+        [data-tara-theme="simple"] main > * { margin-bottom: 0 !important; }
+        [data-tara-theme="simple"] main .grid { gap: 22px !important; }
+
         /* Cards breathe. Dense data needs margin more than it needs small type. */
-        [data-tara-theme="simple"] .p-3 { padding: 15px !important; }
-        [data-tara-theme="simple"] .p-4 { padding: 19px !important; }
-        [data-tara-theme="simple"] .px-5 { padding-left: 22px !important; padding-right: 22px !important; }
+        [data-tara-theme="simple"] .p-3 { padding: 18px !important; }
+        [data-tara-theme="simple"] .p-4 { padding: 24px !important; }
+        [data-tara-theme="simple"] .p-2 { padding: 13px !important; }
+        [data-tara-theme="simple"] .px-5 { padding-left: 26px !important; padding-right: 26px !important; }
+        [data-tara-theme="simple"] .px-4 { padding-left: 22px !important; padding-right: 22px !important; }
+        [data-tara-theme="simple"] .px-3 { padding-left: 17px !important; padding-right: 17px !important; }
+        [data-tara-theme="simple"] .py-3 { padding-top: 17px !important; padding-bottom: 17px !important; }
+        [data-tara-theme="simple"] .mb-5 { margin-bottom: 26px !important; }
+        [data-tara-theme="simple"] .mb-4 { margin-bottom: 22px !important; }
+        [data-tara-theme="simple"] .gap-3 { gap: 17px !important; }
+        [data-tara-theme="simple"] .gap-2 { gap: 12px !important; }
+
+        /* ── V13.4.196 HIERARCHY ────────────────────────────────────────
+           Everything on screen currently sits within a few px of everything
+           else, so nothing leads. These rules push the primaries up hard and
+           the incidental chrome down, which is the actual difference between
+           the reference dashboards and this one. No values are hidden. */
+
+        /* THE HERO. Tara's call is the reason the app exists; it should own the
+           screen the way the reference titles do. */
+        [data-tara-theme="simple"] .text-3xl,
+        [data-tara-theme="simple"] .text-4xl {
+          font-size: 52px !important;
+          line-height: 1.02 !important;
+          font-weight: 300 !important;
+          letter-spacing: -0.045em !important;
+        }
+        [data-tara-theme="simple"] .text-5xl,
+        [data-tara-theme="simple"] .text-6xl {
+          font-size: 68px !important;
+          line-height: 1.0 !important;
+          font-weight: 300 !important;
+          letter-spacing: -0.05em !important;
+        }
+        /* Secondary headline numerals (record W/L/SO, prices). */
+        [data-tara-theme="simple"] .text-2xl {
+          font-size: 34px !important;
+          line-height: 1.08 !important;
+          letter-spacing: -0.035em !important;
+        }
+
+        /* Corner stamps (PRED-015 / PROJ-042 / SCR-008) are provenance marks,
+           not information to read. They were competing with real values at the
+           same weight. Recede, do not remove. */
+        [data-tara-theme="simple"] .absolute.top-2.right-2,
+        [data-tara-theme="simple"] .absolute.top-3.right-3 {
+          opacity: 0.28 !important;
+        }
+
+        /* Supporting prose sits behind the numbers it explains. */
+        [data-tara-theme="simple"] .text-\\[11px\\]:not(.uppercase):not([class*="text-emerald"]):not([class*="text-rose"]),
+        [data-tara-theme="simple"] .text-\\[12px\\]:not(.uppercase):not([class*="text-emerald"]):not([class*="text-rose"]) {
+          color: var(--ink-2);
+        }
+
+        /* ── APP BAR ─────────────────────────────────────────────────────
+           A 52px strip with a 16px wordmark is a toolbar, not an identity. The
+           references all lead with a confident mark. */
+        [data-tara-theme="simple"] header.sticky {
+          padding: 16px 26px !important;
+          border-bottom: 1px solid var(--tara-border) !important;
+        }
         /* V13.4.193 SECTION HEADERS. This rule previously did the opposite of
            its name: it removed text-transform and crushed 0.22em tracking down
            to 0.02em, so every card header in the app rendered as plain grey body
