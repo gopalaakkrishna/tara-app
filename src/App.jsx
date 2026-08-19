@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.201-flat-surfaces';
-const TARA_VERSION_DISPLAY='Tara 13.4.201';
+const BASELINE_VERSION='2026.08.19-v13.4.202-lock-cap-union';
+const TARA_VERSION_DISPLAY='Tara 13.4.202';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -15561,7 +15561,7 @@ const _hrLoad=()=>{try{const j=JSON.parse(localStorage.getItem(_HR_KEY)||'{}');r
 const _HR_CLOUD_PATH='memory/hourlyRecord';
 const _HR_HISTORY_CAP=500;
 const _HR_PENDING_CAP=40;
-const _hrSave=(r)=>{
+const _hrSave=(r,urgent)=>{
   // V13.4.175 FIX: this used to be a blind pending.slice(-CAP) -- newest 40 kept,
   //   oldest silently dropped. settle() retries forever on a failed/void market with
   //   no upper bound on time, so a permanently-stuck lock (delisted ticker, dead
@@ -15587,7 +15587,10 @@ const _hrSave=(r)=>{
   // Cloud mirror. Debounced hard (60s, same as the 15m log) because settlement can
   //   resolve several pending locks in one burst and each would otherwise be a write.
   try{
-    if(typeof cloudWriteDebounced==='function')cloudWriteDebounced(_HR_CLOUD_PATH,_payload,60000);
+    // V13.4.202: 60s for routine settlement bursts, but ~1.5s when a new lock was
+    //   just taken -- that write is what stops another device taking the opposite
+    //   side of the same strike.
+    if(typeof cloudWriteDebounced==='function')cloudWriteDebounced(_HR_CLOUD_PATH,_payload,urgent?1500:60000);
   }catch(_e){}
 };
 // V13.4.162: merge a cloud hourly doc into a local one. Union by ticker|side.
@@ -15681,7 +15684,9 @@ function useHourlyRecord(){
         minsAtLock:(lk.minsAtLock==null?null:Number(lk.minsAtLock)),
         band:lk.band||null,
       }]};
-      _hrSave(next);return next;
+      _hrSave(next,true);return next; // V13.4.202: urgent -- a new lock must reach
+                                      //   the cloud fast, since every other device's
+                                      //   contradiction guard depends on seeing it.
     });
   },[]);
   React.useEffect(()=>{
@@ -16437,7 +16442,20 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
     const _MID_DEAD_LO=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyDeadLo'));return(Number.isFinite(v)&&v>=0&&v<=60)?v:25;}catch(_e){return 25;}})();
     const _MID_DEAD_HI=(function(){try{const v=parseFloat(localStorage.getItem('taraHourlyDeadHi'));return(Number.isFinite(v)&&v>=0&&v<=60)?v:35;}catch(_e){return 35;}})();
     const _inMidDead=_MID_DEAD_HI>_MID_DEAD_LO&&minsLeft>=_MID_DEAD_LO&&minsLeft<_MID_DEAD_HI;
-    if(dir&&L.hydrated&&L.ticks>=needTicks&&eligible.length&&minsLeft>1.5&&minsLeft<=MAX_MINS_LEFT_TO_LOCK&&!_inMidDead&&coolOk&&L.locks.length<MAX_LOCKS){
+    // V13.4.202: the open-lock set is computed BEFORE the gate, because the cap
+    //   has to count the same thing the contradiction check does. Union of the
+    //   in-memory cache and the persisted record, deduped on strike|side.
+    const _openNow=(()=>{
+      const _seen=new Set(L.locks.map(x=>x.strike+'|'+x.side));
+      const _extra=(Array.isArray(rec.pending)?rec.pending:[])
+        .filter(p=>p&&lad.closeMs&&p.closeMs===lad.closeMs&&!_seen.has(p.strike+'|'+p.side))
+        .map(p=>({strike:p.strike,side:p.side}));
+      return L.locks.map(x=>({strike:x.strike,side:x.side})).concat(_extra);
+    })();
+    // V13.4.202: lad.closeMs is now REQUIRED. Without it the rec.pending half of
+    //   the union filters to nothing, and a stale cache then leaves the guards
+    //   checking against an empty set. Refuse rather than lock blind.
+    if(dir&&L.hydrated&&lad.closeMs&&L.ticks>=needTicks&&eligible.length&&minsLeft>1.5&&minsLeft<=MAX_MINS_LEFT_TO_LOCK&&!_inMidDead&&coolOk&&_openNow.length<MAX_LOCKS){
       const side=dir==='UP'?'YES':'NO';
       // V13.4.164: check the PERSISTED record too, not just the in-memory mirror.
       //   L.locks is a cache of rec.pending; rec.pending is the thing that actually
@@ -16445,14 +16463,7 @@ function HourlyLadderPanel({spot,taraCall,onHourlyLock}){
       //   cache has been empty while the record was correct, and both times the guard
       //   silently passed. Taking the union means a stale/missing cache can no longer
       //   defeat either the dedupe or the contradiction check.
-      const _liveOpen=(()=>{
-        const _seen=new Set(L.locks.map(x=>x.strike+'|'+x.side));
-        const _extra=(Array.isArray(rec.pending)?rec.pending:[])
-          .filter(p=>p&&lad.closeMs&&p.closeMs===lad.closeMs
-            &&!_seen.has(p.strike+'|'+p.side))
-          .map(p=>({strike:p.strike,side:p.side}));
-        return L.locks.map(x=>({strike:x.strike,side:x.side})).concat(_extra);
-      })();
+      const _liveOpen=_openNow; // V13.4.202: one definition, shared with the cap
       const pick=eligible.find(c=>!_liveOpen.some(x=>x.strike===c.r.strike&&x.side===side))||null;
       const contradicts=(k)=>_liveOpen.some(x=>{
         if(x.side===side)return false;
