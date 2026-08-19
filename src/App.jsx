@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.200-ink-and-trim';
-const TARA_VERSION_DISPLAY='Tara 13.4.200';
+const BASELINE_VERSION='2026.08.19-v13.4.201-flat-surfaces';
+const TARA_VERSION_DISPLAY='Tara 13.4.201';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -48631,17 +48631,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
                 identity instead of "generic dark dashboard";
              3. a real ambient drop, so cards sit ON the page rather than in it. */
         [data-tara-theme="simple"] .bg-\\[\\#101014\\] {
-          /* V13.4.194: reference cards sit clearly ABOVE the page -- lighter
-             fill, generous radius, and a soft ambient glow rather than a hard
-             edge. Raised the fill and softened the border to match. */
-          background:
-            linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.012) 40%, rgba(255,255,255,0) 100%),
-            var(--tara-bg-card) !important;
+          /* V13.4.201: the gradient + inset highlight WAS the "grey glass".
+             Nested cards stacked the film, so every panel picked up a milky
+             wash. Kalshi -- the source of this palette -- uses FLAT solid
+             surfaces with a hairline. Depth now comes from the fill step and
+             the border alone, not from a sheen laid over the content. */
+          background: var(--tara-bg-card) !important;
           border: 1px solid var(--tara-border) !important;
-          box-shadow:
-            inset 0 1px 0 rgba(40,204,149,0.14),
-            0 18px 44px rgba(0,0,0,0.62),
-            0 2px 8px rgba(0,0,0,0.45) !important;
+          box-shadow: none !important;
         }
         [data-tara-theme="simple"] .bg-\\[\\#050508\\]\\/95 { background: var(--tara-bg-header) !important; }
         [data-tara-theme="simple"] .bg-\\[\\#050508\\]\\/95 { background: var(--tara-bg-header) !important; }
@@ -48658,14 +48655,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         [data-tara-theme="simple"] .shadow-md,
         [data-tara-theme="simple"] .shadow-lg,
         [data-tara-theme="simple"] .shadow-sm {
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 2px 10px rgba(0,0,0,0.42) !important;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.5) !important;
         }
         /* Cards lift slightly toward the pointer. Desktop only -- no hover state
            on touch, and it must never shift a tap target mid-trade. */
         @media (hover:hover) and (pointer:fine) {
           [data-tara-theme="simple"] .shadow-md:hover,
           [data-tara-theme="simple"] .shadow-lg:hover {
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 6px 20px rgba(0,0,0,0.5) !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.55) !important;
             transition: box-shadow var(--dur-2) var(--ease-out);
           }
         }
@@ -48757,7 +48754,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
            so the label is not crushed against a round edge. */
         [data-tara-theme="simple"] button.rounded-lg,
         [data-tara-theme="simple"] button.rounded-xl {
-          background-image: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.01));
+          background-image: none;
           border-color: var(--tara-border-strong) !important;
           padding-left: 14px !important;
           padding-right: 14px !important;
@@ -48768,7 +48765,8 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         @media (hover:hover) and (pointer:fine) {
           [data-tara-theme="simple"] button.rounded-lg:hover,
           [data-tara-theme="simple"] button.rounded-xl:hover {
-            background-image: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02));
+            background-image: none;
+            background-color: var(--bg-2);
             border-color: var(--accent-border) !important;
           }
         }
@@ -48809,21 +48807,21 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
            screen the way the reference titles do. */
         [data-tara-theme="simple"] .text-3xl,
         [data-tara-theme="simple"] .text-4xl {
-          font-size: 52px !important;
+          font-size: 38px !important;
           line-height: 1.02 !important;
           font-weight: 300 !important;
           letter-spacing: -0.045em !important;
         }
         [data-tara-theme="simple"] .text-5xl,
         [data-tara-theme="simple"] .text-6xl {
-          font-size: 68px !important;
+          font-size: 48px !important;
           line-height: 1.0 !important;
           font-weight: 300 !important;
           letter-spacing: -0.05em !important;
         }
         /* Secondary headline numerals (record W/L/SO, prices). */
         [data-tara-theme="simple"] .text-2xl {
-          font-size: 34px !important;
+          font-size: 26px !important;
           line-height: 1.08 !important;
           letter-spacing: -0.035em !important;
         }
@@ -48890,7 +48888,7 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
         [data-tara-theme="simple"] .text-\[10px\].uppercase[class*="tracking-"],
         [data-tara-theme="simple"] .text-\[9px\].uppercase[class*="tracking-"],
         [data-tara-theme="simple"] .text-\[8px\].uppercase[class*="tracking-"] {
-          font-size: 10.5px !important;
+          font-size: 9.5px !important;
         }
         [data-tara-theme="simple"] .uppercase.tracking-wider,
         [data-tara-theme="simple"] .uppercase.tracking-widest,
