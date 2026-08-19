@@ -1,0 +1,21 @@
+# Normalise text files to LF in the repository.
+#
+# src/App.jsx was stored with CRLF while the working copy sat under
+# core.autocrlf=true. Any tool that rewrote the file with LF endings then
+# produced a diff touching all ~50,000 lines, burying a 24-line change and
+# making review impossible. Declaring the convention here means git converts
+# on commit regardless of which editor or script wrote the file, so the diff
+# always reflects the actual change.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.mp4 binary
+*.pdf binary
