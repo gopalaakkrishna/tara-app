@@ -5257,8 +5257,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.208-modal-rowcap';
-const TARA_VERSION_DISPLAY='Tara 13.4.208';
+const BASELINE_VERSION='2026.08.19-v13.4.209-scoreboard';
+const TARA_VERSION_DISPLAY='Tara 13.4.209';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -44011,6 +44011,29 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           //    Aggregate EV is NOT yet distinguishable (PRE +0.16 vs POST -0.32c/ct,
           //    ~1.5sd apart; daily EV swings -68..+43c/ct dwarf the effect at this n).
           //    Do NOT read that as the band failing, and do NOT retune on it.
+          //  ── V13.4.209 RE-READ at n=98 post-v178 (first read was n=82) ──
+          //    Verdict on the band change: it did what it was built to do.
+          //        below 55c   PRE n=35 -> POST n=1
+          //        70-84c      PRE n=117 -> POST n=1
+          //        win rate    66.7% -> 72.4%
+          //        EV/contract -0.34c -> +0.20c   (crossed zero, but ~0.1sd
+          //                                        apart at n=98 -- not proven)
+          //    THE ISLAND HAS DRIFTED TO ITS BREAK-EVEN LINE, exactly as the
+          //    note below warned. Post-v178: n=30, WR 90.0%, avg cost 89.9c.
+          //    Break-even at 89.9c IS 89.9% WR, so the margin is 0.1pt and the
+          //    pocket is running at +0.07c/ct. Pre-v178 it was 97.0% / +7.15c.
+          //    One additional loss in those 30 takes it to roughly -3c/ct.
+          //    NOT ACTED ON, deliberately. All-time the island is still
+          //    +3.78c/ct over n=63, and the sub-buckets are non-monotonic
+          //    (85-87c: n=20 +9.0pt margin / 88-90c: n=12 -5.5pt / 91-94c:
+          //    n=31 +4.0pt), so cutting the middle slice would be fitting to
+          //    n=12 -- the same error that got earlier gates reverted.
+          //    Re-measure at n>=60 POST before touching it.
+          //    Broader conclusion worth carrying: the whole book is near
+          //    break-even per contract either way, so further gate tuning is
+          //    not where the money is. Execution is -- resting instead of
+          //    crossing the spread is worth ~3.6c/ct, an order of magnitude
+          //    more than the differences being argued over here.
           //    THE ONE THING TO WATCH -- this island is now 34% of resolved volume
           //    (28/82) vs 11% pre-ship, a direct consequence of funnelling no-go-edge
           //    into 55-69 or here. Its break-even is WR = 89.9% at the observed 89.9c
