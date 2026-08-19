@@ -5253,8 +5253,8 @@ const evaluateTradeTimingV1=(inputs)=>{
 // V134: Baseline version marker — bump when SEED_TRADES is refreshed.
 // Personal layer compares this on load and offers a sync prompt if the user's
 // last-synced version is older than the current baked baseline.
-const BASELINE_VERSION='2026.08.19-v13.4.198-kalshi-palette';
-const TARA_VERSION_DISPLAY='Tara 13.4.198';
+const BASELINE_VERSION='2026.08.19-v13.4.199-green-headers';
+const TARA_VERSION_DISPLAY='Tara 13.4.199';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // V10.4.0 — CALIBRATION TABLES (regime × direction × conviction-band)
@@ -48868,12 +48868,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           text-transform: uppercase !important;
           letter-spacing: 0.12em !important;
           font-weight: 600 !important;
-          /* V13.4.198: neutral, not accent. Kalshi's brand green is also this
-             app's WIN colour, so painting every section label green would make
-             the one signal that means "this trade won" ambient. Uppercase +
-             0.12em tracking + weight 600 still make these read as headers. */
-          color: var(--ink-2) !important;
-          opacity: 0.9;
+          /* V13.4.199: grey headers read as flat, so colour comes back -- but
+             from Kalshi's LIGHTER green tier (--green-x40 #5CD8AE), not their
+             brand green. That keeps section chrome visibly separate from WIN
+             values at #28CC95, which is the collision the v198 note was about.
+             Size settles the rest: headers are 10.5px tracked caps, a WIN is
+             34-52px. */
+          color: var(--accent-hi) !important;
+          opacity: 0.78;
         }
         /* V13.4.193: the same softening applied to Tailwind's NAMED tracking
            utilities, so headers using tracking-wide/wider (Depth of Market, Tape
@@ -48896,12 +48898,14 @@ if(typeof _src.parseTradeId==='function'){const _newId=_src.parseTradeId(d);if(_
           text-transform: uppercase !important;
           letter-spacing: 0.12em !important;
           font-weight: 600 !important;
-          /* V13.4.198: neutral, not accent. Kalshi's brand green is also this
-             app's WIN colour, so painting every section label green would make
-             the one signal that means "this trade won" ambient. Uppercase +
-             0.12em tracking + weight 600 still make these read as headers. */
-          color: var(--ink-2) !important;
-          opacity: 0.9;
+          /* V13.4.199: grey headers read as flat, so colour comes back -- but
+             from Kalshi's LIGHTER green tier (--green-x40 #5CD8AE), not their
+             brand green. That keeps section chrome visibly separate from WIN
+             values at #28CC95, which is the collision the v198 note was about.
+             Size settles the rest: headers are 10.5px tracked caps, a WIN is
+             34-52px. */
+          color: var(--accent-hi) !important;
+          opacity: 0.78;
         }
 
         /* ── ACCENT COLORS — KNOCK BACK 8-12% ─────────────── */
